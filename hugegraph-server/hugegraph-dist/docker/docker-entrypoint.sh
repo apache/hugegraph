@@ -81,7 +81,7 @@ else
     log "HugeGraph initialization already done. Skipping re-init..."
 fi
 
-./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}"
+./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t 120
 
 STORE_REST="${STORE_REST:-hg-store:8520}"
 export STORE_REST
