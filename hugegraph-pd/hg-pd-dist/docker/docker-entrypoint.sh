@@ -82,12 +82,5 @@ log "  pd.initial-store-list=${HG_PD_INITIAL_STORE_LIST}"
 log "  pd.initial-store-count=${HG_PD_INITIAL_STORE_COUNT}"
 log "  pd.data-path=${HG_PD_DATA_PATH}"
 
-log "Patching conf/application.yml with cluster settings..."
-sed -i "s|address: 127.0.0.1:8610|address: ${HG_PD_RAFT_ADDRESS}|"                   conf/application.yml
-sed -i "s|peers-list: 127.0.0.1:8610|peers-list: ${HG_PD_RAFT_PEERS_LIST}|"          conf/application.yml
-sed -i "s|initial-store-list: 127.0.0.1:8500|initial-store-list: ${HG_PD_INITIAL_STORE_LIST}|" conf/application.yml
-sed -i "s|initial-store-count: 1|initial-store-count: ${HG_PD_INITIAL_STORE_COUNT}|"  conf/application.yml
-sed -i "s|host: 127.0.0.1|host: ${HG_PD_GRPC_HOST}|"                                 conf/application.yml
-
 ./bin/start-hugegraph-pd.sh -j "${JAVA_OPTS:-}"
 tail -f /dev/null

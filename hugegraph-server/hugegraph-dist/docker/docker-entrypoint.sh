@@ -81,10 +81,10 @@ else
     log "HugeGraph initialization already done. Skipping re-init..."
 fi
 
-./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t 120
-
-STORE_REST="${STORE_REST:-hg-store:8520}"
+STORE_REST="${STORE_REST:-store:8520}"
 export STORE_REST
+
+./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t 120
 
 # Post-startup cluster stabilization check
 ./bin/wait-partition.sh || log "WARN: partitions not assigned yet"

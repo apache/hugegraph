@@ -37,9 +37,7 @@ log() {
   echo "[wait-storage] $1"
 }
 
-# Hardcoded PD auth
-PD_AUTH_ARGS="-u store:admin"
-log "PD auth forced to store:admin"
+PD_AUTH_ARGS="-u ${PD_AUTH_USER:-store}:${PD_AUTH_PASSWORD:-admin}"
 
 function key_exists {
     local key=$1

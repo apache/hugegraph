@@ -77,10 +77,5 @@ log "  raft.address=${HG_STORE_RAFT_ADDRESS}"
 log "  server.port=${HG_STORE_REST_PORT}"
 log "  app.data-path=${HG_STORE_DATA_PATH}"
 
-log "Patching conf/application.yml with cluster settings..."
-sed -i "s|address: localhost:8686|address: ${HG_STORE_PD_ADDRESS}|"   conf/application.yml
-sed -i "s|host: 127.0.0.1|host: ${HG_STORE_GRPC_HOST}|"              conf/application.yml
-sed -i "s|address: 127.0.0.1:8510|address: ${HG_STORE_RAFT_ADDRESS}|" conf/application.yml
-
 ./bin/start-hugegraph-store.sh -j "${JAVA_OPTS:-}"
 tail -f /dev/null
