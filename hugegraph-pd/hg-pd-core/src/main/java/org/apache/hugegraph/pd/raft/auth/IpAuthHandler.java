@@ -18,7 +18,10 @@
 package org.apache.hugegraph.pd.raft.auth;
 
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
 
 import io.netty.channel.ChannelDuplexHandler;
@@ -30,11 +33,14 @@ import lombok.extern.slf4j.Slf4j;
 @ChannelHandler.Sharable
 public class IpAuthHandler extends ChannelDuplexHandler {
 
+    // Retained for potential refresh of resolvedIps on membership changes
     private final Set<String> allowedIps;
+    private volatile Set<String> resolvedIps;
     private static volatile IpAuthHandler instance;
 
     private IpAuthHandler(Set<String> allowedIps) {
         this.allowedIps = Collections.unmodifiableSet(allowedIps);
+        this.resolvedIps = resolveAll(allowedIps);
     }
 
     public static IpAuthHandler getInstance(Set<String> allowedIps) {
@@ -65,7 +71,24 @@ public class IpAuthHandler extends ChannelDuplexHandler {
     }
 
     private boolean isIpAllowed(String ip) {
-        return allowedIps.isEmpty() || allowedIps.contains(ip);
+        Set<String> resolved = this.resolvedIps;
+        return resolved.isEmpty() || resolved.contains(ip);
+    }
+
+    private static Set<String> resolveAll(Set<String> entries) {
+        Set<String> result = new HashSet<>(entries);
+
+        for (String entry : entries) {
+            try {
+                for (InetAddress addr : InetAddress.getAllByName(entry)) {
+                    result.add(addr.getHostAddress());
+                }
+            } catch (UnknownHostException e) {
+                log.warn("Could not resolve allowlist entry '{}': {}", entry, e.getMessage());
+            }
+        }
+
+        return Collections.unmodifiableSet(result);
     }
 
     @Override
