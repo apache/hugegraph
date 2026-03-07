@@ -66,7 +66,6 @@ docker compose -f docker-compose-dev.yml up -d
 |---|---|---|
 | **Images** | Pull from Docker Hub | Build from source |
 | **Who it's for** | End users | Developers |
-| **PD healthcheck endpoint** | `/` | `/v1/health` |
 | **pull_policy** | `always` | not set (build) |
 
 **Verify** (both options):
