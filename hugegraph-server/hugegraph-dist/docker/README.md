@@ -92,8 +92,7 @@ If you want to customize the preloaded data, please mount the groovy scripts (no
 1. Start Open-Telemetry-Collector
 
     ```bash
-    cd hugegraph-server/hugegraph-dist/docker/example
-    docker-compose -f docker-compose-trace.yaml -p hugegraph-trace up -d
+    docker compose -f hugegraph-server/hugegraph-dist/docker/example/docker-compose-trace.yaml -p hugegraph-trace up -d
     ```
 
 2. Active Open-Telemetry-Agent
@@ -105,8 +104,7 @@ If you want to customize the preloaded data, please mount the groovy scripts (no
 3. Stop Open-Telemetry-Collector
 
     ```bash
-    cd hugegraph-server/hugegraph-dist/docker/example
-    docker-compose -f docker-compose-trace.yaml -p hugegraph-trace stop
+    docker compose -f hugegraph-server/hugegraph-dist/docker/example/docker-compose-trace.yaml -p hugegraph-trace stop
     ```
 
 4. References
@@ -114,3 +112,19 @@ If you want to customize the preloaded data, please mount the groovy scripts (no
     - [What is OpenTelemetry](https://opentelemetry.io/docs/what-is-opentelemetry/)
 
     - [Tempo in Grafana](https://grafana.com/docs/tempo/latest/getting-started/tempo-in-grafana/)
+
+## 5. Distributed Cluster (PD + Store + Server)
+
+For a full distributed HugeGraph cluster with PD, Store, and Server, use the
+3-node compose file in the `docker/` directory at the repository root.
+
+**Prerequisites**: Allocate at least **12 GB** memory to Docker Desktop
+(Settings → Resources → Memory). The cluster runs 9 JVM processes.
+
+```bash
+cd docker
+docker compose -f docker-compose-3pd-3store-3server.yml up -d
+```
+
+See [docker/README.md](../../../../docker/README.md) for the full setup guide,
+environment variable reference, and troubleshooting.

@@ -209,8 +209,11 @@ docker run -itd --name=hugegraph -e PASSWORD=your_password -p 8080:8080 hugegrap
 
 For advanced Docker configurations, see:
 - [Docker Documentation](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#3-deploy)
-- [Docker Compose Example](./hugegraph-server/hugegraph-dist/docker/example)
-- [Docker README](hugegraph-server/hugegraph-dist/docker/README.md)
+- [Docker Compose Examples](./docker/)
+- [Docker README](./docker/README.md)
+- [Server Docker README](hugegraph-server/hugegraph-dist/docker/README.md)
+
+> **Docker Desktop (Mac/Windows)**: The 3-node distributed cluster (`docker/docker-compose-3pd-3store-3server.yml`) uses Docker bridge networking and works on all platforms including Docker Desktop. Allocate at least 12 GB memory to Docker Desktop.
 
 > **Note**: Docker images are convenience releases, not **official ASF distribution artifacts**. See [ASF Release Distribution Policy](https://infra.apache.org/release-distribution.html#dockerhub) for details.
 >
