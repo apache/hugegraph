@@ -17,6 +17,9 @@ This directory contains Docker Compose files for running HugeGraph:
 > [!IMPORTANT]
 > The 12 GB minimum is for Docker Desktop (Mac/Windows). On Linux with native Docker, ensure the host has at least 12 GB of free memory.
 
+> [!WARNING]
+> **Temporary workaround — source clone currently required.** The `docker-compose.yml` (quickstart) and `docker-compose-3pd-3store-3server.yml` compose files currently mount entrypoint scripts directly from the source tree because the published Docker Hub images do not yet include the updated entrypoints. This means these compose files currently require a full repository clone to run. This requirement will be removed in a follow-up image release once updated images are published to Docker Hub with the new entrypoints baked in. The `docker-compose-dev.yml` (dev build) is unaffected since it builds images from source.
+
 ## Why Bridge Networking (Not Host Mode)
 
 Previous versions used `network_mode: host`, which only works on Linux and is incompatible with Docker Desktop on Mac/Windows. The cluster now uses a proper Docker bridge network (`hg-net`) where services communicate via container hostnames (`pd0`, `pd1`, `store0`, etc.) instead of `127.0.0.1`. This makes the cluster portable across all platforms.
@@ -38,7 +41,6 @@ docker compose up -d
 
 - Images: `hugegraph/pd:latest`, `hugegraph/store:latest`, `hugegraph/server:latest`
 - `pull_policy: always` — always pulls the latest image
-- Mounts entrypoint scripts from the source tree (requires a cloned repo)
 - PD healthcheck endpoint: `/` (root)
 - Single PD, single Store (`HG_PD_INITIAL_STORE_LIST: store:8500`), single Server
 - No `STORE_REST` or `wait-partition.sh` — simpler startup
@@ -64,7 +66,6 @@ docker compose -f docker-compose-dev.yml up -d
 |---|---|---|
 | **Images** | Pull from Docker Hub | Build from source |
 | **Who it's for** | End users | Developers |
-| **Requires source clone** | Yes (for entrypoint mounts) | Yes (for Dockerfiles) |
 | **PD healthcheck endpoint** | `/` | `/v1/health` |
 | **pull_policy** | `always` | not set (build) |
 
