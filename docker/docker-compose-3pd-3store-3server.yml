@@ -29,8 +29,8 @@ volumes:
   hg-store1-data:
   hg-store2-data:
 
-# ── Shared service templates ──────────────────────────────────────────
-
+# ── Shared service defaults ──────────────────────────────────────────
+# TODO: remove volume mounts below once images are published with new entrypoints
 x-pd-common: &pd-common
   image: hugegraph/pd:${HUGEGRAPH_VERSION:-latest}
   pull_policy: missing

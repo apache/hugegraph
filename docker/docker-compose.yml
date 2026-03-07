@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
+# TODO: remove volume mounts below once images are published with new entrypoints
 name: hugegraph-single
 
 networks:
@@ -54,7 +54,7 @@ services:
       - ../hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh:/hugegraph-pd/docker-entrypoint.sh
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8620/ >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8620/v1/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
