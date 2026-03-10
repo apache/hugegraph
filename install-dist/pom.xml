@@ -53,7 +53,7 @@
                                     cp -r -v $root_path/hugegraph-pd/apache-hugegraph-pd-${project.version} ${final.name}/ || exit
                                     cp -r -v $root_path/hugegraph-store/apache-hugegraph-store-${project.version} ${final.name}/ || exit
                                     cp -r -v $root_path/hugegraph-server/apache-hugegraph-server-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/install-dist/release-docs/* $root_path/DISCLAIMER ${final.name}/ || exit
+                                    cp -r -v $root_path/install-dist/release-docs/* ${final.name}/ || exit
 
                                     tar zcvf $root_path/target/${final.name}.tar.gz ./${final.name} || exit 1
 
