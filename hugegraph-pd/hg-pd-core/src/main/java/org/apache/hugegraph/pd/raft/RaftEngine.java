@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -40,7 +41,6 @@ import com.alipay.remoting.config.BoltServerOption;
 import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.RaftGroupService;
-import com.alipay.sofa.jraft.ReplicatorGroup;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.Replicator;
@@ -54,7 +54,6 @@ import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.rpc.impl.BoltRpcServer;
 import com.alipay.sofa.jraft.util.Endpoint;
-import com.alipay.sofa.jraft.util.ThreadId;
 import com.alipay.sofa.jraft.util.internal.ThrowUtil;
 
 import io.netty.channel.ChannelHandler;
@@ -326,6 +325,23 @@ public class RaftEngine {
                 latch.countDown();
             });
             latch.await();
+
+            // Refresh IpAuthHandler so newly added peers are not blocked
+            if (result.get() != null && result.get().isOk()) {
+                IpAuthHandler handler = IpAuthHandler.getInstance();
+                if (handler != null) {
+                    Set<String> newIps = newPeers.getPeers()
+                                                 .stream()
+                                                 .map(PeerId::getIp)
+                                                 .collect(Collectors.toSet());
+                    handler.refresh(newIps);
+                    log.info("IpAuthHandler refreshed after peer list change to: {}", peerList);
+                } else {
+                    log.warn("IpAuthHandler not initialized, skipping refresh for peer list: {}",
+                             peerList);
+                }
+            }
+
         } catch (Exception e) {
             log.error("failed to changePeerList to {},{}", peerList, e);
             result.set(new Status(-1, e.getMessage()));
