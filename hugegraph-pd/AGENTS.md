@@ -110,7 +110,7 @@ mvn clean install
 
 # Build distribution package only
 mvn clean package -pl hg-pd-dist -am -DskipTests
-# Output: hg-pd-dist/target/apache-hugegraph-pd-<version>.tar.gz
+# Output: hugegraph-pd/apache-hugegraph-pd-<version>.tar.gz
 ```
 
 ### Running Tests
