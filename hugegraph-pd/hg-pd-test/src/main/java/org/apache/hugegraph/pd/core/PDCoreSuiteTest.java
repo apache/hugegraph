@@ -20,6 +20,7 @@ package org.apache.hugegraph.pd.core;
 import org.apache.hugegraph.pd.core.meta.MetadataKeyHelperTest;
 import org.apache.hugegraph.pd.core.store.HgKVStoreImplTest;
 import org.apache.hugegraph.pd.raft.IpAuthHandlerTest;
+import org.apache.hugegraph.pd.raft.RaftEngineIpAuthIntegrationTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -38,6 +39,7 @@ import lombok.extern.slf4j.Slf4j;
         StoreServiceTest.class,
         TaskScheduleServiceTest.class,
         IpAuthHandlerTest.class,
+        RaftEngineIpAuthIntegrationTest.class,
         // StoreNodeServiceTest.class,
 })
 @Slf4j
