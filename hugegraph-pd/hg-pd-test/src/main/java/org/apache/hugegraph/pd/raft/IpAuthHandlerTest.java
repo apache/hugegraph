@@ -25,12 +25,24 @@ import org.apache.hugegraph.pd.raft.auth.IpAuthHandler;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 public class IpAuthHandlerTest {
 
+    @Before
+    public void setUp() {
+        // Must reset BEFORE each test — earlier suite classes (e.g. ConfigServiceTest)
+        // initialize RaftEngine which creates the IpAuthHandler singleton with their
+        // own peer IPs. Without this reset, our getInstance() calls return the stale
+        // singleton and ignore the allowlist passed by the test.
+        Whitebox.setInternalState(IpAuthHandler.class, "instance", null);
+    }
+
     @After
     public void tearDown() {
+        // Must reset AFTER each test — prevents our test singleton from leaking
+        // into later suite classes that also depend on IpAuthHandler state.
         Whitebox.setInternalState(IpAuthHandler.class, "instance", null);
     }
 
@@ -42,7 +54,8 @@ public class IpAuthHandlerTest {
 
     @Test
     public void testHostnameResolvesToIp() {
-        // "localhost" should resolve to "127.0.0.1"
+        // "localhost" should resolve to "127.0.0.1" via InetAddress.getAllByName()
+        // This verifies the core fix: hostname allowlists match numeric remote addresses
         IpAuthHandler handler = IpAuthHandler.getInstance(
                 Collections.singleton("localhost"));
         Assert.assertTrue(isIpAllowed(handler, "127.0.0.1"));
@@ -50,11 +63,14 @@ public class IpAuthHandlerTest {
 
     @Test
     public void testUnresolvableHostnameDoesNotCrash() {
-        // Should log a warning and skip — no exception thrown
+        // Should log a warning and skip — no exception thrown during construction
         IpAuthHandler handler = IpAuthHandler.getInstance(
                 Collections.singleton("nonexistent.invalid.hostname"));
-        // unresolvable entry is skipped so 127.0.0.1 should not be allowed
+        // Handler was still created successfully despite bad hostname
+        Assert.assertNotNull(handler);
+        // Unresolvable entry is skipped so no IPs should be allowed
         Assert.assertFalse(isIpAllowed(handler, "127.0.0.1"));
+        Assert.assertFalse(isIpAllowed(handler, "192.168.0.1"));
     }
 
     @Test
@@ -64,18 +80,22 @@ public class IpAuthHandlerTest {
                 Collections.singleton("127.0.0.1"));
         Assert.assertTrue(isIpAllowed(handler, "127.0.0.1"));
 
-        // Refresh with a different IP
+        // Refresh with a different IP — verifies refresh() swaps the set correctly
         Set<String> newIps = new HashSet<>();
         newIps.add("192.168.0.1");
         handler.refresh(newIps);
 
+        // Old IP should no longer be allowed
         Assert.assertFalse(isIpAllowed(handler, "127.0.0.1"));
+        // New IP should now be allowed
         Assert.assertTrue(isIpAllowed(handler, "192.168.0.1"));
     }
 
     @Test
     public void testEmptyAllowlistAllowsAll() {
-        // Empty allowlist = no restriction = allow all
+        // Empty allowlist = no restriction configured = allow all connections
+        // This is intentional fallback behavior and must be explicitly tested
+        // because it is a security-relevant boundary
         IpAuthHandler handler = IpAuthHandler.getInstance(
                 Collections.emptySet());
         Assert.assertTrue(isIpAllowed(handler, "1.2.3.4"));
@@ -83,8 +103,18 @@ public class IpAuthHandlerTest {
     }
 
     @Test
-    public void testGetInstanceReturnsNullBeforeInit() {
-        // After tearDown resets singleton, no-arg getInstance returns null
-        Assert.assertNull(IpAuthHandler.getInstance());
+    public void testGetInstanceReturnsSingletonIgnoresNewAllowlist() {
+        // First call creates the singleton with 127.0.0.1
+        IpAuthHandler first = IpAuthHandler.getInstance(
+                Collections.singleton("127.0.0.1"));
+        // Second call with a different set must return the same instance
+        // and must NOT reinitialize or override the existing allowlist
+        IpAuthHandler second = IpAuthHandler.getInstance(
+                Collections.singleton("192.168.0.1"));
+        Assert.assertSame(first, second);
+        // Original allowlist still in effect
+        Assert.assertTrue(isIpAllowed(second, "127.0.0.1"));
+        // New set was ignored — 192.168.0.1 should not be allowed
+        Assert.assertFalse(isIpAllowed(second, "192.168.0.1"));
     }
 }
