@@ -113,6 +113,9 @@ public class MemberAPI extends API {
      * @return Returns a JSON string containing the modification results
      * @throws Exception If an exception occurs during request processing, service invocation, or Peer list modification, it is captured and returned as the JSON representation of the exception
      */
+    // TODO: this endpoint has no authentication check — any caller with network
+    // access to the management port can trigger a peer list change.
+    // Wire authentication here as part of the planned auth refactor.
     @PostMapping(value = "/members/change", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody

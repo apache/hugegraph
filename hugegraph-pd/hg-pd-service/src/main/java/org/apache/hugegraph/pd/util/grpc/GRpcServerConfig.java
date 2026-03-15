@@ -40,6 +40,8 @@ public class GRpcServerConfig extends GRpcServerBuilderConfigurer {
                 HgExecutorUtil.createExecutor(EXECUTOR_NAME, poolGrpc.getCore(), poolGrpc.getMax(),
                                               poolGrpc.getQueue()));
         serverBuilder.maxInboundMessageSize(MAX_INBOUND_MESSAGE_SIZE);
+        // TODO: GrpcAuthentication is instantiated as a Spring bean but never registered
+        // here — add serverBuilder.intercept(grpcAuthentication) once auth is refactored.
     }
 
 }

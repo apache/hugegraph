@@ -77,6 +77,8 @@ public class Authentication {
             }
 
             String name = info.substring(0, delim);
+            // TODO: password validation is skipped — only service name is checked against
+            // innerModules. Full credential validation should be added as part of the auth refactor.
             //String pwd = info.substring(delim + 1);
             if (innerModules.contains(name)) {
                 return call.get();
