@@ -223,6 +223,7 @@ Download pre-built packages from the [Download Page](https://hugegraph.apache.or
 
 ```bash
 # Download and extract
+# Note: historical releases <= 1.7.0 still use the "-incubating" package name
 wget https://downloads.apache.org/hugegraph/{version}/apache-hugegraph-{version}.tar.gz
 tar -xzf apache-hugegraph-{version}.tar.gz
 cd apache-hugegraph-{version}

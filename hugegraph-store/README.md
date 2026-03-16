@@ -214,6 +214,7 @@ Start the Store server:
 
 ```bash
 # Replace {version} with your hugegraph version
+# Note: historical releases <= 1.7.0 still use the "-incubating" directory name
 cd apache-hugegraph-store-{version}
 
 # Start Store node
