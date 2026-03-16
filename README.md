@@ -223,10 +223,17 @@ Download pre-built packages from the [Download Page](https://hugegraph.apache.or
 
 ```bash
 # Download and extract
-# Note: historical releases <= 1.7.0 still use the "-incubating" package name
-wget https://downloads.apache.org/hugegraph/{version}/apache-hugegraph-{version}.tar.gz
-tar -xzf apache-hugegraph-{version}.tar.gz
-cd apache-hugegraph-{version}
+# For historical 1.7.0 and earlier releases, use the archive URL and
+# set PACKAGE=apache-hugegraph-incubating-{version} instead.
+BASE_URL="https://downloads.apache.org/hugegraph/{version}"
+PACKAGE="apache-hugegraph-{version}"
+# Historical alternative:
+# BASE_URL="https://archive.apache.org/dist/incubator/hugegraph/{version}"
+# PACKAGE="apache-hugegraph-incubating-{version}"
+
+wget ${BASE_URL}/${PACKAGE}.tar.gz
+tar -xzf ${PACKAGE}.tar.gz
+cd ${PACKAGE}
 
 # Initialize backend storage
 bin/init-store.sh

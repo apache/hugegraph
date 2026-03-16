@@ -416,9 +416,9 @@ df -h
 
 ```bash
 # Extract PD distribution
-# Note: historical releases <= 1.7.0 still use the "-incubating" package/directory names
-tar -xzf apache-hugegraph-pd-1.7.0.tar.gz
-cd apache-hugegraph-pd-1.7.0
+# Note: use "-incubating" only for historical 1.7.0 and earlier package/directory names.
+tar -xzf apache-hugegraph-pd-incubating-1.7.0.tar.gz
+cd apache-hugegraph-pd-incubating-1.7.0
 
 # Edit configuration
 vi conf/application.yml
@@ -510,9 +510,9 @@ curl http://192.168.1.10:8620/v1/members
 
 ```bash
 # Extract Store distribution
-# Note: historical releases <= 1.7.0 still use the "-incubating" package/directory names
-tar -xzf apache-hugegraph-store-1.7.0.tar.gz
-cd apache-hugegraph-store-1.7.0
+# Note: use "-incubating" only for historical 1.7.0 and earlier package/directory names.
+tar -xzf apache-hugegraph-store-incubating-1.7.0.tar.gz
+cd apache-hugegraph-store-incubating-1.7.0
 
 # Edit configuration
 vi conf/application.yml
@@ -628,9 +628,9 @@ curl http://192.168.1.10:8620/v1/stores
 
 ```bash
 # Extract Server distribution
-# Note: historical releases <= 1.7.0 still use the "-incubating" package/directory names
-tar -xzf apache-hugegraph-1.7.0.tar.gz
-cd apache-hugegraph-1.7.0
+# Note: use "-incubating" only for historical 1.7.0 and earlier package/directory names.
+tar -xzf apache-hugegraph-incubating-1.7.0.tar.gz
+cd apache-hugegraph-incubating-1.7.0
 
 # Configure backend
 vi conf/graphs/hugegraph.properties

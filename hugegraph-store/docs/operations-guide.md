@@ -593,8 +593,9 @@ curl http://192.168.1.10:8620/v1/partitionsAndStatus
 1. **Deploy New Store Node**:
    ```bash
    # Follow deployment guide
-   tar -xzf apache-hugegraph-store-1.7.0.tar.gz
-   cd apache-hugegraph-store-1.7.0
+   # Historical 1.7.0 packages still include the "-incubating" suffix
+   tar -xzf apache-hugegraph-store-incubating-1.7.0.tar.gz
+   cd apache-hugegraph-store-incubating-1.7.0
 
    # Configure and start
    vi conf/application.yml
@@ -670,14 +671,14 @@ curl http://192.168.1.10:8620/v1/partitionsAndStatus
 bin/stop-hugegraph-store.sh
 
 # Backup current version
-mv apache-hugegraph-store-1.7.0 apache-hugegraph-store-1.7.0-backup
+mv apache-hugegraph-store-incubating-1.7.0 apache-hugegraph-store-incubating-1.7.0-backup
 
-# Extract new version
+# Extract new version (newer releases no longer include "-incubating")
 tar -xzf apache-hugegraph-store-1.8.0.tar.gz
 cd apache-hugegraph-store-1.8.0
 
 # Copy configuration from backup
-cp ../apache-hugegraph-store-1.7.0-backup/conf/application.yml conf/
+cp ../apache-hugegraph-store-incubating-1.7.0-backup/conf/application.yml conf/
 
 # Start new version
 bin/start-hugegraph-store.sh
@@ -715,8 +716,8 @@ bin/stop-hugegraph-store.sh
 
 # Restore backup
 rm -rf apache-hugegraph-store-1.8.0
-mv apache-hugegraph-store-1.7.0-backup apache-hugegraph-store-1.7.0
-cd apache-hugegraph-store-1.7.0
+mv apache-hugegraph-store-incubating-1.7.0-backup apache-hugegraph-store-incubating-1.7.0
+cd apache-hugegraph-store-incubating-1.7.0
 
 # Restart old version
 bin/start-hugegraph-store.sh

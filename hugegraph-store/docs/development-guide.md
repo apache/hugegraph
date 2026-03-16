@@ -58,7 +58,7 @@ git checkout 1.7-rebase
 2. Add new "Application" configuration:
    - Main class: `org.apache.hugegraph.store.node.StoreNodeApplication`
    - VM options: `-Xms4g -Xmx4g -Dconfig.file=conf/application.yml`
-   - Working directory: `hugegraph-store/apache-hugegraph-store-1.7.0`
+   - Working directory: `hugegraph-store/apache-hugegraph-store-<version>` (`apache-hugegraph-store-incubating-<version>` for historical 1.7.0 and earlier directories)
    - Use classpath of module: `hg-store-node`
 
 ### Build from Source
@@ -216,7 +216,9 @@ hg-store-grpc/
 
 **Start Server**:
 ```bash
-cd hugegraph-store/apache-hugegraph-store-1.7.0
+# Historical 1.7.0 and earlier directories use
+# apache-hugegraph-store-incubating-<version> instead.
+cd hugegraph-store/apache-hugegraph-store-<version>
 bin/start-hugegraph-store.sh
 ```
 
