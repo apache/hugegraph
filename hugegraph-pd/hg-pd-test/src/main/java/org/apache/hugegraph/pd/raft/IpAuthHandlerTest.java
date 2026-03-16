@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.pd.raft;
 
+import java.net.InetAddress;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -53,12 +54,23 @@ public class IpAuthHandlerTest {
     }
 
     @Test
-    public void testHostnameResolvesToIp() {
-        // "localhost" should resolve to "127.0.0.1" via InetAddress.getAllByName()
+    public void testHostnameResolvesToIp() throws Exception {
+        // "localhost" should resolve to one or more IPs via InetAddress.getAllByName()
         // This verifies the core fix: hostname allowlists match numeric remote addresses
+        // Using dynamic resolution avoids hardcoding "127.0.0.1" which may not be
+        // returned on IPv6-only or custom resolver environments
         IpAuthHandler handler = IpAuthHandler.getInstance(
                 Collections.singleton("localhost"));
-        Assert.assertTrue(isIpAllowed(handler, "127.0.0.1"));
+        InetAddress[] addresses = InetAddress.getAllByName("localhost");
+        // All resolved addresses should be allowed — resolveAll() adds every address
+        // returned by getAllByName() so none should be blocked
+        Assert.assertTrue("Expected at least one resolved address",
+                          addresses.length > 0);
+        for (InetAddress address : addresses) {
+            Assert.assertTrue(
+                    "Expected " + address.getHostAddress() + " to be allowed",
+                    isIpAllowed(handler, address.getHostAddress()));
+        }
     }
 
     @Test

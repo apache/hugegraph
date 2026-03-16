@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -312,40 +313,61 @@ public class RaftEngine {
 
     public Status changePeerList(String peerList) {
         AtomicReference<Status> result = new AtomicReference<>();
+        Configuration newPeers = new Configuration();
         try {
             String[] peers = peerList.split(",", -1);
             if ((peers.length & 1) != 1) {
                 throw new PDException(-1, "the number of peer list must be odd.");
             }
-            Configuration newPeers = new Configuration();
             newPeers.parse(peerList);
             CountDownLatch latch = new CountDownLatch(1);
             this.raftNode.changePeers(newPeers, status -> {
-                result.set(status);
+                // Use compareAndSet so a late callback does not overwrite a timeout status
+                result.compareAndSet(null, status);
                 latch.countDown();
             });
-            latch.await();
-
-            // Refresh IpAuthHandler so newly added peers are not blocked
-            if (result.get() != null && result.get().isOk()) {
-                IpAuthHandler handler = IpAuthHandler.getInstance();
-                if (handler != null) {
-                    Set<String> newIps = newPeers.getPeers()
-                                                 .stream()
-                                                 .map(PeerId::getIp)
-                                                 .collect(Collectors.toSet());
-                    handler.refresh(newIps);
-                    log.info("IpAuthHandler refreshed after peer list change to: {}", peerList);
-                } else {
-                    log.warn("IpAuthHandler not initialized, skipping refresh for peer list: {}",
-                             peerList);
+            // Use configured RPC timeout — bare await() would block forever if
+            // the callback is never invoked (e.g. node not started / RPC failure)
+            boolean completed = latch.await(3L * config.getRpcTimeout(),
+                                            TimeUnit.MILLISECONDS);
+            if (!completed && result.get() == null) {
+                Status timeoutStatus = new Status(RaftError.EINTERNAL,
+                                                  "changePeerList timed out after %d ms",
+                                                  3L * config.getRpcTimeout());
+                if (!result.compareAndSet(null, timeoutStatus)) {
+                    // Callback arrived just before us — keep its result
+                    timeoutStatus = null;
+                }
+                if (timeoutStatus != null) {
+                    log.error("changePeerList to {} timed out after {} ms",
+                              peerList, 3L * config.getRpcTimeout());
                 }
             }
-
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            result.set(new Status(RaftError.EINTERNAL, "changePeerList interrupted"));
+            log.error("changePeerList to {} was interrupted", peerList, e);
         } catch (Exception e) {
             log.error("failed to changePeerList to {},{}", peerList, e);
             result.set(new Status(-1, e.getMessage()));
         }
+
+        // Refresh IpAuthHandler so newly added peers are not blocked
+        if (result.get() != null && result.get().isOk()) {
+            IpAuthHandler handler = IpAuthHandler.getInstance();
+            if (handler != null) {
+                Set<String> newIps = newPeers.getPeers()
+                                             .stream()
+                                             .map(PeerId::getIp)
+                                             .collect(Collectors.toSet());
+                handler.refresh(newIps);
+                log.info("IpAuthHandler refreshed after peer list change to: {}", peerList);
+            } else {
+                log.warn("IpAuthHandler not initialized, skipping refresh for peer list: {}",
+                         peerList);
+            }
+        }
+
         return result.get();
     }
 
@@ -382,7 +404,8 @@ public class RaftEngine {
         if (p1 == null || p2 == null) {
             return false;
         }
-        return Objects.equals(p1.getIp(), p2.getIp()) && Objects.equals(p1.getPort(), p2.getPort());
+        return Objects.equals(p1.getIp(), p2.getIp()) &&
+               Objects.equals(p1.getPort(), p2.getPort());
     }
 
     private Replicator.State getReplicatorState(PeerId peerId) {
