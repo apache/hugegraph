@@ -68,7 +68,7 @@ public class RaftEngineIpAuthIntegrationTest {
         // This simulates a successful peer change without a real Raft cluster
 
         // Important: fire the closure synchronously or changePeerList() will
-        // block on latch.await() indefinitely — no timeout is configured
+        // block on latch.await(...) until the configured timeout elapses
         Node mockNode = mock(Node.class);
         doAnswer(invocation -> {
             Closure closure = invocation.getArgument(1);
@@ -99,7 +99,7 @@ public class RaftEngineIpAuthIntegrationTest {
         // Simulates a failed peer change — handler should NOT be refreshed
 
         // Important: fire the closure synchronously or changePeerList() will
-        // block on latch.await() indefinitely — no timeout is configured
+        // block on latch.await(...) until the configured timeout elapses
         Node mockNode = mock(Node.class);
         doAnswer(invocation -> {
             Closure closure = invocation.getArgument(1);

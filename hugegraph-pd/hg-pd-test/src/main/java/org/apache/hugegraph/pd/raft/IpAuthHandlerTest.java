@@ -76,8 +76,9 @@ public class IpAuthHandlerTest {
     @Test
     public void testUnresolvableHostnameDoesNotCrash() {
         // Should log a warning and skip — no exception thrown during construction
+        // Uses .invalid TLD which is RFC-2606 reserved and guaranteed to never resolve
         IpAuthHandler handler = IpAuthHandler.getInstance(
-                Collections.singleton("nonexistent.invalid.hostname"));
+                Collections.singleton("nonexistent.invalid"));
         // Handler was still created successfully despite bad hostname
         Assert.assertNotNull(handler);
         // Unresolvable entry is skipped so no IPs should be allowed
