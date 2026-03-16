@@ -123,7 +123,7 @@ public class RaftAPI extends API {
                                               @QueryParam("group")
                                               @DefaultValue("default")
                                               String group,
-                                              @Parameter(description = "The endpoint address to transfer leader to")
+                                              @Parameter(description = "The endpoint address")
                                               @QueryParam("endpoint")
                                               String endpoint) {
         LOG.debug("Graph [{}] prepare to transfer leader to: {}",
@@ -152,7 +152,9 @@ public class RaftAPI extends API {
                                          @QueryParam("group")
                                          @DefaultValue("default")
                                          String group,
-                                         @Parameter(description = "The endpoint address to set as leader")
+                                         @Parameter(
+                                                 description = "The endpoint address to set as " +
+                                                               "leader")
                                          @QueryParam("endpoint")
                                          String endpoint) {
         LOG.debug("Graph [{}] prepare to set leader to: {}",
@@ -180,7 +182,8 @@ public class RaftAPI extends API {
                                    @Parameter(description = "The raft group name")
                                    @QueryParam("group") @DefaultValue("default")
                                    String group,
-                                   @Parameter(description = "The endpoint address of the peer to add")
+                                   @Parameter(
+                                           description = "The endpoint address of the peer to add")
                                    @QueryParam("endpoint") String endpoint) {
         LOG.debug("Graph [{}] prepare to add peer: {}", graph, endpoint);
 
@@ -215,7 +218,9 @@ public class RaftAPI extends API {
                                       @Parameter(description = "The raft group name")
                                       @QueryParam("group")
                                       @DefaultValue("default") String group,
-                                      @Parameter(description = "The endpoint address of the peer to remove")
+                                      @Parameter(
+                                              description = "The endpoint address of the peer to " +
+                                                            "remove")
                                       @QueryParam("endpoint") String endpoint) {
         LOG.debug("Graph [{}] prepare to remove peer: {}", graph, endpoint);
 

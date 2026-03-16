@@ -62,7 +62,7 @@ public class RebuildAPI extends API {
                                               String graphSpace,
                                               @Parameter(description = "The graph name")
                                               @PathParam("graph") String graph,
-                                              @Parameter(description = "The vertex label name to rebuild")
+                                              @Parameter(description = "The vertex label to rebuild")
                                               @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild vertex label: {}", graph, name);
 

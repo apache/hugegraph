@@ -78,7 +78,7 @@ public class TaskAPI extends API {
                                     @QueryParam("status") String status,
                                     @Parameter(description = "The task ids to filter")
                                     @QueryParam("ids") List<Long> ids,
-                                    @Parameter(description = "The maximum number of tasks to return")
+                                    @Parameter(description = "The maximum number of tasks")
                                     @QueryParam("limit")
                                     @DefaultValue("100") long limit,
                                     @Parameter(description = "The page token for pagination")
@@ -179,7 +179,7 @@ public class TaskAPI extends API {
                                       @PathParam("graph") String graph,
                                       @Parameter(description = "The task id")
                                       @PathParam("id") long id,
-                                      @Parameter(description = "The action to perform on the task (e.g., cancel)")
+                                      @Parameter(description = "The action to perform on the task")
                                       @QueryParam("action") String action) {
         LOG.debug("Graph [{}] cancel task: {}", graph, id);
 

@@ -87,7 +87,7 @@ public class EdgeAPI extends BatchAPI {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_write"})
+                                   "$action=edge_write"})
     public String create(@Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
@@ -129,14 +129,14 @@ public class EdgeAPI extends BatchAPI {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_write"})
+                                   "$action=edge_write"})
     public String create(@Context HugeConfig config,
                          @Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
                          @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
-                         @Parameter(description = "Whether to check if source/target vertices exist")
+                         @Parameter(description = "Whether to check if target vertices exist")
                          @QueryParam("check_vertex")
                          @DefaultValue("true") boolean checkVertex,
                          List<JsonEdge> jsonEdges) {
@@ -176,7 +176,7 @@ public class EdgeAPI extends BatchAPI {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_write"})
+                                   "$action=edge_write"})
     public String update(@Context HugeConfig config,
                          @Context GraphManager manager,
                          @Parameter(description = "The graph space name")
@@ -232,7 +232,7 @@ public class EdgeAPI extends BatchAPI {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_write"})
+                                   "$action=edge_write"})
     public String update(@Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
@@ -276,7 +276,7 @@ public class EdgeAPI extends BatchAPI {
     @Compress
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_read"})
+                                   "$action=edge_read"})
     public String list(@Context GraphManager manager,
                        @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
@@ -366,7 +366,7 @@ public class EdgeAPI extends BatchAPI {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_read"})
+                                   "$action=edge_read"})
     public String get(@Context GraphManager manager,
                       @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
@@ -392,7 +392,7 @@ public class EdgeAPI extends BatchAPI {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
-                            "$action=edge_delete"})
+                                   "$action=edge_delete"})
     public void delete(@Context GraphManager manager,
                        @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
