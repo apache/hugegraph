@@ -119,9 +119,10 @@ public class TargetAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
-                      @Parameter(description = "The graph space name") @PathParam("graphspace")
-                      String graphSpace,
-                      @Parameter(description = "The target id") @PathParam("id") String id) {
+                      @Parameter(description = "The graph space name")
+                      @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The target id")
+                      @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] get target: {}", graphSpace, id);
 
         HugeTarget target = manager.authManager().getTarget(UserAPI.parseId(id));

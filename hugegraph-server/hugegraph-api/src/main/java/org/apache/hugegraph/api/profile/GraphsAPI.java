@@ -162,8 +162,7 @@ public class GraphsAPI extends API {
     @RolesAllowed({"analyst"})
     public Object reload(@Context GraphManager manager,
                          @Parameter(
-                                 description = "The action map containing 'action' key with value" +
-                                               " 'reload'")
+                                 description = "The action map containing 'action'='reload'")
                          Map<String, String> actionMap) {
 
         LOG.info("[SERVER] Manage graph with action map {}", actionMap);

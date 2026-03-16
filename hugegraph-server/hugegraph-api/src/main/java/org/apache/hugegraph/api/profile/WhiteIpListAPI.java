@@ -140,7 +140,9 @@ public class WhiteIpListAPI extends API {
     @RolesAllowed("admin")
     @Operation(summary = "enable/disable the white ip list")
     public Map<String, Object> updateStatus(@Context GraphManager manager,
-                                            @Parameter(description = "Status to set: 'true' to enable, 'false' to disable")
+                                            @Parameter(description = "Status to set: " +
+                                                                      "'true' to enable, " +
+                                                                      "'false' to disable")
                                             @QueryParam("status") String status) {
         LOG.debug("Enable or disable white ip list");
         E.checkArgument("true".equals(status) ||

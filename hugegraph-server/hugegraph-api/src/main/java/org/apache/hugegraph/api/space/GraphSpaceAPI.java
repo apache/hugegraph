@@ -107,7 +107,8 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public Object listProfile(@Context GraphManager manager,
-                              @Parameter(description = "Filter graph spaces by name or nickname prefix")
+                              @Parameter(description = "Filter graph spaces by " +
+                                                        "name or nickname prefix")
                               @QueryParam("prefix") String prefix,
                               @Context SecurityContext sc) {
         Set<String> spaces = manager.graphSpaces();

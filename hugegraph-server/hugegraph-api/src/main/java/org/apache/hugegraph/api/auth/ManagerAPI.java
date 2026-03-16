@@ -163,9 +163,9 @@ public class ManagerAPI extends API {
     @Timed
     @Consumes(APPLICATION_JSON)
     public String list(@Context GraphManager manager,
-                       @Parameter(description = "The graph space name") @PathParam("graphspace")
-                       String graphSpace,
-                       @Parameter(description = "The manager type: SPACE, SPACE_MEMBER, or ADMIN")
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The manager type: SPACE, SPACE_MEMBER or ADMIN")
                        @QueryParam("type") HugePermission type) {
         LOG.debug("list graph manager: {} {}", type, graphSpace);
 
@@ -197,8 +197,8 @@ public class ManagerAPI extends API {
     public String checkRole(@Context GraphManager manager,
                             @Parameter(description = "The graph space name")
                             @PathParam("graphspace") String graphSpace,
-                            @Parameter(
-                                    description = "The manager type: SPACE, SPACE_MEMBER, or ADMIN")
+                            @Parameter(description = "The manager type: " +
+                                                     "SPACE, SPACE_MEMBER, or ADMIN")
                             @QueryParam("type") HugePermission type) {
         LOG.debug("check if current user is graph manager: {} {}", type, graphSpace);
 

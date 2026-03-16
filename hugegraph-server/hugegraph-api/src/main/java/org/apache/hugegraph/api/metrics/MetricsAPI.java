@@ -195,7 +195,7 @@ public class MetricsAPI extends API {
     @Operation(summary = "get all base metrics")
     public String all(@Context GraphManager manager,
                       @Parameter(description = "Output format type: 'json' for JSON format, " +
-                                              "other values for Prometheus format")
+                                               "other values for Prometheus format")
                       @QueryParam("type") String type) {
         if (type != null && type.equals(JSON_STR)) {
             return baseMetricAll();
@@ -210,9 +210,9 @@ public class MetricsAPI extends API {
     @Produces(APPLICATION_TEXT_WITH_CHARSET)
     @RolesAllowed({"space", "$owner= $action=metrics_read"})
     @Operation(summary = "get all statistics metrics")
-    public String statistics(@Parameter(description = "Output format type: 'json' for JSON format, " +
-                                               "other values for Prometheus format")
-                             @QueryParam("type") String type) {
+    public String statistics(
+            @Parameter(description = "Output format type: 'json' for JSON format")
+            @QueryParam("type") String type) {
         Map<String, Map<String, Object>> metricMap = statistics();
 
         if (type != null && type.equals(JSON_STR)) {
