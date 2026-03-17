@@ -84,27 +84,37 @@ if env | grep '^hugegraph\.' > /dev/null; then
             : "${HG_SERVER_PD_REST_ENDPOINT:=}"
 
             if [ -n "${HG_SERVER_PD_REST_ENDPOINT}" ]; then
-                PD_REST="${HG_SERVER_PD_REST_ENDPOINT}"
+                PD_REST_LIST="${HG_SERVER_PD_REST_ENDPOINT}"
             else
-                PD_REST=$(echo "$PD_PEERS" | sed 's/:8686/:8620/g' | cut -d',' -f1)
+                PD_REST_LIST=$(echo "$PD_PEERS" | sed 's/:8686/:8620/g')
             fi
 
-            log "PD REST endpoint = $PD_REST"
+            export PD_REST_LIST
+            log "PD REST peers = $PD_REST_LIST"
             log "Timeout = ${WAIT_STORAGE_TIMEOUT_S}s"
 
             timeout "${WAIT_STORAGE_TIMEOUT_S}s" bash -c "
 
               log() { echo '[wait-storage] '\"\$1\"; }
 
-              until curl ${PD_AUTH_ARGS} -f -s \
-                    http://${PD_REST}/v1/health >/dev/null 2>&1; do
-                log 'PD not ready, retrying in 5s'
+              check_any_pd() {
+                for peer in \$(echo \"\$PD_REST_LIST\" | tr ',' ' '); do
+                  if curl ${PD_AUTH_ARGS} -f -s http://\${peer}/v1/health >/dev/null 2>&1; then
+                    echo \"\$peer\"
+                    return 0
+                  fi
+                done
+                return 1
+              }
+
+              until PD_REST=\$(check_any_pd); do
+                log 'No PD peer ready yet, retrying in 5s'
                 sleep 5
               done
-              log 'PD health check PASSED'
+              log \"PD health check PASSED via \$PD_REST\"
 
               until curl ${PD_AUTH_ARGS} -f -s \
-                    http://${PD_REST}/v1/stores 2>/dev/null | \
+                    http://\${PD_REST}/v1/stores 2>/dev/null | \
                     grep -qi '\"state\"[[:space:]]*:[[:space:]]*\"Up\"'; do
                 log 'No Up store yet, retrying in 5s'
                 sleep 5

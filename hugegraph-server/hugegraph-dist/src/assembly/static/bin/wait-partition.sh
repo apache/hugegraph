@@ -20,7 +20,7 @@ set -euo pipefail
 : "${STORE_REST:?STORE_REST not set}"
 
 timeout "${WAIT_PARTITION_TIMEOUT_S:-120}s" bash -c '
-until curl -fsS "http://${STORE_REST}/v1/partitions" 2>/dev/null | \
+until curl -fsS "http://${STORE_REST}" 2>/dev/null | \
       grep -q "\"partitionCount\":[1-9]"
 do
     echo "Waiting for partition assignment..."
