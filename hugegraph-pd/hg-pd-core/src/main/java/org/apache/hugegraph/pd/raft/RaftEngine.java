@@ -125,8 +125,6 @@ public class RaftEngine {
         nodeOptions.setRpcInstallSnapshotTimeout(config.getRpcTimeout());
         // TODO: tune RaftOptions for PD (see hugegraph-store PartitionEngine for reference)
 
-        nodeOptions.setEnableMetrics(true);
-
         final PeerId serverId = JRaftUtils.getPeerId(config.getAddress());
 
         rpcServer = createRaftRpcServer(config.getAddress(), initConf.getPeers());
@@ -256,11 +254,18 @@ public class RaftEngine {
             if (response != null && response.getGrpcAddress() != null) {
                 return response.getGrpcAddress();
             }
-        } catch (TimeoutException | ExecutionException e) {
+        } catch (TimeoutException e) {
             // TODO: a more complete fix would need a source of truth for the leader's
             // actual grpcAddress rather than deriving it from the local node's port config.
             throw new ExecutionException(
-                    String.format("Failed to resolve leader gRPC address for %s", leader), e);
+                    String.format("Timed out while resolving leader gRPC address for %s", leader),
+                    e);
+        } catch (ExecutionException e) {
+            // TODO: a more complete fix would need a source of truth for the leader's
+            // actual grpcAddress rather than deriving it from the local node's port config.
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            throw new ExecutionException(
+                    String.format("Failed to resolve leader gRPC address for %s", leader), cause);
         }
 
         log.warn("Leader gRPC address field is null in RPC response for {}", leader);
