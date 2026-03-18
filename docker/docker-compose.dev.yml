@@ -30,7 +30,6 @@ services:
     build:
       context: ..
       dockerfile: hugegraph-pd/Dockerfile
-    image: hugegraph/pd:${HUGEGRAPH_VERSION:-latest}
     container_name: hg-pd
     hostname: pd
     restart: unless-stopped
@@ -58,7 +57,6 @@ services:
     build:
       context: ..
       dockerfile: hugegraph-store/Dockerfile
-    image: hugegraph/store:${HUGEGRAPH_VERSION:-latest}
     container_name: hg-store
     hostname: store
     restart: unless-stopped
@@ -88,7 +86,6 @@ services:
     build:
       context: ..
       dockerfile: hugegraph-server/Dockerfile-hstore
-    image: hugegraph/server:${HUGEGRAPH_VERSION:-latest}
     container_name: hg-server
     hostname: server
     restart: unless-stopped
