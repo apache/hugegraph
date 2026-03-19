@@ -167,6 +167,8 @@ public class RaftEngineLeaderAddressTest {
 
     @Test
     public void testNullLeaderAfterWaitThrowsExecutionException() throws Exception {
+        // Use 0ms timeout so waitingForLeader(0) skips the wait loop and returns immediately
+        when(mockConfig.getRpcTimeout()).thenReturn(0);
         // Leader is still null after waitingForLeader() — should throw ExecutionException
         when(mockNode.getLeaderId()).thenReturn(null);
 

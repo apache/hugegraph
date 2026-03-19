@@ -275,7 +275,7 @@ public class RaftEngine {
 
         // Best-effort fallback: derive from leader raft endpoint IP + local gRPC port.
         // WARNING: this may be incorrect in clusters where PD nodes use different grpc.port
-        // values , a proper fix requires a cluster-wide source of truth for gRPC addresses.
+        // values, a proper fix requires a cluster-wide source of truth for gRPC addresses.
         String derived = leader.getEndpoint().getIp() + ":" + config.getGrpcPort();
         log.warn("Using derived leader gRPC address {} — may be incorrect if nodes use different ports",
                  derived);
