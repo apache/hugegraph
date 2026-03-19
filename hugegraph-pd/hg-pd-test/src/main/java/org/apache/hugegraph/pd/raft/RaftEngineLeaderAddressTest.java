@@ -74,7 +74,7 @@ public class RaftEngineLeaderAddressTest {
         when(mockNode.getLeaderId()).thenReturn(mockLeader);
 
         // Build mock config
-        // Use a short timeout (100ms) so the null-leader test doesn't block for seconds
+        // Use a short default timeout (100ms); specific tests may override getRpcTimeout()
         mockConfig = mock(PDConfig.Raft.class);
         when(mockConfig.getGrpcAddress()).thenReturn("127.0.0.1:" + GRPC_PORT);
         when(mockConfig.getGrpcPort()).thenReturn(GRPC_PORT);

@@ -277,7 +277,7 @@ public class RaftEngine {
         // WARNING: this may be incorrect in clusters where PD nodes use different grpc.port
         // values, a proper fix requires a cluster-wide source of truth for gRPC addresses.
         String derived = leader.getEndpoint().getIp() + ":" + config.getGrpcPort();
-        log.warn("Using derived leader gRPC address {} — may be incorrect if nodes use different ports",
+        log.info("Using derived leader gRPC address {} - may be incorrect if nodes use different ports",
                  derived);
         return derived;
     }
@@ -415,7 +415,8 @@ public class RaftEngine {
             long start = System.currentTimeMillis();
             while ((System.currentTimeMillis() - start < timeOut) && (leader == null)) {
                 try {
-                    this.wait(1000);
+                    long remaining = timeOut - (System.currentTimeMillis() - start);
+                    this.wait(Math.min(1000, Math.max(0, remaining)));
                 } catch (InterruptedException e) {
                     log.error("Raft wait for leader exception", e);
                 }
