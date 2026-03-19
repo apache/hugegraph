@@ -247,31 +247,39 @@ public class RaftEngine {
             throw new ExecutionException(new IllegalStateException("Leader is not ready"));
         }
 
+        RaftRpcProcessor.GetMemberResponse response = null;
         try {
-            RaftRpcProcessor.GetMemberResponse response = raftRpcClient
+            // TODO: a more complete fix would need a source of truth for the leader's
+            // actual grpcAddress rather than deriving it from the local node's port config.
+            response = raftRpcClient
                     .getGrpcAddress(leader.getEndpoint().toString())
                     .get(config.getRpcTimeout(), TimeUnit.MILLISECONDS);
             if (response != null && response.getGrpcAddress() != null) {
                 return response.getGrpcAddress();
             }
+            if (response == null) {
+                log.warn("Leader RPC response is null for {}, falling back to derived address",
+                         leader);
+            } else {
+                log.warn("Leader gRPC address field is null in RPC response for {}, "
+                         + "falling back to derived address", leader);
+            }
         } catch (TimeoutException e) {
-            // TODO: a more complete fix would need a source of truth for the leader's
-            // actual grpcAddress rather than deriving it from the local node's port config.
-            throw new ExecutionException(
-                    String.format("Timed out while resolving leader gRPC address for %s", leader),
-                    e);
+            log.warn("Timed out resolving leader gRPC address for {}, falling back to derived "
+                     + "address", leader);
         } catch (ExecutionException e) {
-            // TODO: a more complete fix would need a source of truth for the leader's
-            // actual grpcAddress rather than deriving it from the local node's port config.
             Throwable cause = e.getCause() != null ? e.getCause() : e;
-            throw new ExecutionException(
-                    String.format("Failed to resolve leader gRPC address for %s", leader), cause);
+            log.warn("Failed to resolve leader gRPC address for {}, falling back to derived "
+                     + "address", leader, cause);
         }
 
-        log.warn("Leader gRPC address field is null in RPC response for {}", leader);
-        throw new ExecutionException(
-                new IllegalStateException(
-                        String.format("Leader gRPC address unavailable for %s", leader)));
+        // Best-effort fallback: derive from leader raft endpoint IP + local gRPC port.
+        // WARNING: this may be incorrect in clusters where PD nodes use different grpc.port
+        // values , a proper fix requires a cluster-wide source of truth for gRPC addresses.
+        String derived = leader.getEndpoint().getIp() + ":" + config.getGrpcPort();
+        log.warn("Using derived leader gRPC address {} — may be incorrect if nodes use different ports",
+                 derived);
+        return derived;
     }
 
     /**
