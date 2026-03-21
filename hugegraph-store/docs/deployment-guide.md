@@ -728,17 +728,17 @@ environment:
 **Deploy**:
 
 ```bash
-# Start cluster
-docker compose up -d
+# Start cluster (run from the docker/ directory)
+docker compose -f docker-compose-3pd-3store-3server.yml up -d
 
 # Check status
-docker compose ps
+docker ps
 
 # View logs
-docker compose logs -f store1
+docker logs hg-store0
 
 # Stop cluster
-docker compose down
+docker compose -f docker-compose-3pd-3store-3server.yml down
 ```
 
 ---

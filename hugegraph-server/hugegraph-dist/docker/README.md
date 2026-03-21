@@ -128,5 +128,5 @@ cd docker
 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 ```
 
-See [docker/README.md](../../../../docker/README.md) for the full setup guide,
+See [docker/README.md](../../../docker/README.md) for the full setup guide,
 environment variable reference, and troubleshooting.

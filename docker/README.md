@@ -77,6 +77,9 @@ curl http://localhost:8080/versions
 ```bash
 cd docker
 docker compose -f docker-compose-3pd-3store-3server.yml up -d
+
+# To stop and remove all data volumes (clean restart)
+docker compose -f docker-compose-3pd-3store-3server.yml down -v
 ```
 
 **Startup ordering** is enforced via `depends_on` with `condition: service_healthy`:
@@ -257,3 +260,4 @@ docker stats --no-stream
 **Cause**: Services are using `127.0.0.1` instead of container hostnames, or the `hg-net` bridge network is misconfigured.
 
 **Fix**: Ensure all `HG_*` env vars use container hostnames (`pd0`, `store0`, etc.), not `127.0.0.1` or `localhost`.
+
