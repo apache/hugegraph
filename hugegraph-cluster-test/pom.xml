@@ -42,7 +42,7 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <final.name>apache-${release.name}-ct-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-ct-${project.version}</final.name>
     </properties>
 
     <dependencies>

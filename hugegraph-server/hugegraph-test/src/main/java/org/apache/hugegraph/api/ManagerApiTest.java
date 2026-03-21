@@ -68,13 +68,13 @@ public class ManagerApiTest extends BaseApiTest {
         Response r1 = this.client().get("/graphspaces");
         String result = r1.readEntity(String.class);
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
-        List<String> spaces = (List<String>) resultMap.get("graphSpaces");
+        List<String> spaces = (List<String>)resultMap.get("graphSpaces");
         for (String space : spaces) {
             Response r = this.client().get(managerPath(space),
                                            ImmutableMap.of("type", HugePermission.SPACE_MEMBER));
             result = r.readEntity(String.class);
             resultMap = JsonUtil.fromJson(result, Map.class);
-            List<String> spaceAdmins = (List<String>) resultMap.get("admins");
+            List<String> spaceAdmins = (List<String>)resultMap.get("admins");
             for (String user : spaceAdmins) {
                 this.client().delete(managerPath(space),
                                      ImmutableMap.of("user", user,
@@ -89,7 +89,7 @@ public class ManagerApiTest extends BaseApiTest {
                                        ImmutableMap.of("type", HugePermission.ADMIN));
         String result = r.readEntity(String.class);
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
-        List<String> admins = (List<String>) resultMap.get("admins");
+        List<String> admins = (List<String>)resultMap.get("admins");
         for (String user : admins) {
             if ("admin".equals(user)) {
                 continue;
@@ -103,13 +103,13 @@ public class ManagerApiTest extends BaseApiTest {
         Response r1 = this.client().get("/graphspaces");
         String result = r1.readEntity(String.class);
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
-        List<String> spaces = (List<String>) resultMap.get("graphSpaces");
+        List<String> spaces = (List<String>)resultMap.get("graphSpaces");
         for (String space : spaces) {
             Response r = this.client().get(managerPath(space),
                                            ImmutableMap.of("type", HugePermission.SPACE));
             result = r.readEntity(String.class);
             resultMap = JsonUtil.fromJson(result, Map.class);
-            List<String> spaceAdmins = (List<String>) resultMap.get("admins");
+            List<String> spaceAdmins = (List<String>)resultMap.get("admins");
             for (String user : spaceAdmins) {
                 this.client().delete(managerPath(space),
                                      ImmutableMap.of("user", user,
@@ -124,7 +124,7 @@ public class ManagerApiTest extends BaseApiTest {
             if (user.get("user_name").equals("admin")) {
                 continue;
             }
-            this.client().delete(USER_PATH, (String) user.get("id"));
+            this.client().delete(USER_PATH, (String)user.get("id"));
         }
     }
 
@@ -153,10 +153,8 @@ public class ManagerApiTest extends BaseApiTest {
         client().get(managerPath("testspace") + "/check",
                      ImmutableMap.of("type", HugePermission.SPACE_MEMBER));
 
-        RestClient member1Client =
-                new RestClient(baseUrl(), "test_member1", "password1");
-        RestClient member2Client =
-                new RestClient(baseUrl(), "test_member2", "password1");
+        RestClient member1Client = new RestClient(baseUrl(), "test_member1", "password1");
+        RestClient member2Client = new RestClient(baseUrl(), "test_member2", "password1");
 
         String res1 = member1Client.get(managerPath("testspace") + "/check",
                                         ImmutableMap.of("type",
@@ -214,10 +212,8 @@ public class ManagerApiTest extends BaseApiTest {
         r = client().post(managerPath("testspace"), spaceManager);
         assertResponseStatus(201, r);
 
-        RestClient spaceMemberClient =
-                new RestClient(baseUrl(), "perm_member", "password1");
-        RestClient spaceManagerClient =
-                new RestClient(baseUrl(), "perm_manager", "password1");
+        RestClient spaceMemberClient = new RestClient(baseUrl(), "perm_member", "password1");
+        RestClient spaceManagerClient = new RestClient(baseUrl(), "perm_manager", "password1");
 
         String userPath = "graphspaces/testspace/graphs/testgraph/auth/users";
         String user = "{\"user_name\":\"" + "test_perm_user" +
@@ -326,15 +322,17 @@ public class ManagerApiTest extends BaseApiTest {
         Response r = this.client().get(userPath, ImmutableMap.of("limit", NO_LIMIT));
         String result = assertResponseStatus(200, r);
 
-        Map<String, List<Map<String, Object>>> resultMap =
-                JsonUtil.fromJson(result, new TypeReference<Map<String,
-                        List<Map<String, Object>>>>() {
-                });
+        TypeReference<Map<String, List<Map<String, Object>>>> typeRef =
+                new TypeReference<Map<String, List<Map<String, Object>>>>() {
+                };
+        Map<String, List<Map<String, Object>>> resultMap = JsonUtil.fromJson(result,
+                                                                             typeRef);
         return resultMap.get("users");
     }
 
     /**
-     * Test space manager boundary: SpaceA's manager cannot operate SpaceB's resources
+     * Test space manager boundary: SpaceA's manager cannot operate SpaceB's
+     * resources
      */
     @Test
     public void testSpaceManagerBoundary() {
@@ -491,9 +489,11 @@ public class ManagerApiTest extends BaseApiTest {
                           response.contains("no permission"));
 
         // Verify: manageralpha CAN promote usertest to be spacealpha's member
-        // But this will fail because manageralpha doesn't have permission to read user from
+        // But this will fail because manageralpha doesn't have permission to read user
+        // from
         // DEFAULT space
-        // This is expected behavior - space managers should only manage users already in their
+        // This is expected behavior - space managers should only manage users already
+        // in their
         // space
         // or admin should assign users to spaces first
 
@@ -640,7 +640,8 @@ public class ManagerApiTest extends BaseApiTest {
         String vertexJson = "{\"label\":\"person\",\"properties\":{\"age\":30}}";
         r = managerClient.post(vertexPath, vertexJson);
         String response2 = r.readEntity(String.class);
-        // Note: Vertex write might require specific permissions depending on configuration
+        // Note: Vertex write might require specific permissions depending on
+        // configuration
         // We check if it's either allowed (201) or forbidden (403)
         int status = r.getStatus();
         Assert.assertTrue("Status should be 201 or 403, but was: " + status,
@@ -659,7 +660,8 @@ public class ManagerApiTest extends BaseApiTest {
         r = outsiderClient.post(vertexPath, vertexJson3);
         Assert.assertEquals(403, r.getStatus());
 
-        // Test 7: Space manager can manage space members (already tested in other tests)
+        // Test 7: Space manager can manage space members (already tested in other
+        // tests)
         // Test 8: Space member cannot manage space members
         this.createUser("newuser");
         String addMemberJson = "{\"user\":\"newuser\",\"type\":\"SPACE_MEMBER\"}";

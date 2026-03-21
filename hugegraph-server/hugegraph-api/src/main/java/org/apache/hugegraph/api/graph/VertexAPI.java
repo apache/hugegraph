@@ -56,6 +56,8 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -85,7 +87,9 @@ public class VertexAPI extends BatchAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          JsonVertex jsonVertex) {
         LOG.debug("Graph [{}] create vertex: {}", graph, jsonVertex);
@@ -107,7 +111,9 @@ public class VertexAPI extends BatchAPI {
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String create(@Context HugeConfig config,
                          @Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          List<JsonVertex> jsonVertices) {
         LOG.debug("Graph [{}] create vertices: {}", graph, jsonVertices);
@@ -140,7 +146,9 @@ public class VertexAPI extends BatchAPI {
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String update(@Context HugeConfig config,
                          @Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          BatchVertexRequest req) {
         BatchVertexRequest.checkUpdate(req);
@@ -189,9 +197,15 @@ public class VertexAPI extends BatchAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
+                         @Parameter(description = "The vertex ID")
                          @PathParam("id") String idValue,
+                         @Parameter(description =
+                                 "Action to perform: 'append' to add new properties, " +
+                                 "'remove' to delete existing properties")
                          @QueryParam("action") String action,
                          JsonVertex jsonVertex) {
         LOG.debug("Graph [{}] update vertex: {}", graph, jsonVertex);
@@ -225,14 +239,25 @@ public class VertexAPI extends BatchAPI {
     @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
                             "$action=vertex_read"})
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "Filter by vertex label")
                        @QueryParam("label") String label,
+                       @Parameter(description = "Filter by vertex properties in JSON format, " +
+                                                "e.g., {\"key\":\"value\"}")
                        @QueryParam("properties") String properties,
+                       @Parameter(description =
+                               "Keep the starting predicate P (like P.gt(), P.lt()) " +
+                               "in property query or parse it to relational operators")
                        @QueryParam("keep_start_p")
                        @DefaultValue("false") boolean keepStartP,
+                       @Parameter(description = "Offset for pagination")
                        @QueryParam("offset") @DefaultValue("0") long offset,
+                       @Parameter(description = "Page number for pagination")
                        @QueryParam("page") String page,
+                       @Parameter(description = "Limit the number of vertices returned")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
         LOG.debug("Graph [{}] query vertices by label: {}, properties: {}, " +
                   "offset: {}, page: {}, limit: {}",
@@ -286,8 +311,11 @@ public class VertexAPI extends BatchAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_read"})
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("graph") String graph,
+                      @Parameter(description = "The vertex ID")
                       @PathParam("id") String idValue) {
         LOG.debug("Graph [{}] get vertex by id '{}'", graph, idValue);
 
@@ -309,9 +337,13 @@ public class VertexAPI extends BatchAPI {
     @Consumes(APPLICATION_JSON)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_delete"})
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "The vertex ID")
                        @PathParam("id") String idValue,
+                       @Parameter(description = "The vertex label (used to verify vertex identity)")
                        @QueryParam("label") String label) {
         LOG.debug("Graph [{}] remove vertex by id '{}'", graph, idValue);
 
@@ -390,10 +422,13 @@ public class VertexAPI extends BatchAPI {
 
     private static class BatchVertexRequest {
 
+        @Schema(description = "List of vertices to be created or updated", required = true)
         @JsonProperty("vertices")
         public List<JsonVertex> jsonVertices;
+        @Schema(description = "Update strategies for each property key", required = true)
         @JsonProperty("update_strategies")
         public Map<String, UpdateStrategy> updateStrategies;
+        @Schema(description = "Whether to create vertex if it does not exist")
         @JsonProperty("create_if_not_exist")
         public boolean createIfNotExist = true;
 

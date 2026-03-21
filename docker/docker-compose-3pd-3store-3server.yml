@@ -15,166 +15,210 @@
 # limitations under the License.
 #
 
-# TODO: reuse the configs for same type containers
-# User could modify the node nums and the port by themselves
-version: "3"
+name: hugegraph-3x3
+
+networks:
+  hg-net:
+    driver: bridge
+
+volumes:
+  hg-pd0-data:
+  hg-pd1-data:
+  hg-pd2-data:
+  hg-store0-data:
+  hg-store1-data:
+  hg-store2-data:
+
+# ── Shared service defaults ──────────────────────────────────────────
+# TODO: remove volume mounts below once images are published with new entrypoints
+x-pd-common: &pd-common
+  image: hugegraph/pd:${HUGEGRAPH_VERSION:-latest}
+  pull_policy: missing
+  restart: unless-stopped
+  networks: [hg-net]
+  entrypoint: ["/hugegraph-pd/docker-entrypoint.sh"]
+  healthcheck:
+    test: ["CMD-SHELL", "curl -fsS http://localhost:8620/v1/health >/dev/null || exit 1"]
+    interval: 15s
+    timeout: 10s
+    retries: 30
+    start_period: 120s
+
+x-store-common: &store-common
+  image: hugegraph/store:${HUGEGRAPH_VERSION:-latest}
+  pull_policy: missing
+  restart: unless-stopped
+  networks: [hg-net]
+  depends_on:
+    pd0: { condition: service_healthy }
+    pd1: { condition: service_healthy }
+    pd2: { condition: service_healthy }
+  entrypoint: ["/hugegraph-store/docker-entrypoint.sh"]
+  healthcheck:
+    test: ["CMD-SHELL", "curl -fsS http://localhost:8520/v1/health >/dev/null || exit 1"]
+    interval: 15s
+    timeout: 15s
+    retries: 40
+    start_period: 120s
+
+x-server-common: &server-common
+  image: hugegraph/server:${HUGEGRAPH_VERSION:-latest}
+  pull_policy: missing
+  restart: unless-stopped
+  networks: [hg-net]
+  depends_on:
+    store0: { condition: service_healthy }
+    store1: { condition: service_healthy }
+    store2: { condition: service_healthy }
+  entrypoint: ["/hugegraph-server/docker-entrypoint.sh"]
+  environment:
+    STORE_REST: store0:8520
+    HG_SERVER_BACKEND: hstore
+    HG_SERVER_PD_PEERS: pd0:8686,pd1:8686,pd2:8686
+  healthcheck:
+    test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 30
+    start_period: 60s
+
+# ── Services ──────────────────────────────────────────────────────────
 
 services:
+  # --- PD cluster (3 nodes) ---
   pd0:
-    image: hugegraph/pd
-    container_name: pd0
+    <<: *pd-common
+    container_name: hg-pd0
     hostname: pd0
-    network_mode: host
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8620"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    networks: [ hg-net ]
+    environment:
+      HG_PD_GRPC_HOST: pd0
+      HG_PD_GRPC_PORT: "8686"
+      HG_PD_REST_PORT: "8620"
+      HG_PD_RAFT_ADDRESS: pd0:8610
+      HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610
+      HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
+      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_INITIAL_STORE_COUNT: 3
+    ports: ["8620:8620", "8686:8686"]
     volumes:
-      - ./configs/application-pd0.yml:/hugegraph-pd/conf/application.yml
+      - hg-pd0-data:/hugegraph-pd/pd_data
+      - ../hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh:/hugegraph-pd/docker-entrypoint.sh
 
   pd1:
-    image: hugegraph/pd
-    container_name: pd1
+    <<: *pd-common
+    container_name: hg-pd1
     hostname: pd1
-    network_mode: host
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8621"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    networks: [ hg-net ]
+    environment:
+      HG_PD_GRPC_HOST: pd1
+      HG_PD_GRPC_PORT: "8686"
+      HG_PD_REST_PORT: "8620"
+      HG_PD_RAFT_ADDRESS: pd1:8610
+      HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610
+      HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
+      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_INITIAL_STORE_COUNT: 3
+    ports: ["8621:8620", "8687:8686"]
     volumes:
-      - ./configs/application-pd1.yml:/hugegraph-pd/conf/application.yml
+      - hg-pd1-data:/hugegraph-pd/pd_data
+      - ../hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh:/hugegraph-pd/docker-entrypoint.sh
 
   pd2:
-    image: hugegraph/pd
-    container_name: pd2
+    <<: *pd-common
+    container_name: hg-pd2
     hostname: pd2
-    network_mode: host
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8622"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    networks: [ hg-net ]
+    environment:
+      HG_PD_GRPC_HOST: pd2
+      HG_PD_GRPC_PORT: "8686"
+      HG_PD_REST_PORT: "8620"
+      HG_PD_RAFT_ADDRESS: pd2:8610
+      HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610
+      HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
+      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_INITIAL_STORE_COUNT: 3
+    ports: ["8622:8620", "8688:8686"]
     volumes:
-      - ./configs/application-pd2.yml:/hugegraph-pd/conf/application.yml
+      - hg-pd2-data:/hugegraph-pd/pd_data
+      - ../hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh:/hugegraph-pd/docker-entrypoint.sh
 
+  # --- Store cluster (3 nodes) ---
   store0:
-    image: hugegraph/store
-    container_name: store0
+    <<: *store-common
+    container_name: hg-store0
     hostname: store0
-    network_mode: host
-    depends_on:
-      pd0:
-        condition: service_healthy
-      pd1:
-        condition: service_healthy
-      pd2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8520"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    environment:
+      HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
+      HG_STORE_GRPC_HOST: store0
+      HG_STORE_GRPC_PORT: "8500"
+      HG_STORE_REST_PORT: "8520"
+      HG_STORE_RAFT_ADDRESS: store0:8510
+      HG_STORE_DATA_PATH: /hugegraph-store/storage
+    ports: ["8500:8500", "8510:8510", "8520:8520"]
     volumes:
-      - ./configs/application-store0.yml:/hugegraph-store/conf/application.yml
+      - hg-store0-data:/hugegraph-store/storage
+      - ../hugegraph-store/hg-store-dist/docker/docker-entrypoint.sh:/hugegraph-store/docker-entrypoint.sh
 
   store1:
-    image: hugegraph/store
-    container_name: store1
+    <<: *store-common
+    container_name: hg-store1
     hostname: store1
-    network_mode: host
-    depends_on:
-      pd0:
-        condition: service_healthy
-      pd1:
-        condition: service_healthy
-      pd2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8521"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    environment:
+      HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
+      HG_STORE_GRPC_HOST: store1
+      HG_STORE_GRPC_PORT: "8500"
+      HG_STORE_REST_PORT: "8520"
+      HG_STORE_RAFT_ADDRESS: store1:8510
+      HG_STORE_DATA_PATH: /hugegraph-store/storage
+    ports: ["8501:8500", "8511:8510", "8521:8520"]
     volumes:
-      - ./configs/application-store1.yml:/hugegraph-store/conf/application.yml
+      - hg-store1-data:/hugegraph-store/storage
+      - ../hugegraph-store/hg-store-dist/docker/docker-entrypoint.sh:/hugegraph-store/docker-entrypoint.sh
 
   store2:
-    image: hugegraph/store
-    container_name: store2
+    <<: *store-common
+    container_name: hg-store2
     hostname: store2
-    network_mode: host
-    depends_on:
-      pd0:
-        condition: service_healthy
-      pd1:
-        condition: service_healthy
-      pd2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8522"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    environment:
+      HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
+      HG_STORE_GRPC_HOST: store2
+      HG_STORE_GRPC_PORT: "8500"
+      HG_STORE_REST_PORT: "8520"
+      HG_STORE_RAFT_ADDRESS: store2:8510
+      HG_STORE_DATA_PATH: /hugegraph-store/storage
+    ports: ["8502:8500", "8512:8510", "8522:8520"]
     volumes:
-      - ./configs/application-store2.yml:/hugegraph-store/conf/application.yml
+      - hg-store2-data:/hugegraph-store/storage
+      - ../hugegraph-store/hg-store-dist/docker/docker-entrypoint.sh:/hugegraph-store/docker-entrypoint.sh
+
+  # --- Server cluster (3 nodes) ---
+  server0:
+    <<: *server-common
+    container_name: hg-server0
+    hostname: server0
+    ports: ["8080:8080"]
+    volumes:
+      - ../hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh:/hugegraph-server/docker-entrypoint.sh
+      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-storage.sh:/hugegraph-server/bin/wait-storage.sh
+      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-partition.sh:/hugegraph-server/bin/wait-partition.sh
 
   server1:
-    image: hugegraph/server
-    container_name: server1
+    <<: *server-common
+    container_name: hg-server1
     hostname: server1
-    network_mode: host
-    depends_on:
-      store0:
-        condition: service_healthy
-      store1:
-        condition: service_healthy
-      store2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    ports: ["8081:8080"]
     volumes:
-      - ./configs/server1-conf:/hugegraph-server/conf
+      - ../hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh:/hugegraph-server/docker-entrypoint.sh
+      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-storage.sh:/hugegraph-server/bin/wait-storage.sh
+      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-partition.sh:/hugegraph-server/bin/wait-partition.sh
 
   server2:
-    image: hugegraph/server
-    container_name: server2
+    <<: *server-common
+    container_name: hg-server2
     hostname: server2
-    network_mode: host
-    depends_on:
-      store0:
-        condition: service_healthy
-      store1:
-        condition: service_healthy
-      store2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8082"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+    ports: ["8082:8080"]
     volumes:
-      - ./configs/server2-conf:/hugegraph-server/conf
-
-  server3:
-    image: hugegraph/server
-    container_name: server3
-    hostname: server3
-    network_mode: host
-    depends_on:
-      store0:
-        condition: service_healthy
-      store1:
-        condition: service_healthy
-      store2:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    volumes:
-      - ./configs/server3-conf:/hugegraph-server/conf
+      - ../hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh:/hugegraph-server/docker-entrypoint.sh
+      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-storage.sh:/hugegraph-server/bin/wait-storage.sh
+      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-partition.sh:/hugegraph-server/bin/wait-partition.sh

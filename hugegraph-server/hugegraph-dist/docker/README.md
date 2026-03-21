@@ -40,7 +40,7 @@ If you want to customize the preloaded data, please mount the groovy scripts (no
 
 2. Using docker compose
 
-   We can also use `docker-compose up -d` to quickly start. The `docker-compose.yaml` is below. [example.groovy](https://github.com/apache/incubator-hugegraph/blob/master/hugegraph-server/hugegraph-dist/src/assembly/static/scripts/example.groovy) is a pre-defined script. If needed, we can mount a new `example.groovy` to preload different data:
+   We can also use `docker-compose up -d` to quickly start. The `docker-compose.yaml` is below. [example.groovy](https://github.com/apache/hugegraph/blob/master/hugegraph-server/hugegraph-dist/src/assembly/static/scripts/example.groovy) is a pre-defined script. If needed, we can mount a new `example.groovy` to preload different data:
 
     ```yaml
     version: '3'

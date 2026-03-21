@@ -23,9 +23,12 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -40,7 +43,6 @@ import com.alipay.remoting.config.BoltServerOption;
 import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.RaftGroupService;
-import com.alipay.sofa.jraft.ReplicatorGroup;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.Replicator;
@@ -48,13 +50,11 @@ import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.entity.Task;
 import com.alipay.sofa.jraft.error.RaftError;
 import com.alipay.sofa.jraft.option.NodeOptions;
-import com.alipay.sofa.jraft.option.RaftOptions;
 import com.alipay.sofa.jraft.option.RpcOptions;
 import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.rpc.impl.BoltRpcServer;
 import com.alipay.sofa.jraft.util.Endpoint;
-import com.alipay.sofa.jraft.util.ThreadId;
 import com.alipay.sofa.jraft.util.internal.ThrowUtil;
 
 import io.netty.channel.ChannelHandler;
@@ -86,8 +86,12 @@ public class RaftEngine {
         }
         this.config = config;
 
+        // Wire configured rpc timeout into RaftRpcClient so the Bolt transport
+        // timeout and the future.get() caller timeout in getLeaderGrpcAddress() are consistent.
         raftRpcClient = new RaftRpcClient();
-        raftRpcClient.init(new RpcOptions());
+        RpcOptions rpcOptions = new RpcOptions();
+        rpcOptions.setRpcDefaultTimeout(config.getRpcTimeout());
+        raftRpcClient.init(rpcOptions);
 
         String raftPath = config.getDataPath() + "/" + groupId;
         new File(raftPath).mkdirs();
@@ -119,10 +123,7 @@ public class RaftEngine {
         nodeOptions.setRpcConnectTimeoutMs(config.getRpcTimeout());
         nodeOptions.setRpcDefaultTimeout(config.getRpcTimeout());
         nodeOptions.setRpcInstallSnapshotTimeout(config.getRpcTimeout());
-        // Set the raft configuration
-        RaftOptions raftOptions = nodeOptions.getRaftOptions();
-
-        nodeOptions.setEnableMetrics(true);
+        // TODO: tune RaftOptions for PD (see hugegraph-store PartitionEngine for reference)
 
         final PeerId serverId = JRaftUtils.getPeerId(config.getAddress());
 
@@ -228,7 +229,7 @@ public class RaftEngine {
     }
 
     /**
-     * Send a message to the leader to get the grpc address;
+     * Send a message to the leader to get the grpc address.
      */
     public String getLeaderGrpcAddress() throws ExecutionException, InterruptedException {
         if (isLeader()) {
@@ -236,11 +237,49 @@ public class RaftEngine {
         }
 
         if (raftNode.getLeaderId() == null) {
-            waitingForLeader(10000);
+            waitingForLeader(config.getRpcTimeout());
         }
 
-        return raftRpcClient.getGrpcAddress(raftNode.getLeaderId().getEndpoint().toString()).get()
-                            .getGrpcAddress();
+        // Cache leader to avoid repeated getLeaderId() calls and guard against
+        // waitingForLeader() returning without a leader being elected.
+        PeerId leader = raftNode.getLeaderId();
+        if (leader == null) {
+            throw new ExecutionException(new IllegalStateException("Leader is not ready"));
+        }
+
+        RaftRpcProcessor.GetMemberResponse response = null;
+        try {
+            // TODO: a more complete fix would need a source of truth for the leader's
+            // actual grpcAddress rather than deriving it from the local node's port config.
+            response = raftRpcClient
+                    .getGrpcAddress(leader.getEndpoint().toString())
+                    .get(config.getRpcTimeout(), TimeUnit.MILLISECONDS);
+            if (response != null && response.getGrpcAddress() != null) {
+                return response.getGrpcAddress();
+            }
+            if (response == null) {
+                log.warn("Leader RPC response is null for {}, falling back to derived address",
+                         leader);
+            } else {
+                log.warn("Leader gRPC address field is null in RPC response for {}, "
+                         + "falling back to derived address", leader);
+            }
+        } catch (TimeoutException e) {
+            log.warn("Timed out resolving leader gRPC address for {}, falling back to derived "
+                     + "address", leader);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            log.warn("Failed to resolve leader gRPC address for {}, falling back to derived "
+                     + "address", leader, cause);
+        }
+
+        // Best-effort fallback: derive from leader raft endpoint IP + local gRPC port.
+        // WARNING: this may be incorrect in clusters where PD nodes use different grpc.port
+        // values, a proper fix requires a cluster-wide source of truth for gRPC addresses.
+        String derived = leader.getEndpoint().getIp() + ":" + config.getGrpcPort();
+        log.info("Using derived leader gRPC address {} - may be incorrect if nodes use different ports",
+                 derived);
+        return derived;
     }
 
     /**
@@ -313,23 +352,55 @@ public class RaftEngine {
 
     public Status changePeerList(String peerList) {
         AtomicReference<Status> result = new AtomicReference<>();
+        Configuration newPeers = new Configuration();
         try {
             String[] peers = peerList.split(",", -1);
             if ((peers.length & 1) != 1) {
                 throw new PDException(-1, "the number of peer list must be odd.");
             }
-            Configuration newPeers = new Configuration();
             newPeers.parse(peerList);
             CountDownLatch latch = new CountDownLatch(1);
             this.raftNode.changePeers(newPeers, status -> {
-                result.set(status);
+                result.compareAndSet(null, status);
+                if (status != null && status.isOk()) {
+                    IpAuthHandler handler = IpAuthHandler.getInstance();
+                    if (handler != null) {
+                        Set<String> newIps = newPeers.getPeers()
+                                                     .stream()
+                                                     .map(PeerId::getIp)
+                                                     .collect(Collectors.toSet());
+                        handler.refresh(newIps);
+                        log.info("IpAuthHandler refreshed after peer list change to: {}",
+                                 peerList);
+                    } else {
+                        log.warn("IpAuthHandler not initialized, skipping refresh for "
+                                 + "peer list: {}", peerList);
+                    }
+                }
                 latch.countDown();
             });
-            latch.await();
+            boolean completed = latch.await(3L * config.getRpcTimeout(), TimeUnit.MILLISECONDS);
+            if (!completed && result.get() == null) {
+                Status timeoutStatus = new Status(RaftError.EINTERNAL,
+                                                  "changePeerList timed out after %d ms",
+                                                  3L * config.getRpcTimeout());
+                if (!result.compareAndSet(null, timeoutStatus)) {
+                    timeoutStatus = null;
+                }
+                if (timeoutStatus != null) {
+                    log.error("changePeerList to {} timed out after {} ms",
+                              peerList, 3L * config.getRpcTimeout());
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            result.set(new Status(RaftError.EINTERNAL, "changePeerList interrupted"));
+            log.error("changePeerList to {} was interrupted", peerList, e);
         } catch (Exception e) {
             log.error("failed to changePeerList to {},{}", peerList, e);
             result.set(new Status(-1, e.getMessage()));
         }
+
         return result.get();
     }
 
@@ -344,7 +415,8 @@ public class RaftEngine {
             long start = System.currentTimeMillis();
             while ((System.currentTimeMillis() - start < timeOut) && (leader == null)) {
                 try {
-                    this.wait(1000);
+                    long remaining = timeOut - (System.currentTimeMillis() - start);
+                    this.wait(Math.min(1000, Math.max(0, remaining)));
                 } catch (InterruptedException e) {
                     log.error("Raft wait for leader exception", e);
                 }
@@ -352,7 +424,6 @@ public class RaftEngine {
             }
             return leader;
         }
-
     }
 
     public Node getRaftNode() {
@@ -366,7 +437,8 @@ public class RaftEngine {
         if (p1 == null || p2 == null) {
             return false;
         }
-        return Objects.equals(p1.getIp(), p2.getIp()) && Objects.equals(p1.getPort(), p2.getPort());
+        return Objects.equals(p1.getIp(), p2.getIp()) &&
+               Objects.equals(p1.getPort(), p2.getPort());
     }
 
     private Replicator.State getReplicatorState(PeerId peerId) {

@@ -39,6 +39,7 @@ import org.glassfish.jersey.message.GZipEncoder;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 
 import com.fasterxml.jackson.databind.JavaType;
@@ -61,9 +62,9 @@ public class BaseApiTest {
     protected static final String BASE_URL = "http://127.0.0.1:8080";
     private static final String GRAPH = "hugegraph";
     private static final String GRAPHSPACE = "DEFAULT";
-    private static final String USERNAME = "admin";
     protected static final String URL_PREFIX = "graphspaces/" + GRAPHSPACE + "/graphs/" + GRAPH;
     protected static final String TRAVERSERS_API = URL_PREFIX + "/traversers";
+    private static final String USERNAME = "admin";
     private static final String PASSWORD = "pa";
     private static final int NO_LIMIT = -1;
     private static final String SCHEMA_PKS = "/schema/propertykeys";
@@ -73,6 +74,8 @@ public class BaseApiTest {
     private static final String GRAPH_VERTEX = "/graph/vertices";
     private static final String GRAPH_EDGE = "/graph/edges";
     private static final String BATCH = "/batch";
+    static final String STANDALONE_ERROR =
+            "GraphSpace management is not supported in standalone mode";
 
     private static final String ROCKSDB_CONFIG_TEMPLATE =
             "{ \"gremlin.graph\": \"org.apache.hugegraph.HugeFactory\"," +
@@ -82,10 +85,8 @@ public class BaseApiTest {
             "\"rocksdb.wal_path\": \"rocksdbtest-data-%s\"," +
             "\"search.text_analyzer\": \"jieba\"," +
             "\"search.text_analyzer_mode\": \"INDEX\" }";
-
-    protected static RestClient client;
-
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    protected static RestClient client;
 
     @BeforeClass
     public static void init() {
@@ -99,17 +100,8 @@ public class BaseApiTest {
         client = null;
     }
 
-    @After
-    public void teardown() throws Exception {
-        BaseApiTest.clearData();
-    }
-
     public static String baseUrl() {
         return BASE_URL;
-    }
-
-    public RestClient client() {
-        return client;
     }
 
     public static RestClient newClient() {
@@ -193,7 +185,8 @@ public class BaseApiTest {
                 Assert.fail(String.format("Failed to wait for task %s " +
                                           "due to timeout", task));
             }
-        } while (!expectedStatus.contains(status));
+        }
+        while (!expectedStatus.contains(status));
     }
 
     protected static void initVertexLabel() {
@@ -746,6 +739,30 @@ public class BaseApiTest {
         String path = String.format("graphspaces/%s/role", graphSpace);
         client.post(path, String.format(body, username));
         return analystClient;
+    }
+
+    /**
+     * Skips the current test when the server backend is not known to be in
+     * standalone mode. Treats both {@code "hstore"} and {@code null}
+     * (i.e. the backend property is not provided/unknown) as PD/distributed
+     * mode and skips the test for safety.
+     * Call this from a {@code @Before} method in standalone-only test classes.
+     */
+    public static void assumeStandaloneMode() {
+        String backend = System.getProperty("backend");
+        boolean isPdMode = backend == null || "hstore".equals(backend);
+        Assume.assumeFalse(
+                "Skip when backend is hstore (PD/distributed) or not specified",
+                isPdMode);
+    }
+
+    @After
+    public void teardown() throws Exception {
+        BaseApiTest.clearData();
+    }
+
+    public RestClient client() {
+        return client;
     }
 
     public static class RestClient {

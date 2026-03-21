@@ -110,7 +110,7 @@ mvn clean install
 
 # Build distribution package only
 mvn clean package -pl hg-pd-dist -am -DskipTests
-# Output: hg-pd-dist/target/apache-hugegraph-pd-incubating-<version>.tar.gz
+# Output: hugegraph-pd/apache-hugegraph-pd-<version>.tar.gz
 ```
 
 ### Running Tests
@@ -165,7 +165,7 @@ mvn clean
 
 After building, extract the tarball:
 ```
-apache-hugegraph-pd-incubating-<version>/
+apache-hugegraph-pd-<version>/
 ├── bin/
 │   ├── start-hugegraph-pd.sh    # Start PD server
 │   ├── stop-hugegraph-pd.sh     # Stop PD server
@@ -183,7 +183,7 @@ apache-hugegraph-pd-incubating-<version>/
 ### Starting PD
 
 ```bash
-cd apache-hugegraph-pd-incubating-<version>/
+cd apache-hugegraph-pd-<version>/
 bin/start-hugegraph-pd.sh
 
 # With custom GC options

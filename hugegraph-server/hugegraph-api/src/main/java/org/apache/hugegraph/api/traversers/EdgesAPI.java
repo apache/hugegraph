@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.DefaultValue;
@@ -87,6 +88,7 @@ public class EdgesAPI extends API {
     public String shards(@Context GraphManager manager,
                          @PathParam("graphspace") String graphSpace,
                          @PathParam("graph") String graph,
+                         @Parameter(description = "The split size for shards")
                          @QueryParam("split_size") long splitSize) {
         LOG.debug("Graph [{}] get vertex shards with split size '{}'",
                   graph, splitSize);

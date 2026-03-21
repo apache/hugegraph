@@ -38,7 +38,7 @@ import jakarta.ws.rs.core.Response;
  * MultiNode Test generate the cluster env with 3 pd node + 3 store node + 3 server node.
  * Or you can set different num of nodes by using env = new MultiNodeEnv(pdNum, storeNum, serverNum)
  * All nodes are deployed in ports generated randomly, the application of nodes are stored
- * in /apache-hugegraph-ct-incubating-1.7.0, you can visit each node with rest api.
+ * in /apache-hugegraph-ct-1.7.0, you can visit each node with rest api.
  */
 public class BaseMultiClusterTest {
 

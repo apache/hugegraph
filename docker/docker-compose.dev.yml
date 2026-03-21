@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# TODO: remove volume mounts below once images are published with new entrypoints
+
 name: hugegraph-single
 
 networks:
@@ -26,17 +26,14 @@ volumes:
   hg-store-data:
 
 services:
-
   pd:
-    image: hugegraph/pd:${HUGEGRAPH_VERSION:-latest}
-    pull_policy: always
+    build:
+      context: ..
+      dockerfile: hugegraph-pd/Dockerfile
     container_name: hg-pd
     hostname: pd
     restart: unless-stopped
     networks: [hg-net]
-
-    entrypoint: ["/hugegraph-pd/docker-entrypoint.sh"]
-
     environment:
       HG_PD_GRPC_HOST: pd
       HG_PD_GRPC_PORT: "8686"
@@ -45,36 +42,28 @@ services:
       HG_PD_RAFT_PEERS_LIST: pd:8610
       HG_PD_INITIAL_STORE_LIST: store:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
-
     ports:
       - "8620:8620"
-
     volumes:
       - hg-pd-data:/hugegraph-pd/pd_data
-      - ../hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh:/hugegraph-pd/docker-entrypoint.sh
-
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8620/v1/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 30s
-
+      start_period: 20s
 
   store:
-    image: hugegraph/store:${HUGEGRAPH_VERSION:-latest}
-    pull_policy: always
+    build:
+      context: ..
+      dockerfile: hugegraph-store/Dockerfile
     container_name: hg-store
     hostname: store
     restart: unless-stopped
     networks: [hg-net]
-
-    entrypoint: ["/hugegraph-store/docker-entrypoint.sh"]
-
     depends_on:
       pd:
         condition: service_healthy
-
     environment:
       HG_STORE_PD_ADDRESS: pd:8686
       HG_STORE_GRPC_HOST: store
@@ -82,48 +71,33 @@ services:
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store:8510
       HG_STORE_DATA_PATH: /hugegraph-store/storage
-
     ports:
       - "8520:8520"
-
     volumes:
       - hg-store-data:/hugegraph-store/storage
-      - ../hugegraph-store/hg-store-dist/docker/docker-entrypoint.sh:/hugegraph-store/docker-entrypoint.sh
-
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8520/v1/health >/dev/null || exit 1"]
       interval: 10s
       timeout: 10s
       retries: 30
-      start_period: 60s
-
+      start_period: 30s
 
   server:
-    image: hugegraph/server:${HUGEGRAPH_VERSION:-latest}
-    pull_policy: always
+    build:
+      context: ..
+      dockerfile: hugegraph-server/Dockerfile-hstore
     container_name: hg-server
     hostname: server
     restart: unless-stopped
     networks: [hg-net]
-
-    entrypoint: ["/hugegraph-server/docker-entrypoint.sh"]
-
     depends_on:
       store:
         condition: service_healthy
-
     environment:
       HG_SERVER_BACKEND: hstore
       HG_SERVER_PD_PEERS: pd:8686
-
     ports:
       - "8080:8080"
-
-    volumes:
-      - ../hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh:/hugegraph-server/docker-entrypoint.sh
-      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-storage.sh:/hugegraph-server/bin/wait-storage.sh
-      - ../hugegraph-server/hugegraph-dist/src/assembly/static/bin/wait-partition.sh:/hugegraph-server/bin/wait-partition.sh
-
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null || exit 1"]
       interval: 10s

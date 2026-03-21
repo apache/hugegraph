@@ -38,6 +38,7 @@ import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -139,6 +140,9 @@ public class WhiteIpListAPI extends API {
     @RolesAllowed("admin")
     @Operation(summary = "enable/disable the white ip list")
     public Map<String, Object> updateStatus(@Context GraphManager manager,
+                                            @Parameter(description = "Status to set: " +
+                                                                      "'true' to enable, " +
+                                                                      "'false' to disable")
                                             @QueryParam("status") String status) {
         LOG.debug("Enable or disable white ip list");
         E.checkArgument("true".equals(status) ||

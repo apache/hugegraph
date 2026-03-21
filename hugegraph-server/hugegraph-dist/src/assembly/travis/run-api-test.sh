@@ -23,7 +23,7 @@ REPORT_FILE=$REPORT_DIR/jacoco-api-test-for-raft.xml
 
 TRAVIS_DIR=$(dirname $0)
 VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-SERVER_DIR=hugegraph-server/apache-hugegraph-server-incubating-$VERSION/
+SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
 CONF=$SERVER_DIR/conf/graphs/hugegraph.properties
 REST_SERVER_CONF=$SERVER_DIR/conf/rest-server.properties
 GREMLIN_SERVER_CONF=$SERVER_DIR/conf/gremlin-server.yaml
@@ -34,8 +34,8 @@ mvn package -Dmaven.test.skip=true -ntp
 # add mysql dependency
 wget -P $SERVER_DIR/lib/ https://repo1.maven.org/maven2/mysql/mysql-connector-java/8.0.28/mysql-connector-java-8.0.28.jar
 
-if [[ ! -e "$SERVER_DIR/ikanalyzer-2012_u6.jar" ]]; then
-  wget -P $SERVER_DIR/lib/ https://raw.githubusercontent.com/apache/incubator-hugegraph-doc/ik_binary/dist/server/ikanalyzer-2012_u6.jar
+if [[ ! -e "$SERVER_DIR/lib/ikanalyzer-2012_u6.jar" ]]; then
+  wget -P $SERVER_DIR/lib/ https://raw.githubusercontent.com/apache/hugegraph-doc/ik_binary/dist/server/ikanalyzer-2012_u6.jar
 fi
 
 # config rest-server

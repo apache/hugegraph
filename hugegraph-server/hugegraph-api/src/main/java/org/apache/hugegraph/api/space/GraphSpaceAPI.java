@@ -45,6 +45,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -76,6 +78,7 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Object list(@Context GraphManager manager,
                        @Context SecurityContext sc) {
+        ensurePdModeEnabled(manager);
         Set<String> spaces = manager.graphSpaces();
         return ImmutableMap.of("graphSpaces", spaces);
     }
@@ -85,7 +88,9 @@ public class GraphSpaceAPI extends API {
     @Path("{graphspace}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Object get(@Context GraphManager manager,
+                      @Parameter(description = "The name of the graph space")
                       @PathParam("graphspace") String graphSpace) {
+        ensurePdModeEnabled(manager);
         manager.getSpaceStorage(graphSpace);
         GraphSpace gs = space(manager, graphSpace);
 
@@ -104,8 +109,11 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public Object listProfile(@Context GraphManager manager,
+                              @Parameter(description = "Filter graph spaces by " +
+                                                        "name or nickname prefix")
                               @QueryParam("prefix") String prefix,
                               @Context SecurityContext sc) {
+        ensurePdModeEnabled(manager);
         Set<String> spaces = manager.graphSpaces();
         List<Map<String, Object>> spaceList = new ArrayList<>();
         List<Map<String, Object>> result = new ArrayList<>();
@@ -155,7 +163,7 @@ public class GraphSpaceAPI extends API {
     @RolesAllowed({"admin"})
     public String create(@Context GraphManager manager,
                          JsonGraphSpace jsonGraphSpace) {
-
+        ensurePdModeEnabled(manager);
         jsonGraphSpace.checkCreate(false);
 
         String creator = HugeGraphAuthProxy.username();
@@ -184,9 +192,10 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public Map<String, Object> manage(@Context GraphManager manager,
+                                      @Parameter(description = "The name of the graph space")
                                       @PathParam("name") String name,
                                       Map<String, Object> actionMap) {
-
+        ensurePdModeEnabled(manager);
         E.checkArgument(actionMap != null && actionMap.size() == 2 &&
                         actionMap.containsKey(GRAPH_SPACE_ACTION),
                         "Invalid request body '%s'", actionMap);
@@ -314,7 +323,9 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The name of the graph space")
                        @PathParam("name") String name) {
+        ensurePdModeEnabled(manager);
         manager.dropGraphSpace(name);
     }
 
@@ -338,51 +349,70 @@ public class GraphSpaceAPI extends API {
     private static class JsonGraphSpace implements Checkable {
 
         @JsonProperty("name")
+        @Schema(description = "The name of the graph space", required = true)
         public String name;
         @JsonProperty("nickname")
+        @Schema(description = "The nickname of the graph space")
         public String nickname;
         @JsonProperty("description")
+        @Schema(description = "The description of the graph space")
         public String description;
 
         @JsonProperty("cpu_limit")
+        @Schema(description = "The CPU limit for the graph space", required = true)
         public int cpuLimit;
         @JsonProperty("memory_limit")
+        @Schema(description = "The memory limit for the graph space", required = true)
         public int memoryLimit;
         @JsonProperty("storage_limit")
+        @Schema(description = "The storage limit for the graph space", required = true)
         public int storageLimit;
 
         @JsonProperty("compute_cpu_limit")
+        @Schema(description = "The compute CPU limit for the graph space")
         public int computeCpuLimit = 0;
         @JsonProperty("compute_memory_limit")
+        @Schema(description = "The compute memory limit for the graph space")
         public int computeMemoryLimit = 0;
 
         @JsonProperty("oltp_namespace")
+        @Schema(description = "The OLTP namespace for the graph space")
         public String oltpNamespace = "";
         @JsonProperty("olap_namespace")
+        @Schema(description = "The OLAP namespace for the graph space")
         public String olapNamespace = "";
         @JsonProperty("storage_namespace")
+        @Schema(description = "The storage namespace for the graph space")
         public String storageNamespace = "";
 
         @JsonProperty("max_graph_number")
+        @Schema(description = "The maximum number of graphs allowed in the space", required = true)
         public int maxGraphNumber;
         @JsonProperty("max_role_number")
+        @Schema(description = "The maximum number of roles allowed in the space")
         public int maxRoleNumber;
 
         @JsonProperty("dp_username")
+        @Schema(description = "The data platform username for the graph space")
         public String dpUserName;
         @JsonProperty("dp_password")
+        @Schema(description = "The data platform password for the graph space")
         public String dpPassWord;
 
         @JsonProperty("auth")
+        @Schema(description = "Whether authentication is enabled for the graph space")
         public boolean auth = false;
 
         @JsonProperty("configs")
+        @Schema(description = "Additional configurations for the graph space")
         public Map<String, Object> configs;
 
         @JsonProperty("operator_image_path")
+        @Schema(description = "The operator image path for the graph space")
         public String operatorImagePath = "";
 
         @JsonProperty("internal_algorithm_image_url")
+        @Schema(description = "The internal algorithm image URL for the graph space")
         public String internalAlgorithmImageUrl = "";
 
         @Override
@@ -458,10 +488,13 @@ public class GraphSpaceAPI extends API {
     private static class JsonDefaultRole implements Checkable {
 
         @JsonProperty("user")
+        @Schema(description = "The username")
         private String user;
         @JsonProperty("role")
+        @Schema(description = "The role name")
         private String role;
         @JsonProperty("graph")
+        @Schema(description = "The graph name")
         private String graph;
 
         @Override

@@ -30,6 +30,8 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -55,8 +57,11 @@ public class VariablesAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Map<String, Object> update(@Context GraphManager manager,
+                                      @Parameter(description = "The name of the graph space")
                                       @PathParam("graphspace") String graphSpace,
+                                      @Parameter(description = "The name of the graph")
                                       @PathParam("graph") String graph,
+                                      @Parameter(description = "The key of the variable")
                                       @PathParam("key") String key,
                                       JsonVariableValue value) {
         E.checkArgument(value != null && value.data != null,
@@ -72,7 +77,9 @@ public class VariablesAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Map<String, Object> list(@Context GraphManager manager,
+                                    @Parameter(description = "The name of the graph space")
                                     @PathParam("graphspace") String graphSpace,
+                                    @Parameter(description = "The name of the graph")
                                     @PathParam("graph") String graph) {
         LOG.debug("Graph [{}] get variables", graph);
 
@@ -85,8 +92,11 @@ public class VariablesAPI extends API {
     @Path("{key}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Map<String, Object> get(@Context GraphManager manager,
+                                   @Parameter(description = "The name of the graph space")
                                    @PathParam("graphspace") String graphSpace,
+                                   @Parameter(description = "The name of the graph")
                                    @PathParam("graph") String graph,
+                                   @Parameter(description = "The key of the variable")
                                    @PathParam("key") String key) {
         LOG.debug("Graph [{}] get variable by key '{}'", graph, key);
 
@@ -104,8 +114,11 @@ public class VariablesAPI extends API {
     @Path("{key}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The name of the graph space")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The name of the graph")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "The key of the variable")
                        @PathParam("key") String key) {
         LOG.debug("Graph [{}] remove variable by key '{}'", graph, key);
 
@@ -115,6 +128,7 @@ public class VariablesAPI extends API {
 
     private static class JsonVariableValue {
 
+        @Schema(description = "The value of the variable", required = true)
         public Object data;
 
         @Override

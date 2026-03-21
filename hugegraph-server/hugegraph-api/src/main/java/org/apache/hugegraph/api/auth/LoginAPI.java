@@ -35,6 +35,7 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.BadRequestException;
@@ -125,10 +126,13 @@ public class LoginAPI extends API {
     private static class JsonLogin implements Checkable {
 
         @JsonProperty("user_name")
+        @Schema(description = "The user name")
         private String name;
         @JsonProperty("user_password")
+        @Schema(description = "The user password")
         private String password;
         @JsonProperty("token_expire")
+        @Schema(description = "Token expiration time in seconds")
         private long expire;
 
         @Override

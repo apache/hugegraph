@@ -25,6 +25,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -85,6 +86,7 @@ import org.apache.hugegraph.pd.pulse.PulseListener;
 import org.apache.hugegraph.pd.raft.PeerUtil;
 import org.apache.hugegraph.pd.raft.RaftEngine;
 import org.apache.hugegraph.pd.raft.RaftStateListener;
+import org.apache.hugegraph.pd.raft.auth.IpAuthHandler;
 import org.apache.hugegraph.pd.util.grpc.StreamObserverUtil;
 import org.apache.hugegraph.pd.watch.PDWatchSubject;
 import org.lognet.springboot.grpc.GRpcService;
@@ -1735,6 +1737,17 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
             node.changePeers(config, status -> {
                 if (status.isOk()) {
                     log.info("updatePdRaft, change peers success");
+                    // Refresh IpAuthHandler so newly added peers are not blocked
+                    IpAuthHandler handler = IpAuthHandler.getInstance();
+                    if (handler != null) {
+                        Set<String> newIps = new HashSet<>();
+                        config.getPeers().forEach(p -> newIps.add(p.getIp()));
+                        config.getLearners().forEach(p -> newIps.add(p.getIp()));
+                        handler.refresh(newIps);
+                        log.info("IpAuthHandler refreshed after updatePdRaft peer change");
+                    } else {
+                        log.warn("IpAuthHandler not initialized, skipping refresh");
+                    }
                 } else {
                     log.error("changePeers status: {}, msg:{}, code: {}, raft error:{}",
                               status, status.getErrorMsg(), status.getCode(),

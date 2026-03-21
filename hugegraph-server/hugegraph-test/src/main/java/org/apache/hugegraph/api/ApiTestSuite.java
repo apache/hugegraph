@@ -42,6 +42,8 @@ import org.junit.runners.Suite;
         CypherApiTest.class,
         ArthasApiTest.class,
         GraphSpaceApiTest.class,
+        GraphSpaceApiStandaloneTest.class,
+        ManagerApiStandaloneTest.class,
 })
 public class ApiTestSuite {
 

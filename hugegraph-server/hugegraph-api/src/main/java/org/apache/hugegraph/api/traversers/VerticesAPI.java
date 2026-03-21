@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.DefaultValue;
@@ -60,8 +61,11 @@ public class VerticesAPI extends API {
     @Compress
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "The vertex IDs")
                        @QueryParam("ids") List<String> stringIds) {
         LOG.debug("Graph [{}] get vertices by ids: {}", graph, stringIds);
 

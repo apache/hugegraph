@@ -19,13 +19,13 @@ Before submitting the code, we need to do some preparation:
 
 1. Sign up or login to GitHub: [https://github.com](https://github.com)
 
-2. Fork HugeGraph repo from GitHub: [https://github.com/apache/incubator-hugegraph/fork](https://github.com/apache/incubator-hugegraph/fork)
+2. Fork HugeGraph repo from GitHub: [https://github.com/apache/hugegraph/fork](https://github.com/apache/hugegraph/fork)
 
-3. Clone code from fork repo to local: [https://github.com/${GITHUB_USER_NAME}/incubator-hugegraph](https://github.com/${GITHUB_USER_NAME}/incubator-hugegraph)
+3. Clone code from fork repo to local: [https://github.com/${GITHUB_USER_NAME}/hugegraph](https://github.com/${GITHUB_USER_NAME}/hugegraph)
 
    ```shell
    # clone code from remote to local repo
-   git clone https://github.com/${GITHUB_USER_NAME}/incubator-hugegraph.git hugegraph
+   git clone https://github.com/${GITHUB_USER_NAME}/hugegraph.git hugegraph
    ```
 
 4. Configure local HugeGraph repo
@@ -34,7 +34,7 @@ Before submitting the code, we need to do some preparation:
    cd hugegraph
 
    # add upstream to synchronize the latest code
-   git remote add hugegraph https://github.com/apache/incubator-hugegraph
+   git remote add hugegraph https://github.com/apache/hugegraph
 
    # set name and email to push code to github
    git config user.name "{full-name}" # like "Jermy Li"
@@ -43,7 +43,7 @@ Before submitting the code, we need to do some preparation:
 
 ## 2. Create an Issue on GitHub
 
-If you encounter bugs or have any questions, please go to [GitHub Issues](https://github.com/apache/incubator-hugegraph/issues) to report them and feel free to [create an issue](https://github.com/apache/incubator-hugegraph/issues/new).
+If you encounter bugs or have any questions, please go to [GitHub Issues](https://github.com/apache/hugegraph/issues) to report them and feel free to [create an issue](https://github.com/apache/hugegraph/issues/new).
 
 ## 3. Make changes of code locally
 
@@ -75,10 +75,10 @@ Note: Code style is defined by the `.editorconfig` file at the repository root. 
 
 ##### 3.2.1 Check licenses
 If we want to add new third-party dependencies to the `HugeGraph` project, we need to do the following things:
-1. Find the third-party dependent repository, put the dependent `license` file into [./hugegraph-dist/release-docs/licenses/](https://github.com/apache/incubator-hugegraph/tree/master/hugegraph-dist/release-docs/licenses) path.
-2. Declare the dependency in [./install-dist/release-docs/LICENSE](https://github.com/apache/incubator-hugegraph/blob/master/install-dist/release-docs/LICENSE) `LICENSE` information.
-3. Find the NOTICE file in the repository and append it to [./install-dist/release-docs/NOTICE](https://github.com/apache/incubator-hugegraph/blob/master/install-dist/release-docs/NOTICE) file (skip this step if there is no NOTICE file).
-4. Execute locally [./install-dist/scripts/dependency/regenerate_known_dependencies.sh](https://github.com/apache/incubator-hugegraph/blob/master/install-dist/scripts/dependency/regenerate_known_dependencies.sh) to update the dependency list [known-dependencies.txt](https://github.com/apache/incubator-hugegraph/blob/master/install-dist/scripts/dependency/known-dependencies.txt) (or manually update).
+1. Find the third-party dependent repository, put the dependent `license` file into [./install-dist/release-docs/licenses/](https://github.com/apache/hugegraph/tree/master/install-dist/release-docs/licenses) path.
+2. Declare the dependency in [./install-dist/release-docs/LICENSE](https://github.com/apache/hugegraph/blob/master/install-dist/release-docs/LICENSE) `LICENSE` information.
+3. Find the NOTICE file in the repository and append it to [./install-dist/release-docs/NOTICE](https://github.com/apache/hugegraph/blob/master/install-dist/release-docs/NOTICE) file (skip this step if there is no NOTICE file).
+4. Execute locally [./install-dist/scripts/dependency/regenerate_known_dependencies.sh](https://github.com/apache/hugegraph/blob/master/install-dist/scripts/dependency/regenerate_known_dependencies.sh) to update the dependency list [known-dependencies.txt](https://github.com/apache/hugegraph/blob/master/install-dist/scripts/dependency/known-dependencies.txt) (or manually update).
 
 **Example**: A new third-party dependency is introduced into the project -> `ant-1.9.1.jar`
 - The project source code is located at: https://github.com/apache/ant/tree/rel/1.9.1

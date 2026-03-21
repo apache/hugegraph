@@ -416,6 +416,7 @@ df -h
 
 ```bash
 # Extract PD distribution
+# Note: use "-incubating" only for historical 1.7.0 and earlier package/directory names.
 tar -xzf apache-hugegraph-pd-incubating-1.7.0.tar.gz
 cd apache-hugegraph-pd-incubating-1.7.0
 
@@ -509,6 +510,7 @@ curl http://192.168.1.10:8620/v1/members
 
 ```bash
 # Extract Store distribution
+# Note: use "-incubating" only for historical 1.7.0 and earlier package/directory names.
 tar -xzf apache-hugegraph-store-incubating-1.7.0.tar.gz
 cd apache-hugegraph-store-incubating-1.7.0
 
@@ -595,7 +597,7 @@ curl http://192.168.1.10:8620/v1/stores
       "address":"192.168.1.10:8500",
       "raftAddress":"192.168.1.10:8510",
       "version":"","state":"Up",
-      "deployPath":"/Users/user/incubator-hugegraph/hugegraph-store/hg-store-node/target/classes/",
+      "deployPath":"/Users/user/hugegraph/hugegraph-store/hg-store-node/target/classes/",
       "dataPath":"./storage",
       "startTimeStamp":1761818547335,
       "registedTimeStamp":1761818547335,
@@ -626,6 +628,7 @@ curl http://192.168.1.10:8620/v1/stores
 
 ```bash
 # Extract Server distribution
+# Note: use "-incubating" only for historical 1.7.0 and earlier package/directory names.
 tar -xzf apache-hugegraph-incubating-1.7.0.tar.gz
 cd apache-hugegraph-incubating-1.7.0
 

@@ -30,7 +30,7 @@ RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.sk
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13 
 FROM eclipse-temurin:11-jre-jammy
 
-COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-incubating-*/ /hugegraph-server/
+COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default

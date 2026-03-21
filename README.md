@@ -7,8 +7,8 @@
 <div align="center">
 
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
-[![HugeGraph-CI](https://github.com/apache/incubator-hugegraph/actions/workflows/ci.yml/badge.svg)](https://github.com/apache/incubator-hugegraph/actions/workflows/ci.yml)
-[![License checker](https://github.com/apache/incubator-hugegraph/actions/workflows/licence-checker.yml/badge.svg)](https://github.com/apache/incubator-hugegraph/actions/workflows/licence-checker.yml)
+[![HugeGraph-CI](https://github.com/apache/hugegraph/actions/workflows/ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/ci.yml)
+[![License checker](https://github.com/apache/hugegraph/actions/workflows/licence-checker.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/licence-checker.yml)
 [![GitHub Releases Downloads](https://img.shields.io/github/downloads/apache/hugegraph/total.svg)](https://github.com/apache/hugegraph/releases)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/apache/hugegraph)
 
@@ -48,7 +48,7 @@ Complete **HugeGraph** ecosystem components:
 
 2. **[hugegraph-computer](https://github.com/apache/hugegraph-computer)** - Integrated **graph computing** system
 
-3. **[hugegraph-ai](https://github.com/apache/incubator-hugegraph-ai)** - **Graph AI/LLM/Knowledge Graph** integration
+3. **[hugegraph-ai](https://github.com/apache/hugegraph-ai)** - **Graph AI/LLM/Knowledge Graph** integration
 
 4. **[hugegraph-website](https://github.com/apache/hugegraph-doc)** - **Documentation & website** repository
 
@@ -226,9 +226,17 @@ Download pre-built packages from the [Download Page](https://hugegraph.apache.or
 
 ```bash
 # Download and extract
-wget https://downloads.apache.org/incubator/hugegraph/{version}/apache-hugegraph-incubating-{version}.tar.gz
-tar -xzf apache-hugegraph-incubating-{version}.tar.gz
-cd apache-hugegraph-incubating-{version}
+# For historical 1.7.0 and earlier releases, use the archive URL and
+# set PACKAGE=apache-hugegraph-incubating-{version} instead.
+BASE_URL="https://downloads.apache.org/hugegraph/{version}"
+PACKAGE="apache-hugegraph-{version}"
+# Historical alternative:
+# BASE_URL="https://archive.apache.org/dist/incubator/hugegraph/{version}"
+# PACKAGE="apache-hugegraph-incubating-{version}"
+
+wget ${BASE_URL}/${PACKAGE}.tar.gz
+tar -xzf ${PACKAGE}.tar.gz
+cd ${PACKAGE}
 
 # Initialize backend storage
 bin/init-store.sh
@@ -366,7 +374,7 @@ Welcome to contribute to HugeGraph!
 
 Thank you to all the contributors who have helped make HugeGraph better!
 
-[![contributors graph](https://contrib.rocks/image?repo=apache/hugegraph)](https://github.com/apache/incubator-hugegraph/graphs/contributors)
+[![contributors graph](https://contrib.rocks/image?repo=apache/hugegraph)](https://github.com/apache/hugegraph/graphs/contributors)
 
 ## License
 

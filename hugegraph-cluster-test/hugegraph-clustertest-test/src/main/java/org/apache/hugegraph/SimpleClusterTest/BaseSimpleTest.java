@@ -45,7 +45,7 @@ import jakarta.ws.rs.core.Response;
 /**
  * Simple Test generate the cluster env with 1 pd node + 1 store node + 1 server node.
  * All nodes are deployed in ports generated randomly; The application of nodes is stored
- * in /apache-hugegraph-ct-incubating-1.7.0, you can visit each node with rest api.
+ * in /apache-hugegraph-ct-1.7.0, you can visit each node with rest api.
  */
 public class BaseSimpleTest {
 

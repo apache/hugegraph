@@ -42,6 +42,8 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.POST;
@@ -61,7 +63,9 @@ public class CountAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String post(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
                        CountRequest request) {
         LOG.debug("Graph [{}] get count from '{}' with request {}",
@@ -100,12 +104,16 @@ public class CountAPI extends API {
     private static class CountRequest {
 
         @JsonProperty("source")
+        @Schema(description = "The source vertex ID", required = true)
         public Object source;
         @JsonProperty("steps")
+        @Schema(description = "The steps to traverse", required = true)
         public List<Step> steps;
         @JsonProperty("contains_traversed")
+        @Schema(description = "Whether to include traversed vertices")
         public boolean containsTraversed = false;
         @JsonProperty("dedup_size")
+        @Schema(description = "The deduplication size limit")
         public long dedupSize = 1000000L;
 
         @Override
@@ -120,15 +128,20 @@ public class CountAPI extends API {
     private static class Step {
 
         @JsonProperty("direction")
+        @Schema(description = "The direction of traversal", example = "BOTH")
         public Directions direction = Directions.BOTH;
         @JsonProperty("labels")
+        @Schema(description = "The edge labels to traverse")
         public List<String> labels;
         @JsonProperty("properties")
+        @Schema(description = "The properties to filter edges")
         public Map<String, Object> properties;
         @JsonAlias("degree")
         @JsonProperty("max_degree")
+        @Schema(description = "The maximum degree of vertices to traverse")
         public long maxDegree = Long.parseLong(DEFAULT_MAX_DEGREE);
         @JsonProperty("skip_degree")
+        @Schema(description = "The degree to skip when traversing")
         public long skipDegree = Long.parseLong(DEFAULT_SKIP_DEGREE);
 
         @Override

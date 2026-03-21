@@ -35,6 +35,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -62,6 +64,7 @@ public class TargetAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
                          JsonTarget jsonTarget) {
         LOG.debug("GraphSpace [{}] create target: {}", graphSpace, jsonTarget);
@@ -78,7 +81,9 @@ public class TargetAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The target id")
                          @PathParam("id") String id,
                          JsonTarget jsonTarget) {
         LOG.debug("GraphSpace [{}] update target: {}", graphSpace, jsonTarget);
@@ -99,7 +104,9 @@ public class TargetAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
         LOG.debug("GraphSpace [{}] list targets", graphSpace);
 
@@ -112,7 +119,9 @@ public class TargetAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The target id")
                       @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] get target: {}", graphSpace, id);
 
@@ -125,7 +134,9 @@ public class TargetAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The target id")
                        @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] delete target: {}", graphSpace, id);
 
@@ -141,12 +152,16 @@ public class TargetAPI extends API {
     private static class JsonTarget implements Checkable {
 
         @JsonProperty("target_name")
+        @Schema(description = "The target name", required = true)
         private String name;
         @JsonProperty("target_graph")
+        @Schema(description = "The target graph name", required = true)
         private String graph;
         @JsonProperty("target_url")
+        @Schema(description = "The target URL", required = true)
         private String url;
         @JsonProperty("target_resources") // error when List<HugeResource>
+        @Schema(description = "The target resources")
         private List<Map<String, Object>> resources;
 
         public HugeTarget build(HugeTarget target) {
@@ -182,7 +197,6 @@ public class TargetAPI extends API {
                    ", resources=" + resources +
                    '}';
         }
-
 
         @Override
         public void checkCreate(boolean isBatch) {

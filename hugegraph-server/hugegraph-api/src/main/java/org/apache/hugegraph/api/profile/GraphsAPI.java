@@ -45,6 +45,7 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -88,6 +89,7 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$dynamic"})
     public Object list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
                        @Context SecurityContext sc) {
         LOG.debug("List graphs in graph space {}", graphSpace);
@@ -96,13 +98,13 @@ public class GraphsAPI extends API {
         }
         Set<String> graphs = manager.graphs(graphSpace);
         LOG.debug("Get graphs list from graph manager with size {}",
-                graphs.size());
+                  graphs.size());
         // Filter by user role
         Set<String> filterGraphs = new HashSet<>();
         for (String graph : graphs) {
             LOG.debug("Get graph {} and verify auth", graph);
             String role = RequiredPerm.roleFor(graphSpace, graph,
-                    HugePermission.READ);
+                                               HugePermission.READ);
             if (sc.isUserInRole(role)) {
                 try {
                     graph(manager, graphSpace, graph);
@@ -124,7 +126,9 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$name"})
     public Object get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("name") String name) {
         LOG.debug("Get graph by name '{}'", name);
 
@@ -138,8 +142,11 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space"})
     public void drop(@Context GraphManager manager,
+                     @Parameter(description = "The graph space name")
                      @PathParam("graphspace") String graphSpace,
+                     @Parameter(description = "The graph name")
                      @PathParam("name") String name,
+                     @Parameter(description = "Confirmation message to drop the graph")
                      @QueryParam("confirm_message") String message) {
         LOG.debug("Drop graph by name '{}'", name);
 
@@ -154,12 +161,14 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"analyst"})
     public Object reload(@Context GraphManager manager,
+                         @Parameter(
+                                 description = "The action map containing 'action'='reload'")
                          Map<String, String> actionMap) {
 
         LOG.info("[SERVER] Manage graph with action map {}", actionMap);
         E.checkArgument(actionMap != null &&
                         actionMap.containsKey(GRAPH_ACTION),
-                "Please pass '%s' for graphs manage", GRAPH_ACTION);
+                        "Please pass '%s' for graphs manage", GRAPH_ACTION);
         String action = actionMap.get(GRAPH_ACTION);
         if (action.equals(GRAPH_ACTION_RELOAD)) {
             manager.reload();
@@ -177,12 +186,19 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space"})
     public Object create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name to create")
                          @PathParam("name") String name,
+                         @Parameter(description = "The graph name to clone from (optional)")
                          @QueryParam("clone_graph_name") String clone,
+                         @Parameter(
+                                 description = "The graph configuration options including " +
+                                               "'backend', 'serializer', 'store' and optionally " +
+                                               "'description'")
                          Map<String, Object> configs) {
         LOG.debug("Create graph {} with config options '{}' in " +
-                "graph space '{}'", name, configs, graphSpace);
+                  "graph space '{}'", name, configs, graphSpace);
         GraphSpace gs = manager.graphSpace(graphSpace);
         HugeGraph graph;
         E.checkArgumentNotNull(gs, "Not existed graph space: '%s'", graphSpace);
@@ -208,18 +224,18 @@ public class GraphsAPI extends API {
         } else {
             // Create new graph
             graph = manager.createGraph(graphSpace, name, creator,
-                    convConfig(configs), true);
+                                        convConfig(configs), true);
         }
         String description = (String) configs.get(GRAPH_DESCRIPTION);
         if (description == null) {
             description = Strings.EMPTY;
         }
         Object result = ImmutableMap.of("name", graph.name(),
-                "nickname", graph.nickname(),
-                "backend", graph.backend(),
-                "description", description);
+                                        "nickname", graph.nickname(),
+                                        "backend", graph.backend(),
+                                        "description", description);
         LOG.info("user [{}] create graph [{}] in graph space [{}] with config " +
-                "[{}]", creator, name, graphSpace, configs);
+                 "[{}]", creator, name, graphSpace, configs);
         return result;
     }
 
@@ -229,7 +245,9 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space"})
     public File getConf(@Context GraphManager manager,
+                        @Parameter(description = "The graph space name")
                         @PathParam("graphspace") String graphSpace,
+                        @Parameter(description = "The graph name")
                         @PathParam("name") String name) {
         LOG.debug("Get graph configuration by name '{}'", name);
 
@@ -250,8 +268,12 @@ public class GraphsAPI extends API {
     @Consumes(APPLICATION_JSON)
     @RolesAllowed({"space"})
     public void clear(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("name") String name,
+                      @Parameter(description = "Confirmation message to clear all data, must be: " +
+                                               CONFIRM_CLEAR)
                       @QueryParam("confirm_message") String message) {
         LOG.debug("Clear graph by name '{}'", name);
 
@@ -267,7 +289,9 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space", "$owner=$name"})
     public Object createSnapshot(@Context GraphManager manager,
+                                 @Parameter(description = "The graph space name")
                                  @PathParam("graphspace") String graphSpace,
+                                 @Parameter(description = "The graph name")
                                  @PathParam("name") String name) {
         LOG.debug("Create snapshot for graph '{}'", name);
 
@@ -282,7 +306,9 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space", "$owner=$name"})
     public Object resumeSnapshot(@Context GraphManager manager,
+                                 @Parameter(description = "The graph space name")
                                  @PathParam("graphspace") String graphSpace,
+                                 @Parameter(description = "The graph name")
                                  @PathParam("name") String name) {
         LOG.debug("Resume snapshot for graph '{}'", name);
 
@@ -298,7 +324,9 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space"})
     public String compact(@Context GraphManager manager,
+                          @Parameter(description = "The graph space name")
                           @PathParam("graphspace") String graphSpace,
+                          @Parameter(description = "The graph name")
                           @PathParam("name") String name) {
         LOG.debug("Manually compact graph '{}'", name);
 
@@ -313,7 +341,9 @@ public class GraphsAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space", "$owner=$name"})
     public Map<String, GraphMode> mode(@Context GraphManager manager,
+                                       @Parameter(description = "The graph space name")
                                        @PathParam("graphspace") String graphSpace,
+                                       @Parameter(description = "The graph name")
                                        @PathParam("name") String name,
                                        GraphMode mode) {
         LOG.debug("Set mode to: '{}' of graph '{}'", mode, name);
@@ -347,7 +377,9 @@ public class GraphsAPI extends API {
     @RolesAllowed({"space"})
     public Map<String, GraphReadMode> graphReadMode(
             @Context GraphManager manager,
+            @Parameter(description = "The graph space name")
             @PathParam("graphspace") String graphSpace,
+            @Parameter(description = "The graph name")
             @PathParam("name") String name,
             GraphReadMode readMode) {
         LOG.debug("Set graph-read-mode to: '{}' of graph '{}'",
@@ -357,7 +389,7 @@ public class GraphsAPI extends API {
                         "Graph-read-mode can't be null");
         E.checkArgument(readMode == GraphReadMode.ALL ||
                         readMode == GraphReadMode.OLTP_ONLY,
-                "Graph-read-mode could be ALL or OLTP_ONLY");
+                        "Graph-read-mode could be ALL or OLTP_ONLY");
         HugeGraph g = graph(manager, graphSpace, name);
         manager.graphReadMode(graphSpace, name, readMode);
         g.readMode(readMode);

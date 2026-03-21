@@ -29,7 +29,7 @@ else
     exit 1
 fi
 
-PD_DIR=$HOME_DIR/hugegraph-pd/apache-hugegraph-pd-incubating-$VersionInBash
+PD_DIR=$HOME_DIR/hugegraph-pd/apache-hugegraph-pd-$VersionInBash
 
 pushd $PD_DIR
 . bin/start-hugegraph-pd.sh

@@ -276,7 +276,7 @@ public final class GraphManager {
                      .replace("_", "-").toLowerCase();
     }
 
-    private boolean usePD() {
+    public boolean isPDEnabled() {
         return this.PDExist;
     }
 
@@ -1227,7 +1227,7 @@ public final class GraphManager {
 
     public HugeGraph createGraph(String graphSpace, String name, String creator,
                                  Map<String, Object> configs, boolean init) {
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             // Extract nickname from configs
             String nickname;
             if (configs.get("nickname") != null) {
@@ -1937,7 +1937,7 @@ public final class GraphManager {
     public HugeGraph graph(String graphSpace, String name) {
         String key = String.join(DELIMITER, graphSpace, name);
         Graph graph = this.graphs.get(key);
-        if (graph == null && usePD()) {
+        if (graph == null && isPDEnabled()) {
             Map<String, Map<String, Object>> configs =
                     this.metaManager.graphConfigs(graphSpace);
             // If current server registered graph space is not DEFAULT, only load graph creation
@@ -1981,7 +1981,7 @@ public final class GraphManager {
     }
 
     public void dropGraph(String graphSpace, String name, boolean clear) {
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             dropGraphLocal(name);
             return;
         }
@@ -2086,7 +2086,7 @@ public final class GraphManager {
     public Set<String> graphs(String graphSpace) {
         Set<String> graphs = new HashSet<>();
 
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             for (String key : this.graphs.keySet()) {
                 String[] parts = key.split(DELIMITER);
                 if (parts[0].equals(graphSpace)) {
@@ -2103,7 +2103,7 @@ public final class GraphManager {
     }
 
     public GraphSpace graphSpace(String name) {
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             return new GraphSpace("DEFAULT");
         }
         GraphSpace space = this.graphSpaces.get(name);
@@ -2152,7 +2152,7 @@ public final class GraphManager {
     public void graphReadMode(String graphSpace, String graphName,
                               GraphReadMode readMode) {
 
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             HugeGraph g = this.graph(spaceGraphName(graphSpace, graphName));
             g.readMode(readMode);
             return;

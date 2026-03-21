@@ -42,7 +42,7 @@ public class GraphSpaceApiTest extends BaseApiTest {
         Response r = this.client().get(PATH);
         String result = r.readEntity(String.class);
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
-        List<String> spaces = (List<String>) resultMap.get("graphSpaces");
+        List<String> spaces = (List<String>)resultMap.get("graphSpaces");
         for (String space : spaces) {
             if (!"DEFAULT".equals(space)) {
                 this.client().delete(PATH, space);

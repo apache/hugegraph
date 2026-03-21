@@ -50,6 +50,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -73,16 +74,25 @@ public class KneighborAPI extends TraverserAPI {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("graph") String graph,
+                      @Parameter(description = "The source vertex ID")
                       @QueryParam("source") String sourceV,
+                      @Parameter(description = "The direction of traversal")
                       @QueryParam("direction") String direction,
+                      @Parameter(description = "The edge label to traverse")
                       @QueryParam("label") String edgeLabel,
+                      @Parameter(description = "The maximum depth of traversal")
                       @QueryParam("max_depth") int depth,
+                      @Parameter(description = "Whether to return only count")
                       @QueryParam("count_only")
                       @DefaultValue("false") boolean countOnly,
+                      @Parameter(description = "The maximum degree of vertices")
                       @QueryParam("max_degree")
                       @DefaultValue(DEFAULT_MAX_DEGREE) long maxDegree,
+                      @Parameter(description = "The maximum number of results")
                       @QueryParam("limit")
                       @DefaultValue(DEFAULT_ELEMENTS_LIMIT) int limit) {
         LOG.debug("Graph [{}] get k-neighbor from '{}' with " +
