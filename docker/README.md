@@ -173,6 +173,9 @@ Configuration is injected via environment variables. The old `docker/configs/app
 
 ## Port Reference
 
+The table below reflects the published host ports in `docker-compose-3pd-3store-3server.yml`.
+The single-node compose file (`docker-compose.yml`) only publishes the REST/API ports (`8620`, `8520`, `8080`) by default.
+
 | Service | Container Port | Host Port | Protocol | Purpose |
 |---------|---------------|-----------|----------|---------|
 | pd0 | 8620 | 8620 | HTTP | REST API |

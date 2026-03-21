@@ -672,7 +672,7 @@ curl http://localhost:8080/versions
 
 ### Docker Compose: Complete Cluster
 
-For a production-like 3-node distributed deployment, use the compose file at `docker/docker-compose-3pd-3store-3server.yml` in the repository root. See [docker/README.md](../../../docker/README.md) for the full setup guide.
+For a production-like 3-node distributed deployment, use the compose file at `docker/docker-compose-3pd-3store-3server.yml` in the repository root. See [docker/README.md](../../docker/README.md) for the full setup guide.
 
 > **Prerequisites**: Allocate at least **12 GB** memory to Docker Desktop (Settings → Resources → Memory). The cluster runs 9 JVM processes.
 
@@ -729,16 +729,16 @@ environment:
 
 ```bash
 # Start cluster
-docker-compose up -d
+docker compose up -d
 
 # Check status
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs -f store1
+docker compose logs -f store1
 
 # Stop cluster
-docker-compose down
+docker compose down
 ```
 
 ---
