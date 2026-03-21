@@ -231,7 +231,7 @@ For distributed development:
 3. Build Store: `mvn clean package -pl hugegraph-store -am -DskipTests`
 4. Build Server with HStore backend: `mvn clean package -pl hugegraph-server -am -DskipTests`
 
-See Docker Compose examples: `docker/` directory. Single-node quickstart (pre-built images): `docker/docker-compose.yml`. Single-node dev build (from source): `docker/docker-compose-dev.yml`. 3-node cluster: `docker/docker-compose-3pd-3store-3server.yml`. See `docker/README.md` for full setup guide.
+See Docker Compose examples: `docker/` directory. Single-node quickstart (pre-built images): `docker/docker-compose.yml`. Single-node dev build (from source): `docker/docker-compose.dev.yml`. 3-node cluster: `docker/docker-compose-3pd-3store-3server.yml`. See `docker/README.md` for full setup guide.
 
 ### Debugging Tips
 

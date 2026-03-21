@@ -5,7 +5,7 @@ This directory contains Docker Compose files for running HugeGraph:
 | File | Description |
 |------|-------------|
 | `docker-compose.yml` | Single-node cluster using pre-built images from Docker Hub |
-| `docker-compose-dev.yml` | Single-node cluster built from source (for developers) |
+| `docker-compose.dev.yml` | Single-node cluster built from source (for developers) |
 | `docker-compose-3pd-3store-3server.yml` | 3-node distributed cluster (PD + Store + Server) |
 
 ## Prerequisites
@@ -48,7 +48,7 @@ Builds images locally from source Dockerfiles. Best for **developers** who want 
 
 ```bash
 cd docker
-docker compose -f docker-compose-dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 ```
 
 - Images: built from source via `build: context: ..` with Dockerfiles
@@ -59,7 +59,7 @@ docker compose -f docker-compose-dev.yml up -d
 
 ### Key Differences
 
-| | `docker-compose.yml` (quickstart) | `docker-compose-dev.yml` (dev build) |
+| | `docker-compose.yml` (quickstart) | `docker-compose.dev.yml` (dev build) |
 |---|---|---|
 | **Images** | Pull from Docker Hub | Build from source |
 | **Who it's for** | End users | Developers |

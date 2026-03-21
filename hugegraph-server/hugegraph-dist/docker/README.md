@@ -92,6 +92,7 @@ If you want to customize the preloaded data, please mount the groovy scripts (no
 1. Start Open-Telemetry-Collector
 
     ```bash
+    # Run from the repository root
     docker compose -f hugegraph-server/hugegraph-dist/docker/example/docker-compose-trace.yaml -p hugegraph-trace up -d
     ```
 
@@ -104,6 +105,7 @@ If you want to customize the preloaded data, please mount the groovy scripts (no
 3. Stop Open-Telemetry-Collector
 
     ```bash
+    # Run from the repository root
     docker compose -f hugegraph-server/hugegraph-dist/docker/example/docker-compose-trace.yaml -p hugegraph-trace stop
     ```
 
