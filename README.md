@@ -174,7 +174,7 @@ flowchart TB
 
 ```bash
 # Start HugeGraph with Docker
-docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:latest
 
 # Verify server is running
 curl http://localhost:8080/apis/version
@@ -198,13 +198,13 @@ Docker is the quickest way to get started for **testing or development**:
 
 ```bash
 # Basic usage
-docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:latest
 
 # With sample graph preloaded
-docker run -itd --name=hugegraph -e PRELOAD=true -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -e PRELOAD=true -p 8080:8080 hugegraph/hugegraph:latest
 
 # With authentication enabled
-docker run -itd --name=hugegraph -e PASSWORD=your_password -p 8080:8080 hugegraph/hugegraph:1.7.0
+docker run -itd --name=hugegraph -e PASSWORD=your_password -p 8080:8080 hugegraph/hugegraph:latest
 ```
 
 For advanced Docker configurations, see:

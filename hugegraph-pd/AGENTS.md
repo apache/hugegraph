@@ -331,7 +331,7 @@ docker run -d -p 8620:8620 -p 8686:8686 -p 8610:8610 \
   hugegraph-pd:latest
 
 # For production clusters, use Docker Compose or Kubernetes
-# See: docker/docker-compose-3pd-3store-3server.yml and docker/README.md
+# See: ../docker/docker-compose-3pd-3store-3server.yml and ../docker/README.md
 ```
 
 Exposed ports: 8620 (REST), 8686 (gRPC), 8610 (Raft)

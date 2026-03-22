@@ -88,7 +88,7 @@ docker compose -f docker-compose-3pd-3store-3server.yml down -v
 2. **Store nodes** start after all PD nodes are healthy
 3. **Server nodes** start after all Store nodes are healthy
 
-This ensures Raft leader election and partition assignment complete before dependent services attempt connections.
+This ensures PD and Store are healthy before the server starts. The server entrypoint still performs a best-effort partition wait after launch, so partition assignment may take a little longer.
 
 **Verify the cluster is healthy**:
 
