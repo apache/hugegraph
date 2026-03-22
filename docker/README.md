@@ -36,8 +36,10 @@ cd docker
 docker compose up -d
 ```
 
-- Images: `hugegraph/pd:latest`, `hugegraph/store:latest`, `hugegraph/server:latest`
-- `pull_policy: always` — always pulls the latest image
+- Images: `hugegraph/pd:1.7.0`, `hugegraph/store:1.7.0`, `hugegraph/server:1.7.0`
+- `pull_policy: always` — always pulls the specified image tag
+
+> **Note**: Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag is intended for testing or development only.
 - PD healthcheck endpoint: `/v1/health`
 - Single PD, single Store (`HG_PD_INITIAL_STORE_LIST: store:8500`), single Server
 - Server healthcheck endpoint: `/versions`
