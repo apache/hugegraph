@@ -177,7 +177,7 @@ flowchart TB
 docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
 
 # Verify server is running
-curl http://localhost:8080/apis/version
+curl http://localhost:8080/versions
 
 # Try a Gremlin query
 curl -X POST http://localhost:8080/gremlin \
@@ -288,14 +288,16 @@ Once the server is running, verify the installation:
 
 ```bash
 # Check server version
-curl http://localhost:8080/apis/version
+curl http://localhost:8080/versions
 
 # Expected output:
 # {
-#   "version": "1.7.0",
-#   "core": "1.7.0",
-#   "gremlin": "3.5.1",
-#   "api": "1.7.0"
+#   "versions": {
+#     "version": "v1",
+#     "core": "1.7.0",
+#     "gremlin": "3.5.1",
+#     "api": "1.7.0"
+#   }
 # }
 
 # Try Gremlin console (if installed locally)

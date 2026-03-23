@@ -15,12 +15,7 @@ This directory contains Docker Compose files for running HugeGraph:
 - **Memory**: Allocate at least **12 GB** to Docker Desktop (Settings → Resources → Memory). The 3-node cluster runs 9 JVM processes (3 PD + 3 Store + 3 Server) which are memory-intensive. Insufficient memory causes OOM kills that appear as silent Raft failures.
 
 > [!IMPORTANT]
-> The 12 GB minimum is for Docker Desktop (Mac/Windows). On Linux with native Docker, ensure the host has at least 12 GB of free memory.
-
-## Why Bridge Networking (Not Host Mode)
-
-Previous versions used `network_mode: host`, which only works on Linux and is incompatible with Docker Desktop on Mac/Windows. The cluster now uses a proper Docker bridge network (`hg-net`) where services communicate via container hostnames (`pd0`, `pd1`, `store0`, etc.) instead of `127.0.0.1`. This makes the cluster portable across all platforms.
-
+> The 12 GB minimum is for Docker Desktop. On Linux with native Docker, ensure the host has at least 12 GB of free memory.
 ---
 
 ## Single-Node Setup
@@ -78,7 +73,7 @@ curl http://localhost:8080/versions
 
 ```bash
 cd docker
-docker compose -f docker-compose-3pd-3store-3server.yml up -d
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 
 # To stop and remove all data volumes (clean restart)
 docker compose -f docker-compose-3pd-3store-3server.yml down -v
@@ -262,4 +257,3 @@ docker stats --no-stream
 **Cause**: Services are using `127.0.0.1` instead of container hostnames, or the `hg-net` bridge network is misconfigured.
 
 **Fix**: Ensure all `HG_*` env vars use container hostnames (`pd0`, `store0`, etc.), not `127.0.0.1` or `localhost`.
-

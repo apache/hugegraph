@@ -26,7 +26,7 @@ For a full distributed deployment, use the compose file at the repository root:
 
 ```bash
 cd docker
-docker compose -f docker-compose-3pd-3store-3server.yml up -d
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 ```
 
 See [docker/README.md](../docker/README.md) for the full setup guide.

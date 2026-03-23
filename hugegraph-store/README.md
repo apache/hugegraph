@@ -348,7 +348,7 @@ For development workflows and debugging, see [Development Guide](docs/developmen
 From the project root:
 
 ```bash
-docker build -f hugegraph-store/Dockerfile -t hugegraph-store:latest .
+docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
 ```
 
 ### Run Container
@@ -363,7 +363,7 @@ docker run -d \
   -e HG_STORE_RAFT_ADDRESS=<your-ip>:8510 \
   -v /path/to/storage:/hugegraph-store/storage \
   --name hugegraph-store \
-  hugegraph-store:latest
+  hugegraph/store:latest
 ```
 
 **Exposed Ports**:

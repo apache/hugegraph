@@ -678,7 +678,7 @@ For a production-like 3-node distributed deployment, use the compose file at `do
 
 ```bash
 cd docker
-docker compose -f docker-compose-3pd-3store-3server.yml up -d
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 ```
 
 The compose file uses a Docker bridge network (`hg-net`) with container hostnames for service discovery. Configuration is injected via environment variables using the `HG_*` prefix:
@@ -729,7 +729,7 @@ environment:
 
 ```bash
 # Start cluster (run from the docker/ directory)
-docker compose -f docker-compose-3pd-3store-3server.yml up -d
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 
 # Check status
 docker ps
@@ -786,7 +786,7 @@ spec:
     spec:
       containers:
       - name: store
-        image: hugegraph/hugegraph-store:1.7.0
+        image: hugegraph/store:1.7.0
         ports:
         - containerPort: 8500
           name: grpc

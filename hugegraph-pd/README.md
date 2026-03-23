@@ -233,7 +233,7 @@ Build PD Docker image:
 
 ```bash
 # From project root
-docker build -f hugegraph-pd/Dockerfile -t hugegraph/pd:1.7.0 .
+docker build -f hugegraph-pd/Dockerfile -t hugegraph/pd:latest .
 
 # Run container
 docker run -d \
@@ -246,7 +246,7 @@ docker run -d \
   -e HG_PD_INITIAL_STORE_LIST=<store-ip>:8500 \
   -v /path/to/data:/hugegraph-pd/pd_data \
   --name hugegraph-pd \
-  hugegraph/pd:1.7.0
+  hugegraph/pd:latest
 ```
 
 For Docker Compose examples with HugeGraph Store and Server, see:
