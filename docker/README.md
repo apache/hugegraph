@@ -33,7 +33,7 @@ Uses pre-built images from Docker Hub. Best for **end users** who want to run Hu
 
 ```bash
 cd docker
-docker compose up -d
+HUGEGRAPH_VERSION=1.7.0 docker compose up -d
 ```
 
 - Images: `hugegraph/pd:1.7.0`, `hugegraph/store:1.7.0`, `hugegraph/server:1.7.0`

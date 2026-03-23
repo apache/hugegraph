@@ -363,7 +363,7 @@ docker run -d \
   -e HG_STORE_RAFT_ADDRESS=<your-ip>:8510 \
   -v /path/to/storage:/hugegraph-store/storage \
   --name hugegraph-store \
-  hugegraph/store:latest
+  hugegraph-store:latest
 ```
 
 **Exposed Ports**:

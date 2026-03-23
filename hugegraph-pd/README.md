@@ -233,7 +233,7 @@ Build PD Docker image:
 
 ```bash
 # From project root
-docker build -f hugegraph-pd/Dockerfile -t hugegraph-pd:1.7.0 .
+docker build -f hugegraph-pd/Dockerfile -t hugegraph/pd:1.7.0 .
 
 # Run container
 docker run -d \
