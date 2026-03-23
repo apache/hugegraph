@@ -22,7 +22,7 @@ docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
 
 ### Distributed Mode (PD + Store + Server)
 
-For a full distributed deployment, use the compose file at the repository root:
+For a full distributed deployment, use the compose file in the `docker/` directory at the repository root:
 
 ```bash
 cd docker
