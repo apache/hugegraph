@@ -130,6 +130,7 @@
         </logger>
         <!-- Use mixed async way to output logs -->
         <AsyncLogger name="org.apache.hugegraph" level="INFO" additivity="false">
+            <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </AsyncLogger>
         <AsyncLogger name="org.apache.hugegraph.auth" level="INFO" additivity="false">
