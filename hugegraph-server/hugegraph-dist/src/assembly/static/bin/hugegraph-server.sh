@@ -184,5 +184,4 @@ fi
 
 # Turn on security check
 exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} -cp ${CLASSPATH}: \
-    org.apache.hugegraph.dist.HugeGraphServer ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
-    >> ${OUTPUT} 2>&1
+    org.apache.hugegraph.dist.HugeGraphServer ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}

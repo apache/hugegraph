@@ -104,6 +104,7 @@
 
     <loggers>
         <root level="INFO">
+            <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </root>
         <logger name="org.apache.cassandra" level="INFO" additivity="false">

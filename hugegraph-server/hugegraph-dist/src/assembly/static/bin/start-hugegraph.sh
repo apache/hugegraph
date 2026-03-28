@@ -103,13 +103,11 @@ fi
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphServer in daemon mode..."
     "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" \
-    >>"${LOGS}"/hugegraph-server.log 2>&1 &
+    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" &
 else
     echo "Starting HugeGraphServer in foreground mode..."
     "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" \
-    >>"${LOGS}"/hugegraph-server.log 2>&1
+    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}"
 fi
 
 PID="$!"

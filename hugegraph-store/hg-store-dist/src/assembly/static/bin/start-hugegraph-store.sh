@@ -223,7 +223,7 @@ echo "Starting HG-StoreServer..."
 
 exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
     -Dspring.config.location=${CONF}/application.yml \
-    ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+    ${LIB}/hg-store-node-*.jar &
 
 PID="$!"
 # Write pid to file
