@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -19,11 +21,68 @@
 # 1st stage: build source code
 FROM maven:3.9.0-eclipse-temurin-11 AS build
 
-COPY . /pkg
 WORKDIR /pkg
 ARG MAVEN_ARGS
 
-RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true && pwd && ls -l && rm \
+COPY pom.xml ./
+COPY hugegraph-cluster-test/pom.xml ./hugegraph-cluster-test/pom.xml
+COPY hugegraph-cluster-test/hugegraph-clustertest-dist/pom.xml ./hugegraph-cluster-test/hugegraph-clustertest-dist/pom.xml
+COPY hugegraph-cluster-test/hugegraph-clustertest-minicluster/pom.xml ./hugegraph-cluster-test/hugegraph-clustertest-minicluster/pom.xml
+COPY hugegraph-cluster-test/hugegraph-clustertest-test/pom.xml ./hugegraph-cluster-test/hugegraph-clustertest-test/pom.xml
+COPY hugegraph-commons/pom.xml ./hugegraph-commons/pom.xml
+COPY hugegraph-commons/hugegraph-common/pom.xml ./hugegraph-commons/hugegraph-common/pom.xml
+COPY hugegraph-commons/hugegraph-rpc/pom.xml ./hugegraph-commons/hugegraph-rpc/pom.xml
+COPY hugegraph-pd/pom.xml ./hugegraph-pd/pom.xml
+COPY hugegraph-pd/hg-pd-cli/pom.xml ./hugegraph-pd/hg-pd-cli/pom.xml
+COPY hugegraph-pd/hg-pd-client/pom.xml ./hugegraph-pd/hg-pd-client/pom.xml
+COPY hugegraph-pd/hg-pd-common/pom.xml ./hugegraph-pd/hg-pd-common/pom.xml
+COPY hugegraph-pd/hg-pd-core/pom.xml ./hugegraph-pd/hg-pd-core/pom.xml
+COPY hugegraph-pd/hg-pd-dist/pom.xml ./hugegraph-pd/hg-pd-dist/pom.xml
+COPY hugegraph-pd/hg-pd-grpc/pom.xml ./hugegraph-pd/hg-pd-grpc/pom.xml
+COPY hugegraph-pd/hg-pd-service/pom.xml ./hugegraph-pd/hg-pd-service/pom.xml
+COPY hugegraph-pd/hg-pd-test/pom.xml ./hugegraph-pd/hg-pd-test/pom.xml
+COPY hugegraph-server/pom.xml ./hugegraph-server/pom.xml
+COPY hugegraph-server/hugegraph-api/pom.xml ./hugegraph-server/hugegraph-api/pom.xml
+COPY hugegraph-server/hugegraph-cassandra/pom.xml ./hugegraph-server/hugegraph-cassandra/pom.xml
+COPY hugegraph-server/hugegraph-core/pom.xml ./hugegraph-server/hugegraph-core/pom.xml
+COPY hugegraph-server/hugegraph-dist/pom.xml ./hugegraph-server/hugegraph-dist/pom.xml
+COPY hugegraph-server/hugegraph-example/pom.xml ./hugegraph-server/hugegraph-example/pom.xml
+COPY hugegraph-server/hugegraph-hbase/pom.xml ./hugegraph-server/hugegraph-hbase/pom.xml
+COPY hugegraph-server/hugegraph-hstore/pom.xml ./hugegraph-server/hugegraph-hstore/pom.xml
+COPY hugegraph-server/hugegraph-mysql/pom.xml ./hugegraph-server/hugegraph-mysql/pom.xml
+COPY hugegraph-server/hugegraph-palo/pom.xml ./hugegraph-server/hugegraph-palo/pom.xml
+COPY hugegraph-server/hugegraph-postgresql/pom.xml ./hugegraph-server/hugegraph-postgresql/pom.xml
+COPY hugegraph-server/hugegraph-rocksdb/pom.xml ./hugegraph-server/hugegraph-rocksdb/pom.xml
+COPY hugegraph-server/hugegraph-scylladb/pom.xml ./hugegraph-server/hugegraph-scylladb/pom.xml
+COPY hugegraph-server/hugegraph-test/pom.xml ./hugegraph-server/hugegraph-test/pom.xml
+COPY hugegraph-store/pom.xml ./hugegraph-store/pom.xml
+COPY hugegraph-store/hg-store-cli/pom.xml ./hugegraph-store/hg-store-cli/pom.xml
+COPY hugegraph-store/hg-store-client/pom.xml ./hugegraph-store/hg-store-client/pom.xml
+COPY hugegraph-store/hg-store-common/pom.xml ./hugegraph-store/hg-store-common/pom.xml
+COPY hugegraph-store/hg-store-core/pom.xml ./hugegraph-store/hg-store-core/pom.xml
+COPY hugegraph-store/hg-store-dist/pom.xml ./hugegraph-store/hg-store-dist/pom.xml
+COPY hugegraph-store/hg-store-grpc/pom.xml ./hugegraph-store/hg-store-grpc/pom.xml
+COPY hugegraph-store/hg-store-node/pom.xml ./hugegraph-store/hg-store-node/pom.xml
+COPY hugegraph-store/hg-store-rocksdb/pom.xml ./hugegraph-store/hg-store-rocksdb/pom.xml
+COPY hugegraph-store/hg-store-test/pom.xml ./hugegraph-store/hg-store-test/pom.xml
+COPY hugegraph-struct/pom.xml ./hugegraph-struct/pom.xml
+COPY install-dist/pom.xml ./install-dist/pom.xml
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn dependency:go-offline $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true
+
+COPY LICENSE NOTICE ./
+COPY style ./style
+COPY hugegraph-cluster-test ./hugegraph-cluster-test
+COPY hugegraph-commons ./hugegraph-commons
+COPY hugegraph-pd ./hugegraph-pd
+COPY hugegraph-server ./hugegraph-server
+COPY hugegraph-store ./hugegraph-store
+COPY hugegraph-struct ./hugegraph-struct
+COPY install-dist ./install-dist
+
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true && pwd && ls -l && rm \
     ./hugegraph-server/*.tar.gz && rm ./hugegraph-pd/*.tar.gz && rm ./hugegraph-store/*.tar.gz
 
 # 2nd stage: runtime env

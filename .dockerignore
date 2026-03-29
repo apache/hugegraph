@@ -1,0 +1,73 @@
+# Keep this aligned with .gitignore first to avoid duplicate drift.
+
+# VCS and CI metadata
+.git
+.github/
+.svn/
+
+# IDE and local assistant metadata
+.idea/
+.vscode/
+.serena/
+CLAUDE.md
+CLAUDE_*.md
+GEMINI.md
+copilot-instructions.md
+.copilot-instructions.md
+cursor-instructions.md
+.cursor-instructions.md
+cursor.md
+windsurf.md
+windsurf-instructions.md
+codeium.md
+codeium-instructions.md
+.ai-instructions.md
+*.ai-prompt.md
+WARP.md
+
+# Build outputs and local data
+**/target/
+**/build/
+**/node_modules/
+hugegraph-server/hugegraph-dist/docker/data/
+**/pd_data/
+**/storage/
+upload-files/
+output/
+apache-hugegraph-*/
+
+# Local temp and editor files
+.DS_Store
+*/.DS_Store
+**/*.DS_Store
+Thumbs.db
+*.orig
+*.rej
+*.diff
+*.patch
+*.tmp
+*.cache
+*.swp
+*.log
+*.pyc
+*.sdf
+*.suo
+*.vcxproj.user
+
+# Java/IDE project files
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+*.iws
+*.iml
+*.ipr
+
+# Repo files that do not affect image contents
+/docker/
+/BUILDING.md
+/CONTRIBUTING.md
+/README.md
