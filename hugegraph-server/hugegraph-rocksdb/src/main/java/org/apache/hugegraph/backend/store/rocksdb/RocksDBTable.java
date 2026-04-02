@@ -181,7 +181,7 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         // Query by id
         if (query.conditionsSize() == 0) {
             assert query.idsSize() > 0;
-            return this.queryByIds(session, query.ids());
+            return this.getByIds(session, new HashSet<>(query.ids()));
         }
 
         // Query by condition (or condition + id)
