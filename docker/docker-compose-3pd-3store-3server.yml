@@ -71,6 +71,7 @@ x-server-common: &server-common
     STORE_REST: store0:8520
     HG_SERVER_BACKEND: hstore
     HG_SERVER_PD_PEERS: pd0:8686,pd1:8686,pd2:8686
+    STDOUT_MODE: "true"
   healthcheck:
     test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null || exit 1"]
     interval: 10s
@@ -96,6 +97,7 @@ services:
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
       HG_PD_INITIAL_STORE_COUNT: 3
+      STDOUT_MODE: "true"
     ports: ["8620:8620", "8686:8686"]
     volumes:
       - hg-pd0-data:/hugegraph-pd/pd_data
@@ -114,6 +116,7 @@ services:
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
       HG_PD_INITIAL_STORE_COUNT: 3
+      STDOUT_MODE: "true"
     ports: ["8621:8620", "8687:8686"]
     volumes:
       - hg-pd1-data:/hugegraph-pd/pd_data
@@ -132,6 +135,7 @@ services:
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
       HG_PD_INITIAL_STORE_COUNT: 3
+      STDOUT_MODE: "true"
     ports: ["8622:8620", "8688:8686"]
     volumes:
       - hg-pd2-data:/hugegraph-pd/pd_data
@@ -148,6 +152,7 @@ services:
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store0:8510
       HG_STORE_DATA_PATH: /hugegraph-store/storage
+      STDOUT_MODE: "true"
     ports: ["8500:8500", "8510:8510", "8520:8520"]
     volumes:
       - hg-store0-data:/hugegraph-store/storage
@@ -163,6 +168,7 @@ services:
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store1:8510
       HG_STORE_DATA_PATH: /hugegraph-store/storage
+      STDOUT_MODE: "true"
     ports: ["8501:8500", "8511:8510", "8521:8520"]
     volumes:
       - hg-store1-data:/hugegraph-store/storage
@@ -178,6 +184,7 @@ services:
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store2:8510
       HG_STORE_DATA_PATH: /hugegraph-store/storage
+      STDOUT_MODE: "true"
     ports: ["8502:8500", "8512:8510", "8522:8520"]
     volumes:
       - hg-store2-data:/hugegraph-store/storage
