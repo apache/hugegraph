@@ -183,8 +183,7 @@ public class RocksDBTables {
         @Override
         protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
                                                    Collection<Id> ids) {
-                        // TODO: use getByIds() after batch version multi-get is ready
-            return super.queryByIds(session, ids);
+            return this.getByIds(session, new HashSet<>(ids));
             
         }
     }
