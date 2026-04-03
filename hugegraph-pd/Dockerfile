@@ -35,7 +35,8 @@ LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default
 ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm" \
-    HUGEGRAPH_HOME="hugegraph-pd"
+    HUGEGRAPH_HOME="hugegraph-pd" \
+    STDOUT_MODE="true"
 
 #COPY . /hugegraph/hugegraph-pd
 WORKDIR /hugegraph-pd/

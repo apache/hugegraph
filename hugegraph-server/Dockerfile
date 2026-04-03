@@ -36,7 +36,8 @@ LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 # TODO: use g1gc or zgc as default
 # Note: --add-exports is required for Java 11+ to access jdk.internal.reflect for auth proxy
 ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED" \
-    HUGEGRAPH_HOME="hugegraph-server"
+    HUGEGRAPH_HOME="hugegraph-server" \
+    STDOUT_MODE="true"
 
 #COPY . /hugegraph/hugegraph-server
 WORKDIR /hugegraph-server/
