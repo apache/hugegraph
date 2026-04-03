@@ -101,24 +101,12 @@ fi
 
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphServer in daemon mode..."
-    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-        "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" &
-    else
-        "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-        "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" \
-        >>"${LOGS}"/hugegraph-server.log 2>&1 &
-    fi
+    "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
+    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" &
 else
     echo "Starting HugeGraphServer in foreground mode..."
-    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-        "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}"
-    else
-        "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-        "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" \
-        >>"${LOGS}"/hugegraph-server.log 2>&1
-    fi
+    "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
+    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}"
 fi
 
 PID="$!"
@@ -128,7 +116,11 @@ echo "$PID" > "$PID_FILE"
 trap 'kill $PID; exit' SIGHUP SIGINT SIGQUIT SIGTERM
 
 wait_for_startup ${PID} 'HugeGraphServer' "$REST_SERVER_URL/graphs" "${SERVER_STARTUP_TIMEOUT_S}" || {
-    echo "See $LOGS/hugegraph-server.log for HugeGraphServer log output." >&2
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        echo "See 'docker logs' for HugeGraphServer log output." >&2
+    else
+        echo "See $LOGS/hugegraph-server.log for HugeGraphServer log output." >&2
+    fi
     if [[ $DAEMON == "true" ]]; then
         exit 1
     fi

@@ -189,5 +189,5 @@ if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
 else
     exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} -cp ${CLASSPATH}: \
         org.apache.hugegraph.dist.HugeGraphServer ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
-        >> ${OUTPUT} 2>&1
+        >> ${LOGS}/hugegraph-server-stdout.log 2>&1
 fi
