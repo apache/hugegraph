@@ -41,7 +41,6 @@ services:
       HG_PD_RAFT_PEERS_LIST: pd:8610
       HG_PD_INITIAL_STORE_LIST: store:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
-      STDOUT_MODE: "true"
     ports:
       - "8620:8620"
     volumes:
@@ -70,7 +69,6 @@ services:
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store:8510
       HG_STORE_DATA_PATH: /hugegraph-store/storage
-      STDOUT_MODE: "true"
     ports:
       - "8520:8520"
     volumes:
@@ -95,7 +93,6 @@ services:
     environment:
       HG_SERVER_BACKEND: hstore
       HG_SERVER_PD_PEERS: pd:8686
-      STDOUT_MODE: "true"
     ports:
       - "8080:8080"
     healthcheck:
