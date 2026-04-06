@@ -784,7 +784,8 @@ public class GraphTransaction extends IndexableTransaction {
         List<Id> ids = InsertionOrderUtil.newList();
         Map<Id, HugeVertex> vertices = new HashMap<>(vertexIds.length);
 
-        IdQuery query = new IdQuery(type);
+        List<Id> backendIds = InsertionOrderUtil.newList();
+
         for (Object vertexId : vertexIds) {
             HugeVertex vertex;
             Id id = HugeVertex.getIdValue(vertexId);
@@ -799,17 +800,30 @@ public class GraphTransaction extends IndexableTransaction {
                 // Found from local tx
                 vertices.put(vertex.id(), vertex);
             } else {
-                // Prepare to query from backend store
-                query.query(id);
+                // store the IDs queried from backend
+                backendIds.add(id);
             }
             ids.add(id);
         }
 
-        if (!query.empty()) {
+        if (!backendIds.isEmpty()) {
             // Query from backend store
-            query.mustSortByInput(false);
-            Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
-            QueryResults.fillMap(it, vertices);
+            final int batch = this.batchSize > 0 ? this.batchSize : backendIds.size();
+            for (int i = 0; i < backendIds.size(); i += batch) {
+                int end = Math.min(i + batch, backendIds.size());
+                IdQuery query = new IdQuery(type);
+                for (int j = i; j < end; j++) {
+                    Id id = backendIds.get(j);
+                    query.query(id);
+                }
+                // Single batch capacity check
+                Query.checkForceCapacity(query.idsSize());
+
+                // Query from backend store
+                query.mustSortByInput(false);
+                Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
+                QueryResults.fillMap(it, vertices);
+            }
         }
 
         return new MapperIterator<>(ids.iterator(), id -> {

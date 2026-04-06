@@ -20,7 +20,6 @@ package org.apache.hugegraph.backend.store.rocksdb;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 
 import org.apache.hugegraph.backend.id.Id;
@@ -183,8 +182,8 @@ public class RocksDBTables {
         @Override
         protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
                                                    Collection<Id> ids) {
-            return this.getByIds(session, new HashSet<>(ids));
-            
+            // TODO: use getByIds() after batch version multi-get is ready
+            return super.queryByIds(session, ids);
         }
     }
 
