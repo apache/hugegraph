@@ -19,6 +19,7 @@ package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
+import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
 import org.apache.hugegraph.unit.cache.CacheManagerTest;
 import org.apache.hugegraph.unit.cache.CacheTest;
@@ -80,6 +81,9 @@ import org.junit.runners.Suite;
 @Suite.SuiteClasses({
         /* api filter */
         PathFilterTest.class,
+
+        /* api gremlin */
+        GremlinQueryAPITest.class,
 
         /* cache */
         CacheTest.RamCacheTest.class,
