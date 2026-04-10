@@ -36,9 +36,15 @@ public class GremlinQueryAPITest extends BaseUnitTest {
     @Test
     public void testMatchBadRequestExceptionWithTinkerpop() throws Exception {
         Assert.assertTrue(matchBadRequest(
-                "org.apache.tinkerpop.gremlin.structure.util.empty.EmptyProperty"));
-        Assert.assertTrue(matchBadRequest(
                 "org.apache.tinkerpop.gremlin.process.traversal.util.FastNoSuchElementException"));
+    }
+
+    @Test
+    public void testMatchBadRequestExceptionWithAuthExceptions() throws Exception {
+        Assert.assertFalse(matchBadRequest(
+                "org.apache.tinkerpop.gremlin.server.auth.AuthenticationException"));
+        Assert.assertFalse(matchBadRequest(
+                "org.apache.tinkerpop.gremlin.server.authz.AuthorizationException"));
     }
 
     @Test

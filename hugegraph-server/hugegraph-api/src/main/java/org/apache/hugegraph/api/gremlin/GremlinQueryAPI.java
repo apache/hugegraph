@@ -44,7 +44,7 @@ public class GremlinQueryAPI extends API {
             "groovy.lang.",
             "org.codehaus.",
             "org.apache.hugegraph.",
-            "org.apache.tinkerpop."
+            "org.apache.tinkerpop.gremlin.process.traversal.util.FastNoSuchElementException"
     );
 
     @Context
