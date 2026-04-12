@@ -54,6 +54,7 @@ import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
+import org.apache.hugegraph.schema.SchemaLabel;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeElement;
@@ -9074,6 +9075,49 @@ public class VertexCoreTest extends BaseCoreTest {
         vertices = g.V().hasLabel("person", "computer")
                     .hasLabel("book", "language").toList();
         Assert.assertEquals(0, vertices.size());
+    }
+
+    @Test
+    public void testCollectMatchedIndexesByJointLabelsWithIndexedProperties() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        init5Persons();
+        init5Computers();
+        init10Vertices();
+
+        VertexLabel person = graph.vertexLabel("person");
+        VertexLabel computer = graph.vertexLabel("computer");
+        PropertyKey city = graph.propertyKey("city");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(person.id(), computer.id())));
+        query.query(Condition.eq(city.id(), "Beijing"));
+
+        Set<?> matchedIndexes = Whitebox.invoke(params().graphTransaction(),
+                                                "indexTx",
+                                                "collectMatchedIndexes",
+                                                query);
+        Assert.assertEquals(1, matchedIndexes.size());
+        Object matchedIndex = matchedIndexes.iterator().next();
+        SchemaLabel schemaLabel = Whitebox.getInternalState(matchedIndex,
+                                                            "schemaLabel");
+        Assert.assertEquals("person", schemaLabel.name());
+
+        ConditionQuery conflicting = new ConditionQuery(HugeType.VERTEX);
+        conflicting.eq(HugeKeys.LABEL, person.id());
+        conflicting.eq(HugeKeys.LABEL, computer.id());
+        conflicting.query(Condition.eq(city.id(), "Beijing"));
+
+        Assert.assertTrue(conflicting.containsCondition(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(),
+                            conflicting.conditionValues(HugeKeys.LABEL));
+
+        matchedIndexes = Whitebox.invoke(params().graphTransaction(),
+                                         "indexTx",
+                                         "collectMatchedIndexes",
+                                         conflicting);
+        Assert.assertEquals(0, matchedIndexes.size());
     }
 
     @Test

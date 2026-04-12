@@ -49,6 +49,17 @@ public class QueryTest {
     }
 
     @Test
+    public void testConditionWithoutLabel() {
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+
+        Assert.assertFalse(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(),
+                            query.conditionValues(HugeKeys.LABEL));
+        Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
+        Assert.assertNull(query.condition(HugeKeys.LABEL));
+    }
+
+    @Test
     public void testConditionWithEqAndIn() {
         Id label1 = IdGenerator.of(1);
         Id label2 = IdGenerator.of(2);
@@ -58,7 +69,31 @@ public class QueryTest {
         query.query(Condition.in(HugeKeys.LABEL,
                                  ImmutableList.of(label1, label2)));
 
+        Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(label1),
+                            query.conditionValues(HugeKeys.LABEL));
+        Assert.assertEquals(label1, query.conditionValue(HugeKeys.LABEL));
         Assert.assertEquals(label1, query.condition(HugeKeys.LABEL));
+    }
+
+    @Test
+    public void testConditionWithSingleInValues() {
+        Id label1 = IdGenerator.of(1);
+        Id label2 = IdGenerator.of(2);
+
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(label1, label2)));
+
+        Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(label1, label2),
+                            query.conditionValues(HugeKeys.LABEL));
+        Assert.assertThrows(IllegalStateException.class,
+                            () -> query.conditionValue(HugeKeys.LABEL),
+                            e -> Assert.assertContains("Illegal key 'LABEL'",
+                                                       e.getMessage()));
+        Assert.assertEquals(ImmutableList.of(label1, label2),
+                            query.condition(HugeKeys.LABEL));
     }
 
     @Test
@@ -73,6 +108,10 @@ public class QueryTest {
         query.query(Condition.in(HugeKeys.LABEL,
                                  ImmutableList.of(label1, label3)));
 
+        Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(),
+                            query.conditionValues(HugeKeys.LABEL));
+        Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
         Assert.assertNull(query.condition(HugeKeys.LABEL));
     }
 
@@ -89,6 +128,13 @@ public class QueryTest {
         query.query(Condition.in(HugeKeys.LABEL,
                                  ImmutableList.of(label1, label2, label4)));
 
+        Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(label1, label2),
+                            query.conditionValues(HugeKeys.LABEL));
+        Assert.assertThrows(IllegalStateException.class,
+                            () -> query.conditionValue(HugeKeys.LABEL),
+                            e -> Assert.assertContains("Illegal key 'LABEL'",
+                                                       e.getMessage()));
         Assert.assertThrows(IllegalStateException.class,
                             () -> query.condition(HugeKeys.LABEL),
                             e -> Assert.assertContains("Illegal key 'LABEL'",

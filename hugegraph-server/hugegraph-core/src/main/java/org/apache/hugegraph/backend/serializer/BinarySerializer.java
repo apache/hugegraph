@@ -674,7 +674,7 @@ public class BinarySerializer extends AbstractSerializer {
         if (direction == null) {
             direction = Directions.OUT;
         }
-        Id label = cq.condition(HugeKeys.LABEL);
+        Id label = cq.conditionValue(HugeKeys.LABEL);
 
         BytesBuffer start = BytesBuffer.allocate(BytesBuffer.BUF_EDGE_ID);
         writePartitionedId(HugeType.EDGE, vertex, start);
@@ -722,7 +722,8 @@ public class BinarySerializer extends AbstractSerializer {
         int count = 0;
         BytesBuffer buffer = BytesBuffer.allocate(BytesBuffer.BUF_EDGE_ID);
         for (HugeKeys key : EdgeId.KEYS) {
-            Object value = cq.condition(key);
+            Object value = key == HugeKeys.LABEL ?
+                           cq.conditionValue(key) : cq.condition(key);
 
             if (value != null) {
                 count++;

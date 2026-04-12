@@ -415,8 +415,9 @@ public class GraphIndexTransaction extends AbstractTransaction {
         HugeType queryType = query.resultType();
         IndexLabel il = IndexLabel.label(queryType);
         validateIndexLabel(il);
-        Id label = query.condition(HugeKeys.LABEL);
-        assert label != null;
+        Id label = query.conditionValue(HugeKeys.LABEL);
+        E.checkState(label != null, "Expect one label value for query: %s",
+                     query);
 
         HugeType indexType;
         SchemaLabel schemaLabel;
@@ -482,7 +483,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         }
         Set<MatchedIndex> indexes = this.collectMatchedIndexes(query);
         if (indexes.isEmpty()) {
-            Id label = query.condition(HugeKeys.LABEL);
+            Id label = uniqueLabel(query);
             throw noIndexException(this.graph(), query, label);
         }
 
@@ -756,11 +757,16 @@ public class GraphIndexTransaction extends AbstractTransaction {
     @Watched(prefix = "index")
     private Set<MatchedIndex> collectMatchedIndexes(ConditionQuery query) {
         ISchemaTransaction schema = this.params().schemaTransaction();
-        Id label = query.condition(HugeKeys.LABEL);
+        boolean hasLabel = query.containsCondition(HugeKeys.LABEL);
+        Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
 
         List<? extends SchemaLabel> schemaLabels;
-        if (label != null) {
-            // Query has LABEL condition
+        if (hasLabel && labels.isEmpty()) {
+            return Collections.emptySet();
+        }
+        if (labels.size() == 1) {
+            Id label = (Id) labels.iterator().next();
+            // Query has one resolved LABEL condition
             SchemaLabel schemaLabel;
             if (query.resultType().isVertex()) {
                 schemaLabel = schema.getVertexLabel(label);
@@ -773,7 +779,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
             schemaLabels = ImmutableList.of(schemaLabel);
         } else {
-            // Query doesn't have LABEL condition
+            // Query doesn't have LABEL condition or it doesn't resolve
+            // to a single label, so keep the conservative fallback.
             if (query.resultType().isVertex()) {
                 schemaLabels = schema.getVertexLabels();
             } else if (query.resultType().isEdge()) {
@@ -1781,7 +1788,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
 
             // Check label is matched
-            Id label = query.condition(HugeKeys.LABEL);
+            Id label = uniqueLabel(query);
             // NOTE: original condition query may not have label condition,
             // which means possibly label == null.
             if (label != null && !element.schemaLabel().id().equals(label)) {
@@ -1980,5 +1987,13 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
             return t1 + t2;
         }
+    }
+
+    private static Id uniqueLabel(ConditionQuery query) {
+        Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
+        if (labels.size() != 1) {
+            return null;
+        }
+        return (Id) labels.iterator().next();
     }
 }

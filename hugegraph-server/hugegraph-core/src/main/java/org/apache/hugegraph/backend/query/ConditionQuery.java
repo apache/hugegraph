@@ -256,24 +256,26 @@ public class ConditionQuery extends IdQuery {
         return false;
     }
 
+    /**
+     * Returns the legacy condition value of the specified key.
+     *
+     * This method keeps the historical behavior for existing callers:
+     * <ul>
+     * <li>returns {@code null} if no top-level EQ/IN relation exists</li>
+     * <li>returns {@code null} if top-level EQ/IN relations resolve to empty</li>
+     * <li>returns the single value if only one value is resolved</li>
+     * <li>returns the raw IN list if there is exactly one top-level IN relation</li>
+     * <li>throws if multiple values remain after resolving several relations</li>
+     * </ul>
+     *
+     * Prefer {@link #conditionValues(Object)} or {@link #conditionValue(Object)}
+     * for new code that needs explicit semantics.
+     */
     @Watched
     public <T> T condition(Object key) {
         List<Object> valuesEQ = InsertionOrderUtil.newList();
         List<Object> valuesIN = InsertionOrderUtil.newList();
-        for (Condition c : this.conditions) {
-            if (c.isRelation()) {
-                Condition.Relation r = (Condition.Relation) c;
-                if (r.key().equals(key)) {
-                    if (r.relation() == RelationType.EQ) {
-                        valuesEQ.add(r.value());
-                    } else if (r.relation() == RelationType.IN) {
-                        Object value = r.value();
-                        assert value instanceof List;
-                        valuesIN.add(value);
-                    }
-                }
-            }
-        }
+        this.collectConditionValues(key, valuesEQ, valuesIN);
         if (valuesEQ.isEmpty() && valuesIN.isEmpty()) {
             return null;
         }
@@ -323,11 +325,10 @@ public class ConditionQuery extends IdQuery {
         return value;
     }
 
-    public void unsetCondition(Object key) {
-        this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
-    }
-
-    public boolean containsCondition(HugeKeys key) {
+    /**
+     * Returns whether there is any top-level relation for the specified key.
+     */
+    public boolean containsCondition(Object key) {
         for (Condition c : this.conditions) {
             if (c.isRelation()) {
                 Condition.Relation r = (Condition.Relation) c;
@@ -337,6 +338,97 @@ public class ConditionQuery extends IdQuery {
             }
         }
         return false;
+    }
+
+    /**
+     * Returns the resolved candidate values of the specified key from
+     * top-level EQ/IN relations.
+     *
+     * Use {@link #containsCondition(Object)} to distinguish "no condition"
+     * from "conditions exist but resolve to an empty intersection".
+     */
+    public Set<Object> conditionValues(Object key) {
+        List<Object> valuesEQ = InsertionOrderUtil.newList();
+        List<Object> valuesIN = InsertionOrderUtil.newList();
+        this.collectConditionValues(key, valuesEQ, valuesIN);
+        if (valuesEQ.isEmpty() && valuesIN.isEmpty()) {
+            return InsertionOrderUtil.newSet();
+        }
+        return this.resolveConditionValues(valuesEQ, valuesIN);
+    }
+
+    /**
+     * Returns the unique resolved value of the specified key from top-level
+     * EQ/IN relations.
+     *
+     * Returns {@code null} when the resolved candidate set is empty. Throws
+     * if multiple values remain after resolution.
+     */
+    public <T> T conditionValue(Object key) {
+        Set<Object> values = this.conditionValues(key);
+        if (values.isEmpty()) {
+            return null;
+        }
+        E.checkState(values.size() == 1,
+                     "Illegal key '%s' with more than one value: %s",
+                     key, values);
+        @SuppressWarnings("unchecked")
+        T value = (T) values.iterator().next();
+        return value;
+    }
+
+    public void unsetCondition(Object key) {
+        this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
+    }
+
+    public boolean containsCondition(HugeKeys key) {
+        return this.containsCondition((Object) key);
+    }
+
+    private void collectConditionValues(Object key, List<Object> valuesEQ,
+                                        List<Object> valuesIN) {
+        for (Condition c : this.conditions) {
+            if (c.isRelation()) {
+                Condition.Relation r = (Condition.Relation) c;
+                if (r.key().equals(key)) {
+                    if (r.relation() == RelationType.EQ) {
+                        valuesEQ.add(r.value());
+                    } else if (r.relation() == RelationType.IN) {
+                        Object value = r.value();
+                        assert value instanceof List;
+                        valuesIN.add(value);
+                    }
+                }
+            }
+        }
+    }
+
+    private Set<Object> resolveConditionValues(List<Object> valuesEQ,
+                                               List<Object> valuesIN) {
+        boolean initialized = false;
+        Set<Object> intersectValues = InsertionOrderUtil.newSet();
+        for (Object value : valuesEQ) {
+            List<Object> valueAsList = ImmutableList.of(value);
+            if (!initialized) {
+                intersectValues.addAll(valueAsList);
+                initialized = true;
+            } else {
+                CollectionUtil.intersectWithModify(intersectValues,
+                                                   valueAsList);
+            }
+        }
+        for (Object value : valuesIN) {
+            @SuppressWarnings("unchecked")
+            List<Object> valueAsList = (List<Object>) value;
+            if (!initialized) {
+                intersectValues.addAll(valueAsList);
+                initialized = true;
+            } else {
+                CollectionUtil.intersectWithModify(intersectValues,
+                                                   valueAsList);
+            }
+        }
+        return intersectValues;
     }
 
     public boolean containsCondition(Condition.RelationType type) {
