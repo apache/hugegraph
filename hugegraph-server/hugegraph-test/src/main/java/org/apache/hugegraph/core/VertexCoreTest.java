@@ -9081,9 +9081,6 @@ public class VertexCoreTest extends BaseCoreTest {
     public void testCollectMatchedIndexesByJointLabelsWithIndexedProperties() {
         HugeGraph graph = graph();
         initPersonIndex(true);
-        init5Persons();
-        init5Computers();
-        init10Vertices();
 
         VertexLabel person = graph.vertexLabel("person");
         VertexLabel computer = graph.vertexLabel("computer");
