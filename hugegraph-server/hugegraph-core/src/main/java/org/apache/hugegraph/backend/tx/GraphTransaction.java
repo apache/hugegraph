@@ -783,10 +783,8 @@ public class GraphTransaction extends IndexableTransaction {
         // NOTE: allowed duplicated vertices if query by duplicated ids
         List<Id> ids = InsertionOrderUtil.newList();
         Map<Id, HugeVertex> vertices = new HashMap<>(vertexIds.length);
-        Set<Id> fetchedIds = InsertionOrderUtil.newSet();
-        IdQuery batchQuery = null;
-        final int batchSize = this.batchSize;
 
+        IdQuery query = new IdQuery(type);
         for (Object vertexId : vertexIds) {
             HugeVertex vertex;
             Id id = HugeVertex.getIdValue(vertexId);
@@ -801,25 +799,17 @@ public class GraphTransaction extends IndexableTransaction {
                 // Found from local tx
                 vertices.put(vertex.id(), vertex);
             } else {
-                // Query from backend
-                if (!fetchedIds.contains(id)) {
-                    if (batchQuery == null) {
-                        batchQuery = new IdQuery(type);
-                    }
-                    batchQuery.query(id);
-                    fetchedIds.add(id);
-
-                    if (batchQuery.idsSize() >= batchSize) {
-                        flushIdBatch(batchQuery, vertices);
-                        batchQuery = null;
-                    }
-                }
+                // Prepare to query from backend store
+                query.query(id);
             }
             ids.add(id);
         }
 
-        if (batchQuery != null && !batchQuery.empty()) {
-            flushIdBatch(batchQuery, vertices);
+        if (!query.empty()) {
+            // Query from backend store
+            query.mustSortByInput(false);
+            Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
+            QueryResults.fillMap(it, vertices);
         }
 
         return new MapperIterator<>(ids.iterator(), id -> {
@@ -839,13 +829,6 @@ public class GraphTransaction extends IndexableTransaction {
             }
             return vertex;
         });
-    }
-
-    private void flushIdBatch(IdQuery query, Map<Id, HugeVertex> vertices) {
-        Query.checkForceCapacity(query.idsSize());
-        query.mustSortByInput(false);
-        Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
-        QueryResults.fillMap(it, vertices);
     }
 
     public Iterator<Vertex> queryVertices() {
