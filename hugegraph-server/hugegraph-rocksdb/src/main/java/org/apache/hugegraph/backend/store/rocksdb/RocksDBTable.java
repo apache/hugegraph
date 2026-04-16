@@ -20,7 +20,6 @@ package org.apache.hugegraph.backend.store.rocksdb;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -181,9 +180,6 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         // Query by id
         if (query.conditionsSize() == 0) {
             assert query.idsSize() > 0;
-            if (!session.hasChanges()) {
-                return this.getByIds(session, new HashSet<>(query.ids()));
-            }
             return this.queryByIds(session, query.ids());
         }
 

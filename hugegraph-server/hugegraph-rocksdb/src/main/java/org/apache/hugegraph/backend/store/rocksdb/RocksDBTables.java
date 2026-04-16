@@ -20,7 +20,7 @@ package org.apache.hugegraph.backend.store.rocksdb;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 import org.apache.hugegraph.backend.id.Id;
@@ -184,7 +184,7 @@ public class RocksDBTables {
         protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
                                                    Collection<Id> ids) {
             if (!session.hasChanges()) {
-                return this.getByIds(session, new HashSet<>(ids));
+                return this.getByIds(session, new LinkedHashSet<>(ids));
             }
             return super.queryByIds(session, ids);
         }
@@ -216,7 +216,7 @@ public class RocksDBTables {
         protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
                                                    Collection<Id> ids) {
             if (!session.hasChanges()) {
-                return this.getByIds(session, new HashSet<>(ids));
+                return this.getByIds(session, new LinkedHashSet<>(ids));
             }
             return super.queryByIds(session, ids);
         }
