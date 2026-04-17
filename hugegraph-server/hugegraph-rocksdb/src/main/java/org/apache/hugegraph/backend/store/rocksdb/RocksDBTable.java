@@ -224,7 +224,8 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         return BackendColumnIterator.iterator(col);
     }
 
-    protected BackendColumnIterator getByIds(RocksDBSessions.Session session, Set<Id> ids) {
+    protected BackendColumnIterator getByIds(RocksDBSessions.Session session,
+                                             Collection<Id> ids) {
         if (ids.size() == 1) {
             return this.getById(session, ids.iterator().next());
         }
