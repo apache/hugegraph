@@ -22,6 +22,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.backend.id.Id;
@@ -223,11 +224,7 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         return BackendColumnIterator.iterator(col);
     }
 
-    protected BackendColumnIterator getByIds(RocksDBSessions.Session session,
-                                             Collection<Id> ids) {
-        if (session.hasChanges()) {
-            return this.queryByIds(session, ids);
-        }
+    protected BackendColumnIterator getByIds(RocksDBSessions.Session session, Set<Id> ids) {
         if (ids.size() == 1) {
             return this.getById(session, ids.iterator().next());
         }
