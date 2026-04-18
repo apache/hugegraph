@@ -81,12 +81,14 @@ else
     log "HugeGraph initialization already done. Skipping re-init..."
 fi
 
-STORE_REST="${STORE_REST:-store:8520}"
-export STORE_REST
-
 ./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t 120
 
-# Post-startup cluster stabilization check
-./bin/wait-partition.sh || log "WARN: partitions not assigned yet"
+# Post-startup cluster stabilization check (hstore only — rocksdb has no partitions)
+ACTUAL_BACKEND=$(grep -E '^\s*backend\s*=' "${GRAPH_CONF}" | sed 's/.*=\s*//' | tr -d ' ')
+if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
+    STORE_REST="${STORE_REST:-store:8520}"
+    export STORE_REST
+    ./bin/wait-partition.sh || log "WARN: partitions not assigned yet"
+fi
 
 tail -f /dev/null
