@@ -1,5 +1,3 @@
-
-
 # list of languages for which language servers are started; choose from:
 #   al                  bash                clojure             cpp                 csharp
 #   csharp_omnisharp    dart                elixir              elm                 erlang

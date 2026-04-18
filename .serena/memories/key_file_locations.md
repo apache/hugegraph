@@ -30,7 +30,7 @@
 
 ## CI Workflows (.github/workflows/)
 - `server-ci.yml` — Server tests (matrix: memory/rocksdb/hbase × Java 11)
-- `pd-store-ci.yml` — PD & Store tests
+- `pd-store-ci.yml` — PD, Store & HStore tests
 - `commons-ci.yml` — Commons tests
 - `cluster-test-ci.yml` — Cluster integration
 - `licence-checker.yml` — License headers

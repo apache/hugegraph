@@ -3,7 +3,8 @@
 ## 1. Code Quality (MANDATORY)
 ```bash
 mvn apache-rat:check -ntp       # License headers
-mvn editorconfig:check          # Style (uses .editorconfig + style/checkstyle.xml)
+mvn editorconfig:check          # Style (.editorconfig)
+mvn checkstyle:check            # Style (style/checkstyle.xml)
 mvn clean compile -Dmaven.javadoc.skip=true  # Compile warnings
 ```
 

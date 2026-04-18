@@ -31,11 +31,13 @@ mvn test -pl hugegraph-store/hg-store-test -am
 ## Validation
 ```bash
 mvn apache-rat:check -ntp        # License headers
-mvn editorconfig:check           # Code style
+mvn editorconfig:check           # Code style (.editorconfig)
+mvn checkstyle:check             # Code style (style/checkstyle.xml)
 mvn clean compile -Dmaven.javadoc.skip=true  # Compile warnings
 ```
 
-## Server Ops (hugegraph-dist/.../bin/)
+## Server Ops
+Scripts in `hugegraph-server/hugegraph-dist/src/assembly/static/bin/` (or extracted distribution `bin/`):
 ```bash
 bin/init-store.sh && bin/start-hugegraph.sh  # Init + start
 bin/stop-hugegraph.sh                         # Stop
@@ -44,8 +46,8 @@ bin/enable-auth.sh                            # Enable auth
 
 ## Docker
 ```bash
-cd docker && docker compose up -d             # Single-node (bridge network)
-docker compose -f docker-compose-3pd-3store-3server.yml up -d  # Cluster
+cd docker && docker compose up -d                                          # Single-node (bridge network)
+cd docker && docker compose -f docker-compose-3pd-3store-3server.yml up -d # Cluster
 ```
 
 ## Distributed Build (BETA)
