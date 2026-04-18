@@ -84,7 +84,7 @@ fi
 ./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t 120
 
 # Post-startup cluster stabilization check (hstore only — rocksdb has no partitions)
-ACTUAL_BACKEND=$(grep -E '^\s*backend\s*=' "${GRAPH_CONF}" | sed 's/.*=\s*//' | tr -d ' ')
+ACTUAL_BACKEND=$(grep -E '^[[:space:]]*backend[[:space:]]*=' "${GRAPH_CONF}" | head -n 1 | sed 's/.*=//' | tr -d '[:space:]' || true)
 if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
     STORE_REST="${STORE_REST:-store:8520}"
     export STORE_REST
