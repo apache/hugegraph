@@ -6,7 +6,7 @@ Development reference for AI coding agents. See [README.md](README.md) if the ta
 
 1. **Pluggable Backend Architecture**: Storage backends implement the `BackendStore` interface — new backends require no core changes. Active backends: RocksDB (default/embedded), HStore (distributed)
 2. **gRPC Communication**: All distributed components (PD, Store, Server) communicate via gRPC. Proto definitions in `*/grpc/` directories
-3. **Multi-Language Queries**: Native Gremlin support + OpenCypher implementation in `hugegraph-api/opencypher/`
+3. **Multi-Language Queries**: Native Gremlin support(Main) + OpenCypher translation(Backup)
 
 ## Build Commands
 
@@ -34,8 +34,6 @@ All test commands target `hugegraph-server/hugegraph-test` with `-am` flag:
 | Single test class | `mvn test -P core-test,rocksdb -Dtest=YourTestClass` |
 
 All commands above implicitly start with `mvn test -pl hugegraph-server/hugegraph-test -am`.
-
-TinkerPop tests run only on `release-*`/`test-*` branches. Raft tests run only on `test*`/`raft*` branches.
 
 #### PD & Store Tests
 
@@ -84,9 +82,7 @@ When adding dependencies (Apache compliance):
 
 ### gRPC Protocol Changes
 
-When modifying `.proto` files:
-- Run `mvn clean compile` to regenerate gRPC stubs
-- Generated files go to `target/generated-sources/protobuf/` (excluded from Apache RAT)
+When modifying `.proto` files: Run `mvn clean compile` to regenerate gRPC stubs
 
 ### Build Order & Cross-Module Dependencies
 
@@ -100,4 +96,3 @@ mvn clean package -pl hugegraph-server -am -DskipTests   # 4. Server
 ```
 
 Key dependencies: `hugegraph-commons` is shared by all modules. `hugegraph-struct` must be built before PD and Store. Server backends depend on `hugegraph-core`.
-
