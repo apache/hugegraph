@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.pd.rest.exceptionshandler;
 
-import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.rest.response.ApiResponse;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -27,42 +26,23 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
-public class PDExceptionMapper {
+public class GenericExceptionMapper {
 
-     private static final Logger logger = LogManager.getLogger(PDExceptionMapper.class);
+    private static final Logger logger = LogManager.getLogger(GenericExceptionMapper.class);
 
-    @ExceptionHandler(PDException.class)
-    public ResponseEntity<ApiResponse<Object>> toResponse(PDException exception) {
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiResponse<Object>>handleGenericException(Exception exception) {
 
-         logger.error(exception.getMessage(), exception);
+        HttpStatus springStatus = HttpStatus.INTERNAL_SERVER_ERROR;
 
-        HttpStatus status = resolveStatus(exception.getErrorCode());
-        String reasonPhrase = status.getReasonPhrase();
-
+        logger.error("Unexpected error ", exception);
+        
         ApiResponse<Object> apiResponse = new ApiResponse<>(
-                exception.getErrorCode(),
-                exception.getMessage(),
+                500,
+                "An unexpected error occurred",
                 null,
-                reasonPhrase);
+                springStatus.getReasonPhrase());
 
-        return ResponseEntity
-                .status(status)
-                .body(apiResponse);
-
-    }
-
-    private HttpStatus resolveStatus(int code) {
-        try {
-            return HttpStatus.valueOf(code);
-        } catch (Exception e) {
-
-            if (code >= 400 && code < 500) {
-                return HttpStatus.BAD_REQUEST;
-            }
-            if (code >= 500 && code < 600) {
-                return HttpStatus.INTERNAL_SERVER_ERROR;
-            }
-            return HttpStatus.INTERNAL_SERVER_ERROR;
-        }
+        return ResponseEntity.status(springStatus).body(apiResponse);
     }
 }
