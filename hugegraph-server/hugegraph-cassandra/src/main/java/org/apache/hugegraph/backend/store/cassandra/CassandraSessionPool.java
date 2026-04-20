@@ -55,18 +55,30 @@ public class CassandraSessionPool extends BackendSessionPool {
 
     private Cluster cluster;
     private final String keyspace;
-    private int maxRetries;
-    private long retryInterval;
-    private long retryMaxDelay;
+    private final int maxRetries;
+    private final long retryInterval;
+    private final long retryMaxDelay;
 
     public CassandraSessionPool(HugeConfig config,
                                 String keyspace, String store) {
         super(config, keyspace + "/" + store);
         this.cluster = null;
         this.keyspace = keyspace;
-        this.maxRetries = 0;
-        this.retryInterval = 0L;
-        this.retryMaxDelay = 0L;
+        this.maxRetries = config.get(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES);
+        this.retryInterval = config.get(
+                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL);
+        long reconnectBase = config.get(
+                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY);
+        long reconnectMax = config.get(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY);
+        E.checkArgument(reconnectMax >= reconnectBase,
+                        "'%s' (%s) must be >= '%s' (%s)",
+                        CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(),
+                        reconnectMax,
+                        CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(),
+                        reconnectBase);
+        this.retryMaxDelay = reconnectMax;
     }
 
     @Override
@@ -107,21 +119,9 @@ public class CassandraSessionPool extends BackendSessionPool {
         // with exponential backoff after they go down (see issue #2740).
         long reconnectBase = config.get(
                 CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY);
-        long reconnectMax = config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY);
-        E.checkArgument(reconnectMax >= reconnectBase,
-                        "'%s' (%s) must be >= '%s' (%s)",
-                        CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(),
-                        reconnectMax,
-                        CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(),
-                        reconnectBase);
         builder.withReconnectionPolicy(
-                new ExponentialReconnectionPolicy(reconnectBase, reconnectMax));
-        this.retryMaxDelay = reconnectMax;
-        this.maxRetries = config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES);
-        this.retryInterval = config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL);
+                new ExponentialReconnectionPolicy(reconnectBase,
+                                                  this.retryMaxDelay));
 
         // Credential options
         String username = config.get(CassandraOptions.CASSANDRA_USERNAME);
@@ -211,6 +211,7 @@ public class CassandraSessionPool extends BackendSessionPool {
             int processors = Math.min(statements.size(), 1023);
             List<ResultSetFuture> results = new ArrayList<>(processors + 1);
             for (Statement s : statements) {
+                // TODO: commitAsync is not retried (async retry semantics are complex)
                 ResultSetFuture future = this.session.executeAsync(s);
                 results.add(future);
 
@@ -251,7 +252,15 @@ public class CassandraSessionPool extends BackendSessionPool {
          * itself keeps retrying connections in the background via the
          * reconnection policy, so once Cassandra comes back online, a
          * subsequent attempt here will succeed without restarting the server.
-         * See issue #2740.
+         *
+         * <p><b>Blocking note:</b> retries block the calling thread via
+         * {@link Thread#sleep(long)}. Worst-case a single call blocks for
+         * {@code maxRetries * retryMaxDelay} ms. Under high-throughput
+         * workloads concurrent threads may pile up in {@code sleep()} during
+         * a Cassandra outage. For such deployments lower
+         * {@code cassandra.reconnect_max_retries} (default 10) and
+         * {@code cassandra.reconnect_max_delay} (default 60000ms) so the
+         * request fails fast and pressure is released back to the caller.
          */
         private ResultSet executeWithRetry(Statement statement) {
             int retries = CassandraSessionPool.this.maxRetries;
@@ -266,8 +275,15 @@ public class CassandraSessionPool extends BackendSessionPool {
                     if (attempt >= retries) {
                         break;
                     }
-                    long delay = Math.min(interval * (1L << Math.min(attempt, 20)),
-                                          maxDelay > 0 ? maxDelay : interval);
+                    long cap = maxDelay > 0 ? maxDelay : interval;
+                    long shift = 1L << Math.min(attempt, 20);
+                    long delay;
+                    try {
+                        // Guard against Long overflow when retryInterval is huge.
+                        delay = Math.min(Math.multiplyExact(interval, shift), cap);
+                    } catch (ArithmeticException overflow) {
+                        delay = cap;
+                    }
                     LOG.warn("Cassandra temporarily unavailable ({}), " +
                              "retry {}/{} in {} ms",
                              e.getClass().getSimpleName(), attempt + 1,
@@ -282,11 +298,14 @@ public class CassandraSessionPool extends BackendSessionPool {
                     }
                 }
             }
-            throw new BackendException("Failed to execute Cassandra query " +
-                                       "after %s retries: %s",
-                                       lastError, retries,
-                                       lastError == null ? "<null>" :
-                                               lastError.getMessage());
+            // Preserve original exception as cause (stack trace + type) by
+            // pre-formatting the message and using the (String, Throwable)
+            // constructor explicitly — avoids ambiguity with varargs overloads.
+            String msg = String.format(
+                    "Failed to execute Cassandra query after %s retries: %s",
+                    retries,
+                    lastError == null ? "<null>" : lastError.getMessage());
+            throw new BackendException(msg, lastError);
         }
 
         private void tryOpen() {
@@ -353,14 +372,20 @@ public class CassandraSessionPool extends BackendSessionPool {
                 if (this.session == null || this.session.isClosed()) {
                     this.session = null;
                     this.tryOpen();
-                    if (this.session == null) {
-                        return;
-                    }
                 }
-                this.session.execute(new SimpleStatement(HEALTH_CHECK_CQL));
+                if (this.session != null) {
+                    this.session.execute(new SimpleStatement(HEALTH_CHECK_CQL));
+                }
             } catch (DriverException e) {
                 LOG.debug("Cassandra health-check failed, " +
                           "will retry on next query: {}", e.getMessage());
+            } finally {
+                // Keep opened flag consistent with session: if tryOpen()
+                // failed to reopen, clear opened so the next execute() does
+                // not NPE before executeWithRetry() can intercept.
+                if (this.session == null) {
+                    this.opened = false;
+                }
             }
         }
 
@@ -376,7 +401,9 @@ public class CassandraSessionPool extends BackendSessionPool {
             }
             try {
                 this.session.close();
-            } catch (Throwable e) {
+            } catch (Exception e) {
+                // Do not swallow Error (OOM / StackOverflow); only log
+                // ordinary exceptions raised by the driver on close.
                 LOG.warn("Failed to reset Cassandra session", e);
             } finally {
                 this.session = null;
