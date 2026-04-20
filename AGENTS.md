@@ -45,12 +45,21 @@ mvn test -pl hugegraph-pd/hg-pd-test -am
 mvn test -pl hugegraph-store/hg-store-test -am
 ```
 
+## Development Conventions
+
+- Any code change (bug fix or feature) must have sufficient test coverage for the affected logic
+- Check existing suites in `hugegraph-server/hugegraph-test` before writing new tests
+
 ## Code Quality
 
+Run before every commit:
+
 ```bash
-mvn editorconfig:format     # Apply code style (EditorConfig)
-mvn clean compile -Dmaven.javadoc.skip=true  # Compile with warnings
+mvn editorconfig:format # Apply code style (root .editorconfig)
+mvn clean compile -Dmaven.javadoc.skip=true # Compile with warnings
 ```
+
+Key rules from `.editorconfig`: 100-char line limit, 4-space indent, LF endings, UTF-8.
 
 ## Running the Server
 
@@ -74,11 +83,7 @@ bin/stop-hugegraph.sh      # Stop server
 
 ### Adding Third-Party Dependencies
 
-When adding dependencies (Apache compliance):
-1. Add license files to `install-dist/release-docs/licenses/`
-2. Declare dependency in `install-dist/release-docs/LICENSE`
-3. Append NOTICE info to `install-dist/release-docs/NOTICE` (if upstream has NOTICE)
-4. Update `install-dist/scripts/dependency/known-dependencies.txt` (run `regenerate_known_dependencies.sh`)
+Follow ASF compliance: update `install-dist/release-docs/` (LICENSE, NOTICE, licenses/) and `install-dist/scripts/dependency/known-dependencies.txt`.
 
 ### gRPC Protocol Changes
 
@@ -96,3 +101,10 @@ mvn clean package -pl hugegraph-server -am -DskipTests   # 4. Server
 ```
 
 Key dependencies: `hugegraph-commons` is shared by all modules. `hugegraph-struct` must be built before PD and Store. Server backends depend on `hugegraph-core`.
+
+## Reference Documents
+
+| Resource | When to consult |
+|----------|-----------------|
+| `README.md` | Project overview, deployment topology, contribution guide |
+| `.serena/memories/` | Project agent memory; key files: `suggested_commands.md` (commands), `task_completion_checklist.md` (pre-commit checks) |
