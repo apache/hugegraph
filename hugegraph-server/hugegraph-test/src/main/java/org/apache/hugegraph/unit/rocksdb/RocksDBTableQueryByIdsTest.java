@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
@@ -39,16 +40,19 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
     private static final String DATABASE = "db";
 
     private TestVertexTable vertexTable;
-    private TestEdgeTable edgeTable;
+    private TestEdgeTable edgeOutTable;
+    private TestEdgeTable edgeInTable;
 
     @Override
     @Before
     public void setup() throws RocksDBException {
         super.setup();
         this.vertexTable = new TestVertexTable(DATABASE);
-        this.edgeTable = new TestEdgeTable(DATABASE);
+        this.edgeOutTable = new TestEdgeTable(true, DATABASE);
+        this.edgeInTable = new TestEdgeTable(false, DATABASE);
         this.rocks.createTable(this.vertexTable.table());
-        this.rocks.createTable(this.edgeTable.table());
+        this.rocks.createTable(this.edgeOutTable.table());
+        this.rocks.createTable(this.edgeInTable.table());
     }
 
     @Test
@@ -95,7 +99,7 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
     }
 
     @Test
-    public void testVertexQueryByIdsWithDuplicateIds() {
+    public void testVertexQueryByIdsDedupsDuplicateIds() {
         Id id1 = IdGenerator.of("v1");
         Id id2 = IdGenerator.of("v2");
 
@@ -106,34 +110,24 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
         List<Id> ids = Arrays.asList(id1, id2, id1);
         BackendColumnIterator iter = this.vertexTable.queryByIds(this.rocks.session(), ids);
 
-        Map<String, Integer> countMap = new HashMap<>();
-        Map<String, String> results = new HashMap<>();
-        while (iter.hasNext()) {
-            BackendColumn col = iter.next();
-            String key = getString(col.name);
-            results.put(key, getString(col.value));
-            countMap.put(key, countMap.getOrDefault(key, 0) + 1);
-        }
+        Map<String, String> results = toResultMap(iter);
 
         Assert.assertEquals(2, results.size());
         Assert.assertEquals("value1", results.get("v1"));
         Assert.assertEquals("value2", results.get("v2"));
-        // Verify duplicate ids produce duplicate results
-        Assert.assertEquals(Integer.valueOf(2), countMap.get("v1"));
-        Assert.assertEquals(Integer.valueOf(1), countMap.get("v2"));
     }
 
     @Test
-    public void testEdgeQueryByIdsWithAllExistingIds() {
+    public void testEdgeOutQueryByIdsWithAllExistingIds() {
         Id id1 = IdGenerator.of("e1");
         Id id2 = IdGenerator.of("e2");
 
-        this.rocks.session().put(this.edgeTable.table(), id1.asBytes(), getBytes("edge-value1"));
-        this.rocks.session().put(this.edgeTable.table(), id2.asBytes(), getBytes("edge-value2"));
+        this.rocks.session().put(this.edgeOutTable.table(), id1.asBytes(), getBytes("edge-value1"));
+        this.rocks.session().put(this.edgeOutTable.table(), id2.asBytes(), getBytes("edge-value2"));
         this.commit();
 
         List<Id> ids = Arrays.asList(id1, id2);
-        BackendColumnIterator iter = this.edgeTable.queryByIds(this.rocks.session(), ids);
+        BackendColumnIterator iter = this.edgeOutTable.queryByIds(this.rocks.session(), ids);
 
         Map<String, String> results = toResultMap(iter);
 
@@ -142,15 +136,55 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
         Assert.assertEquals("edge-value2", results.get("e2"));
     }
 
-    /**
-     * NOTE: Testing the fallback path (session.hasChanges() == true) is not
-     * feasible here because both the optimized multi-get path and the fallback
-     * scan-based path ultimately delegate to session.get() / session.scan(),
-     * which have a pre-existing assertion `assert !this.hasChanges()` in
-     * RocksDBStdSessions. This assertion is disabled in production but fires
-     * during unit tests when assertions are enabled. The dispatch logic itself
-     * is covered by the implementation in RocksDBTables.Vertex/Edge.queryByIds().
-     */
+    @Test
+    public void testEdgeInQueryByIdsWithAllExistingIds() {
+        Id id1 = IdGenerator.of("e1");
+        Id id2 = IdGenerator.of("e2");
+
+        this.rocks.session().put(this.edgeInTable.table(), id1.asBytes(), getBytes("edge-value1"));
+        this.rocks.session().put(this.edgeInTable.table(), id2.asBytes(), getBytes("edge-value2"));
+        this.commit();
+
+        List<Id> ids = Arrays.asList(id1, id2);
+        BackendColumnIterator iter = this.edgeInTable.queryByIds(this.rocks.session(), ids);
+
+        Map<String, String> results = toResultMap(iter);
+
+        Assert.assertEquals(2, results.size());
+        Assert.assertEquals("edge-value1", results.get("e1"));
+        Assert.assertEquals("edge-value2", results.get("e2"));
+    }
+
+    @Test
+    public void testVertexQueryByIdsFallbackWhenHasChanges() {
+        Id id1 = IdGenerator.of("v1");
+        Id id2 = IdGenerator.of("v2");
+
+        this.rocks.session().put(this.vertexTable.table(), id1.asBytes(), getBytes("value1"));
+        this.rocks.session().put(this.vertexTable.table(), id2.asBytes(), getBytes("value2"));
+        this.commit();
+
+        List<Id> ids = Arrays.asList(id1, id2);
+        RocksDBSessions.Session mockSession = new DelegatingSession(this.rocks.session()) {
+            @Override
+            public boolean hasChanges() {
+                return true;
+            }
+
+            @Override
+            public BackendColumnIterator get(String table, List<byte[]> keys) {
+                throw new AssertionError(
+                        "multi-get should not be called when hasChanges");
+            }
+        };
+
+        BackendColumnIterator iter = this.vertexTable.queryByIds(mockSession, ids);
+
+        Map<String, String> results = toResultMap(iter);
+        Assert.assertEquals(2, results.size());
+        Assert.assertEquals("value1", results.get("v1"));
+        Assert.assertEquals("value2", results.get("v2"));
+    }
 
     private Map<String, String> toResultMap(BackendColumnIterator iter) {
         Map<String, String> results = new HashMap<>();
@@ -159,6 +193,130 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
             results.put(getString(col.name), getString(col.value));
         }
         return results;
+    }
+
+    /**
+     * A session wrapper that delegates all operations to an underlying session.
+     * Subclasses can override specific methods for mocking purposes.
+     */
+    private static class DelegatingSession extends RocksDBSessions.Session {
+
+        private final RocksDBSessions.Session delegate;
+
+        DelegatingSession(RocksDBSessions.Session delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public String dataPath() {
+            return this.delegate.dataPath();
+        }
+
+        @Override
+        public String walPath() {
+            return this.delegate.walPath();
+        }
+
+        @Override
+        public String property(String table, String property) {
+            return this.delegate.property(table, property);
+        }
+
+        @Override
+        public Pair<byte[], byte[]> keyRange(String table) {
+            return this.delegate.keyRange(table);
+        }
+
+        @Override
+        public void compactRange(String table) {
+            this.delegate.compactRange(table);
+        }
+
+        @Override
+        public void put(String table, byte[] key, byte[] value) {
+            this.delegate.put(table, key, value);
+        }
+
+        @Override
+        public void merge(String table, byte[] key, byte[] value) {
+            this.delegate.merge(table, key, value);
+        }
+
+        @Override
+        public void increase(String table, byte[] key, byte[] value) {
+            this.delegate.increase(table, key, value);
+        }
+
+        @Override
+        public void delete(String table, byte[] key) {
+            this.delegate.delete(table, key);
+        }
+
+        @Override
+        public void deleteSingle(String table, byte[] key) {
+            this.delegate.deleteSingle(table, key);
+        }
+
+        @Override
+        public void deletePrefix(String table, byte[] key) {
+            this.delegate.deletePrefix(table, key);
+        }
+
+        @Override
+        public void deleteRange(String table, byte[] keyFrom, byte[] keyTo) {
+            this.delegate.deleteRange(table, keyFrom, keyTo);
+        }
+
+        @Override
+        public byte[] get(String table, byte[] key) {
+            return this.delegate.get(table, key);
+        }
+
+        @Override
+        public BackendColumnIterator get(String table, List<byte[]> keys) {
+            return this.delegate.get(table, keys);
+        }
+
+        @Override
+        public BackendColumnIterator scan(String table) {
+            return this.delegate.scan(table);
+        }
+
+        @Override
+        public BackendColumnIterator scan(String table, byte[] prefix) {
+            return this.delegate.scan(table, prefix);
+        }
+
+        @Override
+        public BackendColumnIterator scan(String table, byte[] keyFrom,
+                                          byte[] keyTo, int scanType) {
+            return this.delegate.scan(table, keyFrom, keyTo, scanType);
+        }
+
+        @Override
+        public Object commit() {
+            return this.delegate.commit();
+        }
+
+        @Override
+        public void rollback() {
+            this.delegate.rollback();
+        }
+
+        @Override
+        public boolean hasChanges() {
+            return this.delegate.hasChanges();
+        }
+
+        @Override
+        public void open() {
+            this.delegate.open();
+        }
+
+        @Override
+        public void close() {
+            this.delegate.close();
+        }
     }
 
     /**
@@ -182,8 +340,8 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
      */
     private static class TestEdgeTable extends RocksDBTables.Edge {
 
-        public TestEdgeTable(String database) {
-            super(true, database);
+        public TestEdgeTable(boolean out, String database) {
+            super(out, database);
         }
 
         @Override

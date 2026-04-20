@@ -19,7 +19,6 @@ package org.apache.hugegraph.backend.store.rocksdb;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Collection;
 import java.util.List;
 
 import org.apache.hugegraph.backend.id.Id;
@@ -178,15 +177,6 @@ public class RocksDBTables {
         protected BackendColumnIterator queryById(RocksDBSessions.Session session, Id id) {
             return this.getById(session, id);
         }
-
-        @Override
-        protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
-                                                   Collection<Id> ids) {
-            if (!session.hasChanges()) {
-                return this.getByIds(session, ids);
-            }
-            return super.queryByIds(session, ids);
-        }
     }
 
     public static class Edge extends RocksDBTable {
@@ -209,15 +199,6 @@ public class RocksDBTables {
         @Override
         protected BackendColumnIterator queryById(RocksDBSessions.Session session, Id id) {
             return this.getById(session, id);
-        }
-
-        @Override
-        protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
-                                                   Collection<Id> ids) {
-            if (!session.hasChanges()) {
-                return this.getByIds(session, ids);
-            }
-            return super.queryByIds(session, ids);
         }
     }
 
