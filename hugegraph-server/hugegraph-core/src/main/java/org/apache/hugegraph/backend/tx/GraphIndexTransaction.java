@@ -415,6 +415,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
         HugeType queryType = query.resultType();
         IndexLabel il = IndexLabel.label(queryType);
         validateIndexLabel(il);
+        // Query-by-label builds a label index entry and requires one
+        // deterministically resolved label instead of best-effort fallback.
         Id label = query.conditionValue(HugeKeys.LABEL);
         E.checkState(label != null, "Expect one label value for query: %s",
                      query);
@@ -483,7 +485,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         }
         Set<MatchedIndex> indexes = this.collectMatchedIndexes(query);
         if (indexes.isEmpty()) {
-            Id label = uniqueLabel(query);
+            Id label = query.uniqueConditionValue(HugeKeys.LABEL);
             throw noIndexException(this.graph(), query, label);
         }
 
@@ -757,11 +759,12 @@ public class GraphIndexTransaction extends AbstractTransaction {
     @Watched(prefix = "index")
     private Set<MatchedIndex> collectMatchedIndexes(ConditionQuery query) {
         ISchemaTransaction schema = this.params().schemaTransaction();
-        boolean hasLabel = query.containsCondition(HugeKeys.LABEL);
+        boolean hasLabelValues = query.containsConditionValues(HugeKeys.LABEL);
         Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
 
         List<? extends SchemaLabel> schemaLabels;
-        if (hasLabel && labels.isEmpty()) {
+        if (hasLabelValues && labels.isEmpty()) {
+            // LABEL EQ/IN conditions resolve to an empty intersection.
             return Collections.emptySet();
         }
         if (labels.size() == 1) {
@@ -952,7 +955,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
     private static Set<IndexLabel> matchSingleOrCompositeIndex(
             ConditionQuery query,
             Set<IndexLabel> indexLabels) {
-        if (query.hasNeqCondition()) {
+        if (query.hasUserpropNeqCondition()) {
             return ImmutableSet.of();
         }
         boolean requireRange = query.hasRangeCondition();
@@ -993,7 +996,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
     private static Set<IndexLabel> matchJointIndexes(
             ConditionQuery query,
             Set<IndexLabel> indexLabels) {
-        if (query.hasNeqCondition()) {
+        if (query.hasUserpropNeqCondition()) {
             return ImmutableSet.of();
         }
         Set<Id> queryPropKeys = query.userpropKeys();
@@ -1788,7 +1791,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
 
             // Check label is matched
-            Id label = uniqueLabel(query);
+            Id label = query.uniqueConditionValue(HugeKeys.LABEL);
             // NOTE: original condition query may not have label condition,
             // which means possibly label == null.
             if (label != null && !element.schemaLabel().id().equals(label)) {
@@ -1987,13 +1990,5 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
             return t1 + t2;
         }
-    }
-
-    private static Id uniqueLabel(ConditionQuery query) {
-        Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
-        if (labels.size() != 1) {
-            return null;
-        }
-        return (Id) labels.iterator().next();
     }
 }

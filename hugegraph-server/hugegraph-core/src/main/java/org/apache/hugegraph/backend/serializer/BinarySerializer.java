@@ -674,7 +674,7 @@ public class BinarySerializer extends AbstractSerializer {
         if (direction == null) {
             direction = Directions.OUT;
         }
-        Id label = cq.conditionValue(HugeKeys.LABEL);
+        Id label = (Id) this.edgeIdConditionValue(cq, HugeKeys.LABEL);
 
         BytesBuffer start = BytesBuffer.allocate(BytesBuffer.BUF_EDGE_ID);
         writePartitionedId(HugeType.EDGE, vertex, start);
@@ -722,8 +722,7 @@ public class BinarySerializer extends AbstractSerializer {
         int count = 0;
         BytesBuffer buffer = BytesBuffer.allocate(BytesBuffer.BUF_EDGE_ID);
         for (HugeKeys key : EdgeId.KEYS) {
-            Object value = key == HugeKeys.LABEL ?
-                           cq.conditionValue(key) : cq.condition(key);
+            Object value = this.edgeIdConditionValue(cq, key);
 
             if (value != null) {
                 count++;
@@ -762,6 +761,17 @@ public class BinarySerializer extends AbstractSerializer {
         }
 
         return null;
+    }
+
+    private Object edgeIdConditionValue(ConditionQuery cq, HugeKeys key) {
+        if (key == HugeKeys.LABEL) {
+            /*
+             * LABEL may still be represented by multiple top-level EQ/IN
+             * relations before strict edge-id serialization.
+             */
+            return cq.conditionValue(key);
+        }
+        return cq.condition(key);
     }
 
     @Override

@@ -457,7 +457,7 @@ public class TextSerializer extends AbstractSerializer {
         if (direction == null) {
             direction = Directions.OUT;
         }
-        Object label = cq.conditionValue(HugeKeys.LABEL);
+        Object label = this.edgeIdConditionValue(cq, HugeKeys.LABEL);
 
         List<String> start = new ArrayList<>(cq.conditionsSize());
         start.add(writeEntryId((Id) vertex));
@@ -491,8 +491,7 @@ public class TextSerializer extends AbstractSerializer {
         List<String> condParts = new ArrayList<>(cq.conditionsSize());
 
         for (HugeKeys key : EdgeId.KEYS) {
-            Object value = key == HugeKeys.LABEL ?
-                           cq.conditionValue(key) : cq.condition(key);
+            Object value = this.edgeIdConditionValue(cq, key);
             if (value == null) {
                 break;
             }
@@ -515,6 +514,17 @@ public class TextSerializer extends AbstractSerializer {
         }
 
         return null;
+    }
+
+    private Object edgeIdConditionValue(ConditionQuery cq, HugeKeys key) {
+        if (key == HugeKeys.LABEL) {
+            /*
+             * LABEL may still be represented by multiple top-level EQ/IN
+             * relations before strict edge-id serialization.
+             */
+            return cq.conditionValue(key);
+        }
+        return cq.condition(key);
     }
 
     @Override

@@ -403,7 +403,7 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
                 if (hugeGraph != null) {
                     for (ConditionQuery conditionQuery :
                          ConditionQueryFlatten.flatten(cq)) {
-                        Id label = this.uniqueLabel(conditionQuery);
+                        Id label = conditionQuery.uniqueConditionValue(HugeKeys.LABEL);
                         /* Parent type + sortKeys: g.V("V.id").outE("parentLabel")
                            .has("sortKey","value") converted to all subtypes + sortKeys */
                         if ((this.subEls == null ||
@@ -455,19 +455,11 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
                     buffer.bytes(), ownerId));
             }
 
-            private Id uniqueLabel(ConditionQuery query) {
-                Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
-                if (labels.size() != 1) {
-                    return null;
-                }
-                return (Id) labels.iterator().next();
-            }
-
             private boolean matchEdgeSortKeys(ConditionQuery query,
                                               boolean matchAll,
                                               HugeGraph graph) {
                 assert query.resultType().isEdge();
-                Id label = this.uniqueLabel(query);
+                Id label = query.uniqueConditionValue(HugeKeys.LABEL);
                 if (label == null) {
                     return false;
                 }

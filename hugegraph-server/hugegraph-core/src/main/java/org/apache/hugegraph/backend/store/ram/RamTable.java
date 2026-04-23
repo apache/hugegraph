@@ -269,7 +269,7 @@ public final class RamTable {
         int conditionsSize = cq.conditionsSize();
         Object owner = cq.condition(HugeKeys.OWNER_VERTEX);
         Directions direction = cq.condition(HugeKeys.DIRECTION);
-        Id label = uniqueLabel(cq);
+        Id label = cq.uniqueConditionValue(HugeKeys.LABEL);
 
         if (direction == null && conditionsSize > 1) {
             for (Condition cond : cq.conditions()) {
@@ -316,7 +316,7 @@ public final class RamTable {
         if (dir == null) {
             dir = Directions.BOTH;
         }
-        Id label = uniqueLabel(query);
+        Id label = query.uniqueConditionValue(HugeKeys.LABEL);
         if (label == null) {
             label = IdGenerator.ZERO;
         }
@@ -375,14 +375,6 @@ public final class RamTable {
                                     "ramtable, but got %s id '%s'",
                                     id.type().name().toLowerCase(), id);
         }
-    }
-
-    private static Id uniqueLabel(ConditionQuery query) {
-        java.util.Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
-        if (labels.size() != 1) {
-            return null;
-        }
-        return (Id) labels.iterator().next();
     }
 
     private static long encode(long target, Directions direction, int label) {
