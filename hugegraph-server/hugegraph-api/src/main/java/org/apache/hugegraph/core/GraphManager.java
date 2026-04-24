@@ -2182,6 +2182,27 @@ public final class GraphManager {
         return this.cluster;
     }
 
+    public Set<String> schemaTemplates(String graphSpace) {
+        return this.metaManager.schemaTemplates(graphSpace);
+    }
+
+    public void createSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        checkSchemaTemplateName(template.name());
+        this.metaManager.addSchemaTemplate(graphSpace, template);
+    }
+
+    public void dropSchemaTemplate(String graphSpace, String name) {
+        this.metaManager.removeSchemaTemplate(graphSpace, name);
+    }
+
+    public void updateSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        this.metaManager.updateSchemaTemplate(graphSpace, template);
+    }
+
+    private static void checkSchemaTemplateName(String name) {
+        checkName(name, "schema template");
+    }
+
     private enum PdRegisterType {
         NODE_PORT,
         DDS
