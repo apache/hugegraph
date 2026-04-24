@@ -22,9 +22,12 @@ package org.apache.hugegraph.api.auth;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.alipay.remoting.util.StringUtils;
+
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter;
 import org.apache.hugegraph.auth.AuthManager;
+import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.core.GraphManager;
@@ -257,6 +260,40 @@ public class ManagerAPI extends API {
         return manager.serializer().writeMap(
                 ImmutableMap.of("user", user, "graphspace", graphSpace, "roles",
                                 result));
+    }
+
+    @GET
+    @Timed
+    @Path("default")
+    @Consumes(APPLICATION_JSON)
+    public String checkDefaultRole(@Context GraphManager manager,
+                                   @QueryParam("graphspace") String graphSpace,
+                                   @QueryParam("role") String role,
+                                   @QueryParam("graph") String graph) {
+        LOG.debug("check if current user is default role: {} {} {}",
+                  role, graphSpace, graph);
+        AuthManager authManager = manager.authManager();
+        String user = HugeGraphAuthProxy.username();
+
+        E.checkArgument(StringUtils.isNotEmpty(role) &&
+                        StringUtils.isNotEmpty(graphSpace),
+                        "Must pass graphspace and role params");
+
+        HugeDefaultRole defaultRole =
+                HugeDefaultRole.valueOf(role.toUpperCase());
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
+        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
+                        "Must set a graph for observer");
+
+        boolean result;
+        if (hasGraph) {
+            result = authManager.isDefaultRole(graphSpace, graph, user,
+                                               defaultRole);
+        } else {
+            result = authManager.isDefaultRole(graphSpace, user,
+                                               defaultRole);
+        }
+        return manager.serializer().writeMap(ImmutableMap.of("check", result));
     }
 
     private void validUser(AuthManager authManager, String user) {

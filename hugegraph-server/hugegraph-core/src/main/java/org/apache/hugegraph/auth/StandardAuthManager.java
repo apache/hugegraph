@@ -19,6 +19,7 @@ package org.apache.hugegraph.auth;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -811,6 +812,179 @@ public class StandardAuthManager implements AuthManager {
     @Override
     public HugeGroup findGroup(String name) {
         return null;
+    }
+
+    private static final String DEFAULT_GRAPH_MARKER = "~default_graph";
+
+    private String defaultGraphGroupName(String graphSpace, String graph) {
+        return DEFAULT_GRAPH_MARKER + ":" + graphSpace + ":" + graph;
+    }
+
+    @Override
+    public void setDefaultGraph(String graphSpace, String graph, String user) {
+        // Use a special-named HugeGroup as a marker for the default graph,
+        // then create a HugeBelong (user -> marker-group) to persist the binding.
+        String markerName = defaultGraphGroupName(graphSpace, graph);
+        Id groupId = IdGenerator.of(markerName);
+        if (!this.groups.exists(groupId)) {
+            HugeGroup markerGroup = new HugeGroup(markerName);
+            markerGroup.creator(user);
+            this.groups.add(markerGroup);
+        }
+        Id userId = IdGenerator.of(user);
+        HugeBelong belong = new HugeBelong(userId, groupId);
+        belong.creator(user);
+        Id belongId = IdGenerator.of(userId.asString() + "->ug->" + groupId.asString());
+        if (!this.belong.exists(belongId)) {
+            this.belong.add(belong);
+        } else {
+            belong.id(belongId);
+            this.belong.update(belong);
+        }
+    }
+
+    @Override
+    public void unsetDefaultGraph(String graphSpace, String graph, String user) {
+        String markerName = defaultGraphGroupName(graphSpace, graph);
+        Id groupId = IdGenerator.of(markerName);
+        Id userId = IdGenerator.of(user);
+        Id belongId = IdGenerator.of(userId.asString() + "->ug->" + groupId.asString());
+        if (this.belong.exists(belongId)) {
+            this.belong.delete(belongId);
+        }
+    }
+
+    @Override
+    public Map<String, Date> getDefaultGraph(String graphSpace, String user) {
+        Id userId = IdGenerator.of(user);
+        List<HugeBelong> belongs = this.belong.list(userId, Directions.OUT,
+                                                    HugeBelong.P.BELONG, -1);
+        String prefix = DEFAULT_GRAPH_MARKER + ":" + graphSpace + ":";
+        Map<String, Date> result = new LinkedHashMap<>();
+        for (HugeBelong b : belongs) {
+            String targetName = b.target().asString();
+            if (targetName.startsWith(prefix)) {
+                String graphName = targetName.substring(prefix.length());
+                result.put(graphName, b.update());
+            }
+        }
+        return result;
+    }
+
+    private static final String DEFAULT_ROLE_MARKER = "~default_role";
+
+    /**
+     * Build marker group name for a space-level role.
+     * Format: ~default_role:<graphSpace>:<role>
+     */
+    private String defaultRoleGroupName(String graphSpace, String role) {
+        return DEFAULT_ROLE_MARKER + ":" + graphSpace + ":" + role;
+    }
+
+    /**
+     * Build marker group name for a graph-level role (e.g. OBSERVER).
+     * Format: ~default_role:<graphSpace>:<role>:<graph>
+     */
+    private String defaultRoleGroupName(String graphSpace, String role,
+                                        String graph) {
+        return DEFAULT_ROLE_MARKER + ":" + graphSpace + ":" + role +
+               ":" + graph;
+    }
+
+    private Id ensureMarkerGroup(String markerName, String creator) {
+        Id groupId = IdGenerator.of(markerName);
+        if (!this.groups.exists(groupId)) {
+            HugeGroup markerGroup = new HugeGroup(markerName);
+            markerGroup.creator(creator);
+            this.groups.add(markerGroup);
+        }
+        return groupId;
+    }
+
+    private Id createBelongBinding(String owner, Id groupId) {
+        Id userId = IdGenerator.of(owner);
+        HugeBelong belong = new HugeBelong(userId, groupId);
+        belong.creator(owner);
+        Id belongId = IdGenerator.of(
+                userId.asString() + "->ug->" + groupId.asString());
+        if (!this.belong.exists(belongId)) {
+            this.belong.add(belong);
+        } else {
+            belong.id(belongId);
+            this.belong.update(belong);
+        }
+        return belongId;
+    }
+
+    private void removeBelongBinding(String owner, Id groupId) {
+        Id userId = IdGenerator.of(owner);
+        Id belongId = IdGenerator.of(
+                userId.asString() + "->ug->" + groupId.asString());
+        if (this.belong.exists(belongId)) {
+            this.belong.delete(belongId);
+        }
+    }
+
+    private boolean existsBelongBinding(String owner, Id groupId) {
+        Id userId = IdGenerator.of(owner);
+        Id belongId = IdGenerator.of(
+                userId.asString() + "->ug->" + groupId.asString());
+        return this.belong.exists(belongId);
+    }
+
+    @Override
+    public Id createDefaultRole(String graphSpace, String owner,
+                                HugeDefaultRole role, String graph) {
+        LOG.debug("Create default role: {} {} {} {}", owner, role,
+                  graphSpace, graph);
+        String markerName = defaultRoleGroupName(graphSpace,
+                                                  role.toString(), graph);
+        Id groupId = ensureMarkerGroup(markerName, owner);
+        return createBelongBinding(owner, groupId);
+    }
+
+    @Override
+    public Id createSpaceDefaultRole(String graphSpace, String owner,
+                                     HugeDefaultRole role) {
+        LOG.debug("Create space default role: {} {} {}", owner, role,
+                  graphSpace);
+        String markerName = defaultRoleGroupName(graphSpace, role.toString());
+        Id groupId = ensureMarkerGroup(markerName, owner);
+        return createBelongBinding(owner, groupId);
+    }
+
+    @Override
+    public boolean isDefaultRole(String graphSpace, String owner,
+                                 HugeDefaultRole role) {
+        String markerName = defaultRoleGroupName(graphSpace, role.toString());
+        Id groupId = IdGenerator.of(markerName);
+        return existsBelongBinding(owner, groupId);
+    }
+
+    @Override
+    public boolean isDefaultRole(String graphSpace, String graph,
+                                 String owner, HugeDefaultRole role) {
+        String markerName = defaultRoleGroupName(graphSpace,
+                                                  role.toString(), graph);
+        Id groupId = IdGenerator.of(markerName);
+        return existsBelongBinding(owner, groupId);
+    }
+
+    @Override
+    public void deleteDefaultRole(String graphSpace, String owner,
+                                  HugeDefaultRole role) {
+        String markerName = defaultRoleGroupName(graphSpace, role.toString());
+        Id groupId = IdGenerator.of(markerName);
+        removeBelongBinding(owner, groupId);
+    }
+
+    @Override
+    public void deleteDefaultRole(String graphSpace, String owner,
+                                  HugeDefaultRole role, String graph) {
+        String markerName = defaultRoleGroupName(graphSpace,
+                                                  role.toString(), graph);
+        Id groupId = IdGenerator.of(markerName);
+        removeBelongBinding(owner, groupId);
     }
 
     public <R> R commit(Callable<R> callable) {
