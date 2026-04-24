@@ -1986,50 +1986,50 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public void setDefaultGraph(String graphSpace, String graph, String user) {
-
+            this.authManager.setDefaultGraph(graphSpace, graph, user);
         }
 
         @Override
         public void unsetDefaultGraph(String graphSpace, String graph, String user) {
-
+            this.authManager.unsetDefaultGraph(graphSpace, graph, user);
         }
 
         @Override
         public Map<String, Date> getDefaultGraph(String graphSpace, String user) {
-            return Map.of();
+            return this.authManager.getDefaultGraph(graphSpace, user);
         }
 
         @Override
         public Id createDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
                                     String graph) {
-            return null;
+            return this.authManager.createDefaultRole(graphSpace, owner, role, graph);
         }
 
         @Override
         public Id createSpaceDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
-            return null;
+            return this.authManager.createSpaceDefaultRole(graphSpace, owner, role);
         }
 
         @Override
         public boolean isDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
-            return false;
+            return this.authManager.isDefaultRole(graphSpace, owner, role);
         }
 
         @Override
         public boolean isDefaultRole(String graphSpace, String graph, String owner,
                                      HugeDefaultRole role) {
-            return false;
+            return this.authManager.isDefaultRole(graphSpace, graph, owner, role);
         }
 
         @Override
         public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
-
+            this.authManager.deleteDefaultRole(graphSpace, owner, role);
         }
 
         @Override
         public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
                                       String graph) {
-
+            this.authManager.deleteDefaultRole(graphSpace, owner, role, graph);
         }
 
         @Override
