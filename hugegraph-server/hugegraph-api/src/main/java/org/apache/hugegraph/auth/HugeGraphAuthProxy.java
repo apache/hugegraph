@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -1981,6 +1982,54 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public HugeGroup findGroup(String name) {
             return this.authManager.findGroup(name);
+        }
+
+        @Override
+        public void setDefaultGraph(String graphSpace, String graph, String user) {
+
+        }
+
+        @Override
+        public void unsetDefaultGraph(String graphSpace, String graph, String user) {
+
+        }
+
+        @Override
+        public Map<String, Date> getDefaultGraph(String graphSpace, String user) {
+            return Map.of();
+        }
+
+        @Override
+        public Id createDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
+                                    String graph) {
+            return null;
+        }
+
+        @Override
+        public Id createSpaceDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
+            return null;
+        }
+
+        @Override
+        public boolean isDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
+            return false;
+        }
+
+        @Override
+        public boolean isDefaultRole(String graphSpace, String graph, String owner,
+                                     HugeDefaultRole role) {
+            return false;
+        }
+
+        @Override
+        public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
+
+        }
+
+        @Override
+        public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
+                                      String graph) {
+
         }
 
         @Override

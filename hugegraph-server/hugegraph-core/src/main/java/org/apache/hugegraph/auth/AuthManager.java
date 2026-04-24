@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.auth;
 
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.security.sasl.AuthenticationException;
@@ -164,4 +166,28 @@ public interface AuthManager {
     boolean isAdminManager(String user);
 
     HugeGroup findGroup(String name);
+
+    void setDefaultGraph(String graphSpace, String graph, String user);
+
+    void unsetDefaultGraph(String graphSpace, String graph, String user);
+
+    Map<String, Date> getDefaultGraph(String graphSpace, String user);
+
+    Id createDefaultRole(String graphSpace, String owner,
+                         HugeDefaultRole role, String graph);
+
+    Id createSpaceDefaultRole(String graphSpace, String owner,
+                              HugeDefaultRole role);
+
+    boolean isDefaultRole(String graphSpace, String owner,
+                          HugeDefaultRole role);
+
+    boolean isDefaultRole(String graphSpace, String graph, String owner,
+                          HugeDefaultRole role);
+
+    void deleteDefaultRole(String graphSpace, String owner,
+                           HugeDefaultRole role);
+
+    void deleteDefaultRole(String graphSpace, String owner,
+                           HugeDefaultRole role, String graph);
 }

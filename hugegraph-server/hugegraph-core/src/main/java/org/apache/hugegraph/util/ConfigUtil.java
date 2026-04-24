@@ -23,8 +23,12 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
+import jakarta.ws.rs.NotSupportedException;
 
 import org.apache.commons.configuration2.FileBasedConfiguration;
 import org.apache.commons.configuration2.HierarchicalConfiguration;
@@ -187,5 +191,31 @@ public final class ConfigUtil {
         E.checkArgument(graphName.matches("^[a-zA-Z0-9_\\-]+$"),
                         "Graph name can only contain letters, numbers, hyphens and underscores: %s",
                         graphName);
+    }
+
+    public static String writeConfigToString(HugeConfig config) {
+        String content;
+        try {
+            if (config.file() == null) {
+                Map<String, Object> configMap = new HashMap<>();
+                Iterator<String> iterator = config.getKeys();
+                while (iterator.hasNext()) {
+                    String key = iterator.next();
+                    configMap.put(key, config.getProperty(key));
+                }
+                content = JsonUtil.toJson(configMap);
+            } else {
+                File file = config.file();
+                if (file == null) {
+                    throw new NotSupportedException(
+                            "Can't access the api in a node which started " +
+                            "with non local file config.");
+                }
+                content = FileUtils.readFileToString(file);
+            }
+        } catch (IOException e) {
+            throw new HugeException("Failed to read config of graph", e);
+        }
+        return content;
     }
 }
