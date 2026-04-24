@@ -455,37 +455,35 @@ public class GraphsAPI extends API {
     }
 
     /**
-     * Create graph via form-urlencoded (Hubble frontend compatibility).
-     * Frontend sends: POST /graphspaces/{graphspace}/graphs
-     * with Content-Type: application/x-www-form-urlencoded
-     * and body: graph=xx&nickname=yy&schema=zz&auth=false&graphspace=DEFAULT
+     * Create graph via text/plain (hugegraph-client compatibility).
+     * Client sends: POST /graphspaces/{graphspace}/graphs/{name}
+     * with Content-Type: text/plain and body containing JSON config string.
      */
     @POST
     @Timed
+    @Path("{name}")
     @StatusFilter.Status(StatusFilter.Status.CREATED)
-    @Consumes("application/x-www-form-urlencoded")
+    @Consumes("text/plain")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space"})
-    public Object createByForm(@Context GraphManager manager,
+    public Object createByText(@Context GraphManager manager,
                                @Parameter(description = "The graph space name")
                                @PathParam("graphspace") String graphSpace,
-                               jakarta.ws.rs.core.MultivaluedMap<String, String>
-                                       formParams) {
-        String name = formParams.getFirst("graph");
-        E.checkArgument(name != null && !name.isEmpty(),
-                        "The 'graph' parameter is required");
-
-        Map<String, Object> configs = new HashMap<>();
-        for (Map.Entry<String, List<String>> entry : formParams.entrySet()) {
-            String key = entry.getKey();
-            List<String> values = entry.getValue();
-            if (values != null && !values.isEmpty()) {
-                configs.put(key, values.get(0));
-            }
+                               @Parameter(description = "The graph name to create")
+                               @PathParam("name") String name,
+                               @Parameter(description = "The graph name to clone from (optional)")
+                               @QueryParam("clone_graph_name") String clone,
+                               String configText) {
+        LOG.debug("Create graph {} with text config in graph space '{}'",
+                  name, graphSpace);
+        Map<String, Object> configs = null;
+        if (configText != null && !configText.isEmpty()) {
+            configs = JsonUtil.fromJson(configText, Map.class);
         }
-
-        return create(manager, graphSpace, name, null, configs);
+        return create(manager, graphSpace, name, clone, configs);
     }
+
+
 
     @GET
     @Timed
