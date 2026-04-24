@@ -148,7 +148,7 @@ public class CassandraOptions extends OptionHolder {
                     "exponential reconnection policy when a Cassandra host " +
                     "becomes unreachable.",
                     rangeInt(1000L, Long.MAX_VALUE),
-                    60_000L
+                    10_000L
             );
 
     public static final ConfigOption<Integer> CASSANDRA_RECONNECT_MAX_RETRIES =
@@ -159,7 +159,7 @@ public class CassandraOptions extends OptionHolder {
                     "(NoHostAvailableException / OperationTimedOutException). " +
                     "Set to 0 to disable query-time retries.",
                     rangeInt(0, Integer.MAX_VALUE),
-                    10
+                    3
             );
 
     public static final ConfigOption<Long> CASSANDRA_RECONNECT_INTERVAL =
@@ -170,6 +170,6 @@ public class CassandraOptions extends OptionHolder {
                     "actual wait grows with exponential backoff, capped at " +
                     "cassandra.reconnect_max_delay.",
                     rangeInt(100L, Long.MAX_VALUE),
-                    5000L
+                    1000L
             );
 }

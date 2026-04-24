@@ -20,6 +20,7 @@ package org.apache.hugegraph.backend.store.cassandra;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.store.BackendSession.AbstractBackendSession;
@@ -53,10 +54,21 @@ public class CassandraSessionPool extends BackendSessionPool {
     private static final String HEALTH_CHECK_CQL =
             "SELECT now() FROM system.local";
 
+    /**
+     * Guards the one-time JVM-wide warning about {@code commitAsync()} not
+     * being covered by query-time retries. {@link CassandraSessionPool} is
+     * instantiated once per backend store per graph, so without this guard
+     * the warning would fire many times on startup for a structural
+     * limitation that does not change between instances.
+     */
+    private static final AtomicBoolean ASYNC_RETRY_WARNING_LOGGED =
+            new AtomicBoolean(false);
+
     private Cluster cluster;
     private final String keyspace;
     private final int maxRetries;
     private final long retryInterval;
+    private final long retryBaseDelay;
     private final long retryMaxDelay;
 
     public CassandraSessionPool(HugeConfig config,
@@ -78,7 +90,14 @@ public class CassandraSessionPool extends BackendSessionPool {
                         reconnectMax,
                         CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(),
                         reconnectBase);
+        this.retryBaseDelay = reconnectBase;
         this.retryMaxDelay = reconnectMax;
+
+        if (this.maxRetries > 0 &&
+            ASYNC_RETRY_WARNING_LOGGED.compareAndSet(false, true)) {
+            LOG.warn("cassandra.reconnect_max_retries={} applies to sync commit()" +
+                     " only. commitAsync() has no retry protection.", this.maxRetries);
+        }
     }
 
     @Override
@@ -117,10 +136,8 @@ public class CassandraSessionPool extends BackendSessionPool {
 
         // Reconnection policy: let driver keep retrying nodes in background
         // with exponential backoff after they go down (see issue #2740).
-        long reconnectBase = config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY);
         builder.withReconnectionPolicy(
-                new ExponentialReconnectionPolicy(reconnectBase,
+                new ExponentialReconnectionPolicy(this.retryBaseDelay,
                                                   this.retryMaxDelay));
 
         // Credential options
@@ -211,7 +228,11 @@ public class CassandraSessionPool extends BackendSessionPool {
             int processors = Math.min(statements.size(), 1023);
             List<ResultSetFuture> results = new ArrayList<>(processors + 1);
             for (Statement s : statements) {
-                // TODO: commitAsync is not retried (async retry semantics are complex)
+                // TODO(issue #2740): commitAsync() bypasses executeWithRetry().
+                // During a Cassandra restart, async writes may fail with
+                // NoHostAvailableException even when maxRetries > 0. Callers
+                // must handle CompletableFuture failures. A follow-up will
+                // wrap each future with retry semantics.
                 ResultSetFuture future = this.session.executeAsync(s);
                 results.add(future);
 
@@ -253,13 +274,19 @@ public class CassandraSessionPool extends BackendSessionPool {
          * reconnection policy, so once Cassandra comes back online, a
          * subsequent attempt here will succeed without restarting the server.
          *
+         * <p>If the driver session has been discarded (e.g. by
+         * {@link #reconnectIfNeeded()} after a failed health-check) it is
+         * lazily reopened at the start of each attempt. After a transient
+         * failure the session is {@linkplain #reset() reset} so the next
+         * iteration gets a fresh driver session.
+         *
          * <p><b>Blocking note:</b> retries block the calling thread via
          * {@link Thread#sleep(long)}. Worst-case a single call blocks for
          * {@code maxRetries * retryMaxDelay} ms. Under high-throughput
          * workloads concurrent threads may pile up in {@code sleep()} during
          * a Cassandra outage. For such deployments lower
-         * {@code cassandra.reconnect_max_retries} (default 10) and
-         * {@code cassandra.reconnect_max_delay} (default 60000ms) so the
+         * {@code cassandra.reconnect_max_retries} (default 3) and
+         * {@code cassandra.reconnect_max_delay} (default 10000ms) so the
          * request fails fast and pressure is released back to the caller.
          */
         private ResultSet executeWithRetry(Statement statement) {
@@ -269,9 +296,18 @@ public class CassandraSessionPool extends BackendSessionPool {
             DriverException lastError = null;
             for (int attempt = 0; attempt <= retries; attempt++) {
                 try {
+                    if (this.session == null) {
+                        // Lazy reopen: may itself throw NHAE while
+                        // Cassandra is still unreachable; the catch below
+                        // treats that as a transient failure.
+                        this.open();
+                    }
                     return this.session.execute(statement);
                 } catch (NoHostAvailableException | OperationTimedOutException e) {
                     lastError = e;
+                    // Discard the (possibly broken) driver session so the
+                    // next iteration reopens cleanly.
+                    this.reset();
                     if (attempt >= retries) {
                         break;
                     }
@@ -359,9 +395,10 @@ public class CassandraSessionPool extends BackendSessionPool {
          * Periodic liveness probe invoked by {@link BackendSessionPool} to
          * recover thread-local sessions after Cassandra has been restarted.
          * Reopens the driver session if it was closed and pings the cluster
-         * with a lightweight query. Any failure here is swallowed so the
-         * caller can still issue the real query, which will drive retries via
-         * {@link #executeWithRetry(Statement)}.
+         * with a lightweight query. On failure the session is discarded via
+         * {@link #reset()} so the next call to
+         * {@link #executeWithRetry(Statement)} reopens it; any exception
+         * here is swallowed so the caller can still issue the real query.
          */
         @Override
         public void reconnectIfNeeded() {
@@ -377,15 +414,9 @@ public class CassandraSessionPool extends BackendSessionPool {
                     this.session.execute(new SimpleStatement(HEALTH_CHECK_CQL));
                 }
             } catch (DriverException e) {
-                LOG.debug("Cassandra health-check failed, " +
-                          "will retry on next query: {}", e.getMessage());
-            } finally {
-                // Keep opened flag consistent with session: if tryOpen()
-                // failed to reopen, clear opened so the next execute() does
-                // not NPE before executeWithRetry() can intercept.
-                if (this.session == null) {
-                    this.opened = false;
-                }
+                LOG.debug("Cassandra health-check failed, resetting session: {}",
+                          e.getMessage());
+                this.session = null;
             }
         }
 

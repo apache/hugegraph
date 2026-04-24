@@ -205,11 +205,11 @@ public class CassandraTest {
         // HugeGraph keeps running when Cassandra restarts (issue #2740).
         Assert.assertEquals(1000L, (long) CassandraOptions
                 .CASSANDRA_RECONNECT_BASE_DELAY.defaultValue());
-        Assert.assertEquals(60_000L, (long) CassandraOptions
+        Assert.assertEquals(10_000L, (long) CassandraOptions
                 .CASSANDRA_RECONNECT_MAX_DELAY.defaultValue());
-        Assert.assertEquals(10, (int) CassandraOptions
+        Assert.assertEquals(3, (int) CassandraOptions
                 .CASSANDRA_RECONNECT_MAX_RETRIES.defaultValue());
-        Assert.assertEquals(5000L, (long) CassandraOptions
+        Assert.assertEquals(1000L, (long) CassandraOptions
                 .CASSANDRA_RECONNECT_INTERVAL.defaultValue());
     }
 
@@ -251,13 +251,22 @@ public class CassandraTest {
 
     @Test
     public void testExecuteWithRetrySucceedsAfterTransientFailures() {
+        // Configure retry knobs via config so the pool reads them through
+        // the normal path (no Whitebox overrides on retry fields). Keep the
+        // values within the validators' lower bounds (base >= 100, max >=
+        // base, interval >= 100).
         Configuration conf = new PropertiesConfiguration();
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(), 100L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 1000L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES.name(), 3);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL.name(), 100L);
         HugeConfig config = new HugeConfig(conf);
         CassandraSessionPool pool = new CassandraSessionPool(config,
                                                              "ks", "store");
-        Whitebox.setInternalState(pool, "maxRetries", 3);
-        Whitebox.setInternalState(pool, "retryInterval", 1L);
-        Whitebox.setInternalState(pool, "retryMaxDelay", 10L);
 
         com.datastax.driver.core.Session driverSession = Mockito.mock(
                 com.datastax.driver.core.Session.class);
@@ -269,6 +278,17 @@ public class CassandraTest {
                .thenThrow(transientFailure)
                .thenReturn(rs);
 
+        // executeWithRetry now resets the driver session on transient
+        // failures, so the next iteration calls cluster().connect(keyspace)
+        // to obtain a fresh one. Install a mocked Cluster that hands back
+        // the same driverSession for each reconnect.
+        com.datastax.driver.core.Cluster mockCluster = Mockito.mock(
+                com.datastax.driver.core.Cluster.class);
+        Mockito.when(mockCluster.isClosed()).thenReturn(false);
+        Mockito.when(mockCluster.connect(Mockito.anyString()))
+               .thenReturn(driverSession);
+        Whitebox.setInternalState(pool, "cluster", mockCluster);
+
         CassandraSessionPool.Session session = pool.new Session();
         Whitebox.setInternalState(session, "session", driverSession);
 
@@ -279,18 +299,38 @@ public class CassandraTest {
     }
 
     @Test
-    public void testReconnectOptionsExposeExpectedKeys() {
-        Assert.assertEquals("cassandra.reconnect_base_delay",
-                            CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY
-                                            .name());
-        Assert.assertEquals("cassandra.reconnect_max_delay",
-                            CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY
-                                            .name());
-        Assert.assertEquals("cassandra.reconnect_max_retries",
-                            CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES
-                                            .name());
-        Assert.assertEquals("cassandra.reconnect_interval",
-                            CassandraOptions.CASSANDRA_RECONNECT_INTERVAL
-                                            .name());
+    public void testReconnectBaseDelayBelowMinimumRejected() {
+        // The validator on CASSANDRA_RECONNECT_BASE_DELAY is
+        // rangeInt(100L, Long.MAX_VALUE); values below 100 must be rejected
+        // at parse time. Setting the property as a String forces HugeConfig
+        // to run parseConvert() which invokes the range check.
+        Configuration conf = new PropertiesConfiguration();
+        Assert.assertThrows(Exception.class, () -> {
+            conf.setProperty(
+                    CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(),
+                    "50");
+            new HugeConfig(conf);
+        });
+    }
+
+    @Test
+    public void testReconnectMaxDelayLessThanBaseRejected() {
+        // Both values must pass their individual range validators with margin
+        // (base >= 100, max >= 1000), so the only thing that can throw is the
+        // E.checkArgument(max >= base) cross-check inside the pool ctor. Set
+        // all four reconnect properties explicitly so the test does not depend
+        // on default values changing in CassandraOptions.
+        Configuration conf = new PropertiesConfiguration();
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(), 10_000L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 2_000L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES.name(), 3);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL.name(), 1_000L);
+        HugeConfig config = new HugeConfig(conf);
+        Assert.assertThrows(IllegalArgumentException.class, () ->
+                new CassandraSessionPool(config, "ks", "store"));
     }
 }
