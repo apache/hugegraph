@@ -17,11 +17,13 @@
 
 package org.apache.hugegraph.unit.cassandra;
 
+import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.Map;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
+import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.store.cassandra.CassandraOptions;
 import org.apache.hugegraph.backend.store.cassandra.CassandraSessionPool;
 import org.apache.hugegraph.backend.store.cassandra.CassandraStore;
@@ -35,8 +37,11 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 import com.datastax.driver.core.ResultSet;
+import com.datastax.driver.core.ResultSetFuture;
+import com.datastax.driver.core.SimpleStatement;
 import com.datastax.driver.core.Statement;
 import com.datastax.driver.core.exceptions.NoHostAvailableException;
+import com.datastax.driver.core.exceptions.OperationTimedOutException;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
@@ -208,18 +213,18 @@ public class CassandraTest {
         Assert.assertEquals(10_000L, (long) CassandraOptions
                 .CASSANDRA_RECONNECT_MAX_DELAY.defaultValue());
         Assert.assertEquals(3, (int) CassandraOptions
-                .CASSANDRA_RECONNECT_MAX_RETRIES.defaultValue());
+                .CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS.defaultValue());
         Assert.assertEquals(1000L, (long) CassandraOptions
-                .CASSANDRA_RECONNECT_INTERVAL.defaultValue());
+                .CASSANDRA_QUERY_RETRY_INTERVAL.defaultValue());
     }
 
     @Test
     public void testReconnectOptionsAreOverridable() {
         String base = CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name();
         String max = CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name();
-        String retries = CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES
+        String retries = CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS
                                          .name();
-        String interval = CassandraOptions.CASSANDRA_RECONNECT_INTERVAL.name();
+        String interval = CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL.name();
 
         Configuration conf = new PropertiesConfiguration();
         conf.setProperty(base, 500L);
@@ -233,20 +238,20 @@ public class CassandraTest {
         Assert.assertEquals(30_000L, (long) config.get(
                 CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY));
         Assert.assertEquals(3, (int) config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES));
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS));
         Assert.assertEquals(1000L, (long) config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL));
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL));
     }
 
     @Test
-    public void testReconnectRetriesCanBeDisabled() {
-        String retries = CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES
+    public void testQueryRetryAttemptsCanBeDisabled() {
+        String retries = CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS
                                          .name();
         Configuration conf = new PropertiesConfiguration();
         conf.setProperty(retries, 0);
         HugeConfig config = new HugeConfig(conf);
         Assert.assertEquals(0, (int) config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES));
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS));
     }
 
     @Test
@@ -261,9 +266,9 @@ public class CassandraTest {
         conf.setProperty(
                 CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 1000L);
         conf.setProperty(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES.name(), 3);
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS.name(), 3);
         conf.setProperty(
-                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL.name(), 100L);
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL.name(), 100L);
         HugeConfig config = new HugeConfig(conf);
         CassandraSessionPool pool = new CassandraSessionPool(config,
                                                              "ks", "store");
@@ -278,17 +283,6 @@ public class CassandraTest {
                .thenThrow(transientFailure)
                .thenReturn(rs);
 
-        // executeWithRetry now resets the driver session on transient
-        // failures, so the next iteration calls cluster().connect(keyspace)
-        // to obtain a fresh one. Install a mocked Cluster that hands back
-        // the same driverSession for each reconnect.
-        com.datastax.driver.core.Cluster mockCluster = Mockito.mock(
-                com.datastax.driver.core.Cluster.class);
-        Mockito.when(mockCluster.isClosed()).thenReturn(false);
-        Mockito.when(mockCluster.connect(Mockito.anyString()))
-               .thenReturn(driverSession);
-        Whitebox.setInternalState(pool, "cluster", mockCluster);
-
         CassandraSessionPool.Session session = pool.new Session();
         Whitebox.setInternalState(session, "session", driverSession);
 
@@ -296,6 +290,113 @@ public class CassandraTest {
         Assert.assertSame(rs, result);
         Mockito.verify(driverSession, Mockito.times(3))
                .execute(Mockito.any(Statement.class));
+        Mockito.verify(driverSession, Mockito.never()).close();
+    }
+
+    @Test
+    public void testExecuteWithRetrySkipsNonIdempotentTimeoutRetry() {
+        Configuration conf = new PropertiesConfiguration();
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(), 100L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 1000L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS.name(), 3);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL.name(), 100L);
+        HugeConfig config = new HugeConfig(conf);
+        CassandraSessionPool pool = new CassandraSessionPool(config,
+                                                             "ks", "store");
+
+        com.datastax.driver.core.Session driverSession = Mockito.mock(
+                com.datastax.driver.core.Session.class);
+        OperationTimedOutException timeout = new OperationTimedOutException(
+                new InetSocketAddress("127.0.0.1", 9042));
+        Mockito.when(driverSession.execute(Mockito.any(Statement.class)))
+               .thenThrow(timeout);
+
+        CassandraSessionPool.Session session = pool.new Session();
+        Whitebox.setInternalState(session, "session", driverSession);
+
+        Assert.assertThrows(BackendException.class, () ->
+                session.execute("UPDATE counter SET value = value + 1"));
+        Mockito.verify(driverSession, Mockito.times(1))
+               .execute(Mockito.any(Statement.class));
+    }
+
+    @Test
+    public void testExecuteWithRetryAllowsIdempotentTimeoutRetry() {
+        Configuration conf = new PropertiesConfiguration();
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(), 100L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 1000L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS.name(), 3);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL.name(), 100L);
+        HugeConfig config = new HugeConfig(conf);
+        CassandraSessionPool pool = new CassandraSessionPool(config,
+                                                             "ks", "store");
+
+        com.datastax.driver.core.Session driverSession = Mockito.mock(
+                com.datastax.driver.core.Session.class);
+        ResultSet rs = Mockito.mock(ResultSet.class);
+        OperationTimedOutException timeout = new OperationTimedOutException(
+                new InetSocketAddress("127.0.0.1", 9042));
+        SimpleStatement statement = new SimpleStatement(
+                "SELECT now() FROM system.local");
+        statement.setIdempotent(true);
+        Mockito.when(driverSession.execute(statement))
+               .thenThrow(timeout)
+               .thenReturn(rs);
+
+        CassandraSessionPool.Session session = pool.new Session();
+        Whitebox.setInternalState(session, "session", driverSession);
+
+        ResultSet result = session.execute(statement);
+        Assert.assertSame(rs, result);
+        Mockito.verify(driverSession, Mockito.times(2)).execute(statement);
+    }
+
+    @Test
+    public void testCommitAsyncOpensSessionBeforeExecuteAsync() {
+        Configuration conf = new PropertiesConfiguration();
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(), 100L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 1000L);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS.name(), 3);
+        conf.setProperty(
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL.name(), 100L);
+        HugeConfig config = new HugeConfig(conf);
+        CassandraSessionPool pool = new CassandraSessionPool(config,
+                                                             "ks", "store");
+
+        com.datastax.driver.core.Cluster mockCluster = Mockito.mock(
+                com.datastax.driver.core.Cluster.class);
+        com.datastax.driver.core.Session driverSession = Mockito.mock(
+                com.datastax.driver.core.Session.class);
+        ResultSetFuture future = Mockito.mock(ResultSetFuture.class);
+        Mockito.when(mockCluster.isClosed()).thenReturn(false);
+        Mockito.when(mockCluster.connect(Mockito.anyString()))
+               .thenReturn(driverSession);
+        Mockito.when(driverSession.executeAsync(Mockito.any(Statement.class)))
+               .thenReturn(future);
+        Whitebox.setInternalState(pool, "cluster", mockCluster);
+
+        CassandraSessionPool.Session session = pool.new Session();
+        Statement statement = new SimpleStatement(
+                "INSERT INTO system.local(key) VALUES ('test')");
+        session.add(statement);
+
+        session.commitAsync();
+
+        Mockito.verify(mockCluster, Mockito.times(1)).connect("ks");
+        Mockito.verify(driverSession, Mockito.times(1)).executeAsync(statement);
+        Mockito.verify(future, Mockito.times(1)).getUninterruptibly();
+        Assert.assertFalse(session.hasChanges());
     }
 
     @Test
@@ -318,17 +419,17 @@ public class CassandraTest {
         // Both values must pass their individual range validators with margin
         // (base >= 100, max >= 1000), so the only thing that can throw is the
         // E.checkArgument(max >= base) cross-check inside the pool ctor. Set
-        // all four reconnect properties explicitly so the test does not depend
-        // on default values changing in CassandraOptions.
+        // all four retry/reconnect properties explicitly so the test does not
+        // depend on default values changing in CassandraOptions.
         Configuration conf = new PropertiesConfiguration();
         conf.setProperty(
                 CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY.name(), 10_000L);
         conf.setProperty(
                 CassandraOptions.CASSANDRA_RECONNECT_MAX_DELAY.name(), 2_000L);
         conf.setProperty(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES.name(), 3);
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS.name(), 3);
         conf.setProperty(
-                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL.name(), 1_000L);
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL.name(), 1_000L);
         HugeConfig config = new HugeConfig(conf);
         Assert.assertThrows(IllegalArgumentException.class, () ->
                 new CassandraSessionPool(config, "ks", "store"));

@@ -77,9 +77,9 @@ public class CassandraSessionPool extends BackendSessionPool {
         this.cluster = null;
         this.keyspace = keyspace;
         this.maxRetries = config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_MAX_RETRIES);
+                CassandraOptions.CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS);
         this.retryInterval = config.get(
-                CassandraOptions.CASSANDRA_RECONNECT_INTERVAL);
+                CassandraOptions.CASSANDRA_QUERY_RETRY_INTERVAL);
         long reconnectBase = config.get(
                 CassandraOptions.CASSANDRA_RECONNECT_BASE_DELAY);
         long reconnectMax = config.get(
@@ -95,7 +95,7 @@ public class CassandraSessionPool extends BackendSessionPool {
 
         if (this.maxRetries > 0 &&
             ASYNC_RETRY_WARNING_LOGGED.compareAndSet(false, true)) {
-            LOG.warn("cassandra.reconnect_max_retries={} applies to sync commit()" +
+            LOG.warn("cassandra.query_retry_max_attempts={} applies to sync commit()" +
                      " only. commitAsync() has no retry protection.", this.maxRetries);
         }
     }
@@ -223,17 +223,25 @@ public class CassandraSessionPool extends BackendSessionPool {
 
         public void commitAsync() {
             Collection<Statement> statements = this.batch.getStatements();
+            if (statements.isEmpty()) {
+                this.batch.clear();
+                return;
+            }
 
             int count = 0;
             int processors = Math.min(statements.size(), 1023);
             List<ResultSetFuture> results = new ArrayList<>(processors + 1);
+            com.datastax.driver.core.Session driverSession =
+                    this.sessionForAsyncCommit();
             for (Statement s : statements) {
-                // TODO(issue #2740): commitAsync() bypasses executeWithRetry().
+                // TODO: track async retry support in a follow-up issue.
+                // commitAsync() bypasses executeWithRetry().
                 // During a Cassandra restart, async writes may fail with
                 // NoHostAvailableException even when maxRetries > 0. Callers
-                // must handle CompletableFuture failures. A follow-up will
-                // wrap each future with retry semantics.
-                ResultSetFuture future = this.session.executeAsync(s);
+                // must handle ResultSetFuture failures surfaced by
+                // getUninterruptibly(). A follow-up issue should wrap each
+                // future with retry semantics.
+                ResultSetFuture future = driverSession.executeAsync(s);
                 results.add(future);
 
                 if (++count > processors) {
@@ -274,18 +282,20 @@ public class CassandraSessionPool extends BackendSessionPool {
          * reconnection policy, so once Cassandra comes back online, a
          * subsequent attempt here will succeed without restarting the server.
          *
+         * <p>OperationTimedOutException is only retried for statements marked
+         * idempotent; otherwise a timed-out mutation might be applied once by
+         * Cassandra and then duplicated by a client-side retry.
+         *
          * <p>If the driver session has been discarded (e.g. by
          * {@link #reconnectIfNeeded()} after a failed health-check) it is
-         * lazily reopened at the start of each attempt. After a transient
-         * failure the session is {@linkplain #reset() reset} so the next
-         * iteration gets a fresh driver session.
+         * lazily reopened at the start of each attempt.
          *
          * <p><b>Blocking note:</b> retries block the calling thread via
          * {@link Thread#sleep(long)}. Worst-case a single call blocks for
          * {@code maxRetries * retryMaxDelay} ms. Under high-throughput
          * workloads concurrent threads may pile up in {@code sleep()} during
          * a Cassandra outage. For such deployments lower
-         * {@code cassandra.reconnect_max_retries} (default 3) and
+         * {@code cassandra.query_retry_max_attempts} (default 3) and
          * {@code cassandra.reconnect_max_delay} (default 10000ms) so the
          * request fails fast and pressure is released back to the caller.
          */
@@ -296,18 +306,23 @@ public class CassandraSessionPool extends BackendSessionPool {
             DriverException lastError = null;
             for (int attempt = 0; attempt <= retries; attempt++) {
                 try {
-                    if (this.session == null) {
+                    if (this.session == null || this.session.isClosed()) {
                         // Lazy reopen: may itself throw NHAE while
                         // Cassandra is still unreachable; the catch below
                         // treats that as a transient failure.
+                        this.session = null;
                         this.open();
                     }
                     return this.session.execute(statement);
                 } catch (NoHostAvailableException | OperationTimedOutException e) {
                     lastError = e;
-                    // Discard the (possibly broken) driver session so the
-                    // next iteration reopens cleanly.
-                    this.reset();
+                    if (e instanceof OperationTimedOutException &&
+                        !Boolean.TRUE.equals(statement.isIdempotent())) {
+                        throw new BackendException(
+                                "Cassandra query timed out and won't be " +
+                                "retried because the statement is not " +
+                                "marked idempotent", e);
+                    }
                     if (attempt >= retries) {
                         break;
                     }
@@ -336,7 +351,7 @@ public class CassandraSessionPool extends BackendSessionPool {
             }
             // Preserve original exception as cause (stack trace + type) by
             // pre-formatting the message and using the (String, Throwable)
-            // constructor explicitly — avoids ambiguity with varargs overloads.
+            // constructor explicitly to avoid ambiguity with varargs overloads.
             String msg = String.format(
                     "Failed to execute Cassandra query after %s retries: %s",
                     retries,
@@ -351,6 +366,24 @@ public class CassandraSessionPool extends BackendSessionPool {
             } catch (InvalidQueryException ignored) {
                 // ignore
             }
+        }
+
+        private com.datastax.driver.core.Session sessionForAsyncCommit() {
+            if (this.session == null || this.session.isClosed()) {
+                this.session = null;
+                try {
+                    this.open();
+                } catch (DriverException e) {
+                    throw new BackendException(
+                            "Failed to open Cassandra session for async commit",
+                            e);
+                }
+            }
+            if (this.session == null) {
+                throw new BackendException(
+                        "Cassandra session is unavailable for async commit");
+            }
+            return this.session;
         }
 
         @Override
@@ -413,10 +446,10 @@ public class CassandraSessionPool extends BackendSessionPool {
                 if (this.session != null) {
                     this.session.execute(new SimpleStatement(HEALTH_CHECK_CQL));
                 }
-            } catch (DriverException e) {
+            } catch (NoHostAvailableException | OperationTimedOutException e) {
                 LOG.debug("Cassandra health-check failed, resetting session: {}",
                           e.getMessage());
-                this.session = null;
+                this.reset();
             }
         }
 

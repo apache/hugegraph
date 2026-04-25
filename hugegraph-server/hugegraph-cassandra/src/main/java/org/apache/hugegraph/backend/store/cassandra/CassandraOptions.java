@@ -151,20 +151,21 @@ public class CassandraOptions extends OptionHolder {
                     10_000L
             );
 
-    public static final ConfigOption<Integer> CASSANDRA_RECONNECT_MAX_RETRIES =
+    public static final ConfigOption<Integer> CASSANDRA_QUERY_RETRY_MAX_ATTEMPTS =
             new ConfigOption<>(
-                    "cassandra.reconnect_max_retries",
-                    "The maximum number of retries applied at query-time when " +
-                    "a Cassandra host is temporarily unreachable " +
-                    "(NoHostAvailableException / OperationTimedOutException). " +
+                    "cassandra.query_retry_max_attempts",
+                    "The maximum number of retry attempts applied at query-time when " +
+                    "a Cassandra host is temporarily unreachable. " +
+                    "OperationTimedOutException is retried only for " +
+                    "idempotent statements. " +
                     "Set to 0 to disable query-time retries.",
                     rangeInt(0, Integer.MAX_VALUE),
                     3
             );
 
-    public static final ConfigOption<Long> CASSANDRA_RECONNECT_INTERVAL =
+    public static final ConfigOption<Long> CASSANDRA_QUERY_RETRY_INTERVAL =
             new ConfigOption<>(
-                    "cassandra.reconnect_interval",
+                    "cassandra.query_retry_interval",
                     "The interval in milliseconds between query-time retries " +
                     "when a Cassandra host is temporarily unreachable. The " +
                     "actual wait grows with exponential backoff, capped at " +
