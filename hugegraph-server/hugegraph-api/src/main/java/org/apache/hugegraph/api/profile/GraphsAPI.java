@@ -80,8 +80,6 @@ public class GraphsAPI extends API {
     private static final String GRAPH_DESCRIPTION = "description";
     private static final String GRAPH_ACTION = "action";
     private static final String UPDATE = "update";
-    private static final String CLEAR_SCHEMA = "clear_schema";
-    private static final String GRAPH_ACTION_CLEAR = "clear";
     private static final String GRAPH_ACTION_RELOAD = "reload";
 
     private static Map<String, Object> convConfig(Map<String, Object> config) {
@@ -197,13 +195,14 @@ public class GraphsAPI extends API {
         return defaultProfiles;
     }
 
-    public boolean isPrefix(Map<String, Object> profile, String prefix) {
+    private static boolean isPrefix(Map<String, Object> profile, String prefix) {
         if (StringUtils.isEmpty(prefix)) {
             return true;
         }
         // graph name or nickname is not empty
         String name = profile.get("name").toString();
-        String nickname = profile.get("nickname").toString();
+        Object nicknameObj = profile.get("nickname");
+        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
         return name.startsWith(prefix) || nickname.startsWith(prefix);
     }
 
@@ -223,7 +222,7 @@ public class GraphsAPI extends API {
         return ImmutableMap.of("name", g.name(), "backend", g.backend());
     }
 
-    @GET
+    @POST
     @Timed
     @Path("{name}/default")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
@@ -243,9 +242,9 @@ public class GraphsAPI extends API {
         return ImmutableMap.of("default_graph", defaults.keySet());
     }
 
-    @GET
+    @DELETE
     @Timed
-    @Path("{name}/undefault")
+    @Path("{name}/default")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$name"})
     public Map<String, Object> unsetDefault(@Context GraphManager manager,
@@ -345,22 +344,6 @@ public class GraphsAPI extends API {
                     exist.nickname(nickname);
                 }
                 return ImmutableMap.of(name, "updated");
-            //case GRAPH_ACTION_CLEAR:
-            //    String username = manager.authManager().username();
-            //    HugeGraph g = graph(manager, graphSpace, name);
-            //    if ((Boolean) actionMap.getOrDefault(CLEAR_SCHEMA, false)) {
-            //        g.truncateBackend();
-            //    } else {
-            //        g.truncateGraph();
-            //    }
-            //    // truncateBackend() will open tx, so must close here(commit)
-            //    g.tx().commit();
-            //    manager.meta().notifyGraphClear(graphSpace, name);
-            //    LOG.info("user [{}] clear [{}/{}]", username, graphSpace, name);
-            //    return ImmutableMap.of(name, "cleared");
-            //case GRAPH_ACTION_RELOAD:
-            //    manager.reload(graphSpace, name);
-            //    return ImmutableMap.of(name, "reloaded");
             default:
                 throw new AssertionError(String.format(
                         "Invalid graph action: '%s'", action));
@@ -435,13 +418,15 @@ public class GraphsAPI extends API {
         if (StringUtils.isNotEmpty(clone)) {
             // Clone from existing graph
             LOG.debug("Clone graph '{}' to '{}' in graph space '{}'", clone, name, graphSpace);
-            graph = manager.cloneGraph(graphSpace, clone, name, convConfig(configs));
+            Map<String, Object> cloneConfigs = configs != null ? configs : new HashMap<>();
+            graph = manager.cloneGraph(graphSpace, clone, name, convConfig(cloneConfigs));
         } else {
             // Create new graph
             graph = manager.createGraph(graphSpace, name, creator,
                                         convConfig(configs), true);
         }
-        String description = (String) configs.get(GRAPH_DESCRIPTION);
+        String description = (configs != null) ?
+                             (String) configs.get(GRAPH_DESCRIPTION) : null;
         if (description == null) {
             description = Strings.EMPTY;
         }

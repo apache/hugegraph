@@ -21,12 +21,12 @@ import java.util.Date;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
-import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.server.RestServer;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.util.E;
@@ -38,9 +38,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
@@ -60,6 +62,7 @@ public class SchemaTemplateAPI extends API {
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
     public Object list(@Context GraphManager manager,
                        @PathParam("graphspace") String graphSpace) {
         LOG.debug("List all schema templates for graph space {}", graphSpace);
@@ -72,6 +75,7 @@ public class SchemaTemplateAPI extends API {
     @Timed
     @Path("{name}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
     public Object get(@Context GraphManager manager,
                       @PathParam("graphspace") String graphSpace,
                       @PathParam("name") String name) {
@@ -87,6 +91,7 @@ public class SchemaTemplateAPI extends API {
     @StatusFilter.Status(StatusFilter.Status.CREATED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
     public String create(@Context GraphManager manager,
                          @PathParam("graphspace") String graphSpace,
                          JsonSchemaTemplate jsonSchemaTemplate) {
@@ -108,11 +113,12 @@ public class SchemaTemplateAPI extends API {
     @Timed
     @Path("{name}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
     public void delete(@Context GraphManager manager,
                        @PathParam("graphspace") String graphSpace,
                        @PathParam("name") String name,
                        @Context SecurityContext sc) {
-        LOG.debug("Remove schema template by name '{}' for graph space",
+        LOG.debug("Remove schema template by name '{}' for graph space '{}'",
                   name, graphSpace);
         E.checkArgument(manager.graphSpace(graphSpace) != null,
                         "The graph space '%s' is not exist", graphSpace);
@@ -127,23 +133,26 @@ public class SchemaTemplateAPI extends API {
         if (st.creator().equals(username) || isSpace) {
             manager.dropSchemaTemplate(graphSpace, name);
         } else {
-            throw new HugeException("No permission to delete schema template");
+            throw new ForbiddenException("No permission to delete schema template");
         }
     }
 
     @PUT
     @Timed
     @Path("{name}")
+    @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
     public String update(@Context GraphManager manager,
                        @PathParam("graphspace") String graphSpace,
                        @PathParam("name") String name,
                        @Context SecurityContext sc,
                        JsonSchemaTemplate jsonSchemaTemplate) {
+        jsonSchemaTemplate.checkUpdate();
 
         SchemaTemplate old = schemaTemplate(manager, graphSpace, name);
         if (null == old) {
-            throw new HugeException("Schema template {} does not exist", name);
+            throw new HugeException("Schema template '%s' does not exist", name);
         }
 
         String username = HugeGraphAuthProxy.username();
@@ -158,7 +167,7 @@ public class SchemaTemplateAPI extends API {
             manager.updateSchemaTemplate(graphSpace, template);
             return manager.serializer().writeSchemaTemplate(template);
         }
-        throw new HugeException("No permission to update schema template");
+        throw new ForbiddenException("No permission to update schema template");
 
     }
 
@@ -175,6 +184,12 @@ public class SchemaTemplateAPI extends API {
                             "The name of schema template can't be null or " +
                             "empty");
 
+            E.checkArgument(this.schema != null && !this.schema.isEmpty(),
+                            "The schema can't be null or empty");
+        }
+
+        @Override
+        public void checkUpdate() {
             E.checkArgument(this.schema != null && !this.schema.isEmpty(),
                             "The schema can't be null or empty");
         }

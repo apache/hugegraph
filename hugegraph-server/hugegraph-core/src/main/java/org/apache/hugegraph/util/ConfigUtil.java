@@ -28,7 +28,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import jakarta.ws.rs.NotSupportedException;
+
 
 import org.apache.commons.configuration2.FileBasedConfiguration;
 import org.apache.commons.configuration2.HierarchicalConfiguration;
@@ -194,28 +194,16 @@ public final class ConfigUtil {
     }
 
     public static String writeConfigToString(HugeConfig config) {
-        String content;
-        try {
-            if (config.file() == null) {
-                Map<String, Object> configMap = new HashMap<>();
-                Iterator<String> iterator = config.getKeys();
-                while (iterator.hasNext()) {
-                    String key = iterator.next();
-                    configMap.put(key, config.getProperty(key));
-                }
-                content = JsonUtil.toJson(configMap);
-            } else {
-                File file = config.file();
-                if (file == null) {
-                    throw new NotSupportedException(
-                            "Can't access the api in a node which started " +
-                            "with non local file config.");
-                }
-                content = FileUtils.readFileToString(file);
-            }
-        } catch (IOException e) {
-            throw new HugeException("Failed to read config of graph", e);
+        // Always serialize config to a JSON object by iterating all keys,
+        // regardless of whether the config was loaded from a file or not.
+        // This ensures callers (e.g. GraphsAPI.listProfile) can safely parse
+        // the result via JsonUtil.fromJson() without format inconsistencies.
+        Map<String, Object> configMap = new HashMap<>();
+        Iterator<String> iterator = config.getKeys();
+        while (iterator.hasNext()) {
+            String key = iterator.next();
+            configMap.put(key, config.getProperty(key));
         }
-        return content;
+        return JsonUtil.toJson(configMap);
     }
 }

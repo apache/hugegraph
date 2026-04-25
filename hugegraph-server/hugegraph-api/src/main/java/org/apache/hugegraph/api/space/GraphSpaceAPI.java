@@ -27,6 +27,7 @@ import java.util.Set;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
 
+import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.AuthManager;
@@ -34,7 +35,6 @@ import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
-import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.util.E;
@@ -55,6 +55,7 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
@@ -116,10 +117,20 @@ public class GraphSpaceAPI extends API {
     public String setDefaultRole(@Context GraphManager manager,
                                  @PathParam("graphspace") String name,
                                  JsonDefaultRole jsonRole) {
+        E.checkArgumentNotNull(jsonRole, "Request body cannot be null");
+        E.checkArgument(StringUtils.isNotEmpty(jsonRole.user),
+                        "The 'user' field cannot be null or empty");
+        E.checkArgument(StringUtils.isNotEmpty(jsonRole.role),
+                        "The 'role' field cannot be null or empty");
         String user = jsonRole.user;
         String graph = jsonRole.graph;
-        HugeDefaultRole role =
-                HugeDefaultRole.valueOf(jsonRole.role.toUpperCase());
+        HugeDefaultRole role;
+        try {
+            role = HugeDefaultRole.valueOf(jsonRole.role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", jsonRole.role);
+            role = null; // unreachable, satisfies compiler
+        }
         LOG.debug("Create default role: {} {} {}", user, role,
                               name);
         AuthManager authManager = manager.authManager();
@@ -129,7 +140,7 @@ public class GraphSpaceAPI extends API {
         // only admin can set space admin
         if (!authManager.isAdminManager(HugeGraphAuthProxy.username()) &&
             role.equals(HugeDefaultRole.SPACE)) {
-            throw new HugeException("Forbidden to set role %s", role.toString());
+            throw new ForbiddenException("Forbidden to set role " + role.toString());
         }
 
         boolean hasGraph = role.equals(HugeDefaultRole.OBSERVER);
@@ -162,12 +173,21 @@ public class GraphSpaceAPI extends API {
                                    @QueryParam("user") String user,
                                    @QueryParam("role") String role,
                                    @QueryParam("graph") String graph) {
+        E.checkArgument(StringUtils.isNotEmpty(user),
+                        "The 'user' query param cannot be null or empty");
+        E.checkArgument(StringUtils.isNotEmpty(role),
+                        "The 'role' query param cannot be null or empty");
         LOG.debug("Check space role: {} {} {}", user, role,
                               name);
         AuthManager authManager = manager.authManager();
 
-        HugeDefaultRole defaultRole =
-                HugeDefaultRole.valueOf(role.toUpperCase());
+        HugeDefaultRole defaultRole;
+        try {
+            defaultRole = HugeDefaultRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", role);
+            defaultRole = null; // unreachable, satisfies compiler
+        }
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
@@ -193,6 +213,10 @@ public class GraphSpaceAPI extends API {
                                   @QueryParam("user") String user,
                                   @QueryParam("role") String role,
                                   @QueryParam("graph") String graph) {
+        E.checkArgument(StringUtils.isNotEmpty(user),
+                        "The 'user' query param cannot be null or empty");
+        E.checkArgument(StringUtils.isNotEmpty(role),
+                        "The 'role' query param cannot be null or empty");
         LOG.debug("Delete space role: {} {} {}", user, role,
                               name);
 
@@ -203,7 +227,7 @@ public class GraphSpaceAPI extends API {
 
         if (!authManager.isAdminManager(HugeGraphAuthProxy.username()) &&
             role.equalsIgnoreCase(HugeDefaultRole.SPACE.toString())) {
-            throw new HugeException("Forbidden to delete role %s", role);
+            throw new ForbiddenException("Forbidden to delete role " + role);
         }
 
         HugeDefaultRole defaultRole =
@@ -289,13 +313,14 @@ public class GraphSpaceAPI extends API {
         return manager.serializer().writeGraphSpace(space);
     }
 
-    public boolean isPrefix(Map<String, Object> profile, String prefix) {
+    private static boolean isPrefix(Map<String, Object> profile, String prefix) {
         if (StringUtils.isEmpty(prefix)) {
             return true;
         }
-        // graph name or nickname is not empty
+        // match by name or nickname (nickname may be null)
         String name = profile.get("name").toString();
-        String nickname = profile.get("nickname").toString();
+        Object nicknameObj = profile.get("nickname");
+        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
         return name.startsWith(prefix) || nickname.startsWith(prefix);
     }
 

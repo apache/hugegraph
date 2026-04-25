@@ -22,7 +22,7 @@ package org.apache.hugegraph.api.auth;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.alipay.remoting.util.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter;
@@ -272,6 +272,7 @@ public class ManagerAPI extends API {
                                    @QueryParam("graph") String graph) {
         LOG.debug("check if current user is default role: {} {} {}",
                   role, graphSpace, graph);
+        ensurePdModeEnabled(manager);
         AuthManager authManager = manager.authManager();
         String user = HugeGraphAuthProxy.username();
 
