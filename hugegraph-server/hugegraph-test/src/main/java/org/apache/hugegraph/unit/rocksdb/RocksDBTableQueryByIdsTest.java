@@ -172,18 +172,26 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
             }
 
             @Override
+            public byte[] get(String table, byte[] key) {
+                throw new AssertionError(
+                        "reads should not be performed when hasChanges");
+            }
+
+            @Override
             public BackendColumnIterator get(String table, List<byte[]> keys) {
                 throw new AssertionError(
                         "multi-get should not be called when hasChanges");
             }
         };
 
-        BackendColumnIterator iter = this.vertexTable.queryByIds(mockSession, ids);
-
-        Map<String, String> results = toResultMap(iter);
-        Assert.assertEquals(2, results.size());
-        Assert.assertEquals("value1", results.get("v1"));
-        Assert.assertEquals("value2", results.get("v2"));
+        try {
+            BackendColumnIterator iter = this.vertexTable.queryByIds(mockSession, ids);
+            // FlatMapperIterator is lazy; trigger evaluation to hit the mock
+            iter.hasNext();
+            Assert.fail("queryByIds should fail when session has pending changes");
+        } catch (AssertionError e) {
+            Assert.assertTrue(e.getMessage().contains("hasChanges"));
+        }
     }
 
     private Map<String, String> toResultMap(BackendColumnIterator iter) {
