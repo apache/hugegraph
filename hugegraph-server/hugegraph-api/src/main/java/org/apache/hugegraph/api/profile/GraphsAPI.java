@@ -18,8 +18,10 @@
 package org.apache.hugegraph.api.profile;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -142,13 +144,21 @@ public class GraphsAPI extends API {
             throw new HugeException("Graphspace not exist!");
         }
         GraphSpace gs = manager.graphSpace(graphSpace);
-        String gsNickname = gs.nickname();
+        // graphSpace.nickname() may be null in non-PD mode (GraphManager returns
+        // a placeholder GraphSpace without a nickname set)
+        String gsNickname = gs.nickname() != null ? gs.nickname() : graphSpace;
 
         AuthManager authManager = manager.authManager();
         String user = HugeGraphAuthProxy.username();
-        Map<String, Date> defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
+        // Default graph concept relies on PD meta storage; in non-PD standalone
+        // mode there is no persistent store for this, so we gracefully degrade.
+        Map<String, Date> defaultGraphs;
+        if (manager.isPDEnabled()) {
+            defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
+        } else {
+            defaultGraphs = new HashMap<>();
+        }
 
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         Set<String> graphs = manager.graphs(graphSpace);
         List<Map<String, Object>> profiles = new ArrayList<>();
         List<Map<String, Object>> defaultProfiles = new ArrayList<>();
@@ -179,7 +189,9 @@ public class GraphsAPI extends API {
                 
                 Date createTime = hg.createTime();
                 if (createTime != null) {
-                    profile.put("create_time", format.format(createTime));
+                    LocalDateTime ldt = createTime.toInstant()
+                            .atZone(ZoneId.systemDefault()).toLocalDateTime();
+                    profile.put("create_time", DATE_FORMATTER.format(ldt));
                 }
                 
                 if (isDefault) {
@@ -195,16 +207,6 @@ public class GraphsAPI extends API {
         return defaultProfiles;
     }
 
-    private static boolean isPrefix(Map<String, Object> profile, String prefix) {
-        if (StringUtils.isEmpty(prefix)) {
-            return true;
-        }
-        // graph name or nickname is not empty
-        String name = profile.get("name").toString();
-        Object nicknameObj = profile.get("nickname");
-        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
-        return name.startsWith(prefix) || nickname.startsWith(prefix);
-    }
 
     @GET
     @Timed
@@ -235,6 +237,11 @@ public class GraphsAPI extends API {
         LOG.debug("Set default graph '{}' in graph space '{}'", name, graphSpace);
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
+        // Default graph persistence requires PD meta storage.
+        // In non-PD (standalone RocksDB) mode, gracefully return empty.
+        if (!manager.isPDEnabled()) {
+            return ImmutableMap.of("default_graph", Collections.emptySet());
+        }
         String user = HugeGraphAuthProxy.username();
         AuthManager authManager = manager.authManager();
         authManager.setDefaultGraph(graphSpace, name, user);
@@ -255,6 +262,11 @@ public class GraphsAPI extends API {
         LOG.debug("Unset default graph '{}' in graph space '{}'", name, graphSpace);
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
+        // Default graph persistence requires PD meta storage.
+        // In non-PD (standalone RocksDB) mode, gracefully return empty.
+        if (!manager.isPDEnabled()) {
+            return ImmutableMap.of("default_graph", Collections.emptySet());
+        }
         String user = HugeGraphAuthProxy.username();
         AuthManager authManager = manager.authManager();
         authManager.unsetDefaultGraph(graphSpace, name, user);
@@ -271,6 +283,11 @@ public class GraphsAPI extends API {
                                           @Parameter(description = "The graph space name")
                                           @PathParam("graphspace") String graphSpace) {
         LOG.debug("Get default graphs in graph space '{}'", graphSpace);
+        // Default graph persistence requires PD meta storage.
+        // In non-PD (standalone RocksDB) mode, return empty set.
+        if (!manager.isPDEnabled()) {
+            return ImmutableMap.of("default_graph", Collections.emptySet());
+        }
         String user = HugeGraphAuthProxy.username();
         AuthManager authManager = manager.authManager();
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
@@ -310,8 +327,7 @@ public class GraphsAPI extends API {
                                       @Parameter(description = "Action map: {'action':'update','update':{...}}")
                                       Map<String, Object> actionMap) {
         LOG.debug("Manage graph '{}' with action '{}'", name, actionMap);
-        E.checkArgument(actionMap != null && actionMap.size() == 2 &&
-                        actionMap.containsKey(GRAPH_ACTION),
+        E.checkArgument(actionMap != null && actionMap.containsKey(GRAPH_ACTION),
                         "Invalid request body '%s'", actionMap);
         Object value = actionMap.get(GRAPH_ACTION);
         E.checkArgument(value instanceof String,
@@ -341,7 +357,9 @@ public class GraphsAPI extends API {
                                     nickname.equals(exist.nickname()),
                                     "Nickname '%s' has already existed in graphspace '%s'",
                                     nickname, graphSpace);
-                    exist.nickname(nickname);
+                    // Delegate to GraphManager: handles both in-memory update and
+                    // PD-mode persistence (non-PD mode is in-memory only).
+                    manager.updateGraphNickname(graphSpace, name, nickname);
                 }
                 return ImmutableMap.of(name, "updated");
             default:
@@ -402,9 +420,12 @@ public class GraphsAPI extends API {
         if (StringUtils.isEmpty(clone)) {
             // Only check required parameters when creating new graph, not when cloning
             E.checkArgument(configs != null, "Config parameters cannot be null");
-            // Auto-fill defaults for PD/HStore mode when not provided
-            configs.putIfAbsent("backend", "hstore");
-            configs.putIfAbsent("serializer", "binary");
+            if (manager.isPDEnabled()) {
+                // Auto-fill HStore/PD mode defaults only when in distributed mode
+                configs.putIfAbsent("backend", "hstore");
+                configs.putIfAbsent("serializer", "binary");
+            }
+            // 'store' is safe to default to graph name in both PD and non-PD modes
             configs.putIfAbsent("store", name);
             // Map frontend 'schema' field to backend config key
             Object schema = configs.remove("schema");

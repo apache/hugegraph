@@ -814,6 +814,34 @@ public class StandardAuthManager implements AuthManager {
         return null;
     }
 
+    /**
+     * <h3>Design Note: Default graph / default role persistence (workaround)</h3>
+     *
+     * <p>We reuse the existing {@code HugeGroup} / {@code HugeBelong} auth entities as a storage
+     * mechanism to avoid introducing new schema or storage APIs.
+     *
+     * <p><b>How it works:</b>
+     * <ul>
+     * <li>A "marker group" with a special prefixed name (e.g. {@code "~default_graph:gs:g"})
+     * is created in the system graph to represent a (graphSpace, graph) binding.</li>
+     * <li>A {@code HugeBelong} edge from the user vertex to this marker group records which
+     * user has set which graph as their default.</li>
+     * <li>The Belong ID is deterministic: {@code "{userId}->ug->{groupId}"}, which lets us
+     * check existence without a full scan.</li>
+     * </ul>
+     *
+     * <p><b>Known limitations:</b>
+     * <ol>
+     * <li>These marker groups appear in {@code listGroups()} results and may confuse callers.</li>
+     * <li>This mechanism only works in <b>PD mode</b> (system graph backed by HStore).
+     * In non-PD (standalone RocksDB) mode, the API layer degrades gracefully
+     * by returning empty results (see {@code GraphsAPI.setDefault / getDefault}).</li>
+     * <li>The belong ID format depends on the internal convention {@code "{u}->ug->{g}"}.</li>
+     * </ol>
+     *
+     * @todo Consider introducing a dedicated lightweight KV store or a separate
+     * vertex label for user-preference data to avoid polluting the auth graph.
+     */
     private static final String DEFAULT_GRAPH_MARKER = "~default_graph";
 
     private String defaultGraphGroupName(String graphSpace, String graph) {

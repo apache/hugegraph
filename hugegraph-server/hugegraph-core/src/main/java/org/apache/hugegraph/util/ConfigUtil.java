@@ -193,17 +193,40 @@ public final class ConfigUtil {
                         graphName);
     }
 
+    /**
+     * Serialize a HugeConfig to a JSON string for frontend consumption.
+     * <p>
+     * Sensitive configuration keys (containing keywords such as "password",
+     * "secret", "token", "credential", "auth.key") are excluded to prevent
+     * accidental exposure of credentials through the API response.
+     */
     public static String writeConfigToString(HugeConfig config) {
-        // Always serialize config to a JSON object by iterating all keys,
-        // regardless of whether the config was loaded from a file or not.
-        // This ensures callers (e.g. GraphsAPI.listProfile) can safely parse
-        // the result via JsonUtil.fromJson() without format inconsistencies.
         Map<String, Object> configMap = new HashMap<>();
         Iterator<String> iterator = config.getKeys();
         while (iterator.hasNext()) {
             String key = iterator.next();
+            if (isSensitiveKey(key)) {
+                continue;
+            }
             configMap.put(key, config.getProperty(key));
         }
         return JsonUtil.toJson(configMap);
+    }
+
+    /**
+     * Returns true if the config key looks like it may contain sensitive data.
+     * Uses a case-insensitive keyword blacklist.
+     */
+    private static boolean isSensitiveKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        String lower = key.toLowerCase();
+        return lower.contains("password") ||
+               lower.contains("secret")   ||
+               lower.contains("token")    ||
+               lower.contains("credential") ||
+               lower.contains("private_key") ||
+               lower.contains("auth.key");
     }
 }

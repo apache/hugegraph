@@ -280,8 +280,13 @@ public class ManagerAPI extends API {
                         StringUtils.isNotEmpty(graphSpace),
                         "Must pass graphspace and role params");
 
-        HugeDefaultRole defaultRole =
-                HugeDefaultRole.valueOf(role.toUpperCase());
+        HugeDefaultRole defaultRole;
+        try {
+            defaultRole = HugeDefaultRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", role);
+            defaultRole = null; // unreachable, satisfies compiler
+        }
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
@@ -312,7 +317,7 @@ public class ManagerAPI extends API {
 
     private void validGraphSpace(GraphManager manager, String graphSpace) {
         E.checkArgument(manager.graphSpace(graphSpace) != null,
-                        "The graph space is not exist");
+                        "The graph space '%s' does not exist", graphSpace);
     }
 
     private static class JsonManager implements Checkable {

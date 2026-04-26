@@ -17,7 +17,8 @@
 
 package org.apache.hugegraph.api.space;
 
-import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -259,7 +260,6 @@ public class GraphSpaceAPI extends API {
         AuthManager authManager = manager.authManager();
         // FIXME: defaultSpace related interface is not implemented
         // String defaultSpace = authManager.getDefaultSpace(user);
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
         for (String sp : spaces) {
             manager.getSpaceStorage(sp);
             GraphSpace gs = space(manager, sp);
@@ -273,8 +273,12 @@ public class GraphSpaceAPI extends API {
                 gsProfile.put("authed", true);
             }
 
-            gsProfile.put("create_time", format.format(gs.createTime()));
-            gsProfile.put("update_time", format.format(gs.updateTime()));
+            gsProfile.put("create_time",
+                          DATE_FORMATTER.format(LocalDateTime.ofInstant(
+                                  gs.createTime().toInstant(), ZoneId.systemDefault())));
+            gsProfile.put("update_time",
+                          DATE_FORMATTER.format(LocalDateTime.ofInstant(
+                                  gs.updateTime().toInstant(), ZoneId.systemDefault())));
             if (!isPrefix(gsProfile, prefix)) {
                 continue;
             }
@@ -313,16 +317,6 @@ public class GraphSpaceAPI extends API {
         return manager.serializer().writeGraphSpace(space);
     }
 
-    private static boolean isPrefix(Map<String, Object> profile, String prefix) {
-        if (StringUtils.isEmpty(prefix)) {
-            return true;
-        }
-        // match by name or nickname (nickname may be null)
-        String name = profile.get("name").toString();
-        Object nicknameObj = profile.get("nickname");
-        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
-        return name.startsWith(prefix) || nickname.startsWith(prefix);
-    }
 
     @PUT
     @Timed

@@ -2108,7 +2108,14 @@ public final class GraphManager {
         }
         GraphSpace space = this.graphSpaces.get(name);
         if (space == null) {
+            // Cache miss: try to load from etcd and populate the local cache
+            // so that subsequent calls (e.g. validGraphSpace checks) don't fail
+            // due to a race between the graphspace-create event and the listener
+            // updating this.graphSpaces.
             space = this.metaManager.graphSpace(name);
+            if (space != null) {
+                this.graphSpaces.putIfAbsent(name, space);
+            }
         }
         return space;
     }
@@ -2136,9 +2143,27 @@ public final class GraphManager {
         if (StringUtils.isEmpty(nickname)) {
             return false;
         }
+        if (!isPDEnabled()) {
+            // In non-PD mode, metaManager is not initialized.
+            // Check nickname against in-memory graphs (same pattern as graphs()).
+            for (Map.Entry<String, Graph> entry : this.graphs.entrySet()) {
+                String key = entry.getKey();
+                String[] parts = key.split(DELIMITER, 2);
+                if (parts.length == 2 && parts[0].equals(graphSpace) &&
+                    entry.getValue() instanceof HugeGraph) {
+                    HugeGraph hg = (HugeGraph) entry.getValue();
+                    if (nickname.equals(hg.nickname())) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        // PD mode: check via metaManager
         for (Map<String, Object> graphConfig :
                 this.metaManager.graphConfigs(graphSpace).values()) {
-            if (nickname.equals(graphConfig.get("nickname").toString())) {
+            Object nick = graphConfig.get("nickname");
+            if (nick != null && nickname.equals(nick.toString())) {
                 return true;
             }
         }
@@ -2172,6 +2197,38 @@ public final class GraphManager {
     public Map<String, Object> graphConfig(String graphSpace,
                                            String graphName) {
         return this.metaManager.getGraphConfig(graphSpace, graphName);
+    }
+
+    /**
+     * Update the nickname of a graph.
+     * In non-PD mode (standalone RocksDB), only the in-memory instance is updated
+     * since local config files cannot be hot-reloaded.
+     * In PD mode, the change is also persisted to the meta storage so it
+     * survives restarts.
+     */
+    public void updateGraphNickname(String graphSpace, String graphName,
+                                    String nickname) {
+        // Always update the in-memory graph instance first
+        HugeGraph g = this.graph(graphSpace, graphName);
+        if (g != null) {
+            g.nickname(nickname);
+        }
+        if (!isPDEnabled()) {
+            // Non-PD mode: in-memory only, acceptable for standalone RocksDB
+            return;
+        }
+        try {
+            Map<String, Object> configs =
+                    this.metaManager.getGraphConfig(graphSpace, graphName);
+            if (configs != null) {
+                configs.put("nickname", nickname);
+                this.metaManager.updateGraphConfig(graphSpace, graphName, configs);
+                this.metaManager.notifyGraphUpdate(graphSpace, graphName);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to persist nickname for graph '{}/{}': {}",
+                     graphSpace, graphName, e.getMessage());
+        }
     }
 
     public String pdPeers() {
