@@ -178,6 +178,9 @@ public class UserAPI extends API {
         @JsonProperty("user_password")
         @Schema(description = "The user password", required = true)
         private String password;
+        @JsonProperty("user_nickname")
+        @Schema(description = "The user nickname")
+        private String nickname;
         @JsonProperty("user_phone")
         @Schema(description = "The user phone number")
         private String phone;
@@ -197,6 +200,9 @@ public class UserAPI extends API {
             if (this.password != null) {
                 user.password(StringEncoding.hashPassword(this.password));
             }
+            if (this.nickname != null) {
+                user.nickname(this.nickname);
+            }
             if (this.phone != null) {
                 user.phone(this.phone);
             }
@@ -215,6 +221,7 @@ public class UserAPI extends API {
         public HugeUser build() {
             HugeUser user = new HugeUser(this.name);
             user.password(StringEncoding.hashPassword(this.password));
+            user.nickname(this.nickname);
             user.phone(this.phone);
             user.email(this.email);
             user.avatar(this.avatar);
@@ -233,10 +240,12 @@ public class UserAPI extends API {
         @Override
         public void checkUpdate() {
             E.checkArgument(!StringUtils.isEmpty(this.password) ||
+                            this.nickname != null ||
                             this.phone != null ||
                             this.email != null ||
-                            this.avatar != null,
-                            "Expect one of user password/phone/email/avatar]");
+                            this.avatar != null ||
+                            this.description != null,
+                            "Expect one of user password/nickname/phone/email/avatar/description");
         }
     }
 }
