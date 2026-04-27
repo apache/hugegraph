@@ -19,8 +19,10 @@ package org.apache.hugegraph.backend.cache;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraphParams;
@@ -43,6 +45,13 @@ import com.google.common.collect.ImmutableSet;
 
 public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
+    private static final String ID_CACHE_PREFIX = "schema-id";
+    private static final String NAME_CACHE_PREFIX = "schema-name";
+
+    // MetaDriver doesn't expose unlisten, register the PD listener once.
+    private static final AtomicBoolean metaEventListenerRegistered =
+            new AtomicBoolean(false);
+
     private final Cache<Id, Object> idCache;
     private final Cache<Id, Object> nameCache;
 
@@ -58,8 +67,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         final long capacity = graphParams.configuration()
                                          .get(CoreOptions.SCHEMA_CACHE_CAPACITY);
-        this.idCache = this.cache("schema-id", capacity);
-        this.nameCache = this.cache("schema-name", capacity);
+        this.idCache = this.cache(ID_CACHE_PREFIX, capacity);
+        this.nameCache = this.cache(NAME_CACHE_PREFIX, capacity);
 
         SchemaCaches<SchemaElement> attachment = this.idCache.attachment();
         if (attachment == null) {
@@ -86,9 +95,34 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     private Cache<Id, Object> cache(String prefix, long capacity) {
-        final String name = prefix + "-" + this.graph().spaceGraphName();
+        final String name = cacheName(prefix, this.graph().spaceGraphName());
         // NOTE: must disable schema cache-expire due to getAllSchema()
         return CacheManager.instance().cache(name, capacity);
+    }
+
+    private static String cacheName(String prefix, String spaceGraphName) {
+        return prefix + "-" + spaceGraphName;
+    }
+
+    private static void clearSchemaCache(String spaceGraphName) {
+        Map<String, Cache<Id, Object>> caches = CacheManager.instance().caches();
+
+        Cache<Id, Object> idCache = caches.get(cacheName(ID_CACHE_PREFIX,
+                                                         spaceGraphName));
+        if (idCache != null) {
+            idCache.clear();
+
+            SchemaCaches<?> arrayCaches = idCache.attachment();
+            if (arrayCaches != null) {
+                arrayCaches.clear();
+            }
+        }
+
+        Cache<Id, Object> nameCache = caches.get(cacheName(NAME_CACHE_PREFIX,
+                                                           spaceGraphName));
+        if (nameCache != null) {
+            nameCache.clear();
+        }
     }
 
     private void listenChanges() {
@@ -145,12 +179,43 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         if (!schemaEventHub.containsListener(Events.CACHE)) {
             schemaEventHub.listen(Events.CACHE, this.cacheEventListener);
         }
+
+        listenSchemaCacheClear();
+    }
+
+    private static void listenSchemaCacheClear() {
+        if (!metaEventListenerRegistered.compareAndSet(false, true)) {
+            return;
+        }
+
+        try {
+            MetaDriver metaDriver = MetaManager.instance().metaDriver();
+            MetaManager.instance().listenSchemaCacheClear(response -> {
+                List<String> graphNames =
+                        metaDriver.extractValuesFromResponse(response);
+                if (graphNames == null) {
+                    return;
+                }
+                for (String graphName : graphNames) {
+                    LOG.debug("Graph {} clear schema cache on meta event",
+                              graphName);
+                    clearSchemaCache(graphName);
+                }
+            });
+        } catch (RuntimeException e) {
+            metaEventListenerRegistered.set(false);
+            throw e;
+        }
     }
 
     public void clearCache(boolean notify) {
         this.idCache.clear();
         this.nameCache.clear();
         this.arrayCaches.clear();
+
+        if (notify) {
+            this.notifySchemaCacheClear();
+        }
     }
 
     private void resetCachedAllIfReachedCapacity() {
@@ -202,6 +267,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         super.updateSchema(schema, updateCallback);
 
         this.updateCache(schema);
+        this.notifySchemaCacheClear();
     }
 
     @Override
@@ -210,11 +276,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.updateCache(schema);
 
-        if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
-            MetaManager.instance()
-                       .notifySchemaCacheClear(this.graph().graphSpace(),
-                                               this.graph().name());
-        }
+        this.notifySchemaCacheClear();
     }
 
     private void updateCache(SchemaElement schema) {
@@ -238,6 +300,10 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.invalidateCache(schema.type(), schema.id());
 
+        this.notifySchemaCacheClear();
+    }
+
+    private void notifySchemaCacheClear() {
         if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
             MetaManager.instance()
                        .notifySchemaCacheClear(this.graph().graphSpace(),

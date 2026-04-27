@@ -20,7 +20,11 @@ package org.apache.hugegraph.unit.cache;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.backend.cache.Cache;
+import org.apache.hugegraph.backend.cache.CacheManager;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransaction;
+import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
+import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
@@ -163,6 +167,41 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                             cache.getPropertyKey("fake-pk-1").id());
         Assert.assertEquals("fake-pk-1",
                             cache.getPropertyKey(IdGenerator.of(1)).name());
+    }
+
+    @Test
+    public void testClearV2SchemaCacheByGraphName() {
+        String graphName = "DEFAULT-unit-test-v2";
+        String otherGraphName = "DEFAULT-other-v2";
+
+        Cache<Id, Object> idCache = CacheManager.instance()
+                                                .cache("schema-id-" +
+                                                       graphName, 10L);
+        Cache<Id, Object> nameCache = CacheManager.instance()
+                                                  .cache("schema-name-" +
+                                                         graphName, 10L);
+        Cache<Id, Object> otherIdCache = CacheManager.instance()
+                                                     .cache("schema-id-" +
+                                                            otherGraphName,
+                                                            10L);
+
+        idCache.update(IdGenerator.of(1), "fake-pk-by-id");
+        nameCache.update(IdGenerator.of("fake-pk"), "fake-pk-by-name");
+        otherIdCache.update(IdGenerator.of(2), "other-pk-by-id");
+
+        Assert.assertEquals(1L, idCache.size());
+        Assert.assertEquals(1L, nameCache.size());
+        Assert.assertEquals(1L, otherIdCache.size());
+
+        Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
+                              new Class<?>[]{String.class},
+                              "clearSchemaCache", graphName);
+
+        Assert.assertEquals(0L, idCache.size());
+        Assert.assertEquals(0L, nameCache.size());
+        Assert.assertEquals(1L, otherIdCache.size());
+
+        otherIdCache.clear();
     }
 
     @Test
