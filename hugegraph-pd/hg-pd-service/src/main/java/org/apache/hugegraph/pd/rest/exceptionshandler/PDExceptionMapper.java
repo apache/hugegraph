@@ -53,15 +53,17 @@ public class PDExceptionMapper {
 
     private HttpStatus resolveStatus(int code) {
         try {
+            // Tenta mapear códigos HTTP exatos (ex: 400, 404, 500)
             return HttpStatus.valueOf(code);
-        } catch (Exception e) {
+        } catch (IllegalArgumentException e) {
+            // Se falhar (ex: 4001), extraímos o primeiro dígito para descobrir a família do erro
+            String codeStr = String.valueOf(code);
 
-            if (code >= 400 && code < 500) {
-                return HttpStatus.BAD_REQUEST;
+            if (codeStr.startsWith("4")) {
+                return HttpStatus.BAD_REQUEST; // Erros de cliente -> 400
             }
-            if (code >= 500 && code < 600) {
-                return HttpStatus.INTERNAL_SERVER_ERROR;
-            }
+
+            // Tudo que for da família 5000 ou não reconhecido vira Erro de Servidor -> 500
             return HttpStatus.INTERNAL_SERVER_ERROR;
         }
     }

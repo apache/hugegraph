@@ -175,6 +175,7 @@
                             <mainClass>
                                 org.apache.hugegraph.pd.boot.HugePDServer
                             </mainClass>
+                            <classifier>exec</classifier>
                         </configuration>
                         <!-- should configure explicitly without spring-boot-starter-parent -->
                         <goals>
