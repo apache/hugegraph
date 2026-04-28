@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.unit.cache;
 
+import java.lang.reflect.Constructor;
+
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
@@ -26,6 +28,7 @@ import org.apache.hugegraph.backend.cache.CachedSchemaTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
@@ -184,24 +187,81 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                                                      .cache("schema-id-" +
                                                             otherGraphName,
                                                             10L);
+        Object arrayCaches = idCache.attachment(newV2SchemaCaches(10));
+        Id arrayCacheId = IdGenerator.of(1);
+        SchemaElement arrayCacheSchema =
+                new FakeObjects("unit-test-v2")
+                        .newPropertyKey(arrayCacheId, "fake-pk-array");
 
-        idCache.update(IdGenerator.of(1), "fake-pk-by-id");
-        nameCache.update(IdGenerator.of("fake-pk"), "fake-pk-by-name");
-        otherIdCache.update(IdGenerator.of(2), "other-pk-by-id");
+        try {
+            clearV2SchemaCaches(arrayCaches);
+            setV2SchemaCache(arrayCaches, HugeType.PROPERTY_KEY, arrayCacheId,
+                             arrayCacheSchema);
+            idCache.update(IdGenerator.of(1), "fake-pk-by-id");
+            nameCache.update(IdGenerator.of("fake-pk"), "fake-pk-by-name");
+            otherIdCache.update(IdGenerator.of(2), "other-pk-by-id");
 
-        Assert.assertEquals(1L, idCache.size());
-        Assert.assertEquals(1L, nameCache.size());
-        Assert.assertEquals(1L, otherIdCache.size());
+            Assert.assertEquals(1L, idCache.size());
+            Assert.assertEquals(1L, nameCache.size());
+            Assert.assertEquals(1L, otherIdCache.size());
+            Assert.assertSame(arrayCacheSchema,
+                              getV2SchemaCache(arrayCaches,
+                                               HugeType.PROPERTY_KEY,
+                                               arrayCacheId));
 
-        Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
-                              new Class<?>[]{String.class},
-                              "clearSchemaCache", graphName);
+            Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
+                                  new Class<?>[]{String.class},
+                                  "clearSchemaCache", graphName);
 
-        Assert.assertEquals(0L, idCache.size());
-        Assert.assertEquals(0L, nameCache.size());
-        Assert.assertEquals(1L, otherIdCache.size());
+            Assert.assertEquals(0L, idCache.size());
+            Assert.assertEquals(0L, nameCache.size());
+            Assert.assertEquals(1L, otherIdCache.size());
+            Assert.assertNull(getV2SchemaCache(arrayCaches,
+                                               HugeType.PROPERTY_KEY,
+                                               arrayCacheId));
+        } finally {
+            clearV2SchemaCaches(arrayCaches);
+            idCache.clear();
+            nameCache.clear();
+            otherIdCache.clear();
+        }
+    }
 
-        otherIdCache.clear();
+    private static Object newV2SchemaCaches(int size) {
+        for (Class<?> clazz :
+             CachedSchemaTransactionV2.class.getDeclaredClasses()) {
+            if (!"SchemaCaches".equals(clazz.getSimpleName())) {
+                continue;
+            }
+            try {
+                Constructor<?> constructor =
+                        clazz.getDeclaredConstructor(int.class);
+                constructor.setAccessible(true);
+                return constructor.newInstance(size);
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError("Failed to create SchemaCaches", e);
+            }
+        }
+        throw new AssertionError("SchemaCaches class not found");
+    }
+
+    private static void clearV2SchemaCaches(Object arrayCaches) {
+        Whitebox.invoke(arrayCaches.getClass(), "clear", arrayCaches);
+    }
+
+    private static void setV2SchemaCache(Object arrayCaches, HugeType type,
+                                         Id id, SchemaElement schema) {
+        Whitebox.invoke(arrayCaches.getClass(),
+                        new Class<?>[]{HugeType.class, Id.class,
+                                       SchemaElement.class},
+                        "set", arrayCaches, type, id, schema);
+    }
+
+    private static SchemaElement getV2SchemaCache(Object arrayCaches,
+                                                  HugeType type, Id id) {
+        return Whitebox.invoke(arrayCaches.getClass(),
+                               new Class<?>[]{HugeType.class, Id.class},
+                               "get", arrayCaches, type, id);
     }
 
     @Test

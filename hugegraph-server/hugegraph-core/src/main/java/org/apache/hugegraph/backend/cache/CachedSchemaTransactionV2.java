@@ -48,7 +48,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     private static final String ID_CACHE_PREFIX = "schema-id";
     private static final String NAME_CACHE_PREFIX = "schema-name";
 
-    // MetaDriver doesn't expose unlisten, register the PD listener once.
+    // MetaDriver doesn't expose unlisten, register the meta listener once.
     private static final AtomicBoolean metaEventListenerRegistered =
             new AtomicBoolean(false);
 
@@ -134,7 +134,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             if (storeEvents.contains(event.name())) {
                 LOG.debug("Graph {} clear schema cache on event '{}'",
                           this.graph(), event.name());
-                this.clearCache(true);
+                boolean notify = !Events.STORE_INIT.equals(event.name());
+                this.clearCache(notify);
                 return true;
             }
             return false;
@@ -189,10 +190,10 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         }
 
         try {
-            MetaDriver metaDriver = MetaManager.instance().metaDriver();
             MetaManager.instance().listenSchemaCacheClear(response -> {
                 List<String> graphNames =
-                        metaDriver.extractValuesFromResponse(response);
+                        MetaManager.instance().metaDriver()
+                                   .extractValuesFromResponse(response);
                 if (graphNames == null) {
                     return;
                 }
@@ -214,7 +215,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         this.arrayCaches.clear();
 
         if (notify) {
-            this.notifySchemaCacheClear();
+            this.maybeNotifySchemaCacheClear();
         }
     }
 
@@ -267,7 +268,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         super.updateSchema(schema, updateCallback);
 
         this.updateCache(schema);
-        this.notifySchemaCacheClear();
+        this.maybeNotifySchemaCacheClear();
     }
 
     @Override
@@ -276,7 +277,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.updateCache(schema);
 
-        this.notifySchemaCacheClear();
+        this.maybeNotifySchemaCacheClear();
     }
 
     private void updateCache(SchemaElement schema) {
@@ -300,10 +301,10 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.invalidateCache(schema.type(), schema.id());
 
-        this.notifySchemaCacheClear();
+        this.maybeNotifySchemaCacheClear();
     }
 
-    private void notifySchemaCacheClear() {
+    private void maybeNotifySchemaCacheClear() {
         if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
             MetaManager.instance()
                        .notifySchemaCacheClear(this.graph().graphSpace(),
