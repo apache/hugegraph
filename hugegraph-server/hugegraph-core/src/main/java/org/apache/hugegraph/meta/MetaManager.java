@@ -380,6 +380,11 @@ public class MetaManager {
         return this.metaDriver.extractValuesFromResponse(response);
     }
 
+    public <T> List<String> extractSchemaCacheClearGraphNamesFromResponse(
+            T response) {
+        return this.metaDriver.extractValuesFromResponse(response);
+    }
+
     public <T> Map<String, String> extractKVFromResponse(T response) {
         return this.metaDriver.extractKVFromResponse(response);
     }
