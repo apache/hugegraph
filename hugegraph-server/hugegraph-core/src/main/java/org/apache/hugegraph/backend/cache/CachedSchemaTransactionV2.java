@@ -49,8 +49,14 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     private static final String NAME_CACHE_PREFIX = "schema-name";
 
     // MetaDriver doesn't expose unlisten, register the meta listener once.
+    // Lifecycle: this JVM-global flag is intentionally never reset by
+    // unlistenChanges() (the underlying gRPC watch is process-wide), but IS
+    // reset on transport reconnect via resetMetaListenerForReconnect() so a
+    // new watch is installed after the old one was silently dropped.
     private static final AtomicBoolean metaEventListenerRegistered =
             new AtomicBoolean(false);
+
+    private static final Object META_LISTENER_LOCK = new Object();
 
     private final Cache<Id, Object> idCache;
     private final Cache<Id, Object> nameCache;
@@ -107,21 +113,23 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     private static void clearSchemaCache(String spaceGraphName) {
         Map<String, Cache<Id, Object>> caches = CacheManager.instance().caches();
 
-        Cache<Id, Object> idCache = caches.get(cacheName(ID_CACHE_PREFIX,
-                                                         spaceGraphName));
-        if (idCache != null) {
-            idCache.clear();
-
-            SchemaCaches<?> arrayCaches = idCache.attachment();
-            if (arrayCaches != null) {
-                arrayCaches.clear();
-            }
-        }
-
+        // Clear name cache first so the (name -> id -> object) lookup path
+        // fails fast instead of returning a stale object backed by an
+        // already-empty id cache during the TOCTOU window.
         Cache<Id, Object> nameCache = caches.get(cacheName(NAME_CACHE_PREFIX,
                                                            spaceGraphName));
         if (nameCache != null) {
             nameCache.clear();
+        }
+
+        Cache<Id, Object> idCache = caches.get(cacheName(ID_CACHE_PREFIX,
+                                                         spaceGraphName));
+        if (idCache != null) {
+            SchemaCaches<?> arrayCaches = idCache.attachment();
+            if (arrayCaches != null) {
+                arrayCaches.clear();
+            }
+            idCache.clear();
         }
     }
 
@@ -185,34 +193,73 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     private static void listenSchemaCacheClear() {
-        if (!metaEventListenerRegistered.compareAndSet(false, true)) {
+        synchronized (META_LISTENER_LOCK) {
+            if (metaEventListenerRegistered.get()) {
+                return;
+            }
+            try {
+                MetaManager.instance().listenSchemaCacheClear(
+                        CachedSchemaTransactionV2::handleSchemaCacheClearEvent);
+                // Set AFTER the underlying watch is live so a concurrent
+                // caller that observes the flag is guaranteed an active
+                // subscription, and a failure leaves the flag false so the
+                // next caller retries registration.
+                metaEventListenerRegistered.set(true);
+            } catch (Exception e) {
+                throw e instanceof RuntimeException
+                      ? (RuntimeException) e
+                      : new RuntimeException(
+                              "Failed to register schema cache clear listener",
+                              e);
+            }
+        }
+    }
+
+    /**
+     * Consumer invoked by the MetaManager schema-cache-clear watch. Extracted
+     * as a package-private static method so end-to-end tests can drive the
+     * publish -> callback -> {@link #clearSchemaCache(String)} path without
+     * depending on a live etcd/PD watch.
+     */
+    static <T> void handleSchemaCacheClearEvent(T response) {
+        List<String> graphNames =
+                MetaManager.instance()
+                           .extractSchemaCacheClearGraphNamesFromResponse(
+                                   response);
+        if (graphNames == null) {
             return;
         }
+        for (String graphName : graphNames) {
+            LOG.debug("Graph {} clear schema cache on meta event", graphName);
+            clearSchemaCache(graphName);
+        }
+    }
 
-        try {
-            MetaManager.instance().listenSchemaCacheClear(response -> {
-                List<String> graphNames =
-                        MetaManager.instance().metaDriver()
-                                   .extractValuesFromResponse(response);
-                if (graphNames == null) {
-                    return;
-                }
-                for (String graphName : graphNames) {
-                    LOG.debug("Graph {} clear schema cache on meta event",
-                              graphName);
-                    clearSchemaCache(graphName);
-                }
-            });
-        } catch (RuntimeException e) {
-            metaEventListenerRegistered.set(false);
-            throw e;
+    /**
+     * Reset the JVM-global meta listener flag after a MetaManager transport
+     * reconnect. The underlying gRPC watch is silently dropped on reconnect;
+     * without this reset {@link #metaEventListenerRegistered} would stay
+     * {@code true} forever and this JVM would stop receiving cross-node
+     * schema cache clear events with no error or warning.
+     *
+     * <p>TODO: wire this into MetaManager once it exposes a transport
+     * reconnect callback (e.g. {@code listenReconnect} /
+     * {@code onTransportReconnect}). Until then it must be invoked
+     * explicitly by code that detects the reconnect.
+     */
+    public static void resetMetaListenerForReconnect() {
+        if (metaEventListenerRegistered.compareAndSet(true, false)) {
+            LOG.warn("Schema cache clear meta listener lost on reconnect — " +
+                     "will re-register on next schema operation.");
         }
     }
 
     public void clearCache(boolean notify) {
-        this.idCache.clear();
+        // Same TOCTOU ordering as clearSchemaCache(String): clear nameCache
+        // first, then the array attachment, then idCache last.
         this.nameCache.clear();
         this.arrayCaches.clear();
+        this.idCache.clear();
 
         if (notify) {
             this.maybeNotifySchemaCacheClear();
@@ -268,7 +315,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         super.updateSchema(schema, updateCallback);
 
         this.updateCache(schema);
-        this.maybeNotifySchemaCacheClear();
+        // Status transitions are internal bookkeeping; notifying here causes a
+        // broadcast storm for every updateSchemaStatus() call from background jobs.
     }
 
     @Override
@@ -277,7 +325,11 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.updateCache(schema);
 
-        this.maybeNotifySchemaCacheClear();
+        // Schema additions must always propagate to remote nodes regardless
+        // of TASK_SYNC_DELETION (which only gates removal flows).
+        MetaManager.instance()
+                   .notifySchemaCacheClear(this.graph().graphSpace(),
+                                           this.graph().name());
     }
 
     private void updateCache(SchemaElement schema) {
@@ -305,6 +357,9 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     private void maybeNotifySchemaCacheClear() {
+        // Only suppress notifications for removal tasks when
+        // TASK_SYNC_DELETION=true: the caller propagates cache invalidation
+        // synchronously, so the meta-event broadcast would be redundant.
         if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
             MetaManager.instance()
                        .notifySchemaCacheClear(this.graph().graphSpace(),
