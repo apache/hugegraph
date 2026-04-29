@@ -108,9 +108,20 @@ public class UserAPI extends API {
     public String list(@Context GraphManager manager,
                        @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "Filter by user name")
+                       @QueryParam("name") String name,
                        @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
-        LOG.debug("GraphSpace [{}] list users", graphSpace);
+        LOG.debug("GraphSpace [{}] list users, name={}", graphSpace, name);
+
+        if (StringUtils.isNotEmpty(name)) {
+            HugeUser user = manager.authManager().findUser(name);
+            if (user == null) {
+                throw new NotFoundException("Can't find user with name '%s'",
+                                            name);
+            }
+            return manager.serializer().writeAuthElement(user);
+        }
 
         List<HugeUser> users = manager.authManager().listAllUsers(limit);
         return manager.serializer().writeAuthElements("users", users);

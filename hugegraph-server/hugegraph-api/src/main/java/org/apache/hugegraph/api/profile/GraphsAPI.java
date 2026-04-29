@@ -420,11 +420,17 @@ public class GraphsAPI extends API {
         if (StringUtils.isEmpty(clone)) {
             // Only check required parameters when creating new graph, not when cloning
             E.checkArgument(configs != null, "Config parameters cannot be null");
+            // Always required by TinkerPop's GraphFactory.open()
+            configs.putIfAbsent("gremlin.graph",
+                                "org.apache.hugegraph.HugeFactory");
             if (manager.isPDEnabled()) {
                 // Auto-fill HStore/PD mode defaults only when in distributed mode
                 configs.putIfAbsent("backend", "hstore");
-                configs.putIfAbsent("serializer", "binary");
+            } else {
+                // Auto-fill standalone (RocksDB) mode defaults
+                configs.putIfAbsent("backend", "rocksdb");
             }
+            configs.putIfAbsent("serializer", "binary");
             // 'store' is safe to default to graph name in both PD and non-PD modes
             configs.putIfAbsent("store", name);
             // Map frontend 'schema' field to backend config key
