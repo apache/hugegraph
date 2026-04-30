@@ -390,6 +390,58 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
     // stubbed without an hstore cluster.
 
     @Test
+    public void testHandleSchemaCacheClearEventSkipsLocalSource()
+            throws Exception {
+        String graphName = "DEFAULT-meta-local-source-v2";
+        Cache<Id, Object> idCache =
+                CacheManager.instance().cache("schema-id-" + graphName, 10L);
+        Cache<Id, Object> nameCache =
+                CacheManager.instance()
+                            .cache("schema-name-" + graphName, 10L);
+
+        MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
+        Object localResponse = new Object();
+        Object remoteResponse = new Object();
+        String localSource = schemaCacheClearSource();
+        Mockito.when(mockDriver.extractValuesFromResponse(localResponse))
+               .thenReturn(Collections.singletonList(
+                       MetaManager.schemaCacheClearEventValue(graphName,
+                                                              localSource)));
+        Mockito.when(mockDriver.extractValuesFromResponse(remoteResponse))
+               .thenReturn(Collections.singletonList(
+                       MetaManager.schemaCacheClearEventValue(graphName,
+                                                              "remote")));
+
+        MetaDriver originalDriver = swapMetaDriver(mockDriver);
+        try {
+            idCache.update(IdGenerator.of(1), "v");
+            nameCache.update(IdGenerator.of("n"), "v");
+
+            Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
+                                  new Class<?>[]{Object.class},
+                                  "handleSchemaCacheClearEvent",
+                                  localResponse);
+
+            Assert.assertEquals("local echo must not clear id cache",
+                                1L, idCache.size());
+            Assert.assertEquals("local echo must not clear name cache",
+                                1L, nameCache.size());
+
+            Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
+                                  new Class<?>[]{Object.class},
+                                  "handleSchemaCacheClearEvent",
+                                  remoteResponse);
+
+            Assert.assertEquals(0L, idCache.size());
+            Assert.assertEquals(0L, nameCache.size());
+        } finally {
+            swapMetaDriver(originalDriver);
+            idCache.clear();
+            nameCache.clear();
+        }
+    }
+
+    @Test
     public void testHandleSchemaCacheClearEventClearsTargetGraphOnly()
             throws Exception {
         // End-to-end coverage of the meta-event consumer:
@@ -605,6 +657,13 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                 .getDeclaredField("metaEventListenerRegistered");
         f.setAccessible(true);
         return (AtomicBoolean) f.get(null);
+    }
+
+    private static String schemaCacheClearSource() throws Exception {
+        Field f = CachedSchemaTransactionV2.class
+                .getDeclaredField("SCHEMA_CACHE_CLEAR_SOURCE");
+        f.setAccessible(true);
+        return (String) f.get(null);
     }
 
     private static MetaDriver swapMetaDriver(MetaDriver replacement)

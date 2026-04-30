@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
+import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
 import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
@@ -92,6 +93,7 @@ import org.junit.runners.Suite;
         CacheTest.OffheapCacheTest.class,
         CacheTest.LevelCacheTest.class,
         CachedSchemaTransactionTest.class,
+        MetaManagerSchemaCacheClearEventTest.class,
         CachedGraphTransactionTest.class,
         CacheManagerTest.class,
         RamTableTest.class,

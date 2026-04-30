@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -35,6 +36,7 @@ import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
+import org.apache.hugegraph.meta.MetaManager.SchemaCacheClearEvent;
 import org.apache.hugegraph.perf.PerfUtil;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.type.HugeType;
@@ -57,6 +59,15 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             new AtomicBoolean(false);
 
     private static final Object META_LISTENER_LOCK = new Object();
+
+    /**
+     * Per-JVM identifier emitted with every schema-cache-clear meta event so
+     * the listener can skip its own echo. Lifecycle: generated once per
+     * classloader at class init, never reused, regenerated on JVM restart.
+     * This is not a stable node identity, only a local self-echo filter.
+     */
+    private static final String SCHEMA_CACHE_CLEAR_SOURCE =
+            UUID.randomUUID().toString();
 
     private final Cache<Id, Object> idCache;
     private final Cache<Id, Object> nameCache;
@@ -222,14 +233,18 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
      * depending on a live etcd/PD watch.
      */
     static <T> void handleSchemaCacheClearEvent(T response) {
-        List<String> graphNames =
+        List<SchemaCacheClearEvent> events =
                 MetaManager.instance()
-                           .extractSchemaCacheClearGraphNamesFromResponse(
+                           .extractSchemaCacheClearEventsFromResponse(
                                    response);
-        if (graphNames == null) {
+        if (events == null) {
             return;
         }
-        for (String graphName : graphNames) {
+        for (SchemaCacheClearEvent event : events) {
+            if (SCHEMA_CACHE_CLEAR_SOURCE.equals(event.source())) {
+                continue;
+            }
+            String graphName = event.graph();
             LOG.debug("Graph {} clear schema cache on meta event", graphName);
             clearSchemaCache(graphName);
         }
@@ -249,7 +264,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
      */
     public static void resetMetaListenerForReconnect() {
         if (metaEventListenerRegistered.compareAndSet(true, false)) {
-            LOG.warn("Schema cache clear meta listener lost on reconnect — " +
+            LOG.warn("Schema cache clear meta listener lost on reconnect - " +
                      "will re-register on next schema operation.");
         }
     }
@@ -327,9 +342,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         // Schema additions must always propagate to remote nodes regardless
         // of TASK_SYNC_DELETION (which only gates removal flows).
-        MetaManager.instance()
-                   .notifySchemaCacheClear(this.graph().graphSpace(),
-                                           this.graph().name());
+        this.notifySchemaCacheClear();
     }
 
     private void updateCache(SchemaElement schema) {
@@ -361,10 +374,15 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         // TASK_SYNC_DELETION=true: the caller propagates cache invalidation
         // synchronously, so the meta-event broadcast would be redundant.
         if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
-            MetaManager.instance()
-                       .notifySchemaCacheClear(this.graph().graphSpace(),
-                                               this.graph().name());
+            this.notifySchemaCacheClear();
         }
+    }
+
+    private void notifySchemaCacheClear() {
+        MetaManager.instance()
+                   .notifySchemaCacheClear(this.graph().graphSpace(),
+                                           this.graph().name(),
+                                           SCHEMA_CACHE_CLEAR_SOURCE);
     }
 
     @Override
