@@ -111,9 +111,9 @@ public class StandardAuthManagerV2 implements AuthManager {
      * Update creator from current context (from TaskManager ThreadLocal or direct call)
      */
     private AuthElement updateCreator(AuthElement elem) {
-        String username = currentUsername();
-        if (username != null && elem.creator() == null) {
-            elem.creator(username);
+        if (elem.creator() == null) {
+            String username = currentUsername();
+            elem.creator(username != null ? username : "system");
         }
         return elem;
     }
@@ -201,6 +201,7 @@ public class StandardAuthManagerV2 implements AuthManager {
 
         try {
             user.create(user.update());
+            updateCreator(user);
             this.metaManager.createUser(user);
 
             // Update cache after successful creation
@@ -375,6 +376,7 @@ public class StandardAuthManagerV2 implements AuthManager {
     public Id createGroup(HugeGroup group) {
         try {
             group.create(group.update());
+            updateCreator(group);
             this.metaManager.createGroup(group);
             Id result = IdGenerator.of(group.name());
             group.id(result);
@@ -462,6 +464,7 @@ public class StandardAuthManagerV2 implements AuthManager {
     public Id createTarget(HugeTarget target) {
         try {
             target.create(target.update());
+            updateCreator(target);
             Id result = this.metaManager.createTarget(graphSpace, target);
             this.invalidateUserCache();
             return result;
@@ -549,6 +552,7 @@ public class StandardAuthManagerV2 implements AuthManager {
     public Id createBelong(HugeBelong belong) {
         try {
             belong.create(belong.update());
+            updateCreator(belong);
             this.invalidateUserCache();
             return this.metaManager.createBelong(graphSpace, belong);
         } catch (IOException e) {
@@ -663,6 +667,7 @@ public class StandardAuthManagerV2 implements AuthManager {
     public Id createAccess(HugeAccess access) {
         try {
             access.create(access.update());
+            updateCreator(access);
             Id result = this.metaManager.createAccess(graphSpace, access);
             this.invalidateUserCache();
             return result;
