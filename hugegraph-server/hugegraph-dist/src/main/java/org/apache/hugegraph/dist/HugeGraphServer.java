@@ -63,8 +63,23 @@ public class HugeGraphServer {
         PdMetaDriver.PDAuthConfig.setAuthority(
                 ServiceConstant.SERVICE_NAME,
                 ServiceConstant.AUTHORITY);
+
+        // Prepare GremlinServer (registers GRAPH_CREATE listener) BEFORE
+        // RestServer starts loading graphs from PD/meta. This ensures that
+        // graphs loaded during RestServer initialization are captured by
+        // ContextGremlinServer's listener and injected into Gremlin's bindings.
+        GremlinServer preparedGremlinServer;
         try {
-            // Start HugeRestServer
+            preparedGremlinServer = HugeGremlinServer.prepare(
+                    gremlinServerConf, graphsDir, hub);
+        } catch (Throwable e) {
+            LOG.error("HugeGremlinServer prepare error: ", e);
+            throw e;
+        }
+
+        try {
+            // Start HugeRestServer (loads graphs from PD; events go to
+            // ContextGremlinServer which is already listening)
             this.restServer = HugeRestServer.start(restServerConf, hub);
         } catch (Throwable e) {
             LOG.error("HugeRestServer start error: ", e);
@@ -72,9 +87,9 @@ public class HugeGraphServer {
         }
 
         try {
-            // Start GremlinServer
-            this.gremlinServer = HugeGremlinServer.start(gremlinServerConf,
-                                                         graphsDir, hub);
+            // Now start the pre-prepared GremlinServer
+            this.gremlinServer = HugeGremlinServer.startPrepared(
+                    preparedGremlinServer);
         } catch (Throwable e) {
             LOG.error("HugeGremlinServer start error: ", e);
             try {
