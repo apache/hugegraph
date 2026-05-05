@@ -17,13 +17,12 @@
 #
 set -ev
 
-HOME_DIR=$(pwd)
-TRAVIS_DIR=$(dirname $0)
+TRAVIS_DIR=$(cd "$(dirname "$0")" && pwd)
 BASE_DIR=$1
 BACKEND=$2
 JACOCO_PORT=$3
 
-JACOCO_DIR=${HOME_DIR}/${TRAVIS_DIR}
+JACOCO_DIR=${TRAVIS_DIR}
 JACOCO_JAR=${JACOCO_DIR}/jacocoagent.jar
 
 BIN=$BASE_DIR/bin
