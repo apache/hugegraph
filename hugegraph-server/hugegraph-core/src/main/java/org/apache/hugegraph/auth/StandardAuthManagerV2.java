@@ -1538,8 +1538,14 @@ public class StandardAuthManagerV2 implements AuthManager {
     public void unsetDefaultGraph(String graphSpace, String graph, String user) {
         String role = graph + DEFAULT_SETTER_ROLE_KEY;
         String belongId = this.metaManager.belongId(user, role);
+        Id id = IdGenerator.of(belongId);
+        // Check if belong exists before attempting to delete to make this operation idempotent
+        if (!this.metaManager.existBelong(graphSpace, id)) {
+            // Already unset, treat as success (idempotent behavior)
+            return;
+        }
         try {
-            this.metaManager.deleteBelong(graphSpace, IdGenerator.of(belongId));
+            this.metaManager.deleteBelong(graphSpace, id);
             this.invalidateUserCache();
         } catch (Exception e) {
             throw new HugeException("Exception occurs when unset default " +
