@@ -21,7 +21,6 @@ import java.io.File;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -149,14 +148,9 @@ public class GraphsAPI extends API {
 
         AuthManager authManager = manager.authManager();
         String user = HugeGraphAuthProxy.username();
-        // Default graph concept relies on PD meta storage; in non-PD standalone
-        // mode there is no persistent store for this, so we gracefully degrade.
-        Map<String, Date> defaultGraphs;
-        if (manager.isPDEnabled()) {
-            defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
-        } else {
-            defaultGraphs = new HashMap<>();
-        }
+        // Both StandardAuthManager (standalone) and StandardAuthManagerV2 (PD)
+        // implement getDefaultGraph(); route through authManager unconditionally.
+        Map<String, Date> defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
 
         Set<String> graphs = manager.graphs(graphSpace);
         List<Map<String, Object>> profiles = new ArrayList<>();
@@ -241,11 +235,6 @@ public class GraphsAPI extends API {
         LOG.debug("Set default graph '{}' in graph space '{}'", name, graphSpace);
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
-        // Default graph persistence requires PD meta storage.
-        // In non-PD (standalone RocksDB) mode, gracefully return empty.
-        if (!manager.isPDEnabled()) {
-            return ImmutableMap.of("default_graph", Collections.emptySet());
-        }
         String user = HugeGraphAuthProxy.username();
         AuthManager authManager = manager.authManager();
         authManager.setDefaultGraph(graphSpace, name, user);
@@ -266,11 +255,6 @@ public class GraphsAPI extends API {
         LOG.debug("Unset default graph '{}' in graph space '{}'", name, graphSpace);
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
-        // Default graph persistence requires PD meta storage.
-        // In non-PD (standalone RocksDB) mode, gracefully return empty.
-        if (!manager.isPDEnabled()) {
-            return ImmutableMap.of("default_graph", Collections.emptySet());
-        }
         String user = HugeGraphAuthProxy.username();
         AuthManager authManager = manager.authManager();
         authManager.unsetDefaultGraph(graphSpace, name, user);
@@ -287,11 +271,6 @@ public class GraphsAPI extends API {
                                           @Parameter(description = "The graph space name")
                                           @PathParam("graphspace") String graphSpace) {
         LOG.debug("Get default graphs in graph space '{}'", graphSpace);
-        // Default graph persistence requires PD meta storage.
-        // In non-PD (standalone RocksDB) mode, return empty set.
-        if (!manager.isPDEnabled()) {
-            return ImmutableMap.of("default_graph", Collections.emptySet());
-        }
         String user = HugeGraphAuthProxy.username();
         AuthManager authManager = manager.authManager();
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
