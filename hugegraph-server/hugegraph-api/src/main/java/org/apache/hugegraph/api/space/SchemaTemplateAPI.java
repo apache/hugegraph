@@ -27,7 +27,6 @@ import org.apache.hugegraph.api.filter.StatusFilter;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
-import org.apache.hugegraph.server.RestServer;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
@@ -57,7 +56,7 @@ import jakarta.ws.rs.core.SecurityContext;
 @Tag(name = "SchemaTemplateAPI")
 public class SchemaTemplateAPI extends API {
 
-    private static final Logger LOG = Log.logger(RestServer.class);
+    private static final Logger LOG = Log.logger(SchemaTemplateAPI.class);
 
     @GET
     @Timed

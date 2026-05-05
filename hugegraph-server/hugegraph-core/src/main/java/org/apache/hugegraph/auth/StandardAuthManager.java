@@ -859,27 +859,14 @@ public class StandardAuthManager implements AuthManager {
             markerGroup.creator(user);
             this.groups.add(markerGroup);
         }
-        Id userId = IdGenerator.of(user);
-        HugeBelong belong = new HugeBelong(userId, groupId);
-        belong.creator(user);
-        Id belongId = IdGenerator.of(userId.asString() + "->ug->" + groupId.asString());
-        if (!this.belong.exists(belongId)) {
-            this.belong.add(belong);
-        } else {
-            belong.id(belongId);
-            this.belong.update(belong);
-        }
+        createBelongBinding(user, groupId);
     }
 
     @Override
     public void unsetDefaultGraph(String graphSpace, String graph, String user) {
         String markerName = defaultGraphGroupName(graphSpace, graph);
         Id groupId = IdGenerator.of(markerName);
-        Id userId = IdGenerator.of(user);
-        Id belongId = IdGenerator.of(userId.asString() + "->ug->" + groupId.asString());
-        if (this.belong.exists(belongId)) {
-            this.belong.delete(belongId);
-        }
+        removeBelongBinding(user, groupId);
     }
 
     @Override
@@ -929,35 +916,38 @@ public class StandardAuthManager implements AuthManager {
         return groupId;
     }
 
+    private HugeBelong findBelongBinding(String owner, Id groupId) {
+        Id userId = IdGenerator.of(owner);
+        List<HugeBelong> belongs = this.belong.list(userId, Directions.OUT,
+                                                     HugeBelong.P.BELONG, -1);
+        for (HugeBelong b : belongs) {
+            if (groupId.equals(b.target())) {
+                return b;
+            }
+        }
+        return null;
+    }
+
     private Id createBelongBinding(String owner, Id groupId) {
+        HugeBelong existing = findBelongBinding(owner, groupId);
+        if (existing != null) {
+            return existing.id();
+        }
         Id userId = IdGenerator.of(owner);
         HugeBelong belong = new HugeBelong(userId, groupId);
         belong.creator(owner);
-        Id belongId = IdGenerator.of(
-                userId.asString() + "->ug->" + groupId.asString());
-        if (!this.belong.exists(belongId)) {
-            this.belong.add(belong);
-        } else {
-            belong.id(belongId);
-            this.belong.update(belong);
-        }
-        return belongId;
+        return this.belong.add(belong);
     }
 
     private void removeBelongBinding(String owner, Id groupId) {
-        Id userId = IdGenerator.of(owner);
-        Id belongId = IdGenerator.of(
-                userId.asString() + "->ug->" + groupId.asString());
-        if (this.belong.exists(belongId)) {
-            this.belong.delete(belongId);
+        HugeBelong existing = findBelongBinding(owner, groupId);
+        if (existing != null) {
+            this.belong.delete(existing.id());
         }
     }
 
     private boolean existsBelongBinding(String owner, Id groupId) {
-        Id userId = IdGenerator.of(owner);
-        Id belongId = IdGenerator.of(
-                userId.asString() + "->ug->" + groupId.asString());
-        return this.belong.exists(belongId);
+        return findBelongBinding(owner, groupId) != null;
     }
 
     @Override

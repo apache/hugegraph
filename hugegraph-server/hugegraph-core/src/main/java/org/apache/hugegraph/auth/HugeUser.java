@@ -290,6 +290,8 @@ public class HugeUser extends Entity {
         @Override
         public void initSchemaIfNeeded() {
             if (this.existVertexLabel(this.label)) {
+                // Schema already exists: do incremental upgrade for new properties
+                upgradeSchemaIfNeeded();
                 return;
             }
 
@@ -304,6 +306,16 @@ public class HugeUser extends Entity {
                                     .enableLabelIndex(true)
                                     .build();
             this.graph.schemaTransaction().addVertexLabel(label);
+        }
+
+        private void upgradeSchemaIfNeeded() {
+            // Add user_nickname property key if missing (new in this version)
+            if (!this.graph.graph().existsPropertyKey(P.NICKNAME)) {
+                createPropertyKey(P.NICKNAME);
+                VertexLabel vl = this.graph.graph().vertexLabel(this.label);
+                vl.nullableKey(this.graph.graph().propertyKey(P.NICKNAME).id());
+                this.graph.schemaTransaction().updateVertexLabel(vl);
+            }
         }
 
         private String[] initProperties() {
