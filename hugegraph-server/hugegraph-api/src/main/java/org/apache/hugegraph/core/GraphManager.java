@@ -2210,6 +2210,8 @@ public final class GraphManager {
                                     String nickname) {
         // Always update the in-memory graph instance first
         HugeGraph g = this.graph(graphSpace, graphName);
+        // Capture the old nickname so we can restore it on failure
+        String oldNickname = g != null ? g.nickname() : null;
         if (g != null) {
             g.nickname(nickname);
         }
@@ -2226,10 +2228,10 @@ public final class GraphManager {
                 this.metaManager.notifyGraphUpdate(graphSpace, graphName);
             }
         } catch (Exception e) {
-            // Roll back the in-memory change so that the runtime state stays
-            // consistent with what was actually persisted.
+            // Roll back the in-memory change to the previous value so that
+            // runtime state stays consistent with what was actually persisted.
             if (g != null) {
-                g.nickname(null);
+                g.nickname(oldNickname);
             }
             throw new HugeException("Failed to persist nickname for graph " +
                                     "'%s/%s'", e, graphSpace, graphName);

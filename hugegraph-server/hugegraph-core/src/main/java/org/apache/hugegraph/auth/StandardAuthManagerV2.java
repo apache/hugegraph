@@ -1519,6 +1519,13 @@ public class StandardAuthManagerV2 implements AuthManager {
     @Override
     public void setDefaultGraph(String graphSpace, String graph, String user) {
         try {
+            String role = graph + DEFAULT_SETTER_ROLE_KEY;
+            String belongId = this.metaManager.belongId(user, role);
+            Id id = IdGenerator.of(belongId);
+            // Idempotent: if binding already exists, treat as success
+            if (this.metaManager.existBelong(graphSpace, id)) {
+                return;
+            }
             HugeBelong belong = new HugeBelong(graphSpace,
                                                IdGenerator.of(user),
                                                IdGenerator.of(graph +
@@ -1577,15 +1584,24 @@ public class StandardAuthManagerV2 implements AuthManager {
                 getGraphDefaultRole(graph, role.toString()) : role.toString();
         try {
             HugeBelong belong;
+            String link;
             if (HugeGroup.isGroup(owner)) {
                 belong = new HugeBelong(graphSpace, null,
                                         IdGenerator.of(owner),
                                         IdGenerator.of(roleName),
                                         HugeBelong.GR);
+                link = HugeBelong.GR;
             } else {
                 belong = new HugeBelong(graphSpace, IdGenerator.of(owner),
                                         null, IdGenerator.of(roleName),
                                         HugeBelong.UR);
+                link = HugeBelong.UR;
+            }
+
+            // Idempotent: if binding already exists, treat as success
+            String belongId = this.metaManager.belongId(owner, roleName, link);
+            if (this.metaManager.existBelong(graphSpace, IdGenerator.of(belongId))) {
+                return IdGenerator.of(belongId);
             }
 
             this.tryInitDefaultRole(graphSpace, roleName, graph);

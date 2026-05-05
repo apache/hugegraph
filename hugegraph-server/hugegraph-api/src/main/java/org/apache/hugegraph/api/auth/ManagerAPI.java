@@ -267,7 +267,7 @@ public class ManagerAPI extends API {
     @Path("default")
     @Consumes(APPLICATION_JSON)
     public String checkDefaultRole(@Context GraphManager manager,
-                                   @QueryParam("graphspace") String graphSpace,
+                                   @PathParam("graphspace") String graphSpace,
                                    @QueryParam("role") String role,
                                    @QueryParam("graph") String graph) {
         LOG.debug("check if current user is default role: {} {} {}",

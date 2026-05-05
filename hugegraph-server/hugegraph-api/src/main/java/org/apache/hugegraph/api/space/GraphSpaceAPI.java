@@ -26,7 +26,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.api.API;
@@ -41,7 +41,6 @@ import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.Log;
-import org.apache.logging.log4j.util.Strings;
 import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
@@ -363,13 +362,13 @@ public class GraphSpaceAPI extends API {
                 }
 
                 String nickname = (String) graphSpaceMap.get("nickname");
-                if (!Strings.isEmpty(nickname)) {
+                if (!StringUtils.isEmpty(nickname)) {
                     GraphManager.checkNickname(nickname);
                     exist.nickname(nickname);
                 }
 
                 String description = (String) graphSpaceMap.get("description");
-                if (!Strings.isEmpty(description)) {
+                if (!StringUtils.isEmpty(description)) {
                     exist.description(description);
                 }
 
@@ -410,31 +409,31 @@ public class GraphSpaceAPI extends API {
                 String oltpNamespace =
                         (String) graphSpaceMap.get("oltp_namespace");
                 if (oltpNamespace != null &&
-                    !Strings.isEmpty(oltpNamespace)) {
+                    !StringUtils.isEmpty(oltpNamespace)) {
                     exist.oltpNamespace(oltpNamespace);
                 }
                 String olapNamespace =
                         (String) graphSpaceMap.get("olap_namespace");
                 if (olapNamespace != null &&
-                    !Strings.isEmpty(olapNamespace)) {
+                    !StringUtils.isEmpty(olapNamespace)) {
                     exist.olapNamespace(olapNamespace);
                 }
                 String storageNamespace =
                         (String) graphSpaceMap.get("storage_namespace");
                 if (storageNamespace != null &&
-                    !Strings.isEmpty(storageNamespace)) {
+                    !StringUtils.isEmpty(storageNamespace)) {
                     exist.storageNamespace(storageNamespace);
                 }
 
                 String operatorImagePath = (String) graphSpaceMap
                         .getOrDefault("operator_image_path", "");
-                if (!Strings.isEmpty(operatorImagePath)) {
+                if (!StringUtils.isEmpty(operatorImagePath)) {
                     exist.operatorImagePath(operatorImagePath);
                 }
 
                 String internalAlgorithmImageUrl = (String) graphSpaceMap
                         .getOrDefault("internal_algorithm_image_url", "");
-                if (!Strings.isEmpty(internalAlgorithmImageUrl)) {
+                if (!StringUtils.isEmpty(internalAlgorithmImageUrl)) {
                     exist.internalAlgorithmImageUrl(internalAlgorithmImageUrl);
                 }
 

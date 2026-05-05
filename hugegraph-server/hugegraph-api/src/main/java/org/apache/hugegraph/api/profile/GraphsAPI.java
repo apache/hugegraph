@@ -46,7 +46,6 @@ import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.Log;
-import org.apache.logging.log4j.util.Strings;
 import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
@@ -213,17 +212,6 @@ public class GraphsAPI extends API {
         return defaultProfiles;
     }
 
-    private static boolean isPrefix(Map<String, Object> profile, String prefix) {
-        if (StringUtils.isEmpty(prefix)) {
-            return true;
-        }
-        // graph name or nickname is not empty
-        String name = profile.get("name").toString();
-        Object nicknameObj = profile.get("nickname");
-        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
-        return name.startsWith(prefix) || nickname.startsWith(prefix);
-    }
-
     @GET
     @Timed
     @Path("{name}")
@@ -358,7 +346,8 @@ public class GraphsAPI extends API {
                 value = actionMap.get(UPDATE);
                 E.checkArgument(value instanceof Map,
                                 "The '%s' must be map, but got %s",
-                                UPDATE, value.getClass());
+                                UPDATE,
+                                value == null ? "null" : value.getClass().getSimpleName());
                 @SuppressWarnings("unchecked")
                 Map<String, Object> graphMap = (Map<String, Object>) value;
                 String graphName = (String) graphMap.get("name");
@@ -367,7 +356,7 @@ public class GraphsAPI extends API {
                                 graphName, name);
                 HugeGraph exist = graph(manager, graphSpace, name);
                 String nickname = (String) graphMap.get("nickname");
-                if (!Strings.isEmpty(nickname)) {
+                if (!StringUtils.isEmpty(nickname)) {
                     GraphManager.checkNickname(nickname);
                     E.checkArgument(!manager.isExistedGraphNickname(graphSpace, nickname) ||
                                     nickname.equals(exist.nickname()),
@@ -471,7 +460,7 @@ public class GraphsAPI extends API {
         String description = (configs != null) ?
                              (String) configs.get(GRAPH_DESCRIPTION) : null;
         if (description == null) {
-            description = Strings.EMPTY;
+            description = StringUtils.EMPTY;
         }
         Object result = ImmutableMap.of("name", graph.name(),
                                         "nickname", graph.nickname(),
