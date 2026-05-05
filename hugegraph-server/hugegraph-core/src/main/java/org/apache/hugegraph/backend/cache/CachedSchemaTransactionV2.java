@@ -52,9 +52,10 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
     // MetaDriver doesn't expose unlisten, register the meta listener once.
     // Lifecycle: this JVM-global flag is intentionally never reset by
-    // unlistenChanges() (the underlying gRPC watch is process-wide), but IS
-    // reset on transport reconnect via resetMetaListenerForReconnect() so a
-    // new watch is installed after the old one was silently dropped.
+    // unlistenChanges() (the underlying gRPC watch is process-wide). If that
+    // watch is silently dropped after a transport reconnect, recovery is not
+    // automatic; resetMetaListenerForReconnect() is only a manual hook to let
+    // the next schema operation install a fresh watch.
     private static final AtomicBoolean metaEventListenerRegistered =
             new AtomicBoolean(false);
 
@@ -251,11 +252,13 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     /**
-     * Reset the JVM-global meta listener flag after a MetaManager transport
-     * reconnect. The underlying gRPC watch is silently dropped on reconnect;
-     * without this reset {@link #metaEventListenerRegistered} would stay
-     * {@code true} forever and this JVM would stop receiving cross-node
-     * schema cache clear events with no error or warning.
+     * Manually reset the JVM-global meta listener flag after detecting that
+     * the MetaManager transport reconnected and dropped the underlying gRPC
+     * watch. This method is not wired to a MetaManager/MetaDriver reconnect
+     * callback today; callers must invoke it explicitly after detecting that
+     * condition. Without such a manual reset {@link #metaEventListenerRegistered}
+     * would stay {@code true} forever and this JVM would stop receiving
+     * cross-node schema cache clear events with no error or warning.
      *
      * <p>TODO: wire this into MetaManager once it exposes a transport
      * reconnect callback (e.g. {@code listenReconnect} /

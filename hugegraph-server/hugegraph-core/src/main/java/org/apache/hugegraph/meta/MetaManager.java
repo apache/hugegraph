@@ -1350,6 +1350,10 @@ public class MetaManager {
             if (StringUtils.isEmpty(value)) {
                 return null;
             }
+            // Compatibility: events published before source-id support stored
+            // only the graph name as a plain string. Keep accepting that format
+            // so mixed-version clusters can consume old/new schema-cache-clear
+            // events during rolling upgrades.
             if (value.charAt(0) != '{') {
                 return new SchemaCacheClearEvent(value, null);
             }
