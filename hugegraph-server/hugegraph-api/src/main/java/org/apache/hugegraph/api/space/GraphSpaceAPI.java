@@ -231,8 +231,13 @@ public class GraphSpaceAPI extends API {
             throw new ForbiddenException("Forbidden to delete role " + role);
         }
 
-        HugeDefaultRole defaultRole =
-                HugeDefaultRole.valueOf(role.toUpperCase());
+        HugeDefaultRole defaultRole;
+        try {
+            defaultRole = HugeDefaultRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", role);
+            defaultRole = null; // unreachable, satisfies compiler
+        }
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");

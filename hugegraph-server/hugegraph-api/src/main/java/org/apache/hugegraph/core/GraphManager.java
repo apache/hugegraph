@@ -2226,8 +2226,13 @@ public final class GraphManager {
                 this.metaManager.notifyGraphUpdate(graphSpace, graphName);
             }
         } catch (Exception e) {
-            LOG.warn("Failed to persist nickname for graph '{}/{}': {}",
-                     graphSpace, graphName, e.getMessage());
+            // Roll back the in-memory change so that the runtime state stays
+            // consistent with what was actually persisted.
+            if (g != null) {
+                g.nickname(null);
+            }
+            throw new HugeException("Failed to persist nickname for graph " +
+                                    "'%s/%s'", e, graphSpace, graphName);
         }
     }
 
@@ -2240,19 +2245,35 @@ public final class GraphManager {
     }
 
     public Set<String> schemaTemplates(String graphSpace) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
         return this.metaManager.schemaTemplates(graphSpace);
     }
 
     public void createSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
         checkSchemaTemplateName(template.name());
         this.metaManager.addSchemaTemplate(graphSpace, template);
     }
 
     public void dropSchemaTemplate(String graphSpace, String name) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
         this.metaManager.removeSchemaTemplate(graphSpace, name);
     }
 
     public void updateSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
         this.metaManager.updateSchemaTemplate(graphSpace, template);
     }
 

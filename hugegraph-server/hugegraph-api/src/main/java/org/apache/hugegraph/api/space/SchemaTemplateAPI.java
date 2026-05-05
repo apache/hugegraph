@@ -66,6 +66,7 @@ public class SchemaTemplateAPI extends API {
     public Object list(@Context GraphManager manager,
                        @PathParam("graphspace") String graphSpace) {
         LOG.debug("List all schema templates for graph space {}", graphSpace);
+        ensurePdModeEnabled(manager);
 
         Set<String> templates = manager.schemaTemplates(graphSpace);
         return ImmutableMap.of("schema_templates", templates);
@@ -81,6 +82,7 @@ public class SchemaTemplateAPI extends API {
                       @PathParam("name") String name) {
         LOG.debug("Get schema template by name '{}' for graph space {}",
                   name, graphSpace);
+        ensurePdModeEnabled(manager);
 
         return manager.serializer().writeSchemaTemplate(
                        schemaTemplate(manager, graphSpace, name));
@@ -97,6 +99,9 @@ public class SchemaTemplateAPI extends API {
                          JsonSchemaTemplate jsonSchemaTemplate) {
         LOG.debug("Create schema template {} for graph space: '{}'",
                   jsonSchemaTemplate, graphSpace);
+        ensurePdModeEnabled(manager);
+        E.checkArgumentNotNull(jsonSchemaTemplate,
+                               "Request body cannot be null or empty");
         jsonSchemaTemplate.checkCreate(false);
 
         E.checkArgument(manager.graphSpace(graphSpace) != null,
@@ -120,6 +125,7 @@ public class SchemaTemplateAPI extends API {
                        @Context SecurityContext sc) {
         LOG.debug("Remove schema template by name '{}' for graph space '{}'",
                   name, graphSpace);
+        ensurePdModeEnabled(manager);
         E.checkArgument(manager.graphSpace(graphSpace) != null,
                         "The graph space '%s' is not exist", graphSpace);
 
@@ -148,6 +154,9 @@ public class SchemaTemplateAPI extends API {
                        @PathParam("name") String name,
                        @Context SecurityContext sc,
                        JsonSchemaTemplate jsonSchemaTemplate) {
+        ensurePdModeEnabled(manager);
+        E.checkArgumentNotNull(jsonSchemaTemplate,
+                               "Request body cannot be null or empty");
         jsonSchemaTemplate.checkUpdate();
 
         SchemaTemplate old = schemaTemplate(manager, graphSpace, name);

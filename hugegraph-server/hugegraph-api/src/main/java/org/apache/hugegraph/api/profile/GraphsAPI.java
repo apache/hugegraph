@@ -184,7 +184,13 @@ public class GraphsAPI extends API {
                 boolean isDefault = defaultGraphs.containsKey(graph);
                 profile.put("default", isDefault);
                 if (isDefault) {
-                    profile.put("default_update_time", defaultGraphs.get(graph));
+                    Date defaultUpdateTime = defaultGraphs.get(graph);
+                    if (defaultUpdateTime != null) {
+                        LocalDateTime ldt = defaultUpdateTime.toInstant()
+                                .atZone(ZoneId.systemDefault()).toLocalDateTime();
+                        profile.put("default_update_time",
+                                    DATE_FORMATTER.format(ldt));
+                    }
                 }
                 
                 Date createTime = hg.createTime();
@@ -342,7 +348,7 @@ public class GraphsAPI extends API {
         Object value = actionMap.get(GRAPH_ACTION);
         E.checkArgument(value instanceof String,
                         "Invalid action type '%s', must be string",
-                        value.getClass());
+                        value == null ? "null" : value.getClass().getSimpleName());
         String action = (String) value;
         switch (action) {
             case UPDATE:
