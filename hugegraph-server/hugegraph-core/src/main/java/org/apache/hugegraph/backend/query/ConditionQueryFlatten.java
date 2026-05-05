@@ -115,12 +115,23 @@ public final class ConditionQueryFlatten {
                 }
             case AND:
                 Condition.And and = (Condition.And) condition;
-                return new Condition.And(flattenIn(and.left(), supportIn),
-                                         flattenIn(and.right(), supportIn));
+                Condition andLeft = flattenIn(and.left(), supportIn);
+                Condition andRight = flattenIn(and.right(), supportIn);
+                if (andLeft == null || andRight == null) {
+                    return null;
+                }
+                return new Condition.And(andLeft, andRight);
             case OR:
                 Condition.Or or = (Condition.Or) condition;
-                return new Condition.Or(flattenIn(or.left(), supportIn),
-                                        flattenIn(or.right(), supportIn));
+                Condition orLeft = flattenIn(or.left(), supportIn);
+                Condition orRight = flattenIn(or.right(), supportIn);
+                if (orLeft == null) {
+                    return orRight;
+                }
+                if (orRight == null) {
+                    return orLeft;
+                }
+                return new Condition.Or(orLeft, orRight);
             default:
                 throw new AssertionError(String.format("Wrong condition type: '%s'",
                                                        condition.type()));
