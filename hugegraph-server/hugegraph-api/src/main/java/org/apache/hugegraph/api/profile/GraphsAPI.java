@@ -207,6 +207,16 @@ public class GraphsAPI extends API {
         return defaultProfiles;
     }
 
+    private static boolean isPrefix(Map<String, Object> profile, String prefix) {
+        if (StringUtils.isEmpty(prefix)) {
+            return true;
+        }
+        // graph name or nickname is not empty
+        String name = profile.get("name").toString();
+        Object nicknameObj = profile.get("nickname");
+        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
+        return name.startsWith(prefix) || nickname.startsWith(prefix);
+    }
 
     @GET
     @Timed
