@@ -1,110 +1,107 @@
 # AGENTS.md
 
-Development reference for AI coding agents. See [README.md](README.md) if the task really needs project overview or architecture context.
+Single source of truth for AI coding agents.
+README.md covers human-facing deployment/ecosystem context; only consult it on demand.
 
-## Key Architectural Patterns
+## Stack & Modules
 
-1. **Pluggable Backend Architecture**: Storage backends implement the `BackendStore` interface — new backends require no core changes. Active backends: RocksDB (default/embedded), HStore (distributed)
-2. **gRPC Communication**: All distributed components (PD, Store, Server) communicate via gRPC. Proto definitions in `*/grpc/` directories
-3. **Multi-Language Queries**: Native Gremlin support(Main) + OpenCypher translation(Backup)
+Apache HugeGraph — Apache TinkerPop 3 compliant graph database.
+Java 11+, Maven 3.5+. Version managed via `${revision}` (currently `1.8.0`).
 
-## Build Commands
+```
+Client (Gremlin / Cypher / REST)
+   │
+Server = hugegraph-server
+   ├─ hugegraph-api     REST, Gremlin/Cypher, auth
+   ├─ hugegraph-core    engine, schema, traversal, BackendStore interface
+   └─ Backend impls     rocksdb (default, embedded) │ hstore (distributed)
+                                                    ▼
+                           hugegraph-pd (placement) + hugegraph-store (Raft)
+```
 
-Requires Java 11 for compilation and testing.
+Top-level modules: `hugegraph-server` · `hugegraph-pd` · `hugegraph-store` ·
+`hugegraph-commons` (shared utils & RPC) · `hugegraph-struct` (data types; dep of PD/Store).
+
+Server submodules worth knowing: `hugegraph-core`, `hugegraph-api`,
+`hugegraph-rocksdb`, `hugegraph-hstore`, `hugegraph-test`, `hugegraph-dist`.
+
+## Code Search Anchors
+
+| Area | Path |
+|---|---|
+| Graph engine | `hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/` |
+| REST APIs | `hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/api/` |
+| Backend interface | `hugegraph-server/hugegraph-core/.../backend/store/BackendStore.java` |
+| Auth | `hugegraph-server/hugegraph-api/.../api/auth/` |
+| gRPC protos | `hugegraph-{pd,store}/hg-{pd,store}-grpc/src/main/proto/` |
+
+Config roots (under each dist module's `src/assembly/static/conf/`):
+- Server — `hugegraph.properties`, `rest-server.properties`, `gremlin-server.yaml`
+- PD / Store — `application.yml`
+
+## Build
 
 ```bash
-# Full build (all modules)
+# All modules
 mvn clean install -DskipTests
 
-# Single module (e.g., server only)
+# Single module
 mvn clean install -pl hugegraph-server -am -DskipTests
 ```
 
+Distributed build order (for HStore-enabled dev):
+
+```bash
+mvn install -pl hugegraph-struct -am -DskipTests         # 1. shared data types
+mvn clean package -pl hugegraph-pd -am -DskipTests       # 2. placement driver
+mvn clean package -pl hugegraph-store -am -DskipTests    # 3. distributed storage
+mvn clean package -pl hugegraph-server -am -DskipTests   # 4. server
+```
+
+Runtime scripts (human-run) live in `hugegraph-server/hugegraph-dist/src/assembly/static/bin/`:
+`init-store.sh`, `start-hugegraph.sh`, `stop-hugegraph.sh`.
+
 ## Testing
 
-All test commands target `hugegraph-server/hugegraph-test` with `-am` flag:
+Server tests implicitly prefix `mvn test -pl hugegraph-server/hugegraph-test -am`:
 
-| Profile | Command |
-|---------|---------|
-| Unit tests | `mvn test -P unit-test` |
-| Core tests | `mvn test -P core-test,rocksdb` |
-| API tests | `mvn test -P api-test,rocksdb` |
-| TinkerPop structure | `mvn test -P tinkerpop-structure-test,memory` |
-| TinkerPop process | `mvn test -P tinkerpop-process-test,memory` |
-| Single test class | `mvn test -P core-test,rocksdb -Dtest=YourTestClass` |
+| Profile | Suffix |
+|---|---|
+| Unit | `-P unit-test` |
+| Core | `-P core-test,rocksdb` (swap `rocksdb` for `memory` / `hbase`) |
+| API | `-P api-test,rocksdb` |
+| TinkerPop structure / process | `-P tinkerpop-{structure,process}-test,memory` |
+| Single class | `-P core-test,rocksdb -Dtest=YourTestClass` |
 
-All commands above implicitly start with `mvn test -pl hugegraph-server/hugegraph-test -am`.
-
-#### PD & Store Tests
+PD / Store tests (need `hugegraph-struct` installed first):
 
 ```bash
-# Build dependency first
 mvn install -pl hugegraph-struct -am -DskipTests
-
-mvn test -pl hugegraph-pd/hg-pd-test -am
-mvn test -pl hugegraph-store/hg-store-test -am
+mvn test -pl hugegraph-pd/hg-pd-test -am      # or hg-store-test
 ```
 
-## Development Conventions
+Before writing new tests, check existing suites under `hugegraph-server/hugegraph-test/`.
 
-- Any code change (bug fix or feature) must have sufficient test coverage for the affected logic
-- Check existing suites in `hugegraph-server/hugegraph-test` before writing new tests
+## Style & Pre-commit
 
-## Code Quality
+- Line 100, 4-space indent, LF, UTF-8, **no star imports**
+- Commit format: `feat|fix|refactor(module): msg`
+- Run before pushing:
+  ```bash
+  mvn editorconfig:format                         # enforce code style
+  mvn clean compile -Dmaven.javadoc.skip=true     # surface warnings
+  ```
 
-Run before every commit:
+## Cross-module notes
 
-```bash
-mvn editorconfig:format # Apply code style (root .editorconfig)
-mvn clean compile -Dmaven.javadoc.skip=true # Compile with warnings
-```
+- `.proto` edits: `mvn clean compile` regenerates gRPC stubs under
+  `target/generated-sources/protobuf/` (output packages `*/grpc/` are excluded from Apache RAT).
+- Adding a third-party dep: update `install-dist/release-docs/{LICENSE,NOTICE,licenses/}`
+  and `install-dist/scripts/dependency/known-dependencies.txt`.
+- `hugegraph-commons` is shared by every module; `hugegraph-struct` must precede PD/Store;
+  server backends depend on `hugegraph-core`.
 
-Key rules from `.editorconfig`: 100-char line limit, 4-space indent, LF endings, UTF-8.
+## Additional context files
 
-## Running the Server
-
-Scripts in `hugegraph-server/hugegraph-dist/src/assembly/static/bin/`:
-
-```bash
-bin/init-store.sh          # Initialize storage backend
-bin/start-hugegraph.sh     # Start server
-bin/stop-hugegraph.sh      # Stop server
-```
-
-## Configuration Files
-
-| Component | Path | Key Files |
-|-----------|------|-----------|
-| Server | `hugegraph-server/hugegraph-dist/src/assembly/static/conf/` | `hugegraph.properties`, `rest-server.properties`, `gremlin-server.yaml` |
-| PD | `hugegraph-pd/hg-pd-dist/src/assembly/static/conf/` | `application.yml` |
-| Store | `hugegraph-store/hg-store-dist/src/assembly/static/conf/` | `application.yml` |
-
-## Development Workflows
-
-### Adding Third-Party Dependencies
-
-Follow ASF compliance: update `install-dist/release-docs/` (LICENSE, NOTICE, licenses/) and `install-dist/scripts/dependency/known-dependencies.txt`.
-
-### gRPC Protocol Changes
-
-When modifying `.proto` files: Run `mvn clean compile` to regenerate gRPC stubs
-
-### Build Order & Cross-Module Dependencies
-
-For distributed development, build in this order:
-
-```bash
-mvn install -pl hugegraph-struct -am -DskipTests       # 1. Shared data structures
-mvn clean package -pl hugegraph-pd -am -DskipTests      # 2. Placement Driver
-mvn clean package -pl hugegraph-store -am -DskipTests    # 3. Distributed storage
-mvn clean package -pl hugegraph-server -am -DskipTests   # 4. Server
-```
-
-Key dependencies: `hugegraph-commons` is shared by all modules. `hugegraph-struct` must be built before PD and Store. Server backends depend on `hugegraph-core`.
-
-## Reference Documents
-
-| Resource | When to consult |
-|----------|-----------------|
-| `README.md` | Project overview, deployment topology, contribution guide |
-| `.serena/memories/` | Project agent memory; key files: `suggested_commands.md` (commands), `task_completion_checklist.md` (pre-commit checks) |
+`.serena/memories/` — notably `suggested_commands.md` and `task_completion_checklist.md`
+when a task needs depth beyond this file.
