@@ -342,6 +342,26 @@ public class ConditionQueryFlattenTest extends BaseUnitTest {
     }
 
     @Test
+    public void testFlattenWithImpossibleInInsideNestedAndOverOr() {
+        Id leftKey = IdGenerator.of("c1");
+        Id rightKey = IdGenerator.of("c2");
+
+        Condition left = Condition.in(leftKey, ImmutableList.of())
+                                  .or(Condition.eq(leftKey, "a"));
+        Condition right = Condition.eq(rightKey, "b");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(left.and(right));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(Condition.eq(leftKey, "a"),
+                                             right), actual);
+    }
+
+    @Test
     public void testFlattenWithConflictingNumericRangeKeepsQuery() {
         Id key = IdGenerator.of("c1");
 
