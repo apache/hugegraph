@@ -68,7 +68,7 @@ Server tests implicitly prefix `mvn test -pl hugegraph-server/hugegraph-test -am
 | Profile | Suffix |
 |---|---|
 | Unit | `-P unit-test` |
-| Core | `-P core-test,rocksdb` (swap `rocksdb` for `memory` / `hbase`) |
+| Core | `-P core-test,rocksdb` (swap `rocksdb` for `memory`) |
 | API | `-P api-test,rocksdb` |
 | TinkerPop structure / process | `-P tinkerpop-{structure,process}-test,memory` |
 | Single class | `-P core-test,rocksdb -Dtest=YourTestClass` |
@@ -77,7 +77,8 @@ PD / Store tests (need `hugegraph-struct` installed first):
 
 ```bash
 mvn install -pl hugegraph-struct -am -DskipTests
-mvn test -pl hugegraph-pd/hg-pd-test -am      # or hg-store-test
+mvn test -pl hugegraph-pd/hg-pd-test -am
+mvn test -pl hugegraph-store/hg-store-test -am
 ```
 
 Before writing new tests, check existing suites under `hugegraph-server/hugegraph-test/`.
