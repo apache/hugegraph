@@ -24,8 +24,6 @@ public interface Cache<K, V> {
 
     String ACTION_INVALID = "invalid";
     String ACTION_CLEAR = "clear";
-    String ACTION_INVALIDED = "invalided";
-    String ACTION_CLEARED = "cleared";
 
     V get(K id);
 

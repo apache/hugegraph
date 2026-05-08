@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraphParams;
@@ -42,6 +43,9 @@ import com.google.common.collect.ImmutableSet;
 
 public final class CachedSchemaTransaction extends SchemaTransaction {
 
+    private static final ConcurrentMap<String, EventListener>
+            SCHEMA_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
+
     private final Cache<Id, Object> idCache;
     private final Cache<Id, Object> nameCache;
 
@@ -49,6 +53,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
 
     private EventListener storeEventListener;
     private EventListener cacheEventListener;
+    private boolean registeredCacheEventListener;
 
     public CachedSchemaTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -111,7 +116,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
         this.store().provider().listen(this.storeEventListener);
 
         // Listen cache event: "cache"(invalid cache item)
-        this.cacheEventListener = event -> {
+        EventListener listener = event -> {
             LOG.debug("Graph {} received schema cache event: {}",
                       this.graph(), event);
             Object[] args = event.args();
@@ -132,8 +137,16 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
             return false;
         };
         EventHub schemaEventHub = this.params().schemaEventHub();
-        if (!schemaEventHub.containsListener(Events.CACHE)) {
+        String graph = this.params().spaceGraphName();
+        EventListener previous =
+                SCHEMA_CACHE_EVENT_LISTENERS.putIfAbsent(graph, listener);
+        if (previous == null) {
+            this.cacheEventListener = listener;
+            this.registeredCacheEventListener = true;
             schemaEventHub.listen(Events.CACHE, this.cacheEventListener);
+        } else {
+            this.cacheEventListener = previous;
+            this.registeredCacheEventListener = false;
         }
     }
 
@@ -143,17 +156,24 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
 
         // Unlisten cache event
         EventHub schemaEventHub = this.params().schemaEventHub();
-        schemaEventHub.unlisten(Events.CACHE, this.cacheEventListener);
+        if (this.registeredCacheEventListener) {
+            schemaEventHub.unlisten(Events.CACHE, this.cacheEventListener);
+            SCHEMA_CACHE_EVENT_LISTENERS.remove(this.params().spaceGraphName(),
+                                               this.cacheEventListener);
+            this.registeredCacheEventListener = false;
+        }
     }
 
     private void notifyChanges(String action, HugeType type, Id id) {
         EventHub graphEventHub = this.params().schemaEventHub();
-        graphEventHub.notify(Events.CACHE, action, type, id);
+        graphEventHub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                   action, type, id);
     }
 
     private void notifyChanges(String action, HugeType type) {
         EventHub graphEventHub = this.params().schemaEventHub();
-        graphEventHub.notify(Events.CACHE, action, type);
+        graphEventHub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                   action, type);
     }
 
     private void resetCachedAll(HugeType type) {
@@ -179,7 +199,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
         this.arrayCaches.clear();
 
         if (notify) {
-            this.notifyChanges(Cache.ACTION_CLEARED, null);
+            this.notifyChanges(Cache.ACTION_CLEAR, null);
         }
     }
 
@@ -221,7 +241,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
 
         this.updateCache(schema);
 
-        this.notifyChanges(Cache.ACTION_INVALIDED, schema.type(), schema.id());
+        this.notifyChanges(Cache.ACTION_INVALID, schema.type(), schema.id());
     }
 
     @Override
@@ -230,7 +250,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
 
         this.updateCache(schema);
 
-        this.notifyChanges(Cache.ACTION_INVALIDED, schema.type(), schema.id());
+        this.notifyChanges(Cache.ACTION_INVALID, schema.type(), schema.id());
     }
 
     @Override
@@ -283,7 +303,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
 
         this.invalidateCache(schema.type(), schema.id());
 
-        this.notifyChanges(Cache.ACTION_INVALIDED, schema.type(), schema.id());
+        this.notifyChanges(Cache.ACTION_INVALID, schema.type(), schema.id());
     }
 
     @Override

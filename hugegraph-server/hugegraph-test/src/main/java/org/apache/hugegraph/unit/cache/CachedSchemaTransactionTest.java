@@ -23,21 +23,26 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.Cache;
+import org.apache.hugegraph.backend.cache.CacheNotifier;
 import org.apache.hugegraph.backend.cache.CacheManager;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.managers.GraphMetaManager;
@@ -185,6 +190,127 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
                             cache.getPropertyKey("fake-pk-1").id());
         Assert.assertEquals("fake-pk-1",
                             cache.getPropertyKey(IdGenerator.of(1)).name());
+    }
+
+    @Test
+    public void testLegacySchemaChangeEmitsActionInvalid()
+            throws Exception {
+        CachedSchemaTransaction cache = this.cache();
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> action = new AtomicReference<>();
+        EventListener listener = event -> {
+            Object[] args = event.args();
+            if (args.length > 0) {
+                action.set((String) args[0]);
+                latch.countDown();
+            }
+            return true;
+        };
+        this.params.schemaEventHub().listen(Events.CACHE, listener);
+
+        try {
+            FakeObjects objects = new FakeObjects("unit-test");
+            cache.addPropertyKey(objects.newPropertyKey(IdGenerator.of(1),
+                                                        "fake-pk-1"));
+
+            Assert.assertTrue(latch.await(1L, TimeUnit.SECONDS));
+            Assert.assertEquals(Cache.ACTION_INVALID, action.get());
+            Assert.assertEquals(1L, Whitebox.invoke(cache, "idCache", "size"));
+            Assert.assertEquals(1L,
+                                Whitebox.invoke(cache, "nameCache", "size"));
+            Assert.assertEquals("fake-pk-1",
+                                cache.getPropertyKey(IdGenerator.of(1))
+                                     .name());
+            Assert.assertEquals(IdGenerator.of(1),
+                                cache.getPropertyKey("fake-pk-1").id());
+        } finally {
+            this.params.schemaEventHub().unlisten(Events.CACHE, listener);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testListenerRegistryClearedOnCloseAndRebuiltOnReopen()
+            throws Exception {
+        // Closing a graph must drop its entry from the per-graph listener
+        // registry so a subsequent transaction for the same graph can register
+        // a fresh listener instead of falsely reusing the closed reference.
+        Field field = CachedSchemaTransaction.class
+                .getDeclaredField("SCHEMA_CACHE_EVENT_LISTENERS");
+        field.setAccessible(true);
+        ConcurrentMap<String, EventListener> registry =
+                (ConcurrentMap<String, EventListener>) field.get(null);
+
+        String graphName = this.params.spaceGraphName();
+        Assert.assertTrue(registry.containsKey(graphName));
+        EventListener firstListener = registry.get(graphName);
+
+        this.cache().graph().clearBackend();
+        this.cache().graph().close();
+
+        Assert.assertFalse(registry.containsKey(graphName));
+
+        HugeGraph graph = HugeFactory.open(FakeObjects.newConfig());
+        this.params = Whitebox.getInternalState(graph, "params");
+        this.cache = new CachedSchemaTransaction(this.params,
+                                                 this.params.loadSchemaStore());
+
+        Assert.assertTrue(registry.containsKey(graphName));
+        Assert.assertNotSame(firstListener, registry.get(graphName));
+    }
+
+    @Test
+    public void testCacheNotifierLocalEventCallsProxyOnce()
+            throws Exception {
+        EventHub hub = new EventHub("schema-cache-notifier-test");
+        AtomicInteger proxyInvalidCalls = new AtomicInteger();
+        CacheNotifier proxy = newCacheNotifier(proxyInvalidCalls,
+                                               new AtomicInteger(),
+                                               new AtomicInteger());
+        CacheNotifier notifier = newSchemaCacheNotifier(hub, proxy);
+
+        try {
+            Assert.assertEquals(1, (int) hub.notify(Events.CACHE,
+                                                    Cache.ACTION_INVALID,
+                                                    HugeType.PROPERTY_KEY,
+                                                    IdGenerator.of(1))
+                                           .get());
+            Assert.assertEquals(1, proxyInvalidCalls.get());
+        } finally {
+            notifier.close();
+        }
+    }
+
+    @Test
+    public void testCacheNotifierRpcInvalidDoesNotLoopToProxy()
+            throws Exception {
+        EventHub hub = new EventHub("schema-cache-notifier-test");
+        AtomicInteger proxyInvalidCalls = new AtomicInteger();
+        AtomicInteger localInvalidCalls = new AtomicInteger();
+        CountDownLatch latch = new CountDownLatch(1);
+        CacheNotifier proxy = newCacheNotifier(proxyInvalidCalls,
+                                               new AtomicInteger(),
+                                               new AtomicInteger());
+        CacheNotifier notifier = newSchemaCacheNotifier(hub, proxy);
+        EventListener localListener = event -> {
+            event.checkArgs(String.class, HugeType.class, Id.class);
+            if (Cache.ACTION_INVALID.equals(event.args()[0])) {
+                localInvalidCalls.incrementAndGet();
+                latch.countDown();
+            }
+            return true;
+        };
+        hub.listen(Events.CACHE, localListener);
+
+        try {
+            notifier.invalid(HugeType.PROPERTY_KEY, IdGenerator.of(1));
+
+            Assert.assertTrue(latch.await(1L, TimeUnit.SECONDS));
+            Assert.assertEquals(1, localInvalidCalls.get());
+            Assert.assertEquals(0, proxyInvalidCalls.get());
+        } finally {
+            notifier.close();
+        }
     }
 
     @Test
@@ -682,6 +808,50 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         Object previous = f.get(MetaManager.instance());
         f.set(MetaManager.instance(), replacement);
         return previous;
+    }
+
+    private static CacheNotifier newSchemaCacheNotifier(EventHub hub,
+                                                        CacheNotifier proxy)
+                                                        throws Exception {
+        Class<?> clazz = Class.forName("org.apache.hugegraph." +
+                                       "StandardHugeGraph$" +
+                                       "HugeSchemaCacheNotifier");
+        Constructor<?> constructor = clazz.getDeclaredConstructor(
+                EventHub.class, CacheNotifier.class);
+        constructor.setAccessible(true);
+        return (CacheNotifier) constructor.newInstance(hub, proxy);
+    }
+
+    private static CacheNotifier newCacheNotifier(AtomicInteger invalidCalls,
+                                                  AtomicInteger invalid2Calls,
+                                                  AtomicInteger clearCalls) {
+        return new CacheNotifier() {
+
+            @Override
+            public void invalid(HugeType type, Id id) {
+                invalidCalls.incrementAndGet();
+            }
+
+            @Override
+            public void invalid2(HugeType type, Object[] ids) {
+                invalid2Calls.incrementAndGet();
+            }
+
+            @Override
+            public void clear(HugeType type) {
+                clearCalls.incrementAndGet();
+            }
+
+            @Override
+            public void reload() {
+                // pass
+            }
+
+            @Override
+            public void close() {
+                // pass
+            }
+        };
     }
 
     @SuppressWarnings("unchecked")

@@ -65,6 +65,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
 
     private EventListener storeEventListener;
     private EventListener cacheEventListener;
+    private boolean registeredCacheEventListener;
 
     public CachedGraphTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -138,7 +139,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         // Listen cache event: "cache"(invalid cache item)
-        this.cacheEventListener = event -> {
+        EventListener listener = event -> {
             LOG.debug("Graph {} received graph cache event: {}",
                       this.graph(), event);
             Object[] args = event.args();
@@ -184,17 +185,29 @@ public final class CachedGraphTransaction extends GraphTransaction {
             }
             return false;
         };
-        if (graphCacheListenStatus.putIfAbsent(this.params().spaceGraphName(), true) == null) {
-            EventHub graphEventHub = this.params().graphEventHub();
+        EventHub graphEventHub = this.params().graphEventHub();
+        EventListener previous =
+                graphCacheEventListeners.putIfAbsent(
+                        this.params().spaceGraphName(), listener);
+        if (previous == null) {
+            this.cacheEventListener = listener;
+            this.registeredCacheEventListener = true;
             graphEventHub.listen(Events.CACHE, this.cacheEventListener);
+        } else {
+            this.cacheEventListener = previous;
+            this.registeredCacheEventListener = false;
         }
     }
 
     private void unlistenChanges() {
         String graphName = this.params().spaceGraphName();
-        if (graphCacheListenStatus.remove(graphName) != null) {
+        if (this.registeredCacheEventListener) {
             EventHub graphEventHub = this.params().graphEventHub();
-            graphEventHub.unlisten(Events.CACHE, this.cacheEventListener);
+            if (graphCacheEventListeners.remove(graphName,
+                                                this.cacheEventListener)) {
+                graphEventHub.unlisten(Events.CACHE, this.cacheEventListener);
+            }
+            this.registeredCacheEventListener = false;
         }
         if (storeEventListenStatus.remove(graphName) != null) {
             this.store().provider().unlisten(this.storeEventListener);
@@ -203,12 +216,14 @@ public final class CachedGraphTransaction extends GraphTransaction {
 
     private void notifyChanges(String action, HugeType type, Id[] ids) {
         EventHub graphEventHub = this.params().graphEventHub();
-        graphEventHub.notify(Events.CACHE, action, type, ids);
+        graphEventHub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                   action, type, ids);
     }
 
     private void notifyChanges(String action, HugeType type) {
         EventHub graphEventHub = this.params().graphEventHub();
-        graphEventHub.notify(Events.CACHE, action, type);
+        graphEventHub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                   action, type);
     }
 
     public void clearCache(HugeType type, boolean notify) {
@@ -220,7 +235,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         if (notify) {
-            this.notifyChanges(Cache.ACTION_CLEARED, null);
+            this.notifyChanges(Cache.ACTION_CLEAR, null);
         }
     }
 
@@ -397,7 +412,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
                     this.verticesCache.invalidate(vertex.id());
                 }
                 if (vertexOffset > 0) {
-                    this.notifyChanges(Cache.ACTION_INVALIDED,
+                    this.notifyChanges(Cache.ACTION_INVALID,
                                        HugeType.VERTEX, vertexIds);
                 }
             }
@@ -411,7 +426,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
             if (invalidEdgesCache && this.enableCacheEdge()) {
                 // TODO: Use a more precise strategy to update the edge cache
                 this.edgesCache.clear();
-                this.notifyChanges(Cache.ACTION_CLEARED, HugeType.EDGE);
+                this.notifyChanges(Cache.ACTION_CLEAR, HugeType.EDGE);
             }
         }
     }
@@ -425,7 +440,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
             if (indexLabel.baseType() == HugeType.EDGE_LABEL) {
                 // TODO: Use a more precise strategy to update the edge cache
                 this.edgesCache.clear();
-                this.notifyChanges(Cache.ACTION_CLEARED, HugeType.EDGE);
+                this.notifyChanges(Cache.ACTION_CLEAR, HugeType.EDGE);
             }
         }
     }

@@ -17,12 +17,21 @@
 
 package org.apache.hugegraph.unit.cache;
 
+import java.lang.reflect.Field;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.tx.GraphTransaction;
+import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
@@ -136,6 +145,96 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         Assert.assertTrue(cache.queryVertices(IdGenerator.of(1)).hasNext());
         Assert.assertEquals(2L,
                             Whitebox.invoke(cache, "verticesCache", "size"));
+    }
+
+    @Test
+    public void testClearCacheEmitsActionClear() throws Exception {
+        // Producers must emit the present-tense ACTION_CLEAR / ACTION_INVALID,
+        // not the legacy past-tense variants - otherwise local listeners that
+        // match only the present-tense actions silently drop the event.
+        CachedGraphTransaction cache = this.cache();
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> action = new AtomicReference<>();
+        EventListener listener = event -> {
+            Object[] args = event.args();
+            if (args.length > 0 && args[0] instanceof String) {
+                action.set((String) args[0]);
+                latch.countDown();
+            }
+            return true;
+        };
+        this.params.graphEventHub().listen(Events.CACHE, listener);
+        try {
+            cache.clearCache(HugeType.VERTEX, true);
+
+            Assert.assertTrue(latch.await(1L, TimeUnit.SECONDS));
+            Assert.assertEquals(Cache.ACTION_CLEAR, action.get());
+        } finally {
+            this.params.graphEventHub().unlisten(Events.CACHE, listener);
+        }
+    }
+
+    @Test
+    public void testVertexMutationEmitsActionInvalid() throws Exception {
+        CachedGraphTransaction cache = this.cache();
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<String> action = new AtomicReference<>();
+        EventListener listener = event -> {
+            Object[] args = event.args();
+            if (args.length > 0 && Cache.ACTION_INVALID.equals(args[0])) {
+                action.set((String) args[0]);
+                latch.countDown();
+            }
+            return true;
+        };
+        this.params.graphEventHub().listen(Events.CACHE, listener);
+        try {
+            cache.addVertex(this.newVertex(IdGenerator.of(1)));
+            cache.commit();
+
+            Assert.assertTrue(latch.await(1L, TimeUnit.SECONDS));
+            Assert.assertEquals(Cache.ACTION_INVALID, action.get());
+        } finally {
+            this.params.graphEventHub().unlisten(Events.CACHE, listener);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testClosingNonOwnerKeepsGraphCacheListenerRegistered()
+            throws Exception {
+        Field cacheField = GraphTransaction.class
+                .getDeclaredField("graphCacheEventListeners");
+        cacheField.setAccessible(true);
+        ConcurrentMap<String, EventListener> cacheListeners =
+                (ConcurrentMap<String, EventListener>) cacheField.get(null);
+        Field storeField = GraphTransaction.class
+                .getDeclaredField("storeEventListenStatus");
+        storeField.setAccessible(true);
+        ConcurrentMap<String, Boolean> storeListeners =
+                (ConcurrentMap<String, Boolean>) storeField.get(null);
+
+        String graphName = this.params.spaceGraphName();
+        EventListener registered = cacheListeners.get(graphName);
+        Assert.assertNotNull(registered);
+
+        CachedGraphTransaction second = new CachedGraphTransaction(
+                this.params, this.params.loadGraphStore());
+        Assert.assertSame(registered, cacheListeners.get(graphName));
+
+        try {
+            second.close();
+
+            Assert.assertSame(registered, cacheListeners.get(graphName));
+            Assert.assertTrue(this.params.graphEventHub()
+                                         .listeners(Events.CACHE)
+                                         .contains(registered));
+        } finally {
+            // Closing the secondary transaction exercises the pre-existing
+            // store listener guard too; restore it so teardown unregisters the
+            // primary transaction's store listener.
+            storeListeners.putIfAbsent(graphName, true);
+        }
     }
 
     @Test
