@@ -133,7 +133,12 @@ public class GraphSpaceAPI extends API {
         }
         LOG.debug("Create default role: {} {} {}", user, role,
                               name);
-        AuthManager authManager = manager.authManager();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
         E.checkArgument(authManager.findUser(user) != null ||
                         authManager.findGroup(user) != null,
                         "The user or group is not exist");
@@ -179,7 +184,12 @@ public class GraphSpaceAPI extends API {
                         "The 'role' query param cannot be null or empty");
         LOG.debug("Check space role: {} {} {}", user, role,
                               name);
-        AuthManager authManager = manager.authManager();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
 
         HugeDefaultRole defaultRole;
         try {
@@ -220,7 +230,12 @@ public class GraphSpaceAPI extends API {
         LOG.debug("Delete space role: {} {} {}", user, role,
                               name);
 
-        AuthManager authManager = manager.authManager();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
         E.checkArgument(authManager.findUser(user) != null ||
                         authManager.findGroup(user) != null,
                         "The user or group is not exist");

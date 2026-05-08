@@ -44,6 +44,9 @@ import org.junit.runners.Suite;
         GraphSpaceApiTest.class,
         GraphSpaceApiStandaloneTest.class,
         ManagerApiStandaloneTest.class,
+        GraphsApiStandaloneTest.class,
+        SchemaTemplateApiTest.class,
+        DefaultRoleApiStandaloneTest.class,
 })
 public class ApiTestSuite {
 

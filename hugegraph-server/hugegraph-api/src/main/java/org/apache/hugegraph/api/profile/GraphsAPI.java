@@ -21,6 +21,7 @@ import java.io.File;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -146,11 +147,15 @@ public class GraphsAPI extends API {
         // a placeholder GraphSpace without a nickname set)
         String gsNickname = gs.nickname() != null ? gs.nickname() : graphSpace;
 
-        AuthManager authManager = manager.authManager();
         String user = HugeGraphAuthProxy.username();
-        // Both StandardAuthManager (standalone) and StandardAuthManagerV2 (PD)
-        // implement getDefaultGraph(); route through authManager unconditionally.
-        Map<String, Date> defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
+        Map<String, Date> defaultGraphs;
+        try {
+            AuthManager authManager = manager.authManager();
+            defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
+        } catch (IllegalStateException ignored) {
+            // authManager is not configured (standalone mode without auth)
+            defaultGraphs = Collections.emptyMap();
+        }
 
         Set<String> graphs = manager.graphs(graphSpace);
         List<Map<String, Object>> profiles = new ArrayList<>();
@@ -236,7 +241,12 @@ public class GraphsAPI extends API {
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
         String user = HugeGraphAuthProxy.username();
-        AuthManager authManager = manager.authManager();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
         authManager.setDefaultGraph(graphSpace, name, user);
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
         return ImmutableMap.of("default_graph", defaults.keySet());
@@ -256,7 +266,12 @@ public class GraphsAPI extends API {
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
         String user = HugeGraphAuthProxy.username();
-        AuthManager authManager = manager.authManager();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
         authManager.unsetDefaultGraph(graphSpace, name, user);
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
         return ImmutableMap.of("default_graph", defaults.keySet());
@@ -272,7 +287,12 @@ public class GraphsAPI extends API {
                                           @PathParam("graphspace") String graphSpace) {
         LOG.debug("Get default graphs in graph space '{}'", graphSpace);
         String user = HugeGraphAuthProxy.username();
-        AuthManager authManager = manager.authManager();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
         return ImmutableMap.of("default_graph", defaults.keySet());
     }

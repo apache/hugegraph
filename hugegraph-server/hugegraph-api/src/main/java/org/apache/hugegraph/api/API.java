@@ -87,7 +87,7 @@ public class API {
             MetricsUtil.registerMeter(API.class, "expected-error");
     private static final Meter unknownErrorMeter =
             MetricsUtil.registerMeter(API.class, "unknown-error");
-    private static final String STANDALONE_ERROR =
+    protected static final String STANDALONE_ERROR =
             "GraphSpace management is not supported in standalone mode";
 
     /**
