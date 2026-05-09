@@ -43,7 +43,12 @@ import com.google.common.collect.ImmutableSet;
 
 public final class CachedSchemaTransaction extends SchemaTransaction {
 
-    private static final ConcurrentMap<String, EventListener>
+    /*
+     * Listener lifetime must cover all active transactions for the graph.
+     * The holder is removed from the registry and unregistered from EventHub
+     * only when the last transaction releases it.
+     */
+    private static final ConcurrentMap<String, CacheListenerHolder>
             SCHEMA_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
 
     private final Cache<Id, Object> idCache;
@@ -53,7 +58,7 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
 
     private EventListener storeEventListener;
     private EventListener cacheEventListener;
-    private boolean registeredCacheEventListener;
+    private CacheListenerHolder holder;
 
     public CachedSchemaTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -138,16 +143,25 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
         };
         EventHub schemaEventHub = this.params().schemaEventHub();
         String graph = this.params().spaceGraphName();
-        EventListener previous =
-                SCHEMA_CACHE_EVENT_LISTENERS.putIfAbsent(graph, listener);
-        if (previous == null) {
-            this.cacheEventListener = listener;
-            this.registeredCacheEventListener = true;
-            schemaEventHub.listen(Events.CACHE, this.cacheEventListener);
-        } else {
-            this.cacheEventListener = previous;
-            this.registeredCacheEventListener = false;
-        }
+        CacheListenerHolder acquired = SCHEMA_CACHE_EVENT_LISTENERS.compute(
+                graph, (key, existing) -> {
+                    if (existing == null || existing.hub != schemaEventHub) {
+                        // Graph close/reopen creates a new EventHub for the
+                        // same graph name; replace the stale holder. Old
+                        // transactions skip decrement via identity check.
+                        if (existing != null) {
+                            existing.hub.unlisten(Events.CACHE,
+                                                  existing.listener);
+                        }
+                        schemaEventHub.listen(Events.CACHE, listener);
+                        return new CacheListenerHolder(listener,
+                                                       schemaEventHub);
+                    }
+                    existing.refCount++;
+                    return existing;
+                });
+        this.holder = acquired;
+        this.cacheEventListener = acquired.listener;
     }
 
     private void unlistenChanges() {
@@ -155,12 +169,23 @@ public final class CachedSchemaTransaction extends SchemaTransaction {
         this.store().provider().unlisten(this.storeEventListener);
 
         // Unlisten cache event
-        EventHub schemaEventHub = this.params().schemaEventHub();
-        if (this.registeredCacheEventListener) {
-            schemaEventHub.unlisten(Events.CACHE, this.cacheEventListener);
-            SCHEMA_CACHE_EVENT_LISTENERS.remove(this.params().spaceGraphName(),
-                                               this.cacheEventListener);
-            this.registeredCacheEventListener = false;
+        CacheListenerHolder ours = this.holder;
+        if (ours != null) {
+            SCHEMA_CACHE_EVENT_LISTENERS.compute(
+                    this.params().spaceGraphName(), (key, existing) -> {
+                        if (existing == null || existing != ours) {
+                            return existing;
+                        }
+                        existing.refCount--;
+                        if (existing.refCount == 0) {
+                            existing.hub.unlisten(Events.CACHE,
+                                                  existing.listener);
+                            return null;
+                        }
+                        return existing;
+                    });
+            this.holder = null;
+            this.cacheEventListener = null;
         }
     }
 

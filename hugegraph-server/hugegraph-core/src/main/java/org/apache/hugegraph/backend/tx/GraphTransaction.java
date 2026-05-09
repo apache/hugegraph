@@ -60,7 +60,6 @@ import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
-import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.iterator.BatchMapperIterator;
@@ -141,8 +140,6 @@ public class GraphTransaction extends IndexableTransaction {
 
     private final int verticesCapacity;
     private final int edgesCapacity;
-    protected static final ConcurrentHashMap<String, EventListener>
-            graphCacheEventListeners = new ConcurrentHashMap<>();
     protected static final ConcurrentHashMap<String, Boolean> storeEventListenStatus =
             new ConcurrentHashMap<>();
 

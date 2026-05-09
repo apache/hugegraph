@@ -65,24 +65,54 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
 
     private CachedSchemaTransaction cache;
     private HugeGraphParams params;
+    private HugeGraph graph;
 
     @Before
     public void setup() {
-        HugeGraph graph = HugeFactory.open(FakeObjects.newConfig());
-        this.params = Whitebox.getInternalState(graph, "params");
+        this.graph = HugeFactory.open(FakeObjects.newConfig());
+        this.params = Whitebox.getInternalState(this.graph, "params");
         this.cache = new CachedSchemaTransaction(this.params,
                                                  this.params.loadSchemaStore());
     }
 
     @After
     public void teardown() throws Exception {
-        this.cache().graph().clearBackend();
-        this.cache().graph().close();
+        try {
+            if (this.cache != null) {
+                this.cache.close();
+            }
+        } finally {
+            this.cache = null;
+            if (this.graph != null) {
+                this.graph.clearBackend();
+                this.graph.close();
+                this.graph = null;
+            }
+        }
     }
 
     private CachedSchemaTransaction cache() {
         Assert.assertNotNull(this.cache);
         return this.cache;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ConcurrentMap<String, Object> schemaCacheEventListeners()
+            throws Exception {
+        Field field = CachedSchemaTransaction.class
+                                             .getDeclaredField(
+                                                     "SCHEMA_CACHE_EVENT_LISTENERS");
+        field.setAccessible(true);
+        return (ConcurrentMap<String, Object>) field.get(null);
+    }
+
+    private static EventListener holderListener(Object holder) {
+        return Whitebox.getInternalState(holder, "listener");
+    }
+
+    private static int holderRefCount(Object holder) {
+        Integer refCount = Whitebox.getInternalState(holder, "refCount");
+        return refCount;
     }
 
     @Test
@@ -229,34 +259,83 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    public void testListenerRegistryClearedOnCloseAndRebuiltOnReopen()
-            throws Exception {
-        // Closing a graph must drop its entry from the per-graph listener
-        // registry so a subsequent transaction for the same graph can register
-        // a fresh listener instead of falsely reusing the closed reference.
-        Field field = CachedSchemaTransaction.class
-                .getDeclaredField("SCHEMA_CACHE_EVENT_LISTENERS");
-        field.setAccessible(true);
-        ConcurrentMap<String, EventListener> registry =
-                (ConcurrentMap<String, EventListener>) field.get(null);
-
+    public void testCacheListenerSurvivesOwnerClose() throws Exception {
+        ConcurrentMap<String, Object> registry = schemaCacheEventListeners();
         String graphName = this.params.spaceGraphName();
-        Assert.assertTrue(registry.containsKey(graphName));
-        EventListener firstListener = registry.get(graphName);
+        CachedSchemaTransaction owner = this.cache();
+        CachedSchemaTransaction second = new CachedSchemaTransaction(
+                this.params, this.params.loadSchemaStore());
 
-        this.cache().graph().clearBackend();
-        this.cache().graph().close();
+        Object holder = registry.get(graphName);
+        Assert.assertNotNull(holder);
+        EventListener registered = holderListener(holder);
+        int refCount = holderRefCount(holder);
+        Assert.assertTrue(refCount >= 2);
+
+        owner.close();
+        this.cache = second;
+
+        Assert.assertSame(holder, registry.get(graphName));
+        Assert.assertEquals(refCount - 1, holderRefCount(holder));
+        Assert.assertTrue(this.params.schemaEventHub()
+                                     .listeners(Events.CACHE)
+                                     .contains(registered));
+
+        FakeObjects objects = new FakeObjects("unit-test");
+        second.addPropertyKey(objects.newPropertyKey(IdGenerator.of(1),
+                                                     "fake-pk-1"));
+        second.addPropertyKey(objects.newPropertyKey(IdGenerator.of(2),
+                                                     "fake-pk-2"));
+        Assert.assertEquals(2L, Whitebox.invoke(second, "idCache", "size"));
+        Assert.assertEquals(2L, Whitebox.invoke(second, "nameCache", "size"));
+
+        this.params.schemaEventHub().notify(Events.CACHE, Cache.ACTION_CLEAR,
+                                            null).get();
+
+        Assert.assertEquals(0L, Whitebox.invoke(second, "idCache", "size"));
+        Assert.assertEquals(0L, Whitebox.invoke(second, "nameCache", "size"));
+    }
+
+    @Test
+    public void testLastCloseRemovesSchemaCacheListener() throws Exception {
+        ConcurrentMap<String, Object> registry = schemaCacheEventListeners();
+        String graphName = this.params.spaceGraphName();
+        CachedSchemaTransaction owner = this.cache();
+        CachedSchemaTransaction second = new CachedSchemaTransaction(
+                this.params, this.params.loadSchemaStore());
+
+        Object holder = registry.get(graphName);
+        Assert.assertNotNull(holder);
+        EventListener registered = holderListener(holder);
+        Assert.assertTrue(holderRefCount(holder) >= 2);
+
+        owner.close();
+        second.close();
+        this.cache = null;
+        this.params.schemaTransaction().close();
 
         Assert.assertFalse(registry.containsKey(graphName));
+        Assert.assertFalse(this.params.schemaEventHub()
+                                      .listeners(Events.CACHE)
+                                      .contains(registered));
 
-        HugeGraph graph = HugeFactory.open(FakeObjects.newConfig());
-        this.params = Whitebox.getInternalState(graph, "params");
-        this.cache = new CachedSchemaTransaction(this.params,
-                                                 this.params.loadSchemaStore());
+        this.graph.clearBackend();
+        this.graph.close();
+        this.graph = null;
 
-        Assert.assertTrue(registry.containsKey(graphName));
-        Assert.assertNotSame(firstListener, registry.get(graphName));
+        HugeGraph reopened = HugeFactory.open(FakeObjects.newConfig());
+        this.graph = reopened;
+        this.params = Whitebox.getInternalState(reopened, "params");
+        Object reopenedHolder = registry.get(graphName);
+        Assert.assertNotNull(reopenedHolder);
+        Assert.assertNotSame(holder, reopenedHolder);
+        int reopenedRefCount = holderRefCount(reopenedHolder);
+        CachedSchemaTransaction third = new CachedSchemaTransaction(
+                this.params, this.params.loadSchemaStore());
+        this.cache = third;
+        Object newHolder = registry.get(graphName);
+        Assert.assertSame(reopenedHolder, newHolder);
+        Assert.assertEquals(reopenedRefCount + 1, holderRefCount(newHolder));
     }
 
     @Test
