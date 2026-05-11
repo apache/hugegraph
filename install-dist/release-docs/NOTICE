@@ -2764,3 +2764,12 @@ swagger-ui NOTICE
 
 swagger-ui
 Copyright 2020-2021 SmartBear Software Inc.
+
+========================================================================
+
+#
+# jansi 2.4.0 (https://github.com/fusesource/jansi)
+#
+# This product includes software developed by the Jansi project (http://fusesource.github.io/jansi/).
+# See licenses/LICENSE-jansi-2.4.0.txt for license details (Apache License 2.0 or LGPL 3.0+).
+

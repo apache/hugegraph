@@ -33,6 +33,7 @@
         <assembly.dir>${project.basedir}/src/assembly</assembly.dir>
         <assembly.descriptor.dir>${assembly.dir}/descriptor</assembly.descriptor.dir>
         <assembly.static.dir>${assembly.dir}/static</assembly.static.dir>
+        <jansi.version>2.4.0</jansi.version>
     </properties>
 
     <dependencies>
@@ -122,6 +123,12 @@
             <groupId>io.grpc</groupId>
             <artifactId>grpc-stub</artifactId>
             <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.fusesource.jansi</groupId>
+            <artifactId>jansi</artifactId>
+            <version>${jansi.version}</version>
+            <scope>runtime</scope>
         </dependency>
     </dependencies>
 

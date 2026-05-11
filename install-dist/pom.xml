@@ -32,6 +32,9 @@
         <final.name>apache-${release.name}-${project.version}</final.name>
     </properties>
 
+    <dependencies>
+    </dependencies>
+
     <build>
         <plugins>
             <plugin>
