@@ -27,23 +27,48 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>hugegraph-hbase</artifactId>
-
+    <properties>
+        <hbase.version>2.6.5</hbase.version>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-core</artifactId>
             <version>${revision}</version>
         </dependency>
+        <!--
+            hbase-endpoint must come before hbase-shaded-client so that the
+            unshaded LongColumnInterpreter (using com.google.protobuf) is on
+            the classpath ahead of the shaded variant, allowing AggregationClient
+            rowCount() generic bounds to resolve correctly.
+        -->
         <dependency>
-            <groupId>com.baidu.hugegraph</groupId>
-            <artifactId>hbase-shaded-endpoint</artifactId>
-            <version>2.0.6</version>
+            <groupId>org.apache.hbase</groupId>
+            <artifactId>hbase-endpoint</artifactId>
+            <version>${hbase.version}</version>
             <exclusions>
                 <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
+                    <groupId>org.apache.hbase</groupId>
+                    <artifactId>hbase-server</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-hdfs</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-mapreduce-client-core</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hbase</groupId>
+            <artifactId>hbase-shaded-client</artifactId>
+            <version>${hbase.version}</version>
         </dependency>
     </dependencies>
 

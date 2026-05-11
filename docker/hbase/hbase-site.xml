@@ -1,0 +1,89 @@
+<?xml version="1.0"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  -->
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<configuration>
+    <!-- Standalone mode: use local filesystem -->
+    <property>
+        <name>hbase.rootdir</name>
+        <value>/tmp/hbase</value>
+    </property>
+    <!-- Embedded ZooKeeper data directory -->
+    <property>
+        <name>hbase.zookeeper.property.dataDir</name>
+        <value>/tmp/zookeeper</value>
+    </property>
+    <!-- Keep ZooKeeper quorum explicit for containerized single-node setup -->
+    <property>
+        <name>hbase.zookeeper.quorum</name>
+        <value>localhost</value>
+    </property>
+    <property>
+        <name>hbase.zookeeper.property.clientPort</name>
+        <value>2181</value>
+    </property>
+    <!-- Allow unlimited ZooKeeper client connections -->
+    <property>
+        <name>hbase.zookeeper.property.maxClientCnxns</name>
+        <value>0</value>
+    </property>
+    <!-- Match hugegraph.properties: hbase.znode_parent=/hbase -->
+    <property>
+        <name>zookeeper.znode.parent</name>
+        <value>/hbase</value>
+    </property>
+    <!-- Longer tick + session for slow CI/test environments -->
+    <property>
+        <name>hbase.zookeeper.property.tickTime</name>
+        <value>6000</value>
+    </property>
+    <property>
+        <name>zookeeper.session.timeout</name>
+        <value>180000</value>
+    </property>
+    <!-- Pseudo-distributed mode so master + regionserver run as distinct daemons -->
+    <property>
+        <name>hbase.cluster.distributed</name>
+        <value>true</value>
+    </property>
+    <!-- Local FS in single-node Docker may not support async WAL hflush -->
+    <property>
+        <name>hbase.wal.provider</name>
+        <value>filesystem</value>
+    </property>
+    <property>
+        <name>hbase.unsafe.stream.capability.enforce</name>
+        <value>false</value>
+    </property>
+    <property>
+        <name>hbase.master.hostname</name>
+        <value>localhost</value>
+    </property>
+    <property>
+        <name>hbase.regionserver.hostname</name>
+        <value>localhost</value>
+    </property>
+    <property>
+        <name>hbase.master.ipc.address</name>
+        <value>0.0.0.0</value>
+    </property>
+    <property>
+        <name>hbase.regionserver.ipc.address</name>
+        <value>0.0.0.0</value>
+    </property>
+</configuration>
+
