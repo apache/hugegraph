@@ -1,0 +1,125 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.hugegraph.unit.core;
+
+import java.util.Date;
+
+import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.schema.SchemaElement;
+import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.util.DateUtil;
+import org.junit.Test;
+
+public class SchemaElementTest {
+
+    private static final String DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
+
+    private static SchemaElement newSchema() {
+        return new PropertyKey(null, IdGenerator.of(1L), "test");
+    }
+
+    @Test
+    public void testSingleSetterNormalizesCreateTimeStringToDate() {
+        SchemaElement schema = newSchema();
+        String formatted = "2026-05-14 10:11:12.345";
+
+        schema.userdata(Userdata.CREATE_TIME, formatted);
+
+        Object value = schema.userdata().get(Userdata.CREATE_TIME);
+        Assert.assertTrue("CREATE_TIME should be a Date, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Date);
+        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT), value);
+    }
+
+    @Test
+    public void testSingleSetterKeepsCreateTimeDateUnchanged() {
+        SchemaElement schema = newSchema();
+        Date now = DateUtil.now();
+
+        schema.userdata(Userdata.CREATE_TIME, now);
+
+        Assert.assertSame(now, schema.userdata().get(Userdata.CREATE_TIME));
+    }
+
+    @Test
+    public void testSingleSetterRejectsInvalidCreateTimeString() {
+        SchemaElement schema = newSchema();
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.userdata(Userdata.CREATE_TIME, "not-a-date");
+        }, e -> {
+            Assert.assertContains(Userdata.CREATE_TIME, e.getMessage());
+            Assert.assertContains("not-a-date", e.getMessage());
+        });
+    }
+
+    @Test
+    public void testSingleSetterLeavesOtherStringKeysUntouched() {
+        SchemaElement schema = newSchema();
+
+        schema.userdata("note", "2026-05-14 10:11:12.345");
+
+        Object value = schema.userdata().get("note");
+        Assert.assertTrue(value instanceof String);
+        Assert.assertEquals("2026-05-14 10:11:12.345", value);
+    }
+
+    @Test
+    public void testBulkSetterNormalizesCreateTimeAndKeepsOtherEntries() {
+        SchemaElement schema = newSchema();
+        Userdata bulk = new Userdata();
+        String formatted = "2026-05-14 10:11:12.345";
+        bulk.put(Userdata.CREATE_TIME, formatted);
+        bulk.put("note", "hello");
+        bulk.put("count", 42);
+
+        schema.userdata(bulk);
+
+        Object createTime = schema.userdata().get(Userdata.CREATE_TIME);
+        Assert.assertTrue(createTime instanceof Date);
+        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT), createTime);
+        Assert.assertEquals("hello", schema.userdata().get("note"));
+        Assert.assertEquals(42, schema.userdata().get("count"));
+    }
+
+    @Test
+    public void testBulkSetterKeepsCreateTimeDateUnchanged() {
+        SchemaElement schema = newSchema();
+        Userdata bulk = new Userdata();
+        Date now = DateUtil.now();
+        bulk.put(Userdata.CREATE_TIME, now);
+
+        schema.userdata(bulk);
+
+        Assert.assertSame(now, schema.userdata().get(Userdata.CREATE_TIME));
+    }
+
+    @Test
+    public void testBulkSetterRejectsNullUserdata() {
+        SchemaElement schema = newSchema();
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.userdata(null);
+        }, e -> {
+            Assert.assertContains("userdata", e.getMessage());
+        });
+    }
+}

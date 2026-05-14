@@ -43,6 +43,7 @@ import org.apache.hugegraph.unit.core.QueryTest;
 import org.apache.hugegraph.unit.core.RangeTest;
 import org.apache.hugegraph.unit.core.RolePermissionTest;
 import org.apache.hugegraph.unit.core.RowLockTest;
+import org.apache.hugegraph.unit.core.SchemaElementTest;
 import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
@@ -64,6 +65,7 @@ import org.apache.hugegraph.unit.serializer.SerializerFactoryTest;
 import org.apache.hugegraph.unit.serializer.StoreSerializerTest;
 import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.TextBackendEntryTest;
+import org.apache.hugegraph.unit.serializer.TextSerializerTest;
 import org.apache.hugegraph.unit.store.RamIntObjectMapTest;
 import org.apache.hugegraph.unit.util.CompressUtilTest;
 import org.apache.hugegraph.unit.util.JsonUtilTest;
@@ -127,6 +129,7 @@ import org.junit.runners.Suite;
         SystemSchemaStoreTest.class,
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
+        SchemaElementTest.class,
 
         /* serializer */
         BytesBufferTest.class,
@@ -137,6 +140,7 @@ import org.junit.runners.Suite;
         BinarySerializerTest.class,
         BinaryScatterSerializerTest.class,
         StoreSerializerTest.class,
+        TextSerializerTest.class,
 
         /* cassandra */
         CassandraTest.class,
