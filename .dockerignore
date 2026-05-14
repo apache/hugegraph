@@ -16,6 +16,7 @@
 #
 
 # NOTE: This file intentionally stays minimal.
+**/target/
 # Most patterns (IDE files, build artifacts, logs, OS files) are already
 # covered by .gitignore. Only Docker-specific extras are listed here.
 

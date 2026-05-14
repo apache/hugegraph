@@ -10,8 +10,7 @@ on:
 
 jobs:
   build-server:
-    # TODO: we need test & replace it to ubuntu-24.04 or ubuntu-latest
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
