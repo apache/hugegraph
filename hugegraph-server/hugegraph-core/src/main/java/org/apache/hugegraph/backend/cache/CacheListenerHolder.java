@@ -29,6 +29,8 @@ final class CacheListenerHolder {
 
     final EventListener listener;
     final EventHub hub;
+    // Must only be read or written inside ConcurrentMap.compute() for the
+    // enclosing registry; ConcurrentHashMap.compute() serialises per-key access.
     int refCount;
 
     CacheListenerHolder(EventListener listener, EventHub hub) {

@@ -87,7 +87,7 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             throws Exception {
         Field field = CachedGraphTransaction.class
                                             .getDeclaredField(
-                                                    "graphCacheEventListeners");
+                                                    "GRAPH_CACHE_EVENT_LISTENERS");
         field.setAccessible(true);
         return (ConcurrentMap<String, Object>) field.get(null);
     }
@@ -99,6 +99,14 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
                                       .getDeclaredField("storeEventListenStatus");
         field.setAccessible(true);
         return (ConcurrentMap<String, Boolean>) field.get(null);
+    }
+
+    private static void restoreStoreListenerStatusForKnownTeardownBug(
+            ConcurrentMap<String, Boolean> storeListeners, String graphName) {
+        // Closing a secondary transaction can consume storeEventListenStatus due
+        // to the follow-up bug documented in CachedGraphTransaction.unlistenChanges().
+        // Restore it so teardown can still unregister the primary store listener.
+        storeListeners.putIfAbsent(graphName, true);
     }
 
     private static EventListener holderListener(Object holder) {
@@ -266,10 +274,8 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
                                          .listeners(Events.CACHE)
                                          .contains(registered));
         } finally {
-            // Closing the secondary transaction exercises the pre-existing
-            // store listener guard too; restore it so teardown unregisters the
-            // primary transaction's store listener.
-            storeListeners.putIfAbsent(graphName, true);
+            restoreStoreListenerStatusForKnownTeardownBug(storeListeners,
+                                                           graphName);
         }
     }
 

@@ -295,7 +295,7 @@ public class CacheManagerTest extends BaseUnitTest {
                           -30 * 1000L);
             cache2.update(IdGenerator.of("fake-id"), "fake-value");
 
-            waitTillNext(1);
+            waitTillNext(3);
 
             Mockito.verify(mockCache1, Mockito.atLeastOnce()).tick();
             Mockito.verify(mockCache2, Mockito.atLeastOnce()).tick();

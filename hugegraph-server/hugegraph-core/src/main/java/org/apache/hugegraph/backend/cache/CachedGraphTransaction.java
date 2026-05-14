@@ -68,7 +68,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
      * only when the last transaction releases it.
      */
     private static final ConcurrentMap<String, CacheListenerHolder>
-            graphCacheEventListeners = new ConcurrentHashMap<>();
+            GRAPH_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
 
     private final Cache<Id, Object> verticesCache;
     private final Cache<Id, Object> edgesCache;
@@ -197,7 +197,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         };
         EventHub graphEventHub = this.params().graphEventHub();
         String graphName = this.params().spaceGraphName();
-        CacheListenerHolder acquired = graphCacheEventListeners.compute(
+        CacheListenerHolder acquired = GRAPH_CACHE_EVENT_LISTENERS.compute(
                 graphName, (key, existing) -> {
                     if (existing == null || existing.hub != graphEventHub) {
                         // Graph close/reopen creates a new EventHub for the
@@ -221,7 +221,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         String graphName = this.params().spaceGraphName();
         CacheListenerHolder ours = this.holder;
         if (ours != null) {
-            graphCacheEventListeners.compute(graphName, (key, existing) -> {
+            GRAPH_CACHE_EVENT_LISTENERS.compute(graphName, (key, existing) -> {
                 if (existing == null || existing != ours) {
                     return existing;
                 }
@@ -236,7 +236,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
             this.cacheEventListener = null;
         }
         // TODO (follow-up): storeEventListenStatus has the same owner-first
-        // close bug this PR fixes for graphCacheEventListeners. A non-owner
+        // close bug this PR fixes for GRAPH_CACHE_EVENT_LISTENERS. A non-owner
         // transaction can remove the tracking entry, unlisten its own
         // never-registered storeEventListener as a no-op, and leave the
         // original store listener registered but untracked. Apply the same
