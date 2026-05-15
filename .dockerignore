@@ -40,7 +40,7 @@ apache-hugegraph-*/
 **/*.class
 **/gen-java/
 **/upload-files/
-**/dist/
+**/target/dist/
 **/build/
 **/node_modules/
 
