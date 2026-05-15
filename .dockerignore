@@ -15,21 +15,47 @@
 # limitations under the License.
 #
 
-# NOTE: This file intentionally stays minimal.
-**/target/
-# Most patterns (IDE files, build artifacts, logs, OS files) are already
-# covered by .gitignore. Only Docker-specific extras are listed here.
+# IMPORTANT: .dockerignore does NOT inherit .gitignore — patterns must be restated.
 
-# Git internals (never tracked by git, must be explicit here)
+# Build output
+**/target/
+
+# Pre-extracted release dirs / archives
+apache-hugegraph-*/
+**/*.tar
+**/*.tar.gz*
+**/*.zip
+**/*.war
+
+# IDE / OS
+.idea/
+.vscode/
+**/*.iml
+**/*.iws
+**/.DS_Store
+
+# Build / runtime artifacts
+**/logs/
+**/*.log
+**/*.class
+**/gen-java/
+**/upload-files/
+**/dist/
+**/build/
+**/node_modules/
+
+# Env files
+.env.local
+.env.*.local
+
+# Git internals
 .git
 .gitignore
-.gitattributes
+.gitattribut
 .github
 
-# Docker compose files not needed in build context
+# Compose / docs not needed in build context
 **/docker-compose*.yml
 **/docker-compose*.yaml
-
-# Docs not needed in build context
 **/*.md
 docs/

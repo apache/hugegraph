@@ -17,18 +17,15 @@
 #
 
 # Dockerfile for HugeGraph Store
-# NOTE: Build with DOCKER_BUILDKIT=1 to enable cache mounts and --parents COPY.
 # 1st stage: build source code
 FROM maven:3.9.0-eclipse-temurin-11 AS build
 
 WORKDIR /pkg
 
-# Copy pom files first — layer is only invalidated when pom files change,
-# keeping the Maven cache mount warm across source-only changes.
-COPY --parents **/pom.xml ./
+COPY . .
+
 ARG MAVEN_ARGS
 
-COPY . .
 RUN --mount=type=cache,target=/root/.m2 \
     mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
     && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
@@ -54,7 +51,7 @@ RUN apt-get -q update \
        procps \
        curl \
        lsof \
-       cron \
+       vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
