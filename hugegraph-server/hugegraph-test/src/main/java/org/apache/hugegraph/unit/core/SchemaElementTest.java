@@ -18,12 +18,16 @@
 package org.apache.hugegraph.unit.core;
 
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.DateUtil;
 import org.junit.Test;
 
@@ -68,6 +72,18 @@ public class SchemaElementTest {
         }, e -> {
             Assert.assertContains(Userdata.CREATE_TIME, e.getMessage());
             Assert.assertContains("not-a-date", e.getMessage());
+            Assert.assertNotNull(e.getCause());
+        });
+    }
+
+    @Test
+    public void testSingleSetterRejectsNullCreateTime() {
+        SchemaElement schema = newSchema();
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.userdata(Userdata.CREATE_TIME, null);
+        }, e -> {
+            Assert.assertContains("userdata value", e.getMessage());
         });
     }
 
@@ -80,6 +96,20 @@ public class SchemaElementTest {
         Object value = schema.userdata().get("note");
         Assert.assertTrue(value instanceof String);
         Assert.assertEquals("2026-05-14 10:11:12.345", value);
+    }
+
+    @Test
+    public void testUserdataConstructorNormalizesCreateTimeString() {
+        String formatted = "2026-05-14 10:11:12.345";
+        Map<String, Object> map = new HashMap<>();
+        map.put(Userdata.CREATE_TIME, formatted);
+
+        Userdata userdata = new Userdata(map);
+
+        Object createTime = userdata.get(Userdata.CREATE_TIME);
+        Assert.assertTrue(createTime instanceof Date);
+        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT),
+                            createTime);
     }
 
     @Test
@@ -110,6 +140,26 @@ public class SchemaElementTest {
         schema.userdata(bulk);
 
         Assert.assertSame(now, schema.userdata().get(Userdata.CREATE_TIME));
+    }
+
+    @Test
+    public void testVertexLabelFromMapNormalizesCreateTimeString() {
+        String formatted = "2026-05-14 10:11:12.345";
+        Map<String, Object> userdata = new HashMap<>();
+        userdata.put(Userdata.CREATE_TIME, formatted);
+
+        Map<String, Object> map = new HashMap<>();
+        map.put(VertexLabel.P.ID, 1);
+        map.put(VertexLabel.P.NAME, "person");
+        map.put(VertexLabel.P.USERDATA, userdata);
+
+        VertexLabel vertexLabel = VertexLabel.fromMap(map,
+                                                      new FakeObjects().graph());
+
+        Object createTime = vertexLabel.userdata().get(Userdata.CREATE_TIME);
+        Assert.assertTrue(createTime instanceof Date);
+        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT),
+                            createTime);
     }
 
     @Test

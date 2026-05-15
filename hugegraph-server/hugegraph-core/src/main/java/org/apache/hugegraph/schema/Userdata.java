@@ -22,6 +22,7 @@ import java.util.Map;
 
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.type.define.Action;
+import org.apache.hugegraph.util.DateUtil;
 
 public class Userdata extends HashMap<String, Object> {
 
@@ -34,7 +35,31 @@ public class Userdata extends HashMap<String, Object> {
     }
 
     public Userdata(Map<String, Object> map) {
-        this.putAll(map);
+        for (Map.Entry<String, Object> e : map.entrySet()) {
+            this.put(e.getKey(), normalizeValue(e.getKey(), e.getValue()));
+        }
+    }
+
+    /**
+     * Normalize internal userdata values whose runtime type can diverge from
+     * their serialized form. The only such key today is {@link #CREATE_TIME}:
+     * it is written as a {@link java.util.Date} but persisted as a formatted
+     * JSON string by the backend serializers, and Jackson cannot re-type a
+     * value to {@code Date} when the target is a raw {@code Map}. This method
+     * restores the original type after deserialization. Idempotent for values
+     * already of the expected type.
+     */
+    public static Object normalizeValue(String key, Object value) {
+        if (CREATE_TIME.equals(key) && value instanceof String) {
+            try {
+                return DateUtil.parse((String) value);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(String.format(
+                          "Invalid userdata '%s' value: '%s'",
+                          CREATE_TIME, value), e);
+            }
+        }
+        return value;
     }
 
     public static void check(Userdata userdata, Action action) {

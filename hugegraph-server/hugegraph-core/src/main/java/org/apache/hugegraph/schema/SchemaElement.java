@@ -27,7 +27,6 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.type.Nameable;
 import org.apache.hugegraph.type.Typeable;
 import org.apache.hugegraph.type.define.SchemaStatus;
-import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Graph;
 
@@ -97,40 +96,27 @@ public abstract class SchemaElement implements Nameable, Typeable,
         return Collections.unmodifiableMap(this.userdata);
     }
 
+    /**
+     * Add userdata. String values of {@link Userdata#CREATE_TIME} are
+     * normalized to {@link java.util.Date} and malformed strings are rejected.
+     */
     public void userdata(String key, Object value) {
         E.checkArgumentNotNull(key, "userdata key");
         E.checkArgumentNotNull(value, "userdata value");
-        this.userdata.put(key, normalizeUserdataValue(key, value));
+        this.userdata.put(key, Userdata.normalizeValue(key, value));
     }
 
+    /**
+     * Add userdata in bulk. String values of {@link Userdata#CREATE_TIME} are
+     * normalized to {@link java.util.Date} and malformed strings are rejected.
+     */
     public void userdata(Userdata userdata) {
         E.checkArgumentNotNull(userdata, "userdata");
         for (Map.Entry<String, Object> e : userdata.entrySet()) {
             this.userdata.put(e.getKey(),
-                              normalizeUserdataValue(e.getKey(), e.getValue()));
+                              Userdata.normalizeValue(e.getKey(),
+                                                      e.getValue()));
         }
-    }
-
-    /**
-     * Normalize internal userdata values whose runtime type can diverge from
-     * their serialized form. The only such key today is
-     * {@link Userdata#CREATE_TIME}: it is written as a {@link java.util.Date}
-     * but persisted as a formatted JSON string by the backend serializers,
-     * and Jackson cannot re-type a value to {@code Date} when the target is
-     * a raw {@code Map}. This method restores the original type after
-     * deserialization. Idempotent for values already of the expected type.
-     */
-    private static Object normalizeUserdataValue(String key, Object value) {
-        if (Userdata.CREATE_TIME.equals(key) && value instanceof String) {
-            try {
-                return DateUtil.parse((String) value);
-            } catch (RuntimeException e) {
-                throw new IllegalArgumentException(String.format(
-                          "Invalid userdata '%s' value: '%s'",
-                          Userdata.CREATE_TIME, value), e);
-            }
-        }
-        return value;
     }
 
     public void removeUserdata(String key) {
@@ -139,6 +125,7 @@ public abstract class SchemaElement implements Nameable, Typeable,
     }
 
     public void removeUserdata(Userdata userdata) {
+        E.checkArgumentNotNull(userdata, "userdata");
         for (String key : userdata.keySet()) {
             this.userdata.remove(key);
         }
