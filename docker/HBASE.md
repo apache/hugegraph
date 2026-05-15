@@ -12,7 +12,7 @@ This guide explains how to start HBase locally with Docker, verify it is working
 
 ## Quick Start
 
-### 0. (Optional) Clean Up Leftover HBase Tables
+### 0. (Optional) Build the HBase Docker Image
 ```bash
 docker compose -f docker/hbase/docker-compose.hbase.yml build --no-cache hbase
 ```
@@ -173,7 +173,7 @@ docker compose -f docker/hbase/docker-compose.hbase.yml logs
 
 These steps assume the HugeGraph server is running at `http://localhost:8080` with auth enabled (`admin/pa`).
 
-> **Note on Idempotency**: Schema creation calls below use `"check_exist": false`. Re-running is safe only when the submitted schema definition matches the existing one. If definitions conflict, HugeGraph returns `ExistedException`.
+> **Note on Idempotency**: Schema creation calls below use `"check_exist": false`, which skips strict "already exists" checks for matching schema definitions. If a re-submitted schema conflicts with an existing definition, HugeGraph can still return an error.
 >
 > **Prerequisite**: The HBase backend tables must be initialized before any API calls will work. If you see `TableNotFoundException` errors, re-run `init-store.sh` (see Step 0 below or the Quick Start section).
 
@@ -206,7 +206,7 @@ curl -s http://localhost:8080/versions | python3 -m json.tool
 ### 2. List Graphs
 
 ```bash
-curl -s -u admin:pa http://localhost:8080/graphspaces/DEFAULT/graphs | python3 -m json.tool
+curl -s -u admin:pa http://localhost:8080/graphs | python3 -m json.tool
 ```
 
 ### 3. Create Property Keys
@@ -216,7 +216,7 @@ Create multiple property keys for testing. Re-running with the same schema retur
 ```bash
 # Text property
 curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/schema/propertykeys \
+  http://localhost:8080/graphs/hugegraph/schema/propertykeys \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "email",
@@ -227,7 +227,7 @@ curl -s -u admin:pa -X POST \
 
 # Numeric property
 curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/schema/propertykeys \
+  http://localhost:8080/graphs/hugegraph/schema/propertykeys \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "age",
@@ -241,7 +241,7 @@ curl -s -u admin:pa -X POST \
 
 ```bash
 curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/schema/vertexlabels \
+  http://localhost:8080/graphs/hugegraph/schema/vertexlabels \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "user",
@@ -257,7 +257,7 @@ curl -s -u admin:pa -X POST \
 ```bash
 # Add first vertex
 curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/graph/vertices \
+  http://localhost:8080/graphs/hugegraph/graph/vertices \
   -H 'Content-Type: application/json' \
   -d '{
     "label": "user",
@@ -266,7 +266,7 @@ curl -s -u admin:pa -X POST \
 
 # Add second vertex
 curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/graph/vertices \
+  http://localhost:8080/graphs/hugegraph/graph/vertices \
   -H 'Content-Type: application/json' \
   -d '{
     "label": "user",
@@ -278,7 +278,7 @@ curl -s -u admin:pa -X POST \
 
 ```bash
 curl -s --compressed -u admin:pa \
-  "http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/graph/vertices" \
+  "http://localhost:8080/graphs/hugegraph/graph/vertices" \
   | python3 -m json.tool
 ```
 

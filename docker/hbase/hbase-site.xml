@@ -20,7 +20,7 @@
     <!-- Standalone mode: use local filesystem -->
     <property>
         <name>hbase.rootdir</name>
-        <value>/tmp/hbase</value>
+        <value>file:///tmp/hbase</value>
     </property>
     <!-- Embedded ZooKeeper data directory -->
     <property>

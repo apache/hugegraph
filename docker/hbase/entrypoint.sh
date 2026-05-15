@@ -44,7 +44,8 @@ until echo "status 'simple'" | ${HBASE_HOME}/bin/hbase shell -n 2>/dev/null | gr
     if [ "$master_attempts" -ge 180 ]; then
         echo "Timed out waiting for HBase master/regionserver readiness"
         ${HBASE_HOME}/bin/hbase-daemon.sh status || true
-        tail -n 80 ${HBASE_HOME}/logs/hbase--*.out 2>/dev/null || true
+        tail -n 80 ${HBASE_HOME}/logs/hbase-*.out ${HBASE_HOME}/logs/hbase-*.log \
+            2>/dev/null || true
         exit 1
     fi
     sleep 3
@@ -52,6 +53,10 @@ done
 echo "HBase is ready. Master + RegionServer online."
 
 # Tail all daemon logs so `docker logs` includes startup/runtime issues
-exec tail -F ${HBASE_HOME}/logs/hbase--*.out ${HBASE_HOME}/logs/hbase--*.log 2>/dev/null || \
-     tail -f /dev/null
+shopt -s nullglob
+log_files=("${HBASE_HOME}/logs"/hbase-*.out "${HBASE_HOME}/logs"/hbase-*.log)
+if [ ${#log_files[@]} -gt 0 ]; then
+    exec tail -F "${log_files[@]}"
+fi
+exec tail -f /dev/null
 
