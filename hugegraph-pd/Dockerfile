@@ -52,6 +52,7 @@ RUN apt-get -q update \
        curl \
        lsof \
        vim \
+       cron \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

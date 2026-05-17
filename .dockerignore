@@ -23,7 +23,7 @@
 # Pre-extracted release dirs / archives
 apache-hugegraph-*/
 **/*.tar
-**/*.tar.gz*
+**/*.tar.gz
 **/*.zip
 **/*.war
 
@@ -40,7 +40,6 @@ apache-hugegraph-*/
 **/*.class
 **/gen-java/
 **/upload-files/
-**/target/dist/
 **/build/
 **/node_modules/
 
@@ -51,7 +50,7 @@ apache-hugegraph-*/
 # Git internals
 .git
 .gitignore
-.gitattribut
+.gitattributes
 .github
 
 # Compose / docs not needed in build context
