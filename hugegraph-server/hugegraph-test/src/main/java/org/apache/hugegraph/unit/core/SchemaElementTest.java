@@ -113,6 +113,33 @@ public class SchemaElementTest {
     }
 
     @Test
+    public void testUserdataConstructorLeavesOtherEntriesUntouched() {
+        Map<String, Object> map = new HashMap<>();
+        map.put("note", "2026-05-14 10:11:12.345");
+        map.put("count", 42);
+
+        Userdata userdata = new Userdata(map);
+
+        Assert.assertEquals("2026-05-14 10:11:12.345",
+                            userdata.get("note"));
+        Assert.assertEquals(42, userdata.get("count"));
+    }
+
+    @Test
+    public void testUserdataConstructorRejectsInvalidCreateTimeString() {
+        Map<String, Object> map = new HashMap<>();
+        map.put(Userdata.CREATE_TIME, "not-a-date");
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            new Userdata(map);
+        }, e -> {
+            Assert.assertContains(Userdata.CREATE_TIME, e.getMessage());
+            Assert.assertContains("not-a-date", e.getMessage());
+            Assert.assertNotNull(e.getCause());
+        });
+    }
+
+    @Test
     public void testBulkSetterNormalizesCreateTimeAndKeepsOtherEntries() {
         SchemaElement schema = newSchema();
         Userdata bulk = new Userdata();
