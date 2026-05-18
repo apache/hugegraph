@@ -314,15 +314,15 @@ Copyright 2003-2020 The Apache Software Foundation
 
 ========================================================================
 
-hbase-shaded-endpoint NOTICE
+hbase-endpoint NOTICE
 
 ========================================================================
 
-hugegraph-hbase-shaded-endpoint
+Apache HBase - Coprocessor Endpoint
 Copyright 2007-2021 The Apache Software Foundation
 
 ====
-hugegraph-hbase-shaded-endpoint contained works
+Apache HBase - Coprocessor Endpoint contained works
 
 This product contains additional works that are distributed under licenses
 other than ASL v2. See LICENSE for full details
@@ -572,93 +572,105 @@ For source see '${dep.url}'.
 --
 This product includes Apache HBase - Client
 
-incorporated from org.apache.hbase:hbase-client:jar:2.0.6
+incorporated from org.apache.hbase:hbase-client:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-client'.
 --
 This product includes Apache HBase - Common
 
-incorporated from org.apache.hbase:hbase-common:jar:2.0.6
+incorporated from org.apache.hbase:hbase-common:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-common'.
 --
 This product includes Apache HBase - Coprocessor Endpoint
 
-incorporated from org.apache.hbase:hbase-endpoint:jar:2.0.6
+incorporated from org.apache.hbase:hbase-endpoint:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-endpoint'.
 --
 This product includes Apache HBase - Hadoop Compatibility
 
-incorporated from org.apache.hbase:hbase-hadoop-compat:jar:2.0.6
+incorporated from org.apache.hbase:hbase-hadoop-compat:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-hadoop-compat'.
 --
-This product includes Apache HBase - MapReduce
+This product includes Apache HBase - Hadoop2 Compatibility
 
-incorporated from org.apache.hbase:hbase-mapreduce:jar:2.0.6
+incorporated from org.apache.hbase:hbase-hadoop2-compat:jar:2.6.5
 
-For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-mapreduce'.
+For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-hadoop2-compat'.
 --
 This product includes Apache HBase - Metrics Implementation
 
-incorporated from org.apache.hbase:hbase-metrics:jar:2.0.6
+incorporated from org.apache.hbase:hbase-metrics:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-metrics'.
 --
 This product includes Apache HBase - Metrics API
 
-incorporated from org.apache.hbase:hbase-metrics-api:jar:2.0.6
+incorporated from org.apache.hbase:hbase-metrics-api:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-metrics-api'.
 --
 This product includes Apache HBase - Protocol
 
-incorporated from org.apache.hbase:hbase-protocol:jar:2.0.6
+incorporated from org.apache.hbase:hbase-protocol:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-protocol'.
 --
 This product includes Apache HBase - Shaded Protocol
 
-incorporated from org.apache.hbase:hbase-protocol-shaded:jar:2.0.6
+incorporated from org.apache.hbase:hbase-protocol-shaded:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-protocol-shaded'.
 --
-This product includes Apache HBase - Replication
+This product includes Apache HBase - Shaded Client
 
-incorporated from org.apache.hbase:hbase-replication:jar:2.0.6
+incorporated from org.apache.hbase:hbase-shaded-client:jar:2.6.5
 
-For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-replication'.
+For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-shaded-client'.
 --
-This product includes Apache HBase - Resource Bundle
+This product includes Apache HBase - Logging
 
-incorporated from org.apache.hbase:hbase-resource-bundle:jar:2.0.6
+incorporated from org.apache.hbase:hbase-logging:jar:2.6.5
 
-For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-resource-bundle'.
+For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-logging'.
 --
 This product includes Apache HBase - Zookeeper
 
-incorporated from org.apache.hbase:hbase-zookeeper:jar:2.0.6
+incorporated from org.apache.hbase:hbase-zookeeper:jar:2.6.5
 
 For source see 'http://hbase.apache.org/hbase-build-configuration/hbase-zookeeper'.
 --
 This product includes Apache HBase Relocated (Shaded) Third-party Miscellaneous Libs
 
-incorporated from org.apache.hbase.thirdparty:hbase-shaded-miscellaneous:jar:2.1.0
+incorporated from org.apache.hbase.thirdparty:hbase-shaded-miscellaneous:jar:4.1.13
 
 For source see 'http://hbase.apache.org/hbase-shaded-miscellaneous'.
 --
 This product includes Apache HBase Relocated (Shaded) Netty Libs
 
-incorporated from org.apache.hbase.thirdparty:hbase-shaded-netty:jar:2.1.0
+incorporated from org.apache.hbase.thirdparty:hbase-shaded-netty:jar:4.1.13
 
 For source see 'http://hbase.apache.org/hbase-shaded-netty'.
 --
 This product includes Apache HBase Patched & Relocated (Shaded) Protobuf
 
-incorporated from org.apache.hbase.thirdparty:hbase-shaded-protobuf:jar:2.1.0
+incorporated from org.apache.hbase.thirdparty:hbase-shaded-protobuf:jar:4.1.13
 
 For source see 'http://hbase.apache.org/hbase-shaded-protobuf'.
+--
+This product includes Apache HBase Relocated (Shaded) Gson
+
+incorporated from org.apache.hbase.thirdparty:hbase-shaded-gson:jar:4.1.13
+
+For source see 'http://hbase.apache.org/hbase-shaded-gson'.
+--
+This product includes Apache HBase Relocated Unsafe Operations
+
+incorporated from org.apache.hbase.thirdparty:hbase-unsafe:jar:4.1.13
+
+For source see 'http://hbase.apache.org/hbase-unsafe'.
 --
 This product includes htrace-core4
 
@@ -690,7 +702,8 @@ Copyright 2009-2012 The Apache Software Foundation
 --
 This product includes zookeeper
 
-incorporated from org.apache.zookeeper:zookeeper:jar:3.4.10
+incorporated from org.apache.zookeeper:zookeeper:jar:3.8.6
+
 
 For source see '${dep.url}'.
 --
@@ -806,13 +819,16 @@ Copyright 2017-2018 The Apache Software Foundation
 Apache HBase - Zookeeper
 Copyright 2007-2019 The Apache Software Foundation
 
-Apache HBase - MapReduce
+Apache HBase - Hadoop2 Compatibility
 Copyright 2007-2019 The Apache Software Foundation
 
 Apache HBase - Metrics Implementation
 Copyright 2007-2019 The Apache Software Foundation
 
-Apache HBase - Replication
+Apache HBase - Shaded Client
+Copyright 2007-2019 The Apache Software Foundation
+
+Apache HBase - Logging
 Copyright 2007-2019 The Apache Software Foundation
 
 Curator Client
