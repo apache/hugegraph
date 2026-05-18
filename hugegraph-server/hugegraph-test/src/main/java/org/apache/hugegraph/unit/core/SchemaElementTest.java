@@ -33,8 +33,6 @@ import org.junit.Test;
 
 public class SchemaElementTest {
 
-    private static final String DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
-
     private static SchemaElement newSchema() {
         return new PropertyKey(null, IdGenerator.of(1L), "test");
     }
@@ -50,7 +48,7 @@ public class SchemaElementTest {
         Assert.assertTrue("CREATE_TIME should be a Date, was " +
                           (value == null ? "null" : value.getClass()),
                           value instanceof Date);
-        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT), value);
+        Assert.assertEquals(DateUtil.parse(formatted), value);
     }
 
     @Test
@@ -108,7 +106,7 @@ public class SchemaElementTest {
 
         Object createTime = userdata.get(Userdata.CREATE_TIME);
         Assert.assertTrue(createTime instanceof Date);
-        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT),
+        Assert.assertEquals(DateUtil.parse(formatted),
                             createTime);
     }
 
@@ -152,7 +150,7 @@ public class SchemaElementTest {
 
         Object createTime = schema.userdata().get(Userdata.CREATE_TIME);
         Assert.assertTrue(createTime instanceof Date);
-        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT), createTime);
+        Assert.assertEquals(DateUtil.parse(formatted), createTime);
         Assert.assertEquals("hello", schema.userdata().get("note"));
         Assert.assertEquals(42, schema.userdata().get("count"));
     }
@@ -185,7 +183,7 @@ public class SchemaElementTest {
 
         Object createTime = vertexLabel.userdata().get(Userdata.CREATE_TIME);
         Assert.assertTrue(createTime instanceof Date);
-        Assert.assertEquals(DateUtil.parse(formatted, DATE_FORMAT),
+        Assert.assertEquals(DateUtil.parse(formatted),
                             createTime);
     }
 

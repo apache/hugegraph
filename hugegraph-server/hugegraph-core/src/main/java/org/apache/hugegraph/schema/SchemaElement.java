@@ -103,7 +103,7 @@ public abstract class SchemaElement implements Nameable, Typeable,
     public void userdata(String key, Object value) {
         E.checkArgumentNotNull(key, "userdata key");
         E.checkArgumentNotNull(value, "userdata value");
-        this.userdata.put(key, Userdata.normalizeValue(key, value));
+        this.userdata.put(key, value);
     }
 
     /**
@@ -112,11 +112,7 @@ public abstract class SchemaElement implements Nameable, Typeable,
      */
     public void userdata(Userdata userdata) {
         E.checkArgumentNotNull(userdata, "userdata");
-        for (Map.Entry<String, Object> e : userdata.entrySet()) {
-            this.userdata.put(e.getKey(),
-                              Userdata.normalizeValue(e.getKey(),
-                                                      e.getValue()));
-        }
+        this.userdata.putAll(userdata);
     }
 
     public void removeUserdata(String key) {

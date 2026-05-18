@@ -33,8 +33,6 @@ import org.junit.Test;
 
 public class TextSerializerTest extends BaseUnitTest {
 
-    private static final String DATE_FORMAT = "yyyy-MM-dd HH:mm:ss.SSS";
-
     @Test
     public void testPropertyKeyUserdataCreateTimeRoundTripsAsDate() {
         HugeConfig config = FakeObjects.newConfig();
@@ -43,7 +41,7 @@ public class TextSerializerTest extends BaseUnitTest {
         FakeObjects objects = new FakeObjects();
         PropertyKey original = objects.newPropertyKey(IdGenerator.of(1L),
                                                       "name");
-        Date created = DateUtil.parse("2026-05-14 10:11:12.345", DATE_FORMAT);
+        Date created = DateUtil.parse("2026-05-14 10:11:12.345");
         original.userdata(Userdata.CREATE_TIME, created);
 
         BackendEntry entry = ser.writePropertyKey(original);

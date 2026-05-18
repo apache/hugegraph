@@ -35,8 +35,22 @@ public class Userdata extends HashMap<String, Object> {
     }
 
     public Userdata(Map<String, Object> map) {
-        for (Map.Entry<String, Object> e : map.entrySet()) {
-            this.put(e.getKey(), normalizeValue(e.getKey(), e.getValue()));
+        this.putAll(map);
+    }
+
+    /**
+     * Normalizes the value before storing so the {@link #CREATE_TIME}-is-Date
+     * invariant holds regardless of how entries are added.
+     */
+    @Override
+    public Object put(String key, Object value) {
+        return super.put(key, normalizeValue(key, value));
+    }
+
+    @Override
+    public void putAll(Map<? extends String, ?> map) {
+        for (Map.Entry<? extends String, ?> e : map.entrySet()) {
+            this.put(e.getKey(), e.getValue());
         }
     }
 

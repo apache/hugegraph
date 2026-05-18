@@ -119,8 +119,7 @@ public class BinarySerializerTest extends BaseUnitTest {
         FakeObjects objects = new FakeObjects();
         PropertyKey original = objects.newPropertyKey(IdGenerator.of(1L),
                                                       "name");
-        Date created = DateUtil.parse("2026-05-14 10:11:12.345",
-                                      "yyyy-MM-dd HH:mm:ss.SSS");
+        Date created = DateUtil.parse("2026-05-14 10:11:12.345");
         original.userdata(Userdata.CREATE_TIME, created);
 
         BackendEntry entry = ser.writePropertyKey(original);
