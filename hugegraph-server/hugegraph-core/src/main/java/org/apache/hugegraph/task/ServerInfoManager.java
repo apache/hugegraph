@@ -29,6 +29,7 @@ import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
@@ -104,7 +105,9 @@ public class ServerInfoManager {
     public synchronized void initServerInfo(GlobalMasterInfo nodeInfo) {
         E.checkArgument(nodeInfo != null, "The global node info can't be null");
 
-        Id serverId = nodeInfo.nodeId();
+        this.globalNodeInfo = nodeInfo;
+
+        Id serverId = this.selfNodeId();
         HugeServerInfo existed = this.serverInfo(serverId);
         if (existed != null && existed.alive()) {
             final long now = DateUtil.now().getTime();
@@ -137,8 +140,6 @@ public class ServerInfoManager {
             } while (page != null);
         }
 
-        this.globalNodeInfo = nodeInfo;
-
         // TODO: save ServerInfo to AuthServer
         this.saveServerInfo(this.selfNodeId(), this.selfNodeRole());
     }
@@ -162,7 +163,9 @@ public class ServerInfoManager {
         if (this.globalNodeInfo == null) {
             return null;
         }
-        return this.globalNodeInfo.nodeId();
+        // Scope server id to graph to avoid cross-graph collision
+        return IdGenerator.of(this.graph.spaceGraphName() + "/" +
+                             this.globalNodeInfo.nodeId().asString());
     }
 
     public NodeRole selfNodeRole() {

@@ -389,6 +389,43 @@ public class EventHubTest extends BaseUnitTest {
     }
 
     @Test
+    public void testNotifyExcept() throws Exception {
+        final String notify = "event-notify";
+        AtomicInteger listenerACount = new AtomicInteger();
+        AtomicInteger listenerBCount = new AtomicInteger();
+        AtomicInteger listenerCCount = new AtomicInteger();
+
+        EventListener listenerA = event -> {
+            event.checkArgs(String.class);
+            Assert.assertEquals("fake-arg", event.args()[0]);
+            listenerACount.incrementAndGet();
+            return true;
+        };
+        EventListener listenerB = event -> {
+            listenerBCount.incrementAndGet();
+            return true;
+        };
+        EventListener listenerC = event -> {
+            event.checkArgs(String.class);
+            Assert.assertEquals("fake-arg", event.args()[0]);
+            listenerCCount.incrementAndGet();
+            return true;
+        };
+
+        this.eventHub.listen(notify, listenerA);
+        this.eventHub.listen(notify, listenerB);
+        this.eventHub.listen(EventHub.ANY_EVENT, listenerC);
+
+        Assert.assertEquals(2, (int) this.eventHub
+                                          .notifyExcept(notify, listenerB,
+                                                        "fake-arg")
+                                          .get());
+        Assert.assertEquals(1, listenerACount.get());
+        Assert.assertEquals(0, listenerBCount.get());
+        Assert.assertEquals(1, listenerCCount.get());
+    }
+
+    @Test
     public void testEventNotifyWithMultiThreads() throws InterruptedException {
         final String notify = "event-notify";
 

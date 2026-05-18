@@ -19,6 +19,7 @@ package org.apache.hugegraph.unit.cache;
 
 import java.lang.reflect.Proxy;
 import java.util.Map;
+import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.hugegraph.backend.cache.Cache;
@@ -271,6 +272,8 @@ public class CacheManagerTest extends BaseUnitTest {
 
     @Test
     public void testCacheExpire() {
+        CacheManager manager = CacheManager.instance();
+
         Cache<Id, Object> cache1 = new RamCache();
         cache1.expire(26 * 1000L);
 
@@ -285,17 +288,23 @@ public class CacheManagerTest extends BaseUnitTest {
                                                                 mockCache2);
         Mockito.when(this.mockCaches.entrySet()).thenReturn(caches.entrySet());
 
-        cache1.update(IdGenerator.of("fake-id"), "fake-value");
-        cache2.update(IdGenerator.of("fake-id"), "fake-value");
+        TimerTask task = Whitebox.invoke(CacheManager.class, "scheduleTimer",
+                                         manager, 0.1F);
+        try {
+            cache1.update(IdGenerator.of("fake-id"), "fake-value",
+                          -30 * 1000L);
+            cache2.update(IdGenerator.of("fake-id"), "fake-value");
 
-        waitTillNext(40);
+            waitTillNext(3);
 
-        // Would call tick() per 30s
-        Mockito.verify(mockCache1, Mockito.times(1)).tick();
-        Mockito.verify(mockCache2, Mockito.times(1)).tick();
+            Mockito.verify(mockCache1, Mockito.atLeastOnce()).tick();
+            Mockito.verify(mockCache2, Mockito.atLeastOnce()).tick();
 
-        Assert.assertEquals(0, cache1.size());
-        Assert.assertEquals(1, cache2.size());
+            Assert.assertEquals(0, cache1.size());
+            Assert.assertEquals(1, cache2.size());
+        } finally {
+            task.cancel();
+        }
     }
 
     @SuppressWarnings({"unused", "unchecked"})
@@ -308,4 +317,3 @@ public class CacheManagerTest extends BaseUnitTest {
         return (Cache<Id, Object>) p;
     }
 }
-
