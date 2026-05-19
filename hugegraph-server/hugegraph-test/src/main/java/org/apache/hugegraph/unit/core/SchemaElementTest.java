@@ -86,6 +86,18 @@ public class SchemaElementTest {
     }
 
     @Test
+    public void testSingleSetterPassesThroughBlankCreateTime() {
+        // "" is the key-only placeholder for the eliminate()/DELETE builder
+        // flow (.userdata(CREATE_TIME, "").eliminate()); it must not be parsed.
+        SchemaElement schema = newSchema();
+
+        schema.userdata(Userdata.CREATE_TIME, "");
+
+        Object value = schema.userdata().get(Userdata.CREATE_TIME);
+        Assert.assertEquals("", value);
+    }
+
+    @Test
     public void testSingleSetterLeavesOtherStringKeysUntouched() {
         SchemaElement schema = newSchema();
 

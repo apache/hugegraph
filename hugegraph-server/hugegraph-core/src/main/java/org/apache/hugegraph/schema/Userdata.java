@@ -62,9 +62,16 @@ public class Userdata extends HashMap<String, Object> {
      * value to {@code Date} when the target is a raw {@code Map}. This method
      * restores the original type after deserialization. Idempotent for values
      * already of the expected type.
+     * <p>
+     * An empty string is passed through unchanged: it is the key-only
+     * placeholder used by the {@code eliminate()}/{@code DELETE} builder flow
+     * (e.g. {@code .userdata(CREATE_TIME, "").eliminate()}), where the value is
+     * ignored and only the key drives {@code removeUserdata}. Parsing it would
+     * fail before the eliminate path can apply its key-only semantics.
      */
     public static Object normalizeValue(String key, Object value) {
-        if (CREATE_TIME.equals(key) && value instanceof String) {
+        if (CREATE_TIME.equals(key) && value instanceof String &&
+            !((String) value).isEmpty()) {
             try {
                 return DateUtil.parse((String) value);
             } catch (RuntimeException e) {
