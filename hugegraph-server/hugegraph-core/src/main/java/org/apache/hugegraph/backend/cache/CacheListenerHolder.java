@@ -17,51 +17,25 @@
 
 package org.apache.hugegraph.backend.cache;
 
-import java.util.function.Consumer;
-import java.util.function.Function;
+import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.event.EventListener;
 
-public interface Cache<K, V> {
+/*
+ * Listener lifetime must cover all active transactions for the graph.
+ * The holder is removed from the registry and unregistered from EventHub
+ * only when the last transaction releases it.
+ */
+final class CacheListenerHolder {
 
-    String ACTION_INVALID = "invalid";
-    String ACTION_CLEAR = "clear";
+    final EventListener listener;
+    final EventHub hub;
+    // Must only be read or written inside ConcurrentMap.compute() for the
+    // enclosing registry; ConcurrentHashMap.compute() serialises per-key access.
+    int refCount;
 
-    V get(K id);
-
-    V getOrFetch(K id, Function<K, V> fetcher);
-
-    boolean containsKey(K id);
-
-    boolean update(K id, V value);
-
-    boolean update(K id, V value, long timeOffset);
-
-    boolean updateIfAbsent(K id, V value);
-
-    boolean updateIfPresent(K id, V value);
-
-    void invalidate(K id);
-
-    void traverse(Consumer<V> consumer);
-
-    void clear();
-
-    void expire(long ms);
-
-    long expire();
-
-    long tick();
-
-    long capacity();
-
-    long size();
-
-    boolean enableMetrics(boolean enabled);
-
-    long hits();
-
-    long miss();
-
-    <T> T attachment(T object);
-
-    <T> T attachment();
+    CacheListenerHolder(EventListener listener, EventHub hub) {
+        this.listener = listener;
+        this.hub = hub;
+        this.refCount = 1;
+    }
 }

@@ -140,8 +140,6 @@ public class GraphTransaction extends IndexableTransaction {
 
     private final int verticesCapacity;
     private final int edgesCapacity;
-    protected static final ConcurrentHashMap<String, Boolean> graphCacheListenStatus =
-            new ConcurrentHashMap<>();
     protected static final ConcurrentHashMap<String, Boolean> storeEventListenStatus =
             new ConcurrentHashMap<>();
 
