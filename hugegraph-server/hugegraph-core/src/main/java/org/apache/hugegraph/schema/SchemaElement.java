@@ -96,13 +96,22 @@ public abstract class SchemaElement implements Nameable, Typeable,
         return Collections.unmodifiableMap(this.userdata);
     }
 
+    /**
+     * Add userdata. String values of {@link Userdata#CREATE_TIME} are
+     * normalized to {@link java.util.Date} and malformed strings are rejected.
+     */
     public void userdata(String key, Object value) {
         E.checkArgumentNotNull(key, "userdata key");
         E.checkArgumentNotNull(value, "userdata value");
         this.userdata.put(key, value);
     }
 
+    /**
+     * Add userdata in bulk. String values of {@link Userdata#CREATE_TIME} are
+     * normalized to {@link java.util.Date} and malformed strings are rejected.
+     */
     public void userdata(Userdata userdata) {
+        E.checkArgumentNotNull(userdata, "userdata");
         this.userdata.putAll(userdata);
     }
 
@@ -112,6 +121,7 @@ public abstract class SchemaElement implements Nameable, Typeable,
     }
 
     public void removeUserdata(Userdata userdata) {
+        E.checkArgumentNotNull(userdata, "userdata");
         for (String key : userdata.keySet()) {
             this.userdata.remove(key);
         }
