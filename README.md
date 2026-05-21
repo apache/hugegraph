@@ -267,14 +267,9 @@ cd hugegraph
 # Build all modules (skip tests for faster build)
 mvn clean package -DskipTests
 
- # After building, the unpacked distribution will be in the project root:
-ls apache-hugegraph-*
-
-# Enter the unpacked directory (e.g., apache-hugegraph-1.7.0):
-cd apache-hugegraph-*
-
-# Enter the server package directory:
-cd apache-hugegraph-server-1.7.0
+# Extract built package
+tar -xzf target/apache-hugegraph-{version}.tar.gz
+cd apache-hugegraph-{version}/apache-hugegraph-server-{version}
 
 # Initialize and start
 bin/init-store.sh
