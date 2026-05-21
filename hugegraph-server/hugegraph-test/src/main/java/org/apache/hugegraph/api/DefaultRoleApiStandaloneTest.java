@@ -17,9 +17,6 @@
 
 package org.apache.hugegraph.api;
 
-import java.util.Map;
-
-import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -53,6 +50,10 @@ DefaultRoleApiStandaloneTest extends BaseApiTest {
 
     private static String managerDefaultPath(String graphspace) {
         return String.format("graphspaces/%s/auth/managers/default", graphspace);
+    }
+
+    private static String legacyManagerDefaultPath() {
+        return "auth/manager/default";
     }
 
     @Before
@@ -151,6 +152,15 @@ DefaultRoleApiStandaloneTest extends BaseApiTest {
         Response r = client().get(managerDefaultPath(SPACE),
                                   ImmutableMap.of("role", "OBSERVER",
                                                   "graph", "hugegraph"));
+        String content = assertResponseStatus(400, r);
+        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+    }
+
+    @Test
+    public void testCheckDefaultAnalystRoleWithLegacyPathReturnsFriendlyError() {
+        Response r = client().get(legacyManagerDefaultPath(),
+                                  ImmutableMap.of("graphspace", SPACE,
+                                                  "role", "ANALYST"));
         String content = assertResponseStatus(400, r);
         Assert.assertTrue(content.contains(STANDALONE_ERROR));
     }

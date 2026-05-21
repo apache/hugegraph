@@ -35,6 +35,8 @@ import jakarta.ws.rs.core.Response;
  * in standalone (RocksDB) mode:
  *  - GET  /graphspaces/{gs}/graphs/profile        — works, defaultGraphs empty
  *  - POST /graphspaces/{gs}/graphs/{name}/default  — returns 400 standalone
+ *  - GET  /graphspaces/{gs}/graphs/{name}/default   — returns 400 standalone
+ *  - GET  /graphspaces/{gs}/graphs/{name}/undefault — returns 400 standalone
  *  - DELETE /graphspaces/{gs}/graphs/{name}/default — returns 400 standalone
  *  - GET  /graphspaces/{gs}/graphs/default          — returns 400 standalone
  *  - PUT  /graphspaces/{gs}/graphs/{name}           — update nickname
@@ -186,6 +188,26 @@ public class GraphsApiStandaloneTest extends BaseApiTest {
 
         Response unsetR = client().delete(GRAPHS_PATH + "/" + TEST_GRAPH + "/default",
                                           ImmutableMap.of());
+        String content = assertResponseStatus(400, unsetR);
+        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+    }
+
+    @Test
+    public void testSetDefaultGraphWithGetCompatibilityReturnsFriendlyError() {
+        Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
+        assertResponseStatus(201, r);
+
+        Response setR = client().get(GRAPHS_PATH + "/" + TEST_GRAPH + "/default");
+        String content = assertResponseStatus(400, setR);
+        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+    }
+
+    @Test
+    public void testUnsetDefaultGraphWithGetCompatibilityReturnsFriendlyError() {
+        Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
+        assertResponseStatus(201, r);
+
+        Response unsetR = client().get(GRAPHS_PATH + "/" + TEST_GRAPH + "/undefault");
         String content = assertResponseStatus(400, unsetR);
         Assert.assertTrue(content.contains(STANDALONE_ERROR));
     }

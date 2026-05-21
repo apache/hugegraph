@@ -313,7 +313,9 @@ public class HugeUser extends Entity {
             if (!this.graph.graph().existsPropertyKey(P.NICKNAME)) {
                 createPropertyKey(P.NICKNAME);
                 VertexLabel vl = this.graph.graph().vertexLabel(this.label);
-                vl.nullableKey(this.graph.graph().propertyKey(P.NICKNAME).id());
+                Id nickname = this.graph.graph().propertyKey(P.NICKNAME).id();
+                vl.property(nickname);
+                vl.nullableKey(nickname);
                 this.graph.schemaTransaction().updateVertexLabel(vl);
             }
         }

@@ -252,6 +252,19 @@ public class GraphsAPI extends API {
         return ImmutableMap.of("default_graph", defaults.keySet());
     }
 
+    @GET
+    @Timed
+    @Path("{name}/default")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$owner=$name"})
+    public Map<String, Object> setDefaultByGet(@Context GraphManager manager,
+                                               @Parameter(description = "The graph space name")
+                                               @PathParam("graphspace") String graphSpace,
+                                               @Parameter(description = "The graph name")
+                                               @PathParam("name") String name) {
+        return this.setDefault(manager, graphSpace, name);
+    }
+
     @DELETE
     @Timed
     @Path("{name}/default")
@@ -275,6 +288,19 @@ public class GraphsAPI extends API {
         authManager.unsetDefaultGraph(graphSpace, name, user);
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
         return ImmutableMap.of("default_graph", defaults.keySet());
+    }
+
+    @GET
+    @Timed
+    @Path("{name}/undefault")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$owner=$name"})
+    public Map<String, Object> unsetDefaultByGet(@Context GraphManager manager,
+                                                 @Parameter(description = "The graph space name")
+                                                 @PathParam("graphspace") String graphSpace,
+                                                 @Parameter(description = "The graph name")
+                                                 @PathParam("name") String name) {
+        return this.unsetDefault(manager, graphSpace, name);
     }
 
     @GET
@@ -357,8 +383,23 @@ public class GraphsAPI extends API {
                 String nickname = (String) graphMap.get("nickname");
                 if (!StringUtils.isEmpty(nickname)) {
                     GraphManager.checkNickname(nickname);
-                    E.checkArgument(!manager.isExistedGraphNickname(graphSpace, nickname) ||
-                                    nickname.equals(exist.nickname()),
+                    boolean existedNickname;
+                    if (manager.isPDEnabled()) {
+                        existedNickname = manager.isExistedGraphNickname(graphSpace, nickname);
+                    } else {
+                        existedNickname = false;
+                        for (String existedGraphName : manager.graphs(graphSpace)) {
+                            if (name.equals(existedGraphName)) {
+                                continue;
+                            }
+                            HugeGraph graph = manager.graph(graphSpace, existedGraphName);
+                            if (graph != null && nickname.equals(graph.nickname())) {
+                                existedNickname = true;
+                                break;
+                            }
+                        }
+                    }
+                    E.checkArgument(!existedNickname || nickname.equals(exist.nickname()),
                                     "Nickname '%s' has already existed in graphspace '%s'",
                                     nickname, graphSpace);
                     // Delegate to GraphManager: handles both in-memory update and

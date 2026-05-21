@@ -122,19 +122,25 @@ public class ServerInfoManager {
                         "The server with name '%s' already in cluster", serverId);
 
         if (nodeInfo.nodeRole().master()) {
-            String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
-            do {
-                Iterator<HugeServerInfo> servers = this.serverInfos(PAGE_SIZE, page);
-                while (servers.hasNext()) {
-                    existed = servers.next();
-                    E.checkArgument(!existed.role().master() || !existed.alive(),
-                                    "Already existed master '%s' in current cluster",
-                                    existed.id());
-                }
-                if (page != null) {
-                    page = PageInfo.pageInfo(servers);
-                }
-            } while (page != null);
+            try {
+                String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
+                do {
+                    Iterator<HugeServerInfo> servers = this.serverInfos(PAGE_SIZE, page);
+                    while (servers.hasNext()) {
+                        existed = servers.next();
+                        E.checkArgument(!existed.role().master() || !existed.alive(),
+                                        "Already existed master '%s' in current cluster",
+                                        existed.id());
+                    }
+                    if (page != null) {
+                        page = PageInfo.pageInfo(servers);
+                    }
+                } while (page != null);
+            } catch (Exception e) {
+                LOG.warn("Failed to check existing master nodes, " +
+                         "may be caused by schema mismatch in shared store: {}",
+                         e.getMessage());
+            }
         }
 
         this.globalNodeInfo = nodeInfo;
@@ -198,16 +204,12 @@ public class ServerInfoManager {
             LOG.info("ServerInfo is missing: {}, may not be initialized yet", this.selfNodeId());
             return;
         }
-        if (this.selfIsMaster()) {
-            // On the master node, just wait for ServerInfo re-init
-            LOG.warn("ServerInfo is missing: {}, may be cleared before", this.selfNodeId());
-            return;
-        }
         /*
-         * Missing server info on non-master node, may be caused by graph
-         * truncated on master node then synced by raft.
-         * TODO: we just patch it here currently, to be improved.
+         * Missing server info on any node (master or worker), may be caused by
+         * graph truncated or store data cleared.
+         * Re-save ServerInfo to recover automatically.
          */
+        LOG.warn("ServerInfo is missing: {}, re-saving it now", this.selfNodeId());
         serverInfo = this.saveServerInfo(this.selfNodeId(), this.selfNodeRole());
         assert serverInfo != null;
     }
@@ -341,21 +343,39 @@ public class ServerInfoManager {
     }
 
     private HugeServerInfo selfServerInfo() {
-        HugeServerInfo selfServerInfo = this.serverInfo(this.selfNodeId());
-        if (selfServerInfo == null && this.selfNodeId() != null) {
-            LOG.warn("ServerInfo is missing: {}", this.selfNodeId());
+        try {
+            HugeServerInfo selfServerInfo = this.serverInfo(this.selfNodeId());
+            if (selfServerInfo == null && this.selfNodeId() != null) {
+                LOG.warn("ServerInfo is missing: {}", this.selfNodeId());
+            }
+            return selfServerInfo;
+        } catch (Exception e) {
+            /*
+             * In hstore mode, multiple graphs share the SERVER vertex table
+             * but may have different schema ID assignments, causing parse
+             * errors when one graph reads ServerInfo written by another.
+             * Return null to trigger the re-save logic in heartbeat().
+             */
+            LOG.warn("Failed to query self server info '{}', will re-init: {}",
+                     this.selfNodeId(), e.getMessage());
+            return null;
         }
-        return selfServerInfo;
     }
 
     private HugeServerInfo serverInfo(Id serverId) {
         return this.call(() -> {
-            Iterator<Vertex> vertices = this.tx().queryServerInfos(serverId);
-            Vertex vertex = QueryResults.one(vertices);
-            if (vertex == null) {
+            try {
+                Iterator<Vertex> vertices = this.tx().queryServerInfos(serverId);
+                Vertex vertex = QueryResults.one(vertices);
+                if (vertex == null) {
+                    return null;
+                }
+                return HugeServerInfo.fromVertex(vertex);
+            } catch (Exception e) {
+                LOG.warn("Failed to parse server info '{}': {}",
+                         serverId, e.getMessage());
                 return null;
             }
-            return HugeServerInfo.fromVertex(vertex);
         });
     }
 

@@ -18,6 +18,7 @@
 package org.apache.hugegraph.api.space;
 
 import java.util.Date;
+import java.util.Objects;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
@@ -135,7 +136,7 @@ public class SchemaTemplateAPI extends API {
         String username = HugeGraphAuthProxy.username();
         boolean isSpace = manager.authManager()
                                  .isSpaceManager(graphSpace, username);
-        if (st.creator().equals(username) || isSpace) {
+        if (Objects.equals(st.creator(), username) || isSpace) {
             manager.dropSchemaTemplate(graphSpace, name);
         } else {
             throw new ForbiddenException("No permission to delete schema template");
@@ -166,7 +167,7 @@ public class SchemaTemplateAPI extends API {
         String username = HugeGraphAuthProxy.username();
         boolean isSpace = manager.authManager()
                                  .isSpaceManager(graphSpace, username);
-        if (old.creator().equals(username) || isSpace) {
+        if (Objects.equals(old.creator(), username) || isSpace) {
             SchemaTemplate template = jsonSchemaTemplate.build(old);
             template.creator(old.creator());
             template.create(old.create());
