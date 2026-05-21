@@ -3,9 +3,6 @@
 This guide explains how to start HBase locally with Docker, verify it is working, and validate HugeGraph API operations.
 
 > **All commands in this guide should be run from the repository root** unless otherwise noted.
-
-> **Recent path change**: The HBase compose file moved from `docker/docker-compose.hbase.yml` to `docker/hbase/docker-compose.hbase.yml`. If you have older shell history/scripts, update `-f` accordingly.
-
 > **Security note**: The HBase Docker build enforces SHA512 verification by default and fails when checksum download/parsing/validation fails. Only use `--build-arg ALLOW_UNVERIFIED_DOWNLOAD=true` for trusted test environments with restricted networks.
 
 ---
