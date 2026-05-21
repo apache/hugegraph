@@ -265,7 +265,6 @@ public class ManagerAPI extends API {
     @GET
     @Timed
     @Path("default")
-    @Consumes(APPLICATION_JSON)
     public String checkDefaultRole(@Context GraphManager manager,
                                    @PathParam("graphspace") String graphSpace,
                                    @QueryParam("role") String role,

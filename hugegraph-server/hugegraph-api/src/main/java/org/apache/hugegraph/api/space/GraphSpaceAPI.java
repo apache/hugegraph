@@ -131,6 +131,7 @@ public class GraphSpaceAPI extends API {
             E.checkArgument(false, "Invalid role value '%s'", jsonRole.role);
             role = null; // unreachable, satisfies compiler
         }
+        validGraphSpace(manager, name);
         LOG.debug("Create default role: {} {} {}", user, role,
                               name);
         AuthManager authManager;
@@ -152,6 +153,9 @@ public class GraphSpaceAPI extends API {
 
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, name, graph);
+        }
 
         Map <String, String> result = new HashMap<>();
         result.put("user", user);
@@ -171,7 +175,6 @@ public class GraphSpaceAPI extends API {
     @GET
     @Timed
     @Path("{graphspace}/role")
-    @Consumes(APPLICATION_JSON)
     @RolesAllowed("analyst")
     public String checkDefaultRole(@Context GraphManager manager,
                                    @PathParam("graphspace") String name,
@@ -198,9 +201,13 @@ public class GraphSpaceAPI extends API {
             E.checkArgument(false, "Invalid role value '%s'", role);
             defaultRole = null; // unreachable, satisfies compiler
         }
+        validGraphSpace(manager, name);
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, name, graph);
+        }
 
         boolean result;
         if (hasGraph) {
@@ -216,7 +223,6 @@ public class GraphSpaceAPI extends API {
     @DELETE
     @Timed
     @Path("{graphspace}/role")
-    @Consumes(APPLICATION_JSON)
     @RolesAllowed("analyst")
     public void deleteDefaultRole(@Context GraphManager manager,
                                   @PathParam("graphspace") String name,
@@ -252,9 +258,13 @@ public class GraphSpaceAPI extends API {
             E.checkArgument(false, "Invalid role value '%s'", role);
             defaultRole = null; // unreachable, satisfies compiler
         }
+        validGraphSpace(manager, name);
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, name, graph);
+        }
         if (hasGraph) {
             authManager.deleteDefaultRole(name, user, defaultRole, graph);
         } else {
@@ -496,6 +506,17 @@ public class GraphSpaceAPI extends API {
         return authManager.isAdminManager(user) ||
                authManager.isSpaceManager(graphSpace, user) ||
                authManager.isSpaceMember(graphSpace, user);
+    }
+
+    private static void validGraphSpace(GraphManager manager, String graphSpace) {
+        E.checkArgument(manager.graphSpace(graphSpace) != null,
+                        "The graph space '%s' does not exist", graphSpace);
+    }
+
+    private static void validGraph(GraphManager manager, String graphSpace,
+                                   String graph) {
+        E.checkArgument(manager.graph(graphSpace, graph) != null,
+                        "Graph '%s/%s' does not exist", graphSpace, graph);
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

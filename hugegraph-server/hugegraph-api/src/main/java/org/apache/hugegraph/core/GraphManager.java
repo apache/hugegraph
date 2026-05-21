@@ -2219,22 +2219,27 @@ public final class GraphManager {
             // Non-PD mode: in-memory only, acceptable for standalone RocksDB
             return;
         }
+        Map<String, Object> configs;
         try {
-            Map<String, Object> configs =
-                    this.metaManager.getGraphConfig(graphSpace, graphName);
-            if (configs != null) {
-                configs.put("nickname", nickname);
-                this.metaManager.updateGraphConfig(graphSpace, graphName, configs);
-                this.metaManager.notifyGraphUpdate(graphSpace, graphName);
+            configs = this.metaManager.getGraphConfig(graphSpace, graphName);
+            if (configs == null) {
+                return;
             }
+            configs.put("nickname", nickname);
+            this.metaManager.updateGraphConfig(graphSpace, graphName, configs);
         } catch (Exception e) {
-            // Roll back the in-memory change to the previous value so that
-            // runtime state stays consistent with what was actually persisted.
+            // Roll back only if the PD metadata write did not succeed.
             if (g != null) {
                 g.nickname(oldNickname);
             }
             throw new HugeException("Failed to persist nickname for graph " +
                                     "'%s/%s'", e, graphSpace, graphName);
+        }
+        try {
+            this.metaManager.notifyGraphUpdate(graphSpace, graphName);
+        } catch (Exception e) {
+            LOG.warn("Failed to notify graph nickname update for graph '{}/{}'",
+                     graphSpace, graphName, e);
         }
     }
 

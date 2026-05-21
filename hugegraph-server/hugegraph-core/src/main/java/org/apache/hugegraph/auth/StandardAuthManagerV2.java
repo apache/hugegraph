@@ -1585,17 +1585,21 @@ public class StandardAuthManagerV2 implements AuthManager {
         try {
             HugeBelong belong;
             String link;
-            if (HugeGroup.isGroup(owner)) {
+            HugeUser user = this.findUser(owner);
+            HugeGroup group = this.findGroup(owner);
+            if (group != null) {
                 belong = new HugeBelong(graphSpace, null,
                                         IdGenerator.of(owner),
                                         IdGenerator.of(roleName),
                                         HugeBelong.GR);
                 link = HugeBelong.GR;
-            } else {
+            } else if (user != null) {
                 belong = new HugeBelong(graphSpace, IdGenerator.of(owner),
                                         null, IdGenerator.of(roleName),
                                         HugeBelong.UR);
                 link = HugeBelong.UR;
+            } else {
+                throw new HugeException("The user or group is not exist");
             }
 
             // Idempotent: if binding already exists, treat as success
@@ -1652,7 +1656,7 @@ public class StandardAuthManagerV2 implements AuthManager {
                                   String role) {
         try {
             String belongId;
-            if (HugeGroup.isGroup(owner)) {
+            if (this.findGroup(owner) != null) {
                 belongId = this.metaManager.belongId(owner, role,
                                                      HugeBelong.GR);
                 return this.metaManager.existBelong(graphSpace,
@@ -1683,15 +1687,18 @@ public class StandardAuthManagerV2 implements AuthManager {
                                          String role) {
         try {
             String belongId;
-            if (HugeGroup.isGroup(owner)) {
+            if (this.findGroup(owner) != null) {
                 belongId = this.metaManager.belongId(owner, role,
                                                      HugeBelong.GR);
             } else {
                 belongId = this.metaManager.belongId(owner, role,
                                                      HugeBelong.UR);
             }
-            this.metaManager.deleteBelong(graphSpace,
-                                          IdGenerator.of(belongId));
+            Id id = IdGenerator.of(belongId);
+            if (!this.metaManager.existBelong(graphSpace, id)) {
+                return;
+            }
+            this.metaManager.deleteBelong(graphSpace, id);
             this.invalidateUserCache();
         } catch (Exception e) {
             throw new HugeException("Exception occurs when " +

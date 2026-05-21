@@ -86,7 +86,16 @@ public class GraphsAPI extends API {
     private static Map<String, Object> convConfig(Map<String, Object> config) {
         Map<String, Object> result = new HashMap<>(config.size());
         for (Map.Entry<String, Object> entry : config.entrySet()) {
-            result.put(entry.getKey(), entry.getValue().toString());
+            Object value = entry.getValue();
+            E.checkArgument(value != null,
+                            "The config value for '%s' cannot be null",
+                            entry.getKey());
+            E.checkArgument(value instanceof CharSequence ||
+                            value instanceof Number ||
+                            value instanceof Boolean,
+                            "The config value for '%s' must be scalar",
+                            entry.getKey());
+            result.put(entry.getKey(), value.toString());
         }
         return result;
     }
@@ -238,6 +247,8 @@ public class GraphsAPI extends API {
                                           @Parameter(description = "The graph name")
                                           @PathParam("name") String name) {
         LOG.debug("Set default graph '{}' in graph space '{}'", name, graphSpace);
+        E.checkArgument(manager.graphSpace(graphSpace) != null,
+                        "The graph space '%s' does not exist", graphSpace);
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
         String user = HugeGraphAuthProxy.username();
@@ -276,6 +287,8 @@ public class GraphsAPI extends API {
                                             @Parameter(description = "The graph name")
                                             @PathParam("name") String name) {
         LOG.debug("Unset default graph '{}' in graph space '{}'", name, graphSpace);
+        E.checkArgument(manager.graphSpace(graphSpace) != null,
+                        "The graph space '%s' does not exist", graphSpace);
         E.checkArgument(manager.graph(graphSpace, name) != null,
                         "Graph '%s/%s' does not exist", graphSpace, name);
         String user = HugeGraphAuthProxy.username();
@@ -375,12 +388,24 @@ public class GraphsAPI extends API {
                                 value == null ? "null" : value.getClass().getSimpleName());
                 @SuppressWarnings("unchecked")
                 Map<String, Object> graphMap = (Map<String, Object>) value;
-                String graphName = (String) graphMap.get("name");
+                Object graphNameValue = graphMap.get("name");
+                E.checkArgument(graphNameValue == null ||
+                                graphNameValue instanceof String,
+                                "The 'name' must be string, but got %s",
+                                graphNameValue == null ? "null" :
+                                graphNameValue.getClass().getSimpleName());
+                String graphName = (String) graphNameValue;
                 E.checkArgument(graphName != null && graphName.equals(name),
                                 "Different name in update body '%s' with path '%s'",
                                 graphName, name);
                 HugeGraph exist = graph(manager, graphSpace, name);
-                String nickname = (String) graphMap.get("nickname");
+                Object nicknameValue = graphMap.get("nickname");
+                E.checkArgument(nicknameValue == null ||
+                                nicknameValue instanceof String,
+                                "The 'nickname' must be string, but got %s",
+                                nicknameValue == null ? "null" :
+                                nicknameValue.getClass().getSimpleName());
+                String nickname = (String) nicknameValue;
                 if (!StringUtils.isEmpty(nickname)) {
                     GraphManager.checkNickname(nickname);
                     boolean existedNickname;
@@ -408,8 +433,8 @@ public class GraphsAPI extends API {
                 }
                 return ImmutableMap.of(name, "updated");
             default:
-                throw new AssertionError(String.format(
-                        "Invalid graph action: '%s'", action));
+                E.checkArgument(false, "Invalid graph action: '%s'", action);
+                return ImmutableMap.of(name, "invalid");
         }
     }
 
@@ -432,8 +457,8 @@ public class GraphsAPI extends API {
             manager.reload();
             return ImmutableMap.of("graphs", "reloaded");
         }
-        throw new AssertionError(String.format(
-                "Invalid graphs action: '%s'", action));
+        E.checkArgument(false, "Invalid graphs action: '%s'", action);
+        return ImmutableMap.of("graphs", "invalid");
     }
 
     @POST
@@ -479,7 +504,16 @@ public class GraphsAPI extends API {
             // 'store' is safe to default to graph name in both PD and non-PD modes
             configs.putIfAbsent("store", name);
             // Map frontend 'schema' field to backend config key
+            boolean hasSchema = configs.containsKey("schema");
             Object schema = configs.remove("schema");
+            if (hasSchema) {
+                E.checkArgument(schema != null,
+                                "The config value for 'schema' cannot be null");
+                E.checkArgument(schema instanceof CharSequence ||
+                                schema instanceof Number ||
+                                schema instanceof Boolean,
+                                "The config value for 'schema' must be scalar");
+            }
             if (schema != null && !schema.toString().isEmpty()) {
                 configs.put("schema.init_template", schema.toString());
             }
@@ -497,8 +531,10 @@ public class GraphsAPI extends API {
             graph = manager.createGraph(graphSpace, name, creator,
                                         convConfig(configs), true);
         }
-        String description = (configs != null) ?
-                             (String) configs.get(GRAPH_DESCRIPTION) : null;
+        Object descriptionValue = (configs != null) ?
+                                  configs.get(GRAPH_DESCRIPTION) : null;
+        String description = descriptionValue != null ?
+                             descriptionValue.toString() : null;
         if (description == null) {
             description = StringUtils.EMPTY;
         }

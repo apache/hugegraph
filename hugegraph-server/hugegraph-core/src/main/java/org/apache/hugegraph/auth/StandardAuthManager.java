@@ -936,13 +936,16 @@ public class StandardAuthManager implements AuthManager {
         Id userId = IdGenerator.of(owner);
         HugeBelong belong = new HugeBelong(userId, groupId);
         belong.creator(owner);
-        return this.belong.add(belong);
+        Id id = this.belong.add(belong);
+        this.invalidateUserCache();
+        return id;
     }
 
     private void removeBelongBinding(String owner, Id groupId) {
         HugeBelong existing = findBelongBinding(owner, groupId);
         if (existing != null) {
             this.belong.delete(existing.id());
+            this.invalidateUserCache();
         }
     }
 

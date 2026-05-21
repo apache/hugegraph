@@ -249,7 +249,46 @@ public class GraphsApiStandaloneTest extends BaseApiTest {
                                    .path(GRAPHS_PATH + "/" + TEST_GRAPH)
                                    .request()
                                    .put(jakarta.ws.rs.client.Entity.json(badBody));
-        Assert.assertTrue("Invalid action should return 4xx",
-                          updateR.getStatus() >= 400);
+        assertResponseStatus(400, updateR);
+    }
+
+    @Test
+    public void testUpdateGraphWithInvalidFieldTypeReturnsBadRequest() {
+        Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
+        assertResponseStatus(201, r);
+
+        String badNameBody = "{\"action\": \"update\", \"update\": {\"name\": 123, " +
+                             "\"nickname\": \"X\"}}";
+        Response updateR = client().target(baseUrl())
+                                   .path(GRAPHS_PATH + "/" + TEST_GRAPH)
+                                   .request()
+                                   .put(jakarta.ws.rs.client.Entity.json(badNameBody));
+        assertResponseStatus(400, updateR);
+
+        String badNicknameBody = "{\"action\": \"update\", \"update\": {\"name\": \"" +
+                                 TEST_GRAPH + "\", \"nickname\": 123}}";
+        updateR = client().target(baseUrl())
+                          .path(GRAPHS_PATH + "/" + TEST_GRAPH)
+                          .request()
+                          .put(jakarta.ws.rs.client.Entity.json(badNicknameBody));
+        assertResponseStatus(400, updateR);
+    }
+
+    @Test
+    public void testCreateGraphWithInvalidConfigValueReturnsBadRequest() {
+        String nullValueBody = "{\"nickname\":\"NullConfig\",\"search.text_analyzer\":null}";
+        Response createR = client().target(baseUrl())
+                                   .path(GRAPHS_PATH + "/" + TEST_GRAPH)
+                                   .request()
+                                   .post(jakarta.ws.rs.client.Entity.json(nullValueBody));
+        assertResponseStatus(400, createR);
+
+        String objectValueBody = "{\"nickname\":\"ObjectConfig\"," +
+                                 "\"schema\":{\"name\":\"template\"}}";
+        createR = client().target(baseUrl())
+                          .path(GRAPHS_PATH + "/" + TEST_GRAPH2)
+                          .request()
+                          .post(jakarta.ws.rs.client.Entity.json(objectValueBody));
+        assertResponseStatus(400, createR);
     }
 }
