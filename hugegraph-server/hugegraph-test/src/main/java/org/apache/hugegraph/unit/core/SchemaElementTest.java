@@ -17,8 +17,11 @@
 
 package org.apache.hugegraph.unit.core;
 
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.backend.id.IdGenerator;
@@ -27,6 +30,8 @@ import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.type.define.Cardinality;
+import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.DateUtil;
 import org.junit.Test;
@@ -197,6 +202,62 @@ public class SchemaElementTest {
         Assert.assertTrue(createTime instanceof Date);
         Assert.assertEquals(DateUtil.parse(formatted),
                             createTime);
+    }
+
+    @Test
+    public void testPropertyKeyFromMapNormalizesDateDefaultValue() {
+        String formatted = "2026-05-14 10:11:12.345";
+        Map<String, Object> userdata = new HashMap<>();
+        userdata.put(Userdata.DEFAULT_VALUE, formatted);
+
+        Map<String, Object> map = new HashMap<>();
+        map.put(PropertyKey.P.ID, 1);
+        map.put(PropertyKey.P.NAME, "birth");
+        map.put(PropertyKey.P.DATA_TYPE, DataType.DATE.string());
+        map.put(PropertyKey.P.CARDINALITY, Cardinality.SINGLE.string());
+        map.put(PropertyKey.P.USERDATA, userdata);
+
+        PropertyKey propertyKey = PropertyKey.fromMap(map,
+                                                      new FakeObjects().graph());
+
+        Object value = propertyKey.defaultValue();
+        Assert.assertTrue("DEFAULT_VALUE should be a Date, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Date);
+        Assert.assertEquals(DateUtil.parse(formatted), value);
+    }
+
+    @Test
+    public void testPropertyKeyFromMapNormalizesDateSetDefaultValue() {
+        String first = "2026-05-14 10:11:12.345";
+        String second = "2026-05-15 11:12:13.456";
+        Map<String, Object> userdata = new HashMap<>();
+        userdata.put(Userdata.DEFAULT_VALUE, Arrays.asList(first, second));
+
+        Map<String, Object> map = new HashMap<>();
+        map.put(PropertyKey.P.ID, 1);
+        map.put(PropertyKey.P.NAME, "tags");
+        map.put(PropertyKey.P.DATA_TYPE, DataType.DATE.string());
+        map.put(PropertyKey.P.CARDINALITY, Cardinality.SET.string());
+        map.put(PropertyKey.P.USERDATA, userdata);
+
+        PropertyKey propertyKey = PropertyKey.fromMap(map,
+                                                      new FakeObjects().graph());
+
+        Object value = propertyKey.defaultValue();
+        Assert.assertTrue("DEFAULT_VALUE should be a Collection, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Collection);
+        Collection<?> values = (Collection<?>) value;
+        Assert.assertEquals(2, values.size());
+        for (Object element : values) {
+            Assert.assertTrue("each element should be a Date, was " +
+                              (element == null ? "null" : element.getClass()),
+                              element instanceof Date);
+        }
+        List<Date> expected = Arrays.asList(DateUtil.parse(first),
+                                            DateUtil.parse(second));
+        Assert.assertTrue(values.containsAll(expected));
     }
 
     @Test

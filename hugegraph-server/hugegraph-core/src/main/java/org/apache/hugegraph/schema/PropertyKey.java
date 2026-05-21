@@ -121,7 +121,12 @@ public class PropertyKey extends SchemaElement implements Propertiable {
 
     public Object defaultValue() {
         // TODO add a field default_value
-        return this.userdata().get(Userdata.DEFAULT_VALUE);
+        Object value = this.userdata().get(Userdata.DEFAULT_VALUE);
+        // Userdata is reloaded from JSON as a raw Map, so a typed default
+        // value (e.g. Date) comes back as a String. Normalize it to the
+        // runtime type expected by this property key's data type. Idempotent
+        // for values already of the expected type.
+        return value == null ? null : this.validValue(value);
     }
 
     public boolean hasSameContent(PropertyKey other) {

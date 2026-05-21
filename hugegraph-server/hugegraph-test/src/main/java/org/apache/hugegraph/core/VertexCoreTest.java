@@ -69,6 +69,7 @@ import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.CollectionUtil;
+import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -824,6 +825,33 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals("Movie", vertex.value("fav"));
         Assert.assertEquals(123, vertex.value("cnt"));
         Assert.assertFalse(vertex.values("age").hasNext());
+    }
+
+    @Test
+    public void testAddVertexWithDateDefaultValue() {
+        SchemaManager schema = graph().schema();
+
+        Date joined = DateUtil.parse("2026-05-14 10:11:12.345");
+        schema.propertyKey("joinDate").asDate()
+              .userdata(Userdata.DEFAULT_VALUE, joined).create();
+        schema.vertexLabel("person")
+              .properties("joinDate")
+              .nullableKeys("joinDate").append();
+
+        // No 'joinDate' supplied
+        Vertex vertex = graph().addVertex(T.label, "person",
+                                          "name", "Baby", "city", "Shanghai");
+
+        this.commitTx();
+
+        // Reload from backend then query: the typed default must survive the
+        // JSON serialize/reload round-trip as a Date, not a String (#3028).
+        vertex = graph().vertex(vertex.id());
+        Object value = vertex.value("joinDate");
+        Assert.assertTrue("default 'joinDate' should be a Date, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Date);
+        Assert.assertEquals(joined, value);
     }
 
     @Test

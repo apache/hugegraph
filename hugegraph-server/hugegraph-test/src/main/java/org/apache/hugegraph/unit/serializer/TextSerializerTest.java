@@ -26,6 +26,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.DateUtil;
@@ -52,5 +53,26 @@ public class TextSerializerTest extends BaseUnitTest {
                           "was " + (value == null ? "null" : value.getClass()),
                           value instanceof Date);
         Assert.assertEquals(created, value);
+    }
+
+    @Test
+    public void testPropertyKeyDefaultValueRoundTripsAsDate() {
+        HugeConfig config = FakeObjects.newConfig();
+        TextSerializer ser = new TextSerializer(config);
+
+        FakeObjects objects = new FakeObjects();
+        PropertyKey original = objects.newPropertyKey(IdGenerator.of(1L),
+                                                      "name", DataType.DATE);
+        Date defaultValue = DateUtil.parse("2026-05-14 10:11:12.345");
+        original.userdata(Userdata.DEFAULT_VALUE, defaultValue);
+
+        BackendEntry entry = ser.writePropertyKey(original);
+        PropertyKey reloaded = ser.readPropertyKey(objects.graph(), entry);
+
+        Object value = reloaded.defaultValue();
+        Assert.assertTrue("DEFAULT_VALUE should be a Date after round-trip, " +
+                          "was " + (value == null ? "null" : value.getClass()),
+                          value instanceof Date);
+        Assert.assertEquals(defaultValue, value);
     }
 }
