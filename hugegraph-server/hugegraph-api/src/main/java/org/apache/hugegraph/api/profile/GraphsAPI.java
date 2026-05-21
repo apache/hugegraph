@@ -187,7 +187,7 @@ public class GraphsAPI extends API {
                     continue;
                 }
                 profile.put("graphspace_nickname", gsNickname);
-                
+
                 boolean isDefault = defaultGraphs.containsKey(graph);
                 profile.put("default", isDefault);
                 if (isDefault) {
@@ -199,14 +199,14 @@ public class GraphsAPI extends API {
                                     DATE_FORMATTER.format(ldt));
                     }
                 }
-                
+
                 Date createTime = hg.createTime();
                 if (createTime != null) {
                     LocalDateTime ldt = createTime.toInstant()
                             .atZone(ZoneId.systemDefault()).toLocalDateTime();
                     profile.put("create_time", DATE_FORMATTER.format(ldt));
                 }
-                
+
                 if (isDefault) {
                     defaultProfiles.add(profile);
                 } else {
