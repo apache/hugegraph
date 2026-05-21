@@ -259,7 +259,8 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
 Third party Apache 2.0 licenses
 ========================================================================
 The following components are provided under the Apache 2.0 License. See project link for details.
-The text of each license is also included in licenses/LICENSE-[project].txt.
+Per-component LICENSE-[project].txt files are included only when additional
+non-Apache-2.0 license text is required for a bundled component.
 
     https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config-base/3.0.3 -> Apache 2.0
     https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config3/3.0.3 -> Apache 2.0
