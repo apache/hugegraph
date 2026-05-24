@@ -190,19 +190,17 @@ public final class HugeCountStrategy
                         traversal.asAdmin().removeStep(curr);
                         size -= 2;
                         if (!dismissCountIs) {
-                            final TraversalParent p;
-                            if ((p = traversal.getParent()) instanceof FilterStep &&
-                                !(p instanceof ConnectiveStep)) {
-                                final Step<?, ?> filterStep = parent.asStep();
-                                final Traversal.Admin parentTraversal =
-                                        filterStep.getTraversal();
-                                final Step notStep = new NotStep<>(
-                                        parentTraversal,
-                                        traversal.getSteps().isEmpty() ?
-                                        __.identity() : traversal);
-                                filterStep.getLabels().forEach(notStep::addLabel);
+                            if (parent instanceof ConnectiveStep) {
+                                final Step<?, ?> notStep = this.transformToNotStep(
+                                        traversal, parent);
+                                TraversalHelper.removeAllSteps(traversal);
+                                traversal.addStep(notStep);
+                            } else if (parent instanceof FilterStep) {
+                                final Step filterStep = parent.asStep();
+                                final Step<?, ?> notStep = this.transformToNotStep(
+                                        traversal, parent);
                                 TraversalHelper.replaceStep(filterStep, notStep,
-                                                            parentTraversal);
+                                                            filterStep.getTraversal());
                             } else {
                                 final Traversal.Admin inner;
                                 if (prev != null) {
@@ -254,6 +252,17 @@ public final class HugeCountStrategy
             }
             prev = curr;
         }
+    }
+
+    private Step<?, ?> transformToNotStep(final Traversal.Admin<?, ?> traversal,
+                                          final TraversalParent parent) {
+        final Step<?, ?> filterStep = parent.asStep();
+        final Traversal.Admin<?, ?> parentTraversal = filterStep.getTraversal();
+        final Step<?, ?> notStep = new NotStep<>(
+                parentTraversal,
+                traversal.getSteps().isEmpty() ? __.identity() : traversal.clone());
+        filterStep.getLabels().forEach(notStep::addLabel);
+        return notStep;
     }
 
     private boolean doStrategy(final Step step) {
