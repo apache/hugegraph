@@ -19,7 +19,7 @@ set -ev
 
 TRAVIS_DIR=$(dirname $0)
 HBASE_DOWNLOAD_ADDRESS="https://archive.apache.org/dist/hbase"
-HBASE_VERSION="2.0.2"
+HBASE_VERSION="2.6.5"
 HBASE_PACKAGE="hbase-${HBASE_VERSION}"
 HBASE_TAR="${HBASE_PACKAGE}-bin.tar.gz"
 
