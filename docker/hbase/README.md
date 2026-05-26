@@ -1,422 +1,293 @@
-# HBase Backend Testing with Docker
+# HugeGraph + HBase Backend
 
-This guide explains how to start HBase locally with Docker, verify it is working, and validate HugeGraph API operations.
+This guide covers running HugeGraph with HBase backend.
 
-> **All commands in this guide should be run from the repository root** unless otherwise noted.
-> **Security note**: The HBase Docker build enforces SHA512 verification by default and fails when checksum download/parsing/validation fails. Only use `--build-arg ALLOW_UNVERIFIED_DOWNLOAD=true` for trusted test environments with restricted networks.
+> All commands below run from the repository root (this project folder).
+
+Use this once at the start of your terminal session:
+
+```bash
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+cd "$ROOT_DIR"
+```
 
 ---
 
-## Quick Start
+## Quick Start Paths (Choose One)
 
-### 0. (Optional) Build the HBase Docker Image
+<details>
+<summary><b>Option 1: Standalone HugeGraph (using start-hugegraph.sh)</b></summary>
+
+Prerequisite: build local artifact first.
+
 ```bash
-docker compose -f docker/hbase/docker-compose.hbase.yml build --no-cache hbase
+mvn clean package -DskipTests
 ```
 
-### 1. Start HBase with Docker
-
 ```bash
-docker compose -f docker/hbase/docker-compose.hbase.yml up -d
+cd "$ROOT_DIR"
+
+# 1) Start HBase
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml build --no-cache hbase
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml up -d
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml logs -f hbase
 ```
 
-### 2. Wait for HBase to be Ready (~2 minutes)
-
 ```bash
-# Check ZooKeeper connectivity
-nc -z localhost 2181 && echo "Ready" || echo "Not ready"
-
-# Or watch the logs
-docker compose -f docker/hbase/docker-compose.hbase.yml logs
-```
-
-### 3. (Optional) Clean Up Leftover HBase Tables
-
-For reruns, drop any leftover HugeGraph tables after the container is up:
-
-```bash
-docker exec hg-hbase-test bash -c '
-  for t in $(echo "list" | hbase shell -n 2>/dev/null | grep "^default_hugegraph"); do
-    echo "disable '"'"'$t'"'"'; drop '"'"'$t'"'"'"
-  done | hbase shell
-'
-```
-
-Verify tables are gone before proceeding:
-
-```bash
-docker exec hg-hbase-test bash -lc "echo 'list' | hbase shell -n"
-# Expected: TABLE (empty), 0 row(s)
-```
-
-
-### 4. Configure and Init the HugeGraph Server (required for API tests)
-
-> This step is only needed for HugeGraph API sanity checks.
-
-> **Prerequisite**: Run `mvn clean package -DskipTests` from the repository root to generate the distribution. This creates an `apache-hugegraph-<version>/` directory with all necessary binaries and configs.
-
-Set backend to HBase in the server config:
-
-```bash
-SERVER_DIR="$(find . -maxdepth 3 -type d -path './apache-hugegraph-*/apache-hugegraph-server-*' | head -n 1)"
-SERVER_DIR="${SERVER_DIR#./}"
-[ -n "$SERVER_DIR" ] || { echo "HugeGraph server runtime not found. Run mvn clean package -DskipTests first."; exit 1; }
+# 2) Configure HugeGraph (standalone runtime)
+SERVER_DIR="$(find . -maxdepth 4 -type d -path './hugegraph-server/apache-hugegraph-server-*' | head -n 1)"
+[ -n "$SERVER_DIR" ] || { echo "Build artifact not found"; exit 1; }
 CONF="$SERVER_DIR/conf/graphs/hugegraph.properties"
 
-# Switch backend to hbase
-perl -pi -e 's/^backend=.*/backend=hbase/'     "$CONF"
+perl -pi -e 's/^backend=.*/backend=hbase/' "$CONF"
 perl -pi -e 's/^serializer=.*/serializer=hbase/' "$CONF"
-
-# Uncomment HBase connection settings
-perl -pi -e 's/^#(hbase\.hosts=.*)/$1/'        "$CONF"
-perl -pi -e 's/^#(hbase\.port=.*)/$1/'         "$CONF"
+perl -pi -e 's/^#(hbase\.hosts=.*)/$1/' "$CONF"
+perl -pi -e 's/^#(hbase\.port=.*)/$1/' "$CONF"
 perl -pi -e 's/^#(hbase\.znode_parent=.*)/$1/' "$CONF"
+perl -pi -e 's/^hbase\.hosts=.*/hbase.hosts=localhost/' "$CONF"
+perl -pi -e 's/^hbase\.port=.*/hbase.port=2181/' "$CONF"
+perl -pi -e 's|^hbase\.znode_parent=.*|hbase.znode_parent=/hbase|' "$CONF"
+
+grep -E '^(backend|serializer|hbase\.)' "$CONF"
 ```
 
-Initialize HBase tables and start the server:
-
 ```bash
-printf 'pa\npa\n' | "$SERVER_DIR/bin/init-store.sh"
-"$SERVER_DIR/bin/start-hugegraph.sh" -t 60
+# 3) Init and start server
+cd "$SERVER_DIR"
+printf 'pa\npa\n' | ./bin/init-store.sh
+./bin/start-hugegraph.sh -t 60
+
+# 4) Verify backend logs mention hbase
+grep -Eai 'hbase|rocksdb|hstore' "$SERVER_DIR"/logs/*.log | tail -n 30
 ```
 
-After `init-store.sh`, you can verify the tables were created:
+</details>
+
+<details>
+<summary><b>Option 2: Docker HugeGraph (fully containerized)</b></summary>
 
 ```bash
-docker exec hg-hbase-test bash -lc "echo 'list' | hbase shell -n"
+cd "$ROOT_DIR"
+
+# 1) Start HBase
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml build --no-cache hbase
+HBASE_HOSTNAME=hbase docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml up -d
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml logs -f hbase
+```
+
+```bash
+# 2) Build HugeGraph server image
+docker build -f hugegraph-server/Dockerfile -t hugegraph/server:dev .
+
+# 3) Resolve HBase network
+HBASE_NETWORK="$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}' hg-hbase-test | head -n 1)"
+echo "$HBASE_NETWORK"
+```
+
+```bash
+# 4) One-shot init-store
+docker run --rm --name hg-server-init \
+  --network "$HBASE_NETWORK" \
+  hugegraph/server:dev \
+  bash -lc '
+    set -euo pipefail
+    CONF=/hugegraph-server/conf/graphs/hugegraph.properties
+    perl -pi -e "s/^backend=.*/backend=hbase/" "$CONF"
+    perl -pi -e "s/^serializer=.*/serializer=hbase/" "$CONF"
+    perl -pi -e "s/^#(hbase\.hosts=.*)/\$1/" "$CONF"
+    perl -pi -e "s/^#(hbase\.port=.*)/\$1/" "$CONF"
+    perl -pi -e "s/^#(hbase\.znode_parent=.*)/\$1/" "$CONF"
+    perl -pi -e "s/^hbase\.hosts=.*/hbase.hosts=hbase/" "$CONF"
+    perl -pi -e "s/^hbase\.port=.*/hbase.port=2181/" "$CONF"
+    perl -pi -e "s|^hbase\.znode_parent=.*|hbase.znode_parent=/hbase|" "$CONF"
+    ./bin/init-store.sh
+  '
+```
+
+```bash
+# 5) Start HugeGraph container
+docker rm -f hg-server-dev-hbase >/dev/null 2>&1 || true
+docker run -d --name hg-server-dev-hbase \
+  --network "$HBASE_NETWORK" \
+  -p 8080:8080 \
+  -p 8182:8182 \
+  hugegraph/server:dev \
+  bash -lc '
+    set -euo pipefail
+    CONF=/hugegraph-server/conf/graphs/hugegraph.properties
+    perl -pi -e "s/^backend=.*/backend=hbase/" "$CONF"
+    perl -pi -e "s/^serializer=.*/serializer=hbase/" "$CONF"
+    perl -pi -e "s/^#(hbase\.hosts=.*)/\$1/" "$CONF"
+    perl -pi -e "s/^#(hbase\.port=.*)/\$1/" "$CONF"
+    perl -pi -e "s/^#(hbase\.znode_parent=.*)/\$1/" "$CONF"
+    perl -pi -e "s/^hbase\.hosts=.*/hbase.hosts=hbase/" "$CONF"
+    perl -pi -e "s/^hbase\.port=.*/hbase.port=2181/" "$CONF"
+    perl -pi -e "s|^hbase\.znode_parent=.*|hbase.znode_parent=/hbase|" "$CONF"
+    ./bin/start-hugegraph.sh -t 120
+    tail -f /hugegraph-server/logs/hugegraph-server.log
+  '
+```
+
+```bash
+# 6) Verify hbase backend
+docker exec hg-server-dev-hbase bash -lc "grep -E '^(backend|serializer|hbase\.)' /hugegraph-server/conf/graphs/hugegraph.properties"
+docker exec hg-server-dev-hbase bash -lc "grep -Ei 'hbase|rocksdb|hstore' /hugegraph-server/logs/*.log | tail -n 30"
+```
+
+</details>
+
+After either path is up, run the shared tests below.
+
+---
+
+## Common Testing Steps
+
+### Apache HugeGraph Persistent Runbook (REST Engine)
+
+### Prerequisites and Constants
+
+- Base URL: `http://localhost:8080`
+- Graph target name: `hugegraph`
+- Storage backend: persistent (HBase/Cassandra/RocksDB)
+
+---
+
+### Step 1: Purge Database (Fresh Restart)
+
+Wipe any conflicting test records and data schema.
+
+```bash
+curl -X DELETE "http://localhost:8080/graphspaces/DEFAULT/graphs/hugegraph/clear?confirm_message=I%27m+sure+to+delete+all+data"
+```
+
+Status `204 No Content` confirms success.
+
+---
+
+### Step 2: Provision Structural Schema
+
+1) Register property keys:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name": "name", "data_type": "TEXT", "cardinality": "SINGLE"}' \
+  "http://localhost:8080/graphs/hugegraph/schema/propertykeys"
+```
+
+2) Register vertex label (PRIMARY_KEY):
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name": "person", "id_strategy": "PRIMARY_KEY", "properties": ["name"], "primary_keys": ["name"]}' \
+  "http://localhost:8080/graphs/hugegraph/schema/vertexlabels"
+```
+
+3) Register edge label:
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"name": "knows", "source_label": "person", "target_label": "person", "properties": []}' \
+  "http://localhost:8080/graphs/hugegraph/schema/edgelabels"
 ```
 
 ---
 
-## Docker Compose Services
+### Step 3: Populate Graph Elements
 
-### HBase Container
+1) Batch write vertices (Alice and Bob):
 
-- **Image**: `hugegraph/hbase:2.6.5`
-- **Container Name**: `hg-hbase-test`
-- **Hostname**: `hbase`
-- **Ports**:
-  - `2181` - ZooKeeper (embedded)
-  - `16000` - HBase Master RPC
-  - `16010` - HBase Master Web UI (http://localhost:16010)
-  - `16020` - HBase RegionServer RPC
-  - `16030` - HBase RegionServer Web UI (http://localhost:16030)
-- **Health Check**: ZooKeeper connectivity on port 2181
-- **Startup Time**: ~90-120 seconds
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '[{"label": "person", "properties": {"name": "Alice"}}, {"label": "person", "properties": {"name": "Bob"}}]' \
+  "http://localhost:8080/graphs/hugegraph/graph/vertices/batch"
+```
+
+Response should include IDs similar to `1:Alice` and `1:Bob`.
+
+2) Create directed edge (Alice knows Bob):
+
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"label": "knows", "outV": "1:Alice", "inV": "1:Bob", "properties": {}}' \
+  "http://localhost:8080/graphs/hugegraph/graph/edges"
+```
 
 ---
 
-## Manual Verification
+### Step 4: Synchronous Verification and Traversal
 
-### 1. Check Container is Healthy
-
-```bash
-docker compose -f docker/hbase/docker-compose.hbase.yml ps
-docker logs hg-hbase-test | tail -50
-```
-
-### 2. Check ZooKeeper Connectivity
+1) Verify target K-hop output:
 
 ```bash
-# From host machine
-nc -z localhost 2181 && echo "ZooKeeper OK" || echo "ZooKeeper not ready"
-
-# From inside the container
-docker exec hg-hbase-test nc -z localhost 2181 && echo "Ready" || echo "Not ready"
+curl -s "http://localhost:8080/graphs/hugegraph/traversers/kout?source=%221:Alice%22&direction=OUT&max_depth=1"
 ```
 
-### 3. Check HBase Master and RegionServer Web UIs
+Expected output: `{"vertices":["1:Bob"]}`
+
+2) Verify relation path structure:
 
 ```bash
-# HBase Master Web UI (should return HTML)
-curl -s http://localhost:16010 | head -20
-
-# RegionServer Web UI
-curl -s http://localhost:16030 | head -20
-
-# Or open in browser
-open http://localhost:16010
+curl -s "http://localhost:8080/graphs/hugegraph/traversers/rays?source=%221:Alice%22&direction=OUT&label=knows&max_depth=1"
 ```
 
-### 4. Verify HBase Tables via Shell
-
-```bash
-# List all tables (should show HugeGraph tables after init-store)
-docker exec hg-hbase-test bash -lc "echo 'list' | hbase shell -n"
-
-# Check a specific table exists (example: after backend init)
-docker exec hg-hbase-test bash -lc 'echo "describe '"'"'default_hugegraph:g_v'"'"'" | hbase shell -n'
-```
-
-### 5. Verify HBase Logs for Errors
-
-```bash
-# Check for any ERROR lines in HBase logs
-docker exec hg-hbase-test bash -lc "grep -i error /opt/hbase/logs/*.log | tail -20"
-
-# Tail live logs (run from repo root)
-docker compose -f docker/hbase/docker-compose.hbase.yml logs
-```
-
-> **Known benign messages** — these are safe to ignore in standalone mode:
-> - `SASL config status: Will not attempt to authenticate using SASL (unknown error)` — ZooKeeper SASL is not configured; standalone HBase does not need it.
-> - `Invalid configuration, only one server specified (ignoring)` — expected when running a single-node ZooKeeper.
-> - `NoClassDefFoundError: org/eclipse/jetty/...` — Jetty UI dependency missing in the container; does not affect HBase or ZooKeeper functionality.
+Expected output contains: `{"target":"1:Bob","label":"knows"}`
 
 ---
 
-## Manual API Sanity (curl)
+### Troubleshooting Cheat Sheet
 
-These steps assume the HugeGraph server is running at `http://localhost:8080` with auth enabled (`admin/pa`).
+- URI syntax error: do not append literal `"` inside bare URLs. Use URL-encoded values (`%22`).
+- Property missing errors: prefer native `/traversers/*` APIs for synchronous reads.
 
-> **Note on Idempotency**: Schema creation calls below use `"check_exist": false`, which skips strict "already exists" checks for matching schema definitions. If a re-submitted schema conflicts with an existing definition, HugeGraph can still return an error.
->
-> **Prerequisite**: The HBase backend tables must be initialized before any API calls will work. If you see `TableNotFoundException` errors, re-run `init-store.sh` (see Step 0 below or the Quick Start section).
+---
 
-### 0. Initialize Backend and Start Server
+## Cleanup
 
-> **Skip this if the server is already running.** This step is required the first time or after a full cleanup.
->
-> **Prerequisite**: Run `mvn clean package -DskipTests` from the repository root first to generate the distribution.
+Run cleanup only after testing is complete.
+
+### Standalone HugeGraph + Docker HBase
 
 ```bash
-SERVER_DIR="$(find . -maxdepth 3 -type d -path './apache-hugegraph-*/apache-hugegraph-server-*' | head -n 1)"
-SERVER_DIR="${SERVER_DIR#./}"
-[ -n "$SERVER_DIR" ] || { echo "HugeGraph server runtime not found. Run mvn clean package -DskipTests first."; exit 1; }
-
-# Initialize HBase tables (enter password 'pa' when prompted)
-printf 'pa\npa\n' | "$SERVER_DIR/bin/init-store.sh"
-
-# Start the server (wait up to 60s for startup)
-"$SERVER_DIR/bin/start-hugegraph.sh" -t 60
+cd "$SERVER_DIR" && ./bin/stop-hugegraph.sh
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 ```
 
-Verify the server is up before continuing:
-
-### 1. Check Server is Up
+### Docker HugeGraph + Docker HBase
 
 ```bash
-curl -s http://localhost:8080/versions | python3 -m json.tool
-```
-
-### 2. List Graphs
-
-```bash
-curl -s -u admin:pa http://localhost:8080/graphs | python3 -m json.tool
-```
-
-### 3. Create Property Keys
-
-Create multiple property keys for testing. Re-running with the same schema returns the existing definition.
-
-```bash
-# Text property
-curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphs/hugegraph/schema/propertykeys \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "email",
-    "data_type": "TEXT",
-    "cardinality": "SINGLE",
-    "check_exist": false
-  }' | python3 -m json.tool
-
-# Numeric property
-curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphs/hugegraph/schema/propertykeys \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "age",
-    "data_type": "INT",
-    "cardinality": "SINGLE",
-    "check_exist": false
-  }' | python3 -m json.tool
-```
-
-### 4. Create a Vertex Label
-
-```bash
-curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphs/hugegraph/schema/vertexlabels \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "user",
-    "id_strategy": "PRIMARY_KEY",
-    "primary_keys": ["email"],
-    "properties": ["email", "age"],
-    "check_exist": false
-  }' | python3 -m json.tool
-```
-
-### 5. Add Vertices
-
-```bash
-# Add first vertex
-curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphs/hugegraph/graph/vertices \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "label": "user",
-    "properties": {"email": "alice@example.com", "age": 30}
-  }' | python3 -m json.tool
-
-# Add second vertex
-curl -s -u admin:pa -X POST \
-  http://localhost:8080/graphs/hugegraph/graph/vertices \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "label": "user",
-    "properties": {"email": "bob@example.com", "age": 25}
-  }' | python3 -m json.tool
-```
-
-### 6. List Vertices
-
-```bash
-curl -s --compressed -u admin:pa \
-  "http://localhost:8080/graphs/hugegraph/graph/vertices" \
-  | python3 -m json.tool
-```
-
-### 7. Run a Gremlin Query
-
-```bash
-curl -s --compressed -u admin:pa -X POST \
-  http://localhost:8080/gremlin \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "gremlin": "g.V().limit(5)",
-    "bindings": {},
-    "language": "gremlin-groovy",
-    "aliases": {
-      "g": "__g_DEFAULT-hugegraph"
-    }
-  }' | python3 -m json.tool
+docker rm -f hg-server-dev-hbase
+docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 ```
 
 ---
 
 ## Troubleshooting
 
-### "The port 8182 has already been used" on Startup
-
-Port 8182 (Gremlin WebSocket) is held by a stale Java process from a previous server run. The pid file may be missing so `stop-hugegraph.sh` won't find it.
-
-```bash
-# Find the process holding port 8182
-lsof -i :8182
-
-SERVER_DIR="$(find . -maxdepth 3 -type d -path './apache-hugegraph-*/apache-hugegraph-server-*' | head -n 1)"
-SERVER_DIR="${SERVER_DIR#./}"
-[ -n "$SERVER_DIR" ] || { echo "HugeGraph server runtime not found. Run mvn clean package -DskipTests first."; exit 1; }
-
-# Graceful stop (works if pid file exists)
-"$SERVER_DIR/bin/stop-hugegraph.sh"
-
-# If still running, kill by PID from lsof output above
-kill <PID>
-
-# Verify port is free before restarting
-lsof -i :8182 || echo "Port 8182 is free"
-
-# Now start the server
-"$SERVER_DIR/bin/start-hugegraph.sh" -t 60
-```
-
-### API Returns `TableNotFoundException`
-
-If you see `org.apache.hadoop.hbase.TableNotFoundException` when calling schema or graph APIs, the HBase backend tables have not been initialized (or were dropped). Re-run `init-store.sh`:
-
-```bash
-SERVER_DIR="$(find . -maxdepth 3 -type d -path './apache-hugegraph-*/apache-hugegraph-server-*' | head -n 1)"
-SERVER_DIR="${SERVER_DIR#./}"
-[ -n "$SERVER_DIR" ] || { echo "HugeGraph server runtime not found. Run mvn clean package -DskipTests first."; exit 1; }
-"$SERVER_DIR/bin/stop-hugegraph.sh"
-printf 'pa\npa\n' | "$SERVER_DIR/bin/init-store.sh"
-"$SERVER_DIR/bin/start-hugegraph.sh" -t 60
-```
-
-### HBase Container Fails to Start
-
-```bash
-# Check container status and logs
-docker compose -f docker/hbase/docker-compose.hbase.yml ps
-docker compose -f docker/hbase/docker-compose.hbase.yml logs --tail 50 hbase
-docker inspect hg-hbase-test | grep -A 5 "State"
-```
-
-**Common causes**:
-
-1. **Port conflict** (port 2181 already in use)
-   ```bash
-   lsof -i :2181
-   # Kill the process or change the port mapping in docker/hbase/docker-compose.hbase.yml
-   ```
-
-2. **Insufficient memory** — Docker Desktop: Settings → Resources → Memory → set to at least 4 GB
-
-3. **Stale ZooKeeper data**
-   ```bash
-   docker compose -f docker/hbase/docker-compose.hbase.yml down -v
-   docker compose -f docker/hbase/docker-compose.hbase.yml up -d
-   ```
-
-### Memory Issues During Build or Setup
-
-```bash
-export MAVEN_OPTS="-Xmx2g -Xms1g"
-mvn clean package -DskipTests
-```
+| Symptom | Fix |
+|---|---|
+| `UnknownHostException: hbase:16000` | HugeGraph container is not on same Docker network as HBase. Verify `HBASE_NETWORK` and `--network`. |
+| RocksDB logs in server output | `backend=rocksdb` still active; re-run backend config and restart. |
+| `TableNotFoundException` on API calls | Tables not initialized; re-run `init-store.sh` from selected path. |
+| Port 8182 already in use | `lsof -i :8182` then `kill <PID>`. |
+| HBase container not starting | Check `lsof -i :2181`; increase Docker memory to >= 4 GB. |
 
 ---
 
-## Cleanup
+## Verification Checklist
 
-### 1. Stop the HugeGraph Server
-
-```bash
-SERVER_DIR="$(find . -maxdepth 3 -type d -path './apache-hugegraph-*/apache-hugegraph-server-*' | head -n 1)"
-SERVER_DIR="${SERVER_DIR#./}"
-[ -n "$SERVER_DIR" ] || { echo "HugeGraph server runtime not found. Run mvn clean package -DskipTests first."; exit 1; }
-"$SERVER_DIR/bin/stop-hugegraph.sh"
-```
-
-### 2. Drop HugeGraph Tables from HBase
-
-HugeGraph creates tables in the `default_hugegraph` namespace (e.g. `default_hugegraph:g_v`, `default_hugegraph:g_oe`, etc.).
-
-Drop all HugeGraph tables (disable then drop each one):
-
-```bash
-docker exec hg-hbase-test bash -c '
-  for t in $(echo "list" | hbase shell -n 2>/dev/null | grep "^default_hugegraph"); do
-    echo "disable '"'"'$t'"'"'; drop '"'"'$t'"'"'"
-  done | hbase shell
-'
-```
-
-Verify tables are gone:
-
-```bash
-docker exec hg-hbase-test bash -lc "echo 'list' | hbase shell -n"
-# Expected: TABLE (empty), 0 row(s)
-```
-
-### 3. Stop and Remove HBase Container
-
-```bash
-# Stop and remove HBase container + volumes
-docker compose -f docker/hbase/docker-compose.hbase.yml down -v
-
-# Verify containers are stopped
-docker ps | grep hbase
-```
+- [ ] `backend=hbase` in `hugegraph.properties`
+- [ ] Server logs show HBase client messages (not RocksDB/HStore)
+- [ ] HBase tables exist in `default_hugegraph:*`
+- [ ] REST runbook queries return expected graph data
+- [ ] Data survives server restart
 
 ---
 
 ## References
 
-- **HBase Official Docs**: https://hbase.apache.org/
-- **HugeGraph HBase Backend**: `hugegraph-server/hugegraph-hbase/`
-- **Docker Compose Reference**: `docker/hbase/docker-compose.hbase.yml`
+- HBase official docs: https://hbase.apache.org/
+- HugeGraph HBase backend: `hugegraph-server/hugegraph-hbase/`
+- HBase Docker Compose: `docker/hbase/docker-compose.hbase.yml`
+- HBase Docker config: `docker/hbase/hbase-site.xml`

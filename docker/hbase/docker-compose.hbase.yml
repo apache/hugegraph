@@ -46,7 +46,11 @@ services:
         HBASE_FALLBACK_URL: "${HBASE_FALLBACK_URL:-https://archive.apache.org/dist/hbase/2.6.5/hbase-2.6.5-bin.tar.gz}"
     image: hugegraph/hbase:2.6.5
     container_name: hg-hbase-test
-    hostname: hbase
+    hostname: "${HBASE_HOSTNAME:-hbase}"
+    environment:
+      HBASE_HOSTNAME: "${HBASE_HOSTNAME:-hbase}"
+      HBASE_MASTER_HOSTNAME: "${HBASE_MASTER_HOSTNAME:-}"
+      HBASE_REGIONSERVER_HOSTNAME: "${HBASE_REGIONSERVER_HOSTNAME:-}"
     ports:
       - "2181:2181"   # ZooKeeper (matches hbase.port in hugegraph.properties)
       - "16000:16000" # Master RPC

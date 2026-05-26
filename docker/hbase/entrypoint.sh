@@ -17,7 +17,31 @@
 #
 set -e
 
+HBASE_HOSTNAME="${HBASE_HOSTNAME:-hbase}"
+HBASE_MASTER_HOSTNAME="${HBASE_MASTER_HOSTNAME:-${HBASE_HOSTNAME}}"
+HBASE_REGIONSERVER_HOSTNAME="${HBASE_REGIONSERVER_HOSTNAME:-${HBASE_HOSTNAME}}"
+HBASE_SITE_XML="${HBASE_HOME}/conf/hbase-site.xml"
+
+escape_sed_replacement() {
+    printf '%s' "$1" | sed -e 's/[&|]/\\&/g'
+}
+
+set_xml_property_value() {
+    local property_name="$1"
+    local property_value
+    property_value=$(escape_sed_replacement "$2")
+
+    sed -i "/<name>${property_name//./\\.}<\\/name>/ {n; s|<value>.*</value>|<value>${property_value}</value>|;}" "${HBASE_SITE_XML}"
+}
+
+set_xml_property_value "hbase.master.hostname" "${HBASE_MASTER_HOSTNAME}"
+set_xml_property_value "hbase.regionserver.hostname" "${HBASE_REGIONSERVER_HOSTNAME}"
+
 echo "Starting HBase ${HBASE_VERSION} standalone..."
+echo "HBase container hostname fallback: ${HBASE_HOSTNAME}"
+echo "HBase advertised master hostname: ${HBASE_MASTER_HOSTNAME}"
+echo "HBase advertised regionserver hostname: ${HBASE_REGIONSERVER_HOSTNAME}"
+
 
 # Start services explicitly to avoid SSH-based helper assumptions in containers
 ${HBASE_HOME}/bin/hbase-daemon.sh start zookeeper
