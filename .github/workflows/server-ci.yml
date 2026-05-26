@@ -82,6 +82,13 @@ jobs:
         run: |
           $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
 
+      - name: Run Gremlin Console smoke test
+        if: ${{ matrix.BACKEND == 'rocksdb' }}
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          bash "$TRAVIS_DIR/run-gremlin-console-smoke-test.sh" "$SERVER_DIR"
+
       # TODO: disable raft test in normal PR due to the always timeout problem
       - name: Run raft test
         if: ${{ env.RAFT_MODE == 'true' && env.BACKEND == 'rocksdb' }}
@@ -155,6 +162,12 @@ jobs:
       - name: Run RocksDB API test
         run: |
           $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+
+      - name: Run Gremlin Console smoke test
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          bash "$TRAVIS_DIR/run-gremlin-console-smoke-test.sh" "$SERVER_DIR"
 
       - name: Show server log on failure
         if: failure()
