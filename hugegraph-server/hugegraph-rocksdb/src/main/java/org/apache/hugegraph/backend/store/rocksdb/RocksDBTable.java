@@ -218,18 +218,12 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
 
     protected BackendColumnIterator queryByIdsWithGet(RocksDBSessions.Session session,
                                                       Collection<Id> ids) {
-        if (ids.size() == 1) {
-            return this.queryById(session, ids.iterator().next());
+        E.checkState(!session.hasChanges(),
+                     "Can't queryByIds() when RocksDB session has pending changes");
+        if (ids.isEmpty()) {
+            return BackendColumnIterator.empty();
         }
-
-        if (!session.hasChanges()) {
-            return this.getByIds(session, ids);
-        }
-
-        // NOTE: this will lead to lazy create rocksdb iterator
-        return BackendColumnIterator.wrap(new FlatMapperIterator<>(
-                ids.iterator(), id -> this.queryById(session, id)
-        ));
+        return this.getByIds(session, ids);
     }
 
     protected BackendColumnIterator getById(RocksDBSessions.Session session, Id id) {

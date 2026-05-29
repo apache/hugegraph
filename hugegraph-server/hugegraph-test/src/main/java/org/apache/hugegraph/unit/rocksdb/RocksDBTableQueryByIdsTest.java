@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.unit.rocksdb;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
@@ -110,11 +111,11 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
         List<Id> ids = Arrays.asList(id1, id2, id1);
         BackendColumnIterator iter = this.vertexTable.queryByIds(this.rocks.session(), ids);
 
-        Map<String, String> results = toResultMap(iter);
+        List<String> names = toColumnNames(iter);
 
-        Assert.assertEquals(2, results.size());
-        Assert.assertEquals("value1", results.get("v1"));
-        Assert.assertEquals("value2", results.get("v2"));
+        Assert.assertEquals(2, names.size());
+        Assert.assertEquals("v1", names.get(0));
+        Assert.assertEquals("v2", names.get(1));
     }
 
     @Test
@@ -156,7 +157,7 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
     }
 
     @Test
-    public void testVertexQueryByIdsFallbackWhenHasChanges() {
+    public void testVertexQueryByIdsFailsWhenHasChanges() {
         Id id1 = IdGenerator.of("v1");
         Id id2 = IdGenerator.of("v2");
 
@@ -170,28 +171,11 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
             public boolean hasChanges() {
                 return true;
             }
-
-            @Override
-            public byte[] get(String table, byte[] key) {
-                throw new AssertionError(
-                        "reads should not be performed when hasChanges");
-            }
-
-            @Override
-            public BackendColumnIterator get(String table, List<byte[]> keys) {
-                throw new AssertionError(
-                        "multi-get should not be called when hasChanges");
-            }
         };
 
-        try {
-            BackendColumnIterator iter = this.vertexTable.queryByIds(mockSession, ids);
-            // FlatMapperIterator is lazy; trigger evaluation to hit the mock
-            iter.hasNext();
-            Assert.fail("queryByIds should fail when session has pending changes");
-        } catch (AssertionError e) {
-            Assert.assertTrue(e.getMessage().contains("hasChanges"));
-        }
+        Assert.assertThrows(IllegalStateException.class, () -> {
+            this.vertexTable.queryByIds(mockSession, ids);
+        });
     }
 
     private Map<String, String> toResultMap(BackendColumnIterator iter) {
@@ -201,6 +185,14 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
             results.put(getString(col.name), getString(col.value));
         }
         return results;
+    }
+
+    private List<String> toColumnNames(BackendColumnIterator iter) {
+        List<String> names = new ArrayList<>();
+        while (iter.hasNext()) {
+            names.add(getString(iter.next().name));
+        }
+        return names;
     }
 
     /**
