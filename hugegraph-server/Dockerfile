@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -19,15 +20,18 @@
 # 1st stage: build source code
 FROM maven:3.9.0-eclipse-temurin-11 AS build
 
-COPY . /pkg
 WORKDIR /pkg
+
+COPY . .
+
 ARG MAVEN_ARGS
 
-RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true && pwd && ls -l && rm \
-    ./hugegraph-server/*.tar.gz && rm ./hugegraph-pd/*.tar.gz && rm ./hugegraph-store/*.tar.gz
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
+    && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
 
 # 2nd stage: runtime env
-# Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13 
+# Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
 FROM eclipse-temurin:11-jre-jammy
 
 COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
@@ -36,16 +40,13 @@ LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 # TODO: use g1gc or zgc as default
 # Note: --add-exports is required for Java 11+ to access jdk.internal.reflect for auth proxy
 ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED" \
-    HUGEGRAPH_HOME="hugegraph-server"
+    HUGEGRAPH_HOME="hugegraph-server" \
+    STDOUT_MODE="true"
 
-#COPY . /hugegraph/hugegraph-server
 WORKDIR /hugegraph-server/
 
-# 1. Install environment and init HugeGraph Sever
-RUN set -x \
-    && rm /var/lib/dpkg/info/libc-bin.* \
-    && apt-get -q clean \
-    && apt-get -q update \
+# 1. Install runtime dependencies and configure server
+RUN apt-get -q update \
     && apt-get -q install -y --no-install-recommends --no-install-suggests \
        dumb-init \
        procps \
@@ -55,8 +56,6 @@ RUN set -x \
        cron \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
-    && service cron start \
-    && pwd && cd /hugegraph-server/ \
     && sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/rest-server.properties
 
 # 2. Init docker script

@@ -83,7 +83,7 @@ function process_id() {
 
 # check the port of rest server is occupied
 function check_port() {
-    local port=`echo $1 | awk -F':' '{print $3}'`
+    local port=$(echo "$1" | sed 's|.*:||' | sed 's|/.*||')
     if ! command_available "lsof"; then
         echo "Required lsof but it is unavailable"
         exit 1

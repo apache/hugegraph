@@ -52,6 +52,11 @@ jobs:
             mvn -U -ntp dependency:get -Dartifact=org.apache.hugegraph:hugegraph-struct:$REVISION
           fi
 
+      - name: Run hugegraph-struct test
+        if: ${{ hashFiles('hugegraph-struct/pom.xml') != '' }}
+        run: |
+          mvn -U -ntp -pl hugegraph-struct test
+
   pd:
     needs: struct
     runs-on: ubuntu-latest

@@ -129,7 +129,7 @@ bin/restart-hugegraph-store.sh
 2. HugeGraph Store cluster (3+ nodes)
 3. Proper configuration pointing Store nodes to PD cluster
 
-See Docker Compose example: `hugegraph-server/hugegraph-dist/docker/example/`
+See Docker Compose examples in the repository root `../docker/` directory. Single-node quickstart (pre-built images): `../docker/docker-compose.yml`. Single-node dev build (from source): `../docker/docker-compose.dev.yml`. 3-node cluster: `../docker/docker-compose-3pd-3store-3server.yml`. See `../docker/README.md` for the full setup guide.
 
 ## Configuration Files
 

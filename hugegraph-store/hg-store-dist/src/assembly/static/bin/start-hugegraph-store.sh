@@ -221,9 +221,16 @@ fi
 
 echo "Starting HG-StoreServer..."
 
-exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-    -Dspring.config.location=${CONF}/application.yml \
-    ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+# Turn on security check
+if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+    exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        -Dspring.config.location=${CONF}/application.yml \
+        ${LIB}/hg-store-node-*.jar &
+else
+    exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        -Dspring.config.location=${CONF}/application.yml \
+        ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+fi
 
 PID="$!"
 # Write pid to file

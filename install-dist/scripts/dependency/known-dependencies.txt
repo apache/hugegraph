@@ -32,7 +32,7 @@ asm-tree-9.2.jar
 asm-util-5.0.3.jar
 assertj-core-3.19.0.jar
 ast-9.0-9.0.20190305.jar
-audience-annotations-0.5.0.jar
+audience-annotations-0.13.0.jar
 auto-service-annotations-1.0.jar
 automaton-1.11-8.jar
 bolt-1.6.2.jar
@@ -59,6 +59,7 @@ chronicle-wire-2.20.117.jar
 classgraph-4.8.162.jar
 commons-beanutils-1.9.4.jar
 commons-cli-1.1.jar
+commons-cli-1.5.0.jar
 commons-codec-1.11.jar
 commons-codec-1.13.jar
 commons-codec-1.15.jar
@@ -68,6 +69,7 @@ commons-collections4-4.4.jar
 commons-compress-1.21.jar
 commons-configuration-1.10.jar
 commons-configuration2-2.8.0.jar
+commons-crypto-1.1.0.jar
 commons-io-2.12.0.jar
 commons-io-2.7.jar
 commons-io-2.8.0.jar
@@ -95,6 +97,7 @@ error_prone_annotations-2.10.0.jar
 error_prone_annotations-2.18.0.jar
 error_prone_annotations-2.3.4.jar
 error_prone_annotations-2.4.0.jar
+error_prone_annotations-2.48.0.jar
 exp4j-0.4.8.jar
 expressions-9.0-9.0.20190305.jar
 failsafe-2.4.1.jar
@@ -164,7 +167,23 @@ hamcrest-2.2.jar
 hamcrest-core-1.3.jar
 hanlp-portable-1.5.0.jar
 hanlp-portable-1.8.3.jar
-hbase-shaded-endpoint-2.0.6.jar
+hbase-client-2.6.5.jar
+hbase-common-2.6.5.jar
+hbase-endpoint-2.6.5.jar
+hbase-hadoop-compat-2.6.5.jar
+hbase-hadoop2-compat-2.6.5.jar
+hbase-logging-2.6.5.jar
+hbase-metrics-2.6.5.jar
+hbase-metrics-api-2.6.5.jar
+hbase-protocol-2.6.5.jar
+hbase-protocol-shaded-2.6.5.jar
+hbase-shaded-client-2.6.5.jar
+hbase-shaded-gson-4.1.13.jar
+hbase-shaded-miscellaneous-4.1.13.jar
+hbase-shaded-netty-4.1.13.jar
+hbase-shaded-protobuf-4.1.13.jar
+hbase-unsafe-4.1.13.jar
+hbase-zookeeper-2.6.5.jar
 hessian-3.3.6.jar
 hessian-3.3.7.jar
 high-scale-lib-1.0.6.jar
@@ -173,7 +192,7 @@ hk2-locator-3.0.1.jar
 hk2-utils-3.0.1.jar
 hppc-0.7.1.jar
 hppc-0.8.1.jar
-htrace-core4-4.2.0-incubating.jar
+htrace-core4-4.1.0-incubating.jar
 httpclient-4.5.13.jar
 httpcore-4.4.13.jar
 ikanalyzer-2012_u6.jar
@@ -243,6 +262,7 @@ jcabi-log-0.14.jar
 jcabi-manifests-1.1.jar
 jcip-annotations-1.0-1.jar
 jcl-over-slf4j-1.7.25.jar
+jcodings-1.0.58.jar
 jcommander-1.30.jar
 jcseg-core-2.2.0.jar
 jcseg-core-2.6.2.jar
@@ -296,6 +316,7 @@ jna-5.7.0.jar
 jnr-ffi-2.1.7.jar
 jnr-x86asm-1.0.2.jar
 joda-time-2.10.8.jar
+joni-2.2.1.jar
 jraft-core-1.3.11.jar
 jraft-core-1.3.13.jar
 jraft-core-1.3.9.jar
@@ -421,10 +442,12 @@ netty-codec-socks-4.1.52.Final.jar
 netty-codec-socks-4.1.72.Final.jar
 netty-common-4.1.52.Final.jar
 netty-common-4.1.72.Final.jar
+netty-handler-4.1.130.Final.jar
 netty-handler-4.1.52.Final.jar
 netty-handler-4.1.72.Final.jar
 netty-handler-proxy-4.1.52.Final.jar
 netty-handler-proxy-4.1.72.Final.jar
+netty-resolver-4.1.130.Final.jar
 netty-resolver-4.1.52.Final.jar
 netty-resolver-4.1.72.Final.jar
 netty-tcnative-boringssl-static-2.0.25.Final.jar
@@ -432,6 +455,8 @@ netty-tcnative-boringssl-static-2.0.36.Final.jar
 netty-tcnative-classes-2.0.46.Final.jar
 netty-transport-4.1.52.Final.jar
 netty-transport-4.1.72.Final.jar
+netty-transport-classes-epoll-4.1.130.Final.jar
+netty-transport-native-epoll-4.1.130.Final.jar
 netty-transport-native-unix-common-4.1.72.Final.jar
 nimbus-jose-jwt-4.41.2.jar
 nlp-lang-1.7.7.jar
@@ -443,6 +468,9 @@ okhttp-3.12.12.jar
 okhttp-4.10.0.jar
 okio-1.15.0.jar
 okio-jvm-3.0.0.jar
+opentelemetry-api-1.49.0.jar
+opentelemetry-context-1.49.0.jar
+opentelemetry-semconv-1.29.0-alpha.jar
 opentest4j-1.2.0.jar
 opentracing-api-0.22.0.jar
 opentracing-mock-0.22.0.jar
@@ -580,5 +608,7 @@ xmlunit-core-2.8.4.jar
 xpp3_min-1.1.4c.jar
 xstream-1.4.10.jar
 zjsonpatch-0.3.0.jar
+zookeeper-3.8.6.jar
+zookeeper-jute-3.8.6.jar
 zstd-jni-1.5.5-1.jar
 zt-zip-1.14.jar

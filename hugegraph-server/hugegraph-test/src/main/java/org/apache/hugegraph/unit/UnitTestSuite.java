@@ -18,7 +18,10 @@
 package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
+import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
+import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
+import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
 import org.apache.hugegraph.unit.cache.CacheManagerTest;
 import org.apache.hugegraph.unit.cache.CacheTest;
@@ -40,8 +43,10 @@ import org.apache.hugegraph.unit.core.QueryTest;
 import org.apache.hugegraph.unit.core.RangeTest;
 import org.apache.hugegraph.unit.core.RolePermissionTest;
 import org.apache.hugegraph.unit.core.RowLockTest;
+import org.apache.hugegraph.unit.core.SchemaElementTest;
 import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
+import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
 import org.apache.hugegraph.unit.id.EdgeIdTest;
@@ -61,6 +66,7 @@ import org.apache.hugegraph.unit.serializer.SerializerFactoryTest;
 import org.apache.hugegraph.unit.serializer.StoreSerializerTest;
 import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.TextBackendEntryTest;
+import org.apache.hugegraph.unit.serializer.TextSerializerTest;
 import org.apache.hugegraph.unit.store.RamIntObjectMapTest;
 import org.apache.hugegraph.unit.util.CompressUtilTest;
 import org.apache.hugegraph.unit.util.JsonUtilTest;
@@ -79,13 +85,18 @@ import org.junit.runners.Suite;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
         /* api filter */
+        LoadDetectFilterTest.class,
         PathFilterTest.class,
+
+        /* api gremlin */
+        GremlinQueryAPITest.class,
 
         /* cache */
         CacheTest.RamCacheTest.class,
         CacheTest.OffheapCacheTest.class,
         CacheTest.LevelCacheTest.class,
         CachedSchemaTransactionTest.class,
+        MetaManagerSchemaCacheClearEventTest.class,
         CachedGraphTransactionTest.class,
         CacheManagerTest.class,
         RamTableTest.class,
@@ -117,8 +128,10 @@ import org.junit.runners.Suite;
         TraversalUtilTest.class,
         PageStateTest.class,
         SystemSchemaStoreTest.class,
+        ServerInfoManagerTest.class,
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
+        SchemaElementTest.class,
 
         /* serializer */
         BytesBufferTest.class,
@@ -129,6 +142,7 @@ import org.junit.runners.Suite;
         BinarySerializerTest.class,
         BinaryScatterSerializerTest.class,
         StoreSerializerTest.class,
+        TextSerializerTest.class,
 
         /* cassandra */
         CassandraTest.class,

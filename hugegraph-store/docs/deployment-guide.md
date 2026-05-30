@@ -672,163 +672,73 @@ curl http://localhost:8080/versions
 
 ### Docker Compose: Complete Cluster
 
-File: `docker-compose.yml`
+For a production-like 3-node distributed deployment, use the compose file at `docker/docker-compose-3pd-3store-3server.yml` in the repository root. See [docker/README.md](../../docker/README.md) for the full setup guide.
+
+> **Prerequisites**: Allocate at least **12 GB** memory to Docker Desktop (Settings → Resources → Memory). The cluster runs 9 JVM processes.
+
+```bash
+cd docker
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
+```
+
+The compose file uses a Docker bridge network (`hg-net`) with container hostnames for service discovery. Configuration is injected via environment variables using the `HG_*` prefix:
+
+**PD environment variables** (per node):
 
 ```yaml
-version: '3.8'
-
-services:
-  # PD Cluster (3 nodes)
-  pd1:
-    image: hugegraph/hugegraph-pd:1.7.0
-    container_name: hugegraph-pd1
-    ports:
-      - "8686:8686"
-      - "8620:8620"
-      - "8610:8610"
-    environment:
-      - GRPC_HOST=pd1
-      - RAFT_ADDRESS=pd1:8610
-      - RAFT_PEERS=pd1:8610,pd2:8610,pd3:8610
-    networks:
-      - hugegraph-net
-
-  pd2:
-    image: hugegraph/hugegraph-pd:1.7.0
-    container_name: hugegraph-pd2
-    ports:
-      - "8687:8686"
-    environment:
-      - GRPC_HOST=pd2
-      - RAFT_ADDRESS=pd2:8610
-      - RAFT_PEERS=pd1:8610,pd2:8610,pd3:8610
-    networks:
-      - hugegraph-net
-
-  pd3:
-    image: hugegraph/hugegraph-pd:1.7.0
-    container_name: hugegraph-pd3
-    ports:
-      - "8688:8686"
-    environment:
-      - GRPC_HOST=pd3
-      - RAFT_ADDRESS=pd3:8610
-      - RAFT_PEERS=pd1:8610,pd2:8610,pd3:8610
-    networks:
-      - hugegraph-net
-
-  # Store Cluster (3 nodes)
-  store1:
-    image: hugegraph/hugegraph-store:1.7.0
-    container_name: hugegraph-store1
-    ports:
-      - "8500:8500"
-      - "8510:8510"
-      - "8520:8520"
-    environment:
-      - PD_ADDRESS=pd1:8686,pd2:8686,pd3:8686
-      - GRPC_HOST=store1
-      - RAFT_ADDRESS=store1:8510
-    volumes:
-      - store1-data:/hugegraph-store/storage
-    depends_on:
-      - pd1
-      - pd2
-      - pd3
-    networks:
-      - hugegraph-net
-
-  store2:
-    image: hugegraph/hugegraph-store:1.7.0
-    container_name: hugegraph-store2
-    ports:
-      - "8501:8500"
-    environment:
-      - PD_ADDRESS=pd1:8686,pd2:8686,pd3:8686
-      - GRPC_HOST=store2
-      - RAFT_ADDRESS=store2:8510
-    volumes:
-      - store2-data:/hugegraph-store/storage
-    depends_on:
-      - pd1
-      - pd2
-      - pd3
-    networks:
-      - hugegraph-net
-
-  store3:
-    image: hugegraph/hugegraph-store:1.7.0
-    container_name: hugegraph-store3
-    ports:
-      - "8502:8500"
-    environment:
-      - PD_ADDRESS=pd1:8686,pd2:8686,pd3:8686
-      - GRPC_HOST=store3
-      - RAFT_ADDRESS=store3:8510
-    volumes:
-      - store3-data:/hugegraph-store/storage
-    depends_on:
-      - pd1
-      - pd2
-      - pd3
-    networks:
-      - hugegraph-net
-
-  # Server (2 nodes)
-  server1:
-    image: hugegraph/hugegraph:1.7.0
-    container_name: hugegraph-server1
-    ports:
-      - "8080:8080"
-    environment:
-      - BACKEND=hstore
-      - PD_PEERS=pd1:8686,pd2:8686,pd3:8686
-    depends_on:
-      - store1
-      - store2
-      - store3
-    networks:
-      - hugegraph-net
-
-  server2:
-    image: hugegraph/hugegraph:1.7.0
-    container_name: hugegraph-server2
-    ports:
-      - "8081:8080"
-    environment:
-      - BACKEND=hstore
-      - PD_PEERS=pd1:8686,pd2:8686,pd3:8686
-    depends_on:
-      - store1
-      - store2
-      - store3
-    networks:
-      - hugegraph-net
-
-networks:
-  hugegraph-net:
-    driver: bridge
-
-volumes:
-  store1-data:
-  store2-data:
-  store3-data:
+environment:
+  HG_PD_GRPC_HOST: pd0                                # maps to grpc.host
+  HG_PD_GRPC_PORT: "8686"                             # maps to grpc.port
+  HG_PD_REST_PORT: "8620"                             # maps to server.port
+  HG_PD_RAFT_ADDRESS: pd0:8610                        # maps to raft.address
+  HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610   # maps to raft.peers-list
+  HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500  # maps to pd.initial-store-list
+  HG_PD_DATA_PATH: /hugegraph-pd/pd_data              # maps to pd.data-path
+  HG_PD_INITIAL_STORE_COUNT: 3                         # maps to pd.initial-store-count
 ```
+
+**Store environment variables** (per node):
+
+```yaml
+environment:
+  HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686     # maps to pdserver.address
+  HG_STORE_GRPC_HOST: store0                           # maps to grpc.host
+  HG_STORE_GRPC_PORT: "8500"                           # maps to grpc.port
+  HG_STORE_REST_PORT: "8520"                           # maps to server.port
+  HG_STORE_RAFT_ADDRESS: store0:8510                   # maps to raft.address
+  HG_STORE_DATA_PATH: /hugegraph-store/storage         # maps to app.data-path
+```
+
+**Server environment variables**:
+
+```yaml
+environment:
+  HG_SERVER_BACKEND: hstore                            # maps to backend
+  HG_SERVER_PD_PEERS: pd0:8686,pd1:8686,pd2:8686      # maps to pd.peers
+  STORE_REST: store0:8520                              # used by wait-partition.sh
+```
+
+**Startup ordering** is enforced via `depends_on` with `condition: service_healthy`:
+1. PD nodes start first and must pass healthchecks (`/v1/health`)
+2. Store nodes start after all PD nodes are healthy
+3. Server nodes start after all Store nodes are healthy
+
+> **Note**: The deprecated env var names (`GRPC_HOST`, `RAFT_ADDRESS`, `RAFT_PEERS`, `PD_ADDRESS`, `BACKEND`, `PD_PEERS`) still work but log a warning. Use the `HG_*` prefixed names for new deployments.
 
 **Deploy**:
 
 ```bash
-# Start cluster
-docker-compose up -d
+# Start cluster (run from the docker/ directory)
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 
 # Check status
-docker-compose ps
+docker ps
 
 # View logs
-docker-compose logs -f store1
+docker logs hg-store0
 
 # Stop cluster
-docker-compose down
+docker compose -f docker-compose-3pd-3store-3server.yml down
 ```
 
 ---
@@ -876,7 +786,7 @@ spec:
     spec:
       containers:
       - name: store
-        image: hugegraph/hugegraph-store:1.7.0
+        image: hugegraph/store:1.7.0
         ports:
         - containerPort: 8500
           name: grpc
@@ -889,11 +799,11 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
-        - name: PD_ADDRESS
+        - name: HG_STORE_PD_ADDRESS
           value: "hugegraph-pd-0.hugegraph-pd:8686,hugegraph-pd-1.hugegraph-pd:8686,hugegraph-pd-2.hugegraph-pd:8686"
-        - name: GRPC_HOST
+        - name: HG_STORE_GRPC_HOST
           value: "$(POD_NAME).hugegraph-store"
-        - name: RAFT_ADDRESS
+        - name: HG_STORE_RAFT_ADDRESS
           value: "$(POD_NAME).hugegraph-store:8510"
         volumeMounts:
         - name: data

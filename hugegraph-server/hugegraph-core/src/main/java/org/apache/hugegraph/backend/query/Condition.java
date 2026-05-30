@@ -195,7 +195,7 @@ public abstract class Condition {
          *
          * @param first  is actual value, might be Number/Date or String, It is
          *               probably that the `first` is serialized to String.
-         * @param second is value in query condition, must be Number/Date
+         * @param second is value in query condition, must be Number/Date/Boolean
          * @return the value 0 if first is numerically equal to second;
          * a value less than 0 if first is numerically less than
          * second; and a value greater than 0 if first is
@@ -208,6 +208,8 @@ public abstract class Condition {
                                                  (Number) second);
             } else if (second instanceof Date) {
                 return compareDate(first, (Date) second);
+            } else if (second instanceof Boolean) {
+                return compareBoolean(first, (Boolean) second);
             }
 
             throw new IllegalArgumentException(String.format(
@@ -227,6 +229,18 @@ public abstract class Condition {
             throw new IllegalArgumentException(String.format(
                     "Can't compare between %s(%s) and %s(%s)",
                     first, first.getClass().getSimpleName(),
+                    second, second.getClass().getSimpleName()));
+        }
+
+        private static int compareBoolean(Object first, Boolean second) {
+            if (first instanceof Boolean) {
+                return Boolean.compare((Boolean) first, second);
+            }
+
+            throw new IllegalArgumentException(String.format(
+                    "Can't compare between %s(%s) and %s(%s)",
+                    first, first == null ? null :
+                           first.getClass().getSimpleName(),
                     second, second.getClass().getSimpleName()));
         }
 

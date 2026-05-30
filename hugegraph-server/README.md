@@ -9,3 +9,24 @@ HugeGraph Server consists of two layers of functionality: the graph engine layer
 
 - Storage Layer:
   - Storage Backend: Supports multiple built-in storage backends (RocksDB/Memory/HStore/HBase/...) and allows users to extend custom backends without modifying the existing source code.
+
+## Docker
+
+### Standalone Mode
+
+```bash
+docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
+```
+
+> Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag is intended for testing or development only.
+
+### Distributed Mode (PD + Store + Server)
+
+For a full distributed deployment, use the compose file in the `docker/` directory at the repository root:
+
+```bash
+cd docker
+HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
+```
+
+See [docker/README.md](../docker/README.md) for the full setup guide.

@@ -100,3 +100,76 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: ${{ env.REPORT_DIR }}/*.xml
+
+  build-server-macos-rocksdb:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            server_java_options: ''
+          - os: macos-15
+            server_java_options: '-Xms512m -Xmx2g'
+    env:
+      USE_STAGE: 'false' # Whether to include the stage repository.
+      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
+      REPORT_DIR: target/site/jacoco
+      BACKEND: rocksdb
+      JAVA_VERSION: '11'
+      SERVER_JAVA_OPTIONS: ${{ matrix.server_java_options }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+
+      - name: Install Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'zulu'
+
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+
+      - name: Use staged maven repo settings
+        if: ${{ env.USE_STAGE == 'true' }}
+        run: |
+          cp $HOME/.m2/settings.xml /tmp/settings.xml
+          cp -vf .github/configs/settings.xml $HOME/.m2/settings.xml && cat $HOME/.m2/settings.xml
+
+      - name: Compile
+        run: |
+          mvn clean compile -pl hugegraph-server/hugegraph-test -am -U -Dmaven.javadoc.skip=true -ntp
+
+      - name: Run RocksDB core test
+        run: |
+          $TRAVIS_DIR/run-core-test.sh $BACKEND
+
+      - name: Run RocksDB API test
+        run: |
+          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+
+      - name: Show server log on failure
+        if: failure()
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          if [ -f "$SERVER_DIR/logs/hugegraph-server.log" ]; then
+            tail -n 200 "$SERVER_DIR/logs/hugegraph-server.log"
+          fi
+
+      - name: Stop RocksDB server
+        if: always()
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          if [ -f "$SERVER_DIR/bin/pid" ]; then
+            $TRAVIS_DIR/stop-server.sh $SERVER_DIR || true
+          fi

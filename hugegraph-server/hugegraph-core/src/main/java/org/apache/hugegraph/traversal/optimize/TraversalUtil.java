@@ -46,6 +46,7 @@ import org.apache.hugegraph.schema.SchemaLabel;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.CollectionUtil;
@@ -419,9 +420,9 @@ public final class TraversalUtil {
         return cond;
     }
 
-    private static Condition.Relation convCompare2Relation(HugeGraph graph,
-                                                           HugeType type,
-                                                           HasContainer has) {
+    private static Condition convCompare2Relation(HugeGraph graph,
+                                                  HugeType type,
+                                                  HasContainer has) {
         assert type.isGraph();
         BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
@@ -459,9 +460,9 @@ public final class TraversalUtil {
         }
     }
 
-    private static Condition.Relation convCompare2UserpropRelation(HugeGraph graph,
-                                                                   HugeType type,
-                                                                   HasContainer has) {
+    private static Condition convCompare2UserpropRelation(HugeGraph graph,
+                                                          HugeType type,
+                                                          HasContainer has) {
         BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
 
@@ -469,6 +470,11 @@ public final class TraversalUtil {
         PropertyKey pkey = graph.propertyKey(key);
         Id pkeyId = pkey.id();
         Object value = validPropertyValue(has.getValue(), pkey);
+        if (pkey.dataType() == DataType.BOOLEAN &&
+            value instanceof Boolean) {
+            return convCompare2BooleanUserpropRelation((Compare) bp, pkeyId,
+                                                       (Boolean) value);
+        }
 
         switch ((Compare) bp) {
             case eq:
@@ -485,6 +491,31 @@ public final class TraversalUtil {
                 return Condition.neq(pkeyId, value);
             default:
                 throw newUnsupportedPredicate(has.getPredicate());
+        }
+    }
+
+    private static Condition convCompare2BooleanUserpropRelation(Compare compare,
+                                                                 Id key,
+                                                                 Boolean value) {
+        switch (compare) {
+            case eq:
+                return Condition.eq(key, value);
+            case neq:
+                return Condition.eq(key, !value);
+            case gt:
+                return value ? Condition.in(key, ImmutableList.of()) :
+                       Condition.eq(key, true);
+            case gte:
+                return value ? Condition.eq(key, true) :
+                       Condition.in(key, ImmutableList.of(false, true));
+            case lt:
+                return value ? Condition.eq(key, false) :
+                       Condition.in(key, ImmutableList.of());
+            case lte:
+                return value ? Condition.in(key, ImmutableList.of(false, true)) :
+                       Condition.eq(key, false);
+            default:
+                throw new AssertionError(compare);
         }
     }
 

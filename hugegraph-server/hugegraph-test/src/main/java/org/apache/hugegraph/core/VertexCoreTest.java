@@ -6471,6 +6471,87 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryVertexByBooleanPredicate() {
+        HugeGraph graph = graph();
+        Assume.assumeFalse("skip this test for hstore",
+                           Objects.equals("hstore", graph.backend()));
+
+        graph.schema().indexLabel("languageByDynamic").onV("language")
+             .secondary().by("dynamic").create();
+
+        graph.addVertex(T.label, "language", "name", "java",
+                        "dynamic", true);
+        graph.addVertex(T.label, "language", "name", "rust",
+                        "dynamic", false);
+        graph.addVertex(T.label, "language", "name", "c");
+        this.commitTx();
+
+        List<Vertex> neqTrueVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .has("dynamic", P.neq(true))
+                                             .toList();
+        Assert.assertEquals(1, neqTrueVertices.size());
+        Assert.assertEquals("rust", neqTrueVertices.get(0).value("name"));
+
+        List<Vertex> neqFalseVertices = graph.traversal().V()
+                                               .hasLabel("language")
+                                               .has("dynamic", P.neq(false))
+                                               .toList();
+        Assert.assertEquals(1, neqFalseVertices.size());
+        Assert.assertEquals("java", neqFalseVertices.get(0).value("name"));
+
+        List<Vertex> hasLtVertices = graph.traversal().V()
+                                           .hasLabel("language")
+                                           .has("dynamic", P.lt(true))
+                                           .toList();
+        Assert.assertEquals(1, hasLtVertices.size());
+        Assert.assertEquals("rust", hasLtVertices.get(0).value("name"));
+
+        List<Vertex> whereLtVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .where(__.has("dynamic",
+                                                           P.lt(true)))
+                                             .toList();
+        Assert.assertEquals(1, whereLtVertices.size());
+        Assert.assertEquals("rust", whereLtVertices.get(0).value("name"));
+
+        List<Vertex> matchLtVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .match(__.as("start")
+                                                      .where(__.has("dynamic",
+                                                                    P.lt(true)))
+                                                      .as("matched"))
+                                             .<Vertex>select("matched")
+                                             .toList();
+        Assert.assertEquals(1, matchLtVertices.size());
+        Assert.assertEquals("rust", matchLtVertices.get(0).value("name"));
+
+        List<Vertex> compoundOrVertices = graph.traversal().V()
+                                                .hasLabel("language")
+                                                .has("dynamic",
+                                                     P.gt(true).or(P.eq(true)))
+                                                .toList();
+        Assert.assertEquals(1, compoundOrVertices.size());
+        Assert.assertEquals("java", compoundOrVertices.get(0).value("name"));
+
+        Assert.assertEquals(0, graph.traversal().V()
+                                    .hasLabel("language")
+                                    .has("dynamic", P.lt(false))
+                                    .toList().size());
+
+        List<Vertex> gteFalseVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .has("dynamic", P.gte(false))
+                                             .toList();
+        Assert.assertEquals(2, gteFalseVertices.size());
+        Set<String> gteFalseNames = new HashSet<>();
+        for (Vertex vertex : gteFalseVertices) {
+            gteFalseNames.add(vertex.value("name"));
+        }
+        Assert.assertEquals(ImmutableSet.of("java", "rust"), gteFalseNames);
+    }
+
+    @Test
     public void testQueryVertexBeforeAfterUpdateMultiPropertyWithIndex() {
         HugeGraph graph = graph();
         initPersonIndex(true);

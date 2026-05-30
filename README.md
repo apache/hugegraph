@@ -7,8 +7,8 @@
 <div align="center">
 
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
-[![HugeGraph-CI](https://github.com/apache/hugegraph/actions/workflows/ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/ci.yml)
-[![License checker](https://github.com/apache/hugegraph/actions/workflows/licence-checker.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/licence-checker.yml)
+[![HugeGraph-Server CI](https://github.com/apache/hugegraph/actions/workflows/server-ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/server-ci.yml)
+[![HugeGraph-PD & Store CI](https://github.com/apache/hugegraph/actions/workflows/pd-store-ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/pd-store-ci.yml)
 [![GitHub Releases Downloads](https://img.shields.io/github/downloads/apache/hugegraph/total.svg)](https://github.com/apache/hugegraph/releases)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/apache/hugegraph)
 
@@ -110,8 +110,8 @@ HugeGraph supports both **standalone** and **distributed** deployments:
 | Module | Description |
 |--------|-------------|
 | [hugegraph-server](hugegraph-server) | Core graph engine with REST API, Gremlin/Cypher support, and pluggable backends (RocksDB default) |
-| [hugegraph-pd](hugegraph-pd) | Placement Driver for distributed mode - handles meta storage, partition management and cluster scheduling |
-| [hugegraph-store](hugegraph-store) | Distributed storage with Raft consensus for high availability and horizontal scaling |
+| [hugegraph-pd](hugegraph-pd/README.md) | Placement Driver for distributed mode - handles meta storage, partition management and cluster scheduling |
+| [hugegraph-store](hugegraph-store/README.md) | Distributed storage with Raft consensus for high availability and horizontal scaling |
 | [hugegraph-commons](hugegraph-commons) | Shared utilities, RPC framework and common components |
 
 <details>
@@ -173,11 +173,11 @@ flowchart TB
 ### 5 Minutes Quick Start
 
 ```bash
-# Start HugeGraph with Docker
+# Start HugeGraph (standalone mode)
 docker run -itd --name=hugegraph -p 8080:8080 hugegraph/hugegraph:1.7.0
 
 # Verify server is running
-curl http://localhost:8080/apis/version
+curl http://localhost:8080/versions
 
 # Try a Gremlin query
 curl -X POST http://localhost:8080/gremlin \
@@ -208,13 +208,18 @@ docker run -itd --name=hugegraph -e PASSWORD=your_password -p 8080:8080 hugegrap
 ```
 
 For advanced Docker configurations, see:
-- [Docker Documentation](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#3-deploy)
-- [Docker Compose Example](./hugegraph-server/hugegraph-dist/docker/example)
-- [Docker README](hugegraph-server/hugegraph-dist/docker/README.md)
+
+* [Docker Documentation](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#3-deploy)
+* [Docker Compose Examples](./docker/)
+* [Docker README](./docker/README.md)
+* [Server Docker README](hugegraph-server/hugegraph-dist/docker/README.md)
+
+> **Docker Desktop (Mac/Windows)**: The 3-node distributed cluster (`docker/docker-compose-3pd-3store-3server.yml`) uses Docker bridge networking and works on all platforms including Docker Desktop. Allocate at least 12 GB memory to Docker Desktop.
 
 > **Note**: Docker images are convenience releases, not **official ASF distribution artifacts**. See [ASF Release Distribution Policy](https://infra.apache.org/release-distribution.html#dockerhub) for details.
 >
-> **Version Tags**: Use release tags (`1.7.0`, `1.x.0`) for stable versions. Use `latest` for development features.
+> **Version Tags**: Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag should only be used for testing or development.
+
 
 <details>
 <summary><b>Option 2: Download Binary Package</b></summary>
@@ -263,9 +268,8 @@ cd hugegraph
 mvn clean package -DskipTests
 
 # Extract built package
-cd install-dist/target
-tar -xzf hugegraph-{version}.tar.gz
-cd hugegraph-{version}
+tar -xzf target/apache-hugegraph-{version}.tar.gz
+cd apache-hugegraph-{version}/apache-hugegraph-server-{version}
 
 # Initialize and start
 bin/init-store.sh
@@ -283,14 +287,16 @@ Once the server is running, verify the installation:
 
 ```bash
 # Check server version
-curl http://localhost:8080/apis/version
+curl http://localhost:8080/versions
 
 # Expected output:
 # {
-#   "version": "1.7.0",
-#   "core": "1.7.0",
-#   "gremlin": "3.5.1",
-#   "api": "1.7.0"
+#   "versions": {
+#     "version": "v1",
+#     "core": "1.7.0",
+#     "gremlin": "3.5.1",
+#     "api": "1.7.0"
+#   }
 # }
 
 # Try Gremlin console (if installed locally)

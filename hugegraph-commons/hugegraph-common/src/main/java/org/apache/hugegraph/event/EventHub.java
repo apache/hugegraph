@@ -149,7 +149,27 @@ public class EventHub {
         return count;
     }
 
+    /**
+     * Notify all registered listeners for {@code event} EXCEPT
+     * {@code ignoredListener}. ANY_EVENT listeners are notified unless they
+     * are the ignored one.
+     *
+     * @return a Future<Integer> resolving to the count of listeners actually
+     *         invoked (the ignored listener is NOT counted)
+     */
+    public Future<Integer> notifyExcept(String event,
+                                        EventListener ignoredListener,
+                                        @Nullable Object... args) {
+        return this.notify(event, ignoredListener, args);
+    }
+
     public Future<Integer> notify(String event, @Nullable Object... args) {
+        return this.notify(event, null, args);
+    }
+
+    private Future<Integer> notify(String event,
+                                   EventListener ignoredListener,
+                                   @Nullable Object... args) {
         @SuppressWarnings("resource")
         ExtendableIterator<EventListener> all = new ExtendableIterator<>();
 
@@ -173,8 +193,12 @@ public class EventHub {
             int count = 0;
             // Notify all listeners, and ignore the results
             while (all.hasNext()) {
+                EventListener listener = all.next();
+                if (listener == ignoredListener) {
+                    continue;
+                }
                 try {
-                    all.next().event(ev);
+                    listener.event(ev);
                     count++;
                 } catch (Throwable e) {
                     LOG.warn("Failed to handle event: {}", ev, e);

@@ -1,104 +1,50 @@
 # Implementation Patterns and Guidelines
 
-## Backend Development
+## Backend Architecture
+- Backends implement `BackendStore` interface from `hugegraph-core`
+- Each backend = separate Maven module under `hugegraph-server/`
+- Configured via `hugegraph.properties` → `backend` property
+- **Active backends (focus here)**: RocksDB (default/embedded), HStore (distributed)
+- **Legacy backends** (deprecated, excluded from Serena context): MySQL, PostgreSQL, Cassandra, ScyllaDB, HBase, Palo
 
-### Backend Architecture Pattern
-- All backends extend abstractions from `hugegraph-server/hugegraph-core`
-- Implement the `BackendStore` interface
-- Each backend is a separate Maven module under `hugegraph-server/`
-- Backend selection configured in `hugegraph.properties` via `backend` property
+## GraphSpace Multi-Tenancy
+- Core: `hugegraph-core/.../space/` (GraphSpace, SchemaTemplate, Service, register/)
+- API: `hugegraph-api/.../api/space/GraphSpaceAPI.java` (includes GS profile endpoints)
+- **Standalone mode**: GraphSpaceAPI and ManagerAPI are disabled
 
-### Available Backends
-- **RocksDB** (default, embedded): `hugegraph-rocksdb`
-- **HStore** (distributed, production): `hugegraph-hstore`
-- **Legacy** (≤1.5.0): MySQL, PostgreSQL, Cassandra, ScyllaDB, HBase, Palo
+## Auth System
+- Disabled by default, enable via `bin/enable-auth.sh`
+- ConfigAuthenticator was removed, use standard auth
+- Multi-level: Users, Groups, Projects, Targets, Access control
+- Location: `hugegraph-api/.../api/auth/`
 
-### Backend Testing Profiles
-- `memory`: In-memory backend for fast unit tests
-- `rocksdb`: RocksDB for realistic local tests
-- `hbase`: HBase for distributed scenarios
-- `hstore`: HStore for production-like distributed tests
-
-## gRPC Protocol Development
-
-### Protocol Buffer Definitions
+## gRPC Protocol
 - PD protos: `hugegraph-pd/hg-pd-grpc/src/main/proto/`
 - Store protos: `hugegraph-store/hg-store-grpc/src/main/proto/`
+- After `.proto` changes: `mvn clean compile` → `target/generated-sources/protobuf/`
 
-### Code Generation
-When modifying `.proto` files:
-1. Run `mvn clean compile` to regenerate gRPC stubs
-2. Generated Java code goes to `*/grpc/` packages
-3. Output location: `target/generated-sources/protobuf/`
-4. Generated files excluded from Apache RAT checks
-5. All inter-service communication uses gRPC
+## Query Languages
+- **Gremlin**: Native TinkerPop 3.5.1
+- **OpenCypher**: `hugegraph-api/opencypher/`
+- TinkerPop exceptions are passed through in Gremlin responses
 
-## Authentication System
+## Schema
+- Labels support TTL with runtime update
+- Edge label conflicting conditions are handled safely
 
-### Default State
-- Authentication **disabled by default**
-- Enable via `bin/enable-auth.sh` or configuration
-- **Required for production deployments**
+## Testing
+- **Profiles**: `unit-test`, `core-test`, `api-test`, `tinkerpop-structure-test`, `tinkerpop-process-test`
+- **Backends in CI**: memory, rocksdb, hbase (matrix)
+- **Single test class**: `mvn test -pl hugegraph-server/hugegraph-test -am -P core-test,memory -Dtest=ClassName`
+- TinkerPop tests: only on `release-*`/`test-*` branches
+- Raft tests: only on `test*`/`raft*` branches
 
-### Implementation Location
-`hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/api/auth/`
+## Docker
+- Single-node: `docker/docker-compose.yml` (bridge network, pd+store+server)
+- Cluster: `docker/docker-compose-3pd-3store-3server.yml`
+- Container logs: stdout-based
 
-### Multi-Level Security Model
-- Users, Groups, Projects, Targets, Access control
-
-## TinkerPop Integration
-
-### Compliance
-- Full Apache TinkerPop 3 implementation
-- Custom optimization strategies
-- Supports both Gremlin and OpenCypher query languages
-
-### Query Language Support
-- **Gremlin**: Native via TinkerPop integration
-- **OpenCypher**: Implementation in `hugegraph-api/opencypher/`
-
-## Testing Patterns
-
-### Test Suite Organization
-- **UnitTestSuite**: Pure unit tests, no external dependencies
-- **CoreTestSuite**: Core functionality tests with backend
-- **ApiTestSuite**: REST API integration tests
-- **StructureStandardTest**: TinkerPop structure compliance
-- **ProcessStandardTest**: TinkerPop process compliance
-
-### Backend Selection in Tests
-Use Maven profiles:
-```bash
--P core-test,memory      # Fast in-memory
--P core-test,rocksdb     # Persistent local
--P api-test,rocksdb      # API with persistent backend
-```
-
-## Distribution and Packaging
-
-### Creating Distribution
-```bash
-mvn clean package -DskipTests
-```
-Output: `install-dist/target/hugegraph-<version>.tar.gz`
-
-## Code Organization
-
-### Package Structure
-```
-org.apache.hugegraph
-├── backend/        # Backend implementations
-├── api/           # REST API endpoints
-├── core/          # Core graph engine
-├── schema/        # Schema definitions
-├── traversal/     # Traversal and query processing
-├── task/          # Background tasks
-├── auth/          # Authentication/authorization
-└── util/          # Utilities
-```
-
-### Module Dependencies
-- Commons is shared by all modules
-- Struct must be built before PD and Store
-- Backend modules depend on core
-- Test module depends on all server modules
+## CI Pipelines
+- `server-ci.yml`: compile + unit/core/API tests (memory/rocksdb/hbase × Java 11)
+- `rerun-ci.yml`: auto-rerun flaky failures (max 2 reruns, 180s delay)
+- `auto-pr-review.yml`: auto-comment on new PRs

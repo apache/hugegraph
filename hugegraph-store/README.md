@@ -348,7 +348,7 @@ For development workflows and debugging, see [Development Guide](docs/developmen
 From the project root:
 
 ```bash
-docker build -f hugegraph-store/Dockerfile -t hugegraph-store:latest .
+docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
 ```
 
 ### Run Container
@@ -358,11 +358,12 @@ docker run -d \
   -p 8520:8520 \
   -p 8500:8500 \
   -p 8510:8510 \
-  -v /path/to/conf:/hugegraph-store/conf \
+  -e HG_STORE_PD_ADDRESS=<pd-ip>:8686 \
+  -e HG_STORE_GRPC_HOST=<your-ip> \
+  -e HG_STORE_RAFT_ADDRESS=<your-ip>:8510 \
   -v /path/to/storage:/hugegraph-store/storage \
-  -e PD_ADDRESS=192.168.1.10:8686,192.168.1.11:8686 \
   --name hugegraph-store \
-  hugegraph-store:latest
+  hugegraph/store:latest
 ```
 
 **Exposed Ports**:
@@ -375,8 +376,10 @@ docker run -d \
 For a complete HugeGraph distributed deployment (PD + Store + Server), see:
 
 ```
-hugegraph-server/hugegraph-dist/docker/example/
+docker/docker-compose-3pd-3store-3server.yml
 ```
+
+See [docker/README.md](../docker/README.md) for the full setup guide.
 
 For Docker and Kubernetes deployment details, see [Deployment Guide](docs/deployment-guide.md).
 

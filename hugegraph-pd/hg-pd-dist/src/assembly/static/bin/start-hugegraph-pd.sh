@@ -168,8 +168,13 @@ echo "Starting HugeGraphPDServer..."
 JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 # Turn on security check
-exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-    -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1 &
+if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+    exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar &
+else
+    exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1 &
+fi
 
 PID="$!"
 # Write pid to file

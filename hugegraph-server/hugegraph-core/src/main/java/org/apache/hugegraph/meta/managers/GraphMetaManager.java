@@ -33,6 +33,7 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_SCHEMA;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_SYS_GRAPH_CONF;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_UPDATE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_VERTEX_LABEL;
+import static org.apache.hugegraph.meta.MetaManager.schemaCacheClearEventValue;
 
 import java.util.Map;
 import java.util.function.Consumer;
@@ -94,8 +95,14 @@ public class GraphMetaManager extends AbstractMetaManager {
     }
 
     public void notifySchemaCacheClear(String graphSpace, String graph) {
+        this.notifySchemaCacheClear(graphSpace, graph, null);
+    }
+
+    public void notifySchemaCacheClear(String graphSpace, String graph,
+                                       String source) {
         this.metaDriver.put(this.schemaCacheClearKey(),
-                            graphName(graphSpace, graph));
+                            schemaCacheClearEventValue(
+                                    graphName(graphSpace, graph), source));
     }
 
     public void notifyGraphCacheClear(String graphSpace, String graph) {
