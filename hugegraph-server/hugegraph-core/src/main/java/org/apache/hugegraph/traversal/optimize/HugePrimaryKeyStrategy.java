@@ -1,18 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
  */
 
 package org.apache.hugegraph.traversal.optimize;
@@ -25,6 +27,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy.ProviderOptimizationStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.step.Mutating;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStartStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
@@ -56,7 +59,9 @@ public class HugePrimaryKeyStrategy
             if (i == 0 && step instanceof AddVertexStartStep) {
                 curAddStep = (Mutating) step;
                 continue;
-            } else if (curAddStep == null && (step) instanceof AddVertexStep) {
+            }
+
+            if (curAddStep == null && step instanceof AddVertexStep) {
                 curAddStep = (Mutating) step;
                 continue;
             }
@@ -75,35 +80,41 @@ public class HugePrimaryKeyStrategy
             if (propertyStep.getCardinality() == Cardinality.single
                 || propertyStep.getCardinality() == null) {
 
-                Object[] kvs = new Object[2];
                 List<Object> kvList = new LinkedList<>();
 
                 propertyStep.getParameters().getRaw().forEach((k, v) -> {
-                    if (T.key.equals(k)) {
-                        kvs[0] = v.get(0);
-                    } else if (T.value.equals(k)) {
-                        kvs[1] = v.get(0);
-                    } else {
+                    if (!T.key.equals(k) && !T.value.equals(k)) {
                         kvList.add(k.toString());
                         kvList.add(v.get(0));
                     }
                 });
 
-                curAddStep.configure(kvs);
-
                 if (!kvList.isEmpty()) {
-                    curAddStep.configure(kvList.toArray(new Object[0]));
+                    applyParameters(curAddStep, kvList);
                 }
 
                 removeSteps.add(step);
             } else {
                 curAddStep = null;
             }
-
         }
 
-        for (Step index : removeSteps) {
-            traversal.removeStep(index);
+        for (Step step : removeSteps) {
+            traversal.removeStep(step);
+        }
+    }
+
+    private void applyParameters(Mutating step, List<Object> kvList) {
+
+        Object[] kvs = kvList.toArray(new Object[0]);
+
+        if (step instanceof AddVertexStep) {
+            AddVertexStep<?> vertexStep = (AddVertexStep<?>) step;
+            vertexStep.getParameters().set(null, kvs);
+
+        } else if (step instanceof AddEdgeStep) {
+            AddEdgeStep<?> edgeStep = (AddEdgeStep<?>) step;
+            edgeStep.getParameters().set(null, kvs);
         }
     }
 }

@@ -18,14 +18,20 @@
 package org.apache.hugegraph.traversal.optimize;
 
 import java.util.Iterator;
+import java.util.List;
 
 import org.apache.hugegraph.backend.query.Aggregate;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.iterator.Metadatable;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 
-public interface QueryHolder extends HasContainerHolder, Metadatable {
+public interface QueryHolder extends Metadatable {
+
+    List<HasContainer> getHasContainers();
+
+    void addHasContainer(HasContainer has);
 
     String SYSPROP_PAGE = "~page";
 

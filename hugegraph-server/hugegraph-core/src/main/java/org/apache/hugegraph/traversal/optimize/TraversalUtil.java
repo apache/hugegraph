@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -55,8 +56,10 @@ import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.tinkerpop.gremlin.process.traversal.Compare;
 import org.apache.tinkerpop.gremlin.process.traversal.Contains;
+import org.apache.tinkerpop.gremlin.process.traversal.NotP;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -91,11 +94,16 @@ import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 
+
 import com.google.common.collect.ImmutableList;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class TraversalUtil {
 
     public static final String P_CALL = "P.";
+    private static final Logger log = LoggerFactory.getLogger(TraversalUtil.class);
 
     public static HugeGraph getGraph(Step<?, ?> step) {
         HugeGraph graph = tryGetGraph(step);
@@ -169,15 +177,18 @@ public final class TraversalUtil {
         Step<?, ?> step = newStep;
         do {
             step = step.getNextStep();
-            if (step instanceof HasStep) {
+            if (step instanceof HasContainerHolder) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
+
+                @SuppressWarnings("unchecked")
+                List<HasContainer> containers =
+                        (List<HasContainer>) holder.getHasContainers();
+
+                for (HasContainer has : containers) {
                     if (!GraphStep.processHasContainerIds(newStep, has)) {
                         newStep.addHasContainer(has);
                     }
                 }
-                TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
-                traversal.removeStep(step);
             }
         } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
     }
@@ -186,9 +197,14 @@ public final class TraversalUtil {
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
         do {
-            if (step instanceof HasStep) {
+            if (step instanceof HasContainerHolder) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
+
+                @SuppressWarnings("unchecked")
+                List<HasContainer> containers =
+                        (List<HasContainer>) holder.getHasContainers();
+
+                for (HasContainer has : containers) {
                     newStep.addHasContainer(has);
                 }
                 TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
@@ -348,28 +364,55 @@ public final class TraversalUtil {
         }
     }
 
-    public static Condition convHas2Condition(HasContainer has, HugeType type, HugeGraph graph) {
+
+    public static Condition convHas2Condition(HasContainer has,
+                                              HugeType type,
+                                              HugeGraph graph) {
+
         P<?> p = has.getPredicate();
-        E.checkArgument(p != null, "The predicate of has(%s) is null", has);
-        BiPredicate<?, ?> bp = p.getBiPredicate();
-        Condition condition;
-        if (keyForContainsKeyOrValue(has.getKey())) {
-            condition = convContains2Relation(graph, has);
-        } else if (bp instanceof Compare) {
-            condition = convCompare2Relation(graph, type, has);
-        } else if (bp instanceof Condition.RelationType) {
-            condition = convRelationType2Relation(graph, type, has);
-        } else if (bp instanceof Contains) {
-            condition = convIn2Relation(graph, type, has);
-        } else if (p instanceof AndP) {
-            condition = convAnd(graph, type, has);
-        } else if (p instanceof OrP) {
-            condition = convOr(graph, type, has);
-        } else {
-            // TODO: deal with other Predicate
-            throw newUnsupportedPredicate(p);
+        E.checkArgument(p != null,
+                        "The predicate of has(%s) is null", has);
+
+        if (p instanceof NotP) {
+
+            P<?> inner = p.negate();
+
+            Condition innerCondition =
+                    convHas2Condition(
+                            new HasContainer(has.getKey(), inner),
+                            type, graph
+                    );
+
+            return Condition.not(innerCondition);
         }
-        return condition;
+
+        if (p instanceof AndP) {
+            return convAnd(graph, type, has);
+        }
+
+        if (p instanceof OrP) {
+            return convOr(graph, type, has);
+        }
+
+        BiPredicate<?, ?> bp = p.getBiPredicate();
+
+        if (keyForContainsKeyOrValue(has.getKey())) {
+            return convContains2Relation(graph, has);
+
+        } else if (bp instanceof Compare) {
+            return convCompare2Relation(graph, type, has);
+
+        } else if (bp instanceof Condition.RelationType) {
+            return convRelationType2Relation(graph, type, has);
+
+        } else if (bp instanceof Contains) {
+            return convIn2Relation(graph, type, has);
+
+        } else if (p instanceof ConditionP) {
+            return convRelationType2Relation(graph, type, has);
+        }
+
+        throw newUnsupportedPredicate(p);
     }
 
     public static Condition convAnd(HugeGraph graph,
@@ -602,6 +645,35 @@ public final class TraversalUtil {
         return new BackendException("Unsupported predicate: '%s'", predicate);
     }
 
+
+    private static Condition.RelationType toHugeRelationType(final P<?> predicate) {
+
+        if (predicate instanceof ConditionP) {
+            return ((ConditionP) predicate).relationType();
+        }
+
+        throw newUnsupportedPredicate(predicate);
+    }
+
+    private static Condition.RelationType convertPredicateToRelation(P<?> predicate) {
+        boolean negated = false;
+
+
+
+        if (predicate instanceof ConditionP) {
+            Condition.RelationType type = ((ConditionP) predicate).relationType();
+            return negated ? negate(type) : type;
+        }
+
+        // TODO: handle Compare / Contains / Within etc as your existing code does
+
+        throw newUnsupportedPredicate(predicate);
+    }
+
+    private static Condition.RelationType negate(Condition.RelationType type) {
+        throw new BackendException("Unsupported negated predicate for relation: %s", type);
+    }
+
     public static HugeKeys string2HugeKey(String key) {
         HugeKeys hugeKey = token2HugeKey(key);
         return hugeKey != null ? hugeKey : HugeKeys.valueOf(key);
@@ -689,8 +761,13 @@ public final class TraversalUtil {
     }
 
     public static void convHasStep(HugeGraph graph, HasStep<?> step) {
-        HasContainerHolder holder = step;
-        for (HasContainer has : holder.getHasContainers()) {
+        HasContainerHolder holder = (HasContainerHolder) step;
+
+        @SuppressWarnings("unchecked")
+        List<HasContainer> containers =
+                (List<HasContainer>) holder.getHasContainers();
+
+        for (HasContainer has : containers) {
             convPredicateValue(graph, has);
         }
     }
