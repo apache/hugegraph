@@ -58,7 +58,6 @@ import org.apache.hugegraph.auth.StandardAuthenticator;
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheManager;
-import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.store.AbstractBackendStoreProvider;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.config.ConfigOption;
@@ -1638,24 +1637,14 @@ public final class GraphManager {
     }
 
     private void initNodeRole() {
+        boolean enableRoleElection = config.get(
+                ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
+        E.checkArgument(!enableRoleElection,
+                        "The server.role_election is no longer supported");
+
         String role = config.get(ServerOptions.SERVER_ROLE);
 
         NodeRole nodeRole = NodeRole.valueOf(role.toUpperCase());
-        boolean enableRoleElection = config.get(
-                ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
-        boolean supportRoleElection = !nodeRole.computer() &&
-                                      enableRoleElection &&
-                                      this.supportRoleElection();
-        if (supportRoleElection) {
-            String id = config.get(ServerOptions.SERVER_ID);
-            E.checkArgument(StringUtils.isNotEmpty(id),
-                            "The server.id can't be empty when server.role_election is enabled");
-
-            // Init any server as Worker role, then do role election
-            this.globalNodeRoleInfo.initNodeId(IdGenerator.of(id));
-            nodeRole = NodeRole.WORKER;
-        }
-
         this.globalNodeRoleInfo.initNodeRole(nodeRole);
     }
 
@@ -1941,30 +1930,33 @@ public final class GraphManager {
     public HugeGraph graph(String graphSpace, String name) {
         String key = String.join(DELIMITER, graphSpace, name);
         Graph graph = this.graphs.get(key);
-        if (graph == null && isPDEnabled()) {
-            Map<String, Map<String, Object>> configs =
-                    this.metaManager.graphConfigs(graphSpace);
-            // If current server registered graph space is not DEFAULT, only load graph creation
-            // under registered graph space
-            if (!configs.containsKey(key) ||
-                (!"DEFAULT".equals(this.serviceGraphSpace) &&
-                 !graphSpace.equals(this.serviceGraphSpace))) {
-                return null;
+        if (graph == null) {
+            if (isPDEnabled()) {
+                Map<String, Map<String, Object>> configs =
+                        this.metaManager.graphConfigs(graphSpace);
+                // If current server registered graph space is not DEFAULT, only load graph creation
+                // under registered graph space
+                if (!configs.containsKey(key) ||
+                    (!"DEFAULT".equals(this.serviceGraphSpace) &&
+                     !graphSpace.equals(this.serviceGraphSpace))) {
+                    return null;
+                }
+                Map<String, Object> config = configs.get(key);
+                String creator = String.valueOf(config.get("creator"));
+                Date createTime = parseDate(config.get("create_time"));
+                Date updateTime = parseDate(config.get("update_time"));
+                HugeGraph graph1 = this.createGraph(graphSpace, name,
+                                                    creator, config, false);
+                graph1.createTime(createTime);
+                graph1.updateTime(updateTime);
+                this.graphs.put(key, graph1);
+                return graph1;
             }
-            Map<String, Object> config = configs.get(key);
-            String creator = String.valueOf(config.get("creator"));
-            Date createTime = parseDate(config.get("create_time"));
-            Date updateTime = parseDate(config.get("update_time"));
-            HugeGraph graph1 = this.createGraph(graphSpace, name,
-                                                creator, config, false);
-            graph1.createTime(createTime);
-            graph1.updateTime(updateTime);
-            this.graphs.put(key, graph1);
-            return graph1;
+            throw new NotFoundException(String.format("Graph '%s' does not exist", name));
         } else if (graph instanceof HugeGraph) {
             return (HugeGraph) graph;
         }
-        throw new NotFoundException(String.format("Graph '%s' does not exist", name));
+        throw new NotSupportException("graph instance of %s", graph.getClass());
     }
 
     public void dropGraphLocal(String name) {

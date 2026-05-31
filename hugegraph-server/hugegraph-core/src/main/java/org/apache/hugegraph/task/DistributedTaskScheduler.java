@@ -396,15 +396,18 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             cronFuture.cancel(false);
         }
 
-        // Wait for cron task to complete to ensure all transactions are closed
+        // Wait behind the scheduler thread to ensure any running cron task is completed
         try {
-            cronFuture.get(schedulePeriod + 5, TimeUnit.SECONDS);
-        } catch (CancellationException e) {
-            // Task was cancelled, this is expected
-            LOG.debug("Cron task was cancelled");
+            Future<?> barrier = this.schedulerExecutor.submit(() -> {
+                // pass
+            });
+            barrier.get(schedulePeriod + 5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             LOG.warn("Cron task did not complete in time when closing scheduler");
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Interrupted while waiting for cron task to complete", e);
+        } catch (ExecutionException e) {
             LOG.warn("Exception while waiting for cron task to complete", e);
         }
 

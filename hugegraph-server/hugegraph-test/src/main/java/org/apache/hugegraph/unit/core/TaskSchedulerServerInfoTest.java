@@ -85,16 +85,17 @@ public class TaskSchedulerServerInfoTest {
     }
 
     @Test
-    public void testGraphManagerDoesNotNeedServerIdWhenElectionUnsupported() {
+    public void testGraphManagerRejectsRoleElection() {
         PropertiesConfiguration conf = new PropertiesConfiguration();
         conf.setProperty(ServerOptions.ENABLE_SERVER_ROLE_ELECTION.name(), true);
         HugeConfig config = new HugeConfig(conf);
 
-        GraphManager manager = new GraphManager(config, new EventHub("test"));
-
-        Assert.assertEquals("", config.get(ServerOptions.SERVER_ID));
-        Assert.assertNull(manager.globalNodeRoleInfo().nodeId());
-        Assert.assertFalse(manager.globalNodeRoleInfo().supportElection());
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            new GraphManager(config, new EventHub("test"));
+        }, e -> {
+            Assert.assertContains("The server.role_election is no longer supported",
+                                  e.getMessage());
+        });
     }
 
     private static HugeConfig newConfig() {
