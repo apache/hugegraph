@@ -51,6 +51,20 @@ public class ServerInfoManagerTest {
     }
 
     @Test
+    public void testInitDoesNotAccessBackendStore() {
+        HugeGraphParams graphParams = Mockito.mock(HugeGraphParams.class);
+        ExecutorService executor = Mockito.mock(ExecutorService.class);
+        ServerInfoManager manager = new ServerInfoManager(graphParams, executor);
+
+        manager.init();
+
+        Mockito.verify(graphParams, Mockito.never()).systemTransaction();
+        Mockito.verify(graphParams, Mockito.never()).backendStoreFeatures();
+        Mockito.verify(graphParams, Mockito.never()).graph();
+        Mockito.verify(graphParams, Mockito.never()).closeTx();
+    }
+
+    @Test
     public void testSelfNodeIdScopedByGraphWithSameNodeId() {
         GlobalMasterInfo nodeInfo = GlobalMasterInfo.master("server-1");
 
