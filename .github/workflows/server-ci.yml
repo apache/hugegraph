@@ -70,6 +70,14 @@ jobs:
         run: |
           mvn clean compile -U -Dmaven.javadoc.skip=true -ntp
 
+      - name: Run start-hugegraph.sh foreground mode tests
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
+
       - name: Run unit test
         run: |
           $TRAVIS_DIR/run-unit-test.sh $BACKEND
