@@ -28,7 +28,6 @@ import java.util.concurrent.TimeoutException;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.concurrent.PausableScheduledThreadPool;
-import org.apache.hugegraph.type.define.NodeRole;
 import org.apache.hugegraph.util.Consumers;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.ExecutorUtil;
@@ -333,35 +332,11 @@ public final class TaskManager {
     }
 
     public void onAsRoleMaster() {
-        try {
-            for (TaskScheduler entry : this.schedulers.values()) {
-                ServerInfoManager serverInfoManager = entry.serverManager();
-                if (serverInfoManager != null) {
-                    serverInfoManager.changeServerRole(NodeRole.MASTER);
-                } else {
-                    LOG.warn("ServerInfoManager is null for graph {}", entry.spaceGraphName());
-                }
-            }
-        } catch (Throwable e) {
-            LOG.error("Exception occurred when change to master role", e);
-            throw e;
-        }
+        // ServerInfo based role propagation is deprecated.
     }
 
     public void onAsRoleWorker() {
-        try {
-            for (TaskScheduler entry : this.schedulers.values()) {
-                ServerInfoManager serverInfoManager = entry.serverManager();
-                if (serverInfoManager != null) {
-                    serverInfoManager.changeServerRole(NodeRole.WORKER);
-                } else {
-                    LOG.warn("ServerInfoManager is null for graph {}", entry.spaceGraphName());
-                }
-            }
-        } catch (Throwable e) {
-            LOG.error("Exception occurred when change to worker role", e);
-            throw e;
-        }
+        // ServerInfo based role propagation is deprecated.
     }
 
     private static final ThreadLocal<String> CONTEXTS = new ThreadLocal<>();

@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -197,18 +196,6 @@ public final class GraphManager {
     public GraphManager(HugeConfig conf, EventHub hub) {
         LOG.info("Init graph manager");
         E.checkArgumentNotNull(conf, "The config can't be null");
-
-        // Auto-generate server.id if not configured.
-        // Random generation is to prevent duplicate id error reports.This id is currently
-        // meaningless and needs to be completely removed serverInfoManager in
-        // the future
-        String server = conf.get(ServerOptions.SERVER_ID);
-        if (StringUtils.isEmpty(server)) {
-            server = "server-" + UUID.randomUUID().toString().substring(0, 8);
-            LOG.info("Auto-generated server.id: {}", server);
-            conf.setProperty(ServerOptions.SERVER_ID.name(), server);
-        }
-        String role = conf.get(ServerOptions.SERVER_ROLE);
 
         this.config = conf;
         this.url = conf.get(ServerOptions.REST_SERVER_URL);
@@ -1651,19 +1638,24 @@ public final class GraphManager {
     }
 
     private void initNodeRole() {
-        String id = config.get(ServerOptions.SERVER_ID);
         String role = config.get(ServerOptions.SERVER_ROLE);
 
         NodeRole nodeRole = NodeRole.valueOf(role.toUpperCase());
+        boolean enableRoleElection = config.get(
+                ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
         boolean supportRoleElection = !nodeRole.computer() &&
-                                      this.supportRoleElection() &&
-                                      config.get(ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
+                                      enableRoleElection &&
+                                      this.supportRoleElection();
         if (supportRoleElection) {
+            String id = config.get(ServerOptions.SERVER_ID);
+            E.checkArgument(StringUtils.isNotEmpty(id),
+                            "The server.id can't be empty when server.role_election is enabled");
+
             // Init any server as Worker role, then do role election
+            this.globalNodeRoleInfo.initNodeId(IdGenerator.of(id));
             nodeRole = NodeRole.WORKER;
         }
 
-        this.globalNodeRoleInfo.initNodeId(IdGenerator.of(id));
         this.globalNodeRoleInfo.initNodeRole(nodeRole);
     }
 

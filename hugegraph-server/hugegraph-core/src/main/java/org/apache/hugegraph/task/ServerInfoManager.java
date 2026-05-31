@@ -43,7 +43,6 @@ import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.NodeRole;
-import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -84,7 +83,6 @@ public class ServerInfoManager {
     public synchronized boolean close() {
         this.closed = true;
         if (!this.dbExecutor.isShutdown()) {
-            this.removeSelfServerInfo();
             this.call(() -> {
                 try {
                     this.tx().close();
@@ -102,53 +100,14 @@ public class ServerInfoManager {
         E.checkArgument(nodeInfo != null, "The global node info can't be null");
 
         this.globalNodeInfo = nodeInfo;
-
-        Id serverId = this.selfNodeId();
-        HugeServerInfo existed = this.serverInfo(serverId);
-        if (existed != null && existed.alive()) {
-            final long now = DateUtil.now().getTime();
-            if (existed.expireTime() > now + 30 * 1000) {
-                LOG.info("The node time maybe skew very much: {}", existed);
-                throw new HugeException("The server with name '%s' maybe skew very much", serverId);
-            }
-            try {
-                Thread.sleep(existed.expireTime() - now + 1);
-            } catch (InterruptedException e) {
-                throw new HugeException("Interrupted when waiting for server info expired", e);
-            }
-        }
-        E.checkArgument(existed == null || !existed.alive(),
-                        "The server with name '%s' already in cluster", serverId);
-
-        if (nodeInfo.nodeRole().master()) {
-            String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
-            do {
-                Iterator<HugeServerInfo> servers = this.serverInfos(PAGE_SIZE, page);
-                while (servers.hasNext()) {
-                    existed = servers.next();
-                    E.checkArgument(!existed.role().master() || !existed.alive(),
-                                    "Already existed master '%s' in current cluster",
-                                    existed.id());
-                }
-                if (page != null) {
-                    page = PageInfo.pageInfo(servers);
-                }
-            } while (page != null);
-        }
-
-        // TODO: save ServerInfo to AuthServer
-        this.saveServerInfo(this.selfNodeId(), this.selfNodeRole());
     }
 
     public synchronized void changeServerRole(NodeRole nodeRole) {
-        if (this.closed) {
+        if (this.closed || this.globalNodeInfo == null) {
             return;
         }
 
         this.globalNodeInfo.changeNodeRole(nodeRole);
-
-        // TODO: save ServerInfo to AuthServer
-        this.saveServerInfo(this.selfNodeId(), this.selfNodeRole());
     }
 
     public GlobalMasterInfo globalNodeRoleInfo() {
@@ -159,9 +118,13 @@ public class ServerInfoManager {
         if (this.globalNodeInfo == null) {
             return null;
         }
+        Id nodeId = this.globalNodeInfo.nodeId();
+        if (nodeId == null) {
+            return null;
+        }
         // Scope server id to graph to avoid cross-graph collision
         return IdGenerator.of(this.graph.spaceGraphName() + "/" +
-                             this.globalNodeInfo.nodeId().asString());
+                             nodeId.asString());
     }
 
     public NodeRole selfNodeRole() {
@@ -176,34 +139,7 @@ public class ServerInfoManager {
     }
 
     public synchronized void heartbeat() {
-        assert this.graphIsReady();
-
-        HugeServerInfo serverInfo = this.selfServerInfo();
-        if (serverInfo != null) {
-            // Update heartbeat time for this server
-            serverInfo.updateTime(DateUtil.now());
-            this.save(serverInfo);
-            return;
-        }
-
-        /* ServerInfo is missing */
-        if (this.selfNodeId() == null) {
-            // Ignore if ServerInfo is not initialized
-            LOG.info("ServerInfo is missing: {}, may not be initialized yet", this.selfNodeId());
-            return;
-        }
-        if (this.selfIsMaster()) {
-            // On the master node, just wait for ServerInfo re-init
-            LOG.warn("ServerInfo is missing: {}, may be cleared before", this.selfNodeId());
-            return;
-        }
-        /*
-         * Missing server info on non-master node, may be caused by graph
-         * truncated on master node then synced by raft.
-         * TODO: we just patch it here currently, to be improved.
-         */
-        serverInfo = this.saveServerInfo(this.selfNodeId(), this.selfNodeRole());
-        assert serverInfo != null;
+        // ServerInfo heartbeat is deprecated for local scheduling.
     }
 
     public int calcMaxLoad() {

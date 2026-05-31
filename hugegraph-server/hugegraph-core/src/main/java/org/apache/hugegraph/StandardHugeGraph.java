@@ -331,11 +331,10 @@ public class StandardHugeGraph implements HugeGraph {
         LOG.info("Init system info for graph '{}'", this.spaceGraphName());
         this.initSystemInfo();
 
-        LOG.info("Init server info [{}-{}] for graph '{}'...",
-                 nodeInfo.nodeId(), nodeInfo.nodeRole(), this.spaceGraphName());
-        this.serverInfoManager().initServerInfo(nodeInfo);
-
-        this.initRoleStateMachine(nodeInfo.nodeId());
+        if (nodeInfo != null && nodeInfo.nodeId() != null) {
+            this.serverInfoManager().initServerInfo(nodeInfo);
+            this.initRoleStateMachine(nodeInfo.nodeId());
+        }
 
         // TODO: check necessary?
         LOG.info("Check olap property-key tables for graph '{}'", this.spaceGraphName());
@@ -481,9 +480,7 @@ public class StandardHugeGraph implements HugeGraph {
         try {
             this.storeProvider.init();
             /*
-             * NOTE: The main goal is to write the serverInfo to the central
-             * node, such as etcd, and also create the system schema in memory,
-             * which has no side effects
+             * NOTE: Create system schema in memory, which has no side effects.
              */
             this.initSystemInfo();
         } finally {
@@ -524,8 +521,7 @@ public class StandardHugeGraph implements HugeGraph {
         LockUtil.lock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         try {
             this.storeProvider.truncate();
-            // TODO: remove this after serverinfo saved in etcd
-            this.serverStarted(this.serverInfoManager().globalNodeRoleInfo());
+            this.serverStarted(null);
         } finally {
             LockUtil.unlock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         }
@@ -547,7 +543,6 @@ public class StandardHugeGraph implements HugeGraph {
     public void initSystemInfo() {
         try {
             this.taskScheduler().init();
-            this.serverInfoManager().init();
             this.authManager().init();
         } finally {
             this.closeTx();

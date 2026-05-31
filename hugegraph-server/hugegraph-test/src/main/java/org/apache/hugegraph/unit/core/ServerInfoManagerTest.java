@@ -73,4 +73,22 @@ public class ServerInfoManagerTest {
     public void testSelfNodeIdReturnsNullWhenNotInitialized() {
         Assert.assertNull(this.sysGraphManager.selfNodeId());
     }
+
+    @Test
+    public void testSelfNodeIdReturnsNullWhenNodeIdMissing() {
+        Whitebox.setInternalState(this.sysGraphManager,
+                                  "globalNodeInfo", new GlobalMasterInfo());
+
+        Assert.assertNull(this.sysGraphManager.selfNodeId());
+    }
+
+    @Test
+    public void testInitServerInfoDoesNotAccessBackendStore() {
+        GlobalMasterInfo nodeInfo = GlobalMasterInfo.master("server-1");
+
+        this.sysGraphManager.initServerInfo(nodeInfo);
+
+        Assert.assertEquals("DEFAULT-~sys_graph/server-1",
+                            this.sysGraphManager.selfNodeId().asString());
+    }
 }
