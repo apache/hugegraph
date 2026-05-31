@@ -133,6 +133,7 @@ else
     PID="$!"
     # Write pid to file
     echo "$PID" > "$PID_FILE"
+    trap 'kill $PID; wait $PID; exit $?' SIGHUP SIGINT SIGQUIT SIGTERM
     wait $PID
     exit $?
 fi

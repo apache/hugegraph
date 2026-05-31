@@ -17,8 +17,8 @@
 #
 # test-start-hugegraph.sh — Tests for start-hugegraph.sh foreground mode fix
 #
-# Baseline (unmodified code):  Tests 1, 2, 4 PASS — Test 3 FAILS
-# After chunk 1 fix:           All 4 tests PASS
+# Baseline (unmodified code):  Tests 1, 2, 4 PASS — Tests 3, 5 FAIL
+# After chunk 1 fix:           All 5 tests PASS
 #
 # Usage: ./test-start-hugegraph.sh [path-to-hugegraph-root]
 #   path-to-hugegraph-root: path to the extracted HugeGraph server dist directory
@@ -312,7 +312,6 @@ if [[ -z "$FG_PID" ]]; then
 else
     info "Hard-killing Java with SIGKILL (pid $FG_PID)..."
     kill -9 "$FG_PID" 2>/dev/null || true
-    sleep "$SETTLE_WAIT"
 
     wait_script_exit "$SCRIPT_PID"
     ACTUAL_EXIT=$?
@@ -337,7 +336,7 @@ cleanup
 section "Test 4 — -m true registers cron job in daemon mode"
 
 info "Clearing crontab..."
-crontab -r 2>/dev/null || true
+crontab -l 2>/dev/null | grep -v monitor-hugegraph | crontab - 2>/dev/null || true
 
 info "Starting in daemon mode with -m true (waiting up to ${STARTUP_WAIT}s)..."
 "$START_SCRIPT" -d true -m true -t "$STARTUP_WAIT" >/dev/null 2>&1
@@ -357,6 +356,58 @@ fi
 
 info "Stopping server..."
 "$STOP_SCRIPT" -m false >/dev/null 2>&1 || true
+
+cleanup
+
+# ── test 5: SIGTERM forwarded to Java in foreground mode ─────────────────────
+
+section "Test 5 — SIGTERM forwarded to Java in foreground mode"
+
+info "Starting in foreground mode..."
+"$START_SCRIPT" -d false >/dev/null 2>&1 &
+SCRIPT_PID=$!
+
+info "Waiting up to ${STARTUP_WAIT}s for server..."
+if wait_for_server; then
+    info "Server is up"
+else
+    info "Server did not respond — continuing"
+fi
+
+wait_for_pid_file
+FG_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+
+if [[ -z "$FG_PID" ]]; then
+    fail "could not get Java PID — skipping signal forwarding check"
+    kill "$SCRIPT_PID" 2>/dev/null || true
+else
+    info "Sending SIGTERM to wrapper script (pid $SCRIPT_PID)..."
+    kill -TERM "$SCRIPT_PID" 2>/dev/null || true
+
+    wait_script_exit "$SCRIPT_PID"
+    ACTUAL_EXIT=$?
+
+    # If the trap fired correctly, the wrapper's `wait $PID` already reaped Java.
+    # If wait_script_exit timed out (killer fired), Java may still be running — also a failure.
+    if ! ps -p "$FG_PID" >/dev/null 2>&1; then
+        pass "Java process terminated after SIGTERM sent to wrapper"
+    else
+        fail "Java process still running after SIGTERM — signal not forwarded"
+        kill "$FG_PID" 2>/dev/null || true
+    fi
+
+    if [[ $ACTUAL_EXIT -ne 0 ]]; then
+        pass "wrapper script exited non-zero ($ACTUAL_EXIT) after SIGTERM"
+    else
+        fail "wrapper script exited 0 after SIGTERM — exit code not propagated"
+    fi
+
+    if [[ $ACTUAL_EXIT -eq 143 ]]; then
+        pass "exit code is 143 (128+15 for SIGTERM) — correctly propagated"
+    elif [[ $ACTUAL_EXIT -ne 0 ]]; then
+        info "exit code was $ACTUAL_EXIT (not 143 — may be shell-wrapped, acceptable if non-zero)"
+    fi
+fi
 
 cleanup
 
