@@ -268,9 +268,8 @@ cd hugegraph
 mvn clean package -DskipTests
 
 # Extract built package
-cd install-dist/target
-tar -xzf hugegraph-{version}.tar.gz
-cd hugegraph-{version}
+tar -xzf target/apache-hugegraph-{version}.tar.gz
+cd apache-hugegraph-{version}/apache-hugegraph-server-{version}
 
 # Initialize and start
 bin/init-store.sh
