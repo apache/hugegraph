@@ -21,17 +21,21 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBSessions;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBTables;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.type.HugeType;
 import org.junit.Before;
 import org.junit.Test;
 import org.rocksdb.RocksDBException;
@@ -175,7 +179,53 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
 
         Assert.assertThrows(IllegalStateException.class, () -> {
             this.vertexTable.queryByIds(mockSession, ids);
-        });
+        }, e -> Assert.assertContains("Can't queryByIds()", e.getMessage()));
+    }
+
+    @Test
+    public void testPublicQueryMultiIdsFails() {
+        Id id1 = IdGenerator.of("v1");
+        Id id2 = IdGenerator.of("v2");
+
+        this.rocks.session().put(this.vertexTable.table(), id1.asBytes(), getBytes("value1"));
+        this.rocks.session().put(this.vertexTable.table(), id2.asBytes(), getBytes("value2"));
+        this.commit();
+
+        Set<Id> idSet = new LinkedHashSet<>(Arrays.asList(id1, id2));
+        IdQuery query = new IdQuery(HugeType.VERTEX, idSet);
+
+        RocksDBSessions.Session mockSession = new DelegatingSession(this.rocks.session()) {
+            @Override
+            public boolean hasChanges() {
+                return true;
+            }
+        };
+
+        Assert.assertThrows(IllegalStateException.class, () -> {
+            this.vertexTable.query(mockSession, query);
+        }, e -> Assert.assertContains("Can't queryByIds()", e.getMessage()));
+    }
+
+    @Test
+    public void testPublicQuerySingleIdFails() {
+        Id id1 = IdGenerator.of("v1");
+
+        this.rocks.session().put(this.vertexTable.table(), id1.asBytes(), getBytes("value1"));
+        this.commit();
+
+        Set<Id> idSet = new LinkedHashSet<>(Arrays.asList(id1));
+        IdQuery query = new IdQuery(HugeType.VERTEX, idSet);
+
+        RocksDBSessions.Session mockSession = new DelegatingSession(this.rocks.session()) {
+            @Override
+            public boolean hasChanges() {
+                return true;
+            }
+        };
+
+        Assert.assertThrows(IllegalStateException.class, () -> {
+            this.vertexTable.query(mockSession, query);
+        }, e -> Assert.assertContains("Can't queryByIds()", e.getMessage()));
     }
 
     private Map<String, String> toResultMap(BackendColumnIterator iter) {
