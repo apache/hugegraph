@@ -17,9 +17,12 @@
 
 package org.apache.hugegraph.struct.schema;
 
+import java.util.Arrays;
 import java.util.Date;
+import java.util.Set;
 
 import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.util.DateUtil;
 import org.junit.Assert;
@@ -43,5 +46,25 @@ public class PropertyKeyTest {
                           (value == null ? "null" : value.getClass()),
                           value instanceof Date);
         Assert.assertEquals(DateUtil.parse(formatted), value);
+    }
+
+    @Test
+    public void testSetDefaultValueCollapsesDuplicatesAndReturnsSet() {
+        String formatted = "2026-05-14 10:11:12.345";
+        PropertyKey propertyKey = new PropertyKey(null, IdGenerator.of(1),
+                                                  "joinDate");
+        propertyKey.dataType(DataType.DATE);
+        propertyKey.cardinality(Cardinality.SET);
+        propertyKey.userdata(Userdata.DEFAULT_VALUE,
+                             Arrays.asList(formatted, formatted));
+
+        Object value = propertyKey.defaultValue();
+        Assert.assertTrue("DEFAULT_VALUE should be a Set, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Set);
+
+        Set<?> values = (Set<?>) value;
+        Assert.assertEquals(1, values.size());
+        Assert.assertTrue(values.contains(DateUtil.parse(formatted)));
     }
 }

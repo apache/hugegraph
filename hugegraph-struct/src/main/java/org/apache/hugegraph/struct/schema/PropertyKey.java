@@ -127,11 +127,22 @@ public class PropertyKey extends SchemaElement implements Propfiable {
     public Object defaultValue() {
         // TODO add a field default_value
         Object value = this.userdata().get(Userdata.DEFAULT_VALUE);
+        if (value == null) {
+            return null;
+        }
+
         // Userdata is reloaded from JSON as a raw Map, so a typed default
         // value (e.g. Date) comes back as a String. Normalize it to the
         // runtime type expected by this property key's data type. Idempotent
         // for values already of the expected type.
-        return value == null ? null : this.validValue(value);
+        Object normalized = this.validValue(value);
+
+        // For SET cardinality, ensure we return a Set container and collapse duplicates
+        if (this.cardinality == Cardinality.SET && normalized instanceof Collection) {
+            return new LinkedHashSet<>((Collection<?>) normalized);
+        }
+
+        return normalized;
     }
 
     public boolean hasSameContent(PropertyKey other) {
