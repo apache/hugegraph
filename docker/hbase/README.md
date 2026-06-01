@@ -19,21 +19,22 @@ cd "$ROOT_DIR"
 <summary><b>Option 1: Standalone HugeGraph (using start-hugegraph.sh)</b></summary>
 
 Prerequisite: build local artifact first.
-
-```bash
 mvn clean package -DskipTests
+```
+cd "$ROOT_DIR"
 ```
 
 ```bash
-cd "$ROOT_DIR"
-
 # 1) Start HBase
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml build --no-cache hbase
+HBASE_MASTER_HOSTNAME=localhost HBASE_REGIONSERVER_HOSTNAME=localhost \
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml up -d
-docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml logs -f hbase
+until docker exec hg-hbase-test nc -z localhost 2181 >/dev/null 2>&1; do sleep 2; done
+echo "HBase ZooKeeper is reachable on 2181"
+# Optional troubleshooting stream:
+# docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml logs -f hbase
 ```
-
 ```bash
 # 2) Configure HugeGraph (standalone runtime)
 SERVER_DIR="$(find . -maxdepth 4 -type d -path './hugegraph-server/apache-hugegraph-server-*' | head -n 1)"
@@ -69,12 +70,17 @@ grep -Eai 'hbase|rocksdb|hstore' "$SERVER_DIR"/logs/*.log | tail -n 30
 
 ```bash
 cd "$ROOT_DIR"
+````
 
+```bash
 # 1) Start HBase
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml build --no-cache hbase
 HBASE_HOSTNAME=hbase docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml up -d
-docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml logs -f hbase
+until docker exec hg-hbase-test nc -z localhost 2181 >/dev/null 2>&1; do sleep 2; done
+echo "HBase ZooKeeper is reachable on 2181"
+# Optional troubleshooting stream:
+# docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml logs -f hbase
 ```
 
 ```bash
@@ -88,6 +94,7 @@ echo "$HBASE_NETWORK"
 
 ```bash
 # 4) One-shot init-store
+docker rm -f hg-server-init >/dev/null 2>&1 || true
 docker run --rm --name hg-server-init \
   --network "$HBASE_NETWORK" \
   hugegraph/server:dev \
@@ -257,6 +264,7 @@ docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 ### Docker HugeGraph + Docker HBase
 
 ```bash
+docker rm -f hg-server-init >/dev/null 2>&1 || true
 docker rm -f hg-server-dev-hbase
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 ```

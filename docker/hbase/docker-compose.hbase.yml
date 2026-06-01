@@ -17,7 +17,10 @@
 #
 # Usage:
 #   Start:  docker compose -f docker/hbase/docker-compose.hbase.yml up -d
-#   Wait:   docker compose -f docker/hbase/docker-compose.hbase.yml logs -f hbase
+#   Standalone HugeGraph on host:
+#           HBASE_MASTER_HOSTNAME=localhost HBASE_REGIONSERVER_HOSTNAME=localhost \
+#           docker compose -f docker/hbase/docker-compose.hbase.yml up -d
+#   Wait:   until docker exec hg-hbase-test nc -z localhost 2181; do sleep 2; done
 #   Verify: nc -z localhost 2181 && echo "ZooKeeper OK"
 #   Test:   mvn test -pl hugegraph-server/hugegraph-test -am -P core-test,hbase
 #   Stop:   docker compose -f docker/hbase/docker-compose.hbase.yml down -v
