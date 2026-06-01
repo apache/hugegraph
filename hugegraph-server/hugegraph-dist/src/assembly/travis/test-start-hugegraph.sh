@@ -145,6 +145,13 @@ if [[ ! -f "$STOP_SCRIPT" ]]; then
     exit 1
 fi
 
+for tool in lsof crontab curl java; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "SKIP: required tool '$tool' not found — skipping test suite"
+        exit 0
+    fi
+done
+
 # start-monitor.sh requires JAVA_HOME
 if [[ -z "${JAVA_HOME:-}" ]]; then
     if command -v /usr/libexec/java_home >/dev/null 2>&1; then
