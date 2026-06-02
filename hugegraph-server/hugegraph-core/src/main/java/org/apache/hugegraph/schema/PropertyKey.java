@@ -130,7 +130,7 @@ public class PropertyKey extends SchemaElement implements Propertiable {
         // value (e.g. Date) comes back as a String. Normalize it to the
         // runtime type expected by this property key's data type. Idempotent
         // for values already of the expected type.
-        Object normalized = this.validValue(value);
+        Object normalized = this.validValueOrThrow(value);
 
         // For SET cardinality, ensure we return a Set container and collapse duplicates
         if (this.cardinality == Cardinality.SET && normalized instanceof Collection) {
