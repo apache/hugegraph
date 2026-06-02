@@ -34,7 +34,7 @@ set_xml_property_value() {
     # The in-place replacement below expects the standard HBase layout where
     # <name>...</name> is followed by <value>...</value> on the next line.
     # Fail loudly if the property entry is missing to avoid silent misconfig.
-    if ! grep -q "<name>${property_name}</name>" "${HBASE_SITE_XML}"; then
+    if ! grep -Fq "<name>${property_name}</name>" "${HBASE_SITE_XML}"; then
         echo "Missing required property '${property_name}' in ${HBASE_SITE_XML}" >&2
         exit 1
     fi

@@ -68,7 +68,7 @@ grep -Eai 'hbase|rocksdb|hstore' "$SERVER_DIR"/logs/*.log | tail -n 30
 <details>
 <summary><b>Option 2: Docker HugeGraph (fully containerized)</b></summary>
 
-```bash
+```
 cd "$ROOT_DIR"
 ````
 
