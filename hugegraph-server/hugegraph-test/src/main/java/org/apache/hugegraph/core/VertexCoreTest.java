@@ -19,6 +19,7 @@ package org.apache.hugegraph.core;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
@@ -852,6 +853,36 @@ public class VertexCoreTest extends BaseCoreTest {
                           (value == null ? "null" : value.getClass()),
                           value instanceof Date);
         Assert.assertEquals(joined, value);
+    }
+
+    @Test
+    public void testAddVertexWithDateSetDefaultValue() {
+        SchemaManager schema = graph().schema();
+
+        String dateStr = "2026-05-14 10:11:12.345";
+        Date expected = DateUtil.parse(dateStr);
+
+        // Simulate JSON-deserialized default: ArrayList of Strings with duplicates
+        schema.propertyKey("joinDates").asDate().valueSet()
+              .userdata(Userdata.DEFAULT_VALUE, Arrays.asList(dateStr, dateStr))
+              .create();
+        schema.vertexLabel("person")
+              .properties("joinDates")
+              .nullableKeys("joinDates").append();
+
+        Vertex vertex = graph().addVertex(T.label, "person",
+                                          "name", "Baby", "city", "Shanghai");
+        this.commitTx();
+
+        vertex = graph().vertex(vertex.id());
+        Object raw = vertex.value("joinDates");
+
+        Assert.assertTrue("joinDates should be a Set, was " +
+                          (raw == null ? "null" : raw.getClass()),
+                          raw instanceof Set);
+        Set<?> values = (Set<?>) raw;
+        Assert.assertEquals("duplicates must be collapsed", 1, values.size());
+        Assert.assertTrue(values.contains(expected));
     }
 
     @Test
