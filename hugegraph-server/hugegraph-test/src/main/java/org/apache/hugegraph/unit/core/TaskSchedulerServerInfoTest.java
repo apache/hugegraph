@@ -24,12 +24,14 @@ import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.concurrent.PausableScheduledThreadPool;
+import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.task.DistributedTaskScheduler;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.ExecutorUtil;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -98,7 +100,38 @@ public class TaskSchedulerServerInfoTest {
         });
     }
 
+    @Test
+    public void testGraphManagerDoesNotInjectPdPeersForStandaloneRocksDB() {
+        HugeConfig serverConfig = newConfig();
+        GraphManager manager = new GraphManager(serverConfig, new EventHub("test"));
+        HugeConfig graphConfig = newGraphConfig("rocksdb");
+
+        Whitebox.invoke(manager.getClass(), "transferPdPeersConfig",
+                        manager, graphConfig);
+
+        Assert.assertFalse(graphConfig.containsKey(CoreOptions.PD_PEERS.name()));
+    }
+
+    @Test
+    public void testGraphManagerInjectsPdPeersForHStoreGraph() {
+        HugeConfig serverConfig = newConfig();
+        GraphManager manager = new GraphManager(serverConfig, new EventHub("test"));
+        HugeConfig graphConfig = newGraphConfig("hstore");
+
+        Whitebox.invoke(manager.getClass(), "transferPdPeersConfig",
+                        manager, graphConfig);
+
+        Assert.assertEquals(serverConfig.get(ServerOptions.PD_PEERS),
+                            graphConfig.get(CoreOptions.PD_PEERS));
+    }
+
     private static HugeConfig newConfig() {
         return new HugeConfig(new PropertiesConfiguration());
+    }
+
+    private static HugeConfig newGraphConfig(String backend) {
+        PropertiesConfiguration conf = new PropertiesConfiguration();
+        conf.setProperty(CoreOptions.BACKEND.name(), backend);
+        return new HugeConfig(conf);
     }
 }

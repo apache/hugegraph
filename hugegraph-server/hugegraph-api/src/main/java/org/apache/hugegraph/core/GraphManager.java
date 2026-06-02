@@ -1552,12 +1552,7 @@ public final class GraphManager {
         config.addProperty(ServerOptions.RAFT_GROUP_PEERS.name(),
                            raftGroupPeers);
 
-        // Transfer `pd.peers` from server config to graph config
-        // Only inject if not already configured in graph config
-        if (!config.containsKey("pd.peers")) {
-            String pdPeers = this.conf.get(ServerOptions.PD_PEERS);
-            config.addProperty("pd.peers", pdPeers);
-        }
+        this.transferPdPeersConfig(config);
 
         this.transferRoleWorkerConfig(config);
 
@@ -1574,6 +1569,19 @@ public final class GraphManager {
             !(graph instanceof HugeGraphAuthProxy)) {
             LOG.warn("You may need to support access control for '{}' with {}",
                      graphConfPath, HugeFactoryAuthProxy.GRAPH_FACTORY);
+        }
+    }
+
+    private void transferPdPeersConfig(HugeConfig config) {
+        if (config.containsKey(CoreOptions.PD_PEERS.name())) {
+            return;
+        }
+
+        String backend = config.get(CoreOptions.BACKEND);
+        boolean needPdPeers = this.conf.get(ServerOptions.USE_PD) ||
+                              "hstore".equals(backend);
+        if (needPdPeers) {
+            config.addProperty(CoreOptions.PD_PEERS.name(), this.pdPeers);
         }
     }
 
