@@ -23,7 +23,12 @@ HBASE_REGIONSERVER_HOSTNAME="${HBASE_REGIONSERVER_HOSTNAME:-${HBASE_HOSTNAME}}"
 HBASE_SITE_XML="${HBASE_HOME}/conf/hbase-site.xml"
 
 escape_sed_replacement() {
-    printf '%s' "$1" | sed -e 's/[&|]/\\&/g'
+    local value="$1"
+    if [[ "$value" == *$'\n'* ]]; then
+        echo "Property values must not contain newlines" >&2
+        exit 1
+    fi
+    printf '%s' "$value" | sed -e 's/[\\&|]/\\&/g'
 }
 
 set_xml_property_value() {

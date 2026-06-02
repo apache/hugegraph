@@ -70,7 +70,7 @@ grep -Eai 'hbase|rocksdb|hstore' "$SERVER_DIR"/logs/*.log | tail -n 30
 
 ```
 cd "$ROOT_DIR"
-````
+```
 
 ```bash
 # 1) Start HBase
@@ -109,7 +109,7 @@ docker run --rm --name hg-server-init \
     perl -pi -e "s/^hbase\.hosts=.*/hbase.hosts=hbase/" "$CONF"
     perl -pi -e "s/^hbase\.port=.*/hbase.port=2181/" "$CONF"
     perl -pi -e "s|^hbase\.znode_parent=.*|hbase.znode_parent=/hbase|" "$CONF"
-    ./bin/init-store.sh
+    printf "pa\npa\n" | ./bin/init-store.sh
   '
 ```
 
@@ -258,6 +258,8 @@ Run cleanup only after testing is complete.
 
 ```bash
 cd "$SERVER_DIR" && ./bin/stop-hugegraph.sh
+
+cd $"ROOT_DIR"
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 ```
 
