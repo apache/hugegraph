@@ -135,14 +135,13 @@ public class PropertyKey extends SchemaElement implements Propfiable {
         // value (e.g. Date) comes back as a String. Normalize it to the
         // runtime type expected by this property key's data type. Idempotent
         // for values already of the expected type.
-        Object normalized = this.validValueOrThrow(value);
-
-        // For SET cardinality, ensure we return a Set container and collapse duplicates
-        if (this.cardinality == Cardinality.SET && normalized instanceof Collection) {
-            return new LinkedHashSet<>((Collection<?>) normalized);
+        Object raw = value;
+        if (this.cardinality == Cardinality.SET && value instanceof Collection &&
+            !(value instanceof Set)) {
+            raw = new LinkedHashSet<>((Collection<?>) value);
         }
 
-        return normalized;
+        return this.validValueOrThrow(raw);
     }
 
     public boolean hasSameContent(PropertyKey other) {
