@@ -39,6 +39,7 @@ import org.apache.hugegraph.backend.query.Aggregate;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.exception.NotSupportException;
 import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.schema.PropertyKey;
@@ -166,36 +167,101 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
-        Step<?, ?> step = newStep;
-        do {
-            step = step.getNextStep();
+        Step<?, ?> step = newStep.getNextStep();
+        while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
+            Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
-                    if (!GraphStep.processHasContainerIds(newStep, has)) {
-                        newStep.addHasContainer(has);
-                    }
+                if (extractHasContainers(newStep, holder)) {
+                    TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
+                    traversal.removeStep(step);
                 }
-                TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
-                traversal.removeStep(step);
             }
-        } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
+            step = nextStep;
+        }
     }
 
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
         do {
+            Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
-                    newStep.addHasContainer(has);
+                if (extractHasContainers(newStep, holder)) {
+                    TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
+                    traversal.removeStep(step);
                 }
-                TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
-                traversal.removeStep(step);
             }
-            step = step.getNextStep();
+            step = nextStep;
         } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
+    }
+
+    private static boolean extractHasContainers(HugeGraphStep<?, ?> newStep,
+                                                HasContainerHolder holder) {
+        HugeGraph graph = TraversalUtil.tryGetGraph(newStep);
+        if (!canExtractHasContainers(graph, holder)) {
+            return false;
+        }
+        for (HasContainer has : holder.getHasContainers()) {
+            if (!GraphStep.processHasContainerIds(newStep, has)) {
+                newStep.addHasContainer(has);
+            }
+        }
+        return true;
+    }
+
+    private static boolean extractHasContainers(HugeVertexStep<?> newStep,
+                                                HasContainerHolder holder) {
+        HugeGraph graph = TraversalUtil.tryGetGraph(newStep);
+        if (!canExtractHasContainers(graph, holder)) {
+            return false;
+        }
+        for (HasContainer has : holder.getHasContainers()) {
+            newStep.addHasContainer(has);
+        }
+        return true;
+    }
+
+    private static boolean canExtractHasContainers(HugeGraph graph,
+                                                   HasContainerHolder holder) {
+        for (HasContainer has : holder.getHasContainers()) {
+            if (!canExtractHasContainer(graph, has)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean canExtractHasContainer(HugeGraph graph,
+                                          HasContainer has) {
+        if (isSysProp(has.getKey())) {
+            return true;
+        }
+        if (graph == null) {
+            return false;
+        }
+
+        PropertyKey pkey;
+        try {
+            pkey = graph.propertyKey(has.getKey());
+        } catch (NotFoundException e) {
+            return false;
+        }
+        if (!pkey.dataType().isText()) {
+            return true;
+        }
+
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            if (bp == Compare.gt || bp == Compare.gte ||
+                bp == Compare.lt || bp == Compare.lte) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static void extractOrder(Step<?, ?> newStep,

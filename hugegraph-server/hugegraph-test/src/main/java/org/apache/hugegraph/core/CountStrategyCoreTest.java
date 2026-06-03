@@ -48,6 +48,19 @@ public class CountStrategyCoreTest extends BaseCoreTest {
         commitTx();
     }
 
+    private void initTextRangeSchema(boolean withEdge) {
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("vp4").asText().create();
+        schema.propertyKey("ep4").asText().create();
+        schema.propertyKey("age").asInt().create();
+        schema.vertexLabel("vl1").properties("vp4", "age")
+              .nullableKeys("vp4", "age").create();
+        if (withEdge) {
+            schema.edgeLabel("el2").properties("ep4")
+                  .nullableKeys("ep4").link("vl1", "vl1").create();
+        }
+    }
+
     @Test
     public void testWhereCountLtNegativeIsAlwaysFalse() {
         this.initSchema();
@@ -82,7 +95,7 @@ public class CountStrategyCoreTest extends BaseCoreTest {
                              .count().next();
 
         Assert.assertEquals(1L, direct);
-        Assert.assertEquals(viaMatch, direct);
+        Assert.assertEquals(direct, viaMatch);
     }
 
     @Test
@@ -125,4 +138,93 @@ public class CountStrategyCoreTest extends BaseCoreTest {
 
         Assert.assertEquals(4L, count);
     }
+
+    @Test
+    public void testRepeatAfterTextRangeFilterWithEmptyResult() {
+        this.initTextRangeSchema(true);
+
+        Vertex v1 = graph().addVertex(T.label, "vl1", "vp4", "a", "age", 1);
+        Vertex v2 = graph().addVertex(T.label, "vl1", "vp4", "b", "age", 2);
+        v1.addEdge("el2", v2);
+        commitTx();
+
+        long direct = graph().traversal().V().has("vp4", P.lt(""))
+                           .repeat(__.out("el2")).emit().times(1)
+                           .count().next();
+        long viaMatch = graph().traversal().V()
+                             .match(__.as("start").has("vp4", P.lt(""))
+                                      .out("el2").as("m"))
+                             .select("m").count().next();
+
+        Assert.assertEquals(0L, direct);
+        Assert.assertEquals(direct, viaMatch);
+    }
+
+    @Test
+    public void testTextRangeFilterKeepsMixedGraphHasStep() {
+        this.initTextRangeSchema(false);
+
+        graph().addVertex(T.label, "vl1", "vp4", "a", "age", 1);
+        graph().addVertex(T.label, "vl1", "vp4", "b", "age", 2);
+        commitTx();
+
+        long direct = graph().traversal().V()
+                           .hasLabel("vl1")
+                           .has("vp4", P.lt(""))
+                           .has("age", 1)
+                           .count().next();
+        long viaMatch = graph().traversal().V()
+                             .match(__.as("v").hasLabel("vl1")
+                                      .has("vp4", P.lt(""))
+                                      .has("age", 1))
+                             .select("v").count().next();
+
+        Assert.assertEquals(0L, direct);
+        Assert.assertEquals(direct, viaMatch);
+    }
+
+    @Test
+    public void testTextRangeFilterKeepsMixedVertexHasStep() {
+        this.initTextRangeSchema(true);
+
+        Vertex v1 = graph().addVertex(T.label, "vl1", "vp4", "a", "age", 1);
+        Vertex v2 = graph().addVertex(T.label, "vl1", "vp4", "b", "age", 2);
+        v1.addEdge("el2", v2);
+        commitTx();
+
+        long direct = graph().traversal().V(v1.id()).out("el2")
+                           .hasLabel("vl1")
+                           .has("vp4", P.lt(""))
+                           .has("age", 2)
+                           .count().next();
+        long viaMatch = graph().traversal().V(v1.id()).out("el2")
+                             .match(__.as("v").hasLabel("vl1")
+                                      .has("vp4", P.lt(""))
+                                      .has("age", 2))
+                             .select("v").count().next();
+
+        Assert.assertEquals(0L, direct);
+        Assert.assertEquals(direct, viaMatch);
+    }
+
+    @Test
+    public void testTextRangeFilterKeepsEdgeGraphHasStep() {
+        this.initTextRangeSchema(true);
+
+        Vertex v1 = graph().addVertex(T.label, "vl1", "vp4", "a", "age", 1);
+        Vertex v2 = graph().addVertex(T.label, "vl1", "vp4", "b", "age", 2);
+        v1.addEdge("el2", v2, "ep4", "a");
+        commitTx();
+
+        long direct = graph().traversal().E()
+                           .has("ep4", P.lt(""))
+                           .count().next();
+        long viaMatch = graph().traversal().E()
+                             .match(__.as("e").has("ep4", P.lt("")))
+                             .select("e").count().next();
+
+        Assert.assertEquals(0L, direct);
+        Assert.assertEquals(direct, viaMatch);
+    }
+
 }
