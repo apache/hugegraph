@@ -57,9 +57,10 @@ grep -E '^(backend|serializer|hbase\.)' "$CONF"
 # 3) Init and start server
 cd "$SERVER_DIR"
 printf 'pa\npa\n' | ./bin/init-store.sh
-./bin/start-hugegraph.sh -t 60
+./bin/start-hugegraph.sh
 
 # 4) Verify backend logs mention hbase
+cd "$ROOT_DIR"
 grep -Eai 'hbase|rocksdb|hstore' "$SERVER_DIR"/logs/*.log | tail -n 30
 ```
 
@@ -239,7 +240,7 @@ Expected output: `{"vertices":["1:Bob"]}`
 curl -s "http://localhost:8080/graphs/hugegraph/traversers/rays?source=%221:Alice%22&direction=OUT&label=knows&max_depth=1"
 ```
 
-Expected output contains: `{"target":"1:Bob","label":"knows"}`
+Expected output contains: `rays":[{"objects":["1:Alice","1:Bob"]}]`
 
 ---
 
@@ -258,8 +259,7 @@ Run cleanup only after testing is complete.
 
 ```bash
 cd "$SERVER_DIR" && ./bin/stop-hugegraph.sh
-
-cd $"ROOT_DIR"
+cd "$ROOT_DIR"
 docker compose -p hg-hbase -f docker/hbase/docker-compose.hbase.yml down -v
 ```
 
