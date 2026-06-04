@@ -55,7 +55,7 @@ cleanup() {
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
-    rm -rf "$PD_ROOT/logs/"
+    rm -rf "$STORE_ROOT/logs/"
     # kill anything holding Store ports (8520 REST, 8510 raft, 8500 gRPC)
     lsof -ti :8520 | xargs kill -9 2>/dev/null || true
     lsof -ti :8510 | xargs kill -9 2>/dev/null || true
