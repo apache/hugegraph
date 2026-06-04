@@ -1,0 +1,12 @@
+ignore:  
+  - "**/*.sh"  
+  - "hugegraph-server/hugegraph-dist/src/assembly/travis/**"  
+  
+coverage:  
+  status:  
+    project:  
+      default:  
+        threshold: 0.5%  
+    patch:  
+      default:  
+        threshold: 0.5%
