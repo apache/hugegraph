@@ -26,14 +26,18 @@ fi
 if [ -z "$OPEN_TELEMETRY" ];then
   OPEN_TELEMETRY="false"
 fi
+if [ -z "$DAEMON" ]; then
+    DAEMON="true"
+fi
 
-while getopts "g:j:y:" arg; do
+while getopts "d:g:j:y:" arg; do
     case ${arg} in
         g) GC_OPTION="$OPTARG" ;;
         j) USER_OPTION="$OPTARG" ;;
         # Telemetry is used to collect metrics, traces and logs
+        d) DAEMON="$OPTARG" ;;
         y) OPEN_TELEMETRY="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
     esac
 done
 
@@ -163,20 +167,33 @@ if [ $(ps -ef|grep -v grep| grep java|grep -cE ${CONF}) -ne 0 ]; then
    echo "HugeGraphPDServer is already running..."
    exit 0
 fi
-echo "Starting HugeGraphPDServer..."
 
 JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 # Turn on security check
-if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-    exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-        -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar &
+if [[ $DAEMON == "true" ]]; then
+    echo "Starting HugeGraphPDServer in daemon mode..."
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar &
+    else
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1 &
+    fi
+    PID="$!"
+    # Write pid to file
+    echo "$PID" > "$PID_FILE"
+    echo "[+pid] $PID"
 else
-    exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-        -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1 &
+    echo "Starting HugeGraphPDServer in foreground mode..."
+    # Write $$ before exec — exec replaces this shell with Java, so $$ becomes Java's PID
+    echo "$$" > "$PID_FILE"
+    echo "[+pid] $$"
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar
+    else
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1
+    fi
 fi
-
-PID="$!"
-# Write pid to file
-echo "$PID" > "$PID_FILE"
-echo "[+pid] $PID"
