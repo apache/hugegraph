@@ -107,6 +107,12 @@ jobs:
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
 
+      - name: Run start-hugegraph-pd.sh foreground mode tests
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION/
+          $TRAVIS_DIR/test-start-hugegraph-pd.sh $PD_DIR
+
       - name: Prepare env and service
         run: |
           $TRAVIS_DIR/start-pd.sh
@@ -162,6 +168,12 @@ jobs:
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+
+      - name: Run start-hugegraph-store.sh foreground mode tests
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION/
+          $TRAVIS_DIR/test-start-hugegraph-store.sh $STORE_DIR
 
       - name: Prepare env and service
         run: |
