@@ -104,7 +104,7 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
     }
 
     @Test
-    public void testVertexQueryByIdsDedupsDuplicateIds() {
+    public void testVertexQueryByIdsDuplicateIds() {
         Id id1 = IdGenerator.of("v1");
         Id id2 = IdGenerator.of("v2");
 
@@ -112,14 +112,16 @@ public class RocksDBTableQueryByIdsTest extends BaseRocksDBUnitTest {
         this.rocks.session().put(this.vertexTable.table(), id2.asBytes(), getBytes("value2"));
         this.commit();
 
+        // [id1, id2, id1] — non-consecutive duplicates must be preserved
         List<Id> ids = Arrays.asList(id1, id2, id1);
         BackendColumnIterator iter = this.vertexTable.queryByIds(this.rocks.session(), ids);
 
         List<String> names = toColumnNames(iter);
 
-        Assert.assertEquals(2, names.size());
+        Assert.assertEquals(3, names.size());
         Assert.assertEquals("v1", names.get(0));
         Assert.assertEquals("v2", names.get(1));
+        Assert.assertEquals("v1", names.get(2));
     }
 
     @Test

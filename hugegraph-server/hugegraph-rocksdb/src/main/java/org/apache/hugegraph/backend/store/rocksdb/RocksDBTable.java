@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.LinkedHashSet;
+
 import java.util.List;
 import java.util.Set;
 
@@ -241,9 +241,8 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
             return this.getById(session, ids.iterator().next());
         }
 
-        Collection<Id> uniqueIds = ids instanceof Set ? ids : new LinkedHashSet<>(ids);
-        List<byte[]> keys = new ArrayList<>(uniqueIds.size());
-        for (Id id : uniqueIds) {
+        List<byte[]> keys = new ArrayList<>(ids.size());
+        for (Id id : ids) {
             keys.add(id.asBytes());
         }
         return session.get(this.table(), keys);

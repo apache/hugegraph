@@ -2684,6 +2684,24 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByNonConsecutiveDuplicateIds() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        List<Edge> allEdges = graph.traversal().E().toList();
+        Assert.assertTrue("need at least 2 edges", allEdges.size() >= 2);
+
+        Object id1 = allEdges.get(0).id();
+        Object id2 = allEdges.get(1).id();
+
+        List<Edge> edges = ImmutableList.copyOf(graph.edges(id1, id2, id1));
+        Assert.assertEquals(3, edges.size());
+        Assert.assertEquals(id1, edges.get(0).id());
+        Assert.assertEquals(id2, edges.get(1).id());
+        Assert.assertEquals(id1, edges.get(2).id());
+    }
+
+    @Test
     public void testQueryEdgesByIdWithGraphAPIAndNotCommittedUpdate() {
         HugeGraph graph = graph();
         init18Edges();
