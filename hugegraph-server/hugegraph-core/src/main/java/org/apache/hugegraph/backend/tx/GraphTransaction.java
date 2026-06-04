@@ -102,6 +102,7 @@ import org.apache.tinkerpop.gremlin.structure.util.ElementHelper;
 import org.apache.tinkerpop.gremlin.util.iterator.IteratorUtils;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterators;
 
 import jakarta.ws.rs.ForbiddenException;
@@ -306,8 +307,8 @@ public class GraphTransaction extends IndexableTransaction {
         return false;
     }
 
-    @Watched(prefix = "tx")
     @Override
+    @Watched(prefix = "graph")
     protected BackendMutation prepareCommit() {
         // Serialize and add updates into super.deletions
         if (!this.removedVertices.isEmpty() || !this.removedEdges.isEmpty()) {
@@ -513,6 +514,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     @Override
+    @Watched(prefix = "graph")
     public void commit() throws BackendException {
         try {
             super.commit();
@@ -522,6 +524,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     @Override
+    @Watched(prefix = "graph")
     public void rollback() throws BackendException {
         // Rollback properties changes
         for (HugeProperty<?> prop : this.updatedOldestProps) {
@@ -535,6 +538,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     @Override
+    @Watched(prefix = "graph")
     public QueryResults<BackendEntry> query(Query query) {
         if (!(query instanceof ConditionQuery)) {
             // It's a sysprop-query, don't need to optimize
@@ -549,6 +553,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     @Override
+    @Watched(prefix = "graph")
     public Number queryNumber(Query query) {
         boolean isConditionQuery = query instanceof ConditionQuery;
         boolean hasUpdate = this.hasUpdate();
@@ -708,6 +713,7 @@ public class GraphTransaction extends IndexableTransaction {
         this.afterWrite();
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Vertex> queryAdjacentVertices(Iterator<Edge> edges) {
         if (this.lazyLoadAdjacentVertex) {
             return new MapperIterator<>(edges, edge -> {
@@ -725,15 +731,18 @@ public class GraphTransaction extends IndexableTransaction {
         });
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Vertex> queryAdjacentVertices(Object... vertexIds) {
         return this.queryVerticesByIds(vertexIds, true,
                                        this.checkAdjacentVertexExist);
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Vertex> queryVertices(Object... vertexIds) {
         return this.queryVerticesByIds(vertexIds, false, false);
     }
 
+    @Watched(prefix = "graph")
     public Vertex queryVertex(Object vertexId) {
         Iterator<Vertex> iter = this.queryVerticesByIds(new Object[]{vertexId},
                                                         false, true);
@@ -774,40 +783,103 @@ public class GraphTransaction extends IndexableTransaction {
         return this.queryVerticesByIds(vertexIds, adjacentVertex, checkMustExist, HugeType.VERTEX);
     }
 
+    @Watched(prefix = "graph")
     protected Iterator<Vertex> queryVerticesByIds(Object[] vertexIds, boolean adjacentVertex,
                                                   boolean checkMustExist, HugeType type) {
         Query.checkForceCapacity(vertexIds.length);
 
-        // NOTE: allowed duplicated vertices if query by duplicated ids
-        List<Id> ids = InsertionOrderUtil.newList();
-        Map<Id, HugeVertex> vertices = new HashMap<>(vertexIds.length);
+        List<Id> ids;
+        Map<Id, HugeVertex> vertices;
+        boolean verticesUpdated = this.verticesInTxSize() > 0;
 
-        IdQuery query = new IdQuery(type);
-        for (Object vertexId : vertexIds) {
-            HugeVertex vertex;
-            Id id = HugeVertex.getIdValue(vertexId);
-            if (id == null || this.removedVertices.containsKey(id)) {
-                // The record has been deleted
-                continue;
-            } else if ((vertex = this.addedVertices.get(id)) != null ||
-                       (vertex = this.updatedVertices.get(id)) != null) {
-                if (vertex.expired()) {
+        if (vertexIds.length == 1) {
+            Id id = HugeVertex.getIdValue(vertexIds[0]);
+
+            boolean tryQueryBackend = true;
+            if (id == null) {
+                tryQueryBackend = false;
+                ids = ImmutableList.of();
+            } else {
+                ids = ImmutableList.of(id);
+            }
+
+            HugeVertex vertex = null;
+            if (id != null && verticesUpdated) {
+                if (this.removedVertices.containsKey(id)) {
+                    // The record has been deleted
+                    tryQueryBackend = false;
+                } else if ((vertex = this.addedVertices.get(id)) != null ||
+                           (vertex = this.updatedVertices.get(id)) != null) {
+                    // Found from local tx
+                    tryQueryBackend = false;
+                    if (vertex.expired()) {
+                        vertex = null;
+                    } else {
+                        assert vertex != null;
+                    }
+                }
+            }
+
+            if (vertex != null) {
+                assert !tryQueryBackend;
+                vertices = ImmutableMap.of(vertex.id(), vertex);
+            } else if (!tryQueryBackend) {
+                assert vertex == null;
+                vertices = ImmutableMap.of();
+            } else {
+                // Query from backend store
+                IdQuery query = new IdQuery.OneIdQuery(type, id);
+                Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
+                vertex = QueryResults.one(it);
+                if (vertex == null) {
+                    vertices = ImmutableMap.of();
+                } else {
+                    vertices = ImmutableMap.of(vertex.id(), vertex);
+                }
+            }
+        } else {
+            // NOTE: allowed duplicated vertices if query by duplicated ids
+            ids = InsertionOrderUtil.newList();
+            vertices = new HashMap<>(vertexIds.length);
+
+            IdQuery query = new IdQuery(type);
+            for (Object vertexId : vertexIds) {
+                Id id = HugeVertex.getIdValue(vertexId);
+                if (id == null) {
                     continue;
                 }
-                // Found from local tx
-                vertices.put(vertex.id(), vertex);
-            } else {
-                // Prepare to query from backend store
-                query.query(id);
+                boolean foundLocal = false;
+                if (verticesUpdated) {
+                    HugeVertex vertex;
+                    if (this.removedVertices.containsKey(id)) {
+                        // The record has been deleted
+                        continue;
+                    }
+                    if ((vertex = this.addedVertices.get(id)) != null ||
+                        (vertex = this.updatedVertices.get(id)) != null) {
+                        if (vertex.expired()) {
+                            continue;
+                        }
+                        // Found from local tx
+                        foundLocal = true;
+                        vertices.put(vertex.id(), vertex);
+                    } else {
+                        assert !foundLocal;
+                    }
+                }
+                if (!foundLocal) {
+                    // Prepare to query from backend store
+                    query.query(id);
+                }
+                ids.add(id);
             }
-            ids.add(id);
-        }
 
-        if (!query.empty()) {
-            // Query from backend store
-            query.mustSortByInput(false);
-            Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
-            QueryResults.fillMap(it, vertices);
+            if (!query.empty()) {
+                // Query from backend store
+                query.mustSortByInput(false);
+                Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
+                QueryResults.fillMap(it, vertices);
+            }
         }
 
         return new MapperIterator<>(ids.iterator(), id -> {
@@ -829,11 +901,13 @@ public class GraphTransaction extends IndexableTransaction {
         });
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Vertex> queryVertices() {
         Query q = new Query(HugeType.VERTEX);
         return this.queryVertices(q);
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Vertex> queryVertices(Query query) {
         if (this.hasUpdate()) {
             E.checkArgument(query.noLimitAndOffset(),
@@ -855,6 +929,7 @@ public class GraphTransaction extends IndexableTransaction {
         return this.skipOffsetOrStopLimit(r, query);
     }
 
+    @Watched(prefix = "graph")
     protected Iterator<HugeVertex> queryVerticesFromBackend(Query query) {
         assert query.resultType().isVertex();
 
@@ -916,14 +991,17 @@ public class GraphTransaction extends IndexableTransaction {
         this.afterWrite();
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Edge> queryEdgesByVertex(Id id) {
         return this.queryEdges(constructEdgesQuery(id, Directions.BOTH, new Id[0]));
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Edge> queryEdges(Object... edgeIds) {
         return this.queryEdgesByIds(edgeIds, false);
     }
 
+    @Watched(prefix = "graph")
     public Edge queryEdge(Object edgeId) {
         Iterator<Edge> iter = this.queryEdgesByIds(new Object[]{edgeId}, true);
         Edge edge = QueryResults.one(iter);
@@ -933,57 +1011,121 @@ public class GraphTransaction extends IndexableTransaction {
         return edge;
     }
 
+    @Watched(prefix = "graph")
     protected Iterator<Edge> queryEdgesByIds(Object[] edgeIds,
                                              boolean verifyId) {
         Query.checkForceCapacity(edgeIds.length);
 
-        // NOTE: allowed duplicated edges if query by duplicated ids
-        List<Id> ids = InsertionOrderUtil.newList();
-        Map<Id, HugeEdge> edges = new HashMap<>(edgeIds.length);
+        List<Id> ids;
+        Map<Id, HugeEdge> edges;
+        boolean edgesUpdated = this.edgesInTxSize() > 0;
 
-        IdQuery query = new IdQuery(HugeType.EDGE);
-        for (Object edgeId : edgeIds) {
-            HugeEdge edge;
-            EdgeId id = HugeEdge.getIdValue(edgeId, !verifyId);
+        if (edgeIds.length == 1) {
+            EdgeId id = HugeEdge.getIdValue(edgeIds[0], !verifyId);
+
+            boolean tryQueryBackend = true;
             if (id == null) {
-                continue;
+                tryQueryBackend = false;
+                ids = ImmutableList.of();
+            } else {
+                if (id.direction() == Directions.IN) {
+                    id = id.switchDirection();
+                }
+                ids = ImmutableList.of(id);
             }
-            if (id.direction() == Directions.IN) {
-                id = id.switchDirection();
+
+            HugeEdge edge = null;
+            if (id != null && edgesUpdated) {
+                if (this.removedEdges.containsKey(id)) {
+                    // The record has been deleted
+                    tryQueryBackend = false;
+                } else if ((edge = this.addedEdges.get(id)) != null ||
+                           (edge = this.updatedEdges.get(id)) != null) {
+                    // Found from local tx
+                    tryQueryBackend = false;
+                    if (edge.expired()) {
+                        edge = null;
+                    } else {
+                        assert edge != null;
+                    }
+                }
             }
-            if (this.removedEdges.containsKey(id)) {
-                // The record has been deleted
-                continue;
-            } else if ((edge = this.addedEdges.get(id)) != null ||
-                       (edge = this.updatedEdges.get(id)) != null) {
-                if (edge.expired()) {
+
+            if (edge != null) {
+                assert !tryQueryBackend;
+                edges = ImmutableMap.of(edge.id(), edge);
+            } else if (!tryQueryBackend) {
+                assert edge == null;
+                edges = ImmutableMap.of();
+            } else {
+                // Query from backend store
+                IdQuery query = new IdQuery.OneIdQuery(HugeType.EDGE, id);
+                Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
+                edge = QueryResults.one(it);
+                if (edge == null) {
+                    edges = ImmutableMap.of();
+                } else {
+                    edges = ImmutableMap.of(edge.id(), edge);
+                }
+            }
+        } else {
+            // NOTE: allowed duplicated edges if query by duplicated ids
+            ids = InsertionOrderUtil.newList();
+            edges = new HashMap<>(edgeIds.length);
+
+            IdQuery query = new IdQuery(HugeType.EDGE);
+            for (Object edgeId : edgeIds) {
+                HugeEdge edge;
+                EdgeId id = HugeEdge.getIdValue(edgeId, !verifyId);
+                if (id == null) {
                     continue;
                 }
-                // Found from local tx
-                edges.put(edge.id(), edge);
-            } else {
-                // Prepare to query from backend store
-                query.query(id);
-            }
-            ids.add(id);
-        }
+                if (id.direction() == Directions.IN) {
+                    id = id.switchDirection();
+                }
 
-        if (!query.empty()) {
-            // Query from backend store
-            if (edges.isEmpty() && query.idsSize() == ids.size()) {
-                /*
-                 * Sort at the lower layer and return directly if there is no
-                 * local vertex and duplicated id.
-                 */
+                boolean foundLocal = false;
+                if (edgesUpdated) {
+                    if (this.removedEdges.containsKey(id)) {
+                        // The record has been deleted
+                        continue;
+                    }
+                    if ((edge = this.addedEdges.get(id)) != null ||
+                        (edge = this.updatedEdges.get(id)) != null) {
+                        if (edge.expired()) {
+                            continue;
+                        }
+                        // Found from local tx
+                        foundLocal = true;
+                        edges.put(edge.id(), edge);
+                    } else {
+                        assert !foundLocal;
+                    }
+                }
+                if (!foundLocal) {
+                    // Prepare to query from backend store
+                    query.query(id);
+                }
+                ids.add(id);
+            }
+
+            if (!query.empty()) {
+                // Query from backend store
+                if (edges.isEmpty() && query.idsSize() == ids.size()) {
+                    /*
+                     * Sort at the lower layer and return directly if there is
+                     * no local vertex and duplicated id.
+                     */
+                    Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
+                    @SuppressWarnings({ "unchecked", "rawtypes" })
+                    Iterator<Edge> r = (Iterator) it;
+                    return r;
+                }
+
+                query.mustSortByInput(false);
                 Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
-                @SuppressWarnings({"unchecked", "rawtypes"})
-                Iterator<Edge> r = (Iterator) it;
-                return r;
+                QueryResults.fillMap(it, edges);
             }
-
-            query.mustSortByInput(false);
-            Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
-            QueryResults.fillMap(it, edges);
         }
 
         return new MapperIterator<>(ids.iterator(), id -> {
@@ -992,6 +1134,7 @@ public class GraphTransaction extends IndexableTransaction {
         });
     }
 
+    @Watched(prefix = "graph")
     public Iterator<Edge> queryEdges() {
         Query q = new Query(HugeType.EDGE);
         return this.queryEdges(q);
@@ -1045,6 +1188,7 @@ public class GraphTransaction extends IndexableTransaction {
         return this.skipOffsetOrStopLimit(r, query);
     }
 
+    @Watched(prefix = "graph")
     protected Iterator<HugeEdge> queryEdgesFromBackend(Query query) {
         assert query.resultType().isEdge();
 
@@ -1542,7 +1686,7 @@ public class GraphTransaction extends IndexableTransaction {
                      * Just query by primary-key(id), ignore other user-props(if exists)
                      * that it will be filtered by queryVertices(Query)
                      */
-                    return new IdQuery(query, id);
+                    return new IdQuery.OneIdQuery(query, id);
                 }
             }
         }
