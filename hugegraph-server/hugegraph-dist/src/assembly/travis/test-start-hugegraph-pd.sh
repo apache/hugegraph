@@ -71,6 +71,7 @@ cleanup() {
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
+    rm -rf "$PD_ROOT/logs/"
     # kill anything still holding the PD port
     lsof -ti :8620 | xargs kill -9 2>/dev/null || true
     lsof -ti :8686 | xargs kill -9 2>/dev/null || true
