@@ -3583,6 +3583,43 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryOutEdgesBySingleResolvedLabelAndSortKey() {
+        HugeGraph graph = graph();
+        Vertex reader = initEdgeLabelQueryEdges();
+
+        List<Edge> edges = graph.traversal().V(reader.id())
+                                .outE("reviewed")
+                                .has(T.label, P.within("reviewed",
+                                                       "recommended"))
+                                .has("time", "2026-1-1")
+                                .toList();
+
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals("reviewed", edges.get(0).label());
+        Assert.assertEquals("2026-1-1", edges.get(0).value("time"));
+    }
+
+    @Test
+    public void testQueryOutEdgesByMultiLabelsAndSortKey() {
+        HugeGraph graph = graph();
+        Vertex reader = initEdgeLabelQueryEdges();
+
+        List<Edge> edges = graph.traversal().V(reader.id())
+                                .outE("reviewed", "recommended")
+                                .has("time", "2026-1-1")
+                                .toList();
+
+        Set<String> labels = new HashSet<>();
+        for (Edge edge : edges) {
+            labels.add(edge.label());
+            Assert.assertEquals("2026-1-1", edge.value("time"));
+        }
+        Assert.assertEquals(2, edges.size());
+        Assert.assertEquals(ImmutableSet.of("reviewed", "recommended"),
+                            labels);
+    }
+
+    @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithRange() {
         // FIXME: skip this test for hstore
         Assume.assumeTrue("skip this test for hstore",
@@ -7689,6 +7726,40 @@ public class EdgeCoreTest extends BaseCoreTest {
         if (commit) {
             graph.tx().commit();
         }
+    }
+
+    private Vertex initEdgeLabelQueryEdges() {
+        HugeGraph graph = graph();
+        SchemaManager schema = graph.schema();
+
+        schema.edgeLabel("reviewed").properties("time", "score")
+              .multiTimes().sortKeys("time")
+              .link("person", "book")
+              .enableLabelIndex(false)
+              .create();
+        schema.edgeLabel("recommended").properties("time", "score")
+              .multiTimes().sortKeys("time")
+              .link("person", "book")
+              .enableLabelIndex(false)
+              .create();
+
+        Vertex reader = graph.addVertex(T.label, "person",
+                                        "name", "edge-label-reader",
+                                        "city", "Beijing",
+                                        "age", 29);
+        Vertex book1 = graph.addVertex(T.label, "book",
+                                       "name", "edge-label-book-1");
+        Vertex book2 = graph.addVertex(T.label, "book",
+                                       "name", "edge-label-book-2");
+        Vertex book3 = graph.addVertex(T.label, "book",
+                                       "name", "edge-label-book-3");
+
+        reader.addEdge("reviewed", book1, "time", "2026-1-1", "score", 1);
+        reader.addEdge("recommended", book2, "time", "2026-1-1", "score", 2);
+        reader.addEdge("reviewed", book3, "time", "2026-1-2", "score", 3);
+
+        graph.tx().commit();
+        return reader;
     }
 
     private void init100LookEdges() {
