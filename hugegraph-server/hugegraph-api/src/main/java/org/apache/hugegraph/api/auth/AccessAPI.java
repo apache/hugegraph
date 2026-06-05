@@ -19,7 +19,6 @@ package org.apache.hugegraph.api.auth;
 
 import java.util.List;
 
-import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.HugeAccess;
@@ -36,6 +35,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -50,7 +51,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphspaces/{graphspace}/graphs/{graph}/auth/accesses")
+@Path("graphspaces/{graphspace}/auth/accesses")
 @Singleton
 @Tag(name = "AccessAPI")
 public class AccessAPI extends API {
@@ -63,16 +64,15 @@ public class AccessAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
-                         @PathParam("graph") String graph,
                          JsonAccess jsonAccess) {
-        LOG.debug("Graph [{}] create access: {}", graph, jsonAccess);
+        LOG.debug("GraphSpace [{}] create access: {}", graphSpace, jsonAccess);
         checkCreatingBody(jsonAccess);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeAccess access = jsonAccess.build();
         access.id(manager.authManager().createAccess(access));
-        return manager.serializer(g).writeAuthElement(access);
+        return manager.serializer().writeAuthElement(access);
     }
 
     @PUT
@@ -81,14 +81,14 @@ public class AccessAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
-                         @PathParam("graph") String graph,
+                         @Parameter(description = "The access id")
                          @PathParam("id") String id,
                          JsonAccess jsonAccess) {
-        LOG.debug("Graph [{}] update access: {}", graph, jsonAccess);
+        LOG.debug("GraphSpace [{}] update access: {}", graphSpace, jsonAccess);
         checkUpdatingBody(jsonAccess);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeAccess access;
         try {
             access = manager.authManager().getAccess(UserAPI.parseId(id));
@@ -97,24 +97,26 @@ public class AccessAPI extends API {
         }
         access = jsonAccess.build(access);
         manager.authManager().updateAccess(access);
-        return manager.serializer(g).writeAuthElement(access);
+        return manager.serializer().writeAuthElement(access);
     }
 
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The group id to filter by")
                        @QueryParam("group") String group,
+                       @Parameter(description = "The target id to filter by")
                        @QueryParam("target") String target,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
-        LOG.debug("Graph [{}] list belongs by group {} or target {}",
-                  graph, group, target);
+        LOG.debug("GraphSpace [{}] list accesses by group {} or target {}",
+                  graphSpace, group, target);
         E.checkArgument(group == null || target == null,
                         "Can't pass both group and target at the same time");
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         List<HugeAccess> belongs;
         if (group != null) {
             Id id = UserAPI.parseId(group);
@@ -125,7 +127,7 @@ public class AccessAPI extends API {
         } else {
             belongs = manager.authManager().listAllAccess(limit);
         }
-        return manager.serializer(g).writeAuthElements("accesses", belongs);
+        return manager.serializer().writeAuthElements("accesses", belongs);
     }
 
     @GET
@@ -133,14 +135,14 @@ public class AccessAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
-                      @PathParam("graph") String graph,
+                      @Parameter(description = "The access id")
                       @PathParam("id") String id) {
-        LOG.debug("Graph [{}] get access: {}", graph, id);
+        LOG.debug("GraphSpace [{}] get access: {}", graphSpace, id);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeAccess access = manager.authManager().getAccess(UserAPI.parseId(id));
-        return manager.serializer(g).writeAuthElement(access);
+        return manager.serializer().writeAuthElement(access);
     }
 
     @DELETE
@@ -148,13 +150,12 @@ public class AccessAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The access id")
                        @PathParam("id") String id) {
-        LOG.debug("Graph [{}] delete access: {}", graph, id);
+        LOG.debug("GraphSpace [{}] delete access: {}", graphSpace, id);
 
-        @SuppressWarnings("unused") // just check if the graph exists
-        HugeGraph g = graph(manager, graphSpace, graph);
         try {
             manager.authManager().deleteAccess(UserAPI.parseId(id));
         } catch (NotFoundException e) {
@@ -167,12 +168,16 @@ public class AccessAPI extends API {
     private static class JsonAccess implements Checkable {
 
         @JsonProperty("group")
+        @Schema(description = "The group id", required = true)
         private String group;
         @JsonProperty("target")
+        @Schema(description = "The target id", required = true)
         private String target;
         @JsonProperty("access_permission")
+        @Schema(description = "The access permission", required = true)
         private HugePermission permission;
         @JsonProperty("access_description")
+        @Schema(description = "The access description")
         private String description;
 
         public HugeAccess build(HugeAccess access) {

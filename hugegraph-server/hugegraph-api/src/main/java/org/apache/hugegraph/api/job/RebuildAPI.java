@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -56,9 +57,12 @@ public class RebuildAPI extends API {
                             "$action=index_label_write"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> vertexLabelRebuild(@Context GraphManager manager,
+                                              @Parameter(description = "The graphspace name")
                                               @PathParam("graphspace")
                                               String graphSpace,
+                                              @Parameter(description = "The graph name")
                                               @PathParam("graph") String graph,
+                                              @Parameter(description = "The vertex label to rebuild")
                                               @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild vertex label: {}", graph, name);
 
@@ -75,9 +79,12 @@ public class RebuildAPI extends API {
     @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
                             "$action=index_label_write"})
     public Map<String, Id> edgeLabelRebuild(@Context GraphManager manager,
+                                            @Parameter(description = "The graphspace name")
                                             @PathParam("graphspace")
                                             String graphSpace,
+                                            @Parameter(description = "The graph name")
                                             @PathParam("graph") String graph,
+                                            @Parameter(description = "The edge label name to rebuild")
                                             @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild edge label: {}", graph, name);
 
@@ -95,9 +102,12 @@ public class RebuildAPI extends API {
                             "$action=index_label_write"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> indexLabelRebuild(@Context GraphManager manager,
+                                             @Parameter(description = "The graphspace name")
                                              @PathParam("graphspace")
                                              String graphSpace,
+                                             @Parameter(description = "The graph name")
                                              @PathParam("graph") String graph,
+                                             @Parameter(description = "The index label name to rebuild")
                                              @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild index label: {}", graph, name);
 

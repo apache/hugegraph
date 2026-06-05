@@ -58,6 +58,8 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -87,7 +89,9 @@ public class VertexAPI extends BatchAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          JsonVertex jsonVertex) {
         LOG.debug("Graph [{}] create vertex: {}", graph, jsonVertex);
@@ -96,7 +100,7 @@ public class VertexAPI extends BatchAPI {
         HugeGraph g = graph(manager, graphSpace, graph);
         Vertex vertex = commit(g, () -> g.addVertex(jsonVertex.properties()));
 
-        return manager.serializer(g).writeVertex(vertex);
+        return manager.serializer().writeVertex(vertex);
     }
 
     @POST
@@ -109,7 +113,9 @@ public class VertexAPI extends BatchAPI {
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String create(@Context HugeConfig config,
                          @Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          List<JsonVertex> jsonVertices) {
         LOG.debug("Graph [{}] create vertices: {}", graph, jsonVertices);
@@ -123,7 +129,7 @@ public class VertexAPI extends BatchAPI {
             for (JsonVertex vertex : jsonVertices) {
                 ids.add((Id) g.addVertex(vertex.properties()).id());
             }
-            return manager.serializer(g).writeIds(ids);
+            return manager.serializer().writeIds(ids);
         });
     }
 
@@ -142,7 +148,9 @@ public class VertexAPI extends BatchAPI {
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String update(@Context HugeConfig config,
                          @Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          BatchVertexRequest req) {
         BatchVertexRequest.checkUpdate(req);
@@ -180,7 +188,7 @@ public class VertexAPI extends BatchAPI {
             });
 
             // If return ids, the ids.size() maybe different with the origins'
-            return manager.serializer(g).writeVertices(vertices.iterator(), false);
+            return manager.serializer().writeVertices(vertices.iterator(), false);
         });
     }
 
@@ -191,9 +199,15 @@ public class VertexAPI extends BatchAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_write"})
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
+                         @Parameter(description = "The vertex ID")
                          @PathParam("id") String idValue,
+                         @Parameter(description =
+                                 "Action to perform: 'append' to add new properties, " +
+                                 "'remove' to delete existing properties")
                          @QueryParam("action") String action,
                          JsonVertex jsonVertex) {
         LOG.debug("Graph [{}] update vertex: {}", graph, jsonVertex);
@@ -217,7 +231,85 @@ public class VertexAPI extends BatchAPI {
 
         commit(g, () -> updateProperties(vertex, jsonVertex, append));
 
-        return manager.serializer(g).writeVertex(vertex);
+        return manager.serializer().writeVertex(vertex);
+    }
+
+    @POST
+    @Timed(name = "ann-search")
+    @Path("annsearch")
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"admin", "$owner=$graph $action=vertex_read"})
+    public String annSearch(@Context GraphManager manager,
+                            @PathParam("graphspace") String graphSpace,
+                            @PathParam("graph") String graph,
+                            AnnSearchRequest searchRequest) {
+        LOG.debug("Graph [{}] ANN search with request: {}", graph, searchRequest);
+
+        AnnSearchRequest.checkRequest(searchRequest);
+
+        HugeGraph g = graph(manager, graphSpace, graph);
+
+        // Check if vertex label exists
+        VertexLabel vertexLabel = g.vertexLabel(searchRequest.vertex_label);
+        if (vertexLabel == null) {
+            throw new IllegalArgumentException(
+                    "Vertex label not found: " + searchRequest.vertex_label);
+        }
+
+        // Check if the property exists in the vertex label
+        PropertyKey propertyKey = g.propertyKey(searchRequest.properties);
+        if (propertyKey == null) {
+            throw new IllegalArgumentException(
+                    "Property key not found: " + searchRequest.properties);
+        }
+
+        // Check if the property is defined in the vertex label
+        if (!vertexLabel.properties().contains(propertyKey.id())) {
+            throw new IllegalArgumentException("Property '" + searchRequest.properties +
+                                               "' is not defined in vertex label '" +
+                                               searchRequest.vertex_label + "'");
+        }
+
+        // Check if vector index exists for the property
+        boolean hasVectorIndex = g.indexLabels().stream().anyMatch(indexLabel ->
+                                                    indexLabel.indexType() == IndexType.VECTOR &&
+                                                    indexLabel.baseType() == HugeType.VERTEX_LABEL &&
+                                                    indexLabel.baseValue()
+                                                              .equals(vertexLabel.id()) &&
+                                                    indexLabel.indexFields()
+                                                              .contains(propertyKey.id()));
+
+        if (!hasVectorIndex) {
+            throw new IllegalArgumentException(
+                    "No vector index found for property '" + searchRequest.properties +
+                    "' in vertex label '" + searchRequest.vertex_label + "'");
+        }
+
+        // Log query information
+        LOG.debug(
+                "ANN query: vertex_label={}, property={}, vector_length={}, metric={}, " +
+                "dimension={}, hasVectorIndex={}",
+                searchRequest.vertex_label, searchRequest.properties,
+                searchRequest.user_vector.length,
+                searchRequest.metric, searchRequest.dimension, hasVectorIndex);
+
+        try {
+            // TODO: Here should call the actual ANN query from backend
+            LOG.debug("ANN query not yet implemented, returning empty result");
+
+            // Temporary: return empty result
+            return manager.serializer(g).writeVertices(g.traversal().V().limit(0), false);
+
+            // Future implementation:
+            // 1. Call JVector engine for similarity query
+            // 2. Return topk most similar vertices
+
+        } finally {
+            if (g.tx().isOpen()) {
+                g.tx().close();
+            }
+        }
     }
 
     @POST
@@ -304,14 +396,25 @@ public class VertexAPI extends BatchAPI {
     @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
                             "$action=vertex_read"})
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "Filter by vertex label")
                        @QueryParam("label") String label,
+                       @Parameter(description = "Filter by vertex properties in JSON format, " +
+                                                "e.g., {\"key\":\"value\"}")
                        @QueryParam("properties") String properties,
+                       @Parameter(description =
+                               "Keep the starting predicate P (like P.gt(), P.lt()) " +
+                               "in property query or parse it to relational operators")
                        @QueryParam("keep_start_p")
                        @DefaultValue("false") boolean keepStartP,
+                       @Parameter(description = "Offset for pagination")
                        @QueryParam("offset") @DefaultValue("0") long offset,
+                       @Parameter(description = "Page number for pagination")
                        @QueryParam("page") String page,
+                       @Parameter(description = "Limit the number of vertices returned")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
         LOG.debug("Graph [{}] query vertices by label: {}, properties: {}, " +
                   "offset: {}, page: {}, limit: {}",
@@ -351,7 +454,7 @@ public class VertexAPI extends BatchAPI {
         }
 
         try {
-            return manager.serializer(g).writeVertices(traversal, page != null);
+            return manager.serializer().writeVertices(traversal, page != null);
         } finally {
             if (g.tx().isOpen()) {
                 g.tx().close();
@@ -365,8 +468,11 @@ public class VertexAPI extends BatchAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_read"})
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("graph") String graph,
+                      @Parameter(description = "The vertex ID")
                       @PathParam("id") String idValue) {
         LOG.debug("Graph [{}] get vertex by id '{}'", graph, idValue);
 
@@ -374,7 +480,7 @@ public class VertexAPI extends BatchAPI {
         HugeGraph g = graph(manager, graphSpace, graph);
         try {
             Vertex vertex = g.vertex(id);
-            return manager.serializer(g).writeVertex(vertex);
+            return manager.serializer().writeVertex(vertex);
         } finally {
             if (g.tx().isOpen()) {
                 g.tx().close();
@@ -388,9 +494,13 @@ public class VertexAPI extends BatchAPI {
     @Consumes(APPLICATION_JSON)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_delete"})
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "The vertex ID")
                        @PathParam("id") String idValue,
+                       @Parameter(description = "The vertex label (used to verify vertex identity)")
                        @QueryParam("label") String label) {
         LOG.debug("Graph [{}] remove vertex by id '{}'", graph, idValue);
 
@@ -469,10 +579,13 @@ public class VertexAPI extends BatchAPI {
 
     private static class BatchVertexRequest {
 
+        @Schema(description = "List of vertices to be created or updated", required = true)
         @JsonProperty("vertices")
         public List<JsonVertex> jsonVertices;
+        @Schema(description = "Update strategies for each property key", required = true)
         @JsonProperty("update_strategies")
         public Map<String, UpdateStrategy> updateStrategies;
+        @Schema(description = "Whether to create vertex if it does not exist")
         @JsonProperty("create_if_not_exist")
         public boolean createIfNotExist = true;
 

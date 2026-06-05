@@ -23,5 +23,4 @@ import org.junit.runner.RunWith;
 @RunWith(ProcessBasicSuite.class)
 @GraphProviderClass(provider = ProcessTestGraphProvider.class, graph = TestGraph.class)
 public class ProcessStandardTest {
-
 }

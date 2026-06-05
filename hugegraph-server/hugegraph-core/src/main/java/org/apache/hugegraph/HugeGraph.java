@@ -49,6 +49,7 @@ import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeFeatures;
 import org.apache.hugegraph.task.TaskScheduler;
+import org.apache.hugegraph.traversal.optimize.HugeCountStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeCountStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeGraphStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugePrimaryKeyStrategy;
@@ -56,7 +57,9 @@ import org.apache.hugegraph.traversal.optimize.HugeVertexStepStrategy;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
+import org.apache.hugegraph.vector.VectorIndexManager;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
+import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.CountStrategy;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -278,6 +281,8 @@ public interface HugeGraph extends Graph {
 
     RaftGroupManager raftGroupManager();
 
+    VectorIndexManager<Id> vectorIndexManager();
+
     void proxy(HugeGraph graph);
 
     boolean sameAs(HugeGraph graph);
@@ -378,7 +383,9 @@ public interface HugeGraph extends Graph {
         TraversalStrategies strategies = TraversalStrategies.GlobalCache
                 .getStrategies(Graph.class)
                 .clone();
-        strategies.addStrategies(HugeVertexStepStrategy.instance(),
+        strategies.removeStrategies(CountStrategy.class);
+        strategies.addStrategies(HugeCountStrategy.instance(),
+                                 HugeVertexStepStrategy.instance(),
                                  HugeGraphStepStrategy.instance(),
                                  HugeCountStepStrategy.instance(),
                                  HugePrimaryKeyStrategy.instance());

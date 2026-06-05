@@ -30,6 +30,24 @@ import org.junit.Test;
 public class RestApiTest extends BaseServerTest {
 
     @Test
+    public void testQueryIndexInfo() throws URISyntaxException, IOException, InterruptedException,
+                                            JSONException {
+        String url = pdRestAddr + "/";
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(new URI(url)).header(key, value)
+                                         .GET()
+                                         .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assert response.statusCode() == 200;
+        JSONObject obj = new JSONObject(response.body());
+        assert obj.getString("state") != null;
+        assert obj.getString("leader") != null;
+        assert obj.getInt("memberSize") > 0 : "memberSize should be > 0 for a running cluster";
+        // storeSize can be 0 in PD-only test environments with no store nodes registered
+        assert obj.getInt("storeSize") >= 0;
+    }
+
+    @Test
     public void testQueryClusterInfo() throws URISyntaxException, IOException, InterruptedException,
                                               JSONException {
         String url = pdRestAddr + "/v1/cluster";

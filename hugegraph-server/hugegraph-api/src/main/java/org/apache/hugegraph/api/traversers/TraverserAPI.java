@@ -32,6 +32,8 @@ import org.apache.hugegraph.type.define.Directions;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 public class TraverserAPI extends API {
 
     protected static EdgeStep step(HugeGraph graph, Step step) {
@@ -61,15 +63,20 @@ public class TraverserAPI extends API {
     protected static class Step {
 
         @JsonProperty("direction")
+        @Schema(description = "The direction of traversal", example = "BOTH")
         public Directions direction;
         @JsonProperty("labels")
+        @Schema(description = "The edge labels to traverse")
         public List<String> labels;
         @JsonProperty("properties")
+        @Schema(description = "The properties to filter edges")
         public Map<String, Object> properties;
         @JsonAlias("degree")
         @JsonProperty("max_degree")
+        @Schema(description = "The maximum degree of vertices to traverse")
         public long maxDegree = Long.parseLong(DEFAULT_MAX_DEGREE);
         @JsonProperty("skip_degree")
+        @Schema(description = "The degree to skip when traversing")
         public long skipDegree = 0L;
 
         @Override
@@ -84,9 +91,11 @@ public class TraverserAPI extends API {
     protected static class VEStepEntity {
 
         @JsonProperty("label")
+        @Schema(description = "The label of the step")
         public String label;
 
         @JsonProperty("properties")
+        @Schema(description = "The properties for the step")
         public Map<String, Object> properties;
 
         @Override
@@ -99,15 +108,20 @@ public class TraverserAPI extends API {
     protected static class VESteps {
 
         @JsonProperty("direction")
+        @Schema(description = "The direction of traversal", example = "BOTH")
         public Directions direction;
         @JsonAlias("degree")
         @JsonProperty("max_degree")
+        @Schema(description = "The maximum degree of vertices to traverse")
         public long maxDegree = Long.parseLong(DEFAULT_MAX_DEGREE);
         @JsonProperty("skip_degree")
+        @Schema(description = "The degree to skip when traversing")
         public long skipDegree = 0L;
         @JsonProperty("vertex_steps")
+        @Schema(description = "The vertex steps in the traversal")
         public List<VEStepEntity> vSteps;
         @JsonProperty("edge_steps")
+        @Schema(description = "The edge steps in the traversal")
         public List<VEStepEntity> eSteps;
 
         @Override

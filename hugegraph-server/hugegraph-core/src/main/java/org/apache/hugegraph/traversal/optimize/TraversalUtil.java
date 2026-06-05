@@ -39,13 +39,16 @@ import org.apache.hugegraph.backend.query.Aggregate;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.exception.NotSupportException;
 import org.apache.hugegraph.iterator.FilterIterator;
+import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaLabel;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.CollectionUtil;
@@ -66,6 +69,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MaxGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinGlobalStep;
@@ -165,36 +169,322 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
-        Step<?, ?> step = newStep;
-        do {
-            step = step.getNextStep();
+        Step<?, ?> step = newStep.getNextStep();
+        while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
+            Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
-                    if (!GraphStep.processHasContainerIds(newStep, has)) {
-                        newStep.addHasContainer(has);
+                /*
+                 * Range/neq predicates before match() may trigger a no-index
+                 * query after MatchStep reorders filters. Keep known-indexed
+                 * boolean predicates pushed down, and leave the rest for
+                 * TinkerPop to evaluate.
+                 */
+                if (followedByMatchStep(step) &&
+                    hasUnusableMatchPredicate(newStep, holder)) {
+                    List<HasContainer> extracted =
+                            extractUsableHasContainers(newStep, holder);
+                    for (HasContainer has : extracted) {
+                        holder.removeHasContainer(has);
                     }
+                    if (holder.getHasContainers().isEmpty()) {
+                        TraversalHelper.copyLabels(step, step.getPreviousStep(),
+                                                   false);
+                        traversal.removeStep(step);
+                    }
+                    step = nextStep;
+                    continue;
                 }
-                TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
-                traversal.removeStep(step);
+                if (extractHasContainers(newStep, holder)) {
+                    TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
+                    traversal.removeStep(step);
+                }
             }
-        } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
+            step = nextStep;
+        }
+    }
+
+    private static boolean followedByMatchStep(Step<?, ?> step) {
+        Step<?, ?> next = step.getNextStep();
+        while (next instanceof HasStep ||
+               next instanceof NoOpBarrierStep ||
+               next instanceof IdentityStep) {
+            next = next.getNextStep();
+        }
+        return next instanceof MatchStep;
+    }
+
+    private static boolean hasUnusableMatchPredicate(HugeGraphStep<?, ?> step,
+                                                     HasContainerHolder holder) {
+        HugeGraph graph = tryGetGraph(step);
+        for (HasContainer has : holder.getHasContainers()) {
+            if (!hasMatchIndexSensitivePredicate(has)) {
+                continue;
+            }
+            if (graph == null || !hasUsableMatchIndex(graph, step, has)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<HasContainer> extractUsableHasContainers(
+            HugeGraphStep<?, ?> step, HasContainerHolder holder) {
+        List<HasContainer> extracted = new ArrayList<>();
+        HugeGraph graph = tryGetGraph(step);
+        for (HasContainer has : holder.getHasContainers()) {
+            if (hasMatchIndexSensitivePredicate(has) &&
+                (graph == null || !hasUsableMatchIndex(graph, step, has))) {
+                continue;
+            }
+            if (!canExtractHasContainer(graph, has)) {
+                continue;
+            }
+            if (!GraphStep.processHasContainerIds(step, has)) {
+                step.addHasContainer(has);
+            }
+            extracted.add(has);
+        }
+        return extracted;
+    }
+
+    private static boolean hasMatchIndexSensitivePredicate(HasContainer has) {
+        if (hasNullPredicate(has)) {
+            return true;
+        }
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            if (bp == Compare.neq ||
+                bp == Compare.gt || bp == Compare.gte ||
+                bp == Compare.lt || bp == Compare.lte) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUsableMatchIndex(HugeGraph graph,
+                                               HugeGraphStep<?, ?> step,
+                                               HasContainer has) {
+        if (isSysProp(has.getKey())) {
+            return false;
+        }
+
+        PropertyKey pkey;
+        try {
+            pkey = graph.propertyKey(has.getKey());
+        } catch (NotFoundException e) {
+            return false;
+        }
+        if (!hasOnlyUsableNeqPredicates(pkey, has)) {
+            return false;
+        }
+        if (!canExtractHasContainer(graph, has)) {
+            return false;
+        }
+
+        Collection<? extends SchemaLabel> schemaLabels = step.returnsVertex() ?
+                                                         graph.vertexLabels() :
+                                                         graph.edgeLabels();
+        boolean seen = false;
+        for (SchemaLabel schemaLabel : schemaLabels) {
+            if (!schemaLabel.properties().contains(pkey.id())) {
+                continue;
+            }
+            seen = true;
+            if (pkey.dataType() == DataType.BOOLEAN &&
+                !hasBooleanIndex(graph, schemaLabel, pkey)) {
+                return false;
+            }
+            if (pkey.dataType().isNumber() &&
+                (!hasOnlyRangePredicates(has) ||
+                 !hasRangeIndex(graph, schemaLabel, pkey))) {
+                return false;
+            }
+            if (pkey.dataType() != DataType.BOOLEAN &&
+                !pkey.dataType().isNumber()) {
+                return false;
+            }
+        }
+        return seen;
+    }
+
+    private static boolean hasOnlyUsableNeqPredicates(PropertyKey pkey,
+                                                      HasContainer has) {
+        if (hasNullPredicate(has)) {
+            return false;
+        }
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            if (pred.getBiPredicate() != Compare.neq) {
+                continue;
+            }
+            if (pkey.dataType() == DataType.BOOLEAN &&
+                pred.getValue() instanceof Boolean) {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean hasNullPredicate(HasContainer has) {
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            if (pred.getValue() == null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasBooleanIndex(HugeGraph graph,
+                                           SchemaLabel schemaLabel,
+                                           PropertyKey pkey) {
+        for (Id id : schemaLabel.indexLabels()) {
+            IndexLabel indexLabel = indexLabelOrNull(graph, id);
+            if (indexLabel == null ||
+                !matchSingleFieldIndex(indexLabel, pkey)) {
+                continue;
+            }
+            if (indexLabel.indexType().isSecondary()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasRangeIndex(HugeGraph graph,
+                                         SchemaLabel schemaLabel,
+                                         PropertyKey pkey) {
+        for (Id id : schemaLabel.indexLabels()) {
+            IndexLabel indexLabel = indexLabelOrNull(graph, id);
+            if (indexLabel == null ||
+                !matchSingleFieldIndex(indexLabel, pkey)) {
+                continue;
+            }
+            if (indexLabel.indexType().isRange()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static IndexLabel indexLabelOrNull(HugeGraph graph, Id id) {
+        try {
+            return graph.indexLabel(id);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static boolean matchSingleFieldIndex(IndexLabel indexLabel,
+                                                 PropertyKey pkey) {
+        return indexLabel.indexFields().size() == 1 &&
+               indexLabel.indexField().equals(pkey.id());
+    }
+
+    private static boolean hasOnlyRangePredicates(HasContainer has) {
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            if (bp != Compare.gt && bp != Compare.gte &&
+                bp != Compare.lt && bp != Compare.lte) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
         do {
+            Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
-                    newStep.addHasContainer(has);
+                if (extractHasContainers(newStep, holder)) {
+                    TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
+                    traversal.removeStep(step);
                 }
-                TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
-                traversal.removeStep(step);
             }
-            step = step.getNextStep();
+            step = nextStep;
         } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
+    }
+
+    private static boolean extractHasContainers(HugeGraphStep<?, ?> newStep,
+                                                HasContainerHolder holder) {
+        HugeGraph graph = TraversalUtil.tryGetGraph(newStep);
+        if (!canExtractHasContainers(graph, holder)) {
+            return false;
+        }
+        for (HasContainer has : holder.getHasContainers()) {
+            if (!GraphStep.processHasContainerIds(newStep, has)) {
+                newStep.addHasContainer(has);
+            }
+        }
+        return true;
+    }
+
+    private static boolean extractHasContainers(HugeVertexStep<?> newStep,
+                                                HasContainerHolder holder) {
+        HugeGraph graph = TraversalUtil.tryGetGraph(newStep);
+        if (!canExtractHasContainers(graph, holder)) {
+            return false;
+        }
+        for (HasContainer has : holder.getHasContainers()) {
+            newStep.addHasContainer(has);
+        }
+        return true;
+    }
+
+    private static boolean canExtractHasContainers(HugeGraph graph,
+                                                   HasContainerHolder holder) {
+        for (HasContainer has : holder.getHasContainers()) {
+            if (!canExtractHasContainer(graph, has)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean canExtractHasContainer(HugeGraph graph,
+                                          HasContainer has) {
+        if (isSysProp(has.getKey())) {
+            return true;
+        }
+        if (graph == null) {
+            return false;
+        }
+
+        PropertyKey pkey;
+        try {
+            pkey = graph.propertyKey(has.getKey());
+        } catch (NotFoundException e) {
+            return false;
+        }
+        if (hasNullPredicate(has)) {
+            return false;
+        }
+        if (!pkey.dataType().isText()) {
+            return true;
+        }
+
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            if (bp == Compare.gt || bp == Compare.gte ||
+                bp == Compare.lt || bp == Compare.lte) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static void extractOrder(Step<?, ?> newStep,
@@ -419,9 +709,9 @@ public final class TraversalUtil {
         return cond;
     }
 
-    private static Condition.Relation convCompare2Relation(HugeGraph graph,
-                                                           HugeType type,
-                                                           HasContainer has) {
+    private static Condition convCompare2Relation(HugeGraph graph,
+                                                  HugeType type,
+                                                  HasContainer has) {
         assert type.isGraph();
         BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
@@ -459,9 +749,9 @@ public final class TraversalUtil {
         }
     }
 
-    private static Condition.Relation convCompare2UserpropRelation(HugeGraph graph,
-                                                                   HugeType type,
-                                                                   HasContainer has) {
+    private static Condition convCompare2UserpropRelation(HugeGraph graph,
+                                                          HugeType type,
+                                                          HasContainer has) {
         BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
 
@@ -469,6 +759,11 @@ public final class TraversalUtil {
         PropertyKey pkey = graph.propertyKey(key);
         Id pkeyId = pkey.id();
         Object value = validPropertyValue(has.getValue(), pkey);
+        if (pkey.dataType() == DataType.BOOLEAN &&
+            value instanceof Boolean) {
+            return convCompare2BooleanUserpropRelation((Compare) bp, pkeyId,
+                                                       (Boolean) value);
+        }
 
         switch ((Compare) bp) {
             case eq:
@@ -485,6 +780,31 @@ public final class TraversalUtil {
                 return Condition.neq(pkeyId, value);
             default:
                 throw newUnsupportedPredicate(has.getPredicate());
+        }
+    }
+
+    private static Condition convCompare2BooleanUserpropRelation(Compare compare,
+                                                                 Id key,
+                                                                 Boolean value) {
+        switch (compare) {
+            case eq:
+                return Condition.eq(key, value);
+            case neq:
+                return Condition.eq(key, !value);
+            case gt:
+                return value ? Condition.in(key, ImmutableList.of()) :
+                       Condition.eq(key, true);
+            case gte:
+                return value ? Condition.eq(key, true) :
+                       Condition.in(key, ImmutableList.of(false, true));
+            case lt:
+                return value ? Condition.eq(key, false) :
+                       Condition.in(key, ImmutableList.of());
+            case lte:
+                return value ? Condition.in(key, ImmutableList.of(false, true)) :
+                       Condition.eq(key, false);
+            default:
+                throw new AssertionError(compare);
         }
     }
 
@@ -678,6 +998,10 @@ public final class TraversalUtil {
         List<P<Object>> leafPredicates = new ArrayList<>();
         collectPredicates(leafPredicates, ImmutableList.of(predicate));
         for (P<Object> pred : leafPredicates) {
+            if (pred.getBiPredicate() == Compare.neq &&
+                pred.getValue() == null) {
+                continue;
+            }
             Object value = validPropertyValue(pred.getValue(), pkey);
             pred.setValue(value);
         }

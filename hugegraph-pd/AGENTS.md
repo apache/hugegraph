@@ -10,8 +10,6 @@ HugeGraph PD (Placement Driver) is a meta server for distributed HugeGraph deplo
 - Store node monitoring and scheduling
 - Metadata coordination using Raft consensus
 
-**Status**: BETA (since HugeGraph 1.5.0)
-
 **Technology Stack**:
 - Java 11+ (required)
 - Apache Maven 3.5+
@@ -112,7 +110,7 @@ mvn clean install
 
 # Build distribution package only
 mvn clean package -pl hg-pd-dist -am -DskipTests
-# Output: hg-pd-dist/target/apache-hugegraph-pd-incubating-<version>.tar.gz
+# Output: hugegraph-pd/apache-hugegraph-pd-<version>.tar.gz
 ```
 
 ### Running Tests
@@ -167,7 +165,7 @@ mvn clean
 
 After building, extract the tarball:
 ```
-apache-hugegraph-pd-incubating-<version>/
+apache-hugegraph-pd-<version>/
 ├── bin/
 │   ├── start-hugegraph-pd.sh    # Start PD server
 │   ├── stop-hugegraph-pd.sh     # Stop PD server
@@ -185,7 +183,7 @@ apache-hugegraph-pd-incubating-<version>/
 ### Starting PD
 
 ```bash
-cd apache-hugegraph-pd-incubating-<version>/
+cd apache-hugegraph-pd-<version>/
 bin/start-hugegraph-pd.sh
 
 # With custom GC options
@@ -249,7 +247,7 @@ store:
 ### Common Configuration Errors
 
 1. **Raft peer discovery failure**: `raft.peers-list` must include all PD nodes' `raft.address` values
-2. **Store connection issues**: `grpc.host` must be a reachable IP (not `127.0.0.1`) for distributed deployments
+2. **Store connection issues**: `grpc.host` must be a reachable IP (not `127.0.0.1`) for distributed deployments. In Docker bridge networking, use the container hostname (e.g., `pd0`) set via `HG_PD_GRPC_HOST` env var.
 3. **Split-brain scenarios**: Always run 3 or 5 PD nodes in production for Raft quorum
 4. **Partition imbalance**: Adjust `patrol-interval` for faster/slower rebalancing
 
@@ -333,7 +331,7 @@ docker run -d -p 8620:8620 -p 8686:8686 -p 8610:8610 \
   hugegraph-pd:latest
 
 # For production clusters, use Docker Compose or Kubernetes
-# See: hugegraph-server/hugegraph-dist/docker/example/
+# See: ../docker/docker-compose-3pd-3store-3server.yml and ../docker/README.md
 ```
 
 Exposed ports: 8620 (REST), 8686 (gRPC), 8610 (Raft)

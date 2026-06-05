@@ -26,6 +26,7 @@ import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.HugeVectorIndexMap;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.type.HugeType;
@@ -52,6 +53,10 @@ public interface GraphSerializer {
     BackendEntry writeIndex(HugeIndex index);
 
     HugeIndex readIndex(HugeGraph graph, ConditionQuery query, BackendEntry entry);
+
+    BackendEntry writeVectorSequence(HugeVectorIndexMap indexMap);
+
+    HugeVectorIndexMap readVectorSequence(HugeGraph graph, ConditionQuery query, BackendEntry entry);
 
     BackendEntry writeId(HugeType type, Id id);
 

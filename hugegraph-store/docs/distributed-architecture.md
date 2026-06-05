@@ -200,11 +200,11 @@ HugeGraph Store follows a layered architecture with clear separation of responsi
 
 ## Raft Consensus Mechanism
 
-HugeGraph Store uses **Apache JRaft** (Ant Financial's Raft implementation) to achieve strong consistency and high availability.
+HugeGraph Store uses **Sofa-JRaft** (Ant Financial's Raft implementation) to achieve strong consistency and high availability.
 
 ### Raft per Partition Design
 
-Unlike some distributed systems that use a single Raft group for the entire cluster, HugeGraph Store uses **one Raft group per partition**:
+Unlike some distributed systems that use a single Raft group for the entire cluster, HugeGraph Store uses MultiRaft:
 
 ```
 Store Cluster (3 nodes: S1, S2, S3)

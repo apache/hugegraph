@@ -34,7 +34,7 @@ public class Version {
             try (InputStream is = Version.class.getResourceAsStream("/version.txt")) {
                 byte[] buf = new byte[64];
                 int len = is.read(buf);
-                version = new String(buf, 0, len);
+                version = new String(buf, 0, len).trim();
             } catch (Exception e) {
                 log.error("Version.getVersion exception: ", e);
             }

@@ -41,13 +41,13 @@ rm -rf dist && mkdir -p dist/apache-${REPO}
 # step1: package the source code
 cd ../../ && echo "Package source in: $(pwd)"
 git archive --format=tar.gz \
-  --output="install-dist/scripts/dist/apache-${REPO}/apache-${REPO}-incubating-${RELEASE_VERSION}-src.tar.gz" \
-  --prefix=apache-${REPO}-incubating-"${RELEASE_VERSION}"-src/ "${GIT_BRANCH}" || exit
+  --output="install-dist/scripts/dist/apache-${REPO}/apache-${REPO}-${RELEASE_VERSION}-src.tar.gz" \
+  --prefix=apache-${REPO}-"${RELEASE_VERSION}"-src/ "${GIT_BRANCH}" || exit
 cd - || exit
 
 # step2: copy the binary file (Optional)
 # Note: it's optional for project to generate binary package (skip this step if not need)
-cp -v ../../target/apache-${REPO}-incubating-"${RELEASE_VERSION}".tar.gz dist/apache-${REPO} || exit
+cp -v ../../target/apache-${REPO}-"${RELEASE_VERSION}".tar.gz dist/apache-${REPO} || exit
 
 # step3: sign + hash
 ##### 3.1 sign in source & binary package
@@ -80,7 +80,7 @@ SVN_DIR="${GROUP}-svn-dev"
 cd ../
 rm -rfv ${SVN_DIR}
 
-svn co "https://dist.apache.org/repos/dist/dev/incubator/${GROUP}" ${SVN_DIR}
+svn co "https://dist.apache.org/repos/dist/dev/${GROUP}" ${SVN_DIR}
 
 ##### 4.2 copy new release package to svn directory
 mkdir -p ${SVN_DIR}/"${RELEASE_VERSION}"

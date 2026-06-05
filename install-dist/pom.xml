@@ -29,7 +29,7 @@
     <artifactId>install-dist</artifactId>
 
     <properties>
-        <final.name>apache-${release.name}-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-${project.version}</final.name>
     </properties>
 
     <build>
@@ -50,10 +50,10 @@
                                     cd $root_path || exit
 
                                     mkdir -p ${final.name}
-                                    cp -r -v $root_path/hugegraph-pd/apache-hugegraph-pd-incubating-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/hugegraph-store/apache-hugegraph-store-incubating-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/hugegraph-server/apache-hugegraph-server-incubating-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/install-dist/release-docs/* $root_path/DISCLAIMER ${final.name}/ || exit
+                                    cp -r -v $root_path/hugegraph-pd/apache-hugegraph-pd-${project.version} ${final.name}/ || exit
+                                    cp -r -v $root_path/hugegraph-store/apache-hugegraph-store-${project.version} ${final.name}/ || exit
+                                    cp -r -v $root_path/hugegraph-server/apache-hugegraph-server-${project.version} ${final.name}/ || exit
+                                    cp -r -v $root_path/install-dist/release-docs/* ${final.name}/ || exit
 
                                     tar zcvf $root_path/target/${final.name}.tar.gz ./${final.name} || exit 1
 

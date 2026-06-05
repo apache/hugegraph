@@ -18,11 +18,25 @@
 package org.apache.hugegraph.api.filter;
 
 import java.io.IOException;
+import java.net.URI;
+import java.util.List;
+import java.util.Set;
+
+import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.config.ServerOptions;
+import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.Log;
+import org.slf4j.Logger;
+
+import com.google.common.collect.ImmutableSet;
 
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
 import jakarta.ws.rs.container.PreMatching;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.PathSegment;
+import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.Provider;
 
 @Provider
@@ -30,29 +44,75 @@ import jakarta.ws.rs.ext.Provider;
 @PreMatching
 public class PathFilter implements ContainerRequestFilter {
 
+    private static final Logger LOG = Log.logger(PathFilter.class);
+
+    private static final String GRAPH_SPACE = "graphspaces";
+    private static final String ARTHAS_START = "arthas";
+
     public static final String REQUEST_TIME = "request_time";
     public static final String REQUEST_PARAMS_JSON = "request_params_json";
 
+    private static final String DELIMITER = "/";
+    private static final Set<String> WHITE_API_LIST = ImmutableSet.of(
+            "",
+            "apis",
+            "metrics",
+            "versions",
+            "health",
+            "gremlin",
+            "graphs/auth",
+            "graphs/auth/users",
+            "auth/users",
+            "auth/managers",
+            "auth",
+            "hstore",
+            "pd",
+            "kafka",
+            "whiteiplist",
+            "vermeer",
+            "store",
+            "expiredclear",
+            "department",
+            "saas",
+            "trade",
+            "kvstore",
+            "openapi.json"
+    );
+
+    @Context
+    private jakarta.inject.Provider<HugeConfig> configProvider;
+
+    public static boolean isWhiteAPI(String rootPath) {
+
+        return WHITE_API_LIST.contains(rootPath);
+    }
+
     @Override
-    public void filter(ContainerRequestContext context) throws IOException {
+    public void filter(ContainerRequestContext context)
+            throws IOException {
         context.setProperty(REQUEST_TIME, System.currentTimeMillis());
 
-        // TODO: temporarily comment it to fix loader bug, handle it later
-        /*// record the request json
-        String method = context.getMethod();
-        String requestParamsJson = "";
-        if (method.equals(HttpMethod.POST)) {
-            requestParamsJson = IOUtils.toString(context.getEntityStream(),
-                                                 Charsets.toCharset(CHARSET));
-            // replace input stream because we have already read it
-            InputStream in = IOUtils.toInputStream(requestParamsJson, Charsets.toCharset(CHARSET));
-            context.setEntityStream(in);
-        } else if (method.equals(HttpMethod.GET)) {
-            MultivaluedMap<String, String> pathParameters = context.getUriInfo()
-                                                                   .getPathParameters();
-            requestParamsJson = pathParameters.toString();
+        List<PathSegment> segments = context.getUriInfo().getPathSegments();
+        E.checkArgument(segments.size() > 0, "Invalid request uri '%s'",
+                        context.getUriInfo().getPath());
+        String rootPath = segments.get(0).getPath();
+
+        if (isWhiteAPI(rootPath) || GRAPH_SPACE.equals(rootPath) ||
+            ARTHAS_START.equals(rootPath)) {
+            return;
         }
 
-        context.setProperty(REQUEST_PARAMS_JSON, requestParamsJson);*/
+        UriInfo uriInfo = context.getUriInfo();
+        String defaultPathSpace =
+                this.configProvider.get().get(ServerOptions.PATH_GRAPH_SPACE);
+        String path = uriInfo.getBaseUri().getPath() +
+                      String.join(DELIMITER, GRAPH_SPACE, defaultPathSpace);
+        for (PathSegment segment : segments) {
+            path = String.join(DELIMITER, path, segment.getPath());
+        }
+        LOG.debug("Redirect request uri from {} to {}",
+                  uriInfo.getRequestUri().getPath(), path);
+        URI requestUri = uriInfo.getRequestUriBuilder().uri(path).build();
+        context.setRequestUri(uriInfo.getBaseUri(), requestUri);
     }
 }

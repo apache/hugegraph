@@ -129,7 +129,6 @@ public final class HugeFactoryAuthProxy {
         Reflection.registerFieldsToFilter(StandardAuthenticator.class, "graph");
         Reflection.registerMethodsToFilter(StandardAuthenticator.class, "initAdminUser",
                                            "inputPassword", "graph");
-        Reflection.registerFieldsToFilter(ConfigAuthenticator.class, "tokens");
         Reflection.registerFieldsToFilter(HugeFactoryAuthProxy.class, "PROTECT_METHODS");
         Reflection.registerMethodsToFilter(HugeFactoryAuthProxy.class, "genRegisterPrivateActions",
                                            "registerClass", "registerPrivateActions",
@@ -508,7 +507,6 @@ public final class HugeFactoryAuthProxy {
         registerPrivateActions(InheritableThreadLocal.class);
 
         registerPrivateActions(StandardAuthenticator.class);
-        registerPrivateActions(ConfigAuthenticator.class);
         registerPrivateActions(HugeFactoryAuthProxy.class);
         registerPrivateActions(HugeAuthenticator.User.class);
 

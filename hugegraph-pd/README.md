@@ -3,8 +3,6 @@
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Version](https://img.shields.io/badge/version-1.7.0-blue)](https://github.com/apache/hugegraph)
 
-> **Note**: From revision 1.5.0, the HugeGraph-PD code has been adapted to this location.
-
 ## Overview
 
 HugeGraph PD (Placement Driver) is a meta server that provides cluster management and coordination services for HugeGraph distributed deployments. It serves as the central control plane responsible for:
@@ -15,7 +13,7 @@ HugeGraph PD (Placement Driver) is a meta server that provides cluster managemen
 - **Node Scheduling**: Intelligent scheduling and load balancing of graph operations
 - **Health Monitoring**: Continuous health checks and failure detection via heartbeat mechanism
 
-PD uses [Apache JRaft](https://github.com/sofastack/sofa-jraft) for Raft consensus and RocksDB for persistent metadata storage, ensuring high availability and consistency in distributed environments.
+PD uses [SOFA-jraft](https://github.com/sofastack/sofa-jraft) for Raft consensus and RocksDB for persistent metadata storage, ensuring high availability and consistency in distributed environments.
 
 ## Architecture
 
@@ -156,6 +154,36 @@ raft:
 
 For detailed configuration options and production tuning, see [Configuration Guide](docs/configuration.md).
 
+#### Docker Bridge Network Example
+
+When running PD in Docker with bridge networking (e.g., `docker/docker-compose-3pd-3store-3server.yml`), configuration is injected via environment variables instead of editing `application.yml` directly. Container hostnames are used instead of IP addresses:
+
+**pd0** container:
+```bash
+HG_PD_GRPC_HOST=pd0
+HG_PD_RAFT_ADDRESS=pd0:8610
+HG_PD_RAFT_PEERS_LIST=pd0:8610,pd1:8610,pd2:8610
+HG_PD_INITIAL_STORE_LIST=store0:8500,store1:8500,store2:8500
+```
+
+**pd1** container:
+```bash
+HG_PD_GRPC_HOST=pd1
+HG_PD_RAFT_ADDRESS=pd1:8610
+HG_PD_RAFT_PEERS_LIST=pd0:8610,pd1:8610,pd2:8610
+HG_PD_INITIAL_STORE_LIST=store0:8500,store1:8500,store2:8500
+```
+
+**pd2** container:
+```bash
+HG_PD_GRPC_HOST=pd2
+HG_PD_RAFT_ADDRESS=pd2:8610
+HG_PD_RAFT_PEERS_LIST=pd0:8610,pd1:8610,pd2:8610
+HG_PD_INITIAL_STORE_LIST=store0:8500,store1:8500,store2:8500
+```
+
+See [docker/README.md](../docker/README.md) for the full environment variable reference.
+
 ### Verify Deployment
 
 Check if PD is running:
@@ -205,22 +233,25 @@ Build PD Docker image:
 
 ```bash
 # From project root
-docker build -f hugegraph-pd/Dockerfile -t hugegraph-pd:latest .
+docker build -f hugegraph-pd/Dockerfile -t hugegraph/pd:latest .
 
 # Run container
 docker run -d \
   -p 8620:8620 \
   -p 8686:8686 \
   -p 8610:8610 \
-  -v /path/to/conf:/hugegraph-pd/conf \
+  -e HG_PD_GRPC_HOST=<your-ip> \
+  -e HG_PD_RAFT_ADDRESS=<your-ip>:8610 \
+  -e HG_PD_RAFT_PEERS_LIST=<your-ip>:8610 \
+  -e HG_PD_INITIAL_STORE_LIST=<store-ip>:8500 \
   -v /path/to/data:/hugegraph-pd/pd_data \
   --name hugegraph-pd \
-  hugegraph-pd:latest
+  hugegraph/pd:latest
 ```
 
 For Docker Compose examples with HugeGraph Store and Server, see:
 ```
-hugegraph-server/hugegraph-dist/docker/example/
+docker/docker-compose-3pd-3store-3server.yml
 ```
 
 ## Documentation
@@ -256,21 +287,9 @@ PD exposes metrics via REST API at:
 
 ## Community
 
-- **Website**: https://hugegraph.apache.org
 - **Documentation**: https://hugegraph.apache.org/docs/
 - **GitHub**: https://github.com/apache/hugegraph
-- **Mailing List**: dev@hugegraph.apache.org
 
 ## Contributing
 
 Contributions are welcome! Please read our [Development Guide](docs/development.md) and follow the Apache HugeGraph contribution guidelines.
-
-## License
-
-HugeGraph PD is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
-
----
-
-**Status**: BETA (from v1.5.0+)
-
-For questions or issues, please contact the HugeGraph community via GitHub issues or mailing list.

@@ -22,6 +22,7 @@ import static org.apache.hugegraph.space.GraphSpace.DEFAULT_GRAPH_SPACE_DESCRIPT
 import static org.apache.hugegraph.space.GraphSpace.DEFAULT_GRAPH_SPACE_SERVICE_NAME;
 
 import java.io.IOException;
+import java.io.StringWriter;
 import java.text.ParseException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -275,7 +276,7 @@ public final class GraphManager {
                      .replace("_", "-").toLowerCase();
     }
 
-    private boolean usePD() {
+    public boolean isPDEnabled() {
         return this.PDExist;
     }
 
@@ -1226,11 +1227,43 @@ public final class GraphManager {
 
     public HugeGraph createGraph(String graphSpace, String name, String creator,
                                  Map<String, Object> configs, boolean init) {
-        if (!usePD()) {
-            return createGraphLocal(configs.toString(), name);
+        if (!isPDEnabled()) {
+            // Extract nickname from configs
+            String nickname;
+            if (configs.get("nickname") != null) {
+                nickname = configs.get("nickname").toString();
+                checkNickname(nickname);
+            } else {
+                nickname = name;
+            }
+
+            Date timeStamp = new Date();
+
+            // Convert Map to Properties format string
+            PropertiesConfiguration propConfig = new PropertiesConfiguration();
+            for (Map.Entry<String, Object> entry : configs.entrySet()) {
+                propConfig.setProperty(entry.getKey(), entry.getValue());
+            }
+            StringWriter writer = new StringWriter();
+            try {
+                propConfig.write(writer);
+            } catch (Exception e) {
+                throw new HugeException("Failed to convert config map to properties", e);
+            }
+
+            HugeGraph graph = createGraphLocal(name, writer.toString());
+
+            // Set metadata fields for non-PD mode
+            graph.nickname(nickname);
+            graph.creator(creator);
+            graph.createTime(timeStamp);
+            graph.updateTime(timeStamp);
+
+            return graph;
         }
 
-        // When the registered graph space is not DEFAULT, only the graphs within that registered graph space are loaded.
+        // When the registered graph space is not DEFAULT, only the graphs within that registered
+        // graph space are loaded.
         if (!"DEFAULT".equals(this.serviceGraphSpace) &&
             !this.serviceGraphSpace.equals(graphSpace)) {
             throw new HugeException(String.format(
@@ -1291,7 +1324,7 @@ public final class GraphManager {
 
         Date timeStamp = new Date();
 
-        configs.putIfAbsent("nickname", nickname);
+        // Note: nickname was already extracted and removed from configs earlier
         configs.putIfAbsent("creator", creator);
         configs.putIfAbsent("create_time", timeStamp);
         configs.putIfAbsent("update_time", timeStamp);
@@ -1514,7 +1547,7 @@ public final class GraphManager {
     }
 
     private String defaultSpaceGraphName(String graphName) {
-        return "DEFAULT-" + graphName;
+        return spaceGraphName("DEFAULT", graphName);
     }
 
     private void loadGraph(String name, String graphConfPath) {
@@ -1578,9 +1611,9 @@ public final class GraphManager {
             if (!hugegraph.backendStoreFeatures().supportsPersistence()) {
                 hugegraph.initBackend();
                 if (this.requireAuthentication()) {
-                    String token = config.get(ServerOptions.AUTH_ADMIN_TOKEN);
+                    String adminPassword = config.get(ServerOptions.ADMIN_PA);
                     try {
-                        this.authenticator().initAdminUser(token);
+                        this.authenticator().initAdminUser(adminPassword);
                     } catch (Exception e) {
                         throw new BackendException(
                                 "The backend store of '%s' can't " +
@@ -1904,7 +1937,7 @@ public final class GraphManager {
     public HugeGraph graph(String graphSpace, String name) {
         String key = String.join(DELIMITER, graphSpace, name);
         Graph graph = this.graphs.get(key);
-        if (graph == null && usePD()) {
+        if (graph == null && isPDEnabled()) {
             Map<String, Map<String, Object>> configs =
                     this.metaManager.graphConfigs(graphSpace);
             // If current server registered graph space is not DEFAULT, only load graph creation
@@ -1931,7 +1964,7 @@ public final class GraphManager {
     }
 
     public void dropGraphLocal(String name) {
-        HugeGraph graph = this.graph(name);
+        HugeGraph graph = this.graph(DEFAULT_GRAPH_SPACE_SERVICE_NAME + "-" + name);
         E.checkArgument(this.conf.get(ServerOptions.ENABLE_DYNAMIC_CREATE_DROP),
                         "Not allowed to drop graph '%s' dynamically, " +
                         "please set `enable_dynamic_create_drop` to true.",
@@ -1948,7 +1981,7 @@ public final class GraphManager {
     }
 
     public void dropGraph(String graphSpace, String name, boolean clear) {
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             dropGraphLocal(name);
             return;
         }
@@ -2052,6 +2085,17 @@ public final class GraphManager {
 
     public Set<String> graphs(String graphSpace) {
         Set<String> graphs = new HashSet<>();
+
+        if (!isPDEnabled()) {
+            for (String key : this.graphs.keySet()) {
+                String[] parts = key.split(DELIMITER);
+                if (parts[0].equals(graphSpace)) {
+                    graphs.add(parts[1]);
+                }
+            }
+            return graphs;
+        }
+
         for (String key : this.metaManager.graphConfigs(graphSpace).keySet()) {
             graphs.add(key.split(DELIMITER)[1]);
         }
@@ -2059,7 +2103,7 @@ public final class GraphManager {
     }
 
     public GraphSpace graphSpace(String name) {
-        if (!usePD()) {
+        if (!isPDEnabled()) {
             return new GraphSpace("DEFAULT");
         }
         GraphSpace space = this.graphSpaces.get(name);
@@ -2107,6 +2151,13 @@ public final class GraphManager {
 
     public void graphReadMode(String graphSpace, String graphName,
                               GraphReadMode readMode) {
+
+        if (!isPDEnabled()) {
+            HugeGraph g = this.graph(spaceGraphName(graphSpace, graphName));
+            g.readMode(readMode);
+            return;
+        }
+
         try {
             Map<String, Object> configs =
                     this.metaManager.getGraphConfig(graphSpace, graphName);

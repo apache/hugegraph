@@ -65,6 +65,6 @@ public class SchemaAPI extends API {
         schemaMap.put("edgelabels", schema.getEdgeLabels());
         schemaMap.put("indexlabels", schema.getIndexLabels());
 
-        return manager.serializer(g).writeMap(schemaMap);
+        return manager.serializer().writeMap(schemaMap);
     }
 }

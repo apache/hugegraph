@@ -50,7 +50,7 @@
 
     <developers>
         <developer>
-            <id>Apache Hugegraph(Incubating)</id>
+            <id>Apache HugeGraph</id>
             <email>dev-subscribe@hugegraph.apache.org</email>
             <url>https://hugegraph.apache.org/</url>
         </developer>
@@ -61,7 +61,7 @@
             <name>Developer List</name>
             <subscribe>dev-subscribe@hugegraph.apache.org</subscribe>
             <unsubscribe>dev-unsubscribe@hugegraph.apache.org</unsubscribe>
-            <post>dev@hugegraph.incubator.apache.org</post>
+            <post>dev@hugegraph.apache.org</post>
         </mailingList>
         <mailingList>
             <name>Commits List</name>

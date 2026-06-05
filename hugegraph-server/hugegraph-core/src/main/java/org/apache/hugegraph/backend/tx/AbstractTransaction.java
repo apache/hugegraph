@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.backend.tx;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
@@ -66,6 +68,9 @@ public abstract class AbstractTransaction implements Transaction {
     private BackendMutation mutation;
 
     protected final AbstractSerializer serializer;
+
+    protected static final ThreadLocal<Map<Id, Boolean>> vectorIndexChanges =
+            ThreadLocal.withInitial(HashMap::new);
 
     public AbstractTransaction(HugeGraphParams graph, BackendStore store) {
         E.checkNotNull(graph, "graph");
@@ -234,10 +239,18 @@ public abstract class AbstractTransaction implements Transaction {
         this.committing = true;
         try {
             this.commit2Backend();
+            signalChangedIndexes();
         } finally {
             this.committing = false;
             this.reset();
         }
+    }
+
+    private void signalChangedIndexes() {
+        Map<Id, Boolean> changes = vectorIndexChanges.get();
+        if (changes.isEmpty()) return;
+
+        changes.keySet().forEach(id -> graph().vectorIndexManager().signal(id));
     }
 
     @Override
@@ -295,6 +308,9 @@ public abstract class AbstractTransaction implements Transaction {
     protected void reset() {
         if (this.mutation == null || !this.mutation.isEmpty()) {
             this.mutation = new BackendMutation();
+        }
+        if (!this.vectorIndexChanges.get().isEmpty()) {
+            vectorIndexChanges.get().clear();
         }
     }
 

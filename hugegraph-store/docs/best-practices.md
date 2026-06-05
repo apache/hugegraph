@@ -345,13 +345,12 @@ grpc:
 bin/enable-auth.sh
 
 # Configure users and roles via REST API
-curl -X POST http://localhost:8080/graphs/hugegraph/auth/users \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_name": "admin",
-    "user_password": "password123",
-    "user_role": "admin"
-  }'
+curl -X POST "http://localhost:8080/graphspaces/{graph_spcace_name}/graphs/{graph}/auth/users" \
+     -H "Content-Type: application/json" \
+     -d '{
+         "user_name": "admin",
+         "user_password": "password123"
+     }'
 ```
 
 ### Data Encryption

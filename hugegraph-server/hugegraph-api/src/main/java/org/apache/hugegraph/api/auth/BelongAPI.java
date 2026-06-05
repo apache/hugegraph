@@ -19,7 +19,6 @@ package org.apache.hugegraph.api.auth;
 
 import java.util.List;
 
-import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.HugeBelong;
@@ -35,6 +34,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -49,7 +50,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphspaces/{graphspace}/graphs/{graph}/auth/belongs")
+@Path("graphspaces/{graphspace}/auth/belongs")
 @Singleton
 @Tag(name = "BelongAPI")
 public class BelongAPI extends API {
@@ -62,16 +63,15 @@ public class BelongAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
-                         @PathParam("graph") String graph,
                          JsonBelong jsonBelong) {
-        LOG.debug("Graph [{}] create belong: {}", graph, jsonBelong);
+        LOG.debug("GraphSpace [{}] create belong: {}", graphSpace, jsonBelong);
         checkCreatingBody(jsonBelong);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeBelong belong = jsonBelong.build();
         belong.id(manager.authManager().createBelong(belong));
-        return manager.serializer(g).writeAuthElement(belong);
+        return manager.serializer().writeAuthElement(belong);
     }
 
     @PUT
@@ -80,14 +80,14 @@ public class BelongAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
-                         @PathParam("graph") String graph,
+                         @Parameter(description = "The belong id")
                          @PathParam("id") String id,
                          JsonBelong jsonBelong) {
-        LOG.debug("Graph [{}] update belong: {}", graph, jsonBelong);
+        LOG.debug("GraphSpace [{}] update belong: {}", graphSpace, jsonBelong);
         checkUpdatingBody(jsonBelong);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeBelong belong;
         try {
             belong = manager.authManager().getBelong(UserAPI.parseId(id));
@@ -96,24 +96,26 @@ public class BelongAPI extends API {
         }
         belong = jsonBelong.build(belong);
         manager.authManager().updateBelong(belong);
-        return manager.serializer(g).writeAuthElement(belong);
+        return manager.serializer().writeAuthElement(belong);
     }
 
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The user id to filter by")
                        @QueryParam("user") String user,
+                       @Parameter(description = "The group id to filter by")
                        @QueryParam("group") String group,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
-        LOG.debug("Graph [{}] list belongs by user {} or group {}",
-                  graph, user, group);
+        LOG.debug("GraphSpace [{}] list belongs by user {} or group {}",
+                  graphSpace, user, group);
         E.checkArgument(user == null || group == null,
                         "Can't pass both user and group at the same time");
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         List<HugeBelong> belongs;
         if (user != null) {
             Id id = UserAPI.parseId(user);
@@ -124,7 +126,7 @@ public class BelongAPI extends API {
         } else {
             belongs = manager.authManager().listAllBelong(limit);
         }
-        return manager.serializer(g).writeAuthElements("belongs", belongs);
+        return manager.serializer().writeAuthElements("belongs", belongs);
     }
 
     @GET
@@ -132,14 +134,14 @@ public class BelongAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
-                      @PathParam("graph") String graph,
+                      @Parameter(description = "The belong id")
                       @PathParam("id") String id) {
-        LOG.debug("Graph [{}] get belong: {}", graph, id);
+        LOG.debug("GraphSpace [{}] get belong: {}", graphSpace, id);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeBelong belong = manager.authManager().getBelong(UserAPI.parseId(id));
-        return manager.serializer(g).writeAuthElement(belong);
+        return manager.serializer().writeAuthElement(belong);
     }
 
     @DELETE
@@ -147,13 +149,12 @@ public class BelongAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The belong id")
                        @PathParam("id") String id) {
-        LOG.debug("Graph [{}] delete belong: {}", graph, id);
+        LOG.debug("GraphSpace [{}] delete belong: {}", graphSpace, id);
 
-        @SuppressWarnings("unused") // just check if the graph exists
-        HugeGraph g = graph(manager, graphSpace, graph);
         try {
             manager.authManager().deleteBelong(UserAPI.parseId(id));
         } catch (NotFoundException e) {
@@ -166,10 +167,13 @@ public class BelongAPI extends API {
     private static class JsonBelong implements Checkable {
 
         @JsonProperty("user")
+        @Schema(description = "The user id", required = true)
         private String user;
         @JsonProperty("group")
+        @Schema(description = "The group id", required = true)
         private String group;
         @JsonProperty("belong_description")
+        @Schema(description = "The belong description")
         private String description;
 
         public HugeBelong build(HugeBelong belong) {

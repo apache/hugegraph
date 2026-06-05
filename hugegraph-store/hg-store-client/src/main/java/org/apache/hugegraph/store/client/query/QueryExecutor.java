@@ -73,12 +73,15 @@ public class QueryExecutor {
 
     private final HugeGraphSupplier supplier;
 
-    private long timeout = 1800_000;
+    /**
+     * Timeout duration for StreamObserver receiving response
+     */
+    private long timeout = 60_000;
 
     /**
      * Used for testing single machine
      */
-    public static String filterStore = null;
+    private static final ThreadLocal<String> filterStore = new ThreadLocal<>();
 
     public QueryExecutor(HgStoreNodePartitioner nodePartitioner, HugeGraphSupplier supplier,
                          Long timeout) {
@@ -123,12 +126,20 @@ public class QueryExecutor {
                 if (o1 == null && o2 == null) {
                     return 0;
                 }
-
-                if (o1 != null) {
-                    return ((KvElement) o1).compareTo((KvElement) o2);
+                if (o1 != null && o2 != null) {
+                    if (o1 instanceof KvElement && o2 instanceof KvElement) {
+                        return ((KvElement) o1).compareTo((KvElement) o2);
+                    }
+                    if (!(o1 instanceof KvElement)) {
+                        throw new IllegalStateException(
+                                "Expected KvElement but got: " + o1.getClass().getName());
+                    }
+                    // !(o2 instanceof KvElement)
+                    throw new IllegalStateException(
+                            "Expected KvElement but got: " + o2.getClass().getName());
                 }
 
-                return 0;
+                return o1 != null ? 1 : -1;
             });
 
             iterator = new StreamFinalAggregationIterator<>(iterator, query.getFuncList());
@@ -277,9 +288,10 @@ public class QueryExecutor {
             }
         }
 
-        if (filterStore != null) {
-            return tasks.containsKey(filterStore) ?
-                   List.of(Tuple2.of(filterStore, tasks.get(filterStore))) : List.of();
+        if (filterStore.get() != null) {
+            String filterStoreStr = filterStore.get();
+            return tasks.containsKey(filterStoreStr) ?
+                   List.of(Tuple2.of(filterStoreStr, tasks.get(filterStoreStr))) : List.of();
         }
 
         return tasks.entrySet().stream()

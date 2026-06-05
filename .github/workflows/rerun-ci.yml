@@ -1,0 +1,85 @@
+name: "Rerun CI"
+
+on:
+  workflow_run:
+    workflows:
+      - "HugeGraph-Server CI"
+      - "HugeGraph-Commons CI"
+      - "HugeGraph-PD & Store & Hstore CI"
+      - "Cluster Test CI"
+    types:
+      - completed
+
+permissions: {}
+
+env:
+  MAX_RERUNS: '2'
+  RETRY_DELAY_SECONDS: '180'
+
+jobs:
+  decide-rerun-action:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.decision.outputs.action }}
+    steps:
+      - name: Decide rerun action
+        id: decision
+        env:
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          EVENT_NAME: ${{ github.event.workflow_run.event }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+
+          action="skip"
+          reason="unsupported event: $EVENT_NAME"
+
+          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
+            if (( RUN_ATTEMPT > MAX_RERUNS )); then
+              reason="retry limit reached"
+            else
+              action="rerun"
+              reason="within retry limit"
+            fi
+          fi
+
+          {
+            echo "action=$action"
+            echo "reason=$reason"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Rerun CI decision"
+            echo ""
+            echo "- Workflow: $WORKFLOW_NAME"
+            echo "- Source event: $EVENT_NAME"
+            echo "- Head branch: $HEAD_BRANCH"
+            echo "- Run ID: $RUN_ID"
+            echo "- Current attempt: $RUN_ATTEMPT"
+            echo "- Max automatic reruns: $MAX_RERUNS"
+            echo "- Delay seconds: $RETRY_DELAY_SECONDS"
+            echo "- Action: $action"
+            echo "- Reason: $reason"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  rerun-failed-jobs:
+    needs: decide-rerun-action
+    if: needs.decide-rerun-action.outputs.action == 'rerun'
+    permissions:
+      actions: write
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait before rerun
+        run: |
+          sleep "$RETRY_DELAY_SECONDS"
+
+      - name: Rerun failed jobs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh run rerun ${{ github.event.workflow_run.id }} --failed

@@ -32,7 +32,7 @@
         <jraft.version>1.3.11</jraft.version>
         <ohc.version>0.7.4</ohc.version>
         <jna.version>5.12.1</jna.version>
-        <lz4.version>1.8.0</lz4.version>
+        <lz4.version>1.8.1</lz4.version>
         <mmseg4j-core.version>1.10.0</mmseg4j-core.version>
         <jcseg.version>2.6.2</jcseg.version>
         <hanlp.version>portable-1.8.3</hanlp.version>
@@ -197,6 +197,8 @@
             <artifactId>commons-compress</artifactId>
             <version>${commons-compress.version}</version>
         </dependency>
+        <!-- LZ4 version update from 1.8.0 to 1.8.1. For details on the specific changes, please refer to:
+        https://sites.google.com/sonatype.com/vulnerabilities/cve-2025-12183 -->
         <dependency>
             <groupId>org.lz4</groupId>
             <artifactId>lz4-java</artifactId>

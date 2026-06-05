@@ -947,6 +947,7 @@ public class StandardAuthManagerV2 implements AuthManager {
         }
 
         if (StringEncoding.checkPassword(password, user.password())) {
+            // TODO: rehash password if bcrypt work factor is lower than expected
             this.pwdCache.update(user.id(), password);
             return user;
         }

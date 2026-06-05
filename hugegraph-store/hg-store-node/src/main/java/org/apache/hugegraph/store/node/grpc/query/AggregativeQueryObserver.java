@@ -60,10 +60,6 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
     private final AtomicInteger consumeCount = new AtomicInteger(0);
     private final AtomicInteger sendCount = new AtomicInteger(0);
     private final AtomicBoolean clientCanceled = new AtomicBoolean(false);
-    //    private final ThreadLocal<QueryResponse.Builder> localBuilder = ThreadLocal.withInitial
-    //    (QueryResponse::newBuilder);
-//    private final ThreadLocal<Kv.Builder> localKvBuilder = ThreadLocal.withInitial
-//    (Kv::newBuilder);
     private final BinaryElementSerializer serializer = BinaryElementSerializer.getInstance();
     private final StreamObserver<QueryResponse> sender;
     private volatile ScanIterator iterator = null;
@@ -328,7 +324,7 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
             try {
                 recordCount++;
                 executePipeline(itr.next());
-                if (System.currentTimeMillis() - current > timeout * 1000) {
+                if (System.nanoTime() - current > timeout * 1_000_000) {
                     throw new RuntimeException("execution timeout");
                 }
             } catch (EarlyStopException ignore) {

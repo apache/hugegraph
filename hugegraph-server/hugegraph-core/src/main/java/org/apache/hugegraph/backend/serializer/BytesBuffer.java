@@ -777,7 +777,7 @@ public final class BytesBuffer extends OutputStream {
 
     public BinaryId readIndexId(HugeType type) {
         byte[] id;
-        if (type.isRange4Index()) {
+        if (type.isRange4Index() || type.isVectorIndex()) {
             // HugeTypeCode 1 byte + IndexLabel 4 bytes + fieldValue 4 bytes
             id = this.read(9);
         } else if (type.isRange8Index()) {
@@ -795,8 +795,13 @@ public final class BytesBuffer extends OutputStream {
     }
 
     public BinaryId parseId(HugeType type, boolean enablePartition) {
-        if (type.isIndex()) {
+        if (type.isIndex() || type.isVectorIndex()) {
             return this.readIndexId(type);
+        }
+        if (type.code() == (byte) 182) {
+            // VECTOR_SEQUENCE: 1 byte prefix(0) + 4 bytes schemaId + 8 bytes sequence = 13 bytes
+            byte[] bytes = this.read(13);
+            return new BinaryId(bytes, null);
         }
         // Parse id from bytes
         if ((type.isVertex() || type.isEdge()) && enablePartition) {

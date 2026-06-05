@@ -1,0 +1,14 @@
+hugegraph-api-${revision}.jar
+hugegraph-cassandra-${revision}.jar
+hugegraph-common-${revision}.jar
+hugegraph-core-${revision}.jar
+hugegraph-dist-${revision}.jar
+hugegraph-hbase-${revision}.jar
+hugegraph-hstore-${revision}.jar
+hugegraph-mysql-${revision}.jar
+hugegraph-palo-${revision}.jar
+hugegraph-postgresql-${revision}.jar
+hugegraph-rocksdb-${revision}.jar
+hugegraph-rpc-${revision}.jar
+hugegraph-scylladb-${revision}.jar
+hugegraph-struct-${revision}.jar

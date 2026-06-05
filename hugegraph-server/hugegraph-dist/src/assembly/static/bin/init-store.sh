@@ -45,12 +45,7 @@ fi
 
 cd "${TOP}" || exit
 
-DEFAULT_JAVA_OPTIONS=""
-JAVA_VERSION=$($JAVA -version 2>&1 | awk 'NR==1{gsub(/"/,""); print $3}' | awk -F'_' '{print $1}')
-# TODO: better not string number compare, use `bc` like github.com/koalaman/shellcheck/wiki/SC2072
-if [[ $? -eq 0 && $JAVA_VERSION >  "1.9" ]]; then
-      DEFAULT_JAVA_OPTIONS="--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED"
-fi
+DEFAULT_JAVA_OPTIONS="--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED"
 
 echo "Initializing HugeGraph Store..."
 

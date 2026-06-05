@@ -101,7 +101,7 @@ public class MultiQuery extends Command {
                                             current = (HgOwnerKey) queue[finalI].poll(1,
                                                                                       TimeUnit.SECONDS);
                                         } catch (InterruptedException e) {
-                                            //
+                                            Thread.currentThread().interrupt();
                                         }
                                     }
                                     if (current == null) {

@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.DefaultValue;
@@ -60,8 +61,11 @@ public class VerticesAPI extends API {
     @Compress
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "The vertex IDs")
                        @QueryParam("ids") List<String> stringIds) {
         LOG.debug("Graph [{}] get vertices by ids: {}", graph, stringIds);
 
@@ -76,7 +80,7 @@ public class VerticesAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
 
         Iterator<Vertex> vertices = g.vertices(ids);
-        return manager.serializer(g).writeVertices(vertices, false);
+        return manager.serializer().writeVertices(vertices, false);
     }
 
     @GET
@@ -93,7 +97,7 @@ public class VerticesAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, graph);
         List<Shard> shards = g.metadata(HugeType.VERTEX, "splits", splitSize);
-        return manager.serializer(g).writeList("shards", shards);
+        return manager.serializer().writeList("shards", shards);
     }
 
     @GET
@@ -122,6 +126,6 @@ public class VerticesAPI extends API {
         }
         Iterator<Vertex> vertices = g.vertices(query);
 
-        return manager.serializer(g).writeVertices(vertices, query.paging());
+        return manager.serializer().writeVertices(vertices, query.paging());
     }
 }

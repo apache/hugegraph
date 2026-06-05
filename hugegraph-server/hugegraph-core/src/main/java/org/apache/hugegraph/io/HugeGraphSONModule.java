@@ -87,7 +87,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
 
     private static final String TYPE_NAMESPACE = "hugegraph";
 
-    private static final boolean OPTIMIZE_SERIALIZE = true;
+    private static boolean OPTIMIZE_SERIALIZE = true;
 
     @SuppressWarnings("rawtypes")
     private static final Map<Class, String> TYPE_DEFINITIONS;

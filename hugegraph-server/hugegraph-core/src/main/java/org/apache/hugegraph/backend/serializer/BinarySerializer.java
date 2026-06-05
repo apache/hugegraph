@@ -18,6 +18,7 @@
 package org.apache.hugegraph.backend.serializer;
 
 import static org.apache.hugegraph.schema.SchemaElement.UNDEF;
+import static org.apache.hugegraph.structure.HugeIndex.number2bytes;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -54,6 +55,7 @@ import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeIndex;
 import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.HugeVectorIndexMap;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.type.HugeType;
@@ -66,6 +68,7 @@ import org.apache.hugegraph.type.define.Frequency;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.type.define.IndexType;
+import org.apache.hugegraph.type.define.IndexVectorState;
 import org.apache.hugegraph.type.define.SchemaStatus;
 import org.apache.hugegraph.type.define.SerialEnum;
 import org.apache.hugegraph.type.define.WriteType;
@@ -116,7 +119,7 @@ public class BinarySerializer extends AbstractSerializer {
             return new BinaryBackendEntry(type, (BinaryId) id);
         }
 
-        if (type.isIndex()) {
+        if (type.isIndex() || type.isVectorIndex() || type.code() == (byte) 182) {
             if (this.enablePartition) {
                 if (type.isStringIndex()) {
                     // TODO: add string index partition
@@ -387,8 +390,10 @@ public class BinarySerializer extends AbstractSerializer {
     protected void parseIndexName(HugeGraph graph, ConditionQuery query,
                                   BinaryBackendEntry entry,
                                   HugeIndex index, Object fieldValues) {
+        boolean isVectorIndex = index.type().isVectorIndex();
         for (BackendColumn col : entry.columns()) {
-            if (indexFieldValuesUnmatched(col.value, fieldValues)) {
+            if ((isVectorIndex && isVectorDleted(col.value)) ||
+                (!isVectorIndex && indexFieldValuesUnmatched(col.value, fieldValues))) {
                 // Skip if field-values is not matched (just the same hash)
                 continue;
             }
@@ -399,6 +404,32 @@ public class BinarySerializer extends AbstractSerializer {
             Id elemId = buffer.readId();
             long expiredTime = index.hasTtl() ? buffer.readVLong() : 0L;
             index.elementIds(elemId, expiredTime);
+        }
+    }
+
+    protected byte[] formatVectorSequenceName(HugeVectorIndexMap vectorIndexMap) {
+        Id sequenceId = vectorIndexMap.sequenceId();
+        Object vectorId = vectorIndexMap.fieldValues();
+
+        // sequenceId_length + vectorId(int)
+        int idLen = sequenceId.length() + 4;
+        BytesBuffer buffer = BytesBuffer.allocate(idLen);
+        // Write index-id (raw bytes, no length prefix, matching newBackendEntry)
+        buffer.write(sequenceId.asBytes());
+        // Write vectorId as fixed 4-byte int (matching readInt in parseVectorSequenceName)
+        buffer.writeInt(((Number) vectorId).intValue());
+        return buffer.bytes();
+    }
+
+    protected void parseVectorSequenceName(BinaryBackendEntry entry,
+                                           HugeVectorIndexMap vectorIndexMap) {
+        for (BackendColumn col : entry.columns()) {
+            BytesBuffer buffer = BytesBuffer.wrap(col.name);
+
+            // sequenceId = prefix(1byte) + indexlabelid(4bytes) + sequence(8byte)
+            buffer.read(vectorIndexMap.sequenceId().length());
+            Object fieldValue = buffer.readInt();
+            vectorIndexMap.fieldValues(fieldValue);
         }
     }
 
@@ -593,8 +624,14 @@ public class BinarySerializer extends AbstractSerializer {
                 id = index.hashId();
                 // Save field-values as column value if the key is a hash string
                 value = StringEncoding.encode(index.fieldValues().toString());
+            } else if (index instanceof HugeVectorIndexMap) {
+                HugeVectorIndexMap indexMap = (HugeVectorIndexMap) index;
+                BytesBuffer buffer = BytesBuffer.allocate(9);
+                buffer.writeLong(indexMap.sequence());
+                buffer.write((byte) indexMap.vectorState().code());
+                value = buffer.bytes();
             }
-
+            // 添加type等于vector 的writeindex
             entry = newBackendEntry(type, id);
             if (index.indexLabel().olap()) {
                 entry.olap(true);
@@ -632,6 +669,30 @@ public class BinarySerializer extends AbstractSerializer {
 
         this.parseIndexName(graph, query, entry, index, fieldValues);
         return index;
+    }
+
+    @Override
+    public BackendEntry writeVectorSequence(HugeVectorIndexMap indexMap) {
+        BinaryBackendEntry entry;
+        Id id = indexMap.sequenceId();
+        entry = newBackendEntry(HugeType.VECTOR_SEQUENCE, id);
+        byte[] value = null;
+        entry.column(formatVectorSequenceName(indexMap), value);
+        return entry;
+    }
+
+    @Override
+    public HugeVectorIndexMap readVectorSequence(HugeGraph graph, ConditionQuery query,
+                                  BackendEntry bytesEntry) {
+        if (bytesEntry == null) {
+            return null;
+        }
+        BinaryBackendEntry entry = this.convertEntry(bytesEntry);
+        byte[] bytes = entry.id().asBytes();
+        HugeVectorIndexMap indexMap = HugeVectorIndexMap.parseSequenceId(graph, bytes);
+
+        this.parseVectorSequenceName(entry, indexMap);
+        return indexMap;
     }
 
     @Override
@@ -986,6 +1047,12 @@ public class BinarySerializer extends AbstractSerializer {
             return !StringEncoding.decode(value).equals(fieldValues);
         }
         return false;
+    }
+
+    protected static boolean isVectorDleted(byte[] value) {
+        BytesBuffer buffer = BytesBuffer.wrap(value);
+        buffer.readLong();
+        return IndexVectorState.DELETING.code() == buffer.read();
     }
 
     public static void increaseOne(byte[] bytes) {

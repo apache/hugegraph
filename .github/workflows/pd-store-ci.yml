@@ -52,6 +52,11 @@ jobs:
             mvn -U -ntp dependency:get -Dartifact=org.apache.hugegraph:hugegraph-struct:$REVISION
           fi
 
+      - name: Run hugegraph-struct test
+        if: ${{ hashFiles('hugegraph-struct/pom.xml') != '' }}
+        run: |
+          mvn -U -ntp -pl hugegraph-struct test
+
   pd:
     needs: struct
     runs-on: ubuntu-latest
@@ -101,6 +106,12 @@ jobs:
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+
+      - name: Run start-hugegraph-pd.sh foreground mode tests
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION/
+          $TRAVIS_DIR/test-start-hugegraph-pd.sh $PD_DIR
 
       - name: Prepare env and service
         run: |
@@ -157,6 +168,12 @@ jobs:
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+
+      - name: Run start-hugegraph-store.sh foreground mode tests
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION/
+          $TRAVIS_DIR/test-start-hugegraph-store.sh $STORE_DIR
 
       - name: Prepare env and service
         run: |

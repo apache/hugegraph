@@ -32,7 +32,7 @@ public class ServerOptions extends OptionHolder {
                     "The url for listening of graph server.",
                     disallowEmpty(),
                     "http://127.0.0.1:8080"
-            );
+            ).withUrlNormalization("http://");
 
     public static final ConfigOption<Integer> SERVER_EVENT_HUB_THREADS =
             new ConfigOption<>(
@@ -118,7 +118,7 @@ public class ServerOptions extends OptionHolder {
                     "The url of gremlin server.",
                     disallowEmpty(),
                     "http://127.0.0.1:8182"
-            );
+            ).withUrlNormalization("http://");
 
     public static final ConfigOption<Integer> GREMLIN_SERVER_TIMEOUT =
             new ConfigOption<>(
@@ -270,7 +270,7 @@ public class ServerOptions extends OptionHolder {
                     "to clients. only used when starting the server in k8s.",
                     disallowEmpty(),
                     "http://0.0.0.0:8080"
-            );
+            ).withUrlNormalization("http://");
 
     public static final ConfigOption<String> SERVER_K8S_URL =
             new ConfigOption<>(
@@ -278,7 +278,7 @@ public class ServerOptions extends OptionHolder {
                     "The url of k8s.",
                     disallowEmpty(),
                     "https://127.0.0.1:8888"
-            );
+            ).withUrlNormalization("https://");
 
     public static final ConfigOption<Boolean> SERVER_K8S_USE_CA =
             new ConfigOption<>(
@@ -389,7 +389,7 @@ public class ServerOptions extends OptionHolder {
                     "batch.max_vertices_per_batch",
                     "The maximum number of vertices submitted per batch.",
                     positiveInt(),
-                    500
+                    2500
             );
 
     public static final ConfigOption<Integer> MAX_EDGES_PER_BATCH =
@@ -397,7 +397,7 @@ public class ServerOptions extends OptionHolder {
                     "batch.max_edges_per_batch",
                     "The maximum number of edges submitted per batch.",
                     positiveInt(),
-                    500
+                    2500
             );
 
     public static final ConfigOption<Integer> MAX_WRITE_RATIO =
@@ -406,7 +406,7 @@ public class ServerOptions extends OptionHolder {
                     "The maximum thread ratio for batch writing, " +
                     "only take effect if the batch.max_write_threads is 0.",
                     rangeInt(0, 100),
-                    50
+                    70
             );
 
     public static final ConfigOption<Integer> MAX_WRITE_THREADS =
@@ -462,8 +462,7 @@ public class ServerOptions extends OptionHolder {
             new ConfigOption<>(
                     "auth.authenticator",
                     "The class path of authenticator implementation. " +
-                    "e.g., org.apache.hugegraph.auth.StandardAuthenticator, " +
-                    "or org.apache.hugegraph.auth.ConfigAuthenticator.",
+                    "e.g., org.apache.hugegraph.auth.StandardAuthenticator.",
                     null,
                     ""
             );
@@ -471,29 +470,10 @@ public class ServerOptions extends OptionHolder {
     public static final ConfigOption<String> ADMIN_PA =
             new ConfigOption<>(
                     "auth.admin_pa",
-                    "The class path of authenticator implementation. " +
-                    "e.g., org.apache.hugegraph.auth.StandardAuthenticator, " +
-                    "or org.apache.hugegraph.auth.ConfigAuthenticator.",
+                    "The default password for built-in admin account, " +
+                    "takes effect on first startup.",
                     null,
                     "pa"
-            );
-
-    public static final ConfigOption<String> AUTH_ADMIN_TOKEN =
-            new ConfigOption<>(
-                    "auth.admin_token",
-                    "Token for administrator operations, " +
-                    "only for org.apache.hugegraph.auth.ConfigAuthenticator.",
-                    disallowEmpty(),
-                    "162f7848-0b6d-4faf-b557-3a0797869c55"
-            );
-
-    public static final ConfigListOption<String> AUTH_USER_TOKENS =
-            new ConfigListOption<>(
-                    "auth.user_tokens",
-                    "The map of user tokens with name and password, " +
-                    "only for org.apache.hugegraph.auth.ConfigAuthenticator.",
-                    disallowEmpty(),
-                    "hugegraph:9fd95c9c-711b-415b-b85f-d4df46ba5c31"
             );
 
     public static final ConfigOption<String> SSL_KEYSTORE_FILE =

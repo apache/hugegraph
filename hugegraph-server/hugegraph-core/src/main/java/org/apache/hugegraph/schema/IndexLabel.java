@@ -275,6 +275,8 @@ public class IndexLabel extends SchemaElement {
 
         Builder unique();
 
+        Builder vector();
+
         Builder on(HugeType baseType, String baseValue);
 
         Builder indexType(IndexType indexType);

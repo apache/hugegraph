@@ -1012,6 +1012,11 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
                                  new RocksDBTables.ShardIndex(database));
             registerTableManager(HugeType.UNIQUE_INDEX,
                                  new RocksDBTables.UniqueIndex(database));
+            registerTableManager(HugeType.VECTOR_INDEX_MAP,
+                                 new RocksDBTables.VectorIndexMap(database));
+            registerTableManager(HugeType.VECTOR_SEQUENCE,
+                                 new RocksDBTables.VectorSequence(database));
+
 
             registerTableManager(this.olapTableName(HugeType.SECONDARY_INDEX),
                                  new RocksDBTables.OlapSecondaryIndex(store));

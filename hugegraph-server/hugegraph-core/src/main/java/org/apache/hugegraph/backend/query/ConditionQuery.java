@@ -288,11 +288,13 @@ public class ConditionQuery extends IdQuery {
             return value;
         }
 
+        boolean initialized = false;
         Set<Object> intersectValues = InsertionOrderUtil.newSet();
         for (Object value : valuesEQ) {
             List<Object> valueAsList = ImmutableList.of(value);
-            if (intersectValues.isEmpty()) {
+            if (!initialized) {
                 intersectValues.addAll(valueAsList);
+                initialized = true;
             } else {
                 CollectionUtil.intersectWithModify(intersectValues,
                                                    valueAsList);
@@ -301,8 +303,9 @@ public class ConditionQuery extends IdQuery {
         for (Object value : valuesIN) {
             @SuppressWarnings("unchecked")
             List<Object> valueAsList = (List<Object>) value;
-            if (intersectValues.isEmpty()) {
+            if (!initialized) {
                 intersectValues.addAll(valueAsList);
+                initialized = true;
             } else {
                 CollectionUtil.intersectWithModify(intersectValues,
                                                    valueAsList);

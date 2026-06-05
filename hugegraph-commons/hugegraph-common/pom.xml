@@ -28,7 +28,7 @@
 
     <artifactId>hugegraph-common</artifactId>
     <name>${project.artifactId}</name>
-    <url>https://github.com/apache/incubator-hugegraph-commons/tree/master/hugegraph-common</url>
+    <url>https://github.com/apache/hugegraph-commons/tree/master/hugegraph-common</url>
     <description>
         hugegraph-common is a common module for HugeGraph and its peripheral components.
         hugegraph-common encapsulates locks, configurations, events, iterators, rest and some
@@ -222,6 +222,14 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
+        </dependency>
+
+        <!-- jvector for vector index -->
+        <!-- https://mvnrepository.com/artifact/io.github.jbellis/jvector -->
+        <dependency>
+            <groupId>io.github.jbellis</groupId>
+            <artifactId>jvector</artifactId>
+            <version>3.0.6</version>
         </dependency>
     </dependencies>
 

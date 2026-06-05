@@ -23,9 +23,11 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.lang.NotImplementedException;
+import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.serializer.TableBackendEntry;
 import org.apache.hugegraph.backend.serializer.TableSerializerV2;
 import org.apache.hugegraph.backend.store.BackendEntry;
@@ -33,6 +35,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.HugeVectorIndexMap;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
@@ -171,5 +174,16 @@ public class MysqlSerializer extends TableSerializerV2 {
     @Override
     public BackendEntry writeOlapVertex(HugeVertex vertex) {
         throw new NotImplementedException("Unsupported writeOlapVertex()");
+    }
+
+    @Override
+    public BackendEntry writeVectorSequence(HugeVectorIndexMap indexMap) {
+        throw new NotImplementedException("Unsupported writeVectorSequence()");
+    }
+
+    @Override
+    public HugeVectorIndexMap readVectorSequence(HugeGraph graph, ConditionQuery query,
+                                                 BackendEntry entry) {
+        throw new NotImplementedException("Unsupported readVectorSequence()");
     }
 }

@@ -64,10 +64,12 @@ public enum HugeType implements SerialEnum {
     SEARCH_INDEX(170, "AI"),
     SHARD_INDEX(175, "HI"),
     UNIQUE_INDEX(178, "UI"),
-    VECTOR_INDEX(180, "VI"),
+    VECTOR_INDEX_MAP(179, "VM"),
+
 
     TASK(180, "T"),
     SERVER(181, "SERVER"),
+    VECTOR_SEQUENCE(182, "VS"),
 
     VARIABLE(185, "VA"),
 
@@ -186,6 +188,10 @@ public enum HugeType implements SerialEnum {
 
     public boolean isUniqueIndex() {
         return this == UNIQUE_INDEX;
+    }
+
+    public boolean isVectorIndex() {
+        return this == VECTOR_INDEX_MAP;
     }
 
     public boolean isVertexAggregateProperty() {

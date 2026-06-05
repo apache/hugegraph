@@ -29,7 +29,7 @@ else
     exit 1
 fi
 
-STORE_DIR=$HOME_DIR/hugegraph-store/apache-hugegraph-store-incubating-$VersionInBash
+STORE_DIR=$HOME_DIR/hugegraph-store/apache-hugegraph-store-$VersionInBash
 
 pushd $STORE_DIR
 . bin/start-hugegraph-store.sh

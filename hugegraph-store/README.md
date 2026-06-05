@@ -104,19 +104,12 @@ From the project root:
 mvn install -pl hugegraph-struct -am -DskipTests
 
 # Build Store and all dependencies
-mvn clean package -pl hugegraph-store -am -DskipTests
-```
-
-Or build from the `hugegraph-store` directory:
-
-```bash
-cd hugegraph-store
-mvn clean install -DskipTests
+mvn clean package -pl hugegraph-store/hg-store-dist -am -DskipTests
 ```
 
 The assembled distribution will be available at:
 ```
-hugegraph-store/hg-store-dist/target/apache-hugegraph-store-incubating-<version>.tar.gz
+hugegraph-store/apache-hugegraph-store-<version>/lib/hg-store-node-<version>.jar
 ```
 
 ### Configuration
@@ -220,8 +213,10 @@ For detailed configuration options, RocksDB tuning, and deployment topologies, s
 Start the Store server:
 
 ```bash
-tar -xzf apache-hugegraph-store-incubating-<version>.tar.gz
-cd apache-hugegraph-store-incubating-<version>
+# Replace {version} with your hugegraph version
+# For historical 1.7.0 and earlier releases, use
+# apache-hugegraph-store-incubating-{version} instead.
+cd apache-hugegraph-store-{version}
 
 # Start Store node
 bin/start-hugegraph-store.sh
@@ -258,13 +253,13 @@ ps aux | grep hugegraph-store
 grpcurl -plaintext localhost:8500 list
 
 # Check REST API health
-curl http://localhost:8520/actuator/health
+curl http://localhost:8520/v1/health
 
 # Check logs
 tail -f logs/hugegraph-store.log
 
 # Verify registration with PD (from PD node)
-curl http://localhost:8620/pd/v1/stores
+curl http://localhost:8620/v1/stores
 ```
 
 For production deployment, see [Deployment Guide](docs/deployment-guide.md) and [Best Practices](docs/best-practices.md).
@@ -307,13 +302,11 @@ bin/start-hugegraph.sh
 
 ```bash
 # Check backend via REST API
-curl http://localhost:8080/graphs/<graph-name>/backend
-
+curl --location --request GET 'http://localhost:8080/metrics/backend' \
+--header 'Authorization: Bearer <YOUR_ACCESS_TOKEN>'
 # Response should show:
 # {"backend": "hstore", "nodes": [...]}
 ```
-
-For detailed integration steps, client API usage, and migration from other backends, see [Integration Guide](docs/integration-guide.md).
 
 ---
 
@@ -355,7 +348,7 @@ For development workflows and debugging, see [Development Guide](docs/developmen
 From the project root:
 
 ```bash
-docker build -f hugegraph-store/Dockerfile -t hugegraph-store:latest .
+docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
 ```
 
 ### Run Container
@@ -365,11 +358,12 @@ docker run -d \
   -p 8520:8520 \
   -p 8500:8500 \
   -p 8510:8510 \
-  -v /path/to/conf:/hugegraph-store/conf \
+  -e HG_STORE_PD_ADDRESS=<pd-ip>:8686 \
+  -e HG_STORE_GRPC_HOST=<your-ip> \
+  -e HG_STORE_RAFT_ADDRESS=<your-ip>:8510 \
   -v /path/to/storage:/hugegraph-store/storage \
-  -e PD_ADDRESS=192.168.1.10:8686,192.168.1.11:8686 \
   --name hugegraph-store \
-  hugegraph-store:latest
+  hugegraph/store:latest
 ```
 
 **Exposed Ports**:
@@ -382,8 +376,10 @@ docker run -d \
 For a complete HugeGraph distributed deployment (PD + Store + Server), see:
 
 ```
-hugegraph-server/hugegraph-dist/docker/example/
+docker/docker-compose-3pd-3store-3server.yml
 ```
+
+See [docker/README.md](../docker/README.md) for the full setup guide.
 
 For Docker and Kubernetes deployment details, see [Deployment Guide](docs/deployment-guide.md).
 
@@ -484,6 +480,4 @@ HugeGraph Store is licensed under the [Apache License 2.0](https://www.apache.or
 
 ---
 
-**Status**: BETA (from v1.5.0+)
-
-HugeGraph Store is under active development. While suitable for production use, APIs and configurations may evolve. Please report issues via GitHub or the mailing list.
+HugeGraph Store is under active development. Please report issues via GitHub or the mailing list.

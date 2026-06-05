@@ -182,8 +182,7 @@ public class RocksDBTables {
         @Override
         protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
                                                    Collection<Id> ids) {
-            // TODO: use getByIds() after batch version multi-get is ready
-            return super.queryByIds(session, ids);
+            return this.queryByIdsWithGet(session, ids);
         }
     }
 
@@ -207,6 +206,12 @@ public class RocksDBTables {
         @Override
         protected BackendColumnIterator queryById(RocksDBSessions.Session session, Id id) {
             return this.getById(session, id);
+        }
+
+        @Override
+        protected BackendColumnIterator queryByIds(RocksDBSessions.Session session,
+                                                   Collection<Id> ids) {
+            return this.queryByIdsWithGet(session, ids);
         }
     }
 
@@ -387,6 +392,18 @@ public class RocksDBTables {
         public ShardIndex(String database) {
             super(database, TABLE);
         }
+    }
+
+    public static class VectorIndexMap extends IndexTable {
+        public static final String TABLE = HugeType.VECTOR_INDEX_MAP.string();
+
+        public VectorIndexMap(String database) { super(database, TABLE); }
+    }
+
+    public static class VectorSequence extends IndexTable {
+        public static final String TABLE = HugeType.VECTOR_SEQUENCE.string();
+
+        public VectorSequence(String database) { super(database, TABLE); }
     }
 
     public static class OlapTable extends RocksDBTable {

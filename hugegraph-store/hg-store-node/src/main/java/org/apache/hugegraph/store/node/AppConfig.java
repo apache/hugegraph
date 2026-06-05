@@ -278,9 +278,9 @@ public class AppConfig {
         private int fetchBatchSize;
 
         /**
-         * the timeout of request fetch
+         * the timeout of request fetch (ms)
          */
-        @Value("${query.push-down.fetch_timeout:3600000}")
+        @Value("${query.push-down.fetch_timeout:300000}")
         private long fetchTimeOut;
 
         /**

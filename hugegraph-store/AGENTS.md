@@ -6,8 +6,6 @@ This file provides guidance to an AI coding tool when working with code in this 
 
 HugeGraph Store is a distributed storage backend for Apache HugeGraph, using RocksDB as the underlying storage engine with Raft consensus protocol for distributed coordination. It is designed for production-scale deployments requiring high availability and horizontal scalability.
 
-**Status**: BETA (active development since version 1.5.0)
-
 **Technology Stack**:
 - Java 11+
 - RocksDB: Embedded key-value storage engine
@@ -131,7 +129,7 @@ bin/restart-hugegraph-store.sh
 2. HugeGraph Store cluster (3+ nodes)
 3. Proper configuration pointing Store nodes to PD cluster
 
-See Docker Compose example: `hugegraph-server/hugegraph-dist/docker/example/`
+See Docker Compose examples in the repository root `../docker/` directory. Single-node quickstart (pre-built images): `../docker/docker-compose.yml`. Single-node dev build (from source): `../docker/docker-compose.dev.yml`. 3-node cluster: `../docker/docker-compose-3pd-3store-3server.yml`. See `../docker/README.md` for the full setup guide.
 
 ## Configuration Files
 
@@ -301,14 +299,6 @@ Store integrates with other HugeGraph components:
 - Must match version of other HugeGraph components (server, PD)
 
 ## Special Notes
-
-### BETA Status
-
-HugeGraph Store is in BETA:
-- Active development and API may change
-- Production use requires thorough testing
-- Monitor GitHub issues for known problems
-- Recommended for new deployments; RocksDB backend available as stable alternative
 
 ### Performance Tuning
 

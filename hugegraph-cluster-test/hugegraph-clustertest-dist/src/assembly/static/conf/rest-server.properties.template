@@ -36,16 +36,17 @@ arthas.disabled_commands=jad
 # authentication configs
 # choose 'org.apache.hugegraph.auth.StandardAuthenticator' or
 # 'org.apache.hugegraph.auth.ConfigAuthenticator'
-#auth.authenticator=
+auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator
+# true if using hstore mode
+usePD=true
+
+# default password
+auth.admin_pa=pa
 
 # for StandardAuthenticator mode
 #auth.graph_store=hugegraph
 # auth client config
 #auth.remote_url=127.0.0.1:8899,127.0.0.1:8898,127.0.0.1:8897
-
-# for ConfigAuthenticator mode
-#auth.admin_token=
-#auth.user_tokens=[]
 
 # rpc server configs for multi graph-servers or raft-servers
 rpc.server_host=127.0.0.1

@@ -59,6 +59,7 @@ header: # `header` section is configurations for source codes license header.
     - 'LICENSE'
     - 'NOTICE'
     - 'DISCLAIMER'
+    - '.serena/**'
     - '**/*.versionsBackup'
     - '**/*.versionsBackup'
     - '**/*.proto'

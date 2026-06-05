@@ -53,7 +53,7 @@ grpc:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `grpc.host` | String | `127.0.0.1` | **IMPORTANT**: Must be set to actual IP address (not `127.0.0.1`) for distributed deployments. Store and Server nodes connect to this address. |
+| `grpc.host` | String | `127.0.0.1` | **IMPORTANT**: Must be set to actual IP address (not `127.0.0.1`) for distributed deployments. Store and Server nodes connect to this address. In Docker bridge networking, set this to the container hostname (e.g., `pd0`) via `HG_PD_GRPC_HOST` env var. |
 | `grpc.port` | Integer | `8686` | gRPC server port. Ensure this port is accessible from Store and Server nodes. |
 
 **Production Notes**:
@@ -118,6 +118,31 @@ raft:
   address: 192.168.1.12:8610
   peers-list: 192.168.1.10:8610,192.168.1.11:8610,192.168.1.12:8610
 ```
+
+### Docker Bridge Network Deployment
+
+When deploying PD in Docker with bridge networking (e.g., `docker/docker-compose-3pd-3store-3server.yml`), container hostnames are used instead of IP addresses. Configuration is injected via `HG_PD_*` environment variables:
+
+```yaml
+# pd0 — set via HG_PD_RAFT_ADDRESS and HG_PD_RAFT_PEERS_LIST env vars
+raft:
+  address: pd0:8610
+  peers-list: pd0:8610,pd1:8610,pd2:8610
+
+# pd1
+raft:
+  address: pd1:8610
+  peers-list: pd0:8610,pd1:8610,pd2:8610
+
+# pd2
+raft:
+  address: pd2:8610
+  peers-list: pd0:8610,pd1:8610,pd2:8610
+```
+
+The `grpc.host` must also use the container hostname (e.g., `pd0`) set via `HG_PD_GRPC_HOST`. Do not use `127.0.0.1` or `0.0.0.0` in bridge networking mode.
+
+See [docker/README.md](../../docker/README.md) for the full environment variable reference.
 
 ### PD Core Settings
 
@@ -726,7 +751,7 @@ pd_partition_count 36.0
 
 ### Pre-Deployment Checklist
 
-- [ ] `grpc.host` set to actual IP address (not `127.0.0.1`)
+- [ ] `grpc.host` set to actual IP address or container hostname (not `127.0.0.1`). For Docker bridge networking use container hostname via `HG_PD_GRPC_HOST` env var.
 - [ ] `raft.address` unique for each PD node
 - [ ] `raft.peers-list` identical on all PD nodes
 - [ ] `raft.peers-list` contains all PD node addresses

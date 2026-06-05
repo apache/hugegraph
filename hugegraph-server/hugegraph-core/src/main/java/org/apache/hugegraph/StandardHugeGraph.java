@@ -108,6 +108,7 @@ import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.util.LockUtil;
 import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.variables.HugeVariables;
+import org.apache.hugegraph.vector.VectorIndexManager;
 import org.apache.tinkerpop.gremlin.process.computer.GraphComputer;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Graph;
@@ -190,6 +191,7 @@ public class StandardHugeGraph implements HugeGraph {
     private Date createTime;
     private Date updateTime;
     private KvStore kvStore;
+    private VectorIndexManager<Id> vectorIndexManager;
 
     public StandardHugeGraph(HugeConfig config) {
         this.params = new StandardHugeGraphParams();
@@ -1120,7 +1122,7 @@ public class StandardHugeGraph implements HugeGraph {
         this.serverStarted(nodeInfo);
 
         // Write config to the disk file
-        String confPath = ConfigUtil.writeToFile(configPath, this.spaceGraphName(),
+        String confPath = ConfigUtil.writeToFile(configPath, this.name,
                                                  this.configuration());
         this.configuration.file(confPath);
     }
@@ -1241,6 +1243,11 @@ public class StandardHugeGraph implements HugeGraph {
         RaftBackendStoreProvider provider =
                 ((RaftBackendStoreProvider) this.storeProvider);
         return provider.raftNodeManager();
+    }
+
+    @Override
+    public VectorIndexManager<Id> vectorIndexManager() {
+        return this.vectorIndexManager;
     }
 
     @Override
@@ -1394,7 +1401,7 @@ public class StandardHugeGraph implements HugeGraph {
                                     "Expect event action argument");
                     String action = (String) args[0];
                     LOG.debug("Event action: {}", action);
-                    if (Cache.ACTION_INVALIDED.equals(action)) {
+                    if (Cache.ACTION_INVALID.equals(action)) {
                         event.checkArgs(String.class, HugeType.class, Object.class);
                         HugeType type = (HugeType) args[1];
                         Object ids = args[2];
@@ -1410,7 +1417,7 @@ public class StandardHugeGraph implements HugeGraph {
                             E.checkArgument(false, "Unexpected argument: %s", ids);
                         }
                         return true;
-                    } else if (Cache.ACTION_CLEARED.equals(action)) {
+                    } else if (Cache.ACTION_CLEAR.equals(action)) {
                         event.checkArgs(String.class, HugeType.class);
                         HugeType type = (HugeType) args[1];
                         LOG.debug("Calling proxy.clear with type: {}", type);
@@ -1435,17 +1442,20 @@ public class StandardHugeGraph implements HugeGraph {
 
         @Override
         public void invalid(HugeType type, Id id) {
-            this.hub.notify(Events.CACHE, Cache.ACTION_INVALID, type, id);
+            this.hub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                  Cache.ACTION_INVALID, type, id);
         }
 
         @Override
         public void invalid2(HugeType type, Object[] ids) {
-            this.hub.notify(Events.CACHE, Cache.ACTION_INVALID, type, ids);
+            this.hub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                  Cache.ACTION_INVALID, type, ids);
         }
 
         @Override
         public void clear(HugeType type) {
-            this.hub.notify(Events.CACHE, Cache.ACTION_CLEAR, type);
+            this.hub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                  Cache.ACTION_CLEAR, type);
         }
 
         @Override

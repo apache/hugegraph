@@ -71,6 +71,7 @@ import com.codahale.metrics.Metric;
 import com.codahale.metrics.annotation.Timed;
 
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -193,6 +194,8 @@ public class MetricsAPI extends API {
     @RolesAllowed({"space", "$owner= $action=metrics_read"})
     @Operation(summary = "get all base metrics")
     public String all(@Context GraphManager manager,
+                      @Parameter(description = "Output format type: 'json' for JSON format, " +
+                                               "other values for Prometheus format")
                       @QueryParam("type") String type) {
         if (type != null && type.equals(JSON_STR)) {
             return baseMetricAll();
@@ -207,7 +210,9 @@ public class MetricsAPI extends API {
     @Produces(APPLICATION_TEXT_WITH_CHARSET)
     @RolesAllowed({"space", "$owner= $action=metrics_read"})
     @Operation(summary = "get all statistics metrics")
-    public String statistics(@QueryParam("type") String type) {
+    public String statistics(
+            @Parameter(description = "Output format type: 'json' for JSON format")
+            @QueryParam("type") String type) {
         Map<String, Map<String, Object>> metricMap = statistics();
 
         if (type != null && type.equals(JSON_STR)) {

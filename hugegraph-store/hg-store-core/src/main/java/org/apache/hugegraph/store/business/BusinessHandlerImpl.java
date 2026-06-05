@@ -130,13 +130,17 @@ public class BusinessHandlerImpl implements BusinessHandler {
     }};
     private static final Map<Integer, String> dbNames = new ConcurrentHashMap<>();
     private static HugeGraphSupplier mockGraphSupplier = null;
-    private static final int compactionThreadCount = 64;
     private static final ConcurrentMap<String, AtomicInteger> pathLock = new ConcurrentHashMap<>();
     private static final ConcurrentMap<Integer, AtomicInteger> compactionState =
             new ConcurrentHashMap<>();
+    // Default core thread count
+    private static final int compactionThreadCount = 64;
+    private static final int compactionMaxThreadCount = 256;
+    // Max size of compaction queue
+    private static final int compactionQueueSize = 1000;
     private static final ThreadPoolExecutor compactionPool =
             ExecutorUtil.createExecutor(PoolNames.COMPACT, compactionThreadCount,
-                                        compactionThreadCount * 4, Integer.MAX_VALUE);
+                                        compactionMaxThreadCount, compactionQueueSize);
     private static final int timeoutMillis = 6 * 3600 * 1000;
     private final BinaryElementSerializer serializer = BinaryElementSerializer.getInstance();
     private final DirectBinarySerializer directBinarySerializer = new DirectBinarySerializer();
@@ -1666,5 +1670,9 @@ public class BusinessHandlerImpl implements BusinessHandler {
                 }
             };
         }
+    }
+
+    public static void clearCache() {
+        GRAPH_SUPPLIER_CACHE.clear();
     }
 }

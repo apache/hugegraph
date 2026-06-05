@@ -37,7 +37,7 @@
 
     <properties>
         <top.level.dir>${project.basedir}/..</top.level.dir>
-        <final.name>apache-${release.name}-server-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-server-${project.version}</final.name>
         <slf4j.version>1.7.5</slf4j.version>
         <log4j.version>1.2.17</log4j.version>
         <log4j2.version>2.17.1</log4j2.version>
