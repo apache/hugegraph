@@ -651,6 +651,9 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
     @Watched(prefix = "index")
     private IdHolder doIndexQuery(IndexLabel indexLabel, ConditionQuery query) {
+        if (this.needHstoreRangeIndexOrder(indexLabel)) {
+            return this.doHstoreRangeIndexQuery(indexLabel, query);
+        }
         if (!query.paging()) {
             return this.doIndexQueryBatch(indexLabel, query);
         } else {
@@ -658,6 +661,184 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 return this.doIndexQueryOnce(indexLabel, q);
             });
         }
+    }
+
+    private boolean needHstoreRangeIndexOrder(IndexLabel indexLabel) {
+        return this.store().provider().isHstore() &&
+               indexLabel.indexType().isRange();
+    }
+
+    private IdHolder doHstoreRangeIndexQuery(IndexLabel indexLabel,
+                                             ConditionQuery query) {
+        if (!query.paging()) {
+            if (query.noLimitAndOffset()) {
+                return this.doIndexQueryBatch(indexLabel, query);
+            }
+            Set<Id> ids = this.querySortedRangeIndexIds(indexLabel, query);
+            return this.newSortedRangeIndexBatchHolder(query, ids);
+        }
+        return new PagingIdHolder(query, q -> {
+            return this.querySortedRangeIndexPage(indexLabel, q);
+        });
+    }
+
+    private BatchIdHolder newSortedRangeIndexBatchHolder(ConditionQuery query,
+                                                         Set<Id> ids) {
+        List<Id> idList = new ArrayList<>(ids);
+        return new BatchIdHolder(query, Collections.emptyIterator(), batch -> {
+            throw new IllegalStateException("Unexpected sorted index fetcher");
+        }) {
+            private int offset = 0;
+
+            @Override
+            public boolean hasNext() {
+                return this.offset < idList.size();
+            }
+
+            @Override
+            public IdHolder next() {
+                if (!this.hasNext()) {
+                    throw new java.util.NoSuchElementException();
+                }
+                return this;
+            }
+
+            @Override
+            public PageIds fetchNext(String page, long batchSize) {
+                E.checkArgument(page == null,
+                                "Not support page parameter by BatchIdHolder");
+                if (!this.hasNext()) {
+                    return PageIds.EMPTY;
+                }
+
+                int end;
+                if (batchSize == Query.NO_LIMIT) {
+                    end = idList.size();
+                } else {
+                    end = (int) Math.min((long) idList.size(),
+                                         this.offset + batchSize);
+                }
+                Set<Id> batchIds = InsertionOrderUtil.newSet();
+                batchIds.addAll(idList.subList(this.offset, end));
+                this.offset = end;
+                return new PageIds(batchIds, PageState.EMPTY);
+            }
+
+            @Override
+            public Set<Id> all() {
+                Set<Id> allIds = InsertionOrderUtil.newSet();
+                allIds.addAll(idList);
+                return allIds;
+            }
+
+            @Override
+            public void close() {
+                this.offset = idList.size();
+            }
+        };
+    }
+
+    private Set<Id> querySortedRangeIndexIds(IndexLabel indexLabel,
+                                             ConditionQuery query) {
+        List<HugeIndex> indexes = this.querySortedRangeIndexes(indexLabel,
+                                                               query);
+        Set<Id> ids = InsertionOrderUtil.newSet();
+        for (HugeIndex index : indexes) {
+            ids.addAll(index.elementIds());
+            Query.checkForceCapacity(ids.size());
+        }
+        return ids;
+    }
+
+    private PageIds querySortedRangeIndexPage(IndexLabel indexLabel,
+                                              ConditionQuery query) {
+        List<HugeIndex> indexes = this.querySortedRangeIndexes(indexLabel,
+                                                               query);
+        Set<Id> allIds = InsertionOrderUtil.newSet();
+        for (HugeIndex index : indexes) {
+            allIds.addAll(index.elementIds());
+            Query.checkForceCapacity(allIds.size());
+        }
+        if (allIds.isEmpty()) {
+            return PageIds.EMPTY;
+        }
+
+        int start = 0;
+        if (!query.page().isEmpty()) {
+            start = PageState.fromString(query.page()).offset();
+        }
+        if (start >= allIds.size()) {
+            return PageIds.EMPTY;
+        }
+
+        long total = allIds.size();
+        long end = query.noLimit() ? total :
+                   Math.min(total, (long) start + query.limit());
+        Set<Id> pageIds = CollectionUtil.subSet(allIds, start, (int) end);
+        if (pageIds.isEmpty()) {
+            return PageIds.EMPTY;
+        }
+
+        int next = (int) end;
+        PageState pageState;
+        if (next < total) {
+            pageState = new PageState(new byte[]{1}, next, pageIds.size());
+        } else {
+            pageState = new PageState(PageState.EMPTY_BYTES, 0,
+                                      pageIds.size());
+        }
+        return new PageIds(pageIds, pageState);
+    }
+
+    private List<HugeIndex> querySortedRangeIndexes(IndexLabel indexLabel,
+                                                    ConditionQuery query) {
+        List<HugeIndex> indexes = new ArrayList<>();
+        Iterator<BackendEntry> entries = null;
+        String spaceGraph = this.params()
+                                .graph().spaceGraphName();
+        LockUtil.Locks locks = new LockUtil.Locks(spaceGraph);
+        ConditionQuery scanQuery = query.copy();
+        scanQuery.page(null);
+        scanQuery.limit(Query.NO_LIMIT);
+        try {
+            locks.lockReads(LockUtil.INDEX_LABEL_DELETE, indexLabel.id());
+            locks.lockReads(LockUtil.INDEX_LABEL_REBUILD, indexLabel.id());
+            if (!indexLabel.system()) {
+                graph().indexLabel(indexLabel.id());
+            }
+
+            entries = super.query(scanQuery).iterator();
+            while (entries.hasNext()) {
+                HugeIndex index = this.readMatchedIndex(indexLabel, scanQuery,
+                                                        entries.next());
+                if (index == null) {
+                    continue;
+                }
+                this.removeExpiredIndexIfNeeded(index, scanQuery.showExpired());
+                this.recordIndexValue(scanQuery, index);
+                indexes.add(index);
+                Query.checkForceCapacity(indexes.size());
+            }
+        } finally {
+            locks.unlock();
+            CloseableIterator.closeIterator(entries);
+        }
+
+        Collections.sort(indexes, (a, b) -> {
+            return this.compareRangeIndexValues(a, b);
+        });
+        return indexes;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private int compareRangeIndexValues(HugeIndex left, HugeIndex right) {
+        Object leftValue = left.fieldValues();
+        Object rightValue = right.fieldValues();
+        E.checkArgument(leftValue instanceof Comparable,
+                        "Invalid range index value '%s'", leftValue);
+        E.checkArgument(rightValue instanceof Comparable,
+                        "Invalid range index value '%s'", rightValue);
+        return ((Comparable) leftValue).compareTo(rightValue);
     }
 
     @Watched(prefix = "index")
@@ -772,8 +953,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
             if (!missingIndexLabel(e)) {
                 throw e;
             }
-            LOG.debug("Skip stale index entry with missing index label while " +
-                      "querying index label '{}'", indexLabel.id(), e);
+            LOG.debug("Skip stale index entry with missing index label " +
+                      "while querying index label '{}'", indexLabel.id(), e);
             return null;
         }
         if (!Objects.equals(index.indexLabelId(), indexLabel.id())) {
