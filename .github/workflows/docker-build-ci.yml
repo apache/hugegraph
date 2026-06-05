@@ -49,6 +49,4 @@ jobs:
           echo "Built: $IMAGE_ID"
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
           echo "Healthcheck: $HC"
-          if [[ "${{ matrix.dockerfile }}" != *"hstore"* ]]; then
-            [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
-          fi
+          [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
