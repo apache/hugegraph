@@ -91,4 +91,8 @@ if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
     ./bin/wait-partition.sh || log "WARN: partitions not assigned yet"
 fi
 
-tail -f /dev/null
+PID=$(cat ./bin/pid 2>/dev/null || true)
+if [[ -n "$PID" ]]; then
+    tail --pid="$PID" -f /dev/null
+    exit 1
+fi
