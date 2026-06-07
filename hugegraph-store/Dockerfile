@@ -63,8 +63,7 @@ EXPOSE 8520
 VOLUME /hugegraph-store
 
 HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=3 \
-    CMD curl -fsS http://localhost:8520/v1/health >/dev/null \
-        || kill -0 "$(cat ./bin/pid 2>/dev/null)" 2>/dev/null
+    CMD curl -fsS http://localhost:8520/v1/health >/dev/null
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["./docker-entrypoint.sh"]
