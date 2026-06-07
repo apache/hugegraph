@@ -799,6 +799,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         LockUtil.Locks locks = new LockUtil.Locks(spaceGraph);
         ConditionQuery scanQuery = query.copy();
         scanQuery.page(null);
+        scanQuery.offset(0L);
         scanQuery.limit(Query.NO_LIMIT);
         try {
             locks.lockReads(LockUtil.INDEX_LABEL_DELETE, indexLabel.id());
