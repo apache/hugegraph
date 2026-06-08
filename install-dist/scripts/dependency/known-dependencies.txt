@@ -241,6 +241,7 @@ jakarta.ws.rs-api-3.0.0.jar
 jakarta.xml.bind-api-2.3.3.jar
 jakarta.xml.bind-api-3.0.0.jar
 jamm-0.3.2.jar
+jansi-2.4.0.jar
 java-cup-runtime-11b-20160615.jar
 javapoet-1.8.0.jar
 javassist-3.21.0-GA.jar
