@@ -111,7 +111,15 @@ jobs:
         run: |
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION/
+          set +e
           $TRAVIS_DIR/test-start-hugegraph-pd.sh $PD_DIR
+          EXIT=$?
+          set -e
+          if [ $EXIT -eq 77 ]; then
+            echo "::notice::PD startup tests skipped — required tools not available"
+            exit 0
+          fi
+          exit $EXIT
 
       - name: Prepare env and service
         run: |
@@ -173,7 +181,15 @@ jobs:
         run: |
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION/
+          set +e
           $TRAVIS_DIR/test-start-hugegraph-store.sh $STORE_DIR
+          EXIT=$?
+          set -e
+          if [ $EXIT -eq 77 ]; then
+            echo "::notice::Store startup tests skipped — required tools not available"
+            exit 0
+          fi
+          exit $EXIT
 
       - name: Prepare env and service
         run: |

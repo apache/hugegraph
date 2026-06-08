@@ -76,7 +76,15 @@ jobs:
           mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          set +e
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
+          EXIT=$?
+          set -e
+          if [ $EXIT -eq 77 ]; then
+            echo "::notice::Startup tests skipped — required tools not available"
+            exit 0
+          fi
+          exit $EXIT
 
       - name: Run unit test
         run: |
