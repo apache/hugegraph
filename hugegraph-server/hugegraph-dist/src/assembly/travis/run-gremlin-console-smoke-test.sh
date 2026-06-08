@@ -31,11 +31,12 @@ if [ ! -x "$SERVER_DIR/bin/gremlin-console.sh" ]; then
 fi
 
 TMP_DIR=${TMPDIR:-/tmp}
-SMOKE_SCRIPT=$(mktemp "${TMP_DIR}/hugegraph-gremlin-console-smoke.XXXXXX.groovy")
-SMOKE_LOG=$(mktemp "${TMP_DIR}/hugegraph-gremlin-console-smoke.XXXXXX.log")
+TMP_WORK_DIR=$(mktemp -d "${TMP_DIR}/hugegraph-gremlin-console-smoke.XXXXXX")
+SMOKE_SCRIPT="${TMP_WORK_DIR}/smoke.groovy"
+SMOKE_LOG="${TMP_WORK_DIR}/smoke.log"
 
 cleanup() {
-    rm -f "$SMOKE_SCRIPT" "$SMOKE_LOG"
+    rm -rf "$TMP_WORK_DIR"
 }
 trap cleanup EXIT
 
