@@ -102,12 +102,12 @@ public class QueryResults<R> {
             return origin;
         }
         Collection<Id> ids;
-        if (!this.mustSortByInputIds() || this.paging() ||
+        if (!this.mustSortByInputIds() ||
             (ids = this.queryIds()).size() <= 1) {
             /*
-             * Return the original iterator if it's paging query or if the
-             * query input is less than one id, or don't have to do sort.
-             * NOTE: queryIds() only return the first batch of index query
+             * Return the original iterator if the query input is less than one
+             * id, or don't have to do sort.
+             * NOTE: queryIds() only return the first batch of index query.
              */
             return origin;
         }

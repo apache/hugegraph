@@ -677,65 +677,14 @@ public class GraphIndexTransaction extends AbstractTransaction {
             Set<Id> ids = this.querySortedRangeIndexIds(indexLabel, query);
             return this.newSortedRangeIndexBatchHolder(query, ids);
         }
-        return new PagingIdHolder(query, q -> {
+        return new SortedRangePagingIdHolder(query, q -> {
             return this.querySortedRangeIndexPage(indexLabel, q);
         });
     }
 
     private BatchIdHolder newSortedRangeIndexBatchHolder(ConditionQuery query,
                                                          Set<Id> ids) {
-        List<Id> idList = new ArrayList<>(ids);
-        return new BatchIdHolder(query, Collections.emptyIterator(), batch -> {
-            throw new IllegalStateException("Unexpected sorted index fetcher");
-        }) {
-            private int offset = 0;
-
-            @Override
-            public boolean hasNext() {
-                return this.offset < idList.size();
-            }
-
-            @Override
-            public IdHolder next() {
-                if (!this.hasNext()) {
-                    throw new java.util.NoSuchElementException();
-                }
-                return this;
-            }
-
-            @Override
-            public PageIds fetchNext(String page, long batchSize) {
-                E.checkArgument(page == null,
-                                "Not support page parameter by BatchIdHolder");
-                if (!this.hasNext()) {
-                    return PageIds.EMPTY;
-                }
-
-                int end;
-                if (batchSize == Query.NO_LIMIT) {
-                    end = idList.size();
-                } else {
-                    end = (int) Math.min((long) idList.size(),
-                                         this.offset + batchSize);
-                }
-                Set<Id> batchIds = InsertionOrderUtil.newSet();
-                batchIds.addAll(idList.subList(this.offset, end));
-                this.offset = end;
-                return new PageIds(batchIds, PageState.EMPTY);
-            }
-
-            @Override
-            public Set<Id> all() {
-                Set<Id> allIds = InsertionOrderUtil.newSet();
-                allIds.addAll(idList);
-                return allIds;
-            }
-
-            @Override
-            public void close() {
-                this.offset = idList.size();
-            }
-        };
+        return new SortedRangeBatchIdHolder(query, ids);
     }
 
     private Set<Id> querySortedRangeIndexIds(IndexLabel indexLabel,
@@ -840,6 +789,122 @@ public class GraphIndexTransaction extends AbstractTransaction {
         E.checkArgument(rightValue instanceof Comparable,
                         "Invalid range index value '%s'", rightValue);
         return ((Comparable) leftValue).compareTo(rightValue);
+    }
+
+    static class SortedRangeBatchIdHolder extends BatchIdHolder {
+
+        private final List<Id> idList;
+        private int offset;
+        private PageIds pendingBatch;
+
+        SortedRangeBatchIdHolder(ConditionQuery query, Set<Id> ids) {
+            super(query, Collections.emptyIterator(), batch -> {
+                throw new IllegalStateException("Unexpected sorted index fetcher");
+            });
+            this.idList = new ArrayList<>(ids);
+            this.offset = 0;
+            this.pendingBatch = null;
+        }
+
+        @Override
+        public boolean keepOrder() {
+            return true;
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (this.pendingBatch != null) {
+                return true;
+            }
+            if (this.exhausted) {
+                return false;
+            }
+            return this.offset < this.idList.size();
+        }
+
+        @Override
+        public IdHolder next() {
+            if (!this.hasNext()) {
+                throw new java.util.NoSuchElementException();
+            }
+            return this;
+        }
+
+        @Override
+        public PageIds fetchNext(String page, long batchSize) {
+            E.checkArgument(page == null,
+                            "Not support page parameter by BatchIdHolder");
+            E.checkArgument(batchSize >= 0L,
+                            "Invalid batch size value: %s", batchSize);
+            if (this.pendingBatch != null) {
+                PageIds result = this.pendingBatch;
+                this.pendingBatch = null;
+                return result;
+            }
+            return this.fetchBatch(batchSize);
+        }
+
+        @Override
+        public Set<Id> all() {
+            Set<Id> allIds = InsertionOrderUtil.newSet();
+            if (this.pendingBatch != null) {
+                allIds.addAll(this.pendingBatch.ids());
+            }
+            if (this.offset < this.idList.size()) {
+                allIds.addAll(this.idList.subList(this.offset,
+                                                  this.idList.size()));
+            }
+            this.close();
+            return allIds;
+        }
+
+        @Override
+        public PageIds peekNext(long size) {
+            E.checkArgument(this.pendingBatch == null,
+                            "Can't call peekNext() twice");
+            this.pendingBatch = this.fetchBatch(size);
+            return this.pendingBatch;
+        }
+
+        @Override
+        public void close() {
+            this.exhausted = true;
+            this.pendingBatch = null;
+            this.offset = this.idList.size();
+        }
+
+        private PageIds fetchBatch(long batchSize) {
+            if (this.offset >= this.idList.size() || batchSize == 0L) {
+                this.close();
+                return PageIds.EMPTY;
+            }
+
+            int end;
+            if (batchSize == Query.NO_LIMIT) {
+                end = this.idList.size();
+            } else {
+                end = (int) Math.min((long) this.idList.size(),
+                                     this.offset + batchSize);
+            }
+            Set<Id> batchIds = InsertionOrderUtil.newSet();
+            batchIds.addAll(this.idList.subList(this.offset, end));
+            this.offset = end;
+            this.exhausted = this.offset >= this.idList.size();
+            return new PageIds(batchIds, PageState.EMPTY);
+        }
+    }
+
+    private static class SortedRangePagingIdHolder extends PagingIdHolder {
+
+        SortedRangePagingIdHolder(ConditionQuery query,
+                                  Function<ConditionQuery, PageIds> fetcher) {
+            super(query, fetcher);
+        }
+
+        @Override
+        public boolean keepOrder() {
+            return true;
+        }
     }
 
     @Watched(prefix = "index")

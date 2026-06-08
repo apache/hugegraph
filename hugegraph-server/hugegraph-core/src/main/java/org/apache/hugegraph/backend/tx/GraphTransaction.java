@@ -865,7 +865,8 @@ public class GraphTransaction extends IndexableTransaction {
                                                              this::parseEntry);
         vertices = this.filterExpiredResultFromBackend(query, vertices);
 
-        if (!this.store().features().supportsQuerySortByInputIds()) {
+        if (!this.store().features().supportsQuerySortByInputIds() ||
+            this.needKeepInputOrder(query)) {
             // There is no id in BackendEntry, so sort after deserialization
             vertices = results.keepInputOrderIfNeeded(vertices);
         }
@@ -1104,11 +1105,17 @@ public class GraphTransaction extends IndexableTransaction {
 
         edges = this.filterExpiredResultFromBackend(query, edges);
 
-        if (!this.store().features().supportsQuerySortByInputIds()) {
+        if (!this.store().features().supportsQuerySortByInputIds() ||
+            this.needKeepInputOrder(query)) {
             // There is no id in BackendEntry, so sort after deserialization
             edges = results.keepInputOrderIfNeeded(edges);
         }
         return edges;
+    }
+
+    private boolean needKeepInputOrder(Query query) {
+        return query instanceof IdQuery &&
+               ((IdQuery) query).mustSortByInput();
     }
 
     private Iterator<HugeEdge> parentElQueryWithSortKeys(EdgeLabel label,

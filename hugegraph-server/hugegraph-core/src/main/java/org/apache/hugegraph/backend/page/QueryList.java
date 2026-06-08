@@ -258,7 +258,7 @@ public final class QueryList<R> {
                     return null;
                 }
 
-                return this.queryByIndexIds(ids);
+                return this.queryByIndexIds(ids, holder.keepOrder());
             });
         }
 
@@ -275,7 +275,8 @@ public final class QueryList<R> {
                 return PageResults.emptyIterator();
             }
 
-            QueryResults<R> results = this.queryByIndexIds(pageIds.ids());
+            QueryResults<R> results = this.queryByIndexIds(pageIds.ids(),
+                                                           holder.keepOrder());
 
             return new PageResults<>(results, pageIds.pageState());
         }
