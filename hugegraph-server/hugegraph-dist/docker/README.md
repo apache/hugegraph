@@ -143,7 +143,4 @@ native `HEALTHCHECK` instructions. `docker ps` shows real health status:
 | `hugegraph/hugegraph-pd` | `GET /v1/health` on port 8620 |
 | `hugegraph/hugegraph-store` | `GET /v1/health` on port 8520 |
 
-The entrypoints supervise the Java process directly — when Java exits, the
-container exits and Docker's `restart: unless-stopped` policy brings it back
-automatically. The old cron-based monitor (`-m true`) is for VM/bare-metal
-deployments only and is not used in Docker images.
+The entrypoints supervise the Java process directly — when Java exits, the container exits. If started with a restart policy (the provided compose files use `restart: unless-stopped`), Docker will bring it back automatically. The old cron-based monitor (`-m true`) is for VM/bare-metal deployments only and is not used in Docker images.
