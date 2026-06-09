@@ -231,11 +231,12 @@ bin/restart-hugegraph-store.sh
 #### Startup Options
 
 ```bash
-bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"]
+bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
 ```
 
 - `-g`: GC type (`g1` or `ZGC`, default: `g1`)
 - `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
+- `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
 
 Default JVM memory settings (defined in `start-hugegraph-store.sh`):
 - Max heap: 32GB
