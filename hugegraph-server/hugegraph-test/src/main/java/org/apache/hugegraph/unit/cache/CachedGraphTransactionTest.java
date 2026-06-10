@@ -30,7 +30,6 @@ import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
@@ -93,20 +92,13 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static ConcurrentMap<String, Boolean> storeEventListenStatus()
+    private static ConcurrentMap<String, Object> storeEventListeners()
             throws Exception {
-        Field field = GraphTransaction.class
-                                      .getDeclaredField("storeEventListenStatus");
+        Field field = CachedGraphTransaction.class
+                                            .getDeclaredField(
+                                                    "STORE_EVENT_LISTENERS");
         field.setAccessible(true);
-        return (ConcurrentMap<String, Boolean>) field.get(null);
-    }
-
-    private static void restoreStoreListenerStatusForKnownTeardownBug(
-            ConcurrentMap<String, Boolean> storeListeners, String graphName) {
-        // Closing a secondary transaction can consume storeEventListenStatus due
-        // to the follow-up bug documented in CachedGraphTransaction.unlistenChanges().
-        // Restore it so teardown can still unregister the primary store listener.
-        storeListeners.putIfAbsent(graphName, true);
+        return (ConcurrentMap<String, Object>) field.get(null);
     }
 
     private static EventListener holderListener(Object holder) {
@@ -251,8 +243,6 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             throws Exception {
         ConcurrentMap<String, Object> cacheListeners =
                 graphCacheEventListeners();
-        ConcurrentMap<String, Boolean> storeListeners =
-                storeEventListenStatus();
 
         String graphName = this.params.spaceGraphName();
         Object holder = cacheListeners.get(graphName);
@@ -265,18 +255,58 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         Assert.assertSame(holder, cacheListeners.get(graphName));
         Assert.assertEquals(refCount + 1, holderRefCount(holder));
 
-        try {
-            second.close();
+        second.close();
 
-            Assert.assertSame(holder, cacheListeners.get(graphName));
-            Assert.assertEquals(refCount, holderRefCount(holder));
-            Assert.assertTrue(this.params.graphEventHub()
-                                         .listeners(Events.CACHE)
-                                         .contains(registered));
-        } finally {
-            restoreStoreListenerStatusForKnownTeardownBug(storeListeners,
-                                                           graphName);
-        }
+        Assert.assertSame(holder, cacheListeners.get(graphName));
+        Assert.assertEquals(refCount, holderRefCount(holder));
+        Assert.assertTrue(this.params.graphEventHub()
+                                     .listeners(Events.CACHE)
+                                     .contains(registered));
+    }
+
+    @Test
+    public void testClosingNonOwnerKeepsStoreListenerRegistered()
+            throws Exception {
+        ConcurrentMap<String, Object> storeListeners = storeEventListeners();
+
+        String graphName = this.params.spaceGraphName();
+        Object holder = storeListeners.get(graphName);
+        Assert.assertNotNull(holder);
+        EventListener registered = holderListener(holder);
+        int refCount = holderRefCount(holder);
+
+        CachedGraphTransaction second = new CachedGraphTransaction(
+                this.params, this.params.loadGraphStore());
+        Assert.assertSame(holder, storeListeners.get(graphName));
+        Assert.assertEquals(refCount + 1, holderRefCount(holder));
+
+        second.close();
+
+        // Non-owner close must decrement the refcount, not drop the entry
+        Assert.assertSame(holder, storeListeners.get(graphName));
+        Assert.assertEquals(refCount, holderRefCount(holder));
+        Assert.assertSame(registered, holderListener(holder));
+    }
+
+    @Test
+    public void testLastCloseRemovesStoreListener() throws Exception {
+        ConcurrentMap<String, Object> storeListeners = storeEventListeners();
+
+        String graphName = this.params.spaceGraphName();
+        CachedGraphTransaction owner = this.cache();
+        CachedGraphTransaction second = new CachedGraphTransaction(
+                this.params, this.params.loadGraphStore());
+
+        Object holder = storeListeners.get(graphName);
+        Assert.assertNotNull(holder);
+        Assert.assertTrue(holderRefCount(holder) >= 2);
+
+        owner.close();
+        second.close();
+        this.cache = null;
+        this.params.graphTransaction().close();
+
+        Assert.assertFalse(storeListeners.containsKey(graphName));
     }
 
     @Test
