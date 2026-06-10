@@ -81,7 +81,6 @@ public final class CachedGraphTransaction extends GraphTransaction {
     private final Cache<Id, Object> verticesCache;
     private final Cache<Id, Object> edgesCache;
 
-    private EventListener storeEventListener;
     private EventListener cacheEventListener;
     private CacheListenerHolder holder;
     private StoreListenerHolder storeHolder;
@@ -171,7 +170,6 @@ public final class CachedGraphTransaction extends GraphTransaction {
                     return existing;
                 });
         this.storeHolder = storeAcquired;
-        this.storeEventListener = storeAcquired.listener;
 
         // Listen cache event: "cache"(invalid cache item)
         EventListener listener = event -> {
@@ -273,7 +271,6 @@ public final class CachedGraphTransaction extends GraphTransaction {
                 return existing;
             });
             this.storeHolder = null;
-            this.storeEventListener = null;
         }
     }
 
