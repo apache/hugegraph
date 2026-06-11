@@ -39,6 +39,12 @@
             <artifactId>rocksdbjni</artifactId>
             <version>8.10.2</version>
         </dependency>
+        <!-- AWS SDK v2 S3 — required by the rocksdb-cloud backend for S3 snapshot -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>2.25.60</version>
+        </dependency>
     </dependencies>
 
 </project>

@@ -114,6 +114,13 @@ public class RegisterUtil {
         BackendProviderFactory.register("rocksdbsst",
                                         "org.apache.hugegraph.backend.store.rocksdbsst" +
                                         ".RocksDBSstStoreProvider");
+        // Register rocksdb-cloud (S3-backed) backend
+        OptionSpace.register("rocksdb.cloud",
+                             "org.apache.hugegraph.backend.store.rocksdbcloud" +
+                             ".RocksDBCloudOptions");
+        BackendProviderFactory.register("rocksdb-cloud",
+                                        "org.apache.hugegraph.backend.store.rocksdbcloud" +
+                                        ".RocksDBCloudStoreProvider");
     }
 
     public static void registerHstore() {
@@ -147,6 +154,7 @@ public class RegisterUtil {
 
             if (!VersionUtil.match(CoreVersion.VERSION, minVersion,
                                    maxVersion)) {
+                assert CoreVersion.VERSION != null;
                 LOG.warn("Skip loading plugin '{}' due to the version range " +
                          "'[{}, {})' that it's supported doesn't cover " +
                          "current core version '{}'", plugin.name(),

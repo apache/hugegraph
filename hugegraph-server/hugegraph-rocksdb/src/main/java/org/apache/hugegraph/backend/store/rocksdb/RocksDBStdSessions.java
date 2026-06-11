@@ -245,6 +245,17 @@ public class RocksDBStdSessions extends RocksDBSessions {
         }
     }
 
+    /**
+     * Flush all memtable data to SST files. Useful before S3 sync so that
+     * all committed writes are persisted to disk before uploading.
+     */
+    public void flushAll() throws RocksDBException {
+        try (org.rocksdb.FlushOptions flushOptions = new org.rocksdb.FlushOptions()) {
+            flushOptions.setWaitForFlush(true);
+            rocksdb().flush(flushOptions);
+        }
+    }
+
     @Override
     public RocksDBSessions copy(HugeConfig config, String database, String store) {
         return new RocksDBStdSessions(config, database, store, this);
