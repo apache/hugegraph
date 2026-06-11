@@ -3620,6 +3620,20 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByNonEqLabel() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        List<Edge> edges = graph.traversal().E()
+                                .has(T.label, P.neq("created"))
+                                .toList();
+        Assert.assertEquals(16, edges.size());
+        for (Edge edge : edges) {
+            Assert.assertNotEquals("created", edge.label());
+        }
+    }
+
+    @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithRange() {
         // FIXME: skip this test for hstore
         Assume.assumeTrue("skip this test for hstore",

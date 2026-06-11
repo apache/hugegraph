@@ -9102,6 +9102,20 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByNonEqLabel() {
+        HugeGraph graph = graph();
+        init10Vertices();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Vertex> vertices = g.V().has(T.label, P.neq("author")).toList();
+        Assert.assertEquals(8, vertices.size());
+        for (Vertex vertex : vertices) {
+            Assert.assertNotEquals("author", vertex.label());
+        }
+    }
+
+    @Test
     public void testCollectMatchedIndexesByJointLabelsWithIndexedProperties() {
         HugeGraph graph = graph();
         initPersonIndex(true);

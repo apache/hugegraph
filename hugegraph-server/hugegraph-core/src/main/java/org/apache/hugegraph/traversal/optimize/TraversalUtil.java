@@ -445,8 +445,30 @@ public final class TraversalUtil {
 
     private static boolean canExtractHasContainers(HugeGraph graph,
                                                    HasContainerHolder holder) {
+        List<HasContainer> hasContainers = holder.getHasContainers();
+        // Keep pure label non-EQ/IN predicates on GraphStep for TinkerPop filtering.
+        if (hasContainers.size() == 1 &&
+            isOnlyNonEqInLabelPredicate(hasContainers.get(0))) {
+            return false;
+        }
         for (HasContainer has : holder.getHasContainers()) {
             if (!canExtractHasContainer(graph, has)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isOnlyNonEqInLabelPredicate(HasContainer has) {
+        if (!has.getKey().equals(T.label.getAccessor())) {
+            return false;
+        }
+
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> predicate : predicates) {
+            BiPredicate<?, ?> bp = predicate.getBiPredicate();
+            if (bp == Compare.eq || bp == Contains.within) {
                 return false;
             }
         }

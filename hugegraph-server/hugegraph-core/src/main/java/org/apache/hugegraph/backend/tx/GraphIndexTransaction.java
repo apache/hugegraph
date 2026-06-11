@@ -400,9 +400,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
         // Query by index
         query.optimized(OptimizedType.INDEX);
+        Id label = query.uniqueConditionValue(HugeKeys.LABEL);
         if (query.allSysprop() && conds.size() == 1 &&
-            query.containsCondition(HugeKeys.LABEL)) {
-            // Query only by label
+            label != null) {
+            // Query only by one EQ/IN-resolved label
             return this.queryByLabel(query);
         } else {
             // Query by userprops (or userprops + label)
