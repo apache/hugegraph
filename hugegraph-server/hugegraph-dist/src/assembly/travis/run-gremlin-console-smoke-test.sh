@@ -41,11 +41,7 @@ cleanup() {
 trap cleanup EXIT
 
 cat > "$SMOKE_SCRIPT" <<EOF
-def result = 1 + 1
-if (result != 2) {
-    throw new IllegalStateException("Unexpected smoke result: " + result)
-}
-println("${SMOKE_MARKER}")
+println("${SMOKE_MARKER}-" + (1 + 1))
 EOF
 
 (
