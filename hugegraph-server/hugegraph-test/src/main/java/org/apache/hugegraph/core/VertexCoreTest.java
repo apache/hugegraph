@@ -8775,6 +8775,27 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(3, vertices2.size());
         Assert.assertTrue(CollectionUtil.intersect(vertices1, vertices2)
                                         .isEmpty());
+
+        // There are 12 vertices matched, ordered by range-index key
+        iter = g.V().hasLabel("software")
+                .has("price", P.between(100, 400))
+                .has("~page", "")
+                .limit(5);
+
+        vertices1 = IteratorUtils.list(iter);
+        Assert.assertEquals(5, vertices1.size());
+        assertSortedByPrice(vertices1);
+        page = TraversalUtil.page(iter);
+        vertices2 = g.V().hasLabel("software")
+                     .has("price", P.between(100, 400))
+                     .has("~page", page).limit(5).toList();
+        Assert.assertEquals(5, vertices2.size());
+        assertSortedByPrice(vertices2);
+        Assert.assertTrue((int) vertices1.get(vertices1.size() - 1)
+                                         .value("price") <=
+                          (int) vertices2.get(0).value("price"));
+        Assert.assertTrue(CollectionUtil.intersect(vertices1, vertices2)
+                                        .isEmpty());
     }
 
     @Test
@@ -9601,6 +9622,15 @@ public class VertexCoreTest extends BaseCoreTest {
                                        .toList();
         Assert.assertTrue(vertices.size() <= 1);
         return vertices.size() == 1 ? vertices.get(0) : null;
+    }
+
+    private static void assertSortedByPrice(List<Vertex> vertices) {
+        int previous = Integer.MIN_VALUE;
+        for (Vertex vertex : vertices) {
+            int current = vertex.value("price");
+            Assert.assertTrue(previous <= current);
+            previous = current;
+        }
     }
 
     private static void assertContains(List<Vertex> vertices,

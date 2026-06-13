@@ -625,9 +625,8 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
         ConditionQuery cq;
         Query origin = query.originQuery();
-        byte[] position = null;
         if (query.paging() && !query.page().isEmpty()) {
-            position = PageState.fromString(query.page()).position();
+            type = (type & ~Session.SCAN_GTE_BEGIN) | Session.SCAN_GT_BEGIN;
         }
         byte[] ownerStart = this.ownerByQueryDelegate.apply(query.resultType(),
                                                             query.start());
@@ -636,6 +635,7 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         if (origin instanceof ConditionQuery &&
             (query.resultType().isEdge() || query.resultType().isVertex())) {
             cq = (ConditionQuery) query.originQuery();
+            long limit = rangeScanLimit(query);
 
             // LOG.debug("query {} with ownerKeyFrom: {}, ownerKeyTo: {}, " +
             //          "keyFrom: {}, keyTo: {}, " +
@@ -643,11 +643,18 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             //          this.table(), bytes2String(ownerStart),
             //          bytes2String(ownerEnd), bytes2String(start),
             //          bytes2String(end), type, cq.bytes());
-            return session.scan(this.table(), ownerStart,
-                                ownerEnd, start, end, type, cq.bytes(), position);
+            return session.scan(this.table(), ownerStart, ownerEnd, start,
+                                end, type, cq.bytes(), null, limit);
         }
-        return session.scan(this.table(), ownerStart,
-                            ownerEnd, start, end, type, null, position);
+        return session.scan(this.table(), ownerStart, ownerEnd, start, end,
+                            type, null, null, rangeScanLimit(query));
+    }
+
+    private static long rangeScanLimit(IdRangeQuery query) {
+        if (query.noLimit()) {
+            return HgStoreClientConst.NO_LIMIT;
+        }
+        return query.total();
     }
 
     protected BackendColumnIterator queryByCond(Session session,

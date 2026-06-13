@@ -150,6 +150,18 @@ public abstract class HstoreSessions extends BackendSessionPool {
                                                    int scanType,
                                                    byte[] query);
 
+        public BackendColumnIterator scan(String table,
+                                          byte[] ownerKeyFrom,
+                                          byte[] ownerKeyTo,
+                                          byte[] keyFrom,
+                                          byte[] keyTo,
+                                          int scanType,
+                                          byte[] query,
+                                          long limit) {
+            return this.scan(table, ownerKeyFrom, ownerKeyTo, keyFrom, keyTo,
+                             scanType, query);
+        }
+
         public abstract BackendColumnIterator scan(String table,
                                                    byte[] ownerKeyFrom,
                                                    byte[] ownerKeyTo,
@@ -158,6 +170,19 @@ public abstract class HstoreSessions extends BackendSessionPool {
                                                    int scanType,
                                                    byte[] query,
                                                    byte[] position);
+
+        public BackendColumnIterator scan(String table,
+                                          byte[] ownerKeyFrom,
+                                          byte[] ownerKeyTo,
+                                          byte[] keyFrom,
+                                          byte[] keyTo,
+                                          int scanType,
+                                          byte[] query,
+                                          byte[] position,
+                                          long limit) {
+            return this.scan(table, ownerKeyFrom, ownerKeyTo, keyFrom, keyTo,
+                             scanType, query, position);
+        }
 
         public abstract BackendColumnIterator scan(String table,
                                                    int codeFrom,

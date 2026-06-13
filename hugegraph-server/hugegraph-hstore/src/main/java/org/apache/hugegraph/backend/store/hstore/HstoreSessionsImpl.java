@@ -691,6 +691,16 @@ public class HstoreSessionsImpl extends HstoreSessions {
                                           byte[] ownerKeyTo,
                                           byte[] keyFrom, byte[] keyTo,
                                           int scanType, byte[] query) {
+            return this.scan(table, ownerKeyFrom, ownerKeyTo, keyFrom, keyTo,
+                             scanType, query, HgStoreClientConst.NO_LIMIT);
+        }
+
+        @Override
+        public BackendColumnIterator scan(String table, byte[] ownerKeyFrom,
+                                          byte[] ownerKeyTo,
+                                          byte[] keyFrom, byte[] keyTo,
+                                          int scanType, byte[] query,
+                                          long limit) {
             assert !this.hasChanges();
             HgKvIterator<HgKvEntry> result = this.graph.scanIterator(table,
                                                                      HgOwnerKey.of(
@@ -699,7 +709,7 @@ public class HstoreSessionsImpl extends HstoreSessions {
                                                                      HgOwnerKey.of(
                                                                              ownerKeyTo,
                                                                              keyTo),
-                                                                     0,
+                                                                     toHstoreLimit(limit),
                                                                      scanType,
                                                                      query);
             return new ColumnIterator<>(table, result, keyFrom, keyTo,
@@ -712,6 +722,17 @@ public class HstoreSessionsImpl extends HstoreSessions {
                                           byte[] keyFrom, byte[] keyTo,
                                           int scanType, byte[] query,
                                           byte[] position) {
+            return this.scan(table, ownerKeyFrom, ownerKeyTo, keyFrom, keyTo,
+                             scanType, query, position,
+                             HgStoreClientConst.NO_LIMIT);
+        }
+
+        @Override
+        public BackendColumnIterator scan(String table, byte[] ownerKeyFrom,
+                                          byte[] ownerKeyTo,
+                                          byte[] keyFrom, byte[] keyTo,
+                                          int scanType, byte[] query,
+                                          byte[] position, long limit) {
             assert !this.hasChanges();
             HgKvIterator<HgKvEntry> result = this.graph.scanIterator(table,
                                                                      HgOwnerKey.of(
@@ -720,12 +741,21 @@ public class HstoreSessionsImpl extends HstoreSessions {
                                                                      HgOwnerKey.of(
                                                                              ownerKeyTo,
                                                                              keyTo),
-                                                                     0,
+                                                                     toHstoreLimit(limit),
                                                                      scanType,
                                                                      query);
-            result.seek(position);
+            if (position != null && position.length > 0) {
+                result.seek(position);
+            }
             return new ColumnIterator<>(table, result, keyFrom, keyTo,
                                         scanType);
+        }
+
+        private long toHstoreLimit(long limit) {
+            if (limit <= 0L || limit == Query.NO_LIMIT) {
+                return HgStoreClientConst.NO_LIMIT;
+            }
+            return limit;
         }
 
         @Override

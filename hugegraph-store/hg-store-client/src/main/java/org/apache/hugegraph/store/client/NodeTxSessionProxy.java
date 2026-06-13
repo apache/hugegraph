@@ -434,7 +434,7 @@ public class NodeTxSessionProxy implements HgStoreSession {
         HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
         HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
 
-        return this.toHgKvIteratorProxy(
+        return this.toOrderedHgKvIteratorProxy(
                 this.toNodeTkvList(table, startKey, endKey)
                     .parallelStream()
                     .map(
@@ -452,7 +452,7 @@ public class NodeTxSessionProxy implements HgStoreSession {
         HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
         HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
 
-        return this.toHgKvIteratorProxy(
+        return this.toOrderedHgKvIteratorProxy(
                 this.toNodeTkvList(table, startKey, endKey)
                     .parallelStream()
                     .map(
@@ -472,7 +472,7 @@ public class NodeTxSessionProxy implements HgStoreSession {
         HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
         HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
 
-        return this.toHgKvIteratorProxy(
+        return this.toOrderedHgKvIteratorProxy(
                 this.toNodeTkvList(table, startKey, endKey)
                     .parallelStream()
                     .map(
@@ -642,6 +642,15 @@ public class NodeTxSessionProxy implements HgStoreSession {
     }
 
     /*-- common --*/
+    @SuppressWarnings("unchecked")
+    private HgKvIterator toOrderedHgKvIteratorProxy(List<HgKvIterator> iteratorList,
+                                                    long limit) {
+        List<? extends HgKvIterator<? extends HgKvEntry>> iterators =
+                (List<? extends HgKvIterator<? extends HgKvEntry>>)
+                (List<?>) iteratorList;
+        return new OrderedKvIterator(iterators, limit);
+    }
+
     private HgKvIterator toHgKvIteratorProxy(List<HgKvIterator> iteratorList, long limit) {
         boolean isAllOrderedLimiter = iteratorList.stream()
                                                   .allMatch(
