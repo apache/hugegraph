@@ -19,6 +19,7 @@ set -euo pipefail
 
 SERVER_DIR=${1:?Usage: run-gremlin-console-smoke-test.sh <server-dir>}
 SMOKE_MARKER="gremlin-console-smoke-ok"
+REMOTE_CONFIG="$SERVER_DIR/conf/remote.yaml"
 
 if [ ! -d "$SERVER_DIR" ]; then
     echo "Server directory does not exist: $SERVER_DIR"
@@ -30,8 +31,14 @@ if [ ! -x "$SERVER_DIR/bin/gremlin-console.sh" ]; then
     exit 1
 fi
 
+if [ ! -f "$REMOTE_CONFIG" ]; then
+    echo "Gremlin Console remote config does not exist: $REMOTE_CONFIG"
+    exit 1
+fi
+
 TMP_DIR=${TMPDIR:-/tmp}
 TMP_WORK_DIR=$(mktemp -d "${TMP_DIR}/hugegraph-gremlin-console-smoke.XXXXXX")
+SMOKE_REMOTE_CONFIG="${TMP_WORK_DIR}/remote.yaml"
 SMOKE_SCRIPT="${TMP_WORK_DIR}/smoke.groovy"
 SMOKE_LOG="${TMP_WORK_DIR}/smoke.log"
 
@@ -40,8 +47,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+cp "$REMOTE_CONFIG" "$SMOKE_REMOTE_CONFIG"
+cat >> "$SMOKE_REMOTE_CONFIG" <<EOF
+username: admin
+password: pa
+EOF
+
 cat > "$SMOKE_SCRIPT" <<EOF
-println("${SMOKE_MARKER}-" + (1 + 1))
+:remote connect tinkerpop.server ${SMOKE_REMOTE_CONFIG}
+:> def count = g.V().count().next(); if (count < 0L) throw new IllegalStateException("Unexpected vertex count: " + count); "${SMOKE_MARKER}-" + count
 EOF
 
 (
