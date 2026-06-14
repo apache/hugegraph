@@ -100,7 +100,7 @@ $TRAVIS_DIR/start-server.sh $SERVER_DIR $BACKEND $JACOCO_PORT || (cat $SERVER_DI
 mvn test -pl hugegraph-server/hugegraph-test -am -P api-test,$BACKEND || (cat $SERVER_DIR/logs/hugegraph-server.log && exit 1)
 
 if [ "$RUN_GREMLIN_CONSOLE_SMOKE_TEST" == "true" ]; then
-    $TRAVIS_DIR/run-gremlin-console-smoke-test.sh "$SERVER_DIR" || \
+    bash "$TRAVIS_DIR/run-gremlin-console-smoke-test.sh" "$SERVER_DIR" || \
         (cat "$SERVER_DIR/logs/hugegraph-server.log" && exit 1)
 fi
 

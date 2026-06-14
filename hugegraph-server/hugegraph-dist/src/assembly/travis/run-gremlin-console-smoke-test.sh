@@ -38,23 +38,27 @@ fi
 
 TMP_DIR=${TMPDIR:-/tmp}
 TMP_WORK_DIR=$(mktemp -d "${TMP_DIR}/hugegraph-gremlin-console-smoke.XXXXXX")
-SMOKE_REMOTE_CONFIG="${TMP_WORK_DIR}/remote.yaml"
+REMOTE_CONFIG_BACKUP="${TMP_WORK_DIR}/remote.yaml.orig"
 SMOKE_SCRIPT="${TMP_WORK_DIR}/smoke.groovy"
 SMOKE_LOG="${TMP_WORK_DIR}/smoke.log"
 
 cleanup() {
+    if [ -f "$REMOTE_CONFIG_BACKUP" ]; then
+        cp "$REMOTE_CONFIG_BACKUP" "$REMOTE_CONFIG"
+    fi
     rm -rf "$TMP_WORK_DIR"
 }
 trap cleanup EXIT
 
-cp "$REMOTE_CONFIG" "$SMOKE_REMOTE_CONFIG"
-cat >> "$SMOKE_REMOTE_CONFIG" <<EOF
+cp "$REMOTE_CONFIG" "$REMOTE_CONFIG_BACKUP"
+cat >> "$REMOTE_CONFIG" <<EOF
+
 username: admin
 password: pa
 EOF
 
 cat > "$SMOKE_SCRIPT" <<EOF
-:remote connect tinkerpop.server ${SMOKE_REMOTE_CONFIG}
+:remote connect tinkerpop.server conf/remote.yaml
 :> def count = g.V().count().next(); if (count < 0L) throw new IllegalStateException("Unexpected vertex count: " + count); "${SMOKE_MARKER}-" + count
 EOF
 
