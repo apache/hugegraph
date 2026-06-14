@@ -59,7 +59,7 @@ EOF
 
 cat > "$SMOKE_SCRIPT" <<EOF
 :remote connect tinkerpop.server conf/remote.yaml
-:> def count = g.V().count().next(); if (count < 0L) throw new IllegalStateException("Unexpected vertex count: " + count); "${SMOKE_MARKER}-" + count
+:> def count = hugegraph.traversal().V().count().next(); if (count < 0L) throw new IllegalStateException("Unexpected vertex count: " + count); "${SMOKE_MARKER}-" + count
 EOF
 
 (
