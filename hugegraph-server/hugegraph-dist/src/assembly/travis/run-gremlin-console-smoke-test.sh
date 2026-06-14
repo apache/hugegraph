@@ -55,14 +55,27 @@ cat >> "$REMOTE_CONFIG" <<EOF
 
 username: admin
 password: pa
-aliases:
-  g: __g_DEFAULT-hugegraph
 EOF
 
 cat > "$SMOKE_SCRIPT" <<EOF
-:remote connect tinkerpop.server conf/remote.yaml
-:> def count = g.V().count().next(); if (count < 0L) throw new IllegalStateException("Unexpected vertex count: " + count); "${SMOKE_MARKER}-" + count
-println(result[0].object)
+import org.apache.tinkerpop.gremlin.driver.Cluster
+
+def cluster = Cluster.open('conf/remote.yaml')
+def client = cluster.connect().alias(['g': '__g_DEFAULT-hugegraph'])
+try {
+    def remoteScript = '''
+        def count = g.V().count().next()
+        if (count < 0L) {
+            throw new IllegalStateException('Unexpected vertex count: ' + count)
+        }
+        '${SMOKE_MARKER}-' + count
+    '''
+    def results = client.submit(remoteScript).all().get()
+    println(results[0].object)
+} finally {
+    client.close()
+    cluster.close()
+}
 EOF
 
 (
