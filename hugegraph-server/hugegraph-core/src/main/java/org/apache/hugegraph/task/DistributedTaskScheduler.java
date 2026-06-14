@@ -19,7 +19,6 @@ package org.apache.hugegraph.task;
 
 import java.util.Iterator;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -358,11 +357,10 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         HugeTask<?> task = this.taskWithoutResult(id);
 
         if (!force && !task.completed()) {
-            // Check task status: can't delete running tasks without force
+            // Can't delete running tasks without force, mark DELETING instead
+            // and let cronSchedule() perform the actual deletion later
             this.updateStatus(id, null, TaskStatus.DELETING);
             return null;
-            // Already in DELETING status, delete directly from DB
-            // Completed tasks can also be deleted directly
         }
 
         // Delete from DB directly for completed/DELETING tasks or force=true

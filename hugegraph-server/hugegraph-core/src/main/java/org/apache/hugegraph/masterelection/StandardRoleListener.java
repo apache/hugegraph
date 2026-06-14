@@ -17,11 +17,11 @@
 
 package org.apache.hugegraph.masterelection;
 
+import java.util.Objects;
+
 import org.apache.hugegraph.task.TaskManager;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
-
-import java.util.Objects;
 
 public class StandardRoleListener implements RoleListener {
 
