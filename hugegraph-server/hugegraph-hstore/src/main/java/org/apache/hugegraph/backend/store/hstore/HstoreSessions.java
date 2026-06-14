@@ -162,6 +162,15 @@ public abstract class HstoreSessions extends BackendSessionPool {
                              scanType, query);
         }
 
+        public abstract BackendColumnIterator scanOrdered(String table,
+                                                          byte[] ownerKeyFrom,
+                                                          byte[] ownerKeyTo,
+                                                          byte[] keyFrom,
+                                                          byte[] keyTo,
+                                                          int scanType,
+                                                          byte[] query,
+                                                          long limit);
+
         public abstract BackendColumnIterator scan(String table,
                                                    byte[] ownerKeyFrom,
                                                    byte[] ownerKeyTo,
@@ -209,6 +218,12 @@ public abstract class HstoreSessions extends BackendSessionPool {
 
         public abstract BackendColumnIterator scan(String table,
                                                    byte[] conditionQueryToByte);
+
+        public BackendColumnIterator scan(String table,
+                                          byte[] conditionQueryToByte,
+                                          long limit) {
+            return this.scan(table, conditionQueryToByte);
+        }
 
         public HugeConfig getConf() {
             return conf;

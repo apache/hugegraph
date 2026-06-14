@@ -272,7 +272,9 @@ public final class QueryList<R> {
             this.updateResultsFilter(bindQuery);
             PageIds pageIds = holder.fetchNext(page, pageSize);
             if (pageIds.empty()) {
-                return PageResults.emptyIterator();
+                return PageResults.emptyIterator(bindQuery,
+                                                 pageIds.pageState(),
+                                                 holder.continueEmptyPage());
             }
 
             QueryResults<R> results = this.queryByIndexIds(pageIds.ids(),
@@ -331,10 +333,17 @@ public final class QueryList<R> {
 
         private final QueryResults<R> results;
         private final PageState pageState;
+        private final boolean continueOnEmpty;
 
         public PageResults(QueryResults<R> results, PageState pageState) {
+            this(results, pageState, false);
+        }
+
+        public PageResults(QueryResults<R> results, PageState pageState,
+                           boolean continueOnEmpty) {
             this.results = results;
             this.pageState = pageState;
+            this.continueOnEmpty = continueOnEmpty;
         }
 
         public Iterator<R> get() {
@@ -344,6 +353,10 @@ public final class QueryList<R> {
         public boolean hasNextPage() {
             return !Bytes.equals(this.pageState.position(),
                                  PageState.EMPTY_BYTES);
+        }
+
+        public boolean continueOnEmpty() {
+            return this.continueOnEmpty;
         }
 
         public Query query() {
@@ -364,6 +377,19 @@ public final class QueryList<R> {
         @SuppressWarnings("unchecked")
         public static <R> PageResults<R> emptyIterator() {
             return (PageResults<R>) EMPTY;
+        }
+
+        public static <R> PageResults<R> emptyIterator(Query query,
+                                                       PageState pageState) {
+            return emptyIterator(query, pageState, false);
+        }
+
+        public static <R> PageResults<R> emptyIterator(Query query,
+                                                       PageState pageState,
+                                                       boolean continueOnEmpty) {
+            return new PageResults<>(
+                    new QueryResults<>(QueryResults.emptyIterator(), query),
+                    pageState, continueOnEmpty);
         }
     }
 }

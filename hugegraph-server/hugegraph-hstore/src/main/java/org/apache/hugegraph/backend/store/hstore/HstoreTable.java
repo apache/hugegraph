@@ -55,6 +55,7 @@ import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
@@ -114,15 +115,12 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
 
     protected static BackendEntryIterator newEntryIterator(
             BackendColumnIterator cols, Query query) {
-        return new BinaryEntryIterator<>(cols, query, (entry, col) -> {
-            if (entry == null || !entry.belongToMe(col)) {
-                HugeType type = query.resultType();
-                // NOTE: only support BinaryBackendEntry currently
-                entry = new BinaryBackendEntry(type, col.name);
-            }
-            entry.columns(col);
-            return entry;
-        });
+        BiFunction<BackendEntry, BackendColumn, BackendEntry> merger =
+                (entry, col) -> mergeColumn(query, entry, col);
+        if (query.resultType().isRangeIndex()) {
+            return new RangeIndexEntryIterator(cols, query, merger);
+        }
+        return new BinaryEntryIterator<>(cols, query, merger);
     }
 
     protected static BackendEntryIterator newEntryIteratorOlap(
@@ -136,6 +134,42 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             entry.columns(col);
             return entry;
         });
+    }
+
+    private static BackendEntry mergeColumn(Query query, BackendEntry entry,
+                                            BackendColumn col) {
+        if (entry == null || !entry.belongToMe(col)) {
+            HugeType type = query.resultType();
+            // NOTE: only support BinaryBackendEntry currently
+            entry = new BinaryBackendEntry(type, col.name);
+        }
+        entry.columns(col);
+        return entry;
+    }
+
+    private static final class RangeIndexEntryIterator
+            extends BinaryEntryIterator<BackendColumn> {
+
+        private byte[] lastPosition;
+
+        private RangeIndexEntryIterator(
+                BackendColumnIterator cols, Query query,
+                BiFunction<BackendEntry, BackendColumn, BackendEntry> merger) {
+            super(cols, query, merger);
+            this.lastPosition = PageState.EMPTY_BYTES;
+        }
+
+        @Override
+        public BackendEntry next() {
+            BackendEntry entry = super.next();
+            this.lastPosition = entry.id().asBytes();
+            return entry;
+        }
+
+        @Override
+        protected PageState pageState() {
+            return new PageState(this.lastPosition, 0, (int) this.count());
+        }
     }
 
     public static String bytes2String(byte[] bytes) {
@@ -625,17 +659,26 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
         ConditionQuery cq;
         Query origin = query.originQuery();
-        if (query.paging() && !query.page().isEmpty()) {
-            type = (type & ~Session.SCAN_GTE_BEGIN) | Session.SCAN_GT_BEGIN;
-        }
+        byte[] position = null;
         byte[] ownerStart = this.ownerByQueryDelegate.apply(query.resultType(),
                                                             query.start());
         byte[] ownerEnd = this.ownerByQueryDelegate.apply(query.resultType(),
                                                           query.end());
+        if (shouldUseOrderedRangeScan(query)) {
+            if (query.paging() && !query.page().isEmpty()) {
+                start = rangeIndexScanStart(query, start);
+                type = (type & ~Session.SCAN_GTE_BEGIN) | Session.SCAN_GT_BEGIN;
+            }
+            return session.scanOrdered(this.table(), ownerStart, ownerEnd,
+                                       start, end, type, null,
+                                       rangeScanLimit(query));
+        }
+        if (query.paging() && !query.page().isEmpty()) {
+            position = PageState.fromString(query.page()).position();
+        }
         if (origin instanceof ConditionQuery &&
             (query.resultType().isEdge() || query.resultType().isVertex())) {
             cq = (ConditionQuery) query.originQuery();
-            long limit = rangeScanLimit(query);
 
             // LOG.debug("query {} with ownerKeyFrom: {}, ownerKeyTo: {}, " +
             //          "keyFrom: {}, keyTo: {}, " +
@@ -644,10 +687,25 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             //          bytes2String(ownerEnd), bytes2String(start),
             //          bytes2String(end), type, cq.bytes());
             return session.scan(this.table(), ownerStart, ownerEnd, start,
-                                end, type, cq.bytes(), null, limit);
+                                end, type, cq.bytes(), position);
         }
         return session.scan(this.table(), ownerStart, ownerEnd, start, end,
-                            type, null, null, rangeScanLimit(query));
+                            type, null, position);
+    }
+
+    static boolean shouldUseOrderedRangeScan(IdRangeQuery query) {
+        long limit = rangeScanLimit(query);
+        return query.resultType().isRangeIndex() &&
+               query.paging() &&
+               limit > HgStoreClientConst.NO_LIMIT &&
+               limit <= HgStoreClientConfig.of().getNetKvScannerPageSize();
+    }
+
+    static byte[] rangeIndexScanStart(IdRangeQuery query, byte[] start) {
+        if (query.paging() && !query.page().isEmpty()) {
+            return PageState.fromString(query.page()).position();
+        }
+        return start;
     }
 
     private static long rangeScanLimit(IdRangeQuery query) {

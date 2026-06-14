@@ -37,6 +37,7 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
     private HgKvEntry current;
     private byte[] position;
     private byte[] seekPosition;
+    private boolean closed;
 
     OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
                       long limit) {
@@ -56,12 +57,17 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         this.current = null;
         this.position = HgStoreClientConst.EMPTY_BYTES;
         this.seekPosition = HgStoreClientConst.EMPTY_BYTES;
+        this.closed = false;
     }
 
     @Override
     public boolean hasNext() {
         this.initialize();
-        return this.count < this.limit && !this.queue.isEmpty();
+        boolean hasNext = this.count < this.limit && !this.queue.isEmpty();
+        if (!hasNext) {
+            this.close();
+        }
+        return hasNext;
     }
 
     @Override
@@ -75,9 +81,13 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         this.position = entry.entry.key();
         this.count++;
 
-        HgKvIterator<? extends HgKvEntry> iterator =
-                this.iterators.get(entry.source);
-        this.addNext(entry.source, iterator);
+        if (this.count < this.limit) {
+            HgKvIterator<? extends HgKvEntry> iterator =
+                    this.iterators.get(entry.source);
+            this.addNext(entry.source, iterator);
+        } else {
+            this.close();
+        }
         return this.current;
     }
 
@@ -107,6 +117,10 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     @Override
     public void close() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
         for (HgKvIterator<? extends HgKvEntry> iterator : this.iterators) {
             iterator.close();
         }
@@ -134,6 +148,9 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
                 this.queue.add(new SourceEntry(source, entry));
                 break;
             }
+        }
+        if (this.queue.stream().noneMatch(entry -> entry.source == source)) {
+            iterator.close();
         }
     }
 

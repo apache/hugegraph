@@ -657,13 +657,15 @@ public class GraphIndexTransaction extends AbstractTransaction {
         } else {
             return new PagingIdHolder(query, q -> {
                 return this.doIndexQueryOnce(indexLabel, q);
-            }, this.keepBackendIndexOrder(indexLabel));
+            }, this.keepBackendIndexOrder(indexLabel, query));
         }
     }
 
-    private boolean keepBackendIndexOrder(IndexLabel indexLabel) {
+    private boolean keepBackendIndexOrder(IndexLabel indexLabel,
+                                          ConditionQuery query) {
         return this.store().provider().isHstore() &&
-               indexLabel.indexType().isRange();
+               indexLabel.indexType().isRange() &&
+               !query.noLimit();
     }
 
     @Watched(prefix = "index")
@@ -705,7 +707,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             } finally {
                 locks.unlock();
             }
-        }, this.keepBackendIndexOrder(indexLabel));
+        }, this.keepBackendIndexOrder(indexLabel, query));
     }
 
     private void recordIndexValue(ConditionQuery query, HugeIndex index) {
@@ -749,8 +751,15 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 Query.checkForceCapacity(ids.size());
                 this.recordIndexValue(query, index);
             }
-            // If there is no data, the entries is not a Metadatable object
             if (ids.isEmpty()) {
+                if (query.paging() && entries instanceof Metadatable) {
+                    PageState pageState = PageInfo.pageState(entries);
+                    if (pageState.position().length > 0) {
+                        pageState = new PageState(pageState.position(),
+                                                  pageState.offset(), 0);
+                        return new PageIds(ids, pageState);
+                    }
+                }
                 return PageIds.EMPTY;
             }
             // NOTE: Memory backend's iterator is not Metadatable
@@ -761,7 +770,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
                          "The entries must be Metadatable when query " +
                          "in paging, but got '%s'",
                          entries.getClass().getName());
-            return new PageIds(ids, PageInfo.pageState(entries));
+            PageState pageState = PageInfo.pageState(entries);
+            pageState = new PageState(pageState.position(),
+                                      pageState.offset(), ids.size());
+            return new PageIds(ids, pageState);
         } finally {
             locks.unlock();
             CloseableIterator.closeIterator(entries);

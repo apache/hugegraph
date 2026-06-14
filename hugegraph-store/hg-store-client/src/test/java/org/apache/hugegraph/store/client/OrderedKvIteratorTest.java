@@ -91,6 +91,30 @@ public class OrderedKvIteratorTest {
         Assert.assertFalse(iterator.hasNext());
     }
 
+    @Test
+    public void testCloseUnderlyingIteratorsWhenLimitReached() {
+        TestIterator first = new TestIterator(1, 4);
+        TestIterator second = new TestIterator(2, 3);
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 1L);
+
+        Assert.assertEquals(1, key(iterator.next()));
+        Assert.assertFalse(iterator.hasNext());
+        Assert.assertTrue(first.closed());
+        Assert.assertTrue(second.closed());
+    }
+
+    @Test
+    public void testCloseUnderlyingIteratorsWhenExhausted() {
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator();
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 0L);
+
+        Assert.assertEquals(1, key(iterator.next()));
+        Assert.assertFalse(iterator.hasNext());
+        Assert.assertTrue(first.closed());
+        Assert.assertTrue(second.closed());
+    }
+
     private static int key(HgKvEntry entry) {
         return entry.key()[0] & 0xFF;
     }
@@ -104,11 +128,13 @@ public class OrderedKvIteratorTest {
         private final List<Integer> keys;
         private int offset;
         private HgKvEntry current;
+        private boolean closed;
 
         private TestIterator(Integer... keys) {
             this.keys = Arrays.asList(keys);
             this.offset = 0;
             this.current = null;
+            this.closed = false;
         }
 
         @Override
@@ -149,6 +175,15 @@ public class OrderedKvIteratorTest {
                    this.keys.get(this.offset) < target) {
                 this.offset++;
             }
+        }
+
+        @Override
+        public void close() {
+            this.closed = true;
+        }
+
+        private boolean closed() {
+            return this.closed;
         }
     }
 

@@ -434,7 +434,7 @@ public class NodeTxSessionProxy implements HgStoreSession {
         HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
         HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
 
-        return this.toOrderedHgKvIteratorProxy(
+        return this.toHgKvIteratorProxy(
                 this.toNodeTkvList(table, startKey, endKey)
                     .parallelStream()
                     .map(
@@ -452,7 +452,7 @@ public class NodeTxSessionProxy implements HgStoreSession {
         HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
         HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
 
-        return this.toOrderedHgKvIteratorProxy(
+        return this.toHgKvIteratorProxy(
                 this.toNodeTkvList(table, startKey, endKey)
                     .parallelStream()
                     .map(
@@ -472,7 +472,7 @@ public class NodeTxSessionProxy implements HgStoreSession {
         HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
         HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
 
-        return this.toOrderedHgKvIteratorProxy(
+        return this.toHgKvIteratorProxy(
                 this.toNodeTkvList(table, startKey, endKey)
                     .parallelStream()
                     .map(
@@ -483,6 +483,26 @@ public class NodeTxSessionProxy implements HgStoreSession {
                     .collect(Collectors.toList())
                 , limit);
 
+    }
+
+    public HgKvIterator<HgKvEntry> scanIteratorOrdered(String table, HgOwnerKey startKey,
+                                                       HgOwnerKey endKey, long limit,
+                                                       int scanType, byte[] query) {
+        HgAssert.isFalse(HgAssert.isInvalid(table), "The argument is invalid: table");
+        HgAssert.isFalse(startKey == null, "The argument is invalid: startKey");
+        HgAssert.isFalse(endKey == null, "The argument is invalid: endKey");
+
+        List<HgKvIterator> iterators =
+                this.toOrderedRangeNodeTkvList(table, startKey, endKey)
+                    .parallelStream()
+                    .map(e -> this.getStoreNode(e.getNodeId())
+                                  .openSession(this.graphName)
+                                  .scanIterator(e.getTable(), e.getKey(),
+                                                e.getEndKey(), limit,
+                                                scanType, query))
+                    .collect(Collectors.toList());
+        prefetchOrderedRangeScanIterators(iterators);
+        return this.toOrderedHgKvIteratorProxy(iterators, limit);
     }
 
     @Override
@@ -645,24 +665,47 @@ public class NodeTxSessionProxy implements HgStoreSession {
     @SuppressWarnings("unchecked")
     private HgKvIterator toOrderedHgKvIteratorProxy(List<HgKvIterator> iteratorList,
                                                     long limit) {
+        return mergeOrderedRangeScanIterators(iteratorList, limit);
+    }
+
+    @SuppressWarnings("unchecked")
+    static HgKvIterator<HgKvEntry> mergeOrderedRangeScanIterators(
+            List<? extends HgKvIterator> iteratorList, long limit) {
         List<? extends HgKvIterator<? extends HgKvEntry>> iterators =
                 (List<? extends HgKvIterator<? extends HgKvEntry>>)
                 (List<?>) iteratorList;
         return new OrderedKvIterator(iterators, limit);
     }
 
+    static void prefetchOrderedRangeScanIterators(
+            List<? extends HgKvIterator> iteratorList) {
+        try {
+            iteratorList.parallelStream().forEach(iterator -> iterator.hasNext());
+        } catch (RuntimeException | Error e) {
+            iteratorList.forEach(HgKvIterator::close);
+            throw e;
+        }
+    }
+
     private HgKvIterator toHgKvIteratorProxy(List<HgKvIterator> iteratorList, long limit) {
+        return mergeRangeScanIterators(iteratorList, limit);
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    static HgKvIterator<HgKvEntry> mergeRangeScanIterators(
+            List<? extends HgKvIterator> iteratorList, long limit) {
+        List<HgKvIterator> iterators = (List<HgKvIterator>) (List<?>) iteratorList;
         boolean isAllOrderedLimiter = iteratorList.stream()
                                                   .allMatch(
                                                           e -> e instanceof HgKvOrderedIterator);
 
         HgKvIterator<HgKvEntry> iterator;
         if (isAllOrderedLimiter) {
-            iterator = new SequencedIterator(iteratorList.stream()
-                                                         .map(e -> (HgKvOrderedIterator) e)
-                                                         .collect(Collectors.toList()), limit);
+            iterator = new SequencedIterator(iterators.stream()
+                                                      .map(e -> (HgKvOrderedIterator) e)
+                                                      .collect(Collectors.toList()), limit);
         } else {
-            iterator = new TopWorkIteratorProxy(iteratorList, limit);
+            iterator = new TopWorkIteratorProxy(iterators, limit);
         }
 
         return iterator;
@@ -755,6 +798,12 @@ public class NodeTxSessionProxy implements HgStoreSession {
             nodeTkvs.add(new NodeTkv(partition, table, startKey, endKey));
         }
         return nodeTkvs;
+    }
+
+    private List<NodeTkv> toOrderedRangeNodeTkvList(String table,
+                                                    HgOwnerKey startKey,
+                                                    HgOwnerKey endKey) {
+        return this.toNodeTkvList(table, startKey, endKey);
     }
 
     private List<NodeTkv> toNodeTkvList(String table, int startCode, int endCode) {
