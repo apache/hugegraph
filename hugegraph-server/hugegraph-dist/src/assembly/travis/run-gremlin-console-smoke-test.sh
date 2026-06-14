@@ -60,17 +60,14 @@ EOF
 cat > "$SMOKE_SCRIPT" <<EOF
 import org.apache.tinkerpop.gremlin.driver.Cluster
 
-def cluster = Cluster.open('conf/remote.yaml')
-def client = cluster.connect().alias(['g': '__g_DEFAULT-hugegraph'])
+cluster = Cluster.open('conf/remote.yaml')
+client = cluster.connect().alias(['g': '__g_DEFAULT-hugegraph'])
 try {
-    def remoteScript = '''
-        def count = g.V().count().next()
-        if (count < 0L) {
-            throw new IllegalStateException('Unexpected vertex count: ' + count)
-        }
-        '${SMOKE_MARKER}-' + count
-    '''
-    def results = client.submit(remoteScript).all().get()
+    remoteScript = "def count = g.V().count().next(); " +
+                   "if (count < 0L) " +
+                   "throw new IllegalStateException('Unexpected vertex count: ' + count); " +
+                   "'${SMOKE_MARKER}-' + count"
+    results = client.submit(remoteScript).all().get()
     println(results[0].object)
 } finally {
     client.close()
