@@ -87,13 +87,7 @@ public class PageEntryIterator<R> implements CIter<R> {
             this.remaining -= this.pageResults.total();
             return true;
         } else {
-            if (this.pageResults.continueOnEmpty() &&
-                this.pageResults.hasNextPage() &&
-                !this.pageResults.page().equals(this.pageInfo.page())) {
-                this.pageInfo.page(this.pageResults.page());
-            } else {
-                this.pageInfo.increase();
-            }
+            this.pageInfo.increase();
             return this.fetch();
         }
     }

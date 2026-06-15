@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.unit;
 
+import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
@@ -38,7 +39,6 @@ import org.apache.hugegraph.unit.core.ConditionTest;
 import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
-import org.apache.hugegraph.unit.core.IdHolderTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
 import org.apache.hugegraph.unit.core.QueryResultsTest;
@@ -123,6 +123,7 @@ import org.junit.runners.Suite;
         BackendMutationTest.class,
         ConditionTest.class,
         ConditionQueryFlattenTest.class,
+        GraphIndexTransactionTest.class,
         QueryTest.class,
         QueryResultsTest.class,
         RangeTest.class,
@@ -132,7 +133,6 @@ import org.junit.runners.Suite;
         BackendStoreInfoTest.class,
         TraversalUtilTest.class,
         TraversalUtilOptimizeTest.class,
-        IdHolderTest.class,
         PageStateTest.class,
         SystemSchemaStoreTest.class,
         ServerInfoManagerTest.class,

@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.store.client;
 
-import java.util.Arrays;
 import java.util.Objects;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -40,16 +39,16 @@ class NodeTkv {
     NodeTkv(HgNodePartition nodePartition, String table, HgOwnerKey key) {
         this.nodePartition = nodePartition;
         this.table = table;
-        this.key = copyOf(key);
-        this.endKey = this.key;
+        this.key = key;
+        this.endKey = key;
         this.key.setKeyCode(this.nodePartition.getKeyCode());
     }
 
     NodeTkv(HgNodePartition nodePartition, String table, HgOwnerKey key, int keyCode) {
         this.nodePartition = nodePartition;
         this.table = table;
-        this.key = copyOf(key);
-        this.endKey = this.key;
+        this.key = key;
+        this.endKey = key;
 
         this.key.setKeyCode(keyCode);
     }
@@ -58,8 +57,8 @@ class NodeTkv {
             HgOwnerKey endKey) {
         this.nodePartition = nodePartition;
         this.table = table;
-        this.key = copyOf(startKey);
-        this.endKey = copyOf(endKey);
+        this.key = startKey;
+        this.endKey = endKey;
         this.key.setKeyCode(nodePartition.getStartKey());
         this.endKey.setKeyCode(nodePartition.getEndKey());
     }
@@ -122,15 +121,5 @@ class NodeTkv {
 
     public void setSession(HgStoreSession session) {
         this.session = session;
-    }
-
-    private static HgOwnerKey copyOf(HgOwnerKey key) {
-        HgOwnerKey copy = HgOwnerKey.of(Arrays.copyOf(key.getOwner(),
-                                                      key.getOwner().length),
-                                       Arrays.copyOf(key.getKey(),
-                                                     key.getKey().length));
-        copy.setKeyCode(key.getKeyCode());
-        copy.setSerialNo(key.getSerialNo());
-        return copy;
     }
 }

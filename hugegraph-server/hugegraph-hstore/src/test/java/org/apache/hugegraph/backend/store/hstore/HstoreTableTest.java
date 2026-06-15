@@ -31,12 +31,9 @@ import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
-import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
-import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.type.HugeType;
 import org.junit.Assert;
 import org.junit.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 public class HstoreTableTest {
@@ -60,79 +57,7 @@ public class HstoreTableTest {
     }
 
     @Test
-    public void testRangeIndexPagingUsesPagePositionAsScanStart() {
-        byte[] originalStart = keyBytes(1);
-        byte[] pagePosition = keyBytes(2);
-        IdRangeQuery query = new IdRangeQuery(HugeType.RANGE_INT_INDEX, null,
-                                              IdGenerator.of(originalStart,
-                                                             IdType.STRING),
-                                              true,
-                                              IdGenerator.of(keyBytes(9),
-                                                             IdType.STRING),
-                                              false);
-
-        query.page("");
-        Assert.assertArrayEquals(originalStart,
-                                 HstoreTable.rangeIndexScanStart(
-                                         query, originalStart));
-
-        query.page(new PageState(pagePosition, 0, 1).toString());
-        Assert.assertArrayEquals(pagePosition,
-                                  HstoreTable.rangeIndexScanStart(
-                                          query, originalStart));
-    }
-
-    @Test
-    public void testRangeIndexOrderedScanForOrderSensitiveQuery() {
-        IdRangeQuery query = rangeIndexQuery();
-        Assert.assertFalse(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query.limit(10L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.offset(1L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.offset(1L);
-        query.limit(10L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.page("");
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.page("");
-        query.limit(10L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.page(new PageState(keyBytes(2), 0, 1).toString());
-        query.limit(10L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.limit(HgStoreClientConfig.of().getNetKvScannerPageSize() + 1L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = rangeIndexQuery();
-        query.page("");
-        query.limit(HgStoreClientConfig.of().getNetKvScannerPageSize() + 1L);
-        Assert.assertTrue(HstoreTable.shouldUseOrderedRangeScan(query));
-
-        query = new IdRangeQuery(HugeType.VERTEX, null,
-                                 IdGenerator.of(keyBytes(1), IdType.STRING),
-                                 true,
-                                 IdGenerator.of(keyBytes(9), IdType.STRING),
-                                 false);
-        query.limit(10L);
-        Assert.assertFalse(HstoreTable.shouldUseOrderedRangeScan(query));
-    }
-
-    @Test
-    public void testQueryByRangeUsesOrderedScanForOrderSensitiveRangeIndex() {
+    public void testQueryByRangeUsesLegacyScanForRangeIndexQueries() {
         HstoreTable table = new HstoreTable("graph", "index");
         HstoreSessions.Session session = Mockito.mock(
                 HstoreSessions.Session.class);
@@ -145,16 +70,13 @@ public class HstoreTableTest {
         query = rangeIndexQuery();
         query.limit(10L);
         table.queryByRange(session, query);
-        OrderedScan orderedScan = verifyOrderedRangeScan(session);
-        Assert.assertEquals(10L, orderedScan.limit);
+        verifyLegacyRangeScan(session);
 
         Mockito.reset(session);
         query = rangeIndexQuery();
         query.offset(1L);
         table.queryByRange(session, query);
-        orderedScan = verifyOrderedRangeScan(session);
-        Assert.assertEquals(HgStoreClientConst.NO_LIMIT,
-                            orderedScan.limit);
+        verifyLegacyRangeScan(session);
 
         Mockito.reset(session);
         byte[] pagePosition = keyBytes(3);
@@ -162,21 +84,7 @@ public class HstoreTableTest {
         query.page(new PageState(pagePosition, 0, 1).toString());
         query.limit(10L);
         table.queryByRange(session, query);
-        orderedScan = verifyOrderedRangeScan(session);
-        Assert.assertArrayEquals(pagePosition, orderedScan.keyFrom);
-        Assert.assertTrue(HstoreSessions.Session.matchScanType(
-                HstoreSessions.Session.SCAN_GT_BEGIN,
-                orderedScan.scanType));
-        Assert.assertFalse(HstoreSessions.Session.matchScanType(
-                HstoreSessions.Session.SCAN_GTE_BEGIN,
-                orderedScan.scanType));
-
-        Mockito.reset(session);
-        query = rangeIndexQuery();
-        query.limit(HgStoreClientConfig.of().getNetKvScannerPageSize() + 1L);
-        table.queryByRange(session, query);
-        orderedScan = verifyOrderedRangeScan(session);
-        Assert.assertEquals(query.total(), orderedScan.limit);
+        verifyLegacyRangeScan(session, pagePosition);
     }
 
     private static IdRangeQuery rangeIndexQuery() {
@@ -234,6 +142,11 @@ public class HstoreTableTest {
     }
 
     private static void verifyLegacyRangeScan(HstoreSessions.Session session) {
+        verifyLegacyRangeScan(session, null);
+    }
+
+    private static void verifyLegacyRangeScan(HstoreSessions.Session session,
+                                              byte[] position) {
         Mockito.verify(session).scan(Mockito.anyString(),
                                      Mockito.any(byte[].class),
                                      Mockito.any(byte[].class),
@@ -241,67 +154,13 @@ public class HstoreTableTest {
                                      Mockito.any(byte[].class),
                                      Mockito.anyInt(),
                                      Mockito.<byte[]>isNull(),
-                                     Mockito.<byte[]>isNull());
-        verifyNoLegacyOrderedScan(session);
+                                     positionMatcher(position));
     }
 
-    private static OrderedScan verifyOrderedRangeScan(
-            HstoreSessions.Session session) {
-        ArgumentCaptor<byte[]> keyFrom = ArgumentCaptor.forClass(byte[].class);
-        ArgumentCaptor<Integer> scanType =
-                ArgumentCaptor.forClass(Integer.class);
-        ArgumentCaptor<Long> limit = ArgumentCaptor.forClass(Long.class);
-
-        Mockito.verify(session).scanOrdered(Mockito.anyString(),
-                                            Mockito.any(byte[].class),
-                                            Mockito.any(byte[].class),
-                                            keyFrom.capture(),
-                                            Mockito.any(byte[].class),
-                                            scanType.capture(),
-                                            Mockito.<byte[]>isNull(),
-                                            limit.capture());
-        verifyNoLegacyRangeScan(session);
-
-        return new OrderedScan(keyFrom.getValue(), scanType.getValue(),
-                               limit.getValue());
-    }
-
-    private static void verifyNoLegacyRangeScan(
-            HstoreSessions.Session session) {
-        Mockito.verify(session, Mockito.never())
-               .scan(Mockito.anyString(),
-                     Mockito.any(byte[].class),
-                     Mockito.any(byte[].class),
-                     Mockito.any(byte[].class),
-                     Mockito.any(byte[].class),
-                     Mockito.anyInt(),
-                     Mockito.<byte[]>isNull(),
-                     Mockito.<byte[]>isNull());
-    }
-
-    private static void verifyNoLegacyOrderedScan(
-            HstoreSessions.Session session) {
-        Mockito.verify(session, Mockito.never())
-               .scanOrdered(Mockito.anyString(),
-                            Mockito.any(byte[].class),
-                            Mockito.any(byte[].class),
-                            Mockito.any(byte[].class),
-                            Mockito.any(byte[].class),
-                            Mockito.anyInt(),
-                            Mockito.<byte[]>isNull(),
-                            Mockito.anyLong());
-    }
-
-    private static final class OrderedScan {
-
-        private final byte[] keyFrom;
-        private final int scanType;
-        private final long limit;
-
-        private OrderedScan(byte[] keyFrom, int scanType, long limit) {
-            this.keyFrom = keyFrom;
-            this.scanType = scanType;
-            this.limit = limit;
+    private static byte[] positionMatcher(byte[] position) {
+        if (position == null) {
+            return Mockito.isNull();
         }
+        return Mockito.argThat(value -> Arrays.equals(position, value));
     }
 }

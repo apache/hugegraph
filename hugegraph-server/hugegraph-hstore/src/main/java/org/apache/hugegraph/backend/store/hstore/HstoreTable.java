@@ -663,15 +663,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
                                                             query.start());
         byte[] ownerEnd = this.ownerByQueryDelegate.apply(query.resultType(),
                                                           query.end());
-        if (shouldUseOrderedRangeScan(query)) {
-            if (query.paging() && !query.page().isEmpty()) {
-                start = rangeIndexScanStart(query, start);
-                type = (type & ~Session.SCAN_GTE_BEGIN) | Session.SCAN_GT_BEGIN;
-            }
-            return session.scanOrdered(this.table(), ownerStart, ownerEnd,
-                                       start, end, type, null,
-                                       rangeScanLimit(query));
-        }
         if (query.paging() && !query.page().isEmpty()) {
             position = PageState.fromString(query.page()).position();
         }
@@ -690,25 +681,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
         return session.scan(this.table(), ownerStart, ownerEnd, start, end,
                             type, null, position);
-    }
-
-    static boolean shouldUseOrderedRangeScan(IdRangeQuery query) {
-        return query.resultType().isRangeIndex() &&
-               (query.paging() || !query.noLimitAndOffset());
-    }
-
-    static byte[] rangeIndexScanStart(IdRangeQuery query, byte[] start) {
-        if (query.paging() && !query.page().isEmpty()) {
-            return PageState.fromString(query.page()).position();
-        }
-        return start;
-    }
-
-    private static long rangeScanLimit(IdRangeQuery query) {
-        if (query.noLimit()) {
-            return HgStoreClientConst.NO_LIMIT;
-        }
-        return query.total();
     }
 
     protected BackendColumnIterator queryByCond(Session session,

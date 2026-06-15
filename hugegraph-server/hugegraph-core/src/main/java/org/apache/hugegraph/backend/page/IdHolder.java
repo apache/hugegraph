@@ -35,17 +35,11 @@ import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 public abstract class IdHolder {
 
     protected final Query query;
-    private final boolean keepOrder;
     protected boolean exhausted;
 
     public IdHolder(Query query) {
-        this(query, false);
-    }
-
-    public IdHolder(Query query, boolean keepOrder) {
         E.checkNotNull(query, "query");
         this.query = query;
-        this.keepOrder = keepOrder;
         this.exhausted = false;
     }
 
@@ -54,10 +48,6 @@ public abstract class IdHolder {
     }
 
     public boolean keepOrder() {
-        return this.keepOrder;
-    }
-
-    public boolean continueEmptyPage() {
         return false;
     }
 
@@ -104,39 +94,13 @@ public abstract class IdHolder {
     public static class PagingIdHolder extends IdHolder {
 
         private final Function<ConditionQuery, PageIds> fetcher;
-        private final boolean continueEmptyPage;
-        private final boolean continuePartialPage;
 
         public PagingIdHolder(ConditionQuery query,
                               Function<ConditionQuery, PageIds> fetcher) {
-            this(query, fetcher, false);
-        }
-
-        public PagingIdHolder(ConditionQuery query,
-                              Function<ConditionQuery, PageIds> fetcher,
-                              boolean keepOrder) {
-            this(query, fetcher, keepOrder, false, false);
-        }
-
-        public PagingIdHolder(ConditionQuery query,
-                              Function<ConditionQuery, PageIds> fetcher,
-                              boolean keepOrder,
-                              boolean continueEmptyPage) {
-            this(query, fetcher, keepOrder, continueEmptyPage,
-                 continueEmptyPage);
-        }
-
-        public PagingIdHolder(ConditionQuery query,
-                              Function<ConditionQuery, PageIds> fetcher,
-                              boolean keepOrder,
-                              boolean continueEmptyPage,
-                              boolean continuePartialPage) {
-            super(query.copy(), keepOrder);
+            super(query.copy());
             E.checkArgument(query.paging(),
                             "Query '%s' must include page info", query);
             this.fetcher = fetcher;
-            this.continueEmptyPage = continueEmptyPage;
-            this.continuePartialPage = continuePartialPage;
         }
 
         @Override
@@ -155,21 +119,10 @@ public abstract class IdHolder {
 
             PageIds result = this.fetcher.apply((ConditionQuery) this.query);
             assert result != null;
-            if (result.empty() && !this.continueEmptyPage) {
-                this.exhausted = true;
-                return PageIds.EMPTY;
-            }
-            if (result.page() == null ||
-                (!this.continuePartialPage &&
-                 result.ids().size() < pageSize)) {
+            if (result.ids().size() < pageSize || result.page() == null) {
                 this.exhausted = true;
             }
             return result;
-        }
-
-        @Override
-        public boolean continueEmptyPage() {
-            return this.continueEmptyPage;
         }
 
         @Override
@@ -189,14 +142,7 @@ public abstract class IdHolder {
         public BatchIdHolder(ConditionQuery query,
                              Iterator<BackendEntry> entries,
                              Function<Long, Set<Id>> fetcher) {
-            this(query, entries, fetcher, false);
-        }
-
-        public BatchIdHolder(ConditionQuery query,
-                             Iterator<BackendEntry> entries,
-                             Function<Long, Set<Id>> fetcher,
-                             boolean keepOrder) {
-            super(query, keepOrder);
+            super(query);
             this.entries = entries;
             this.fetcher = fetcher;
             this.count = 0L;
