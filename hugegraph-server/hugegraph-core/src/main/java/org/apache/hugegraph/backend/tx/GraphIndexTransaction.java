@@ -665,7 +665,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                                           ConditionQuery query) {
         return this.store().provider().isHstore() &&
                indexLabel.indexType().isRange() &&
-               !query.noLimit();
+               (query.paging() || !query.noLimitAndOffset());
     }
 
     @Watched(prefix = "index")

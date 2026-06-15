@@ -55,7 +55,6 @@ import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.store.HgOwnerKey;
-import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
@@ -694,11 +693,8 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
     }
 
     static boolean shouldUseOrderedRangeScan(IdRangeQuery query) {
-        long limit = rangeScanLimit(query);
         return query.resultType().isRangeIndex() &&
-               query.paging() &&
-               limit > HgStoreClientConst.NO_LIMIT &&
-               limit <= HgStoreClientConfig.of().getNetKvScannerPageSize();
+               (query.paging() || !query.noLimitAndOffset());
     }
 
     static byte[] rangeIndexScanStart(IdRangeQuery query, byte[] start) {
