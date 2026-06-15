@@ -18,8 +18,12 @@
 package org.apache.hugegraph.store.client;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -28,6 +32,9 @@ import java.util.Set;
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.store.HgStoreSession;
+import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamReq.Builder;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -78,16 +85,91 @@ public class NodeTxSessionProxyTest {
     }
 
     @Test
-    public void testPrefetchOrderedRangeScanIteratorsDoesNotConsumeEntries() {
+    public void testMergeOrderedRangeScanIteratorsIsLazy() {
         TestIterator first = new TestIterator(3, 4);
         TestIterator second = new TestIterator(1, 2);
-        NodeTxSessionProxy.prefetchOrderedRangeScanIterators(
-                Arrays.asList(first, second));
 
-        Assert.assertTrue(first.hasNextCalls > 0);
-        Assert.assertTrue(second.hasNextCalls > 0);
+        HgKvIterator<HgKvEntry> iterator =
+                NodeTxSessionProxy.mergeOrderedRangeScanIterators(
+                        Arrays.asList(first, second), 0L);
+
+        Assert.assertEquals(0, first.hasNextCalls);
+        Assert.assertEquals(0, second.hasNextCalls);
         Assert.assertEquals(0, first.nextCalls);
         Assert.assertEquals(0, second.nextCalls);
+
+        Assert.assertEquals(1, key(iterator.next()));
+        Assert.assertEquals(2, key(iterator.next()));
+        Assert.assertEquals(3, key(iterator.next()));
+        Assert.assertEquals(4, key(iterator.next()));
+        Assert.assertFalse(iterator.hasNext());
+    }
+
+    @Test
+    public void testScanIteratorOrderedUsesStreamingBuildersLazily()
+            throws Exception {
+        HgStoreNodeManager manager = HgStoreNodeManager.getInstance();
+        HgStoreNodePartitioner oldPartitioner = manager.getNodePartitioner();
+        long firstNodeId = System.nanoTime();
+        long secondNodeId = firstNodeId + 1L;
+        RecordingPartitioner partitioner =
+                new RecordingPartitioner(firstNodeId, secondNodeId);
+        TestIterator firstIterator = new TestIterator(3, 4);
+        TestIterator secondIterator = new TestIterator(1, 2);
+        RecordingSession firstSession =
+                new RecordingSession(firstIterator);
+        RecordingSession secondSession =
+                new RecordingSession(secondIterator);
+        String graph = "graph-" + firstNodeId;
+        manager.addNode(graph, new RecordingStoreNode(firstNodeId,
+                                                      firstSession.proxy()));
+        manager.addNode(graph, new RecordingStoreNode(secondNodeId,
+                                                      secondSession.proxy()));
+        manager.setNodePartitioner(partitioner);
+        try {
+            NodeTxSessionProxy proxy = new NodeTxSessionProxy(graph, manager);
+            HgKvIterator<HgKvEntry> iterator = proxy.scanIteratorOrdered(
+                    "table", HgOwnerKey.of(keyBytes(9), keyBytes(1)),
+                    HgOwnerKey.of(keyBytes(9), keyBytes(5)), 5L, 123,
+                    keyBytes(7));
+
+            Assert.assertEquals(1, firstSession.builders.size());
+            Assert.assertEquals(1, secondSession.builders.size());
+            Assert.assertEquals(0, firstSession.rangeScanCalls);
+            Assert.assertEquals(0, secondSession.rangeScanCalls);
+            Assert.assertEquals(0, firstIterator.hasNextCalls);
+            Assert.assertEquals(0, secondIterator.hasNextCalls);
+            assertOrderedRangeBuilder(firstSession.builders.get(0), 5L, 123,
+                                      keyBytes(7));
+            assertOrderedRangeBuilder(secondSession.builders.get(0), 5L, 123,
+                                      keyBytes(7));
+
+            Assert.assertEquals(1, key(iterator.next()));
+            Assert.assertEquals(2, key(iterator.next()));
+            Assert.assertEquals(3, key(iterator.next()));
+            Assert.assertEquals(4, key(iterator.next()));
+            Assert.assertFalse(iterator.hasNext());
+        } finally {
+            restoreNodePartitioner(manager, oldPartitioner);
+        }
+    }
+
+    private static void assertOrderedRangeBuilder(Builder builder, long limit,
+                                                  int scanType,
+                                                  byte[] query) {
+        Assert.assertEquals(ScanMethod.RANGE, builder.getMethod());
+        Assert.assertEquals("table", builder.getTable());
+        Assert.assertEquals(limit, builder.getLimit());
+        Assert.assertEquals(scanType, builder.getScanType());
+        Assert.assertArrayEquals(query, builder.getQuery().toByteArray());
+    }
+
+    @Test
+    public void testMergeOrderedRangeScanIteratorsSortsPrefetchedSources() {
+        TestIterator first = new TestIterator(3, 4);
+        TestIterator second = new TestIterator(1, 2);
+        first.hasNext();
+        second.hasNext();
 
         HgKvIterator<HgKvEntry> iterator =
                 NodeTxSessionProxy.mergeOrderedRangeScanIterators(
@@ -225,10 +307,21 @@ public class NodeTxSessionProxyTest {
     private static final class RecordingPartitioner
             implements HgStoreNodePartitioner {
 
+        private final long firstNodeId;
+        private final long secondNodeId;
         private int byteRangeCalls;
         private int codeRangeCalls;
         private byte[] lastStartKey;
         private byte[] lastEndKey;
+
+        private RecordingPartitioner() {
+            this(1L, 2L);
+        }
+
+        private RecordingPartitioner(long firstNodeId, long secondNodeId) {
+            this.firstNodeId = firstNodeId;
+            this.secondNodeId = secondNodeId;
+        }
 
         @Override
         public int partition(HgNodePartitionerBuilder builder,
@@ -237,7 +330,7 @@ public class NodeTxSessionProxyTest {
             this.byteRangeCalls++;
             this.lastStartKey = startKey;
             this.lastEndKey = endKey;
-            builder.setPartitions(partitions());
+            builder.setPartitions(this.partitions());
             return 0;
         }
 
@@ -246,15 +339,81 @@ public class NodeTxSessionProxyTest {
                              String graphName, int startCode,
                              int endCode) {
             this.codeRangeCalls++;
-            builder.setPartitions(partitions());
+            builder.setPartitions(this.partitions());
             return 0;
         }
 
-        private static Set<HgNodePartition> partitions() {
+        private Set<HgNodePartition> partitions() {
             Set<HgNodePartition> partitions = new LinkedHashSet<>();
-            partitions.add(HgNodePartition.of(1L, 10, 10, 20));
-            partitions.add(HgNodePartition.of(2L, 30, 30, 40));
+            partitions.add(HgNodePartition.of(this.firstNodeId, 10, 10, 20));
+            partitions.add(HgNodePartition.of(this.secondNodeId, 30, 30, 40));
             return partitions;
+        }
+    }
+
+    private static final class RecordingStoreNode implements HgStoreNode {
+
+        private final Long nodeId;
+        private final HgStoreSession session;
+
+        private RecordingStoreNode(Long nodeId, HgStoreSession session) {
+            this.nodeId = nodeId;
+            this.session = session;
+        }
+
+        @Override
+        public Long getNodeId() {
+            return this.nodeId;
+        }
+
+        @Override
+        public String getAddress() {
+            return "127.0.0.1:" + this.nodeId;
+        }
+
+        @Override
+        public HgStoreSession openSession(String graphName) {
+            return this.session;
+        }
+    }
+
+    private static final class RecordingSession
+            implements InvocationHandler {
+
+        private final List<Builder> builders;
+        private final TestIterator iterator;
+        private int rangeScanCalls;
+
+        private RecordingSession(TestIterator iterator) {
+            this.builders = Collections.synchronizedList(new ArrayList<>());
+            this.iterator = iterator;
+            this.rangeScanCalls = 0;
+        }
+
+        private HgStoreSession proxy() {
+            return (HgStoreSession) Proxy.newProxyInstance(
+                    HgStoreSession.class.getClassLoader(),
+                    new Class[]{HgStoreSession.class}, this);
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if ("scanIterator".equals(method.getName())) {
+                if (args != null && args.length == 1 &&
+                    args[0] instanceof Builder) {
+                    this.builders.add(((Builder) args[0]).clone());
+                    return this.iterator;
+                }
+                this.rangeScanCalls++;
+                return this.iterator;
+            }
+            if ("isTx".equals(method.getName())) {
+                return false;
+            }
+            if ("toString".equals(method.getName())) {
+                return "RecordingSession";
+            }
+            throw new UnsupportedOperationException(method.toString());
         }
     }
 }

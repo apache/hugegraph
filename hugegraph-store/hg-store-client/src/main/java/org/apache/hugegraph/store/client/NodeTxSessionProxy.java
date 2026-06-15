@@ -54,11 +54,16 @@ import org.apache.hugegraph.store.client.query.QueryExecutor;
 import org.apache.hugegraph.store.client.util.HgAssert;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.client.util.HgStoreClientUtil;
+import org.apache.hugegraph.store.grpc.common.Header;
+import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq.Builder;
 import org.apache.hugegraph.store.query.StoreQueryParam;
 import org.apache.hugegraph.store.term.HgPair;
 import org.apache.hugegraph.store.term.HgTriple;
 import org.apache.hugegraph.structure.BaseElement;
+
+import com.google.protobuf.ByteString;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -497,11 +502,11 @@ public class NodeTxSessionProxy implements HgStoreSession {
                     .parallelStream()
                     .map(e -> this.getStoreNode(e.getNodeId())
                                   .openSession(this.graphName)
-                                  .scanIterator(e.getTable(), e.getKey(),
-                                                e.getEndKey(), limit,
-                                                scanType, query))
+                                  .scanIterator(this.orderedRangeScanBuilder(e,
+                                                                              limit,
+                                                                              scanType,
+                                                                              query)))
                     .collect(Collectors.toList());
-        prefetchOrderedRangeScanIterators(iterators);
         return this.toOrderedHgKvIteratorProxy(iterators, limit);
     }
 
@@ -677,16 +682,6 @@ public class NodeTxSessionProxy implements HgStoreSession {
         return new OrderedKvIterator(iterators, limit);
     }
 
-    static void prefetchOrderedRangeScanIterators(
-            List<? extends HgKvIterator> iteratorList) {
-        try {
-            iteratorList.parallelStream().forEach(iterator -> iterator.hasNext());
-        } catch (RuntimeException | Error e) {
-            iteratorList.forEach(HgKvIterator::close);
-            throw e;
-        }
-    }
-
     private HgKvIterator toHgKvIteratorProxy(List<HgKvIterator> iteratorList, long limit) {
         return mergeRangeScanIterators(iteratorList, limit);
     }
@@ -804,6 +799,29 @@ public class NodeTxSessionProxy implements HgStoreSession {
                                                     HgOwnerKey startKey,
                                                     HgOwnerKey endKey) {
         return this.toNodeTkvList(table, startKey, endKey);
+    }
+
+    private Builder orderedRangeScanBuilder(NodeTkv nodeTkv, long limit,
+                                            int scanType, byte[] query) {
+        long scanLimit = limit <= HgStoreClientConst.NO_LIMIT ?
+                         Integer.MAX_VALUE : limit;
+        return ScanStreamReq.newBuilder()
+                            .setHeader(Header.newBuilder()
+                                             .setGraph(this.graphName)
+                                             .build())
+                            .setMethod(ScanMethod.RANGE)
+                            .setTable(nodeTkv.getTable())
+                            .setStart(toByteString(nodeTkv.getKey().getKey()))
+                            .setEnd(toByteString(nodeTkv.getEndKey().getKey()))
+                            .setLimit(scanLimit)
+                            .setCode(nodeTkv.getKey().getKeyCode())
+                            .setScanType(scanType)
+                            .setQuery(toByteString(query));
+    }
+
+    private static ByteString toByteString(byte[] bytes) {
+        return ByteString.copyFrom(bytes != null ? bytes :
+                                   HgStoreClientConst.EMPTY_BYTES);
     }
 
     private List<NodeTkv> toNodeTkvList(String table, int startCode, int endCode) {
