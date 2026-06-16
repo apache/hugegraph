@@ -74,6 +74,9 @@ public final class CachedGraphTransaction extends GraphTransaction {
     /*
      * Same ref-counted lifecycle for the store event listener registered
      * on the BackendStoreProvider; see StoreListenerHolder.
+     *
+     * Replaces the removed protected static storeEventListenStatus field
+     * that previously tracked store-listen state on GraphTransaction.
      */
     private static final ConcurrentMap<String, StoreListenerHolder>
             STORE_EVENT_LISTENERS = new ConcurrentHashMap<>();
