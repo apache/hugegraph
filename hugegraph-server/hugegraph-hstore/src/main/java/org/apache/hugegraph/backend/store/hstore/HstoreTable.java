@@ -648,6 +648,11 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
 
     protected BackendColumnIterator queryByRange(Session session,
                                                  IdRangeQuery query) {
+        /*
+         * FIXME: multi-partition HStore range-index paging still needs a
+         * bounded ordered merge in the store-client layer before it can
+         * guarantee globally ordered pages.
+         */
         byte[] start = query.start().asBytes();
         byte[] end = query.end() == null ? null : query.end().asBytes();
         int type = query.inclusiveStart() ?
