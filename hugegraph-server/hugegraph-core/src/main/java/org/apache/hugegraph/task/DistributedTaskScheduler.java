@@ -308,8 +308,9 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             if (vertex == null) {
                 return null;
             }
-            HugeTask<V> result = HugeTask.fromVertex(vertex);
-            this.tx().removeVertex(vertex);
+            HugeTask<V> result = HugeTask.fromVertex(vertex, false);
+            this.deleteTaskResultFromTx(id);
+            this.tx().removeTaskVertex(vertex);
             return result;
         });
     }
@@ -629,7 +630,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                     // 1. start task can be from schedule() & cronSchedule()
                     // 2. recheck the status of task, in case one same task
                     // called by both methods at same time;
-                    HugeTask<Object> queryTask = task(this.task.id());
+                    HugeTask<Object> queryTask = task(this.task.id(), false);
                     if (queryTask != null &&
                         !TaskStatus.NEW.equals(queryTask.status())) {
                         return;

@@ -47,12 +47,25 @@ public interface TaskScheduler {
 
     <V> HugeTask<V> delete(Id id, boolean force);
 
-    <V> HugeTask<V> task(Id id);
+    default <V> HugeTask<V> task(Id id) {
+        return this.task(id, true);
+    }
 
-    <V> Iterator<HugeTask<V>> tasks(List<Id> ids);
+    <V> HugeTask<V> task(Id id, boolean withResult);
 
-    <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
-                                    long limit, String page);
+    default <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
+        return this.tasks(ids, true);
+    }
+
+    <V> Iterator<HugeTask<V>> tasks(List<Id> ids, boolean withResult);
+
+    default <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
+                                            long limit, String page) {
+        return this.tasks(status, limit, page, true);
+    }
+
+    <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
+                                    String page, boolean withResult);
 
     void init();
 

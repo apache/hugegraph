@@ -20,6 +20,7 @@ package org.apache.hugegraph.core;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.hugegraph.HugeException;
@@ -110,6 +111,79 @@ public class TaskCoreTest extends BaseCoreTest {
         scheduler.delete(id, false);
         iter = scheduler.tasks(null, 10, null);
         Assert.assertFalse(iter.hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            scheduler.task(id);
+        });
+    }
+
+    @Test
+    public void testTaskWithoutResult() throws TimeoutException {
+        HugeGraph graph = graph();
+        TaskScheduler scheduler = graph.taskScheduler();
+        CountDownLatch latch = new CountDownLatch(1);
+
+        TaskCallable<String> callable = new TaskCallable<String>() {
+            @Override
+            public String call() throws Exception {
+                latch.await();
+                return "metadata-result";
+            }
+
+            @Override
+            protected void done() {
+                scheduler.save(this.task());
+            }
+        };
+
+        Id id = IdGenerator.of(88889);
+        HugeTask<?> task = new HugeTask<>(id, null, callable);
+        task.type("test");
+        task.name("metadata-task");
+        scheduler.schedule(task);
+
+        try {
+            Whitebox.setInternalState(task, "result", "\"in-memory-result\"");
+
+            HugeTask<?> taskWithoutResult = scheduler.task(id, false);
+            Assert.assertEquals("metadata-task", taskWithoutResult.name());
+            Assert.assertNull(taskWithoutResult.result());
+
+            Iterator<HugeTask<Object>> iter = scheduler.tasks(ImmutableList.of(id),
+                                                              false);
+            Assert.assertTrue(iter.hasNext());
+            taskWithoutResult = iter.next();
+            Assert.assertEquals("metadata-task", taskWithoutResult.name());
+            Assert.assertNull(taskWithoutResult.result());
+            Assert.assertFalse(iter.hasNext());
+        } finally {
+            Whitebox.setInternalState(task, "result", null);
+            latch.countDown();
+        }
+
+        scheduler.waitUntilTaskCompleted(id, 10);
+
+        HugeTask<?> taskWithResult = scheduler.task(id, true);
+        Assert.assertEquals("\"metadata-result\"", taskWithResult.result());
+
+        HugeTask<?> taskWithoutResult = scheduler.task(id, false);
+        Assert.assertEquals("metadata-task", taskWithoutResult.name());
+        Assert.assertNull(taskWithoutResult.result());
+
+        Iterator<HugeTask<Object>> iter = scheduler.tasks(ImmutableList.of(id),
+                                                          false);
+        Assert.assertTrue(iter.hasNext());
+        taskWithoutResult = iter.next();
+        Assert.assertEquals("metadata-task", taskWithoutResult.name());
+        Assert.assertNull(taskWithoutResult.result());
+        Assert.assertFalse(iter.hasNext());
+
+        iter = scheduler.tasks(TaskStatus.SUCCESS, 10, null, false);
+        Assert.assertTrue(iter.hasNext());
+        taskWithoutResult = iter.next();
+        Assert.assertEquals("metadata-task", taskWithoutResult.name());
+        Assert.assertNull(taskWithoutResult.result());
+
+        scheduler.delete(id, false);
         Assert.assertThrows(NotFoundException.class, () -> {
             scheduler.task(id);
         });
