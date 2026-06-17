@@ -71,6 +71,31 @@ public interface PdProvider {
 
     void reportTask(MetaTask.Task task) throws PDException;
 
+    default Metapb.PartitionLease acquirePartitionLease(String graphName, int partitionId,
+                                                        long storeId,
+                                                        int leaseTtlSeconds) throws PDException {
+        return null;
+    }
+
+    default Metapb.PartitionLease renewPartitionLease(String graphName, int partitionId,
+                                                      long storeId, long leaseEpoch,
+                                                      int leaseTtlSeconds) throws PDException {
+        return null;
+    }
+
+    default void releasePartitionLease(String graphName, int partitionId, long storeId,
+                                       long leaseEpoch) throws PDException {
+    }
+
+    default String resolvePartitionBucket(String graphName, int partitionId, long storeId,
+                                          long leaseEpoch) {
+        return null;
+    }
+
+    default void updatePartitionBucket(String graphName, int partitionId, long leaseEpoch,
+                                       String bucket) {
+    }
+
     PDClient getPDClient();
 
     boolean updatePartitionLeader(String graphName, int partId, long leaderStoreId);

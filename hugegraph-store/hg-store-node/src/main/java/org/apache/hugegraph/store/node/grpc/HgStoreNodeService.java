@@ -88,6 +88,10 @@ public class HgStoreNodeService implements RaftTaskHandler {
             setRocksdbConfig(appConfig.getRocksdbConfig());
             setGrpcAddress(appConfig.getStoreServerAddress());
             setLabels(appConfig.getLabelConfig().getLabel());
+            setPartitionLeaseEnabled(appConfig.isPartitionLeaseEnabled());
+            setPartitionLeaseTtlSeconds(appConfig.getPartitionLeaseTtlSeconds());
+            setPartitionLeaseRenewIntervalSeconds(
+                    appConfig.getPartitionLeaseRenewIntervalSeconds());
             setRaftOptions(new RaftOptions() {{
                 setMetrics(appConfig.getRaft().isMetrics());
                 setRpcDefaultTimeout(appConfig.getRaft().getRpcTimeOut());
@@ -132,6 +136,10 @@ public class HgStoreNodeService implements RaftTaskHandler {
 
     public List<Integer> getGraphLeaderPartitionIds(String graphName) {
         return storeEngine.getPartitionManager().getLeaderPartitionIds(graphName);
+    }
+
+    public Map<String, Object> getPartitionLeaseMetrics() {
+        return storeEngine.getPartitionLeaseMetrics();
     }
 
     /**

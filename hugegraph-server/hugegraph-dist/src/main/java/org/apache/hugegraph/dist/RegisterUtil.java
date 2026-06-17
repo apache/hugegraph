@@ -114,13 +114,6 @@ public class RegisterUtil {
         BackendProviderFactory.register("rocksdbsst",
                                         "org.apache.hugegraph.backend.store.rocksdbsst" +
                                         ".RocksDBSstStoreProvider");
-        // Register rocksdb-cloud (S3-backed) backend
-        OptionSpace.register("rocksdb.cloud",
-                             "org.apache.hugegraph.backend.store.rocksdbcloud" +
-                             ".RocksDBCloudOptions");
-        BackendProviderFactory.register("rocksdb-cloud",
-                                        "org.apache.hugegraph.backend.store.rocksdbcloud" +
-                                        ".RocksDBCloudStoreProvider");
     }
 
     public static void registerHstore() {

@@ -36,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
         KvServiceTest.class,
         LogServiceTest.class,
         PartitionServiceTest.class,
+        PartitionLeaseServiceTest.class,
         StoreMonitorDataServiceTest.class,
         StoreServiceTest.class,
         TaskScheduleServiceTest.class,

@@ -79,6 +79,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     final AtomicBoolean shutdown;
     final String tempSuffix = "_temp_";
     private final transient String graphName;
+    private final transient String dbDataPath;
     private final HugeConfig hugeConfig;
     private final ReentrantReadWriteLock cfHandleLock;
     private final Map<String, ColumnFamilyHandle> tables;
@@ -93,6 +94,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     public RocksDBSession(HugeConfig hugeConfig, String dbDataPath, String graphName, long version) {
         this.hugeConfig = hugeConfig;
         this.graphName = graphName;
+        this.dbDataPath = dbDataPath;
         this.cfHandleLock = new ReentrantReadWriteLock();
         this.tables = new ConcurrentHashMap<>();
         this.refCount = new AtomicInteger(1);
@@ -106,6 +108,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     private RocksDBSession(RocksDBSession origin) {
         this.hugeConfig = origin.hugeConfig;
         this.graphName = origin.graphName;
+        this.dbDataPath = origin.dbDataPath;
         this.cfHandleLock = origin.cfHandleLock;
         this.tables = origin.tables;
         this.dbPath = origin.dbPath;
@@ -617,12 +620,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         }
     }
 
-    void shutdown() {
-        if (!shutdown.compareAndSet(false, true)) {
-            return;
-        }
-        log.info("shutdown db {}, path is {} ", getGraphName(), getDbPath());
-
+    private void closeCurrentDbResources(boolean syncWal, boolean closeSharedOptions) {
         cfHandleLock.writeLock().lock();
         try {
             this.tables.forEach((k, v) -> {
@@ -631,15 +629,17 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
             this.tables.clear();
 
             if (rocksDB != null) {
-                try {
-                    this.rocksDB.syncWal();
-                } catch (RocksDBException e) {
-                    log.warn("exception ", e);
+                if (syncWal) {
+                    try {
+                        this.rocksDB.syncWal();
+                    } catch (RocksDBException e) {
+                        log.warn("exception ", e);
+                    }
                 }
                 this.rocksDB.close();
             }
             rocksDB = null;
-            if (dbOptions != null) {
+            if (closeSharedOptions && dbOptions != null) {
                 this.dbOptions.close();
                 this.writeOptions.close();
                 this.rocksDbStats.close();
@@ -648,6 +648,20 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         } finally {
             cfHandleLock.writeLock().unlock();
         }
+    }
+
+    void shutdown() {
+        if (!shutdown.compareAndSet(false, true)) {
+            return;
+        }
+        log.info("shutdown db {}, path is {} ", getGraphName(), getDbPath());
+        closeCurrentDbResources(true, true);
+    }
+
+    protected void reload(long version) {
+        log.warn("reload db {}, path is {}", getGraphName(), getDbPath());
+        closeCurrentDbResources(false, false);
+        openRocksDB(this.dbDataPath, version);
     }
 
     public SessionOperator sessionOp() {

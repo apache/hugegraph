@@ -51,6 +51,29 @@ app:
   data-path: ./storage
   #raft-path: ./storage
 
+rocksdb:
+  # Optional: enable periodic S3 sync for each store node's local RocksDB
+  cloud_enabled: false
+  cloud_s3_bucket: hugegraph-rocksdb
+  cloud_s3_endpoint: http://minio:9000
+  cloud_s3_region: us-east-1
+  cloud_s3_access_key: minioadmin
+  cloud_s3_secret_key: minioadmin
+  cloud_s3_path_style: true
+  # Use a unique prefix per store node, e.g. store0, store1, store2
+  cloud_s3_object_prefix: store0
+  cloud_sync_interval_seconds: 60
+  cloud_sync_incremental: true
+  cloud_sync_on_write_count: 100000
+
+store:
+  # Enable PD partition lease write fencing (distributed rocksdb-cloud mode)
+  partition-lease-enabled: false
+  # Lease ttl in seconds
+  partition-lease-ttl-seconds: 30
+  # Lease renew interval in seconds
+  partition-lease-renew-interval-seconds: 20
+
 spring:
   application:
     name: store-node-grpc-server

@@ -63,4 +63,9 @@ public class HgStoreMetricsController {
         return nodeService.getNodeMetrics();
     }
 
+    @GetMapping("leases")
+    public Map<String, Object> getLeaseMetrics() {
+        return nodeService.getPartitionLeaseMetrics();
+    }
+
 }

@@ -42,6 +42,9 @@ public class MetadataKeyHelper {
     private static final String TASK_MOVE = "TASK_MOVE";
     private static final String TASK_BUILD_INDEX = "TASK_BI";
     private static final String LOG_RECORD = "LOG_RECORD";
+    private static final String PARTITION_LEASE = "PARTITION_LEASE";
+    private static final String PARTITION_CHECKPOINT = "PARTITION_CHECKPOINT";
+    private static final String PARTITION_BUCKET = "PARTITION_BUCKET";
 
     private static final String QUEUE = "QUEUE";
 
@@ -111,6 +114,40 @@ public class MetadataKeyHelper {
                                         .append(GRAPH).append(DELIMITER)
                                         .append(graphName).append(DELIMITER)
                                         .append(PARTITION).append(DELIMITER)
+                                        .append(partId)
+                                        .toString();
+        return key.getBytes(Charset.defaultCharset());
+    }
+
+    public static byte[] getPartitionLeaseKey(final String graphName, final int partId) {
+        String key = StringBuilderHelper.get()
+                                        .append(PARTITION_LEASE).append(DELIMITER)
+                                        .append(graphName).append(DELIMITER)
+                                        .append(partId)
+                                        .toString();
+        return key.getBytes(Charset.defaultCharset());
+    }
+
+    public static byte[] getPartitionLeasePrefix() {
+        String key = StringBuilderHelper.get()
+                                        .append(PARTITION_LEASE).append(DELIMITER)
+                                        .toString();
+        return key.getBytes(Charset.defaultCharset());
+    }
+
+    public static byte[] getPartitionCheckpointKey(final String graphName, final int partId) {
+        String key = StringBuilderHelper.get()
+                                        .append(PARTITION_CHECKPOINT).append(DELIMITER)
+                                        .append(graphName).append(DELIMITER)
+                                        .append(partId)
+                                        .toString();
+        return key.getBytes(Charset.defaultCharset());
+    }
+
+    public static byte[] getPartitionBucketKey(final String graphName, final int partId) {
+        String key = StringBuilderHelper.get()
+                                        .append(PARTITION_BUCKET).append(DELIMITER)
+                                        .append(graphName).append(DELIMITER)
                                         .append(partId)
                                         .toString();
         return key.getBytes(Charset.defaultCharset());

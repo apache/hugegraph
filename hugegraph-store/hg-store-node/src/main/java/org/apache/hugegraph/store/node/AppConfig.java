@@ -65,6 +65,16 @@ public class AppConfig {
     // Built-in pd mode, for standalone deployment
     @Value("${app.fake-pd: false}")
     private boolean fakePd;
+
+    @Value("${store.partition-lease-enabled:false}")
+    private boolean partitionLeaseEnabled;
+
+    @Value("${store.partition-lease-ttl-seconds:30}")
+    private int partitionLeaseTtlSeconds;
+
+    @Value("${store.partition-lease-renew-interval-seconds:20}")
+    private int partitionLeaseRenewIntervalSeconds;
+
     @Autowired
     private Raft raft;
     @Autowired

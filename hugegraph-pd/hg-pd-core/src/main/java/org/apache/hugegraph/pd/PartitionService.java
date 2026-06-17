@@ -25,6 +25,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.commons.collections4.SetUtils;
@@ -46,8 +50,11 @@ import org.apache.hugegraph.pd.grpc.pulse.PartitionKeyRange;
 import org.apache.hugegraph.pd.grpc.pulse.SplitPartition;
 import org.apache.hugegraph.pd.grpc.pulse.TransferLeader;
 import org.apache.hugegraph.pd.meta.MetadataFactory;
+import org.apache.hugegraph.pd.meta.PartitionBucketRecord;
 import org.apache.hugegraph.pd.meta.PartitionMeta;
+import org.apache.hugegraph.pd.meta.StoreInfoMeta;
 import org.apache.hugegraph.pd.meta.TaskInfoMeta;
+import org.apache.hugegraph.pd.raft.RaftEngine;
 import org.apache.hugegraph.pd.raft.RaftStateListener;
 
 import lombok.extern.slf4j.Slf4j;
@@ -59,26 +66,275 @@ import lombok.extern.slf4j.Slf4j;
 public class PartitionService implements RaftStateListener {
 
     private final long Partition_Version_Skip = 0x0F;
+    private static final int DEFAULT_LEASE_TTL_SECONDS = 30;
+    private static final long LEASE_CLEANUP_INTERVAL_MS = 5000L;
+    private static final long LEASE_RENEW_WINDOW_MS = 15000L;
+    private static final String BUCKET_LAYOUT_PER_STORE = "per_store";
+    private static final String BUCKET_LAYOUT_PER_STORE_MIGRATING = "per_store_migrating";
     private final StoreNodeService storeService;
     private PartitionMeta partitionMeta;
+    private final StoreInfoMeta storeInfoMeta;
     private PDConfig pdConfig;
     // Partition command listening
     private List<PartitionInstructionListener> instructionListeners;
 
     // Partition status listeners
     private List<PartitionStatusListener> statusListeners;
+    private final ScheduledExecutorService leaseCleanupScheduler;
+    private ScheduledFuture<?> leaseCleanupFuture;
 
     public PartitionService(PDConfig config, StoreNodeService storeService) {
         this.pdConfig = config;
         this.storeService = storeService;
         partitionMeta = MetadataFactory.newPartitionMeta(config);
+        storeInfoMeta = MetadataFactory.newStoreInfoMeta(config);
         instructionListeners =
                 Collections.synchronizedList(new ArrayList<PartitionInstructionListener>());
         statusListeners = Collections.synchronizedList(new ArrayList<PartitionStatusListener>());
+        leaseCleanupScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "pd-lease-cleanup");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    public synchronized Metapb.PartitionLease acquirePartitionLease(String graphName,
+                                                                    int partitionId,
+                                                                    long storeId,
+                                                                    int ttlSeconds)
+            throws PDException {
+        this.ensurePartitionAndStore(graphName, partitionId, storeId);
+
+        long now = System.currentTimeMillis();
+        long expireAt = now + ttlToMs(ttlSeconds);
+        Metapb.PartitionLease current =
+                storeInfoMeta.getPartitionLease(graphName, partitionId);
+
+        if (current != null && !leaseExpired(current, now) &&
+            current.getLeaseOwnerStoreId() != storeId) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("partition lease conflict %s/%d owned by %d",
+                                                graphName, partitionId,
+                                                current.getLeaseOwnerStoreId()));
+        }
+
+        long epoch = current == null ? 1L : current.getLeaseEpoch();
+        if (current == null || leaseExpired(current, now)) {
+            epoch = epoch + (current == null ? 0L : 1L);
+        }
+
+        Metapb.PartitionLease lease = Metapb.PartitionLease.newBuilder()
+                                                           .setGraphName(graphName)
+                                                           .setPartitionId(partitionId)
+                                                           .setLeaseOwnerStoreId(storeId)
+                                                           .setLeaseEpoch(epoch)
+                                                           .setLeaseExpireTimestamp(expireAt)
+                                                           .build();
+        storeInfoMeta.updatePartitionLease(lease);
+        return lease;
+    }
+
+    public synchronized Metapb.PartitionLease renewPartitionLease(String graphName,
+                                                                  int partitionId,
+                                                                  long storeId,
+                                                                  long leaseEpoch,
+                                                                  int ttlSeconds)
+            throws PDException {
+        this.ensurePartitionAndStore(graphName, partitionId, storeId);
+
+        long now = System.currentTimeMillis();
+        Metapb.PartitionLease current =
+                storeInfoMeta.getPartitionLease(graphName, partitionId);
+        if (current == null) {
+            throw new PDException(Pdpb.ErrorType.LEASE_NOT_FOUND_VALUE,
+                                  String.format("partition lease not found %s/%d",
+                                                graphName, partitionId));
+        }
+
+        if (current.getLeaseOwnerStoreId() != storeId ||
+            current.getLeaseEpoch() != leaseEpoch ||
+            leaseExpired(current, now)) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("partition lease stale for %s/%d", graphName,
+                                                partitionId));
+        }
+        long remainingMs = current.getLeaseExpireTimestamp() - now;
+        if (remainingMs > LEASE_RENEW_WINDOW_MS) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("partition lease renew is too early for %s/%d",
+                                                graphName, partitionId));
+        }
+
+        Metapb.PartitionLease renewed = Metapb.PartitionLease.newBuilder(current)
+                                                             .setLeaseExpireTimestamp(
+                                                                     now + ttlToMs(ttlSeconds))
+                                                             .build();
+        storeInfoMeta.updatePartitionLease(renewed);
+        return renewed;
+    }
+
+    public synchronized void releasePartitionLease(String graphName, int partitionId,
+                                                   long storeId,
+                                                   long leaseEpoch) throws PDException {
+        this.ensurePartitionAndStore(graphName, partitionId, storeId);
+
+        Metapb.PartitionLease current =
+                storeInfoMeta.getPartitionLease(graphName, partitionId);
+        if (current == null) {
+            throw new PDException(Pdpb.ErrorType.LEASE_NOT_FOUND_VALUE,
+                                  String.format("partition lease not found %s/%d",
+                                                graphName, partitionId));
+        }
+        if (current.getLeaseOwnerStoreId() != storeId ||
+            current.getLeaseEpoch() != leaseEpoch) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("partition lease release conflict %s/%d",
+                                                graphName, partitionId));
+        }
+        storeInfoMeta.removePartitionLease(graphName, partitionId);
+        storeInfoMeta.removePartitionBucketRecord(graphName, partitionId);
+    }
+
+    public synchronized String resolvePartitionBucket(String graphName,
+                                                      int partitionId,
+                                                      long storeId,
+                                                      long leaseEpoch) throws PDException {
+        this.ensurePartitionAndStore(graphName, partitionId, storeId);
+
+        Metapb.PartitionLease lease = storeInfoMeta.getPartitionLease(graphName, partitionId);
+        long now = System.currentTimeMillis();
+        if (lease == null) {
+            throw new PDException(Pdpb.ErrorType.LEASE_NOT_FOUND_VALUE,
+                                  String.format("partition lease not found %s/%d", graphName,
+                                                partitionId));
+        }
+        if (lease.getLeaseOwnerStoreId() != storeId ||
+            lease.getLeaseEpoch() != leaseEpoch ||
+            leaseExpired(lease, now)) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("bucket resolve fenced by lease %s/%d",
+                                                graphName, partitionId));
+        }
+
+        String bucket = targetBucket(storeId);
+        PartitionBucketRecord current =
+                storeInfoMeta.getPartitionBucketRecord(graphName, partitionId);
+
+        if (current == null ||
+            current.getOwnerStoreId() != storeId ||
+            current.getLeaseEpoch() != leaseEpoch ||
+            !bucket.equals(current.getBucket())) {
+            PartitionBucketRecord record = new PartitionBucketRecord(graphName,
+                                                                     partitionId,
+                                                                     storeId,
+                                                                     leaseEpoch,
+                                                                     bucket,
+                                                                     now);
+            storeInfoMeta.updatePartitionBucketRecord(record);
+        }
+        return bucket;
+    }
+
+    public synchronized PartitionBucketRecord getPartitionBucketRecord(String graphName,
+                                                                       int partitionId)
+            throws PDException {
+        this.ensurePartitionExists(graphName, partitionId);
+        return storeInfoMeta.getPartitionBucketRecord(graphName, partitionId);
+    }
+
+    public Metapb.PartitionCheckpoint getPartitionCheckpoint(String graphName,
+                                                             int partitionId) throws PDException {
+        this.ensurePartitionExists(graphName, partitionId);
+        Metapb.PartitionCheckpoint checkpoint =
+                storeInfoMeta.getPartitionCheckpoint(graphName, partitionId);
+        if (checkpoint == null) {
+            throw new PDException(Pdpb.ErrorType.CHECKPOINT_NOT_FOUND_VALUE,
+                                  String.format("checkpoint not found %s/%d", graphName,
+                                                partitionId));
+        }
+        return checkpoint;
+    }
+
+    public synchronized Metapb.PartitionCheckpoint updatePartitionCheckpoint(
+            Metapb.PartitionCheckpoint checkpoint,
+            long storeId,
+            long leaseEpoch) throws PDException {
+        String graphName = checkpoint.getGraphName();
+        int partitionId = checkpoint.getPartitionId();
+
+        this.ensurePartitionAndStore(graphName, partitionId, storeId);
+
+        Metapb.PartitionLease lease = storeInfoMeta.getPartitionLease(graphName, partitionId);
+        long now = System.currentTimeMillis();
+        if (lease == null) {
+            throw new PDException(Pdpb.ErrorType.LEASE_NOT_FOUND_VALUE,
+                                  String.format("partition lease not found %s/%d", graphName,
+                                                partitionId));
+        }
+        if (lease.getLeaseOwnerStoreId() != storeId ||
+            lease.getLeaseEpoch() != leaseEpoch ||
+            leaseExpired(lease, now)) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("checkpoint update fenced by lease %s/%d",
+                                                graphName, partitionId));
+        }
+
+        Metapb.PartitionCheckpoint current =
+                storeInfoMeta.getPartitionCheckpoint(graphName, partitionId);
+        if (current != null && checkpoint.getCheckpointEpoch() < current.getCheckpointEpoch()) {
+            throw new PDException(Pdpb.ErrorType.LEASE_CONFLICT_VALUE,
+                                  String.format("checkpoint epoch rollback %s/%d", graphName,
+                                                partitionId));
+        }
+
+        Metapb.PartitionCheckpoint toSave = Metapb.PartitionCheckpoint
+                .newBuilder(checkpoint)
+                .setCheckpointTimestamp(now)
+                .build();
+        storeInfoMeta.updatePartitionCheckpoint(toSave);
+        return toSave;
+    }
+
+    private void ensurePartitionAndStore(String graphName, int partitionId,
+                                         long storeId) throws PDException {
+        ensurePartitionExists(graphName, partitionId);
+        storeService.getStore(storeId);
+    }
+
+    private void ensurePartitionExists(String graphName, int partitionId) throws PDException {
+        Metapb.Partition partition = partitionMeta.getPartitionById(graphName, partitionId);
+        if (partition == null) {
+            throw new PDException(Pdpb.ErrorType.NOT_FOUND_VALUE,
+                                  String.format("partition not found %s/%d", graphName,
+                                                partitionId));
+        }
+    }
+
+    private static boolean leaseExpired(Metapb.PartitionLease lease, long now) {
+        return lease.getLeaseExpireTimestamp() <= now;
+    }
+
+    private static long ttlToMs(int ttlSeconds) {
+        int ttl = ttlSeconds > 0 ? ttlSeconds : DEFAULT_LEASE_TTL_SECONDS;
+        return ttl * 1000L;
+    }
+
+    private String targetBucket(long storeId) {
+        String layout = pdConfig.getStore().getCloudBucketLayout();
+        if (layout == null) {
+            return pdConfig.getStore().getCloudSharedBucket();
+        }
+        String normalized = layout.trim().toLowerCase();
+        if (BUCKET_LAYOUT_PER_STORE.equals(normalized) ||
+            BUCKET_LAYOUT_PER_STORE_MIGRATING.equals(normalized)) {
+            return pdConfig.getStore().getPerStoreBucketPrefix() + storeId;
+        }
+        return pdConfig.getStore().getCloudSharedBucket();
     }
 
     public void init() throws PDException {
         partitionMeta.init();
+        restartLeaseCleanupTask();
         storeService.addStatusListener(new StoreStatusListener() {
             @Override
             public void onStoreStatusChanged(Metapb.Store store, Metapb.StoreState old,
@@ -1558,8 +1814,43 @@ public class PartitionService implements RaftStateListener {
         log.info("Partition service reload cache from rocksdb, due to leader change");
         try {
             partitionMeta.reload();
+            restartLeaseCleanupTask();
         } catch (PDException e) {
             log.error("Partition meta reload exception {}", e);
+        }
+    }
+
+    private synchronized void restartLeaseCleanupTask() {
+        if (leaseCleanupFuture != null) {
+            leaseCleanupFuture.cancel(false);
+            leaseCleanupFuture = null;
+        }
+        if (!RaftEngine.getInstance().isLeader()) {
+            return;
+        }
+        leaseCleanupFuture = leaseCleanupScheduler.scheduleAtFixedRate(() -> {
+            try {
+                cleanupExpiredLeases();
+            } catch (Throwable t) {
+                log.warn("Lease cleanup task failed", t);
+            }
+        }, LEASE_CLEANUP_INTERVAL_MS, LEASE_CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void cleanupExpiredLeases() throws PDException {
+        if (!RaftEngine.getInstance().isLeader()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        for (Metapb.PartitionLease lease : storeInfoMeta.getPartitionLeases()) {
+            if (!leaseExpired(lease, now)) {
+                continue;
+            }
+            storeInfoMeta.removePartitionLease(lease.getGraphName(), lease.getPartitionId());
+            storeInfoMeta.removePartitionBucketRecord(lease.getGraphName(), lease.getPartitionId());
+            log.info("Removed expired lease {}/{} epoch={} owner={}",
+                     lease.getGraphName(), lease.getPartitionId(),
+                     lease.getLeaseEpoch(), lease.getLeaseOwnerStoreId());
         }
     }
 

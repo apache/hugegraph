@@ -21,10 +21,8 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -95,10 +93,8 @@ import org.springframework.util.CollectionUtils;
 
 import org.apache.hugegraph.pd.watch.ChangeType;
 
-import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
-import com.alipay.sofa.jraft.entity.PeerId;
 
 import io.grpc.ManagedChannel;
 import io.grpc.stub.StreamObserver;
@@ -1966,6 +1962,128 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
         }
 
         observer.onNext(builder.build());
+        observer.onCompleted();
+    }
+
+    @Override
+    public void acquirePartitionLease(Pdpb.AcquirePartitionLeaseRequest request,
+                                      StreamObserver<Pdpb.AcquirePartitionLeaseResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getAcquirePartitionLeaseMethod(), request, observer);
+            return;
+        }
+        Pdpb.AcquirePartitionLeaseResponse response;
+        try {
+            Metapb.PartitionLease lease = partitionService.acquirePartitionLease(
+                    request.getGraphName(), request.getPartitionId(), request.getStoreId(),
+                    request.getLeaseTtlSeconds());
+            response = Pdpb.AcquirePartitionLeaseResponse.newBuilder()
+                                                         .setHeader(okHeader)
+                                                         .setLease(lease)
+                                                         .build();
+        } catch (PDException e) {
+            response = Pdpb.AcquirePartitionLeaseResponse.newBuilder()
+                                                         .setHeader(newErrorHeader(e))
+                                                         .build();
+        }
+        observer.onNext(response);
+        observer.onCompleted();
+    }
+
+    @Override
+    public void renewPartitionLease(Pdpb.RenewPartitionLeaseRequest request,
+                                    StreamObserver<Pdpb.RenewPartitionLeaseResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getRenewPartitionLeaseMethod(), request, observer);
+            return;
+        }
+        Pdpb.RenewPartitionLeaseResponse response;
+        try {
+            Metapb.PartitionLease lease = partitionService.renewPartitionLease(
+                    request.getGraphName(), request.getPartitionId(), request.getStoreId(),
+                    request.getLeaseEpoch(), request.getLeaseTtlSeconds());
+            response = Pdpb.RenewPartitionLeaseResponse.newBuilder()
+                                                       .setHeader(okHeader)
+                                                       .setLease(lease)
+                                                       .build();
+        } catch (PDException e) {
+            response = Pdpb.RenewPartitionLeaseResponse.newBuilder()
+                                                       .setHeader(newErrorHeader(e))
+                                                       .build();
+        }
+        observer.onNext(response);
+        observer.onCompleted();
+    }
+
+    @Override
+    public void releasePartitionLease(Pdpb.ReleasePartitionLeaseRequest request,
+                                      StreamObserver<Pdpb.ReleasePartitionLeaseResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getReleasePartitionLeaseMethod(), request, observer);
+            return;
+        }
+        Pdpb.ReleasePartitionLeaseResponse response;
+        try {
+            partitionService.releasePartitionLease(request.getGraphName(), request.getPartitionId(),
+                                                  request.getStoreId(), request.getLeaseEpoch());
+            response = Pdpb.ReleasePartitionLeaseResponse.newBuilder()
+                                                         .setHeader(okHeader)
+                                                         .build();
+        } catch (PDException e) {
+            response = Pdpb.ReleasePartitionLeaseResponse.newBuilder()
+                                                         .setHeader(newErrorHeader(e))
+                                                         .build();
+        }
+        observer.onNext(response);
+        observer.onCompleted();
+    }
+
+    @Override
+    public void getPartitionCheckpoint(Pdpb.GetPartitionCheckpointRequest request,
+                                       StreamObserver<Pdpb.GetPartitionCheckpointResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getGetPartitionCheckpointMethod(), request, observer);
+            return;
+        }
+        Pdpb.GetPartitionCheckpointResponse response;
+        try {
+            Metapb.PartitionCheckpoint checkpoint =
+                    partitionService.getPartitionCheckpoint(request.getGraphName(),
+                                                           request.getPartitionId());
+            response = Pdpb.GetPartitionCheckpointResponse.newBuilder()
+                                                          .setHeader(okHeader)
+                                                          .setCheckpoint(checkpoint)
+                                                          .build();
+        } catch (PDException e) {
+            response = Pdpb.GetPartitionCheckpointResponse.newBuilder()
+                                                          .setHeader(newErrorHeader(e))
+                                                          .build();
+        }
+        observer.onNext(response);
+        observer.onCompleted();
+    }
+
+    @Override
+    public void updatePartitionCheckpoint(Pdpb.UpdatePartitionCheckpointRequest request,
+                                          StreamObserver<Pdpb.UpdatePartitionCheckpointResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getUpdatePartitionCheckpointMethod(), request, observer);
+            return;
+        }
+        Pdpb.UpdatePartitionCheckpointResponse response;
+        try {
+            Metapb.PartitionCheckpoint checkpoint = partitionService.updatePartitionCheckpoint(
+                    request.getCheckpoint(), request.getStoreId(), request.getLeaseEpoch());
+            response = Pdpb.UpdatePartitionCheckpointResponse.newBuilder()
+                                                             .setHeader(okHeader)
+                                                             .setCheckpoint(checkpoint)
+                                                             .build();
+        } catch (PDException e) {
+            response = Pdpb.UpdatePartitionCheckpointResponse.newBuilder()
+                                                             .setHeader(newErrorHeader(e))
+                                                             .build();
+        }
+        observer.onNext(response);
         observer.onCompleted();
     }
 

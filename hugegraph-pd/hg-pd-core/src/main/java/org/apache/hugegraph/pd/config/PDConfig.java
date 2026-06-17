@@ -182,6 +182,15 @@ public class PDConfig {
         @Value("${store.monitor_data_retention: 1 day}")
         private String monitorDataRetention = "1 day";
 
+        @Value("${store.cloud.bucket-layout:shared}")
+        private String cloudBucketLayout = "shared";
+
+        @Value("${store.cloud.shared-bucket:hugegraph-shared}")
+        private String cloudSharedBucket = "hugegraph-shared";
+
+        @Value("${store.cloud.per-store-bucket-prefix:hugegraph-store-}")
+        private String perStoreBucketPrefix = "hugegraph-store-";
+
         /**
          * interval -> seconds.
          * minimum value is 1 seconds.

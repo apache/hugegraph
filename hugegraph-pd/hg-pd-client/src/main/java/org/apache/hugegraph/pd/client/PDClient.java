@@ -17,8 +17,6 @@
 
 package org.apache.hugegraph.pd.client;
 
-import static org.apache.hugegraph.pd.watch.NodeEvent.EventType.NODE_PD_LEADER_CHANGE;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -634,6 +632,50 @@ public class PDClient {
             }
         }
         return partShard;
+    }
+
+    public Metapb.PartitionLease acquirePartitionLease(String graphName, int partitionId,
+                                                       long storeId,
+                                                       int leaseTtlSeconds) throws PDException {
+        Pdpb.AcquirePartitionLeaseRequest request = Pdpb.AcquirePartitionLeaseRequest.newBuilder()
+                                                                                     .setHeader(header)
+                                                                                     .setGraphName(graphName)
+                                                                                     .setPartitionId(partitionId)
+                                                                                     .setStoreId(storeId)
+                                                                                     .setLeaseTtlSeconds(leaseTtlSeconds)
+                                                                                     .build();
+        Pdpb.AcquirePartitionLeaseResponse response = getStub().acquirePartitionLease(request);
+        handleResponseError(response.getHeader());
+        return response.getLease();
+    }
+
+    public Metapb.PartitionLease renewPartitionLease(String graphName, int partitionId,
+                                                     long storeId, long leaseEpoch,
+                                                     int leaseTtlSeconds) throws PDException {
+        Pdpb.RenewPartitionLeaseRequest request = Pdpb.RenewPartitionLeaseRequest.newBuilder()
+                                                                                  .setHeader(header)
+                                                                                  .setGraphName(graphName)
+                                                                                  .setPartitionId(partitionId)
+                                                                                  .setStoreId(storeId)
+                                                                                  .setLeaseEpoch(leaseEpoch)
+                                                                                  .setLeaseTtlSeconds(leaseTtlSeconds)
+                                                                                  .build();
+        Pdpb.RenewPartitionLeaseResponse response = getStub().renewPartitionLease(request);
+        handleResponseError(response.getHeader());
+        return response.getLease();
+    }
+
+    public void releasePartitionLease(String graphName, int partitionId, long storeId,
+                                      long leaseEpoch) throws PDException {
+        Pdpb.ReleasePartitionLeaseRequest request = Pdpb.ReleasePartitionLeaseRequest.newBuilder()
+                                                                                      .setHeader(header)
+                                                                                      .setGraphName(graphName)
+                                                                                      .setPartitionId(partitionId)
+                                                                                      .setStoreId(storeId)
+                                                                                      .setLeaseEpoch(leaseEpoch)
+                                                                                      .build();
+        Pdpb.ReleasePartitionLeaseResponse response = getStub().releasePartitionLease(request);
+        handleResponseError(response.getHeader());
     }
 
     public ShardGroup getShardGroup(int partId) throws PDException {

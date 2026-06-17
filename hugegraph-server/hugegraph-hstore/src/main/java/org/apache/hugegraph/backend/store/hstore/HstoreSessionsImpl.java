@@ -117,6 +117,9 @@ public class HstoreSessionsImpl extends HstoreSessions {
                     defaultPdClient = PDClient.create(pdConfig);
                     hgStoreClient = HgStoreClient.create(defaultPdClient);
                     initializedNode = Boolean.TRUE;
+
+                    // Check if cloud sync is configured
+                    HstoreCloudConfigUtil.logCloudConfigIfEnabled(config);
                 }
             }
         }
