@@ -25,6 +25,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.apache.commons.io.FileUtils;
@@ -33,7 +36,9 @@ import org.apache.hugegraph.meta.lock.EtcdDistributedLock;
 import org.apache.hugegraph.meta.lock.LockResult;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.collection.CollectionFactory;
+import org.slf4j.Logger;
 
 import com.google.common.base.Strings;
 
@@ -42,6 +47,7 @@ import io.etcd.jetcd.Client;
 import io.etcd.jetcd.ClientBuilder;
 import io.etcd.jetcd.KV;
 import io.etcd.jetcd.KeyValue;
+import io.etcd.jetcd.Watch;
 import io.etcd.jetcd.kv.GetResponse;
 import io.etcd.jetcd.lease.LeaseKeepAliveResponse;
 import io.etcd.jetcd.options.DeleteOption;
@@ -57,8 +63,23 @@ import io.netty.handler.ssl.SslProvider;
 
 public class EtcdMetaDriver implements MetaDriver {
 
+    private static final Logger LOG = Log.logger(EtcdMetaDriver.class);
+
     private final Client client;
     private final EtcdDistributedLock lock;
+
+    // Re-subscribes a dropped watch off the jetcd callback thread; single
+    // daemon thread, process-lifetime (no close()), so JVM shutdown reclaims it.
+    private final ScheduledExecutorService reWatchExecutor =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "etcd-meta-rewatch");
+                thread.setDaemon(true);
+                return thread;
+            });
+
+    // Backoff before re-subscribing a dropped watch. Package-private and
+    // mutable only so tests can set it to 0; never reassigned in production.
+    long reWatchDelayMs = 1000L;
 
     public EtcdMetaDriver(String trustFile, String clientCertFile,
                           String clientKeyFile, Object... endpoints) {
@@ -74,6 +95,13 @@ public class EtcdMetaDriver implements MetaDriver {
         ClientBuilder builder = this.etcdMetaDriverBuilder(endpoints);
         this.client = builder.build();
         this.lock = EtcdDistributedLock.getInstance(this.client);
+    }
+
+    // Package-private constructor for tests: inject a mock Client and skip lock
+    // setup (watch tests never touch the distributed lock).
+    EtcdMetaDriver(Client client) {
+        this.client = client;
+        this.lock = null;
     }
 
     private static ByteSequence toByteSequence(String content) {
@@ -303,9 +331,8 @@ public class EtcdMetaDriver implements MetaDriver {
     @SuppressWarnings("unchecked")
     @Override
     public <T> void listen(String key, Consumer<T> consumer) {
-
-        this.client.getWatchClient().watch(toByteSequence(key),
-                                           (Consumer<WatchResponse>) consumer);
+        this.watchKey(toByteSequence(key), WatchOption.DEFAULT,
+                      (Consumer<WatchResponse>) consumer);
     }
 
     /**
@@ -314,9 +341,35 @@ public class EtcdMetaDriver implements MetaDriver {
     @SuppressWarnings("unchecked")
     @Override
     public <T> void listenPrefix(String prefix, Consumer<T> consumer) {
-        ByteSequence sequence = toByteSequence(prefix);
         WatchOption option = WatchOption.newBuilder().isPrefix(true).build();
-        this.client.getWatchClient().watch(sequence, option, (Consumer<WatchResponse>) consumer);
+        this.watchKey(toByteSequence(prefix), option,
+                      (Consumer<WatchResponse>) consumer);
+    }
 
+    /**
+     * Subscribe a self-healing watch. Unlike the bare {@code Consumer} overload,
+     * this surfaces {@code onError}/{@code onCompleted}: when the underlying
+     * watch terminates (e.g. a transport reconnect drops the gRPC stream) it
+     * re-subscribes after a short backoff, so the listener is not silently lost.
+     * Mirrors the re-subscribe behaviour PdMetaDriver already gets from KvClient.
+     */
+    private void watchKey(ByteSequence key, WatchOption option,
+                          Consumer<WatchResponse> consumer) {
+        Watch.Listener listener = Watch.listener(
+                consumer,
+                throwable -> this.scheduleReWatch(key, option, consumer, throwable),
+                () -> this.scheduleReWatch(key, option, consumer, null));
+        // Watcher intentionally not closed: process-lifetime watch, recreated
+        // on self-heal; the prior watcher's stream has already terminated.
+        this.client.getWatchClient().watch(key, option, listener);
+    }
+
+    private void scheduleReWatch(ByteSequence key, WatchOption option,
+                                 Consumer<WatchResponse> consumer,
+                                 Throwable cause) {
+        LOG.warn("etcd meta watch dropped, re-subscribing", cause);
+        this.reWatchExecutor.schedule(
+                () -> this.watchKey(key, option, consumer),
+                this.reWatchDelayMs, TimeUnit.MILLISECONDS);
     }
 }
