@@ -77,5 +77,4 @@ log "  raft.address=${HG_STORE_RAFT_ADDRESS}"
 log "  server.port=${HG_STORE_REST_PORT}"
 log "  app.data-path=${HG_STORE_DATA_PATH}"
 
-./bin/start-hugegraph-store.sh -j "${JAVA_OPTS:-}"
-tail -f /dev/null
+./bin/start-hugegraph-store.sh -d false -j "${JAVA_OPTS:-}"

@@ -45,4 +45,8 @@ jobs:
 
       - name: Build ${{ matrix.dockerfile }}
         run: |
-          docker build -f ${{ matrix.dockerfile }} .
+          IMAGE_ID=$(docker build -q -f ${{ matrix.dockerfile }} .)
+          echo "Built: $IMAGE_ID"
+          HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
+          echo "Healthcheck: $HC"
+          [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }

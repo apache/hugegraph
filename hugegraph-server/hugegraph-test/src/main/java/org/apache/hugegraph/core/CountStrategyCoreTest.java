@@ -37,10 +37,11 @@ public class CountStrategyCoreTest extends BaseCoreTest {
     private void initSchema() {
         SchemaManager schema = graph().schema();
         schema.propertyKey("name").asText().create();
-        schema.vertexLabel("person").properties("name")
-              .nullableKeys("name").create();
-        schema.vertexLabel("software").properties("name")
-              .nullableKeys("name").create();
+        schema.propertyKey("none").asText().create();
+        schema.vertexLabel("person").properties("name", "none")
+              .nullableKeys("name", "none").create();
+        schema.vertexLabel("software").properties("name", "none")
+              .nullableKeys("name", "none").create();
         schema.edgeLabel("knows").link("person", "person").create();
         schema.edgeLabel("created").link("person", "software").create();
     }
@@ -509,5 +510,59 @@ public class CountStrategyCoreTest extends BaseCoreTest {
         Assert.assertEquals(0, graphStep.getHasContainers().size());
         Assert.assertTrue(hasRemainingHasStep(traversal, "vp2"));
         Assert.assertEquals(1L, traversal.next());
+    }
+
+    @Test
+    public void testConnectiveAndCountIsZero() {
+        this.initSchema();
+        this.initGraph();
+
+        long count = graph().traversal().V()
+                            .filter(__.and(__.out().count().is(0),
+                                           __.in().count().is(0)))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testConnectiveOrCountIsZero() {
+        this.initSchema();
+        this.initGraph();
+
+        long count = graph().traversal().V()
+                            .filter(__.or(__.out().count().is(0),
+                                          __.in().count().is(0)))
+                            .count().next();
+
+        Assert.assertEquals(3L, count);
+    }
+
+    @Test
+    public void testWhereOrWithMultiStepCountIsZero() {
+        this.initSchema();
+        this.initGraph();
+
+        long count = graph().traversal().V()
+                            .where(__.or(__.out("created").out("knows")
+                                           .count().is(0),
+                                         __.has("none")))
+                            .count().next();
+
+        Assert.assertEquals(3L, count);
+    }
+
+    @Test
+    public void testWhereOrWithMultipleCountIsZero() {
+        this.initSchema();
+        this.initGraph();
+
+        long count = graph().traversal().V()
+                            .where(__.or(__.out("created").out("knows")
+                                           .count().is(0),
+                                         __.has("none").count().is(0)))
+                            .count().next();
+
+        Assert.assertEquals(3L, count);
     }
 }

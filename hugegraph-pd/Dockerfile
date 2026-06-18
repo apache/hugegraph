@@ -52,7 +52,6 @@ RUN apt-get -q update \
        curl \
        lsof \
        vim \
-       cron \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -62,6 +61,9 @@ RUN chmod 755 ./docker-entrypoint.sh
 
 EXPOSE 8620
 VOLUME /hugegraph-pd
+
+HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -fsS http://localhost:8620/v1/health >/dev/null
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["./docker-entrypoint.sh"]

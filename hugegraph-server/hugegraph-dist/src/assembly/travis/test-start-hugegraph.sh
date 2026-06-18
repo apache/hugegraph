@@ -148,7 +148,7 @@ fi
 for tool in lsof crontab curl java; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "SKIP: required tool '$tool' not found — skipping test suite"
-        exit 0
+        exit 77
     fi
 done
 

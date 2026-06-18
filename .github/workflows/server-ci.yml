@@ -70,13 +70,31 @@ jobs:
         run: |
           mvn clean compile -U -Dmaven.javadoc.skip=true -ntp
 
-      - name: Run start-hugegraph.sh foreground mode tests
+      - name: Check startup test prerequisites
+        id: server-preflight
         if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          for tool in lsof crontab curl java; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "can_run=false" >> "$GITHUB_OUTPUT"
+              echo "skip_reason=missing tool: $tool" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "can_run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run start-hugegraph.sh foreground mode tests
+        if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'true' }}
         run: |
           mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
+
+      - name: Startup tests skipped (missing prerequisites)
+        if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'false' }}
+        run: |
+          echo "::notice::Server startup tests skipped — ${{ steps.server-preflight.outputs.skip_reason }}"
 
       - name: Run unit test
         run: |

@@ -48,6 +48,7 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.serializer.SerializerFactory;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendProviderFactory;
@@ -231,14 +232,21 @@ public class StandardHugeGraph implements HugeGraph {
         this.readMode = GraphReadMode.OLTP_ONLY;
         this.schedulerType = config.get(CoreOptions.SCHEDULER_TYPE);
 
-        LockUtil.init(this.spaceGraphName());
-
+        // Init process-wide static configs before lock, so that validation
+        // failures won't leave stale lock groups in LockManager.
+        boolean explicitBufferCapacity = config.containsKey(
+                CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY.name());
+        BytesBuffer.initMaxBufferCapacity(
+                config.get(CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY),
+                explicitBufferCapacity);
         MemoryManager.setMemoryMode(
                 MemoryManager.MemoryMode.fromValue(config.get(CoreOptions.MEMORY_MODE)));
         MemoryManager.setMaxMemoryCapacityInBytes(config.get(CoreOptions.MAX_MEMORY_CAPACITY));
         MemoryManager.setMaxMemoryCapacityForOneQuery(
                 config.get(CoreOptions.ONE_QUERY_MAX_MEMORY_CAPACITY));
         RoundUtil.setAlignment(config.get(CoreOptions.MEMORY_ALIGNMENT));
+
+        LockUtil.init(this.spaceGraphName());
 
         try {
             this.storeProvider = this.loadStoreProvider();

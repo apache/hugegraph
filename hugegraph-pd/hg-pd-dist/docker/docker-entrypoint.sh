@@ -82,5 +82,4 @@ log "  pd.initial-store-list=${HG_PD_INITIAL_STORE_LIST}"
 log "  pd.initial-store-count=${HG_PD_INITIAL_STORE_COUNT}"
 log "  pd.data-path=${HG_PD_DATA_PATH}"
 
-./bin/start-hugegraph-pd.sh -j "${JAVA_OPTS:-}"
-tail -f /dev/null
+./bin/start-hugegraph-pd.sh -d false -j "${JAVA_OPTS:-}"
