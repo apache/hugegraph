@@ -34,58 +34,58 @@ public class RocksDBStoreCloudOptions extends OptionHolder {
                     false
             );
 
-    public static final ConfigOption<String> CLOUD_S3_BUCKET =
+    public static final ConfigOption<String> CLOUD_BUCKET =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_bucket",
-                    "S3 bucket for store-side RocksDB files.",
+                    "rocksdb.cloud_bucket",
+                    "Cloud storage bucket for store-side RocksDB files.",
                     null,
                     "hugegraph-rocksdb"
             );
 
-    public static final ConfigOption<String> CLOUD_S3_ENDPOINT =
+    public static final ConfigOption<String> CLOUD_ENDPOINT =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_endpoint",
-                    "S3 endpoint URL for MinIO or other S3-compatible storage.",
+                    "rocksdb.cloud_endpoint",
+                    "Cloud storage endpoint URL for S3-compatible providers.",
                     null,
                     ""
             );
 
-    public static final ConfigOption<String> CLOUD_S3_REGION =
+    public static final ConfigOption<String> CLOUD_REGION =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_region",
-                    "S3 region used by AWS SDK.",
+                    "rocksdb.cloud_region",
+                    "Cloud storage region used by SDK.",
                     null,
                     "us-east-1"
             );
 
-    public static final ConfigOption<String> CLOUD_S3_ACCESS_KEY =
+    public static final ConfigOption<String> CLOUD_ACCESS_KEY =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_access_key",
-                    "S3 access key.",
+                    "rocksdb.cloud_access_key",
+                    "Cloud storage access key.",
                     null,
                     ""
             );
 
-    public static final ConfigOption<String> CLOUD_S3_SECRET_KEY =
+    public static final ConfigOption<String> CLOUD_SECRET_KEY =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_secret_key",
-                    "S3 secret key.",
+                    "rocksdb.cloud_secret_key",
+                    "Cloud storage secret key.",
                     null,
                     ""
             );
 
-    public static final ConfigOption<Boolean> CLOUD_S3_PATH_STYLE =
+    public static final ConfigOption<Boolean> CLOUD_PATH_STYLE =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_path_style",
-                    "Use path-style addressing (required by MinIO).",
+                    "rocksdb.cloud_path_style",
+                    "Use path-style addressing for compatible object storage providers.",
                     disallowEmpty(),
                     false
             );
 
-    public static final ConfigOption<String> CLOUD_S3_OBJECT_PREFIX =
+    public static final ConfigOption<String> CLOUD_OBJECT_PREFIX =
             new ConfigOption<>(
-                    "rocksdb.cloud_s3_object_prefix",
-                    "Node-specific S3 object prefix, e.g. store0.",
+                    "rocksdb.cloud_object_prefix",
+                    "Node-specific cloud object prefix, e.g. store0.",
                     null,
                     "store"
             );
@@ -105,42 +105,40 @@ public class RocksDBStoreCloudOptions extends OptionHolder {
                     disallowEmpty(),
                     true
             );
+    public static final ConfigOption<Boolean> CLOUD_CLOUD_FIRST_MODE =
+            new ConfigOption<>(
+                    "rocksdb.cloud_cloud_first_mode",
+                    "If true, each committed write batch performs synchronous cloud storage " +
+                    "upload before returning to caller.",
+                    disallowEmpty(),
+                    true
+            );
 
+    public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_MAX =
+            new ConfigOption<>(
+                    "rocksdb.cloud_sync_retry_max",
+                    "Max retries when commit-time sync waits for syncInProgress lock.",
+                    rangeInt(1, Integer.MAX_VALUE),
+                    100
+            );
 
-     public static final ConfigOption<Boolean> CLOUD_S3_FIRST_MODE =
-             new ConfigOption<>(
-                     "rocksdb.cloud_s3_first_mode",
-                     "If true, each committed write batch performs synchronous S3 upload " +
-                     "before returning to caller.",
-                     disallowEmpty(),
-                     true
-             );
+    public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_BACKOFF_MS =
+            new ConfigOption<>(
+                    "rocksdb.cloud_sync_retry_backoff_ms",
+                    "Initial backoff in milliseconds for commit-time sync retry loop.",
+                    rangeInt(1, Integer.MAX_VALUE),
+                    10
+            );
 
-     public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_MAX =
-             new ConfigOption<>(
-                     "rocksdb.cloud_sync_retry_max",
-                     "Max retries when commit-time sync waits for syncInProgress lock.",
-                     rangeInt(1, Integer.MAX_VALUE),
-                     100
-             );
+    public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_MAX_BACKOFF_MS =
+            new ConfigOption<>(
+                    "rocksdb.cloud_sync_retry_max_backoff_ms",
+                    "Maximum backoff cap in milliseconds for exponential backoff.",
+                    rangeInt(1, Integer.MAX_VALUE),
+                    1000
+            );
 
-     public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_BACKOFF_MS =
-             new ConfigOption<>(
-                     "rocksdb.cloud_sync_retry_backoff_ms",
-                     "Initial backoff in milliseconds for commit-time sync retry loop.",
-                     rangeInt(1, Integer.MAX_VALUE),
-                     10
-             );
-
-     public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_MAX_BACKOFF_MS =
-             new ConfigOption<>(
-                     "rocksdb.cloud_sync_retry_max_backoff_ms",
-                     "Maximum backoff cap in milliseconds for exponential backoff.",
-                     rangeInt(1, Integer.MAX_VALUE),
-                     1000
-             );
-
-     private static volatile RocksDBStoreCloudOptions instance;
+    private static volatile RocksDBStoreCloudOptions instance;
 
     private RocksDBStoreCloudOptions() {
         super();

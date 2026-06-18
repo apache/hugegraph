@@ -106,6 +106,7 @@
         <module>install-dist</module>
         <module>hugegraph-cluster-test</module>
         <module>hugegraph-struct</module>
+        <module>examples/cloud-storage-plugin/SampleCloudStorage</module>
     </modules>
 
     <dependencyManagement>

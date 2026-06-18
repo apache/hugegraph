@@ -57,12 +57,12 @@ public class HstoreCloudConfigUtil {
         return String.format(
             "Cloud sync enabled: bucket=%s, region=%s, endpoint=%s, " +
             "syncMode=%s, syncIntervalSeconds=%s, pathStyle=%s",
-            config.get(HstoreOptions.CLOUD_S3_BUCKET),
-            config.get(HstoreOptions.CLOUD_S3_REGION),
-            config.get(HstoreOptions.CLOUD_S3_ENDPOINT),
+            config.get(HstoreOptions.CLOUD_BUCKET),
+            config.get(HstoreOptions.CLOUD_REGION),
+            config.get(HstoreOptions.CLOUD_ENDPOINT),
             config.get(HstoreOptions.CLOUD_SYNC_MODE),
             config.get(HstoreOptions.CLOUD_SYNC_INTERVAL_SECONDS),
-            config.get(HstoreOptions.CLOUD_S3_PATH_STYLE)
+            config.get(HstoreOptions.CLOUD_PATH_STYLE)
         );
     }
 

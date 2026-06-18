@@ -401,36 +401,36 @@ public class RocksDBOptions extends OptionHolder {
     public static final String WRITE_CACHE = "rocksdb.write_cache";
     public static final String ENV = "rocksdb.env";
 
-    // ── RocksDB-Cloud (S3 sync) options ───────────────────────────────────────
+    // ── RocksDB cloud storage options ──────────────────────────────────────────
     public static final ConfigOption<Boolean> CLOUD_ENABLED =
             new ConfigOption<>(
                     "rocksdb.cloud.enabled",
-                    "Enable S3 cloud sync for this store node's RocksDB data. " +
-                    "When true, SST files are synced to S3 on a configurable schedule.",
+                    "Enable cloud storage sync for this store node's RocksDB data. " +
+                    "When true, SST files are synced on a configurable schedule.",
                     null,
                     false
             );
 
-    public static final ConfigOption<String> CLOUD_S3_BUCKET_NAME =
+    public static final ConfigOption<String> CLOUD_BUCKET_NAME =
             new ConfigOption<>(
-                    "rocksdb.cloud.s3_bucket_name",
-                    "S3 bucket name for RocksDB cloud storage.",
+                    "rocksdb.cloud.bucket_name",
+                    "Cloud storage bucket name for RocksDB cloud storage.",
                     null,
                     "hugegraph-rocksdb"
             );
 
-    public static final ConfigOption<String> CLOUD_S3_REGION =
+    public static final ConfigOption<String> CLOUD_REGION =
             new ConfigOption<>(
-                    "rocksdb.cloud.s3_region",
-                    "AWS region of the S3 bucket.",
+                    "rocksdb.cloud.region",
+                    "Region of the cloud storage bucket.",
                     null,
                     "us-east-1"
             );
 
-    public static final ConfigOption<String> CLOUD_S3_OBJECT_PREFIX =
+    public static final ConfigOption<String> CLOUD_OBJECT_PREFIX =
             new ConfigOption<>(
-                    "rocksdb.cloud.s3_object_prefix",
-                    "S3 key prefix for this store's RocksDB files. " +
+                    "rocksdb.cloud.object_prefix",
+                    "Object prefix for this store's RocksDB files. " +
                     "Use a per-node prefix (e.g. 'store0/') to avoid collisions.",
                     null,
                     "store/"
@@ -452,19 +452,19 @@ public class RocksDBOptions extends OptionHolder {
                     ""
             );
 
-    public static final ConfigOption<String> CLOUD_S3_ENDPOINT =
+    public static final ConfigOption<String> CLOUD_ENDPOINT =
             new ConfigOption<>(
-                    "rocksdb.cloud.s3_endpoint",
-                    "Custom S3-compatible endpoint URL (e.g. MinIO). " +
+                    "rocksdb.cloud.endpoint",
+                    "Custom S3-compatible endpoint URL. " +
                     "Leave empty for standard AWS endpoints.",
                     null,
                     ""
             );
 
-    public static final ConfigOption<Boolean> CLOUD_S3_PATH_STYLE_ACCESS =
+    public static final ConfigOption<Boolean> CLOUD_PATH_STYLE_ACCESS =
             new ConfigOption<>(
-                    "rocksdb.cloud.s3_path_style_access",
-                    "Use path-style S3 access (required for MinIO).",
+                    "rocksdb.cloud.path_style_access",
+                    "Use path-style access for S3-compatible providers.",
                     null,
                     false
             );
@@ -472,28 +472,28 @@ public class RocksDBOptions extends OptionHolder {
     public static final ConfigOption<Integer> CLOUD_SYNC_INTERVAL_SECONDS =
             new ConfigOption<>(
                     "rocksdb.cloud.sync_interval_seconds",
-                    "Periodic S3 sync interval in seconds. 0 = disabled.",
+                    "Periodic cloud storage sync interval in seconds. 0 = disabled.",
                     null,
                     60
             );
 
 
-    public static final ConfigOption<Boolean> CLOUD_SYNC_INCREMENTAL =
-            new ConfigOption<>(
-                    "rocksdb.cloud.sync_incremental",
-                    "Only upload new/changed SST files (incremental sync). " +
-                    "Greatly reduces S3 PUT costs.",
-                    null,
-                    true
-            );
+     public static final ConfigOption<Boolean> CLOUD_SYNC_INCREMENTAL =
+             new ConfigOption<>(
+                     "rocksdb.cloud.sync_incremental",
+                     "Only upload new/changed SST files (incremental sync). " +
+                     "Greatly reduces cloud storage API costs.",
+                     null,
+                     true
+             );
 
-    public static final ConfigOption<String> CLOUD_SYNC_MODE =
-            new ConfigOption<>(
-                    "rocksdb.cloud.sync_mode",
-                    "S3 sync mode: 'async' (background) or 'sync' (inline on every write commit).",
-                    null,
-                    "async"
-            );
+     public static final ConfigOption<String> CLOUD_SYNC_MODE =
+             new ConfigOption<>(
+                     "rocksdb.cloud.sync_mode",
+                     "Cloud storage sync mode: 'async' (background) or 'sync' (cloud-first, inline on every write commit).",
+                     null,
+                     "async"
+             );
 
     private static volatile RocksDBOptions instance;
 

@@ -1,8 +1,8 @@
-# RocksDB-Cloud Distributed Smoke Test with MinIO
+# RocksDB Cloud Storage Distributed Smoke Test with MinIO
 
-This guide covers the automated test and manual setup for the **rocksdb-cloud distributed backend** with MinIO (S3-compatible object storage). Each store node has its own isolated S3 bucket for durability.
+This guide covers the automated test and manual setup for the **rocksdb cloud storage distributed backend** with MinIO (S3-compatible object storage). Each store node has its own isolated cloud storage bucket for durability.
 
-- `docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh` — Automated smoke test (server `backend=hstore` + 3 stores with rocksdb-cloud + separate per-store S3 bucket sync)
+- `docker/cloud-storage/test-rocksdb-cloud-distributed.sh` — Automated smoke test (server `backend=hstore` + 3 stores with rocksdb cloud storage + separate per-store cloud storage bucket sync)
 
 > **All commands must be run from the repository root.**
 
@@ -12,24 +12,24 @@ This guide covers the automated test and manual setup for the **rocksdb-cloud di
 
 ```
 HugeGraph Server  (backend=hstore)
-  └── Stateless coordinator
-        ├── Routes all graph operations to store nodes
-        └── No local data persistence
+   └── Stateless coordinator
+         ├── Routes all graph operations to store nodes
+         └── No local data persistence
 
 PD (Placement Driver) + 3 Store nodes (Raft consensus)
-  └── Each store: embedded RocksDB + S3 cloud sync (separate bucket per store)
-        ├── store0 → RocksDB + Cloud sync → Bucket: store0-rocksdb
-        ├── store1 → RocksDB + Cloud sync → Bucket: store1-rocksdb
-        └── store2 → RocksDB + Cloud sync → Bucket: store2-rocksdb
+   └── Each store: embedded RocksDB + cloud storage sync (separate bucket per store)
+         ├── store0 → RocksDB + Cloud sync → Cloud storage bucket: store0-rocksdb
+         ├── store1 → RocksDB + Cloud sync → Cloud storage bucket: store1-rocksdb
+         └── store2 → RocksDB + Cloud sync → Cloud storage bucket: store2-rocksdb
 ```
 
-> **Key architectural point:** Fully distributed with S3-first durability:
+> **Key architectural point:** Fully distributed with cloud-first durability:
 > - Server (`backend=hstore`) is **stateless** — all graph data is in stores
-> - Each store runs **embedded RocksDB** with rocksdb-cloud module enabled
-> - Store 0 syncs to isolated `store0-rocksdb` bucket (independent credentials + quota possible)
-> - Store 1 syncs to isolated `store1-rocksdb` bucket  
-> - Store 2 syncs to isolated `store2-rocksdb` bucket
-> - Graph data is **Raft-replicated** across stores; each store's local RocksDB is cloud-backed
+> - Each store runs **embedded RocksDB** with cloud storage module enabled
+> - Store 0 syncs to isolated `store0-rocksdb` cloud storage bucket (independent credentials + quota possible)
+> - Store 1 syncs to isolated `store1-rocksdb` cloud storage bucket  
+> - Store 2 syncs to isolated `store2-rocksdb` cloud storage bucket
+> - Graph data is **Raft-replicated** across stores; each store's local RocksDB is cloud storage-backed
 
 **Port mappings (localhost → container):**
 
@@ -51,11 +51,11 @@ PD (Placement Driver) + 3 Store nodes (Raft consensus)
 ## Quick Start (Automated)
 
 The automated script handles everything end-to-end. Use this for reliable testing of server
-`backend=hstore` (stateless coordinator), plus required store-side S3 sync checks.
+`backend=hstore` (stateless coordinator), plus required store-side cloud storage sync checks.
 
 ### Step 1 — Build or auto-build images
 
-The server and store nodes both need the rocksdb-cloud backend.
+The server and store nodes both need the rocksdb cloud storage backend.
 
 **Option A: Build manually first, then run test:**
 
@@ -63,28 +63,28 @@ The server and store nodes both need the rocksdb-cloud backend.
 docker build -t hugegraph/server:rocksdb-cloud-local -f hugegraph-server/Dockerfile .
 docker build -t hugegraph/store:rocksdb-cloud-local -f hugegraph-store/Dockerfile .
 
-chmod +x docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+chmod +x docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 ```
 
 **Option B: Let the script build images automatically:**
 
 ```bash
-chmod +x docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+chmod +x docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 AUTO_BUILD_SERVER_IMAGE=true \
 AUTO_BUILD_STORE_IMAGE=true \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 ```
 
 (Optional) verify the generated server backend explicitly:
 
 ```bash
-DRY_RUN=true ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
-grep -n '^backend=' docker/HStore-On-S3/.generated/hugegraph.properties
+DRY_RUN=true ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
+grep -n '^backend=' docker/cloud-storage/.generated/hugegraph.properties
 # expected: backend=hstore
 ```
 
@@ -94,7 +94,7 @@ The script:
 - Waits for all services to be healthy
 - Creates MinIO buckets for each store: `store0-rocksdb`, `store1-rocksdb`, `store2-rocksdb`
 - **Optionally** (default): Creates schema and writes/reads vertices via server REST API
-- **Optionally** (default): Verifies store-side cloud mode and S3 objects
+- **Optionally** (default): Verifies store-side cloud storage mode and cloud objects
 - Cleans up (unless `KEEP_UP=true`)
 
 **Two modes of operation:**
@@ -118,44 +118,44 @@ The script:
 # Auto-build both server and store images from source
 AUTO_BUILD_SERVER_IMAGE=true \
 AUTO_BUILD_STORE_IMAGE=true \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 # Keep containers running after test (for inspection)
 KEEP_UP=true HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 # Skip automated smoke tests — use script for environment setup only (manual testing mode)
 SKIP_SMOKE_TESTS=true KEEP_UP=true \
 AUTO_BUILD_SERVER_IMAGE=true \
 AUTO_BUILD_STORE_IMAGE=true \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 # Dry run: only generate compose/config files without starting services
-DRY_RUN=true ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+DRY_RUN=true ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 # Use custom image tags
 HG_SERVER_IMAGE=hugegraph/server:my-tag \
 HG_STORE_IMAGE=hugegraph/store:my-tag \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
-# S3-first mode is DEFAULT: each write commit waits for S3 sync before ack
+# Cloud-first mode is DEFAULT: each write commit waits for cloud storage sync before ack
 HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
-# Optional: disable S3-first mode and use periodic background sync only
-STORE_ROCKSDB_CLOUD_S3_FIRST_MODE=false \
+# Optional: disable cloud-first mode and use periodic background sync only
+STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE=false \
 STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS=60 \
 HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
 # Tune periodic background sync interval (seconds)
 STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS=60 \
 HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 ```
 
 ---
@@ -174,7 +174,7 @@ Run the automated Quick Start with `KEEP_UP=true` to retain containers:
 KEEP_UP=true \
 AUTO_BUILD_SERVER_IMAGE=true \
 AUTO_BUILD_STORE_IMAGE=true \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 ```
 
 Once the test completes successfully and containers are running, proceed with steps below.
@@ -309,10 +309,10 @@ curl -s --compressed "http://localhost:8080/graphs/hugegraph/graph/vertices/${PE
 ```bash
 # Option A: Using the same COMPOSE_PROJECT_NAME as the test
 COMPOSE_PROJECT_NAME=hg-rocksdb-cloud-dist \
-  docker compose -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
+  docker compose -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
 
 # Option B: If Option A doesn't work, use explicit project name flag
-docker compose -p hg-rocksdb-cloud-dist -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
+docker compose -p hg-rocksdb-cloud-dist -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
 
 # Option C: If neither works, clean up manually
 docker stop hg-minio-test hg-pd-dist hg-store0-dist hg-store1-dist hg-store2-dist hg-server-test 2>/dev/null || true
@@ -342,24 +342,24 @@ docker network rm hg-rocksdb-cloud-dist_hg-net 2>/dev/null || true
 docker build -t hugegraph/server:rocksdb-cloud-local -f hugegraph-server/Dockerfile .
 
 # Verify server backend is hstore (not rocksdb-cloud)
-grep -n '^backend=' docker/HStore-On-S3/.generated/hugegraph.properties
+grep -n '^backend=' docker/cloud-storage/.generated/hugegraph.properties
 # expected output: backend=hstore
 
 # Re-run with the built image
 HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
-  ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+  ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 ```
 
 ---
 
-### `The specified bucket does not exist` (S3 404)
+### `The specified bucket does not exist` (Cloud storage 404)
 
 **Symptom** in store logs (e.g., `docker logs hg-store0-dist`):
 ```
-Failed to sync data to S3 on close ... The specified bucket does not exist (Status Code: 404)
+Failed to sync data to cloud storage on close ... The specified bucket does not exist (Status Code: 404)
 ```
 
-**Cause:** Store node started before its MinIO bucket was created.
+**Cause:** Store node started before its cloud storage bucket was created.
 
 **Fix:**
 ```bash
@@ -368,7 +368,7 @@ NETWORK_NAME="${COMPOSE_PROJECT_NAME:-hg-rocksdb-cloud-dist}_hg-net"
 # Verify MinIO is healthy
 curl -fsS http://localhost:9000/minio/health/live
 
-# Create per-store buckets
+# Create per-store cloud storage buckets
 docker run --rm --network "$NETWORK_NAME" --entrypoint /bin/sh minio/mc:latest -c \
   "mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
    mc mb --ignore-existing local/store0-rocksdb && \
@@ -376,7 +376,7 @@ docker run --rm --network "$NETWORK_NAME" --entrypoint /bin/sh minio/mc:latest -
    mc mb --ignore-existing local/store2-rocksdb && \
    mc ls local/"
 
-# Restart all store containers to reconnect to S3
+# Restart all store containers to reconnect to cloud storage
 for i in 0 1 2; do
   docker restart hg-store${i}-dist
 done
@@ -392,7 +392,7 @@ The full stack (MinIO + PD + 3 Stores + Server) can take **2-3 minutes** to full
 
 ```bash
 # Check all services health
-docker compose -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml ps
+docker compose -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml ps
 
 # Check port is published to host
 docker ps --format "table {{.Names}}\t{{.Ports}}" | grep hg-server-test
@@ -411,7 +411,7 @@ sleep 60 && curl http://localhost:8080/versions
 **Common causes:**
 - `Waiting for partition assignment...` — Stores still joining the Raft cluster (wait longer or check store health)
 - `backend is illegal` — wrong server image (build from source, see above)
-- `bucket does not exist` — MinIO bucket not created before server start (see above)
+- `bucket does not exist` — Cloud storage bucket not created before server start (see above)
 - Port not listed in `docker ps` — stack started before port bindings were added; regenerate and restart
 
 ---
@@ -422,10 +422,10 @@ Ports are not published to the host. The generated compose file must include por
 
 ```bash
 # Tear down and regenerate (script includes port bindings)
-docker compose -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
+docker compose -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
 export COMPOSE_PROJECT_NAME=hg-rocksdb-cloud-dist
-DRY_RUN=true ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
-docker compose -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml up -d
+DRY_RUN=true ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
+docker compose -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml up -d
 
 # Verify ports are published
 docker ps --format "table {{.Names}}\t{{.Ports}}"
@@ -443,7 +443,7 @@ The property key 'name' has existed
 
 ---
 
-### Store node S3 prefix empty after sync interval
+### Store node cloud storage prefix empty after sync interval
 
 **Symptom:** `mc ls local/hugegraph-rocksdb/store0/` returns no results even after waiting.
 
@@ -452,33 +452,33 @@ The property key 'name' has existed
 1. **Store image does not support `cloud_enabled`** — the `rocksdb.cloud_enabled` property was
    added in HugeGraph Store 1.7.0. Older images ignore it.
    ```bash
-   # Confirm the entrypoint logged the cloud settings
+   # Confirm the entrypoint logged the cloud storage settings
    docker logs hg-store0-dist 2>&1 | grep "rocksdb.cloud"
    # If nothing is printed, build from source
    docker build -t hugegraph/store:rocksdb-cloud-local -f hugegraph-store/Dockerfile .
    HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
      HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
-     ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+     ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
    ```
 
-2. **Sync interval not yet elapsed** — each store node flushes SST files to S3 every
+2. **Sync interval not yet elapsed** — each store node flushes SST files to cloud storage every
    `STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS` seconds (default 30). Wait longer or set:
    ```bash
    STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS=5 \
      HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
-     ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+     ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
    ```
 
-3. **Bucket does not exist** — ensure the MinIO bucket was created before the stores started
+3. **Bucket does not exist** — ensure the cloud storage bucket was created before the stores started
    (see `The specified bucket does not exist` troubleshooting entry above).
 
 4. **Temporary debug-only bypass (not recommended for this smoke test)**:
    ```bash
    STORE_ROCKSDB_CLOUD_ENABLED=false \
      HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
-     ./docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh
+     ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
    ```
-   The script is expected to fail fast in this mode because per-store S3 writes are required.
+   The script is expected to fail fast in this mode because per-store cloud storage writes are required.
 
 ---
 
@@ -565,7 +565,7 @@ docker logs hg-minio-test  | tail -30
 
 # Clean restart
 COMPOSE_PROJECT_NAME=hg-rocksdb-cloud-dist \
-  docker compose -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
+  docker compose -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
 # Then re-run Step 1
 ```
 
@@ -582,17 +582,17 @@ COMPOSE_PROJECT_NAME=hg-rocksdb-cloud-dist \
 ```bash
 # Recommended: Set COMPOSE_PROJECT_NAME explicitly
 COMPOSE_PROJECT_NAME=hg-rocksdb-cloud-dist \
-  docker compose -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
+  docker compose -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
 
 # Or: Use the -p flag
-docker compose -p hg-rocksdb-cloud-dist -f docker/HStore-On-S3/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
+docker compose -p hg-rocksdb-cloud-dist -f docker/cloud-storage/.generated/docker-compose.rocksdb-cloud-distributed.yml down -v
 ```
 
 ---
 
 ## References
 
-- **Automated test script**: `docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh`
+- **Automated test script**: `docker/cloud-storage/test-rocksdb-cloud-distributed.sh`
 - **MinIO Docs**: https://min.io/docs/minio/container/index.html
 - **Phase 2 Lease Integration**: `hugegraph-store/PHASE2_LEASE_INTEGRATION.md`
 - **RocksDB Tuning Guide**: https://github.com/facebook/rocksdb/wiki/RocksDB-Tuning-Guide

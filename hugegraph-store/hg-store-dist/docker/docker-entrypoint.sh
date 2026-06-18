@@ -60,17 +60,17 @@ require_env "HG_STORE_RAFT_ADDRESS"
 
 # ── RocksDB-Cloud defaults (all optional; cloud sync disabled unless HG_STORE_ROCKSDB_CLOUD_ENABLED=true) ──
 : "${HG_STORE_ROCKSDB_CLOUD_ENABLED:=false}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_BUCKET:=hugegraph-rocksdb}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_ENDPOINT:=}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_REGION:=us-east-1}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_ACCESS_KEY:=}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_SECRET_KEY:=}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_PATH_STYLE:=true}"
+: "${HG_STORE_ROCKSDB_CLOUD_BUCKET:=hugegraph-rocksdb}"
+: "${HG_STORE_ROCKSDB_CLOUD_ENDPOINT:=}"
+: "${HG_STORE_ROCKSDB_CLOUD_REGION:=us-east-1}"
+: "${HG_STORE_ROCKSDB_CLOUD_ACCESS_KEY:=}"
+: "${HG_STORE_ROCKSDB_CLOUD_SECRET_KEY:=}"
+: "${HG_STORE_ROCKSDB_CLOUD_PATH_STYLE:=true}"
 # Each store node should use a unique prefix, e.g. "store0", "store1", "store2"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_OBJECT_PREFIX:=store}"
+: "${HG_STORE_ROCKSDB_CLOUD_OBJECT_PREFIX:=store}"
 : "${HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS:=60}"
 : "${HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL:=true}"
-: "${HG_STORE_ROCKSDB_CLOUD_S3_FIRST_MODE:=true}"
+: "${HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE:=true}"
 
 # ── Build SPRING_APPLICATION_JSON ─────────────────────────────────────
 SPRING_APPLICATION_JSON="$(cat <<JSON
@@ -88,16 +88,16 @@ SPRING_APPLICATION_JSON="$(cat <<JSON
                },
   "rocksdb":  {
                  "cloud_enabled": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_ENABLED}")",
-                 "cloud_s3_bucket": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_BUCKET}")",
-                 "cloud_s3_endpoint": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_ENDPOINT}")",
-                 "cloud_s3_region": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_REGION}")",
-                 "cloud_s3_access_key": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_ACCESS_KEY}")",
-                 "cloud_s3_secret_key": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_SECRET_KEY}")",
-                 "cloud_s3_path_style": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_PATH_STYLE}")",
-                 "cloud_s3_object_prefix": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_OBJECT_PREFIX}")",
+                 "cloud_bucket": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_BUCKET}")",
+                 "cloud_endpoint": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_ENDPOINT}")",
+                 "cloud_region": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_REGION}")",
+                 "cloud_access_key": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_ACCESS_KEY}")",
+                 "cloud_secret_key": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_SECRET_KEY}")",
+                 "cloud_path_style": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_PATH_STYLE}")",
+                 "cloud_object_prefix": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_OBJECT_PREFIX}")",
                  "cloud_sync_interval_seconds": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS}")",
                  "cloud_sync_incremental": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL}")",
-                 "cloud_s3_first_mode": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_S3_FIRST_MODE}")"
+                 "cloud_cloud_first_mode": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE}")"
                }
 }
 JSON
@@ -116,13 +116,13 @@ log "  store.partition-lease-ttl-seconds=${HG_STORE_PARTITION_LEASE_TTL_SECONDS}
 log "  store.partition-lease-renew-interval-seconds=${HG_STORE_PARTITION_LEASE_RENEW_INTERVAL_SECONDS}"
 log "  rocksdb.cloud_enabled=${HG_STORE_ROCKSDB_CLOUD_ENABLED}"
 if [[ "${HG_STORE_ROCKSDB_CLOUD_ENABLED}" == "true" ]]; then
-    log "  rocksdb.cloud_s3_bucket=${HG_STORE_ROCKSDB_CLOUD_S3_BUCKET}"
-    log "  rocksdb.cloud_s3_endpoint=${HG_STORE_ROCKSDB_CLOUD_S3_ENDPOINT}"
-    log "  rocksdb.cloud_s3_region=${HG_STORE_ROCKSDB_CLOUD_S3_REGION}"
-    log "  rocksdb.cloud_s3_object_prefix=${HG_STORE_ROCKSDB_CLOUD_S3_OBJECT_PREFIX}"
+    log "  rocksdb.cloud_bucket=${HG_STORE_ROCKSDB_CLOUD_BUCKET}"
+    log "  rocksdb.cloud_endpoint=${HG_STORE_ROCKSDB_CLOUD_ENDPOINT}"
+    log "  rocksdb.cloud_region=${HG_STORE_ROCKSDB_CLOUD_REGION}"
+    log "  rocksdb.cloud_object_prefix=${HG_STORE_ROCKSDB_CLOUD_OBJECT_PREFIX}"
     log "  rocksdb.cloud_sync_interval_seconds=${HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS}"
     log "  rocksdb.cloud_sync_incremental=${HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL}"
-    log "  rocksdb.cloud_s3_first_mode=${HG_STORE_ROCKSDB_CLOUD_S3_FIRST_MODE}"
+    log "  rocksdb.cloud_cloud_first_mode=${HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE}"
 fi
 
 ./bin/start-hugegraph-store.sh -d false -j "${JAVA_OPTS:-}"

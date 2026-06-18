@@ -3,12 +3,8 @@
 ## Overview
 
 This document explains the **fully distributed HugeGraph architecture** where the server runs `backend=hstore`
-with optional cloud sync (`hstore.cloud_enabled=true`). Each store node uses RocksDB with S3 sync enabled,
-with its own S3 bucket for cloud durability.
-
-> **Note:** The old `backend=rocksdb-cloud` (single-node, server-side) has been removed.
-> Use `backend=hstore` with `hstore.cloud_*` options instead — it provides the same cloud
-> durability with full distributed Raft replication on top.
+with optional cloud sync (`hstore.cloud_enabled=true`). Each store node uses RocksDB with cloud storage sync enabled,
+with its own cloud storage bucket for cloud durability (S3 is the default implementation).
 
 ## System Architecture
 
@@ -47,15 +43,15 @@ with its own S3 bucket for cloud durability.
 │ │  ├─ edges         │  │  ├─ edges       │  │  ├─ edges       │ │
 │ │  └─ metadata      │  │  └─ metadata    │  │  └─ metadata    │ │
 │ │                     │  │                  │  │                 │ │
-│ │ Cloud Module        │  │ Cloud Module     │  │ Cloud Module    │ │
+| │ Cloud Module        │  │ Cloud Module     │  │ Cloud Module    │ │
 │ │  └─ commit-time    │  │  └─ commit-time │  │  └─ commit-time│ │
 │ │     upload         │  │     upload      │  │     upload     │ │
-│ │     (s3_first)     │  │     (s3_first)  │  │     (s3_first) │ │
+│ │     (cloud-first)  │  │     (cloud-first) │  │  (cloud-first) │ │
 │ │  └─ periodic       │  │  └─ periodic    │  │  └─ periodic   │ │
 │ │     reconcile      │  │     reconcile   │  │     reconcile  │ │
 │ │     (async mode)   │  │     (async mode)│  │     (async mode)│ │
 │ ├─────────────────────┤  ├──────────────────┤  ├─────────────────┤ │
-│ │ S3 Bucket:          │  │ S3 Bucket:       │  │ S3 Bucket:      │ │
+│ │ Cloud Bucket:       │  │ Cloud Bucket:    │  │ Cloud Bucket:   │ │
 │ │ store0-rocksdb      │  │ store1-rocksdb   │  │ store2-rocksdb  │ │
 │ │                     │  │                  │  │                 │ │
 │ │ Credentials:        │  │ Credentials:     │  │ Credentials:    │ │
@@ -87,16 +83,16 @@ User POST /graphs/hugegraph/graph/vertices
         Raft: replicate to other stores
         (Store0 → Store1 + Store2)
                 ↓
-        Default (`s3_first_mode=true`):
-          - Synchronous S3 upload (incremental/full per config)
-          - ACK returned only after S3 sync succeeds
-        Optional fallback (`s3_first_mode=false`):
+        Default (`cloud_first_mode=true`):
+          - Synchronous cloud storage upload (incremental/full per config)
+          - ACK returned only after cloud storage sync succeeds
+        Optional fallback (`cloud_first_mode=false`):
           - ACK returned after local/Raft commit
-          - Periodic background sync/reconciliation uploads to S3
-        
-Store0: upload to store0-rocksdb/...
-Store1: upload to store1-rocksdb/...
-Store2: upload to store2-rocksdb/...
+          - Periodic background sync/reconciliation uploads to cloud storage
+         
+Store0: upload to cloud storage bucket for store0-rocksdb/...
+Store1: upload to cloud storage bucket for store1-rocksdb/...
+Store2: upload to cloud storage bucket for store2-rocksdb/...
 ```
 
 ### Read Operation Flow
@@ -114,8 +110,8 @@ User GET /graphs/hugegraph/graph/vertices
         RocksDB local read path
           ├─ Data available locally: serve from RocksDB
           └─ Local data missing/corrupted: recovery is required
-             (runtime attempts live auto-hydration from S3,
-              reloads local DB, then retries read once)
+             (runtime performs one on-demand rehydration from cloud storage,
+              reloads local DB, then retries the read once)
                 ↓
         Return to client (or error if recovery needed)
 ```
@@ -129,31 +125,33 @@ backend=hstore                    # Distributed routing to store cluster
 pd.peers=pd:8686                  # PD coordinator address
 serializer=binary                 # RPC serialization format
 
-# Optional: Enable cloud sync directly from server config
+# Optional: Enable cloud storage sync directly from server config
 hstore.cloud_enabled=true
-hstore.cloud_s3_bucket=hugegraph-data   # base name; stores append -0, -1, -2
-hstore.cloud_s3_endpoint=http://minio:9000
-hstore.cloud_s3_access_key=minioadmin
-hstore.cloud_s3_secret_key=minioadmin
-hstore.cloud_s3_path_style=true         # required for MinIO
+hstore.cloud_provider=s3          # Cloud storage provider (default: s3)
+hstore.cloud_bucket=hugegraph-data      # base name; stores append -0, -1, -2
+hstore.cloud_endpoint=http://minio:9000
+hstore.cloud_access_key=minioadmin
+hstore.cloud_secret_key=minioadmin
+hstore.cloud_path_style=true            # required for some S3-compatible providers
 hstore.cloud_sync_mode=sync             # sync (zero-loss) or async
 ```
 
 ### Per-Store Configuration (via environment variables)
 
-Each store node reads cloud settings from environment variables.
+Each store node reads cloud storage settings from environment variables.
 Use `HstoreCloudConfigUtil.getStoreNodeEnvVars(config, storeIndex)` to generate them
 from the server-side `hstore.cloud_*` configuration.
 
 **Store0 Example:**
 ```bash
 HG_STORE_ROCKSDB_CLOUD_ENABLED=true
-HG_STORE_ROCKSDB_CLOUD_S3_BUCKET=hugegraph-data-0   # per-store isolated bucket
-HG_STORE_ROCKSDB_CLOUD_S3_ENDPOINT=http://minio:9000
-HG_STORE_ROCKSDB_CLOUD_S3_ACCESS_KEY=minioadmin
-HG_STORE_ROCKSDB_CLOUD_S3_SECRET_KEY=minioadmin
-HG_STORE_ROCKSDB_CLOUD_S3_PATH_STYLE=true
-HG_STORE_ROCKSDB_CLOUD_S3_FIRST_MODE=true           # maps from hstore.cloud_sync_mode=sync
+HG_STORE_ROCKSDB_CLOUD_PROVIDER=s3           # Cloud storage provider (default: s3)
+HG_STORE_ROCKSDB_CLOUD_BUCKET=hugegraph-data-0   # per-store isolated bucket
+HG_STORE_ROCKSDB_CLOUD_ENDPOINT=http://minio:9000
+HG_STORE_ROCKSDB_CLOUD_ACCESS_KEY=minioadmin
+HG_STORE_ROCKSDB_CLOUD_SECRET_KEY=minioadmin
+HG_STORE_ROCKSDB_CLOUD_PATH_STYLE=true
+HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE=true           # maps from hstore.cloud_sync_mode=sync
 HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS=30
 HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL=true
 ```
@@ -167,16 +165,16 @@ HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL=true
 | **Server replicas** | 1 (stateless) | 2-3 (stateless, behind LB) |
 | **PD nodes** | 1 (single point of failure) | 3 (Raft HA) |
 | **Store nodes** | 3 | 9+ (sharding by region) |
-| **S3 buckets** | Shared MinIO | Separate per-store (or per-region) |
-| **S3 credentials** | Shared (dev) | Per-store/per-node (prod) |
-| **S3-first mode** | true (default) | true (recommended) |
+| **Cloud storage buckets** | Shared cloud storage | Separate per-store (or per-region) |
+| **Cloud storage credentials** | Shared (dev) | Per-store/per-node (prod) |
+| **Cloud-first mode** | true (default) | true (recommended) |
 | **Sync interval** | 30s (optional) | 60-300s (optional, reconciliation) |
 
-## Bucket Isolation Benefits
+## Cloud Storage Bucket Isolation Benefits
 
 ### Per-Store Bucket Strategy
 
-Each store has **its own isolated S3 bucket** for several reasons:
+Each store has **its own isolated cloud storage bucket** for several reasons:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -186,7 +184,7 @@ Each store has **its own isolated S3 bucket** for several reasons:
 │    - Store0 quota ≠ Store1 quota (can auto-scale)           │
 │                                                              │
 │ 2. Fine-grained access control (IAM per bucket)            │
-│    - Store0 only accesses store0-rocksdb                    │
+│    - Store0 only accesses store0 bucket                     │
 │    - Prevents cross-store data leaks                        │
 │                                                              │
 │ 3. Disaster recovery isolation                              │
@@ -194,24 +192,24 @@ Each store has **its own isolated S3 bucket** for several reasons:
 │    - Can restore individual stores independently            │
 │                                                              │
 │ 4. Regional/DC distribution                                 │
-│    - Store0 → S3 in us-east-1                              │
-│    - Store1 → S3 in eu-west-1                              │
-│    - Store2 → S3 in ap-southeast-1                         │
+│    - Store0 → cloud storage in us-east-1                   │
+│    - Store1 → cloud storage in eu-west-1                   │
+│    - Store2 → cloud storage in ap-southeast-1              │
 │                                                              │
 │ 5. Performance isolation                                    │
 │    - Store0 cloud sync doesn't compete with Store1          │
-│    - Independent cloud API rate limiting                    │
+│    - Independent cloud storage API rate limiting           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## Failure Modes and Recovery
 
-> Default behavior: S3-first mode is enabled (`rocksdb.cloud_s3_first_mode=true`,
-> env: `HG_STORE_ROCKSDB_CLOUD_S3_FIRST_MODE=true`). Each committed write batch
-> performs synchronous S3 upload before acknowledging commit.
+> Default behavior: Cloud-first mode is enabled (`rocksdb.cloud_cloud_first_mode=true`,
+> env: `HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE=true`). Each committed write batch
+> performs synchronous cloud storage upload before acknowledging commit.
 >
-> Optional fallback mode: set `rocksdb.cloud_s3_first_mode=false` to use
-> periodic background cloud sync only.
+> Optional fallback mode: set `rocksdb.cloud_cloud_first_mode=false` to use
+> periodic background cloud storage sync only.
 
 ### Scenario: Store0 RocksDB Corrupted
 
@@ -222,15 +220,15 @@ Each store has **its own isolated S3 bucket** for several reasons:
 2. Write requests: routed to Store1/2 (Store0 excluded)
 
 3. Recovery options:
-   a) FAST: Store0 syncs from S3 bucket (store0-rocksdb)
-      └─ Restores all SST files
-      └─ Raft resync fills gaps
-      └─ TBD: minutes
+    a) FAST: Store0 syncs from cloud storage bucket (store0-rocksdb)
+       └─ Restores all SST files
+       └─ Raft resync fills gaps
+       └─ TBD: minutes
 
-   b) SLOW: Delete Store0, replace with new node
-      └─ PD adds new store3
-      └─ Raft rebalances: 3 stores again
-      └─ Can be hours (data transfer)
+    b) SLOW: Delete Store0, replace with new node
+       └─ PD adds new store3
+       └─ Raft rebalances: 3 stores again
+       └─ Can be hours (data transfer)
 
 4. Graph operations: Continue throughout (no downtime)
 ```
@@ -239,28 +237,28 @@ Each store has **its own isolated S3 bucket** for several reasons:
 
 ```
 1. If local disks fail before latest upload completes:
-   └─ S3 may lag the latest acknowledged writes
+   └─ Cloud storage may lag the latest acknowledged writes
    └─ Potential recent-write loss window depends on sync settings
 
 2. AFTER (depends on sync recency):
-   └─ Stores boot from S3 buckets
+   └─ Stores boot from cloud storage buckets
    └─ Raft identifies missing commits
    └─ Data consistency restored
    └─ May lose last N seconds of writes (depends on sync grace period)
 
 3. Mitigation:
-   └─ Best durability: set HG_STORE_ROCKSDB_CLOUD_S3_FIRST_MODE=true
-   └─ Monitor sync errors and S3 latency/availability
+   └─ Best durability: set HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE=true
+   └─ Monitor sync errors and cloud storage latency/availability
 ```
 
 
 ## File Locations & References
 
 - **Documentation**: 
-  - Main guide: `docker/HStore-On-S3/RocksDB-Cloud.md`
-  - Architecture (this file): `docker/HStore-On-S3/ARCHITECTURE.md`
+   - Main guide: `docker/cloud-storage/RocksDB-Cloud.md`
+   - Architecture (this file): `docker/cloud-storage/ARCHITECTURE.md`
 
-- **Test Script**: `docker/HStore-On-S3/test-rocksdb-cloud-distributed.sh`
+- **Test Script**: `docker/cloud-storage/test-rocksdb-cloud-distributed.sh`
 
 - **Server Config Options**: `hugegraph-server/hugegraph-hstore/src/main/java/.../HstoreOptions.java`
 
@@ -273,21 +271,125 @@ Each store has **its own isolated S3 bucket** for several reasons:
 | Term | Meaning |
 |------|---------|
 | **hstore** | HStore backend: stateless server routing layer that talks to store cluster via PD |
-| **hstore.cloud_enabled** | Server-side flag to activate cloud sync; config propagated to store nodes |
-| **rocksdb-cloud (store-level)** | RocksDB running on each store node with S3 sync enabled (via env vars) |
+| **hstore.cloud_enabled** | Server-side flag to activate cloud storage sync; config propagated to store nodes |
+| **rocksdb-cloud (store-level)** | RocksDB running on each store node with cloud storage sync enabled (via env vars) |
 | **rocksdb-cloud (backend)** | ~~Deprecated~~ server-side `backend=rocksdb-cloud` — removed; use `hstore` instead |
 | **PD** | Placement Driver: cluster coordinator, manages partition assignment |
 | **Raft** | Consensus algorithm: ensures data consistency across replicas |
 | **SST** | Sorted String Table: RocksDB internal file format for storage |
-| **Cloud Sync** | Store-to-S3 upload path: synchronous on commit when `s3_first_mode=true`, periodic reconciliation when `s3_first_mode=false` |
-| **Bucket** | S3 storage container: isolated namespace for objects |
+| **Cloud Sync** | Store-to-cloud-storage upload path: synchronous on commit when `cloud_first_mode=true`, periodic reconciliation when `cloud_first_mode=false` |
+| **Bucket** | Cloud storage container: isolated namespace for objects |
 | **Quorum** | Minimum subset of nodes needed for consensus (2 of 3 = OK) |
 
 ## Next Steps
 
-1. **Run the automated test**: Follow `docker/HStore-On-S3/RocksDB-Cloud.md`
+1. **Run the automated test**: Follow `docker/cloud-storage/RocksDB-Cloud.md`
 2. **Inspect configuration**: Review generated `hugegraph.properties` and `docker-compose.yml`
 3. **Test manually**: Use `KEEP_UP=true` and query API while containers run
-4. **Read full docs**: `docker/HStore-On-S3/RocksDB-Cloud.md` has step-by-step manual guide
+4. **Read full docs**: `docker/cloud-storage/RocksDB-Cloud.md` has step-by-step manual guide
 5. **Production deployment**: Consider HA for PD and multiple servers behind load balancer
 
+
+## Pluggable Cloud Storage Architecture
+
+HugeGraph supports a **pluggable cloud storage provider** architecture that enables support for multiple cloud storage vendors without modifying core code.
+
+### Core Components
+
+```
+┌─────────────────────────────────────────────────┐
+│ RocksDBCloudSession                             │
+│ (Cloud sync orchestration - vendor-neutral)     │
+└──────────────┬──────────────────────────────────┘
+               │
+               ↓ (uses)
+┌─────────────────────────────────────────────────┐
+│ CloudStorageClient Interface                     │
+│ - provider(): String                             │
+│ - uploadDirectory()                              │
+│ - uploadIncremental()                            │
+│ - downloadDirectory()                            │
+│ - close()                                        │
+└──────────────┬──────────────────────────────────┘
+               │
+               ↓ (discovered via ServiceLoader)
+┌──────────────────────────────────────────────────────────────┐
+│ CloudStorageRegistry                                         │
+│ (Manages available providers via ServiceLoader)              │
+├──────────────────────────────────────────────────────────────┤
+│ Registered Providers:                                        │
+│ ├─ S3CompatibleStorageProvider (built-in)                   │
+│ │   └─ Supports: AWS S3, LocalStack, Wasabi, etc. (any S3-compatible storage)   │
+│ ├─ AzureStorageProvider (plugin JAR)                        │
+│ ├─ GcsStorageProvider (plugin JAR)                          │
+│ └─ Custom providers (user-implemented plugins)              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Provider Selection
+
+Providers are selected at runtime via configuration (choose one):
+
+- **S3-compatible storage (default):**
+  ```properties
+  rocksdb.cloud.provider=s3
+  ```
+
+- **Azure Blob Storage (when plugin JAR added):**
+  ```properties
+  rocksdb.cloud.provider=azure
+  ```
+
+- **Google Cloud Storage (when plugin JAR added):**
+  ```properties
+  rocksdb.cloud.provider=gcs
+  ```
+
+### Adding New Cloud Providers
+
+New cloud storage providers can be added as **external plugins** without modifying HugeGraph source code.
+
+**Process:**
+1. Implement `CloudStorageProvider` factory interface
+2. Implement `CloudStorageClient` interface with vendor SDK
+3. Register via `META-INF/services/org.apache.hugegraph.rocksdb.access.cloud.CloudStorageProvider`
+4. Package as JAR and add to HugeGraph classpath
+5. Configure via `rocksdb.cloud.provider=<your-provider>`
+6. Restart HugeGraph
+
+**Reference Implementation:**
+- Sample plugin: `examples/cloud-storage-plugin/SampleCloudStorage/`
+- Developer guide: `examples/cloud-storage-plugin/PLUGIN_DEVELOPMENT_GUIDE.md`
+
+### Built-in Providers
+
+#### S3-Compatible Provider (Built-in, Default)
+- **Provider ID:** `s3`
+- **Description:** Default cloud storage provider that supports S3-compatible APIs
+- **Supports:**
+   - AWS S3
+   - LocalStack
+   - Wasabi
+   - DigitalOcean Spaces
+   - And any other S3-compatible object storage (including MinIO)
+
+```properties
+rocksdb.cloud.provider=s3
+rocksdb.cloud_region=us-east-1
+rocksdb.cloud_endpoint=https://s3-compatible-endpoint.example.com:9000
+rocksdb.cloud_access_key=access_key
+rocksdb.cloud_secret_key=secret_key
+rocksdb.cloud_path_style=true  # required for some S3-compatible providers
+```
+
+### Plugin Architecture Benefits
+
+| Benefit | Description |
+|---------|------------|
+| **No Code Changes** | Add new provider via plugin JAR without recompiling HugeGraph |
+| **Vendor Isolation** | Each provider in separate JAR with independent dependencies |
+| **Lazy Discovery** | Providers loaded on first use via Java ServiceLoader |
+| **Multi-Cloud Support** | Multiple providers can coexist; config determines which is used |
+| **Future-Proof** | Adding Azure, GCS, or other providers requires no core changes |
+
+---
