@@ -105,16 +105,18 @@ public class RocksDBStoreCloudOptions extends OptionHolder {
                     disallowEmpty(),
                     true
             );
-    public static final ConfigOption<Boolean> CLOUD_CLOUD_FIRST_MODE =
-            new ConfigOption<>(
-                    "rocksdb.cloud_cloud_first_mode",
-                    "If true, each committed write batch performs synchronous cloud storage " +
-                    "upload before returning to caller.",
-                    disallowEmpty(),
-                    true
-            );
 
-    public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_MAX =
+     public static final ConfigOption<Boolean> SYNCHRONOUS_SST_UPLOAD_MODE =
+             new ConfigOption<>(
+                     "rocksdb.cloud.synchronous_sst_upload_mode",
+                     "Single control flag for cloud upload mode. If true, SST-triggered uploads " +
+                     "run synchronously. If false, SST-triggered uploads are disabled and cloud " +
+                     "sync uses periodic background reconciliation only.",
+                     disallowEmpty(),
+                      true
+             );
+
+     public static final ConfigOption<Integer> CLOUD_SYNC_RETRY_MAX =
             new ConfigOption<>(
                     "rocksdb.cloud_sync_retry_max",
                     "Max retries when commit-time sync waits for syncInProgress lock.",

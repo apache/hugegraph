@@ -23,7 +23,7 @@ PD (Placement Driver) + 3 Store nodes (Raft consensus)
          └── store2 → RocksDB + Cloud sync → Cloud storage bucket: store2-rocksdb
 ```
 
-> **Key architectural point:** Fully distributed with cloud-first durability:
+> **Key architectural point:** Fully distributed with cloud-sync durability controlled by one mode flag:
 > - Server (`backend=hstore`) is **stateless** — all graph data is in stores
 > - Each store runs **embedded RocksDB** with cloud storage module enabled
 > - Store 0 syncs to isolated `store0-rocksdb` cloud storage bucket (independent credentials + quota possible)
@@ -45,6 +45,21 @@ PD (Placement Driver) + 3 Store nodes (Raft consensus)
 | HugeGraph Server  | 8080      | REST API           |
 
 > **Note on initialization timing:** The server (`backend=hstore`) may take **2-5 minutes** to fully initialize after all store nodes become healthy. The server health check (`/versions` endpoint) returns 200 quickly, but graph operations only succeed after the hstore backend has fully connected to and synchronized with all store nodes. The test script waits for the first successful graph API call before attempting schema operations.
+
+---
+
+## Data Loss & Reliability
+
+**📖 For detailed information on data loss scenarios and risk mitigation, see:**
+
+- **[Architecture](./ARCHITECTURE.md)** — Failure modes, recovery behavior, and configuration trade-offs
+
+**Key takeaway:**
+- `rocksdb.cloud.synchronous_sst_upload_mode=true` => synchronous cloud upload
+- `rocksdb.cloud.synchronous_sst_upload_mode=false` => periodic background reconcile mode
+- ✅ **Single/double store failure**: ZERO data loss (Raft replication protects)
+- ⚠️ **Catastrophic disk loss (all 3 stores)**: Possible loss of recent writes if not yet synced to cloud (typically 30-60 seconds)
+- 🛡️ **Mitigation**: Use persistent storage + monitoring. See [Architecture](./ARCHITECTURE.md) for configuration tuning.
 
 ---
 
@@ -144,8 +159,8 @@ HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \
   ./docker/cloud-storage/test-rocksdb-cloud-distributed.sh
 
-# Optional: disable cloud-first mode and use periodic background sync only
-STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE=false \
+# Optional: periodic fallback mode (disable synchronous cloud upload)
+STORE_ROCKSDB_CLOUD_SYNCHRONOUS_SST_UPLOAD_MODE=false \
 STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS=60 \
 HG_SERVER_IMAGE=hugegraph/server:rocksdb-cloud-local \
 HG_STORE_IMAGE=hugegraph/store:rocksdb-cloud-local \

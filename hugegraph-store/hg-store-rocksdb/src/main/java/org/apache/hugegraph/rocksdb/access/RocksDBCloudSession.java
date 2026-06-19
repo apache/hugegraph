@@ -19,6 +19,13 @@ package org.apache.hugegraph.rocksdb.access;
 
 import java.util.Objects;
 import java.util.Locale;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -52,10 +59,10 @@ public class RocksDBCloudSession extends RocksDBSession {
     private static final String KEY_SYNC_INCREMENTAL_LEGACY =
             "rocksdb.cloud_sync_incremental";
 
-    private static final String KEY_CLOUD_FIRST_MODE = "rocksdb.cloud.cloud_first_mode";
-    private static final String KEY_CLOUD_FIRST_MODE_LEGACY = "rocksdb.cloud_cloud_first_mode";
+     private static final String KEY_SYNCHRONOUS_SST_UPLOAD_MODE = "rocksdb.cloud.synchronous_sst_upload_mode";
+     private static final String KEY_SYNCHRONOUS_SST_UPLOAD_MODE_LEGACY = "rocksdb.cloud_synchronous_sst_upload_mode";
 
-    private static final String KEY_SYNC_RETRY_MAX = "rocksdb.cloud.sync_retry_max";
+     private static final String KEY_SYNC_RETRY_MAX = "rocksdb.cloud.sync_retry_max";
     private static final String KEY_SYNC_RETRY_MAX_LEGACY = "rocksdb.cloud_sync_retry_max";
 
     private static final String KEY_SYNC_RETRY_BACKOFF_MS = "rocksdb.cloud.sync_retry_backoff_ms";
@@ -71,27 +78,30 @@ public class RocksDBCloudSession extends RocksDBSession {
                 return t;
             });
 
-    private final CloudStorageClient storageClient;
-    private final String bucket;
-    private final String objectPrefix;
-    private final int syncIntervalSeconds;
-    private final boolean syncIncremental;
-    private final boolean cloudFirstMode;
-    private final int syncRetryMax;
-    private final int syncRetryBackoffMs;
-    private final int syncRetryMaxBackoffMs;
+     private final CloudStorageClient storageClient;
+     private final String bucket;
+     private final String objectPrefix;
+     private final int syncIntervalSeconds;
+     private final boolean syncIncremental;
+     private final boolean synchronousSstUploadMode;
+     private final int syncRetryMax;
+     private final int syncRetryBackoffMs;
+     private final int syncRetryMaxBackoffMs;
 
     private final AtomicBoolean syncInProgress = new AtomicBoolean(false);
     private final AtomicBoolean hydrationInProgress = new AtomicBoolean(false);
+    private final AtomicBoolean sstSyncQueued = new AtomicBoolean(false);
 
     private ScheduledFuture<?> periodicSyncFuture;
+    private WatchService sstWatchService;
+    private Thread sstWatchThread;
 
     public RocksDBCloudSession(HugeConfig hugeConfig, String dbDataPath,
                                 String graphName, long version) {
         super(hugeConfig, dbDataPath, graphName, version);
 
         boolean cloudEnabled = getBoolean(hugeConfig, "rocksdb.cloud.enabled",
-                                          "rocksdb.cloud_enabled", true);
+                                          "rocksdb.cloud_enabled");
         if (!cloudEnabled) {
             log.warn("RocksDBCloudSession is initialized while cloud sync is disabled for graph {}",
                      graphName);
@@ -115,27 +125,28 @@ public class RocksDBCloudSession extends RocksDBSession {
                                       KEY_PREFIX_LEGACY);
         this.objectPrefix = normalizedPrefix(basePrefix, graphName);
 
-        this.syncIntervalSeconds = getInt(hugeConfig, KEY_SYNC_INTERVAL,
-                                          KEY_SYNC_INTERVAL_LEGACY, 60);
-        this.syncIncremental = getBoolean(hugeConfig, KEY_SYNC_INCREMENTAL,
-                                          KEY_SYNC_INCREMENTAL_LEGACY, true);
-        this.cloudFirstMode = getBoolean(hugeConfig, KEY_CLOUD_FIRST_MODE,
-                                         KEY_CLOUD_FIRST_MODE_LEGACY,
-                                         false);
-        this.syncRetryMax = getInt(hugeConfig, KEY_SYNC_RETRY_MAX,
-                                   KEY_SYNC_RETRY_MAX_LEGACY, 100);
+         this.syncIntervalSeconds = getInt(hugeConfig, KEY_SYNC_INTERVAL,
+                                           KEY_SYNC_INTERVAL_LEGACY, 60);
+         this.syncIncremental = getBoolean(hugeConfig, KEY_SYNC_INCREMENTAL,
+                                           KEY_SYNC_INCREMENTAL_LEGACY);
+         this.synchronousSstUploadMode = getBoolean(hugeConfig, KEY_SYNCHRONOUS_SST_UPLOAD_MODE,
+                                                      KEY_SYNCHRONOUS_SST_UPLOAD_MODE_LEGACY);
+         this.syncRetryMax = getInt(hugeConfig, KEY_SYNC_RETRY_MAX,
+                                    KEY_SYNC_RETRY_MAX_LEGACY, 100);
         this.syncRetryBackoffMs = getInt(hugeConfig, KEY_SYNC_RETRY_BACKOFF_MS,
                                          KEY_SYNC_RETRY_BACKOFF_MS_LEGACY, 10);
         this.syncRetryMaxBackoffMs = getInt(hugeConfig, KEY_SYNC_RETRY_MAX_BACKOFF_MS,
                                             KEY_SYNC_RETRY_MAX_BACKOFF_MS_LEGACY, 1000);
 
-        startPeriodicSync();
-        log.info("RocksDB cloud enabled for graph {}: {}://{}/{}, interval={}s, " +
-                 "incremental={}, cloud_first_mode={}, retry_max={}, " +
-                 "retry_backoff_ms={}, retry_max_backoff_ms={}",
-                 graphName, this.storageClient.provider(), this.bucket, this.objectPrefix,
-                 this.syncIntervalSeconds, this.syncIncremental, this.cloudFirstMode,
-                 this.syncRetryMax, this.syncRetryBackoffMs, this.syncRetryMaxBackoffMs);
+         startSstWatchSync();
+         startPeriodicSync();
+         log.info("RocksDB cloud enabled for graph {}: {}://{}/{}, interval={}s, " +
+                  "incremental={}, synchronous_sst_upload_mode={}, " +
+                  "retry_max={}, retry_backoff_ms={}, retry_max_backoff_ms={}",
+                  graphName, this.storageClient.provider(), this.bucket, this.objectPrefix,
+                  this.syncIntervalSeconds, this.syncIncremental,
+                  this.synchronousSstUploadMode, this.syncRetryMax, this.syncRetryBackoffMs,
+                  this.syncRetryMaxBackoffMs);
     }
 
     @Override
@@ -232,6 +243,7 @@ public class RocksDBCloudSession extends RocksDBSession {
 
     @Override
     void shutdown() {
+        stopSstWatchSync();
         stopPeriodicSync();
         try {
             syncNow(true, true);
@@ -260,6 +272,101 @@ public class RocksDBCloudSession extends RocksDBSession {
                          getGraphName(), t.getMessage());
             }
         }, this.syncIntervalSeconds, this.syncIntervalSeconds, TimeUnit.SECONDS);
+    }
+
+    private void startSstWatchSync() {
+        // Single-flag behavior: only synchronous_sst_upload_mode=true enables SST-triggered uploads.
+        if (!this.synchronousSstUploadMode) {
+            return;
+        }
+        try {
+            this.sstWatchService = FileSystems.getDefault().newWatchService();
+            Path dbPath = Paths.get(getDbPath());
+            dbPath.register(this.sstWatchService,
+                            StandardWatchEventKinds.ENTRY_CREATE,
+                            StandardWatchEventKinds.ENTRY_MODIFY,
+                            StandardWatchEventKinds.ENTRY_DELETE);
+        } catch (Exception e) {
+            log.warn("Failed to start SST watch sync for {}: {}",
+                     getGraphName(), e.getMessage());
+            return;
+        }
+
+        this.sstWatchThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    WatchKey key = this.sstWatchService.poll(1, TimeUnit.SECONDS);
+                    if (key == null) {
+                        continue;
+                    }
+
+                    boolean hasSstChange = false;
+                    for (WatchEvent<?> event : key.pollEvents()) {
+                        if (event.kind() == StandardWatchEventKinds.OVERFLOW) {
+                            hasSstChange = true;
+                            continue;
+                        }
+                        Object context = event.context();
+                        if (!(context instanceof Path)) {
+                            continue;
+                        }
+                        String fileName = ((Path) context).getFileName().toString()
+                                                         .toLowerCase(Locale.ROOT);
+                        if (fileName.endsWith(".sst")) {
+                            hasSstChange = true;
+                            break;
+                        }
+                    }
+                    if (!key.reset()) {
+                        break;
+                    }
+
+                    if (hasSstChange) {
+                        queueSstSync();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Throwable t) {
+                    log.warn("SST watch sync loop failed for {}: {}",
+                             getGraphName(), t.getMessage());
+                }
+            }
+        }, "store-rocksdb-sst-watch-" + getGraphName());
+        this.sstWatchThread.setDaemon(true);
+        this.sstWatchThread.start();
+    }
+
+     private void queueSstSync() {
+         if (!this.sstSyncQueued.compareAndSet(false, true)) {
+             return;
+         }
+
+          // Synchronous-only path: upload SST-triggered changes immediately.
+          try {
+              syncNow(false, false);
+              log.debug("Synchronous SST cloud upload completed for graph {}", getGraphName());
+          } catch (Throwable t) {
+              log.warn("Synchronous SST cloud upload failed for {}: {}",
+                       getGraphName(), t.getMessage());
+          } finally {
+              this.sstSyncQueued.set(false);
+          }
+     }
+
+    private void stopSstWatchSync() {
+        if (this.sstWatchThread != null) {
+            this.sstWatchThread.interrupt();
+            this.sstWatchThread = null;
+        }
+        if (this.sstWatchService != null) {
+            try {
+                this.sstWatchService.close();
+            } catch (Exception ignored) {
+                // Ignore close exception on shutdown path
+            }
+            this.sstWatchService = null;
+        }
     }
 
     private void stopPeriodicSync() {
@@ -306,8 +413,8 @@ public class RocksDBCloudSession extends RocksDBSession {
     }
 
     private static boolean getBoolean(HugeConfig conf, String key,
-                                      String legacyKey, boolean defaultValue) {
-        return Boolean.parseBoolean(getString(conf, String.valueOf(defaultValue), key, legacyKey));
+                                      String legacyKey) {
+        return Boolean.parseBoolean(getString(conf, String.valueOf(true), key, legacyKey));
     }
 
     private static int getInt(HugeConfig conf, String key,
@@ -346,14 +453,7 @@ public class RocksDBCloudSession extends RocksDBSession {
 
          @Override
          public Integer commit() throws DBStoreException {
-             Integer count = super.commit();
-             if (count != null && count > 0) {
-                 if (this.cloudSession.cloudFirstMode) {
-                     // In cloud-first mode, sync before acknowledging commit to caller.
-                     this.cloudSession.syncNow(false, true);
-                 }
-             }
-             return count;
+             return super.commit();
          }
 
         @Override

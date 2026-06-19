@@ -70,7 +70,8 @@ require_env "HG_STORE_RAFT_ADDRESS"
 : "${HG_STORE_ROCKSDB_CLOUD_OBJECT_PREFIX:=store}"
 : "${HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS:=60}"
 : "${HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL:=true}"
-: "${HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE:=true}"
+: "${HG_STORE_ROCKSDB_CLOUD_SYNCHRONOUS_SST_UPLOAD_MODE:=true}"
+
 
 # ── Build SPRING_APPLICATION_JSON ─────────────────────────────────────
 SPRING_APPLICATION_JSON="$(cat <<JSON
@@ -97,7 +98,7 @@ SPRING_APPLICATION_JSON="$(cat <<JSON
                  "cloud_object_prefix": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_OBJECT_PREFIX}")",
                  "cloud_sync_interval_seconds": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS}")",
                  "cloud_sync_incremental": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL}")",
-                 "cloud_cloud_first_mode": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE}")"
+                  "cloud_synchronous_sst_upload_mode": "$(json_escape "${HG_STORE_ROCKSDB_CLOUD_SYNCHRONOUS_SST_UPLOAD_MODE}")"
                }
 }
 JSON
@@ -122,7 +123,7 @@ if [[ "${HG_STORE_ROCKSDB_CLOUD_ENABLED}" == "true" ]]; then
     log "  rocksdb.cloud_object_prefix=${HG_STORE_ROCKSDB_CLOUD_OBJECT_PREFIX}"
     log "  rocksdb.cloud_sync_interval_seconds=${HG_STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS}"
     log "  rocksdb.cloud_sync_incremental=${HG_STORE_ROCKSDB_CLOUD_SYNC_INCREMENTAL}"
-    log "  rocksdb.cloud_cloud_first_mode=${HG_STORE_ROCKSDB_CLOUD_CLOUD_FIRST_MODE}"
+    log "  rocksdb.cloud_synchronous_sst_upload_mode=${HG_STORE_ROCKSDB_CLOUD_SYNCHRONOUS_SST_UPLOAD_MODE}"
 fi
 
 ./bin/start-hugegraph-store.sh -d false -j "${JAVA_OPTS:-}"
