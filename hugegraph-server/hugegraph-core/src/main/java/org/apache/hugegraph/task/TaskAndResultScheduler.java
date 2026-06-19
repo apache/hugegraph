@@ -129,7 +129,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
 
     @Override
     public <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
-        return this.tasks(ids, false);
+        return this.tasks(ids, true);
     }
 
     @Override
@@ -144,7 +144,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     @Override
     public <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
                                            String page) {
-        return this.tasks(status, limit, page, false);
+        return this.tasks(status, limit, page, true);
     }
 
     @Override
