@@ -306,11 +306,13 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
             HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
             if (vertex == null) {
+                this.deleteTaskResultFromTx(id);
                 return null;
             }
             HugeTask<V> result = HugeTask.fromVertex(vertex, false);
-            this.deleteTaskResultFromTx(id);
+            // Prefer a retryable orphan result over a live task missing result.
             this.tx().removeTaskVertex(vertex);
+            this.deleteTaskResultFromTx(id);
             return result;
         });
     }

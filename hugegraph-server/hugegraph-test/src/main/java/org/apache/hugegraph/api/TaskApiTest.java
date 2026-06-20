@@ -93,8 +93,12 @@ public class TaskApiTest extends BaseApiTest {
 
         waitTaskSuccess(taskId);
 
-        Response r = client().get(PATH, String.valueOf(taskId));
+        Response r = client().get(PATH, ImmutableMap.of("limit", -1));
         String content = assertResponseStatus(200, r);
+        Assert.assertFalse(content, content.contains("task_result"));
+
+        r = client().get(PATH, String.valueOf(taskId));
+        content = assertResponseStatus(200, r);
         assertJsonContains(content, "task_result");
 
         r = client().get(PATH + taskId,
