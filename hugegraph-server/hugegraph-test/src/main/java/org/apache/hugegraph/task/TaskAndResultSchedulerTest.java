@@ -74,9 +74,24 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
             assertIteratorContainsTaskWithoutResult(tasks, id);
             Assert.assertEquals(0, scheduler.resultReadCount());
 
+            tasks = scheduler.tasks(ImmutableList.of(id));
+            assertIteratorContainsTaskWithoutResult(tasks, id);
+            Assert.assertEquals(0, scheduler.resultReadCount());
+
+            tasks = scheduler.tasks(TaskStatus.SUCCESS, 10L, null);
+            assertIteratorContainsTaskWithoutResult(tasks, id);
+            Assert.assertEquals(0, scheduler.resultReadCount());
+
             tasks = scheduler.queryMetadataTasksByStatus(TaskStatus.SUCCESS);
             assertIteratorContainsTaskWithoutResult(tasks, id);
             Assert.assertEquals(0, scheduler.resultReadCount());
+
+            scheduler.forbidResultRead(false);
+            scheduler.resetResultReadCount();
+
+            tasks = scheduler.tasks(ImmutableList.of(id), true);
+            assertIteratorContainsTaskWithResult(tasks, id, largeResult);
+            Assert.assertGt(0, scheduler.resultReadCount());
         } finally {
             scheduler.forbidResultRead(false);
             scheduler.deleteFromDBForTest(id);
@@ -100,13 +115,14 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
 
             scheduler.failNextTaskResultDelete();
             Assert.assertThrows(HugeException.class, () -> {
-                scheduler.deleteFromDBForTest(id);
+                scheduler.delete(id, true);
             });
 
-            Assert.assertFalse(scheduler.taskVertexExists(id));
+            Assert.assertTrue(scheduler.taskVertexExists(id));
+            Assert.assertEquals(TaskStatus.DELETING, scheduler.taskStatus(id));
             Assert.assertTrue(scheduler.taskResultVertexExists(id));
 
-            Assert.assertNull(scheduler.deleteFromDBForTest(id));
+            scheduler.cronSchedule();
             Assert.assertFalse(scheduler.taskVertexExists(id));
             Assert.assertFalse(scheduler.taskResultVertexExists(id));
         } finally {
@@ -142,6 +158,20 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
             HugeTask<?> task = tasks.next();
             if (id.equals(task.id())) {
                 assertTaskWithoutResult(task, id);
+                matched = true;
+            }
+        }
+        Assert.assertTrue(matched);
+    }
+
+    private static void assertIteratorContainsTaskWithResult(
+            Iterator<HugeTask<Object>> tasks, Id id, String result) {
+        boolean matched = false;
+        while (tasks.hasNext()) {
+            HugeTask<?> task = tasks.next();
+            if (id.equals(task.id())) {
+                Assert.assertEquals(id, task.id());
+                Assert.assertEquals(result, task.result());
                 matched = true;
             }
         }
@@ -241,6 +271,11 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
             super.deleteTaskResultFromTx(taskId);
         }
 
+        @Override
+        protected boolean isLockedTask(String taskId) {
+            return false;
+        }
+
         public <V> HugeTask<V> deleteFromDBForTest(Id id) {
             return super.deleteFromDB(id);
         }
@@ -256,6 +291,10 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
 
         public boolean taskResultVertexExists(Id id) {
             return this.vertexExists(HugeTaskResult.genId(id));
+        }
+
+        public TaskStatus taskStatus(Id id) {
+            return this.task(id, false).status();
         }
 
         public int resultReadCount() {

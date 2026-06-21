@@ -496,6 +496,11 @@ public class StandardTaskScheduler implements TaskScheduler {
     }
 
     @Override
+    public <V> HugeTask<V> task(Id id) {
+        return this.task(id, true);
+    }
+
+    @Override
     public <V> HugeTask<V> task(Id id, boolean withResult) {
         E.checkArgumentNotNull(id, "Parameter task id can't be null");
         @SuppressWarnings("unchecked")
@@ -504,6 +509,11 @@ public class StandardTaskScheduler implements TaskScheduler {
             return withResult ? task : task.copyWithoutResult();
         }
         return this.findTask(id, withResult);
+    }
+
+    @Override
+    public <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
+        return this.tasks(ids, true);
     }
 
     @Override
@@ -528,6 +538,12 @@ public class StandardTaskScheduler implements TaskScheduler {
         }
         iterator.extend(this.findTasks(taskIdsNotInMem, withResult));
         return iterator;
+    }
+
+    @Override
+    public <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
+                                           String page) {
+        return this.tasks(status, limit, page, true);
     }
 
     @Override

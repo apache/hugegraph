@@ -103,6 +103,11 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     }
 
     @Override
+    public <V> HugeTask<V> task(Id id) {
+        return this.task(id, true);
+    }
+
+    @Override
     public <V> HugeTask<V> task(Id id, boolean withResult) {
         HugeTask<V> task = this.call(() -> {
             Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
@@ -129,7 +134,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
 
     @Override
     public <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
-        return this.tasks(ids, true);
+        return this.tasks(ids, false);
     }
 
     @Override
@@ -144,7 +149,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     @Override
     public <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
                                            String page) {
-        return this.tasks(status, limit, page, true);
+        return this.tasks(status, limit, page, false);
     }
 
     @Override
