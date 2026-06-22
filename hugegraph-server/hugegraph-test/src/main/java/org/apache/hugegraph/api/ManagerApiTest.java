@@ -38,7 +38,7 @@ import jakarta.ws.rs.core.Response;
 
 public class ManagerApiTest extends BaseApiTest {
 
-    private static final String USER_PATH = "graphspaces/DEFAULT/graphs/hugegraph/auth/users";
+    private static final String USER_PATH = "graphspaces/DEFAULT/auth/users";
     private static final int NO_LIMIT = -1;
 
     // Helper method to build manager path with graphspace

@@ -237,43 +237,132 @@ The text of each license is the standard Apache 2.0 license.
     (Apache License, Version 2.0) * swagger-ui v4.15.5 (https://github.com/swagger-api/swagger-ui)
 
 ========================================================================
+Third party CC0 1.0 licenses
+========================================================================
+The following components are provided under the CC0 1.0 License. See project link for details.
+The text of each license is also included in licenses/LICENSE-[project].txt.
+
+    https://central.sonatype.com/artifact/org.hdrhistogram/HdrHistogram/2.1.12 -> CC0 1.0
+    https://central.sonatype.com/artifact/org.hdrhistogram/HdrHistogram/2.1.9 -> CC0 1.0
+
+========================================================================
+Third party BSD-2-Clause licenses
+========================================================================
+The following components are provided under the BSD-2-Clause License. See project link for details.
+The text of each license is also included in licenses/LICENSE-[project].txt.
+
+    https://central.sonatype.com/artifact/com.github.luben/zstd-jni/1.5.5-1 -> BSD-2-Clause
+    https://central.sonatype.com/artifact/org.latencyutils/LatencyUtils/2.0.3 -> BSD-2-Clause
+    https://central.sonatype.com/artifact/org.postgresql/postgresql/42.4.3 -> BSD-2-Clause
+
+========================================================================
 Third party Apache 2.0 licenses
 ========================================================================
 The following components are provided under the Apache 2.0 License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
-    https://central.sonatype.com/artifact/net.minidev/accessors-smart/1.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.airlift/airline/0.8 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.vaadin.external.google/android-json/0.0.20131108.vaadin1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jetbrains/annotations/13.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jetbrains/annotations/24.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config-base/3.0.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config3/3.0.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alibaba/fastjson/1.2.83 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa.common/sofa-common-tools/1.0.12 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa.lookout/lookout-api/1.4.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.11 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.13 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/sofa-rpc-all/5.7.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/tracer-core/3.0.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.baidu.hugegraph/hbase-shaded-endpoint/2.0.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.beust/jcommander/1.30 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.carrotsearch/hppc/0.7.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.carrotsearch/hppc/0.8.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.chenlb.mmseg4j/mmseg4j-core/1.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.clearspring.analytics/stream/2.5.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.codahale.metrics/metrics-core/3.0.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.datastax.cassandra/cassandra-driver-core/3.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.13.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.14.0-rc1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.13.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.13.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.14.0-rc1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.12.6.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.13.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.13.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.14.0-rc1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.dataformat/jackson-dataformat-yaml/2.11.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.dataformat/jackson-dataformat-yaml/2.9.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.datatype/jackson-datatype-jdk8/2.12.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.datatype/jackson-datatype-jsr310/2.11.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.datatype/jackson-datatype-jsr310/2.12.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.jakarta.rs/jackson-jakarta-rs-base/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.jakarta.rs/jackson-jakarta-rs-json-provider/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.jaxrs/jackson-jaxrs-base/2.14.0-rc1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.jaxrs/jackson-jaxrs-base/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.jaxrs/jackson-jaxrs-json-provider/2.14.0-rc1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.jaxrs/jackson-jaxrs-json-provider/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-jakarta-xmlbind-annotations/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-jaxb-annotations/2.14.0-rc1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-jaxb-annotations/2.15.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-parameter-names/2.12.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.ben-manes.caffeine/caffeine/2.3.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.ben-manes.caffeine/caffeine/2.5.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.jbellis/jamm/0.3.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.jnr/jffi/1.2.16 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.jnr/jnr-ffi/2.1.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.mifmif/generex/1.0.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.stephenc.findbugs/findbugs-annotations/1.3.9-1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.stephenc.jcip/jcip-annotations/1.0-1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.android/annotations/4.1.1.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.ansj/ansj_seg/5.1.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apiguardian/apiguardian-api/1.1.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/1.17.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/2.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.auto.service/auto-service-annotations/1.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.code.findbugs/jsr305/3.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.code.findbugs/jsr305/3.0.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.code.gson/gson/2.8.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.code.gson/gson/2.8.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.1.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.18.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.3.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.4.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/failureaccess/1.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/25.1-jre -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/27.0-jre -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/30.0-jre -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/30.1-android -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/31.0.1-android -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/32.0.1-android -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.j2objc/j2objc-annotations/1.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.j2objc/j2objc-annotations/1.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.j2objc/j2objc-annotations/2.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.googlecode.concurrent-trees/concurrent-trees/2.4.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.googlecode.json-simple/json-simple/1.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.hankcs/hanlp/portable-1.8.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.huaban/jieba-analysis/1.0.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.janeluo/ikanalyzer/2012_u6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.jayway.jsonpath/json-path/2.5.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.lmax/disruptor/3.3.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.lmax/disruptor/3.4.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.nimbusds/nimbus-jose-jwt/4.41.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup.okhttp3/logging-interceptor/3.12.12 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup.okhttp3/logging-interceptor/4.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup.okhttp3/okhttp/3.12.12 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup.okhttp3/okhttp/4.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup.okio/okio-jvm/3.0.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup.okio/okio/1.15.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.squareup/javapoet/1.8.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.taobao.arthas/arthas-agent-attach/3.6.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.taobao.arthas/arthas-agent-attach/3.7.1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.taobao.arthas/arthas-packaging/3.6.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.taobao.arthas/arthas-packaging/3.7.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.assertj/assertj-core/3.19.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher/ast-9.0/9.0.20190305 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.yetus/audience-annotations/0.5.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.auto.service/auto-service-annotations/1.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy/1.10.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy/1.10.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.10.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.10.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.11.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.ben-manes.caffeine/caffeine/2.3.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.ben-manes.caffeine/caffeine/2.5.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.cassandra/cassandra-all/4.0.10 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.datastax.cassandra/cassandra-driver-core/3.6.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.openhft/chronicle-bytes/2.20.111 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.openhft/chronicle-core/2.20.126 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.openhft/chronicle-queue/5.20.123 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.openhft/chronicle-threads/2.20.111 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.openhft/chronicle-wire/2.20.117 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.vaadin.external.google/android-json/0.0.20131108.vaadin1 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-beanutils/commons-beanutils/1.9.4 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-cli/commons-cli/1.1 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.11 -> Apache 2.0
@@ -281,54 +370,47 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.15 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.9 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-collections/commons-collections/3.2.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-collections4/4.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-compress/1.21 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-configuration/commons-configuration/1.10 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.8.0 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-io/commons-io/2.12.0 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-io/commons-io/2.7 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-io/commons-io/2.8.0 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-lang/commons-lang/2.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.11 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.12.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.13.0 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-logging/commons-logging/1.1.1 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-logging/commons-logging/1.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-math3/3.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.googlecode.concurrent-trees/concurrent-trees/2.4.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher.gremlin/cypher-gremlin-extensions/1.0.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.lmax/disruptor/3.3.7 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.lmax/disruptor/3.4.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.3.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.4.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.objecthunter/exp4j/0.4.8 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher/expressions-9.0/9.0.20190305 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.jodah/failsafe/2.4.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.guava/failureaccess/1.0.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alibaba/fastjson/1.2.83 -> Apache 2.0
-    https://central.sonatype.com/artifact/it.unimi.dsi/fastutil/8.5.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.stephenc.findbugs/findbugs-annotations/1.3.9-1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher/front-end-9.0/9.0.20190305 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-console/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-core/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-driver/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-groovy/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-groovy-test/3.2.11 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-server/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-shaded/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-test/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-cli-picocli/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-console/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-groovysh/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-json/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-jsr223/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-swing/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-templates/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-xml/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/info.picocli/picocli/4.3.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.airlift/airline/0.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-annotation/4.2.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-core/3.1.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-core/4.0.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-core/4.2.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-jersey3/4.2.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-jvm/3.1.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-logback/3.1.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.etcd/jetcd-common/0.5.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.etcd/jetcd-core/0.5.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-client/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-admissionregistration/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-apiextensions/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-apps/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-autoscaling/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-batch/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-certificates/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-common/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-coordination/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-core/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-discovery/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-events/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-extensions/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-flowcontrol/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-metrics/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-networking/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-node/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-policy/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-rbac/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-scheduling/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/kubernetes-model-storageclass/5.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.fabric8/zjsonpatch/0.3.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.github.lognet/grpc-spring-boot-starter/4.5.5 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-api/1.28.1 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-api/1.39.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-api/1.47.0 -> Apache 2.0
@@ -339,116 +421,116 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/io.grpc/grpc-core/1.39.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-core/1.47.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-grpclb/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.47.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.28.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.39.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.28.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.39.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.39.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.47.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-protobuf-lite/1.28.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-protobuf-lite/1.39.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.28.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.39.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-services/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.github.lognet/grpc-spring-boot-starter/4.5.5 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.28.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.39.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.code.gson/gson/2.8.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.code.gson/gson/2.8.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.guava/guava/27.0-jre -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.guava/guava/30.0-jre -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.guava/guava/30.1-android -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.guava/guava/31.0.1-android -> Apache 2.0
-    https://central.sonatype.com/artifact/com.hankcs/hanlp/portable-1.8.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.baidu.hugegraph/hbase-shaded-endpoint/2.0.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.7 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.carrotsearch/hppc/0.7.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.carrotsearch/hppc/0.8.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.htrace/htrace-core4/4.2.0-incubating -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.httpcomponents/httpclient/4.5.13 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.httpcomponents/httpcore/4.4.13 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.janeluo/ikanalyzer/2012_u6 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.ivy/ivy/2.4.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.j2objc/j2objc-annotations/1.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.12.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.13.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.13.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.14.0-rc1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-annotations/2.15.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.12.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.13.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.13.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-core/2.14.0-rc1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.12.6.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.13.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.13.2.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.14.0-rc1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.core/jackson-databind/2.15.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.dataformat/jackson-dataformat-yaml/2.9.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.datatype/jackson-datatype-jdk8/2.12.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.datatype/jackson-datatype-jsr310/2.12.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.datatype/jackson-datatype-jsr310/2.15.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.jakarta.rs/jackson-jakarta-rs-base/2.15.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.jakarta.rs/jackson-jakarta-rs-json-provider/2.15.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.jaxrs/jackson-jaxrs-base/2.14.0-rc1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.jaxrs/jackson-jaxrs-json-provider/2.14.0-rc1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-jakarta-xmlbind-annotations/2.15.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-jaxb-annotations/2.14.0-rc1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.fasterxml.jackson.module/jackson-module-parameter-names/2.12.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/jakarta.inject/jakarta.inject-api/2.0.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/jakarta.validation/jakarta.validation-api/3.0.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.jbellis/jamm/0.3.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.squareup/javapoet/1.8.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.javassist/javassist/3.21.0-GA -> Apache 2.0
-    https://central.sonatype.com/artifact/org.javassist/javassist/3.24.0-GA -> Apache 2.0
-    https://central.sonatype.com/artifact/org.javassist/javassist/3.28.0-GA -> Apache 2.0
-    https://central.sonatype.com/artifact/org.javatuples/javatuples/1.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/javax.inject/javax.inject/1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/javax-websocket-client-impl/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/javax-websocket-server-impl/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.stephenc.jcip/jcip-annotations/1.0-1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.beust/jcommander/1.30 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.lionsoul/jcseg-core/2.6.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jctools/jctools-core/2.1.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jctools/jctools-core/3.1.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.etcd/jetcd-common/0.5.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.etcd/jetcd-core/0.5.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-annotations/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-client/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-continuation/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-http/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-io/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-plus/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-security/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-server/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-servlet/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-servlets/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-util/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-util-ajax/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-webapp/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-xml/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.jnr/jffi/1.2.16 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.jnr/jffi/1.2.16 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.huaban/jieba-analysis/1.0.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-api/0.11.2 -> Apache 2.0
     https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-api/0.11.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-impl/0.11.2 -> Apache 2.0
     https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-impl/0.11.5 -> Apache 2.0
     https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-jackson/0.11.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.micrometer/micrometer-core/1.7.12 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.micrometer/micrometer-registry-prometheus/1.7.12 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-all/4.1.42.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-all/4.1.44.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-all/4.1.61.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-socks/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-socks/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-common/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-common/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-handler-proxy/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-handler-proxy/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-tcnative-boringssl-static/2.0.25.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-tcnative-boringssl-static/2.0.36.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-tcnative-classes/2.0.46.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-transport-native-unix-common/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.52.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.72.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.opentracing/opentracing-api/0.22.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.opentracing/opentracing-mock/0.22.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.opentracing/opentracing-noop/0.22.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.opentracing/opentracing-util/0.22.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.perfmark/perfmark-api/0.19.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.perfmark/perfmark-api/0.23.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.perfmark/perfmark-api/0.25.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.prometheus/simpleclient/0.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.prometheus/simpleclient_common/0.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-api/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-collectionschema/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-core/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-runtime/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-annotations-jakarta/2.2.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-core-jakarta/2.2.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-integration-jakarta/2.2.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-jaxrs2-jakarta/2.2.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-models-jakarta/2.2.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger/swagger-annotations/1.5.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger/swagger-core/1.5.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.swagger/swagger-models/1.5.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/it.unimi.dsi/fastutil/8.1.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/it.unimi.dsi/fastutil/8.5.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/jakarta.inject/jakarta.inject-api/2.0.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/jakarta.validation/jakarta.validation-api/3.0.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/javax.inject/javax.inject/1 -> Apache 2.0
+    https://central.sonatype.com/artifact/javax.validation/validation-api/1.1.0.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/joda-time/joda-time/2.10.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.10.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.10.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.11.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy/1.10.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy/1.10.5 -> Apache 2.0
     https://central.sonatype.com/artifact/net.java.dev.jna/jna/5.12.1 -> Apache 2.0
     https://central.sonatype.com/artifact/net.java.dev.jna/jna/5.5.0 -> Apache 2.0
     https://central.sonatype.com/artifact/net.java.dev.jna/jna/5.7.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.github.jnr/jnr-ffi/2.1.7 -> Apache 2.0
-    https://central.sonatype.com/artifact/joda-time/joda-time/2.10.8 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.11 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.13 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.skyscreamer/jsonassert/1.5.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.jayway.jsonpath/json-path/2.5.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.googlecode.json-simple/json-simple/1.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.jodah/failsafe/2.4.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.minidev/accessors-smart/1.2 -> Apache 2.0
     https://central.sonatype.com/artifact/net.minidev/json-smart/2.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.code.findbugs/jsr305/3.0.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.code.findbugs/jsr305/3.0.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.gridkit.lab/jvm-attach-api/1.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.objecthunter/exp4j/0.4.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.openhft/chronicle-bytes/2.20.111 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.openhft/chronicle-core/2.20.126 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.openhft/chronicle-queue/5.20.123 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.openhft/chronicle-threads/2.20.111 -> Apache 2.0
+    https://central.sonatype.com/artifact/net.openhft/chronicle-wire/2.20.117 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.ansj/ansj_seg/5.1.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.cassandra/cassandra-all/4.0.10 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-collections4/4.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-compress/1.21 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.8.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.11 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.12.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.13.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.18.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-math3/3.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-pool2/2.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.fury/fury-core/0.9.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.htrace/htrace-core4/4.2.0-incubating -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.httpcomponents/httpclient/4.5.13 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.httpcomponents/httpcore/4.4.13 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.ivy/ivy/2.4.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-admin/2.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-client/2.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-common/2.0.0 -> Apache 2.0
@@ -463,11 +545,7 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/org.apache.kerby/kerby-pkix/2.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerby-util/2.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerby-xdr/2.0.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib/1.6.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib-common/1.5.31 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.6.10 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.6.10 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.kerby/token-provider/2.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.logging.log4j/log4j-api/2.15.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.logging.log4j/log4j-api/2.17.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.logging.log4j/log4j-api/2.17.1 -> Apache 2.0
@@ -483,197 +561,169 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/org.apache.logging.log4j/log4j-slf4j-impl/2.17.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.logging.log4j/log4j-slf4j-impl/2.17.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.logging.log4j/log4j-slf4j-impl/2.18.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.squareup.okhttp3/logging-interceptor/4.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa.lookout/lookout-api/1.4.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-analyzers-common/5.2.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-analyzers-common/8.11.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-analyzers-smartcn/7.4.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-analyzers-smartcn/8.11.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-backward-codecs/5.2.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-core/7.4.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-core/8.11.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-misc/5.2.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-queries/4.7.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-queries/5.2.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-queryparser/4.7.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-queryparser/5.2.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-sandbox/4.7.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.lz4/lz4-java/1.4.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.lz4/lz4-java/1.8.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-annotation/4.2.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.codahale.metrics/metrics-core/3.0.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-core/3.1.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-core/4.0.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-core/4.2.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-jersey3/4.2.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-jvm/3.1.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.dropwizard.metrics/metrics-logback/3.1.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.micrometer/micrometer-core/1.7.12 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.micrometer/micrometer-registry-prometheus/1.7.12 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.chenlb.mmseg4j/mmseg4j-core/1.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.gridkit.jvmtool/mxdump/0.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-all/4.1.42.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-all/4.1.44.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-all/4.1.61.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-socks/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-socks/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-common/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-common/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-handler-proxy/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-handler-proxy/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-tcnative-boringssl-static/2.0.25.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-tcnative-boringssl-static/2.0.36.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-tcnative-classes/2.0.46.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.52.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-transport-native-unix-common/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/com.nimbusds/nimbus-jose-jwt/4.41.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.nlpcn/nlp-lang/1.7.7 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.objenesis/objenesis/2.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.objenesis/objenesis/3.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.caffinitas.ohc/ohc-core/0.7.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-sandbox/5.2.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.lucene/lucene-suggest/5.2.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-console/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-core/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-driver/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-groovy-test/3.2.11 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-groovy/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-server/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-shaded/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/gremlin-test/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tinkerpop/tinkergraph-gremlin/3.5.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.tomcat.embed/tomcat-embed-el/9.0.63 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.yetus/audience-annotations/0.5.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apiguardian/apiguardian-api/1.1.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.assertj/assertj-core/3.19.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.caffinitas.ohc/ohc-core-j8/0.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.squareup.okhttp3/okhttp/4.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.squareup.okio/okio-jvm/3.0.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opentest4j/opentest4j/1.2.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.opentracing/opentracing-api/0.22.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.opentracing/opentracing-mock/0.22.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.opentracing/opentracing-noop/0.22.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.opentracing/opentracing-util/0.22.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.parboiled/parboiled-core/1.2.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.parboiled/parboiled-scala_2.12/1.2.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher/parser-9.0/9.0.20190305 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.perfmark/perfmark-api/0.19.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.perfmark/perfmark-api/0.23.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.perfmark/perfmark-api/0.25.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/info.picocli/picocli/4.3.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-api-mockito2/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-api-support/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-classloading-base/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-classloading-xstream/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-core/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-common/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-rule/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-reflect/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/1.17.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/2.0.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.protostuff/protostuff-api/1.6.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.protostuff/protostuff-collectionschema/1.6.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.protostuff/protostuff-core/1.6.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.protostuff/protostuff-runtime/1.6.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config3/3.0.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config-base/3.0.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher/rewriting-9.0/9.0.20190305 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/6.29.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/7.2.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/7.7.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.caffinitas.ohc/ohc-core/0.7.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-cli-picocli/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-console/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-groovysh/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-json/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-jsr223/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-swing/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-templates/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-xml/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/javax-websocket-client-impl/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/javax-websocket-server-impl/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-api/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-client/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-common/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-server/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-servlet/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-annotations/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-client/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-continuation/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-http/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-io/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-plus/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-security/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-server/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-servlet/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-servlets/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-util-ajax/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-util/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-webapp/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.eclipse.jetty/jetty-xml/9.4.46.v20220331 -> Apache 2.0
     https://central.sonatype.com/artifact/org.fusesource/sigar/1.6.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.prometheus/simpleclient/0.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.prometheus/simpleclient_common/0.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/mxdump/0.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-agent/0.22 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-cli/0.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-cli/0.22 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-core/0.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-core/0.22 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-hflame/0.22 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr5/0.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr6/0.7 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr-standalone/0.7 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-json/0.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-json/0.22 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-nps/0.9 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-stacktrace/0.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-stacktrace/0.22 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.26 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.27 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.28 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.yaml/snakeyaml/2.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.xerial.snappy/snappy-java/1.1.2.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa.common/sofa-common-tools/1.0.12 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/sofa-rpc-all/5.7.6 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework/spring-aop/5.3.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework/spring-beans/5.3.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-actuator/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.lab/jvm-attach-api/1.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.javassist/javassist/3.21.0-GA -> Apache 2.0
+    https://central.sonatype.com/artifact/org.javassist/javassist/3.24.0-GA -> Apache 2.0
+    https://central.sonatype.com/artifact/org.javassist/javassist/3.28.0-GA -> Apache 2.0
+    https://central.sonatype.com/artifact/org.javatuples/javatuples/1.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jctools/jctools-core/2.1.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jctools/jctools-core/3.1.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib-common/1.5.31 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk7/1.6.10 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib-jdk8/1.6.10 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jetbrains.kotlin/kotlin-stdlib/1.6.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jetbrains/annotations/13.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.jetbrains/annotations/24.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.lionsoul/jcseg-core/2.2.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.lionsoul/jcseg-core/2.6.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.lz4/lz4-java/1.4.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.lz4/lz4-java/1.7.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.lz4/lz4-java/1.8.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.nlpcn/nlp-lang/1.7.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.objenesis/objenesis/2.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.objenesis/objenesis/3.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher.gremlin/cypher-gremlin-extensions/1.0.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher.gremlin/translation/1.0.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/ast-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/expressions-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/front-end-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/parser-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/rewriting-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/util-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opentest4j/opentest4j/1.2.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.parboiled/parboiled-core/1.2.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.parboiled/parboiled-scala_2.12/1.2.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr-standalone/0.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr5/0.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr6/0.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-nps/0.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-api-mockito2/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-api-support/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-classloading-base/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-classloading-xstream/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-core/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-common/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-rule/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.powermock/powermock-reflect/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.roaringbitmap/RoaringBitmap/0.9.38 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.roaringbitmap/shims/0.9.38 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/6.29.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/7.7.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/8.10.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.skyscreamer/jsonassert/1.5.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-actuator-autoconfigure/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-actuator/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-autoconfigure/2.5.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-autoconfigure/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter/2.5.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter-actuator/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter-jetty/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter-json/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter-log4j2/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter-test/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter-web/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-test/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter/2.5.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-starter/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-test-autoconfigure/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.springframework/spring-context/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-test/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.security/spring-security-core/5.8.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.security/spring-security-crypto/5.8.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-aop/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-aop/5.3.27 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-beans/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-beans/5.3.27 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework/spring-context-support/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-context/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-context/5.3.27 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework/spring-core/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-core/5.3.27 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework/spring-expression/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-expression/5.3.27 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework/spring-jcl/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-jcl/5.3.27 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework/spring-web/5.3.20 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework/spring-webmvc/5.3.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.clearspring.analytics/stream/2.5.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger/swagger-annotations/1.5.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-annotations-jakarta/2.2.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger/swagger-core/1.5.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-core-jakarta/2.2.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-integration-jakarta/2.2.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-jaxrs2-jakarta/2.2.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger/swagger-models/1.5.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.swagger.core.v3/swagger-models-jakarta/2.2.18 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tinkerpop/tinkergraph-gremlin/3.5.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.kerby/token-provider/2.0.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.tomcat.embed/tomcat-embed-el/9.0.63 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/tracer-core/3.0.8 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher.gremlin/translation/1.0.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.opencypher/util-9.0/9.0.20190305 -> Apache 2.0
-    https://central.sonatype.com/artifact/javax.validation/validation-api/1.1.0.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-api/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-client/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-common/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-server/9.4.46.v20220331 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-servlet/9.4.46.v20220331 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.xerial.snappy/snappy-java/1.1.2.6 -> Apache 2.0
     https://central.sonatype.com/artifact/org.xmlunit/xmlunit-core/2.8.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.26 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.27 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.28 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/2.2 -> Apache 2.0
     https://central.sonatype.com/artifact/org.zeroturnaround/zt-zip/1.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.fabric8/kubernetes-client/5.6.0 -> Apache 2.0
-
-========================================================================
-Third party MIT licenses
-========================================================================
-The following components are provided under the MIT License. See project link for details.
-The text of each license is also included in licenses/LICENSE-[project].txt.
-
-    https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.18 -> MIT
-    https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.19 -> MIT
-    https://central.sonatype.com/artifact/org.checkerframework/checker-compat-qual/2.5.5 -> MIT
-    https://central.sonatype.com/artifact/org.checkerframework/checker-qual/3.12.0 -> MIT
-    https://central.sonatype.com/artifact/org.checkerframework/checker-qual/3.5.0 -> MIT
-    https://central.sonatype.com/artifact/io.github.classgraph/classgraph/4.8.162 -> MIT
-    https://central.sonatype.com/artifact/com.lihaoyi/fastparse_2.12/2.0.4 -> MIT
-    https://central.sonatype.com/artifact/com.boundary/high-scale-lib/1.0.6 -> MIT
-    https://central.sonatype.com/artifact/org.slf4j/jcl-over-slf4j/1.7.25 -> MIT
-    https://central.sonatype.com/artifact/com.github.jnr/jnr-x86asm/1.0.2 -> MIT
-    https://central.sonatype.com/artifact/org.slf4j/jul-to-slf4j/1.7.36 -> MIT
-    https://central.sonatype.com/artifact/org.projectlombok/lombok/1.18.24 -> MIT
-    https://central.sonatype.com/artifact/org.mockito/mockito-core/3.3.3 -> MIT
-    https://central.sonatype.com/artifact/org.mockito/mockito-core/3.9.0 -> MIT
-    https://central.sonatype.com/artifact/org.mockito/mockito-junit-jupiter/3.9.0 -> MIT
-    https://central.sonatype.com/artifact/org.psjava/psjava/0.1.19 -> MIT
-    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.21 -> MIT
-    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.25 -> MIT
-    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.32 -> MIT
-    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/2.0.9 -> MIT
-    https://central.sonatype.com/artifact/com.lihaoyi/sourcecode_2.12/0.1.4 -> MIT
 
 ========================================================================
 Third party BSD licenses
@@ -681,21 +731,57 @@ Third party BSD licenses
 The following components are provided under the BSD License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
+    https://central.sonatype.com/artifact/com.belerweb/pinyin4j/2.5.0 -> BSD
+    https://central.sonatype.com/artifact/com.github.rholder/snowball-stemmer/1.3.0.581.1 -> BSD
+    https://central.sonatype.com/artifact/com.jcabi/jcabi-log/0.14 -> BSD
+    https://central.sonatype.com/artifact/com.jcabi/jcabi-manifests/1.1 -> BSD
+    https://central.sonatype.com/artifact/com.thoughtworks.xstream/xstream/1.4.10 -> BSD
+    https://central.sonatype.com/artifact/de.jflex/jflex/1.8.2 -> BSD
+    https://central.sonatype.com/artifact/dk.brics.automaton/automaton/1.11-8 -> BSD
+    https://central.sonatype.com/artifact/jline/jline/2.14.6 -> BSD
+    https://central.sonatype.com/artifact/org.antlr/ST4/4.0.8 -> BSD
     https://central.sonatype.com/artifact/org.antlr/antlr-runtime/3.5.2 -> BSD
-    https://central.sonatype.com/artifact/org.ow2.asm/asm/6.0 -> BSD
-    https://central.sonatype.com/artifact/org.ow2.asm/asm/7.1 -> BSD
+    https://central.sonatype.com/artifact/org.hamcrest/hamcrest-core/1.3 -> BSD
     https://central.sonatype.com/artifact/org.ow2.asm/asm-analysis/5.0.3 -> BSD
     https://central.sonatype.com/artifact/org.ow2.asm/asm-commons/5.0.3 -> BSD
     https://central.sonatype.com/artifact/org.ow2.asm/asm-tree/5.0.3 -> BSD
     https://central.sonatype.com/artifact/org.ow2.asm/asm-util/5.0.3 -> BSD
-    https://central.sonatype.com/artifact/org.hamcrest/hamcrest-core/1.3 -> BSD
-    https://central.sonatype.com/artifact/com.jcabi/jcabi-log/0.14 -> BSD
-    https://central.sonatype.com/artifact/com.jcabi/jcabi-manifests/1.1 -> BSD
-    https://central.sonatype.com/artifact/de.jflex/jflex/1.8.2 -> BSD
-    https://central.sonatype.com/artifact/jline/jline/2.14.6 -> BSD
-    https://central.sonatype.com/artifact/com.github.rholder/snowball-stemmer/1.3.0.581.1 -> BSD
-    https://central.sonatype.com/artifact/org.antlr/ST4/4.0.8 -> BSD
-    https://central.sonatype.com/artifact/com.thoughtworks.xstream/xstream/1.4.10 -> BSD
+    https://central.sonatype.com/artifact/org.ow2.asm/asm/5.0.4 -> BSD
+    https://central.sonatype.com/artifact/org.ow2.asm/asm/6.0 -> BSD
+    https://central.sonatype.com/artifact/org.ow2.asm/asm/7.1 -> BSD
+
+========================================================================
+Third party MIT licenses
+========================================================================
+The following components are provided under the MIT License. See project link for details.
+The text of each license is also included in licenses/LICENSE-[project].txt.
+
+    https://central.sonatype.com/artifact/com.boundary/high-scale-lib/1.0.6 -> MIT
+    https://central.sonatype.com/artifact/com.github.jnr/jnr-x86asm/1.0.2 -> MIT
+    https://central.sonatype.com/artifact/com.lihaoyi/fastparse_2.12/2.0.4 -> MIT
+    https://central.sonatype.com/artifact/com.lihaoyi/sourcecode_2.12/0.1.4 -> MIT
+    https://central.sonatype.com/artifact/io.github.classgraph/classgraph/4.8.162 -> MIT
+    https://central.sonatype.com/artifact/org.checkerframework/checker-compat-qual/2.5.5 -> MIT
+    https://central.sonatype.com/artifact/org.checkerframework/checker-qual/2.0.0 -> MIT
+    https://central.sonatype.com/artifact/org.checkerframework/checker-qual/3.12.0 -> MIT
+    https://central.sonatype.com/artifact/org.checkerframework/checker-qual/3.33.0 -> MIT
+    https://central.sonatype.com/artifact/org.checkerframework/checker-qual/3.5.0 -> MIT
+    https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.14 -> MIT
+    https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.18 -> MIT
+    https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.19 -> MIT
+    https://central.sonatype.com/artifact/org.mockito/mockito-core/3.3.3 -> MIT
+    https://central.sonatype.com/artifact/org.mockito/mockito-core/3.9.0 -> MIT
+    https://central.sonatype.com/artifact/org.mockito/mockito-junit-jupiter/3.9.0 -> MIT
+    https://central.sonatype.com/artifact/org.projectlombok/lombok/1.18.24 -> MIT
+    https://central.sonatype.com/artifact/org.psjava/psjava/0.1.19 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/jcl-over-slf4j/1.7.25 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/jul-to-slf4j/1.7.36 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.21 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.25 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.31 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/1.7.32 -> MIT
+    https://central.sonatype.com/artifact/org.slf4j/slf4j-api/2.0.9 -> MIT
+    https://central.sonatype.com/artifact/redis.clients/jedis/2.5.1 -> MIT
 
 ========================================================================
 Third party EPL 2.0 licenses
@@ -703,41 +789,41 @@ Third party EPL 2.0 licenses
 The following components are provided under the EPL 2.0 License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
-    https://central.sonatype.com/artifact/org.glassfish.hk2.external/aopalliance-repackaged/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-framework/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-http/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-http-server/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-http-servlet/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.hk2/hk2-api/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.hk2/hk2-locator/3.0.1 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.hk2/hk2-utils/3.0.1 -> EPL 2.0
     https://central.sonatype.com/artifact/jakarta.annotation/jakarta.annotation-api/1.3.5 -> EPL 2.0
     https://central.sonatype.com/artifact/jakarta.annotation/jakarta.annotation-api/2.0.0 -> EPL 2.0
     https://central.sonatype.com/artifact/jakarta.servlet/jakarta.servlet-api/4.0.4 -> EPL 2.0
     https://central.sonatype.com/artifact/jakarta.servlet/jakarta.servlet-api/5.0.0 -> EPL 2.0
     https://central.sonatype.com/artifact/jakarta.websocket/jakarta.websocket-api/1.1.2 -> EPL 2.0
     https://central.sonatype.com/artifact/jakarta.ws.rs/jakarta.ws.rs-api/3.0.0 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-framework/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-http-server/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-http-servlet/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.grizzly/grizzly-http/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.hk2.external/aopalliance-repackaged/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.hk2/hk2-api/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.hk2/hk2-locator/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.hk2/hk2-utils/3.0.1 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.hk2/osgi-resource-locator/1.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.connectors/jersey-apache-connector/3.0.3 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.jersey.core/jersey-client/3.0.3 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.jersey.core/jersey-common/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.containers/jersey-container-grizzly2-http/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.containers/jersey-container-grizzly2-servlet/3.0.3 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.jersey.containers/jersey-container-servlet/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.containers/jersey-container-servlet-core/3.0.3 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.jersey.containers/jersey-container-servlet/3.0.3 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.jersey.core/jersey-client/3.0.3 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.jersey.core/jersey-common/3.0.3 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.jersey.core/jersey-server/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.ext/jersey-entity-filtering/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.inject/jersey-hk2/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.media/jersey-media-jaxb/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.media/jersey-media-json-jackson/3.0.3 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.jersey.core/jersey-server/3.0.3 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.jersey.test-framework/jersey-test-framework-core/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.glassfish.jersey.test-framework.providers/jersey-test-framework-provider-grizzly2/3.0.3 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.junit.jupiter/junit-jupiter/5.7.2 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.glassfish.jersey.test-framework/jersey-test-framework-core/3.0.3 -> EPL 2.0
     https://central.sonatype.com/artifact/org.junit.jupiter/junit-jupiter-api/5.7.2 -> EPL 2.0
     https://central.sonatype.com/artifact/org.junit.jupiter/junit-jupiter-engine/5.7.2 -> EPL 2.0
     https://central.sonatype.com/artifact/org.junit.jupiter/junit-jupiter-params/5.7.2 -> EPL 2.0
+    https://central.sonatype.com/artifact/org.junit.jupiter/junit-jupiter/5.7.2 -> EPL 2.0
     https://central.sonatype.com/artifact/org.junit.platform/junit-platform-commons/1.7.2 -> EPL 2.0
     https://central.sonatype.com/artifact/org.junit.platform/junit-platform-engine/1.7.2 -> EPL 2.0
-    https://central.sonatype.com/artifact/org.glassfish.hk2/osgi-resource-locator/1.0.3 -> EPL 2.0
 
 ========================================================================
 Third party BSD-3-Clause licenses
@@ -745,16 +831,16 @@ Third party BSD-3-Clause licenses
 The following components are provided under the BSD-3-Clause License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
-    https://central.sonatype.com/artifact/org.ow2.asm/asm-analysis/9.2 -> BSD-3-Clause
-    https://central.sonatype.com/artifact/org.ow2.asm/asm-commons/9.2 -> BSD-3-Clause
-    https://central.sonatype.com/artifact/org.ow2.asm/asm-tree/9.2 -> BSD-3-Clause
-    https://central.sonatype.com/artifact/org.hamcrest/hamcrest/2.2 -> BSD-3-Clause
-    https://central.sonatype.com/artifact/com.sun.activation/jakarta.activation/2.0.0 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java-util/3.17.2 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.11.0 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.17.2 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.21.7 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.5.1 -> BSD-3-Clause
-    https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java-util/3.17.2 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/com.sun.activation/jakarta.activation/2.0.0 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/org.hamcrest/hamcrest/2.2 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/org.ow2.asm/asm-analysis/9.2 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/org.ow2.asm/asm-commons/9.2 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/org.ow2.asm/asm-tree/9.2 -> BSD-3-Clause
     https://central.sonatype.com/artifact/org.scala-lang.modules/scala-java8-compat_2.12/0.8.0 -> BSD-3-Clause
     https://central.sonatype.com/artifact/org.scala-lang/scala-library/2.12.7 -> BSD-3-Clause
     https://central.sonatype.com/artifact/org.scala-lang/scala-reflect/2.12.7 -> BSD-3-Clause
@@ -765,32 +851,24 @@ Third party EDL 1.0 licenses
 The following components are provided under the EDL 1.0 License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
-    https://central.sonatype.com/artifact/org.eclipse.collections/eclipse-collections/11.1.0 -> EDL 1.0
-    https://central.sonatype.com/artifact/org.eclipse.collections/eclipse-collections-api/11.1.0 -> EDL 1.0
     https://central.sonatype.com/artifact/com.sun.activation/jakarta.activation/2.0.1 -> EDL 1.0
+    https://central.sonatype.com/artifact/com.sun.xml.bind/jaxb-core/3.0.2 -> EDL 1.0
+    https://central.sonatype.com/artifact/com.sun.xml.bind/jaxb-impl/3.0.2 -> EDL 1.0
     https://central.sonatype.com/artifact/jakarta.activation/jakarta.activation-api/1.2.2 -> EDL 1.0
     https://central.sonatype.com/artifact/jakarta.xml.bind/jakarta.xml.bind-api/2.3.3 -> EDL 1.0
     https://central.sonatype.com/artifact/jakarta.xml.bind/jakarta.xml.bind-api/3.0.0 -> EDL 1.0
-    https://central.sonatype.com/artifact/com.sun.xml.bind/jaxb-core/3.0.2 -> EDL 1.0
-    https://central.sonatype.com/artifact/com.sun.xml.bind/jaxb-impl/3.0.2 -> EDL 1.0
+    https://central.sonatype.com/artifact/org.eclipse.collections/eclipse-collections-api/10.4.0 -> EDL 1.0
+    https://central.sonatype.com/artifact/org.eclipse.collections/eclipse-collections-api/11.1.0 -> EDL 1.0
+    https://central.sonatype.com/artifact/org.eclipse.collections/eclipse-collections/10.4.0 -> EDL 1.0
+    https://central.sonatype.com/artifact/org.eclipse.collections/eclipse-collections/11.1.0 -> EDL 1.0
 
 ========================================================================
-Third party CC0 1.0 licenses
+Third party Historical Permission Notice and Disclaimer licenses
 ========================================================================
-The following components are provided under the CC0 1.0 License. See project link for details.
+The following components are provided under the Historical Permission Notice and Disclaimer License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
-    https://central.sonatype.com/artifact/org.hdrhistogram/HdrHistogram/2.1.12 -> CC0 1.0
-    https://central.sonatype.com/artifact/org.hdrhistogram/HdrHistogram/2.1.9 -> CC0 1.0
-    https://central.sonatype.com/artifact/org.latencyutils/LatencyUtils/2.0.3 -> CC0 1.0
-
-========================================================================
-Third party CUP Parser Generator Copyright Notice, License, and Disclaimer licenses
-========================================================================
-The following components are provided under the CUP Parser Generator Copyright Notice, License, and Disclaimer License. See project link for details.
-The text of each license is also included in licenses/LICENSE-[project].txt.
-
-    https://central.sonatype.com/artifact/com.github.vbmacher/java-cup-runtime/11b-20160615 -> CUP Parser Generator Copyright Notice, License, and Disclaimer
+    https://central.sonatype.com/artifact/com.github.vbmacher/java-cup-runtime/11b-20160615 -> Historical Permission Notice and Disclaimer
 
 ========================================================================
 Third party CDDL licenses
@@ -826,15 +904,6 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
 
     https://central.sonatype.com/artifact/junit/junit/4.13.1 -> EPL 1.0
     https://central.sonatype.com/artifact/junit/junit/4.13.2 -> EPL 1.0
-
-========================================================================
-Third party BSD-2-Clause licenses
-========================================================================
-The following components are provided under the BSD-2-Clause License. See project link for details.
-The text of each license is also included in licenses/LICENSE-[project].txt.
-
-    https://central.sonatype.com/artifact/org.postgresql/postgresql/42.4.3 -> BSD-2-Clause
-    https://central.sonatype.com/artifact/com.github.luben/zstd-jni/1.5.5-1 -> BSD-2-Clause
 
 ========================================================================
 Third party Public Domain licenses

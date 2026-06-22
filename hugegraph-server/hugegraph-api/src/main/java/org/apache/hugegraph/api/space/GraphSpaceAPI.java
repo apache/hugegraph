@@ -26,6 +26,7 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
+import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
 import org.apache.hugegraph.exception.NotFoundException;
@@ -103,7 +104,7 @@ public class GraphSpaceAPI extends API {
 
         jsonGraphSpace.checkCreate(false);
 
-        String creator = "admin";
+        String creator = HugeGraphAuthProxy.getContext().user().username();
         GraphSpace exist = manager.graphSpace(jsonGraphSpace.name);
         E.checkArgument(exist == null, "The graph space '%s' has existed",
                         jsonGraphSpace.name);

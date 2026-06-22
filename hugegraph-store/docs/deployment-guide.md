@@ -471,17 +471,34 @@ curl http://localhost:8620/actuator/health
 
 ```bash
 # Check cluster members
-curl http://192.168.1.10:8620/pd/v1/members
+curl http://192.168.1.10:8620/v1/members
 
 # Expected output:
-# {
-#   "members": [
-#     {"id": "1", "name": "pd-1", "address": "192.168.1.10:8686"},
-#     {"id": "2", "name": "pd-2", "address": "192.168.1.11:8686"},
-#     {"id": "3", "name": "pd-3", "address": "192.168.1.12:8686"}
-#   ],
-#   "leader": "1"
-# }
+{
+  "message":"OK",
+  "data":{
+    "pdLeader":null,
+    "pdList":[{
+      "raftUrl":"127.0.0.1:8610",
+      "grpcUrl":"",
+      "restUrl":"",
+      "state":"Offline",
+      "dataPath":"",
+      "role":"Leader",
+      "replicateState":"",
+      "serviceName":"-PD",
+      "serviceVersion":"1.7.0",
+      "startTimeStamp":1761818483830
+      }],
+    "stateCountMap":{
+      "Offline":1
+      },
+      "numOfService":1,
+      "state":"Cluster_OK",
+      "numOfNormalService":0
+      },
+    "status":0
+}
 ```
 
 ---
@@ -560,23 +577,45 @@ bin/start-hugegraph-store.sh
 tail -f logs/hugegraph-store.log
 
 # Verify Store is running
-curl http://localhost:8520/actuator/health
+curl http://localhost:8520/v1/health
 ```
 
 **Verify Store registration with PD**:
 
 ```bash
 # Query PD for registered stores
-curl http://192.168.1.10:8620/pd/v1/stores
+curl http://192.168.1.10:8620/v1/stores
 
 # Expected output:
-# {
-#   "stores": [
-#     {"id": "1", "address": "192.168.1.20:8500", "state": "Online"},
-#     {"id": "2", "address": "192.168.1.21:8500", "state": "Online"},
-#     {"id": "3", "address": "192.168.1.22:8500", "state": "Online"}
-#   ]
-# }
+{
+  "message":"OK",
+  "data":{
+    "stores":[{
+      "storeId":"1783423547167821026",
+      "address":"192.168.1.10:8500",
+      "raftAddress":"192.168.1.10:8510",
+      "version":"","state":"Up",
+      "deployPath":"/Users/user/incubator-hugegraph/hugegraph-store/hg-store-node/target/classes/",
+      "dataPath":"./storage",
+      "startTimeStamp":1761818547335,
+      "registedTimeStamp":1761818547335,
+      "lastHeartBeat":1761818727631,
+      "capacity":245107195904,
+      "available":118497292288,
+      "partitionCount":0,
+      "graphSize":0,
+      "keyCount":0,
+      "leaderCount":0,
+      "serviceName":"192.168.1.10:8500-store",
+      "serviceVersion":"",
+      "serviceCreatedTimeStamp":1761818547000,
+      "partitions":[]}],
+      "stateCountMap":{"Up":1},
+      "numOfService":1,
+      "numOfNormalService":1
+      },
+      "status":0
+}
 ```
 
 ---
@@ -904,47 +943,45 @@ kubectl port-forward svc/hugegraph-store 8500:8500 -n hugegraph
 
 ```bash
 # PD health
-curl http://192.168.1.10:8620/actuator/health
+curl http://192.168.1.10:8620/v1/health
 
 # Store health
-curl http://192.168.1.20:8520/actuator/health
-
-# Server health
-curl http://192.168.1.30:8080/actuator/health
+curl http://192.168.1.20:8520/v1/health
 ```
 
 ### Cluster Status
 
 ```bash
 # PD cluster members
-curl http://192.168.1.10:8620/pd/v1/members
+curl http://192.168.1.10:8620/v1/members
 
 # Registered stores
-curl http://192.168.1.10:8620/pd/v1/stores
+curl http://192.168.1.10:8620/v1/stores
 
 # Partitions
-curl http://192.168.1.10:8620/pd/v1/partitions
+curl http://192.168.1.10:8620/v1/partitions
 
 # Graph list
-curl http://192.168.1.30:8080/graphs
+curl http://192.168.1.10:8620/v1/graphs
 ```
 
 ### Basic Operations Test
 
 ```bash
 # Create vertex via Server
-curl -X POST http://192.168.1.30:8080/graphs/hugegraph/graph/vertices \
-  -H "Content-Type: application/json" \
-  -d '{
-    "label": "person",
-    "properties": {
-      "name": "Alice",
-      "age": 30
-    }
-  }'
+curl -X POST "http://192.168.1.30:8080/graphspaces/{graphspace_name}/graphs/{graph_name}/graph/vertices" \
+     -H "Content-Type: application/json" \
+     -d '{
+         "label": "person",
+         "properties": {
+             "name": "marko",
+             "age": 29
+         }
+     }'
 
-# Query vertex
-curl http://192.168.1.30:8080/graphs/hugegraph/graph/vertices
+# Query vertex (using -u if auth is enabled)
+curl -u admin:admin \
+     -X GET "http://localhost:8080/graphspaces/{graphspace_name}/graphs/graphspace_name}/graph/vertices/{graph_id}
 ```
 
 ### Performance Baseline Test

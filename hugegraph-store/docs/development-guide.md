@@ -220,6 +220,8 @@ cd hugegraph-store/hg-store-dist/target/apache-hugegraph-store-incubating-1.7.0
 bin/start-hugegraph-store.sh
 ```
 
+If you want to run store module in debug mode
+Directly run HgStoreNodeService in your IDE (ensure PD is on).
 ---
 
 ## Build and Test
@@ -823,7 +825,7 @@ cd install-dist/scripts/dependency
 - Slack: (link in project README)
 
 **Related Projects**:
-- Apache JRaft: https://github.com/sofastack/sofa-jraft
+- SOFA-JRaft: https://github.com/sofastack/sofa-jraft
 - RocksDB: https://rocksdb.org/
 - gRPC: https://grpc.io/docs/languages/java/
 

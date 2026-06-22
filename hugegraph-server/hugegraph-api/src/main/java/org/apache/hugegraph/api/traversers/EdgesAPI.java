@@ -76,7 +76,7 @@ public class EdgesAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
 
         Iterator<Edge> edges = g.edges(ids);
-        return manager.serializer(g).writeEdges(edges, false);
+        return manager.serializer().writeEdges(edges, false);
     }
 
     @GET
@@ -93,7 +93,7 @@ public class EdgesAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, graph);
         List<Shard> shards = g.metadata(HugeType.EDGE_OUT, "splits", splitSize);
-        return manager.serializer(g).writeList("shards", shards);
+        return manager.serializer().writeList("shards", shards);
     }
 
     @GET
@@ -122,6 +122,6 @@ public class EdgesAPI extends API {
         }
         Iterator<Edge> edges = g.edges(query);
 
-        return manager.serializer(g).writeEdges(edges, query.paging());
+        return manager.serializer().writeEdges(edges, query.paging());
     }
 }

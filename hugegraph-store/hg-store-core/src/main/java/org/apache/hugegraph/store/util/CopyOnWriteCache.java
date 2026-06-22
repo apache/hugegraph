@@ -20,6 +20,7 @@ package org.apache.hugegraph.store.util;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
@@ -29,7 +30,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.jetbrains.annotations.NotNull;
 
-//FIXME Missing shutdown method
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
 
     // Scheduled executor service for periodically clearing the cache.
@@ -261,6 +264,25 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
             return put(k, v);
         } else {
             return null;
+        }
+    }
+
+    public void close(){
+        scheduledExecutor.shutdown();
+        try {
+            boolean isTerminated = scheduledExecutor.awaitTermination(30, TimeUnit.SECONDS);
+            if (!isTerminated) {
+                List<Runnable> runnables = scheduledExecutor.shutdownNow();
+                log.info("CopyOnWriteCache shutting down with {} tasks left", runnables.size());
+
+                boolean isNowTerminated = scheduledExecutor.awaitTermination(30, TimeUnit.SECONDS);
+                if (!isNowTerminated) {
+                    log.warn("Failed to shutdown CopyOnWriteCache thread pool");
+                }
+            }
+        }catch (InterruptedException e) {
+            scheduledExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 }

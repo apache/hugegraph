@@ -76,7 +76,7 @@ public class VerticesAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
 
         Iterator<Vertex> vertices = g.vertices(ids);
-        return manager.serializer(g).writeVertices(vertices, false);
+        return manager.serializer().writeVertices(vertices, false);
     }
 
     @GET
@@ -93,7 +93,7 @@ public class VerticesAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, graph);
         List<Shard> shards = g.metadata(HugeType.VERTEX, "splits", splitSize);
-        return manager.serializer(g).writeList("shards", shards);
+        return manager.serializer().writeList("shards", shards);
     }
 
     @GET
@@ -122,6 +122,6 @@ public class VerticesAPI extends API {
         }
         Iterator<Vertex> vertices = g.vertices(query);
 
-        return manager.serializer(g).writeVertices(vertices, query.paging());
+        return manager.serializer().writeVertices(vertices, query.paging());
     }
 }

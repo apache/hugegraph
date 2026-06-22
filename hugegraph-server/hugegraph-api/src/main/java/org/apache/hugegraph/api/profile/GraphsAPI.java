@@ -29,6 +29,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter;
 import org.apache.hugegraph.auth.HugeAuthenticator.RequiredPerm;
+import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
@@ -128,7 +129,7 @@ public class GraphsAPI extends API {
         LOG.debug("Get graph by name '{}'", name);
 
         HugeGraph g = graph(manager, graphSpace, name);
-        return ImmutableMap.of("name", g.spaceGraphName(), "backend", g.backend());
+        return ImmutableMap.of("name", g.name(), "backend", g.backend());
     }
 
     @DELETE
@@ -198,8 +199,7 @@ public class GraphsAPI extends API {
             }
         }
 
-        // todo: auth get actual user info
-        String creator = "admin";
+        String creator = HugeGraphAuthProxy.getContext().user().username();
 
         if (StringUtils.isNotEmpty(clone)) {
             // Clone from existing graph
@@ -214,7 +214,7 @@ public class GraphsAPI extends API {
         if (description == null) {
             description = Strings.EMPTY;
         }
-        Object result = ImmutableMap.of("name", graph.spaceGraphName(),
+        Object result = ImmutableMap.of("name", graph.name(),
                 "nickname", graph.nickname(),
                 "backend", graph.backend(),
                 "description", description);

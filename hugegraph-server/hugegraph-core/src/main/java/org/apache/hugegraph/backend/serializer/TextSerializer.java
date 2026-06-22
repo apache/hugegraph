@@ -51,6 +51,7 @@ import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeIndex;
 import org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime;
 import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.HugeVectorIndexMap;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.type.HugeType;
@@ -416,6 +417,17 @@ public class TextSerializer extends AbstractSerializer {
         }
         // Memory backend might return empty BackendEntry
         return index;
+    }
+
+    @Override
+    public BackendEntry writeVectorSequence(HugeVectorIndexMap indexMap) {
+        throw new RuntimeException("Method not implemented error.");
+    }
+
+    @Override
+    public HugeVectorIndexMap readVectorSequence(HugeGraph graph, ConditionQuery query,
+                                  BackendEntry entry) {
+        throw new RuntimeException("Method not implemented error.");
     }
 
     @Override

@@ -52,15 +52,6 @@ curl http://<pd-host>:8620/actuator/metrics
 - **Normal**: <30,000ms (30 seconds)
 - **Warning**: >60,000ms (large partition or slow disk)
 
-**Queries**:
-```bash
-# Check leader election count
-curl http://192.168.1.20:8520/actuator/metrics/raft.leader.election.count
-
-# Check log apply latency
-curl http://192.168.1.20:8520/actuator/metrics/raft.log.apply.latency
-```
-
 #### 2. RocksDB Metrics
 
 **Metric**: `rocksdb.read.latency`
@@ -83,12 +74,6 @@ curl http://192.168.1.20:8520/actuator/metrics/raft.log.apply.latency
 - **Normal**: >90%
 - **Warning**: <70% (increase cache size)
 
-**Queries**:
-```bash
-curl http://192.168.1.20:8520/actuator/metrics/rocksdb.read.latency
-curl http://192.168.1.20:8520/actuator/metrics/rocksdb.compaction.pending
-```
-
 #### 3. Partition Metrics
 
 **Metric**: `partition.count`
@@ -103,14 +88,15 @@ curl http://192.168.1.20:8520/actuator/metrics/rocksdb.compaction.pending
 
 **Queries**:
 ```bash
-# Check partition distribution (via PD)
-curl http://192.168.1.10:8620/pd/v1/stats/partition-distribution
+# Check partition distribution
+curl  http://localhost:8620/v1/partitionsAndStats 
 
-# Expected output:
+# Example output (imbalanced):
 # {
-#   "store_1": {"total": 12, "leaders": 4},
-#   "store_2": {"total": 12, "leaders": 4},
-#   "store_3": {"total": 12, "leaders": 4}
+#   {
+#   "partitions": {}, 
+#   "partitionStats: {}"
+#   }
 # }
 ```
 
@@ -272,13 +258,14 @@ curl http://192.168.1.10:8620/pd/v1/partitions | jq '.[] | select(.leader == nul
 **Diagnosis**:
 ```bash
 # Check partition distribution
-curl http://192.168.1.10:8620/pd/v1/stats/partition-distribution
+curl  http://localhost:8620/v1/partitionsAndStats 
 
 # Example output (imbalanced):
 # {
-#   "store_1": {"total": 20, "leaders": 15},
-#   "store_2": {"total": 8, "leaders": 2},
-#   "store_3": {"total": 8, "leaders": 1}
+#   {
+#   "partitions": {}, 
+#   "partitionStats: {}"
+#   }
 # }
 ```
 
@@ -290,7 +277,7 @@ curl http://192.168.1.10:8620/pd/v1/stats/partition-distribution
 **Solutions**:
 1. **Trigger Manual Rebalance** (via PD API):
    ```bash
-   curl -X POST http://192.168.1.10:8620/pd/v1/balance/trigger
+   curl http://192.168.1.10:8620/v1/balanceLeaders
    ```
 
 2. **Reduce Patrol Interval** (in PD `application.yml`):
@@ -347,7 +334,7 @@ iostat -x 1
 4. **Monitor Progress**:
    ```bash
    # Check partition state transitions
-   curl http://192.168.1.10:8620/pd/v1/partitions | grep -i migrating
+   curl http://192.168.1.10:8620/v1/partitions | grep -i migrating
    ```
 
 ---
@@ -361,10 +348,6 @@ iostat -x 1
 
 **Diagnosis**:
 ```bash
-# Check RocksDB stats
-curl http://192.168.1.20:8520/actuator/metrics/rocksdb.compaction.pending
-curl http://192.168.1.20:8520/actuator/metrics/rocksdb.block.cache.hit.rate
-
 # Check Store logs for compaction
 tail -f logs/hugegraph-store.log | grep compaction
 ```
@@ -388,13 +371,7 @@ tail -f logs/hugegraph-store.log | grep compaction
      max_write_buffer_number: 8    # More memtables
    ```
 
-3. **Manual Compaction** (if safe):
-   ```bash
-   # Trigger compaction via Store admin API
-   curl -X POST http://192.168.1.20:8520/admin/rocksdb/compact
-   ```
-
-4. **Restart Store Node** (last resort, triggers compaction on startup):
+3. **Restart Store Node** (last resort, triggers compaction on startup):
    ```bash
    bin/stop-hugegraph-store.sh
    bin/start-hugegraph-store.sh
@@ -496,58 +473,6 @@ scp backup-store1-*.tar.gz backup-server:/backups/
 - Requires all Store nodes to be backed up
 - May miss recent writes (since last snapshot)
 
-#### Strategy 2: RocksDB Checkpoint
-
-**Frequency**: Before major operations (upgrades, schema changes)
-
-**Process**:
-```bash
-# Trigger checkpoint via Store API
-curl -X POST http://192.168.1.20:8520/admin/rocksdb/checkpoint
-
-# Checkpoint created in storage/rocksdb-checkpoint/
-tar -czf backup-checkpoint-$(date +%Y%m%d).tar.gz storage/rocksdb-checkpoint/
-
-# Upload to backup server
-scp backup-checkpoint-*.tar.gz backup-server:/backups/
-```
-
-**Pros**:
-- Consistent checkpoint
-- Can be restored to a single node (for testing)
-
-**Cons**:
-- Larger backup size
-- Slower than snapshot
-
-#### Strategy 3: Logical Backup (via HugeGraph API)
-
-**Frequency**: Weekly or monthly
-
-**Process**:
-```bash
-# Use HugeGraph-Tools
-cd hugegraph-tools
-
-bin/hugegraph-backup.sh \
-  --graph hugegraph \
-  --directory /backups/logical-$(date +%Y%m%d) \
-  --format json
-
-# Backup includes:
-# - schema.json
-# - vertices.json
-# - edges.json
-```
-
-**Pros**:
-- Backend-agnostic (can restore to different backend)
-- Human-readable format
-
-**Cons**:
-- Slower (especially for large graphs)
-- Requires Server to be running
-
 ### Disaster Recovery Procedures
 
 #### Scenario 1: Single Store Node Failure
@@ -558,7 +483,7 @@ bin/hugegraph-backup.sh \
 1. **No immediate action needed**: Remaining replicas continue serving
 2. **Monitor**: Check if Raft leaders re-elected
    ```bash
-   curl http://192.168.1.10:8620/pd/v1/partitions | grep leader
+   curl http://192.168.1.10:8620/v1/partitions | grep leader
    ```
 
 3. **Replace Failed Node**:
@@ -568,7 +493,7 @@ bin/hugegraph-backup.sh \
 
 4. **Verify**: Check partition distribution
    ```bash
-   curl http://192.168.1.10:8620/pd/v1/stats/partition-distribution
+    curl  http://localhost:8620/v1/partitionsAndStats
    ```
 
 #### Scenario 2: Complete Store Cluster Failure
@@ -597,7 +522,7 @@ bin/hugegraph-backup.sh \
 4. **Verify Data**:
    ```bash
    # Check via Server
-   curl http://192.168.1.30:8080/graphs/hugegraph/graph/vertices?limit=10
+   curl http://192.168.1.30:8080/graphspaces/{graphspaces_name}/graphs/{graph_name}/vertices?limit=10
    ```
 
 #### Scenario 3: Data Corruption
@@ -651,7 +576,7 @@ du -sh storage/
 **Partition Count**:
 ```bash
 # Current partition count
-curl http://192.168.1.10:8620/pd/v1/stats/partition-count
+curl http://192.168.1.10:8620/v1/partitionsAndStatus
 
 # Recommendation: 3-5x Store node count
 # Example: 6 Store nodes → 18-30 partitions
@@ -678,19 +603,19 @@ curl http://192.168.1.10:8620/pd/v1/stats/partition-count
 
 2. **Verify Registration**:
    ```bash
-   curl http://192.168.1.10:8620/pd/v1/stores
+   curl http://192.168.1.10:8620/v1/stores
    # New Store should appear
    ```
 
 3. **Trigger Rebalancing** (optional):
    ```bash
-   curl -X POST http://192.168.1.10:8620/pd/v1/balance/trigger
+   curl -X POST http://192.168.1.10:8620/v1/balanceLeaders
    ```
 
 4. **Monitor Rebalancing**:
    ```bash
    # Watch partition distribution
-   watch -n 10 'curl -s http://192.168.1.10:8620/pd/v1/stats/partition-distribution'
+   watch -n 10 'curl http://192.168.1.10:8620/v1/partitionsAndStatus'
    ```
 
 5. **Verify**: Wait for even distribution (may take hours)
@@ -703,17 +628,17 @@ curl http://192.168.1.10:8620/pd/v1/stats/partition-count
 
 **Process**:
 1. **Mark Store for Removal** (via PD API):
-   ```bash
-   curl -X POST http://192.168.1.10:8620/pd/v1/stores/3/decommission
-   ```
+    ```bash
+    curl --location --request POST 'http://localhost:8080/store/123' \
+    --header 'Content-Type: application/json' \
+    --data-raw '{
+    "storeState": "Off"
+    }'
+    ```
+   Refer to API definition in `StoreAPI::setStore`
 
 2. **Wait for Migration**:
    - PD migrates all partitions off this Store
-   - Monitor:
-     ```bash
-     curl http://192.168.1.10:8620/pd/v1/stores/3
-     # Check partition count → should reach 0
-     ```
 
 3. **Stop Store Node**:
    ```bash
@@ -721,9 +646,6 @@ curl http://192.168.1.10:8620/pd/v1/stats/partition-count
    ```
 
 4. **Remove from PD** (optional):
-   ```bash
-   curl -X DELETE http://192.168.1.10:8620/pd/v1/stores/3
-   ```
 
 ---
 
@@ -761,7 +683,7 @@ cp ../apache-hugegraph-store-incubating-1.7.0-backup/conf/application.yml conf/
 bin/start-hugegraph-store.sh
 
 # Verify
-curl http://192.168.1.20:8520/actuator/health
+curl http://192.168.1.20:8520/v1/health
 tail -f logs/hugegraph-store.log
 ```
 

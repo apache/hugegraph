@@ -104,19 +104,12 @@ From the project root:
 mvn install -pl hugegraph-struct -am -DskipTests
 
 # Build Store and all dependencies
-mvn clean package -pl hugegraph-store -am -DskipTests
-```
-
-Or build from the `hugegraph-store` directory:
-
-```bash
-cd hugegraph-store
-mvn clean install -DskipTests
+mvn clean package -pl hugegraph-store/hugegraph-store-dist -am -DskipTests
 ```
 
 The assembled distribution will be available at:
 ```
-hugegraph-store/hg-store-dist/target/apache-hugegraph-store-incubating-<version>.tar.gz
+hugegraph-store/apache-hugegraph-store-incubating-1.7.0/lib/hg-store-node-1.7.0.jar```
 ```
 
 ### Configuration
@@ -220,8 +213,8 @@ For detailed configuration options, RocksDB tuning, and deployment topologies, s
 Start the Store server:
 
 ```bash
-tar -xzf apache-hugegraph-store-incubating-<version>.tar.gz
-cd apache-hugegraph-store-incubating-<version>
+# Replace {version} with your hugegraph version
+cd apache-hugegraph-store-incubating-{version}
 
 # Start Store node
 bin/start-hugegraph-store.sh
@@ -258,13 +251,13 @@ ps aux | grep hugegraph-store
 grpcurl -plaintext localhost:8500 list
 
 # Check REST API health
-curl http://localhost:8520/actuator/health
+curl http://localhost:8520/v1/health
 
 # Check logs
 tail -f logs/hugegraph-store.log
 
 # Verify registration with PD (from PD node)
-curl http://localhost:8620/pd/v1/stores
+curl http://localhost:8620/v1/stores
 ```
 
 For production deployment, see [Deployment Guide](docs/deployment-guide.md) and [Best Practices](docs/best-practices.md).
@@ -307,13 +300,11 @@ bin/start-hugegraph.sh
 
 ```bash
 # Check backend via REST API
-curl http://localhost:8080/graphs/<graph-name>/backend
-
+curl --location --request GET 'http://localhost:8080/metrics/backend' \
+--header 'Authorization: Bearer <YOUR_ACCESS_TOKEN>'
 # Response should show:
 # {"backend": "hstore", "nodes": [...]}
 ```
-
-For detailed integration steps, client API usage, and migration from other backends, see [Integration Guide](docs/integration-guide.md).
 
 ---
 

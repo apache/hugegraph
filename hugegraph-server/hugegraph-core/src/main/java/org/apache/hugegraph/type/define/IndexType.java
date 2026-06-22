@@ -84,7 +84,7 @@ public enum IndexType implements SerialEnum {
             case UNIQUE:
                 return HugeType.UNIQUE_INDEX;
             case VECTOR:
-                return HugeType.VECTOR_INDEX;
+                return HugeType.VECTOR_INDEX_MAP;
             default:
                 throw new AssertionError(String.format(
                         "Unknown index type '%s'", this));

@@ -1559,7 +1559,6 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public Id createGroup(HugeGroup group) {
             this.updateCreator(group);
-            verifyUserPermission(HugePermission.WRITE, group);
             this.invalidRoleCache();
             return this.authManager.createGroup(group);
         }
@@ -1567,35 +1566,29 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public Id updateGroup(HugeGroup group) {
             this.updateCreator(group);
-            verifyUserPermission(HugePermission.WRITE, group);
             this.invalidRoleCache();
             return this.authManager.updateGroup(group);
         }
 
         @Override
         public HugeGroup deleteGroup(Id id) {
-            verifyUserPermission(HugePermission.DELETE,
-                                 this.authManager.getGroup(id));
             this.invalidRoleCache();
             return this.authManager.deleteGroup(id);
         }
 
         @Override
         public HugeGroup getGroup(Id id) {
-            return verifyUserPermission(HugePermission.READ,
-                                        this.authManager.getGroup(id));
+            return this.authManager.getGroup(id);
         }
 
         @Override
         public List<HugeGroup> listGroups(List<Id> ids) {
-            return verifyUserPermission(HugePermission.READ,
-                                        this.authManager.listGroups(ids));
+            return this.authManager.listGroups(ids);
         }
 
         @Override
         public List<HugeGroup> listAllGroups(long limit) {
-            return verifyUserPermission(HugePermission.READ,
-                                        this.authManager.listAllGroups(limit));
+            return this.authManager.listAllGroups(limit);
         }
 
         @Override

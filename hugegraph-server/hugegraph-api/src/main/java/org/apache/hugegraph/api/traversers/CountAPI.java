@@ -85,7 +85,7 @@ public class CountAPI extends API {
         long count = traverser.count(sourceId, steps, request.containsTraversed,
                                      request.dedupSize);
 
-        return manager.serializer(g).writeMap(ImmutableMap.of("count", count));
+        return manager.serializer().writeMap(ImmutableMap.of("count", count));
     }
 
     private static List<EdgeStep> steps(HugeGraph graph, CountRequest request) {

@@ -142,6 +142,7 @@ public class IndexLabelRebuildJob extends SchemaJob {
             for (IndexLabel il : ils) {
                 schemaTx.updateSchemaStatus(il, SchemaStatus.CREATED);
             }
+        //  todo: add check indexlable is vector index, if it is call vector rebuild job
         } finally {
             locks.unlock();
         }

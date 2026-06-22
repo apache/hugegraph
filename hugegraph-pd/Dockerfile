@@ -28,7 +28,7 @@ RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.sk
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
-FROM openjdk:11-slim
+FROM eclipse-temurin:11-jre
 
 COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-incubating-*/ /hugegraph-pd/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"

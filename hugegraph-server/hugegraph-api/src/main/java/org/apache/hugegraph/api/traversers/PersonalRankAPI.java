@@ -102,7 +102,7 @@ public class PersonalRankAPI extends API {
         Map<Id, Double> ranks = traverser.personalRank(sourceId, request.label,
                                                        request.withLabel);
         ranks = HugeTraverser.topN(ranks, request.sorted, request.limit);
-        return manager.serializer(g).writeMap(ranks);
+        return manager.serializer().writeMap(ranks);
     }
 
     private static class RankRequest {

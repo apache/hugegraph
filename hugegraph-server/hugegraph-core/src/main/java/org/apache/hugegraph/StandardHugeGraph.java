@@ -1120,7 +1120,7 @@ public class StandardHugeGraph implements HugeGraph {
         this.serverStarted(nodeInfo);
 
         // Write config to the disk file
-        String confPath = ConfigUtil.writeToFile(configPath, this.spaceGraphName(),
+        String confPath = ConfigUtil.writeToFile(configPath, this.name,
                                                  this.configuration());
         this.configuration.file(confPath);
     }

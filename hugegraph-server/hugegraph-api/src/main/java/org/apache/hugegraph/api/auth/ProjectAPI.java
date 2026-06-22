@@ -23,7 +23,6 @@ import java.util.Set;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.AuthManager;
@@ -54,7 +53,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphspaces/{graphspace}/graphs/{graph}/auth/projects")
+@Path("graphspaces/{graphspace}/auth/projects")
 @Singleton
 @Tag(name = "ProjectAPI")
 public class ProjectAPI extends API {
@@ -70,12 +69,10 @@ public class ProjectAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
                          @PathParam("graphspace") String graphSpace,
-                         @PathParam("graph") String graph,
                          JsonProject jsonProject) {
-        LOG.debug("Graph [{}] create project: {}", graph, jsonProject);
+        LOG.debug("GraphSpace [{}] create project: {}", graphSpace, jsonProject);
         checkCreatingBody(jsonProject);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeProject project = jsonProject.build();
         Id projectId = manager.authManager().createProject(project);
         /*
@@ -83,7 +80,7 @@ public class ProjectAPI extends API {
          * created
          */
         project = manager.authManager().getProject(projectId);
-        return manager.serializer(g).writeAuthElement(project);
+        return manager.serializer().writeAuthElement(project);
     }
 
     @PUT
@@ -93,15 +90,13 @@ public class ProjectAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
                          @PathParam("graphspace") String graphSpace,
-                         @PathParam("graph") String graph,
                          @PathParam("id") String id,
                          @QueryParam("action") String action,
                          JsonProject jsonProject) {
-        LOG.debug("Graph [{}] update {} project: {}", graph, action,
+        LOG.debug("GraphSpace [{}] update {} project: {}", graphSpace, action,
                   jsonProject);
         checkUpdatingBody(jsonProject);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeProject project;
         Id projectId = UserAPI.parseId(id);
         AuthManager authManager = manager.authManager();
@@ -124,7 +119,7 @@ public class ProjectAPI extends API {
             project = jsonProject.buildUpdateDescription(project);
         }
         authManager.updateProject(project);
-        return manager.serializer(g).writeAuthElement(project);
+        return manager.serializer().writeAuthElement(project);
     }
 
     @GET
@@ -132,14 +127,12 @@ public class ProjectAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
                        @PathParam("graphspace") String graphSpace,
-                       @PathParam("graph") String graph,
                        @QueryParam("limit") @DefaultValue("100") long limit) {
-        LOG.debug("Graph [{}] list project", graph);
+        LOG.debug("GraphSpace [{}] list project", graphSpace);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         List<HugeProject> projects = manager.authManager()
                                             .listAllProject(limit);
-        return manager.serializer(g).writeAuthElements("projects", projects);
+        return manager.serializer().writeAuthElements("projects", projects);
     }
 
     @GET
@@ -148,18 +141,16 @@ public class ProjectAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
                       @PathParam("graphspace") String graphSpace,
-                      @PathParam("graph") String graph,
                       @PathParam("id") String id) {
-        LOG.debug("Graph [{}] get project: {}", graph, id);
+        LOG.debug("GraphSpace [{}] get project: {}", graphSpace, id);
 
-        HugeGraph g = graph(manager, graphSpace, graph);
         HugeProject project;
         try {
             project = manager.authManager().getProject(UserAPI.parseId(id));
         } catch (NotFoundException e) {
             throw new IllegalArgumentException("Invalid project id: " + id);
         }
-        return manager.serializer(g).writeAuthElement(project);
+        return manager.serializer().writeAuthElement(project);
     }
 
     @DELETE
@@ -168,12 +159,9 @@ public class ProjectAPI extends API {
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
                        @PathParam("graphspace") String graphSpace,
-                       @PathParam("graph") String graph,
                        @PathParam("id") String id) {
-        LOG.debug("Graph [{}] delete project: {}", graph, id);
+        LOG.debug("GraphSpace [{}] delete project: {}", graphSpace, id);
 
-        @SuppressWarnings("unused") // just check if the graph exists
-        HugeGraph g = graph(manager, graphSpace, graph);
         try {
             manager.authManager().deleteProject(UserAPI.parseId(id));
         } catch (NotFoundException e) {

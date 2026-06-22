@@ -85,7 +85,7 @@ public class IndexLabelAPI extends API {
         IndexLabel.Builder builder = jsonIndexLabel.convert2Builder(g);
         SchemaElement.TaskWithSchema il = builder.createWithTask();
         il.indexLabel(mapIndexLabel(il.indexLabel()));
-        return manager.serializer(g).writeTaskWithSchema(il);
+        return manager.serializer().writeTaskWithSchema(il);
     }
 
     @PUT
@@ -112,7 +112,7 @@ public class IndexLabelAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
         IndexLabel.Builder builder = jsonIndexLabel.convert2Builder(g);
         IndexLabel indexLabel = append ? builder.append() : builder.eliminate();
-        return manager.serializer(g).writeIndexlabel(mapIndexLabel(indexLabel));
+        return manager.serializer().writeIndexlabel(mapIndexLabel(indexLabel));
     }
 
     @GET
@@ -141,7 +141,7 @@ public class IndexLabelAPI extends API {
                 labels.add(g.schema().getIndexLabel(name));
             }
         }
-        return manager.serializer(g).writeIndexlabels(mapIndexLabels(labels));
+        return manager.serializer().writeIndexlabels(mapIndexLabels(labels));
     }
 
     @GET
@@ -158,7 +158,7 @@ public class IndexLabelAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, graph);
         IndexLabel indexLabel = g.schema().getIndexLabel(name);
-        return manager.serializer(g).writeIndexlabel(mapIndexLabel(indexLabel));
+        return manager.serializer().writeIndexlabel(mapIndexLabel(indexLabel));
     }
 
     @DELETE

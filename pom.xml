@@ -199,6 +199,8 @@
                             <exclude>.github/**/*</exclude>
                             <exclude>.gitignore</exclude>
                             <exclude>.gitattributes</exclude>
+                            <!-- AI Tools -->
+                            <exclude>.serena/**</exclude>
                             <!-- Intellij -->
                             <exclude>**/*.iml</exclude>
                             <exclude>**/*.iws</exclude>

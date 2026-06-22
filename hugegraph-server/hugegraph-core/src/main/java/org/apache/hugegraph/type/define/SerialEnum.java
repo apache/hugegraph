@@ -64,5 +64,6 @@ public interface SerialEnum {
         SerialEnum.register(IdStrategy.class);
         SerialEnum.register(IndexType.class);
         SerialEnum.register(SchemaStatus.class);
+        SerialEnum.register(IndexVectorState.class);
     }
 }

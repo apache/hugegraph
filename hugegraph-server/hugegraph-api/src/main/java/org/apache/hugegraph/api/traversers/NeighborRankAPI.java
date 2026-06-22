@@ -87,7 +87,7 @@ public class NeighborRankAPI extends API {
         traverser = new NeighborRankTraverser(g, request.alpha,
                                               request.capacity);
         List<Map<Id, Double>> ranks = traverser.neighborRank(sourceId, steps);
-        return manager.serializer(g).writeList("ranks", ranks);
+        return manager.serializer().writeList("ranks", ranks);
     }
 
     private static List<NeighborRankTraverser.Step> steps(HugeGraph graph,

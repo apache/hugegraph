@@ -91,6 +91,8 @@ hs_err_pid*
 hugegraph-server/hugegraph-dist/docker/data/
 
 # AI-IDE prompt files (We only keep AGENTS.md, other files could soft-linked it when needed)
+# Serena MCP memories
+.serena/
 # Claude Projects
 CLAUDE.md
 CLAUDE_*.md

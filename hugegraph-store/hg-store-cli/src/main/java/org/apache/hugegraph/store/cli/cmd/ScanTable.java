@@ -73,7 +73,7 @@ public class ScanTable extends Command {
                             if (iterator.hasNext()) {
                                 iterator.next();
                                 position = iterator.position();
-                                System.out.println("count is " + count);
+                                log.info("count is {}", count);
                             } else {
                                 position = null;
                             }

@@ -76,14 +76,17 @@ import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeIndex;
 import org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime;
 import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.HugeVectorIndexMap;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.task.EphemeralJobQueue;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Action;
+import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.IndexType;
 import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.HashUtil;
 import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.apache.hugegraph.util.LockUtil;
 import org.apache.hugegraph.util.LongEncoding;
@@ -308,10 +311,38 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 this.updateIndex(indexLabel, value, element.id(),
                                  expiredTime, removed);
                 break;
+            case VECTOR:
+                value = nnPropValues.get(0);
+                E.checkState(nnPropValues.size() == 1,
+                             "Expect only one property in range index");
+                E.checkArgument(value instanceof List,
+                                "Vector value must be a list but got %s", value.getClass());
+                Id elementId = element.id();
+                /*
+                 * This column only stores the vector-id → vertex-id mapping and tracks the state.
+                 * Entries are removed only after the actual vector index is deleted in JVector.
+                 * The column is garbage-collected once the data has been flushed to disk.
+                 */
+                byte[] vectorId = HashUtil.hash(elementId.asBytes());
+                this.updateVectorIndex(indexLabel, HugeIndex.bytes2number(vectorId, DataType.INT.clazz()),
+                                       elementId, expiredTime, removed);
+                break;
             default:
                 throw new AssertionError(String.format(
                         "Unknown index type '%s'", indexLabel.indexType()));
         }
+    }
+
+    private void updateVectorIndex(IndexLabel indexLabel, Object vectorId, Id elementId,
+                                   long expiredTime, boolean removed){
+
+        HugeVectorIndexMap indexMap = new HugeVectorIndexMap(this.graph(), indexLabel, removed);
+        indexMap.fieldValues(vectorId);
+        indexMap.elementIds(elementId, expiredTime);
+
+        this.doAppend(this.serializer.writeIndex(indexMap));
+        // writeIndex
+        this.doAppend(this.serializer.writeVectorSequence(indexMap));
     }
 
     private void updateIndex(IndexLabel indexLabel, Object propValue,

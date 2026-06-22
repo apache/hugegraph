@@ -28,13 +28,14 @@ RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.sk
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13 
-FROM openjdk:11-slim
+FROM eclipse-temurin:11-jre
 
 COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-incubating-*/ /hugegraph-server/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default
-ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm" \
+# Note: --add-exports is required for Java 11+ to access jdk.internal.reflect for auth proxy
+ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED" \
     HUGEGRAPH_HOME="hugegraph-server"
 
 #COPY . /hugegraph/hugegraph-server

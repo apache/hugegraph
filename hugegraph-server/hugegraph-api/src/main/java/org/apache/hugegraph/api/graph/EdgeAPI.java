@@ -114,7 +114,7 @@ public class EdgeAPI extends BatchAPI {
                                      jsonEdge.properties());
         });
 
-        return manager.serializer(g).writeEdge(edge);
+        return manager.serializer().writeEdge(edge);
     }
 
     @POST
@@ -155,7 +155,7 @@ public class EdgeAPI extends BatchAPI {
                 Edge edge = srcVertex.addEdge(jsonEdge.label, tgtVertex, jsonEdge.properties());
                 ids.add((Id) edge.id());
             }
-            return manager.serializer(g).writeIds(ids);
+            return manager.serializer().writeIds(ids);
         });
     }
 
@@ -213,7 +213,7 @@ public class EdgeAPI extends BatchAPI {
             });
 
             // If return ids, the ids.size() maybe different with the origins'
-            return manager.serializer(g).writeEdges(edges.iterator(), false);
+            return manager.serializer().writeEdges(edges.iterator(), false);
         });
     }
 
@@ -255,7 +255,7 @@ public class EdgeAPI extends BatchAPI {
         }
 
         commit(g, () -> updateProperties(edge, jsonEdge, append));
-        return manager.serializer(g).writeEdge(edge);
+        return manager.serializer().writeEdge(edge);
     }
 
     @GET
@@ -329,7 +329,7 @@ public class EdgeAPI extends BatchAPI {
         }
 
         try {
-            return manager.serializer(g).writeEdges(traversal, page != null);
+            return manager.serializer().writeEdges(traversal, page != null);
         } finally {
             if (g.tx().isOpen()) {
                 g.tx().close();
@@ -352,7 +352,7 @@ public class EdgeAPI extends BatchAPI {
         HugeGraph g = graph(manager, graphSpace, graph);
         try {
             Edge edge = g.edge(id);
-            return manager.serializer(g).writeEdge(edge);
+            return manager.serializer().writeEdge(edge);
         } finally {
             if (g.tx().isOpen()) {
                 g.tx().close();

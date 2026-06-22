@@ -213,8 +213,8 @@ public class HugeIndex implements GraphType, Cloneable {
             String strIndexLabelId = IdGenerator.asStoredString(indexLabelId);
             return SplicingIdGenerator.splicing(type.string(), strIndexLabelId, value);
         } else {
-            assert type.isRangeIndex();
-            int length = type.isRange4Index() ? 4 : 8;
+            assert (type.isRangeIndex() || type.isVectorIndex());
+            int length = type.isRange4Index() || type.isVectorIndex() ? 4 : 8;
             BytesBuffer buffer = BytesBuffer.allocate(HUGE_TYPE_CODE_LENGTH + 4 + length);
             buffer.write(type.code());
             buffer.writeInt(SchemaElement.schemaId(indexLabelId));
@@ -241,7 +241,7 @@ public class HugeIndex implements GraphType, Cloneable {
             indexLabel = IndexLabel.label(graph, label);
             values = parts[2];
         } else {
-            assert type.isRange4Index() || type.isRange8Index();
+            assert type.isRange4Index() || type.isRange8Index() || type.isVectorIndex();
             final int labelLength = 4;
             E.checkState(id.length > labelLength, "Invalid range index id");
             BytesBuffer buffer = BytesBuffer.wrap(id);

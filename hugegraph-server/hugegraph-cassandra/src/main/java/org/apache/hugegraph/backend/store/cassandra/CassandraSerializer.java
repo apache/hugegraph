@@ -24,10 +24,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.commons.lang.NotImplementedException;
+import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.id.IdUtil;
+import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.serializer.TableBackendEntry;
 import org.apache.hugegraph.backend.serializer.TableSerializer;
@@ -38,6 +41,7 @@ import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeIndex;
 import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.HugeVectorIndexMap;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.DataType;
@@ -164,6 +168,17 @@ public class CassandraSerializer extends TableSerializer {
                      this.writeProperty(pk, property.value()));
         entry.olap(true);
         return entry;
+    }
+
+    @Override
+    public BackendEntry writeVectorSequence(HugeVectorIndexMap indexMap) {
+        throw new NotImplementedException("Unsupported writeVectorSequence()");
+    }
+
+    @Override
+    public HugeVectorIndexMap readVectorSequence(HugeGraph graph, ConditionQuery query,
+                                                 BackendEntry entry) {
+        throw new NotImplementedException("Unsupported readVectorSequence()");
     }
 
     @Override

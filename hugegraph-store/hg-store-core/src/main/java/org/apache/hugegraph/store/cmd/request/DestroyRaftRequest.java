@@ -27,7 +27,7 @@ import lombok.Data;
 @Data
 public class DestroyRaftRequest extends HgCmdBase.BaseRequest {
 
-    private List<String> graphNames = new ArrayList<>();
+    private final List<String> graphNames = new ArrayList<>();
 
     public void addGraphName(String graphName) {
         graphNames.add(graphName);

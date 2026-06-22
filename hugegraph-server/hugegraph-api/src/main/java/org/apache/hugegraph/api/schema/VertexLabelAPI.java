@@ -83,7 +83,7 @@ public class VertexLabelAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
         VertexLabel.Builder builder = jsonVertexLabel.convert2Builder(g);
         VertexLabel vertexLabel = builder.create();
-        return manager.serializer(g).writeVertexLabel(vertexLabel);
+        return manager.serializer().writeVertexLabel(vertexLabel);
     }
 
     @PUT
@@ -115,7 +115,7 @@ public class VertexLabelAPI extends API {
         VertexLabel vertexLabel = append ?
                                   builder.append() :
                                   builder.eliminate();
-        return manager.serializer(g).writeVertexLabel(vertexLabel);
+        return manager.serializer().writeVertexLabel(vertexLabel);
     }
 
     @GET
@@ -144,7 +144,7 @@ public class VertexLabelAPI extends API {
                 labels.add(g.schema().getVertexLabel(name));
             }
         }
-        return manager.serializer(g).writeVertexLabels(labels);
+        return manager.serializer().writeVertexLabels(labels);
     }
 
     @GET
@@ -161,7 +161,7 @@ public class VertexLabelAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, graph);
         VertexLabel vertexLabel = g.schema().getVertexLabel(name);
-        return manager.serializer(g).writeVertexLabel(vertexLabel);
+        return manager.serializer().writeVertexLabel(vertexLabel);
     }
 
     @DELETE

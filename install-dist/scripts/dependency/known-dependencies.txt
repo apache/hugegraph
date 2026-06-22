@@ -483,8 +483,8 @@ reporter-config-base-3.0.3.jar
 reporter-config3-3.0.3.jar
 rewriting-9.0-9.0.20190305.jar
 rocksdbjni-6.29.5.jar
-rocksdbjni-7.2.2.jar
 rocksdbjni-7.7.3.jar
+rocksdbjni-8.10.2.jar
 scala-java8-compat_2.12-0.8.0.jar
 scala-library-2.12.7.jar
 scala-reflect-2.12.7.jar

@@ -32,7 +32,7 @@ import jakarta.ws.rs.core.Response;
 
 public class UserApiTest extends BaseApiTest {
 
-    private static final String PATH = "graphspaces/DEFAULT/graphs/hugegraph/auth/users";
+    private static final String PATH = "graphspaces/DEFAULT/auth/users";
     private static final int NO_LIMIT = -1;
 
     @Override

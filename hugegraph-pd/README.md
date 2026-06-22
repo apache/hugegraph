@@ -3,8 +3,6 @@
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Version](https://img.shields.io/badge/version-1.7.0-blue)](https://github.com/apache/hugegraph)
 
-> **Note**: From revision 1.5.0, the HugeGraph-PD code has been adapted to this location.
-
 ## Overview
 
 HugeGraph PD (Placement Driver) is a meta server that provides cluster management and coordination services for HugeGraph distributed deployments. It serves as the central control plane responsible for:
@@ -15,7 +13,7 @@ HugeGraph PD (Placement Driver) is a meta server that provides cluster managemen
 - **Node Scheduling**: Intelligent scheduling and load balancing of graph operations
 - **Health Monitoring**: Continuous health checks and failure detection via heartbeat mechanism
 
-PD uses [Apache JRaft](https://github.com/sofastack/sofa-jraft) for Raft consensus and RocksDB for persistent metadata storage, ensuring high availability and consistency in distributed environments.
+PD uses [SOFA-jraft](https://github.com/sofastack/sofa-jraft) for Raft consensus and RocksDB for persistent metadata storage, ensuring high availability and consistency in distributed environments.
 
 ## Architecture
 
@@ -256,21 +254,9 @@ PD exposes metrics via REST API at:
 
 ## Community
 
-- **Website**: https://hugegraph.apache.org
 - **Documentation**: https://hugegraph.apache.org/docs/
 - **GitHub**: https://github.com/apache/hugegraph
-- **Mailing List**: dev@hugegraph.apache.org
 
 ## Contributing
 
 Contributions are welcome! Please read our [Development Guide](docs/development.md) and follow the Apache HugeGraph contribution guidelines.
-
-## License
-
-HugeGraph PD is licensed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
-
----
-
-**Status**: BETA (from v1.5.0+)
-
-For questions or issues, please contact the HugeGraph community via GitHub issues or mailing list.

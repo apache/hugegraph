@@ -181,26 +181,26 @@ mvn test jacoco:report
 
 ```bash
 # Core module tests
-mvn test -pl hg-pd-test -am -P pd-core-test
+mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-core-test
 
 # Client module tests
-mvn test -pl hg-pd-test -am -P pd-client-test
+mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-client-test
 
 # Common module tests
-mvn test -pl hg-pd-test -am -P pd-common-test
+mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-common-test
 
 # REST API tests
-mvn test -pl hg-pd-test -am -P pd-rest-test
+mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-rest-test
 ```
 
 #### Single Test Class
 
 ```bash
 # Run specific test class
-mvn test -pl hg-pd-test -am -Dtest=PartitionServiceTest
+mvn -pl hugegraph-pd/hg-pd-test test -Dtest=PartitionServiceTest -DfailIfNoTests=false
 
 # Run specific test method
-mvn test -pl hg-pd-test -am -Dtest=PartitionServiceTest#testSplitPartition
+mvn -pl hugegraph-pd/hg-pd-test test -Dtest=PartitionServiceTest#testSplitPartition -DfailIfNoTests=false
 ```
 
 #### Test from IDE
@@ -227,15 +227,6 @@ open hg-pd-test/target/site/jacoco/index.html
 - Utility classes: >70%
 - Generated gRPC code: Excluded from coverage
 
-### Integration Tests
-
-Integration tests start embedded PD instances and verify end-to-end functionality.
-
-```bash
-# Run integration test suite
-mvn test -pl hg-pd-test -am -Dtest=PDCoreSuiteTest
-```
-
 **What Integration Tests Cover**:
 - Raft cluster formation and leader election
 - Partition allocation and balancing
@@ -243,220 +234,6 @@ mvn test -pl hg-pd-test -am -Dtest=PDCoreSuiteTest
 - Metadata persistence and recovery
 - gRPC service interactions
 
-## Development Workflows
-
-### Adding a New gRPC Service
-
-#### 1. Define Protocol Buffers
-
-Create or modify `.proto` file in `hg-pd-grpc/src/main/proto/`:
-
-```protobuf
-// example_service.proto
-syntax = "proto3";
-
-package org.apache.hugegraph.pd.grpc;
-
-service ExampleService {
-    rpc DoSomething(DoSomethingRequest) returns (DoSomethingResponse);
-}
-
-message DoSomethingRequest {
-    string input = 1;
-}
-
-message DoSomethingResponse {
-    string output = 1;
-}
-```
-
-#### 2. Generate Java Stubs
-
-```bash
-cd hugegraph-pd
-mvn clean compile -pl hg-pd-grpc
-
-# Generated files location:
-# hg-pd-grpc/target/generated-sources/protobuf/java/
-# hg-pd-grpc/target/generated-sources/protobuf/grpc-java/
-```
-
-**Note**: Generated files are excluded from source control (`.gitignore`)
-
-#### 3. Implement Service
-
-Create service implementation in `hg-pd-service`:
-
-```java
-// ExampleServiceImpl.java
-package org.apache.hugegraph.pd.service;
-
-import io.grpc.stub.StreamObserver;
-import org.apache.hugegraph.pd.grpc.ExampleServiceGrpc;
-
-public class ExampleServiceImpl extends ExampleServiceGrpc.ExampleServiceImplBase {
-
-    @Override
-    public void doSomething(DoSomethingRequest request,
-                           StreamObserver<DoSomethingResponse> responseObserver) {
-        String output = processInput(request.getInput());
-
-        DoSomethingResponse response = DoSomethingResponse.newBuilder()
-            .setOutput(output)
-            .build();
-
-        responseObserver.onNext(response);
-        responseObserver.onCompleted();
-    }
-
-    private String processInput(String input) {
-        // Business logic here
-        return "Processed: " + input;
-    }
-}
-```
-
-#### 4. Register Service
-
-Register service in gRPC server (in `hg-pd-service`):
-
-```java
-// In GrpcServerInitializer or similar
-ExampleServiceImpl exampleService = new ExampleServiceImpl();
-grpcServer.addService(exampleService);
-```
-
-#### 5. Add Tests
-
-Create test class in `hg-pd-test`:
-
-```java
-// ExampleServiceTest.java
-package org.apache.hugegraph.pd.service;
-
-import org.junit.Test;
-import static org.junit.Assert.*;
-
-public class ExampleServiceTest extends BaseTest {
-
-    @Test
-    public void testDoSomething() {
-        ExampleServiceImpl service = new ExampleServiceImpl();
-        // Test service logic...
-    }
-}
-```
-
-#### 6. Update Documentation
-
-Document the new API in `docs/api-reference.md`.
-
-### Modifying Partition Logic
-
-Partition logic is in `hg-pd-core/.../PartitionService.java` (2000+ lines).
-
-**Key Methods**:
-- `splitPartition()`: Partition splitting
-- `balancePartitions()`: Auto-balancing
-- `updatePartitionLeader()`: Leader changes
-- `getPartitionByCode()`: Partition routing
-
-**Development Process**:
-
-1. **Understand Current Logic**:
-   ```bash
-   # Read relevant methods
-   # File: hg-pd-core/src/main/java/.../PartitionService.java
-   ```
-
-2. **Make Changes**:
-   - Modify partition allocation algorithm
-   - Update balancing logic
-   - Add new partition operations
-
-3. **Test Changes**:
-   ```bash
-   # Run partition service tests
-   mvn test -pl hg-pd-test -am -Dtest=PartitionServiceTest
-
-   # Run integration tests
-   mvn test -pl hg-pd-test -am -Dtest=PDCoreSuiteTest
-   ```
-
-4. **Submit Raft Proposals**:
-   All partition metadata changes must go through Raft:
-   ```java
-   // Example: Update partition metadata via Raft
-   KVOperation operation = KVOperation.put(key, value);
-   raftTaskHandler.submitTask(operation, closure);
-   ```
-
-### Adding a New Metadata Store
-
-Metadata stores extend `MetadataRocksDBStore` (in `hg-pd-core/.../meta/`).
-
-**Example**: Creating `GraphMetaStore`:
-
-```java
-package org.apache.hugegraph.pd.meta;
-
-public class GraphMetaStore extends MetadataRocksDBStore {
-
-    private static final String GRAPH_PREFIX = "@GRAPH@";
-
-    public GraphMetaStore(PDConfig config) {
-        super(config);
-    }
-
-    public void saveGraph(String graphName, Graph graph) throws PDException {
-        String key = GRAPH_PREFIX + graphName;
-        byte[] value = serialize(graph);
-        put(key.getBytes(), value);
-    }
-
-    public Graph getGraph(String graphName) throws PDException {
-        String key = GRAPH_PREFIX + graphName;
-        byte[] value = get(key.getBytes());
-        return deserialize(value, Graph.class);
-    }
-
-    public List<Graph> listGraphs() throws PDException {
-        List<Graph> graphs = new ArrayList<>();
-        String startKey = GRAPH_PREFIX;
-        String endKey = GRAPH_PREFIX + "\uffff";
-
-        scan(startKey.getBytes(), endKey.getBytes(), (key, value) -> {
-            Graph graph = deserialize(value, Graph.class);
-            graphs.add(graph);
-            return true;  // Continue scanning
-        });
-
-        return graphs;
-    }
-
-    private byte[] serialize(Object obj) {
-        // Use Hessian2 or Protocol Buffers
-    }
-
-    private <T> T deserialize(byte[] bytes, Class<T> clazz) {
-        // Deserialize bytes to object
-    }
-}
-```
-
-**Testing**:
-```java
-@Test
-public void testGraphMetaStore() {
-    GraphMetaStore store = new GraphMetaStore(config);
-
-    Graph graph = new Graph("test_graph", 12);
-    store.saveGraph("test_graph", graph);
-
-    Graph retrieved = store.getGraph("test_graph");
-    assertEquals("test_graph", retrieved.getName());
-}
-```
 
 ### Debugging Raft Issues
 

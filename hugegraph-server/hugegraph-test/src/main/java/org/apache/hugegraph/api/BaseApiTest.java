@@ -74,6 +74,15 @@ public class BaseApiTest {
     private static final String GRAPH_EDGE = "/graph/edges";
     private static final String BATCH = "/batch";
 
+    private static final String ROCKSDB_CONFIG_TEMPLATE =
+            "{ \"gremlin.graph\": \"org.apache.hugegraph.HugeFactory\"," +
+            "\"backend\": \"rocksdb\", \"serializer\": \"binary\"," +
+            "\"store\": \"%s\", \"nickname\": \"%s\"," +
+            "\"rocksdb.data_path\": \"rocksdbtest-data-%s\"," +
+            "\"rocksdb.wal_path\": \"rocksdbtest-data-%s\"," +
+            "\"search.text_analyzer\": \"jieba\"," +
+            "\"search.text_analyzer_mode\": \"INDEX\" }";
+
     protected static RestClient client;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -659,6 +668,17 @@ public class BaseApiTest {
 
     public static Response createGraph(String graphSpace, String name) {
         return createGraph(graphSpace, name, name);
+    }
+
+    public static Response createGraphInRocksDB(String graphSpace, String name) {
+        return createGraphInRocksDB(graphSpace, name, name);
+    }
+
+    public static Response createGraphInRocksDB(String graphSpace, String name,
+                                                String nickname) {
+        String path = String.format("graphspaces/%s/graphs/%s", graphSpace, name);
+        String config = String.format(ROCKSDB_CONFIG_TEMPLATE, name, nickname, name, name);
+        return client.post(path, Entity.json(config));
     }
 
     public static Response createGraph(String graphSpace, String name,

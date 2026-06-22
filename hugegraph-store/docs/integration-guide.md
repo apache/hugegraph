@@ -99,19 +99,10 @@ tail -f logs/hugegraph-server.log
 
 ```bash
 # Check backend via REST API
-curl http://localhost:8080/graphs/hugegraph/backend
-
-# Expected response:
-{
-  "backend": "hstore",
-  "version": "1.7.0",
-  "nodes": [
-    {"id": "1", "address": "192.168.1.20:8500"},
-    {"id": "2", "address": "192.168.1.21:8500"},
-    {"id": "3", "address": "192.168.1.22:8500"}
-  ],
-  "partitions": 12
-}
+curl --location --request GET 'http://localhost:8080/metrics/backend' \
+--header 'Authorization: Bearer <YOUR_ACCESS_TOKEN>'
+# Response should show:
+# {"backend": "hstore", "nodes": [...]}
 ```
 
 ---
@@ -125,184 +116,304 @@ The `hg-store-client` module provides a Java client for directly interacting wit
 ```xml
 <dependency>
     <groupId>org.apache.hugegraph</groupId>
-    <artifactId>hg-store-client</artifactId>
+    <artifactId>hugegraph-client</artifactId>
     <version>1.7.0</version>
 </dependency>
 ```
 
 ### Basic Usage
 
-#### 1. Creating a Client
+#### 1. Single Example
 
 ```java
-import org.apache.hugegraph.store.client.HgStoreClient;
-import org.apache.hugegraph.store.client.HgStoreSession;
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.List;
 
-// PD addresses
-String pdPeers = "192.168.1.10:8686,192.168.1.11:8686,192.168.1.12:8686";
+import org.apache.hugegraph.driver.GraphManager;
+import org.apache.hugegraph.driver.GremlinManager;
+import org.apache.hugegraph.driver.HugeClient;
+import org.apache.hugegraph.driver.SchemaManager;
+import org.apache.hugegraph.structure.constant.T;
+import org.apache.hugegraph.structure.graph.Edge;
+import org.apache.hugegraph.structure.graph.Path;
+import org.apache.hugegraph.structure.graph.Vertex;
+import org.apache.hugegraph.structure.gremlin.Result;
+import org.apache.hugegraph.structure.gremlin.ResultSet;
 
-// Create client
-HgStoreClient client = HgStoreClient.create(pdPeers);
+public class SingleExample {
 
-// Create session for a graph
-String graphName = "hugegraph";
-HgStoreSession session = client.openSession(graphName);
-```
+    public static void main(String[] args) throws IOException {
+        // If connect failed will throw a exception.
+        HugeClient hugeClient = HugeClient.builder("http://localhost:8080",
+                        "hugegraph")
+                .build();
 
-#### 2. Basic Operations
+        SchemaManager schema = hugeClient.schema();
 
-**Put (Write)**:
-```java
-import org.apache.hugegraph.store.client.HgStoreSession;
+        schema.propertyKey("name").asText().ifNotExist().create();
+        schema.propertyKey("age").asInt().ifNotExist().create();
+        schema.propertyKey("city").asText().ifNotExist().create();
+        schema.propertyKey("weight").asDouble().ifNotExist().create();
+        schema.propertyKey("lang").asText().ifNotExist().create();
+        schema.propertyKey("date").asDate().ifNotExist().create();
+        schema.propertyKey("price").asInt().ifNotExist().create();
 
-// Put a key-value pair
-byte[] key = "vertex:person:1001".getBytes();
-byte[] value = serializeVertex(vertex);  // Your serialization logic
+        schema.vertexLabel("person")
+                .properties("name", "age", "city")
+                .primaryKeys("name")
+                .ifNotExist()
+                .create();
 
-session.put(tableName, key, value);
-```
+        schema.vertexLabel("software")
+                .properties("name", "lang", "price")
+                .primaryKeys("name")
+                .ifNotExist()
+                .create();
 
-**Get (Read)**:
-```java
-// Get value by key
-byte[] key = "vertex:person:1001".getBytes();
-byte[] value = session.get(tableName, key);
+        schema.indexLabel("personByCity")
+                .onV("person")
+                .by("city")
+                .secondary()
+                .ifNotExist()
+                .create();
 
-if (value != null) {
-    Vertex vertex = deserializeVertex(value);
-}
-```
+        schema.indexLabel("personByAgeAndCity")
+                .onV("person")
+                .by("age", "city")
+                .secondary()
+                .ifNotExist()
+                .create();
 
-**Delete**:
-```java
-// Delete a key
-byte[] key = "vertex:person:1001".getBytes();
-session.delete(tableName, key);
-```
+        schema.indexLabel("softwareByPrice")
+                .onV("software")
+                .by("price")
+                .range()
+                .ifNotExist()
+                .create();
 
-**Scan (Range Query)**:
-```java
-import org.apache.hugegraph.store.client.HgStoreResultSet;
+        schema.edgeLabel("knows")
+                .sourceLabel("person")
+                .targetLabel("person")
+                .properties("date", "weight")
+                .ifNotExist()
+                .create();
 
-// Scan all keys with prefix "vertex:person:"
-byte[] startKey = "vertex:person:".getBytes();
-byte[] endKey = "vertex:person:~".getBytes();
+        schema.edgeLabel("created")
+                .sourceLabel("person").targetLabel("software")
+                .properties("date", "weight")
+                .ifNotExist()
+                .create();
 
-HgStoreResultSet resultSet = session.scan(tableName, startKey, endKey);
+        schema.indexLabel("createdByDate")
+                .onE("created")
+                .by("date")
+                .secondary()
+                .ifNotExist()
+                .create();
 
-while (resultSet.hasNext()) {
-    HgStoreResultSet.Entry entry = resultSet.next();
-    byte[] key = entry.key();
-    byte[] value = entry.value();
+        schema.indexLabel("createdByWeight")
+                .onE("created")
+                .by("weight")
+                .range()
+                .ifNotExist()
+                .create();
 
-    // Process entry
-}
+        schema.indexLabel("knowsByWeight")
+                .onE("knows")
+                .by("weight")
+                .range()
+                .ifNotExist()
+                .create();
 
-resultSet.close();
-```
+        GraphManager graph = hugeClient.graph();
+        Vertex marko = graph.addVertex(T.LABEL, "person", "name", "marko",
+                "age", 29, "city", "Beijing");
+        Vertex vadas = graph.addVertex(T.LABEL, "person", "name", "vadas",
+                "age", 27, "city", "Hongkong");
+        Vertex lop = graph.addVertex(T.LABEL, "software", "name", "lop",
+                "lang", "java", "price", 328);
+        Vertex josh = graph.addVertex(T.LABEL, "person", "name", "josh",
+                "age", 32, "city", "Beijing");
+        Vertex ripple = graph.addVertex(T.LABEL, "software", "name", "ripple",
+                "lang", "java", "price", 199);
+        Vertex peter = graph.addVertex(T.LABEL, "person", "name", "peter",
+                "age", 35, "city", "Shanghai");
 
-#### 3. Batch Operations
+        marko.addEdge("knows", vadas, "date", "2016-01-10", "weight", 0.5);
+        marko.addEdge("knows", josh, "date", "2013-02-20", "weight", 1.0);
+        marko.addEdge("created", lop, "date", "2017-12-10", "weight", 0.4);
+        josh.addEdge("created", lop, "date", "2009-11-11", "weight", 0.4);
+        josh.addEdge("created", ripple, "date", "2017-12-10", "weight", 1.0);
+        peter.addEdge("created", lop, "date", "2017-03-24", "weight", 0.2);
 
-```java
-import org.apache.hugegraph.store.client.HgStoreBatch;
+        GremlinManager gremlin = hugeClient.gremlin();
+        System.out.println("==== Path ====");
+        ResultSet resultSet = gremlin.gremlin("g.V().outE().path()").execute();
+        Iterator<Result> results = resultSet.iterator();
+        results.forEachRemaining(result -> {
+            System.out.println(result.getObject().getClass());
+            Object object = result.getObject();
+            if (object instanceof Vertex) {
+                System.out.println(((Vertex) object).id());
+            } else if (object instanceof Edge) {
+                System.out.println(((Edge) object).id());
+            } else if (object instanceof Path) {
+                List<Object> elements = ((Path) object).objects();
+                elements.forEach(element -> {
+                    System.out.println(element.getClass());
+                    System.out.println(element);
+                });
+            } else {
+                System.out.println(object);
+            }
+        });
 
-// Create batch
-HgStoreBatch batch = session.beginBatch();
-
-// Add operations to batch
-for (Vertex vertex : vertices) {
-    byte[] key = vertexKey(vertex.id());
-    byte[] value = serializeVertex(vertex);
-    batch.put(tableName, key, value);
-}
-
-// Commit batch (atomic write via Raft)
-batch.commit();
-
-// Or rollback
-// batch.rollback();
-```
-
-#### 4. Session Management
-
-```java
-// Close session
-session.close();
-
-// Close client (releases all resources)
-client.close();
-```
-
-### Advanced Usage
-
-#### Query with Filters
-
-```java
-import org.apache.hugegraph.store.client.HgStoreQuery;
-import org.apache.hugegraph.store.client.HgStoreQuery.Filter;
-
-// Build query with filter
-HgStoreQuery query = HgStoreQuery.builder()
-    .table(tableName)
-    .prefix("vertex:person:")
-    .filter(Filter.eq("age", 30))  // Filter: age == 30
-    .limit(100)
-    .build();
-
-// Execute query
-HgStoreResultSet resultSet = session.query(query);
-
-while (resultSet.hasNext()) {
-    // Process results
-}
-```
-
-#### Aggregation Queries
-
-```java
-import org.apache.hugegraph.store.client.HgStoreQuery.Aggregation;
-
-// Count vertices with label "person"
-HgStoreQuery query = HgStoreQuery.builder()
-    .table(tableName)
-    .prefix("vertex:person:")
-    .aggregation(Aggregation.COUNT)
-    .build();
-
-long count = session.aggregate(query);
-System.out.println("Person count: " + count);
-```
-
-#### Multi-Partition Iteration
-
-```java
-// Scan across all partitions (Store handles partition routing)
-HgStoreResultSet resultSet = session.scanAll(tableName);
-
-while (resultSet.hasNext()) {
-    HgStoreResultSet.Entry entry = resultSet.next();
-    // Process entry from any partition
+        hugeClient.close();
+    }
 }
 
-resultSet.close();
 ```
 
-### Connection Pool Configuration
+#### 2. Batch Example
 
 ```java
-import org.apache.hugegraph.store.client.HgStoreClientConfig;
+import java.util.ArrayList;
+import java.util.List;
 
-// Configure client
-HgStoreClientConfig config = HgStoreClientConfig.builder()
-    .pdPeers(pdPeers)
-    .maxSessions(10)               // Max sessions per Store node
-    .sessionTimeout(30000)          // Session timeout (ms)
-    .rpcTimeout(10000)              // RPC timeout (ms)
-    .maxRetries(3)                  // Max retry attempts
-    .retryInterval(1000)            // Retry interval (ms)
-    .build();
+import org.apache.hugegraph.driver.GraphManager;
+import org.apache.hugegraph.driver.HugeClient;
+import org.apache.hugegraph.driver.SchemaManager;
+import org.apache.hugegraph.structure.graph.Edge;
+import org.apache.hugegraph.structure.graph.Vertex;
 
-HgStoreClient client = HgStoreClient.create(config);
+public class BatchExample {
+
+    public static void main(String[] args) {
+        // If connect failed will throw a exception.
+        HugeClient hugeClient = HugeClient.builder("http://localhost:8080",
+                                                   "hugegraph")
+                                          .build();
+
+        SchemaManager schema = hugeClient.schema();
+
+        schema.propertyKey("name").asText().ifNotExist().create();
+        schema.propertyKey("age").asInt().ifNotExist().create();
+        schema.propertyKey("lang").asText().ifNotExist().create();
+        schema.propertyKey("date").asDate().ifNotExist().create();
+        schema.propertyKey("price").asInt().ifNotExist().create();
+
+        schema.vertexLabel("person")
+              .properties("name", "age")
+              .primaryKeys("name")
+              .ifNotExist()
+              .create();
+
+        schema.vertexLabel("person")
+              .properties("price")
+              .nullableKeys("price")
+              .append();
+
+        schema.vertexLabel("software")
+              .properties("name", "lang", "price")
+              .primaryKeys("name")
+              .ifNotExist()
+              .create();
+
+        schema.indexLabel("softwareByPrice")
+              .onV("software").by("price")
+              .range()
+              .ifNotExist()
+              .create();
+
+        schema.edgeLabel("knows")
+              .link("person", "person")
+              .properties("date")
+              .ifNotExist()
+              .create();
+
+        schema.edgeLabel("created")
+              .link("person", "software")
+              .properties("date")
+              .ifNotExist()
+              .create();
+
+        schema.indexLabel("createdByDate")
+              .onE("created").by("date")
+              .secondary()
+              .ifNotExist()
+              .create();
+
+        // get schema object by name
+        System.out.println(schema.getPropertyKey("name"));
+        System.out.println(schema.getVertexLabel("person"));
+        System.out.println(schema.getEdgeLabel("knows"));
+        System.out.println(schema.getIndexLabel("createdByDate"));
+
+        // list all schema objects
+        System.out.println(schema.getPropertyKeys());
+        System.out.println(schema.getVertexLabels());
+        System.out.println(schema.getEdgeLabels());
+        System.out.println(schema.getIndexLabels());
+
+        GraphManager graph = hugeClient.graph();
+
+        Vertex marko = new Vertex("person").property("name", "marko")
+                                           .property("age", 29);
+        Vertex vadas = new Vertex("person").property("name", "vadas")
+                                           .property("age", 27);
+        Vertex lop = new Vertex("software").property("name", "lop")
+                                           .property("lang", "java")
+                                           .property("price", 328);
+        Vertex josh = new Vertex("person").property("name", "josh")
+                                          .property("age", 32);
+        Vertex ripple = new Vertex("software").property("name", "ripple")
+                                              .property("lang", "java")
+                                              .property("price", 199);
+        Vertex peter = new Vertex("person").property("name", "peter")
+                                           .property("age", 35);
+
+        Edge markoKnowsVadas = new Edge("knows").source(marko).target(vadas)
+                                                .property("date", "2016-01-10");
+        Edge markoKnowsJosh = new Edge("knows").source(marko).target(josh)
+                                               .property("date", "2013-02-20");
+        Edge markoCreateLop = new Edge("created").source(marko).target(lop)
+                                                 .property("date",
+                                                           "2017-12-10");
+        Edge joshCreateRipple = new Edge("created").source(josh).target(ripple)
+                                                   .property("date",
+                                                             "2017-12-10");
+        Edge joshCreateLop = new Edge("created").source(josh).target(lop)
+                                                .property("date", "2009-11-11");
+        Edge peterCreateLop = new Edge("created").source(peter).target(lop)
+                                                 .property("date",
+                                                           "2017-03-24");
+
+        List<Vertex> vertices = new ArrayList<>();
+        vertices.add(marko);
+        vertices.add(vadas);
+        vertices.add(lop);
+        vertices.add(josh);
+        vertices.add(ripple);
+        vertices.add(peter);
+
+        List<Edge> edges = new ArrayList<>();
+        edges.add(markoKnowsVadas);
+        edges.add(markoKnowsJosh);
+        edges.add(markoCreateLop);
+        edges.add(joshCreateRipple);
+        edges.add(joshCreateLop);
+        edges.add(peterCreateLop);
+
+        vertices = graph.addVertices(vertices);
+        vertices.forEach(vertex -> System.out.println(vertex));
+
+        edges = graph.addEdges(edges, false);
+        edges.forEach(edge -> System.out.println(edge));
+
+        hugeClient.close();
+    }
+}
 ```
 
 ---
@@ -331,55 +442,6 @@ HgStoreClient client = HgStoreClient.create(config);
    - Look up partition's leader Store
    - Send request to leader Store
 ```
-
-### Partition Routing
-
-**Example**: Write vertex with ID `"person:1001"`
-
-```java
-// 1. Client hashes the key
-String key = "vertex:person:1001";
-int hash = MurmurHash3.hash32(key);  // e.g., 0x12345678
-
-// 2. Client queries PD: which partition owns this hash?
-Partition partition = pdClient.getPartitionByHash(graphName, hash);
-// PD responds: Partition 5
-
-// 3. Client queries PD: who is the leader of Partition 5?
-Shard leader = partition.getLeader();
-// PD responds: Store 2 (192.168.1.21:8500)
-
-// 4. Client sends write request to Store 2
-storeClient.put(leader.getStoreAddress(), tableName, key, value);
-```
-
-**Caching**:
-- Client caches partition metadata (refreshed every 60 seconds)
-- On leader change, client receives redirect response and updates cache
-
-### Handling PD Failures
-
-**Scenario**: PD cluster is temporarily unavailable
-
-**Client Behavior**:
-1. **Short outage** (<60 seconds):
-   - Client uses cached partition metadata
-   - Operations continue normally
-   - Client retries PD connection in background
-
-2. **Long outage** (>60 seconds):
-   - Cached metadata may become stale (e.g., leader changed)
-   - Client may send requests to wrong Store node
-   - Store node redirects client to current leader
-   - Client updates cache and retries
-
-3. **Complete PD failure**:
-   - Client cannot discover new Store nodes or partitions
-   - Existing operations work, but cluster cannot scale or rebalance
-
-**Recommendation**: Always run PD in a 3-node or 5-node cluster for high availability
-
----
 
 ## Migration from Other Backends
 
@@ -453,13 +515,13 @@ bin/hugegraph-restore.sh \
 
 ```bash
 # Check vertex count
-curl http://localhost:8080/graphs/hugegraph/graph/vertices?limit=0
+curl http://localhost:8080/graphspaces/{graphspace_name}/graphs/{graph_name}/graph/vertices
 
 # Check edge count
-curl http://localhost:8080/graphs/hugegraph/graph/edges?limit=0
+curl http://localhost:8080/graphspaces/{graphspace_name}/graphs/{graph_name}/graph/edges
 
 # Run sample queries
-curl http://localhost:8080/graphs/hugegraph/graph/vertices?label=person&limit=10
+curl http://localhost:8080/graphspaces/{graphspace_name}/graphs/{graph_name}/graph/vertices/{id}
 ```
 
 ---
@@ -577,10 +639,10 @@ graph.name=analytics
 **Access**:
 ```bash
 # Production graph
-curl http://localhost:8080/graphs/production/graph/vertices
+curl "http://192.168.1.30:8080/graphspaces/{graphspace_name}/graphs/production/graph/vertices" 
 
 # Analytics graph
-curl http://localhost:8080/graphs/analytics/graph/vertices
+curl "http://192.168.1.30:8080/graphspaces/{graphspace_name}/graphs/analytics/graph/vertices" 
 ```
 
 ### Mixed Backend Configuration
@@ -615,7 +677,7 @@ ERROR o.a.h.b.s.h.HstoreProvider - Failed to connect to PD cluster
 **Diagnosis**:
 ```bash
 # Check PD is running
-curl http://192.168.1.10:8620/actuator/health
+curl http://192.168.1.10:8620/v1/health
 
 # Check network connectivity
 telnet 192.168.1.10 8686
@@ -641,10 +703,10 @@ tail -f logs/hugegraph-server.log | grep PD
 **Diagnosis**:
 ```bash
 # Check Store node health
-curl http://192.168.1.20:8520/actuator/metrics
+curl http://192.168.1.20:8520/v1/health
 
 # Check partition distribution
-curl http://192.168.1.10:8620/pd/v1/partitions
+curl http://192.168.1.10:8620/v1/partitions
 
 # Check if queries are using indexes
 # (Enable query logging in Server)
@@ -652,11 +714,6 @@ curl http://192.168.1.10:8620/pd/v1/partitions
 
 **Solutions**:
 1. **Create indexes**: Ensure label and property indexes exist
-   ```groovy
-   // In Gremlin console
-   schema.indexLabel("personByName").onV("person").by("name").secondary().create()
-   ```
-
 2. **Increase Store nodes**: If data exceeds capacity of 3 nodes
 3. **Tune RocksDB**: See [Best Practices](best-practices.md)
 4. **Enable query pushdown**: Ensure Server is using Store's query API
@@ -676,10 +733,10 @@ ERROR o.a.h.b.s.h.HstoreSession - Write operation failed: Raft leader not found
 tail -f logs/hugegraph-store.log | grep Raft
 
 # Check partition leaders
-curl http://192.168.1.10:8620/pd/v1/partitions | grep leader
+curl http://192.168.1.10:8620/v1/partitions | grep leader
 
 # Check Store node states
-curl http://192.168.1.10:8620/pd/v1/stores
+curl http://192.168.1.10:8620/v1/stores
 ```
 
 **Solutions**:
@@ -699,7 +756,7 @@ curl http://192.168.1.10:8620/pd/v1/stores
 **Diagnosis**:
 ```bash
 # Compare counts
-curl http://localhost:8080/graphs/hugegraph/graph/vertices?limit=0
+curl http://localhost:8080/graphspaces/{graphspace_name}/graphs/{graph_name}/graph/vertices
 # vs expected count from backup
 
 # Check for restore errors
@@ -710,7 +767,7 @@ tail -f logs/hugegraph-tools.log | grep ERROR
 1. **Re-run restore**: Delete graph and restore again
    ```bash
    # Clear graph
-   curl -X DELETE http://localhost:8080/graphs/hugegraph/graph/vertices
+   curl -X DELETE http://localhost:8080/graphspaces/{graphspace_name}/graphs/{graph_name}/graph/vertices/{id}
 
    # Restore
    bin/hugegraph-restore.sh --graph hugegraph --directory /backup/data
@@ -738,12 +795,6 @@ jmap -dump:format=b,file=heap.bin <server-pid>
 
 **Solutions**:
 1. **Close sessions**: Ensure `HgStoreSession.close()` is called
-   ```java
-   try (HgStoreSession session = client.openSession(graphName)) {
-       // Use session
-   }  // Auto-closed
-   ```
-
 2. **Tune connection pool**: Reduce `store.max_sessions` if too high
 3. **Increase heap**: Increase Server JVM heap size
    ```bash

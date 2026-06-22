@@ -121,10 +121,9 @@ public class Load extends Command {
         for (int i = 0; i < readerSize; i++) {
             int fi = i;
             new Thread(() -> {
-                try {
-                    InputStreamReader isr = new InputStreamReader(new FileInputStream(split[fi]),
-                                                                  StandardCharsets.UTF_8);
-                    BufferedReader reader = new BufferedReader(isr);
+                try(InputStreamReader isr = new InputStreamReader(new FileInputStream(split[fi]),
+                                                                       StandardCharsets.UTF_8);
+                    BufferedReader reader = new BufferedReader(isr)) {
                     long count = 0;
                     String line;
                     try {
@@ -146,9 +145,6 @@ public class Load extends Command {
                         }
                     } catch (Exception e) {
                         throw new RuntimeException(e);
-                    } finally {
-                        isr.close();
-                        reader.close();
                     }
                 } catch (Exception e) {
                     log.error("send data with error:", e);
@@ -158,13 +154,12 @@ public class Load extends Command {
             }).start();
         }
         latch.await();
-        loadThread.join();
         completed.set(true);
+        loadThread.join();
     }
 
     public boolean put(String table, List<String> keys) {
         HgStoreSession session = storeClient.openSession(graph);
-        session.beginTx();
         try {
             session.beginTx();
             for (String key : keys) {

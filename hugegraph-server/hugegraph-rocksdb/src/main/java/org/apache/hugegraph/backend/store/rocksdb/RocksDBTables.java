@@ -389,6 +389,18 @@ public class RocksDBTables {
         }
     }
 
+    public static class VectorIndexMap extends IndexTable {
+        public static final String TABLE = HugeType.VECTOR_INDEX_MAP.string();
+
+        public VectorIndexMap(String database) { super(database, TABLE); }
+    }
+
+    public static class VectorSequence extends IndexTable {
+        public static final String TABLE = HugeType.VECTOR_SEQUENCE.string();
+
+        public VectorSequence(String database) { super(database, TABLE); }
+    }
+
     public static class OlapTable extends RocksDBTable {
 
         public static final String TABLE = HugeType.OLAP.string();
