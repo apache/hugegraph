@@ -6,9 +6,24 @@ This document explains the **fully distributed HugeGraph architecture** where th
 with optional cloud sync (`hstore.cloud_enabled=true`). Each store node uses RocksDB with cloud storage sync enabled,
 with its own cloud storage bucket for cloud durability (S3 is the default implementation).
 
+### Architectural Positioning: HStore vs Cloud Integration
+
+The cloud-storage work is an **additive integration**, not a replacement for existing HStore implementation:
+
+| Component | Existing HStore | New Cloud Integration |
+|---|---|---|
+| **Role** | Distributed graph serving (server + PD + store + Raft) | Optional durability/rehydration extension for store RocksDB data |
+| **Enabled by** | `backend=hstore` | `hstore.cloud_enabled=true` + store cloud env/config |
+| **Runtime dependency** | Required for distributed deployment | Optional (can be fully disabled) |
+| **Failure when disabled** | HStore still works as before | No cloud sync/rehydration path only |
+
+In short: **HStore remains the core distributed data path**; cloud storage is a **separate optional capability** attached at the store layer.
+
 ## System Architecture
 
-### Three-Layer Design
+### Three-Layer Design (HStore Core + Optional Cloud Integration)
+
+The following view separates the **existing HStore core path** from the **new cloud-storage integration path**.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -31,37 +46,38 @@ with its own cloud storage bucket for cloud durability (S3 is the default implem
 │ • Backup: Should be HA in production (3 PD nodes)                │
 └──────────────────────────────────────────────────────────────────┘
                          ↓ gRPC calls
-┌───────────────────────────────────────────────────────────────────────────┐
-│ Layer 3: Graph Storage (Store Cluster)                                    │
-│ ──────────────────────────────────────────────────────────────────────────│
-│ Each Store Node:                                                          │
-│ ┌─────────────────────┐  ┌─────────────────────┐  ┌─────────────────────┐ │
-│ │ Store0              │  │ Store1              │  │ Store2              │ │
-│ ├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤ │
-│ │ RocksDB (embedded)  │  │ RocksDB (embedded)  │  │ RocksDB (embedded)  │ │
-│ │  ├─ vertices        │  │  ├─ vertices        │  │  ├─ vertices        │ │
-│ │  ├─ edges           │  │  ├─ edges           │  │  ├─ edges           │ │
-│ │  └─ metadata        │  │  └─ metadata        │  │  └─ metadata        │ │
-│ │ Cloud Module        │  │ Cloud Module        │  │ Cloud Module        │ │
-│ │  └─ synchronous     │  │  └─ synchronous     │  │  └─ synchronous     │ │
-│ │     SST upload      │  │     SST upload      │  │     SST upload      │ │
-│ │     (mode=true)     │  │     (mode=true)     │  │     (mode=true)     │ │
-│ │     => syncs cloud  │  │     => syncs cloud  │  │     => syncs cloud  │ │
-│ │  └─ periodic        │  │  └─ periodic        │  │  └─ periodic        │ │
-│ │     fallback        │  │     fallback        │  │     fallback        │ │
-│ │     (mode=false)    │  │     (mode=false)    │  │     (mode=false)    │ │
-│ ├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤ │
-│ │ Cloud Bucket:       │  │ Cloud Bucket:       │  │ Cloud Bucket:       │ │
-│ │ store0-rocksdb      │  │ store1-rocksdb      │  │ store2-rocksdb      │ │
-│ │                     │  │                     │  │                     │ │
-│ │ Credentials:        │  │ Credentials:        │  │ Credentials:        │ │
-│ │ (via env var)       │  │ (via env var)       │  │ (via env var)       │ │
-│ └─────────────────────┘  └─────────────────────┘  └─────────────────────┘ │
-│                                                                           │
-│       Consensus: 3-way Raft replication (all writes replicate)            │
-│       Failure Mode: Single store failure = reduced capacity, continued    │
-│              operations (2-node quorum OK for 3-node cluster)             │
-└───────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Layer 3: Graph Storage (Store Cluster)                                      │
+│ ────────────────────────────────────────────────────────────────────────────│
+│ Each store node contains BOTH:                                              │
+│   (1) RocksDB (embedded, existing HStore core)                              │
+│   (2) Cloud Module [NEW] (optional, additive integration)                   │
+│                                                                             │
+│ ┌──────────────────────┐ ┌──────────────────────┐ ┌──────────────────────┐  │
+│ │ Store0               │ │ Store1               │ │ Store2               │  │
+│ ├──────────────────────┤ ├──────────────────────┤ ├──────────────────────┤  │
+│ │ RocksDB (embedded)   │ │ RocksDB (embedded)   │ │ RocksDB (embedded)   │  │
+│ │  ├─ vertices         │ │  ├─ vertices         │ │  ├─ vertices         │  │
+│ │  ├─ edges            │ │  ├─ edges            │ │  ├─ edges            │  │
+│ │  └─ metadata         │ │  └─ metadata         │ │  └─ metadata         │  │
+│ │----------------------│ │----------------------│ │----------------------│  │
+│ │  Cloud Module [NEW]  │ │ Cloud Module [NEW]   │ │ Cloud Module [NEW]   │  │
+│ │  ├─ sync SST upload  │ │  ├─ sync SST upload  │ │  ├─ sync SST upload  │  │
+│ │  │  (mode=true)      │ │  │  (mode=true)      │ │  │  (mode=true)      │  │
+│ │  └─ periodic recon.  │ │  └─ periodic recon.  │ │  └─ periodic recon.  │  │
+│ │     (mode=false)     │ │     (mode=false)     │ │     (mode=false)     │  │
+│ └──────────────────────┘ └──────────────────────┘ └──────────────────────┘  │
+│                               ↓ object sync/download                        │
+│ ┌────────────────────────────────────────────────────────────────────────┐  │
+│ │ Cloud Storage                                                          │  │
+│ ├────────────────────────────────────────────────────────────────────────┤  │
+│ │    Bucket: store0-*        Bucket: store1-*         Bucket: store2-*   │  │
+│ └────────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│ Core consistency: 3-way Raft replication (all writes replicate)             │
+│ Failure mode: single store failure => reduced capacity,                     │
+│                continued operations (2-node quorum OK for 3-node cluster)   │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Mode legend (single flag): `rocksdb.cloud.synchronous_sst_upload_mode=true` => synchronous cloud upload;
@@ -459,6 +475,12 @@ T5: Stores boot from cloud
 ## Pluggable Cloud Storage Architecture
 
 HugeGraph supports a **pluggable cloud storage provider** architecture that enables support for multiple cloud storage vendors without modifying core code.
+
+This architecture is intentionally separated from core HStore semantics:
+
+- **HStore responsibilities stay unchanged:** request routing, partition placement, Raft replication, and local RocksDB reads/writes.
+- **Cloud module responsibilities are orthogonal:** SST/object upload, object download, and post-failure rehydration.
+- **Operational choice:** keep classic HStore behavior (cloud off) or enable cloud durability (cloud on) without switching backend type.
 
 ### Core Components
 
