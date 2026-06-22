@@ -153,7 +153,7 @@ public class StandardTaskScheduler implements TaskScheduler {
             String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
             do {
                 Iterator<HugeTask<V>> iter;
-                for (iter = this.findTask(status, PAGE_SIZE, page);
+                for (iter = this.findTask(status, PAGE_SIZE, page, false);
                      iter.hasNext(); ) {
                     HugeTask<V> task = iter.next();
                     if (selfServer.equals(task.server())) {
@@ -323,7 +323,8 @@ public class StandardTaskScheduler implements TaskScheduler {
         Collection<HugeServerInfo> serverInfos = this.serverManager().allServerInfos();
         String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
         do {
-            Iterator<HugeTask<Object>> tasks = this.tasks(TaskStatus.SCHEDULING, PAGE_SIZE, page);
+            Iterator<HugeTask<Object>> tasks = this.tasks(TaskStatus.SCHEDULING, PAGE_SIZE, page,
+                                                          false);
             while (tasks.hasNext()) {
                 HugeTask<?> task = tasks.next();
                 if (task.server() != null) {
@@ -365,7 +366,8 @@ public class StandardTaskScheduler implements TaskScheduler {
     protected void executeTasksOnWorker(Id server) {
         String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
         do {
-            Iterator<HugeTask<Object>> tasks = this.tasks(TaskStatus.SCHEDULED, PAGE_SIZE, page);
+            Iterator<HugeTask<Object>> tasks = this.tasks(TaskStatus.SCHEDULED, PAGE_SIZE, page,
+                                                          false);
             while (tasks.hasNext()) {
                 HugeTask<?> task = tasks.next();
                 this.initTaskCallable(task);
@@ -394,7 +396,8 @@ public class StandardTaskScheduler implements TaskScheduler {
     protected void cancelTasksOnWorker(Id server) {
         String page = this.supportsPaging() ? PageInfo.PAGE_NONE : null;
         do {
-            Iterator<HugeTask<Object>> tasks = this.tasks(TaskStatus.CANCELLING, PAGE_SIZE, page);
+            Iterator<HugeTask<Object>> tasks = this.tasks(TaskStatus.CANCELLING, PAGE_SIZE, page,
+                                                          false);
             while (tasks.hasNext()) {
                 HugeTask<?> task = tasks.next();
                 Id taskServer = task.server();
@@ -494,24 +497,35 @@ public class StandardTaskScheduler implements TaskScheduler {
 
     @Override
     public <V> HugeTask<V> task(Id id) {
+        return this.task(id, true);
+    }
+
+    @Override
+    public <V> HugeTask<V> task(Id id, boolean withResult) {
         E.checkArgumentNotNull(id, "Parameter task id can't be null");
         @SuppressWarnings("unchecked")
         HugeTask<V> task = (HugeTask<V>) this.tasks.get(id);
         if (task != null) {
-            return task;
+            return withResult ? task : task.copyWithoutResult();
         }
-        return this.findTask(id);
+        return this.findTask(id, withResult);
     }
 
     @Override
     public <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
+        return this.tasks(ids, true);
+    }
+
+    @Override
+    public <V> Iterator<HugeTask<V>> tasks(List<Id> ids,
+                                           boolean withResult) {
         List<Id> taskIdsNotInMem = new ArrayList<>();
         List<HugeTask<V>> taskInMem = new ArrayList<>();
         for (Id id : ids) {
             @SuppressWarnings("unchecked")
             HugeTask<V> task = (HugeTask<V>) this.tasks.get(id);
             if (task != null) {
-                taskInMem.add(task);
+                taskInMem.add(withResult ? task : task.copyWithoutResult());
             } else {
                 taskIdsNotInMem.add(id);
             }
@@ -522,27 +536,37 @@ public class StandardTaskScheduler implements TaskScheduler {
         } else {
             iterator = new ExtendableIterator<>(taskInMem.iterator());
         }
-        iterator.extend(this.findTasks(taskIdsNotInMem));
+        iterator.extend(this.findTasks(taskIdsNotInMem, withResult));
         return iterator;
     }
 
     @Override
-    public <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
-                                           long limit, String page) {
+    public <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
+                                           String page) {
+        return this.tasks(status, limit, page, true);
+    }
+
+    @Override
+    public <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
+                                           String page, boolean withResult) {
         if (status == null) {
-            return this.findAllTask(limit, page);
+            return this.findAllTask(limit, page, withResult);
         }
-        return this.findTask(status, limit, page);
+        return this.findTask(status, limit, page, withResult);
     }
 
     public <V> HugeTask<V> findTask(Id id) {
+        return this.findTask(id, true);
+    }
+
+    public <V> HugeTask<V> findTask(Id id, boolean withResult) {
         HugeTask<V> result = this.call(() -> {
             Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
             Vertex vertex = QueryResults.one(vertices);
             if (vertex == null) {
                 return null;
             }
-            return HugeTask.fromVertex(vertex);
+            return HugeTask.fromVertex(vertex, withResult);
         });
         if (result == null) {
             throw new NotFoundException("Can't find task with id '%s'", id);
@@ -551,23 +575,40 @@ public class StandardTaskScheduler implements TaskScheduler {
     }
 
     public <V> Iterator<HugeTask<V>> findTasks(List<Id> ids) {
-        return this.queryTask(ids);
+        return this.findTasks(ids, true);
+    }
+
+    public <V> Iterator<HugeTask<V>> findTasks(List<Id> ids,
+                                               boolean withResult) {
+        return this.queryTask(ids, withResult);
     }
 
     public <V> Iterator<HugeTask<V>> findAllTask(long limit, String page) {
-        return this.queryTask(ImmutableMap.of(), limit, page);
+        return this.findAllTask(limit, page, true);
+    }
+
+    public <V> Iterator<HugeTask<V>> findAllTask(long limit, String page,
+                                                 boolean withResult) {
+        return this.queryTask(ImmutableMap.of(), limit, page, withResult);
     }
 
     public <V> Iterator<HugeTask<V>> findTask(TaskStatus status,
                                               long limit, String page) {
-        return this.queryTask(P.STATUS, status.code(), limit, page);
+        return this.findTask(status, limit, page, true);
+    }
+
+    public <V> Iterator<HugeTask<V>> findTask(TaskStatus status,
+                                              long limit, String page,
+                                              boolean withResult) {
+        return this.queryTask(P.STATUS, status.code(), limit, page,
+                              withResult);
     }
 
     @Override
     public <V> HugeTask<V> delete(Id id, boolean force) {
         this.checkOnMasterNode("delete");
 
-        HugeTask<?> task = this.task(id);
+        HugeTask<?> task = this.task(id, false);
         /*
          * The following is out of date when the task running on worker node:
          * HugeTask<?> task = this.tasks.get(id);
@@ -592,11 +633,11 @@ public class StandardTaskScheduler implements TaskScheduler {
             if (vertex == null) {
                 return null;
             }
-            HugeTask<V> result = HugeTask.fromVertex(vertex);
+            HugeTask<V> result = HugeTask.fromVertex(vertex, false);
             E.checkState(force || result.completed(),
                          "Can't delete incomplete task '%s' in status %s",
                          id, result.status());
-            this.tx().removeVertex(vertex);
+            this.tx().removeTaskVertex(vertex);
             return result;
         });
     }
@@ -674,11 +715,24 @@ public class StandardTaskScheduler implements TaskScheduler {
 
     private <V> Iterator<HugeTask<V>> queryTask(String key, Object value,
                                                 long limit, String page) {
-        return this.queryTask(ImmutableMap.of(key, value), limit, page);
+        return this.queryTask(key, value, limit, page, true);
+    }
+
+    private <V> Iterator<HugeTask<V>> queryTask(String key, Object value,
+                                                long limit, String page,
+                                                boolean withResult) {
+        return this.queryTask(ImmutableMap.of(key, value), limit, page,
+                              withResult);
     }
 
     private <V> Iterator<HugeTask<V>> queryTask(Map<String, Object> conditions,
                                                 long limit, String page) {
+        return this.queryTask(conditions, limit, page, true);
+    }
+
+    private <V> Iterator<HugeTask<V>> queryTask(Map<String, Object> conditions,
+                                                long limit, String page,
+                                                boolean withResult) {
         return this.call(() -> {
             ConditionQuery query;
             if (this.graph.backendStoreFeatures().supportsTaskAndServerVertex()) {
@@ -701,18 +755,27 @@ public class StandardTaskScheduler implements TaskScheduler {
             }
             Iterator<Vertex> vertices = this.tx().queryVertices(query);
             Iterator<HugeTask<V>> tasks =
-                    new MapperIterator<>(vertices, HugeTask::fromVertex);
+                    new MapperIterator<>(vertices, vertex -> {
+                        return HugeTask.fromVertex(vertex, withResult);
+                    });
             // Convert iterator to list to avoid across thread tx accessed
             return QueryResults.toList(tasks);
         });
     }
 
     private <V> Iterator<HugeTask<V>> queryTask(List<Id> ids) {
+        return this.queryTask(ids, true);
+    }
+
+    private <V> Iterator<HugeTask<V>> queryTask(List<Id> ids,
+                                                boolean withResult) {
         return this.call(() -> {
             Object[] idArray = ids.toArray(new Id[0]);
             Iterator<Vertex> vertices = this.tx().queryTaskInfos(idArray);
             Iterator<HugeTask<V>> tasks =
-                    new MapperIterator<>(vertices, HugeTask::fromVertex);
+                    new MapperIterator<>(vertices, vertex -> {
+                        return HugeTask.fromVertex(vertex, withResult);
+                    });
             // Convert iterator to list to avoid across thread tx accessed
             return QueryResults.toList(tasks);
         });

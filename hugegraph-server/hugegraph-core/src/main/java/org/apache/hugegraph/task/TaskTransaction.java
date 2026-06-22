@@ -31,6 +31,7 @@ import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.structure.HugeIndex;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
@@ -72,6 +73,34 @@ public class TaskTransaction extends GraphTransaction {
             return true;
         }
         return false;
+    }
+
+    public void removeTaskVertex(HugeVertex vertex) {
+        this.checkOwnerThread();
+
+        this.beforeWrite();
+
+        this.doRemove(this.serializer.writeVertex(vertex.prepareRemoved()));
+        if (TASK.equals(vertex.schemaLabel().name())) {
+            this.updateIndex(this.indexLabel(HugeTask.P.STATUS).id(),
+                             vertex, true);
+        }
+        this.removeLabelIndex(vertex);
+
+        this.afterWrite();
+    }
+
+    private void removeLabelIndex(HugeVertex vertex) {
+        if (this.store().features().supportsQueryByLabel() ||
+            !vertex.schemaLabel().enableLabelIndex()) {
+            return;
+        }
+
+        HugeIndex index = new HugeIndex(this.graph(),
+                                        IndexLabel.label(vertex.type()));
+        index.fieldValues(vertex.schemaLabel().id());
+        index.elementIds(vertex.id(), vertex.expiredTime());
+        this.doEliminate(this.serializer.writeIndex(index));
     }
 
     public void initSchema() {
