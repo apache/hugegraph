@@ -347,29 +347,57 @@ public class EtcdMetaDriver implements MetaDriver {
     }
 
     /**
-     * Subscribe a self-healing watch. Unlike the bare {@code Consumer} overload,
-     * this surfaces {@code onError}/{@code onCompleted}: when the underlying
-     * watch terminates (e.g. a transport reconnect drops the gRPC stream) it
-     * re-subscribes after a short backoff, so the listener is not silently lost.
-     * Mirrors the re-subscribe behaviour PdMetaDriver already gets from KvClient.
+     * Subscribe a watch that survives the terminal close jetcd cannot recover
+     * from. The bare {@code Consumer} overload discards {@code onError} and
+     * {@code onCompleted}, so a non-retryable failure silently drops the
+     * listener (issue #3036).
+     * <p>
+     * jetcd 0.5.9 ({@code WatchImpl.WatcherImpl.handleError}) already retries
+     * <em>retryable</em> errors itself: it notifies {@code onError} and then
+     * reschedules {@code resume()} on the same watcher. Re-subscribing from
+     * {@code onError} would therefore open a duplicate watch on every transient
+     * reconnect, so {@code onError} only logs here. A non-retryable error (or an
+     * explicit cancel) ends in {@code close()}, which removes the watcher and
+     * invokes {@code onCompleted}; that is the only point where the watch is
+     * truly gone, so re-subscribe happens there. The old watcher is already
+     * closed and removed, so the replacement is not a duplicate.
      */
     private void watchKey(ByteSequence key, WatchOption option,
                           Consumer<WatchResponse> consumer) {
         Watch.Listener listener = Watch.listener(
                 consumer,
-                throwable -> this.scheduleReWatch(key, option, consumer, throwable),
-                () -> this.scheduleReWatch(key, option, consumer, null));
-        // Watcher intentionally not closed: process-lifetime watch, recreated
-        // on self-heal; the prior watcher's stream has already terminated.
+                throwable -> LOG.warn("etcd meta watch error for key '{}', " +
+                                      "jetcd will retry if recoverable",
+                                      key.toString(Charset.defaultCharset()),
+                                      throwable),
+                () -> this.scheduleReWatch(key, option, consumer));
         this.client.getWatchClient().watch(key, option, listener);
     }
 
     private void scheduleReWatch(ByteSequence key, WatchOption option,
-                                 Consumer<WatchResponse> consumer,
-                                 Throwable cause) {
-        LOG.warn("etcd meta watch dropped, re-subscribing", cause);
-        this.reWatchExecutor.schedule(
-                () -> this.watchKey(key, option, consumer),
-                this.reWatchDelayMs, TimeUnit.MILLISECONDS);
+                                 Consumer<WatchResponse> consumer) {
+        this.reWatchExecutor.schedule(() -> this.reWatch(key, option, consumer),
+                                      this.reWatchDelayMs, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Re-establish a watch dropped by a terminal close. If the re-subscribe
+     * itself fails (e.g. the endpoint is still unreachable), it is retried with
+     * the same backoff instead of giving up, otherwise a single failed attempt
+     * would lose the listener permanently.
+     */
+    private void reWatch(ByteSequence key, WatchOption option,
+                         Consumer<WatchResponse> consumer) {
+        try {
+            LOG.info("Re-establishing etcd meta watch for key '{}'",
+                     key.toString(Charset.defaultCharset()));
+            this.watchKey(key, option, consumer);
+        } catch (Exception e) {
+            LOG.warn("Failed to re-establish etcd meta watch for key '{}', " +
+                     "retrying in {} ms",
+                     key.toString(Charset.defaultCharset()),
+                     this.reWatchDelayMs, e);
+            this.scheduleReWatch(key, option, consumer);
+        }
     }
 }
