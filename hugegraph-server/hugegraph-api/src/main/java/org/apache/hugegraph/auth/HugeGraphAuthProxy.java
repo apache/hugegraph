@@ -1326,8 +1326,14 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public <V> HugeTask<V> task(Id id) {
+            return this.task(id, true);
+        }
+
+        @Override
+        public <V> HugeTask<V> task(Id id, boolean withResult) {
             return verifyTaskPermission(HugePermission.READ,
-                                        this.taskScheduler.task(id));
+                                        this.taskScheduler.task(id,
+                                                                withResult));
         }
 
         @Override
@@ -1337,17 +1343,35 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public <V> Iterator<HugeTask<V>> tasks(List<Id> ids,
+                                               boolean withResult) {
+            return verifyTaskPermission(HugePermission.READ,
+                                        this.taskScheduler.tasks(ids,
+                                                                 withResult));
+        }
+
+        @Override
         public <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
                                                long limit, String page) {
             Iterator<HugeTask<V>> tasks = this.taskScheduler.tasks(status,
-                                                                   limit, page);
+                                                                   limit,
+                                                                   page);
+            return verifyTaskPermission(HugePermission.READ, tasks);
+        }
+
+        @Override
+        public <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
+                                               long limit, String page,
+                                               boolean withResult) {
+            Iterator<HugeTask<V>> tasks = this.taskScheduler.tasks(
+                    status, limit, page, withResult);
             return verifyTaskPermission(HugePermission.READ, tasks);
         }
 
         @Override
         public <V> HugeTask<V> delete(Id id, boolean force) {
             verifyTaskPermission(HugePermission.DELETE,
-                                 this.taskScheduler.task(id));
+                                 this.taskScheduler.task(id, false));
             return this.taskScheduler.delete(id, force);
         }
 

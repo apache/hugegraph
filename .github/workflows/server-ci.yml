@@ -106,7 +106,11 @@ jobs:
 
       - name: Run api test
         run: |
-          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+          if [ "$BACKEND" = "rocksdb" ]; then
+            $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
+          else
+            $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+          fi
 
       # TODO: disable raft test in normal PR due to the always timeout problem
       - name: Run raft test
@@ -180,7 +184,7 @@ jobs:
 
       - name: Run RocksDB API test
         run: |
-          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
+          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
 
       - name: Show server log on failure
         if: failure()

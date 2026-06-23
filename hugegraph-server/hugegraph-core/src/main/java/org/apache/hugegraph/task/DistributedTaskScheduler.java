@@ -306,10 +306,14 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
             HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
             if (vertex == null) {
+                this.deleteTaskResultFromTx(id);
                 return null;
             }
-            HugeTask<V> result = HugeTask.fromVertex(vertex);
-            this.tx().removeVertex(vertex);
+            HugeTask<V> result = HugeTask.fromVertex(vertex, false);
+            // Keep the task vertex as a retryable tombstone until its result
+            // vertex is removed; cronSchedule() can rediscover DELETING tasks.
+            this.deleteTaskResultFromTx(id);
+            this.tx().removeTaskVertex(vertex);
             return result;
         });
     }
@@ -322,6 +326,12 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             this.updateStatus(id, null, TaskStatus.DELETING);
             return null;
         } else {
+            HugeTask<?> task = this.taskWithoutResult(id);
+            if (task != null && task.status() != TaskStatus.DELETING) {
+                initTaskParams(task);
+                task.overwriteStatus(TaskStatus.DELETING);
+                this.save(task);
+            }
             return this.deleteFromDB(id);
         }
     }
@@ -587,7 +597,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         }
     }
 
-    private boolean isLockedTask(String taskId) {
+    protected boolean isLockedTask(String taskId) {
         return MetaManager.instance().isLockedTask(graphSpace,
                                                    graphName, taskId);
     }
@@ -629,7 +639,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                     // 1. start task can be from schedule() & cronSchedule()
                     // 2. recheck the status of task, in case one same task
                     // called by both methods at same time;
-                    HugeTask<Object> queryTask = task(this.task.id());
+                    HugeTask<Object> queryTask = task(this.task.id(), false);
                     if (queryTask != null &&
                         !TaskStatus.NEW.equals(queryTask.status())) {
                         return;

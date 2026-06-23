@@ -41,6 +41,7 @@ import org.apache.hugegraph.job.ComputerJob;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.job.GremlinJob;
 import org.apache.hugegraph.job.schema.SchemaJob;
+import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.define.SerialEnum;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.E;
@@ -653,6 +654,11 @@ public class HugeTask<V> extends FutureTask<V> {
     }
 
     public synchronized Map<String, Object> asMap(boolean withDetails) {
+        return this.asMap(withDetails, true);
+    }
+
+    public synchronized Map<String, Object> asMap(boolean withDetails,
+                                                  boolean withResult) {
         E.checkState(this.type != null, "Task type can't be null");
         E.checkState(this.name != null, "Task name can't be null");
 
@@ -689,7 +695,7 @@ public class HugeTask<V> extends FutureTask<V> {
             if (this.input != null) {
                 map.put(Hidden.unHide(P.INPUT), this.input);
             }
-            if (this.result != null) {
+            if (withResult && this.result != null) {
                 map.put(Hidden.unHide(P.RESULT), this.result);
             }
         }
@@ -697,7 +703,37 @@ public class HugeTask<V> extends FutureTask<V> {
         return map;
     }
 
+    synchronized HugeTask<V> copyWithoutResult() {
+        HugeTask<V> task = new HugeTask<>(this.id, this.parent, this.callable);
+        task.type = this.type;
+        task.name = this.name;
+        task.dependencies = this.dependencies == null ?
+                            null : InsertionOrderUtil.newSet(this.dependencies);
+        task.description = this.description;
+        task.context = this.context;
+        task.create = this.create;
+        task.server = this.server;
+        task.load = this.load;
+        task.status = this.status;
+        task.progress = this.progress;
+        task.update = this.update;
+        task.retries = this.retries;
+        task.input = this.input;
+        task.result = null;
+        task.scheduler = this.scheduler;
+        return task;
+    }
+
     public static <V> HugeTask<V> fromVertex(Vertex vertex) {
+        return fromVertex(vertex, true);
+    }
+
+    public static <V> HugeTask<V> fromVertex(Vertex vertex,
+                                             boolean withResult) {
+        if (!withResult && vertex instanceof HugeVertex) {
+            return fromHugeVertex((HugeVertex) vertex);
+        }
+
         String callableName = vertex.value(P.CALLABLE);
         TaskCallable<V> callable;
         try {
@@ -710,9 +746,35 @@ public class HugeTask<V> extends FutureTask<V> {
         for (Iterator<VertexProperty<Object>> iter = vertex.properties();
              iter.hasNext(); ) {
             VertexProperty<Object> prop = iter.next();
+            if (!withResult && P.RESULT.equals(prop.key())) {
+                continue;
+            }
             task.property(prop.key(), prop.value());
         }
         return task;
+    }
+
+    private static <V> HugeTask<V> fromHugeVertex(HugeVertex vertex) {
+        String callableName = getPropertyValue(vertex, P.CALLABLE);
+        TaskCallable<V> callable;
+        try {
+            callable = TaskCallable.fromClass(callableName);
+        } catch (Exception e) {
+            callable = TaskCallable.empty(e);
+        }
+
+        HugeTask<V> task = new HugeTask<>(vertex.id(), null, callable);
+        for (String property : P.METADATA_PROPERTIES) {
+            Object value = getPropertyValue(vertex, property);
+            if (value != null) {
+                task.property(property, value);
+            }
+        }
+        return task;
+    }
+
+    private static <V> V getPropertyValue(HugeVertex vertex, String property) {
+        return vertex.getPropertyValue(vertex.graph().propertyKey(property).id());
     }
 
     private static <V> Collector<V, ?, Set<V>> toOrderSet() {
@@ -791,6 +853,11 @@ public class HugeTask<V> extends FutureTask<V> {
         public static final String RESULT = "~task_result";
         public static final String DEPENDENCIES = "~task_dependencies";
         public static final String SERVER = "~task_server";
+
+        private static final String[] METADATA_PROPERTIES = new String[]{
+                TYPE, NAME, CALLABLE, DESCRIPTION, CONTEXT, STATUS, PROGRESS,
+                CREATE, UPDATE, RETRIES, DEPENDENCIES, INPUT, SERVER
+        };
 
         //public static final String PARENT = hide("parent");
         //public static final String CHILDREN = hide("children");
