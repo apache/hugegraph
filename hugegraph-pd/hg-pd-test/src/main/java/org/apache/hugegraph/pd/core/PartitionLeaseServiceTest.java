@@ -30,6 +30,7 @@ import org.apache.hugegraph.pd.StoreNodeService;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.meta.PartitionBucketRecord;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -101,6 +102,36 @@ public class PartitionLeaseServiceTest extends PDCoreTestBase {
                                         .build();
         storeNodeService.getStoreInfoMeta().updateStore(store);
         storeNodeService.getStoreInfoMeta().keepStoreAlive(store);
+    }
+
+    @After
+    public void tearDown() {
+        // Keep suite tests isolated: this test class creates active stores that
+        // would otherwise leak into StoreServiceTest expectations.
+        cleanupStore(1L);
+        cleanupStore(2L);
+        cleanupStore(3L);
+        try {
+            storeNodeService.getStoreInfoMeta().deleteShardGroup(partitionId);
+        } catch (PDException ignored) {
+            // Best-effort cleanup for shared in-process test services.
+        }
+    }
+
+    private void cleanupStore(long id) {
+        try {
+            Metapb.Store store = storeNodeService.getStore(id);
+            if (store != null) {
+                storeNodeService.getStoreInfoMeta().removeActiveStore(store);
+            }
+        } catch (PDException ignored) {
+            // Store not present is acceptable during cleanup.
+        }
+        try {
+            storeNodeService.removeStore(id);
+        } catch (PDException ignored) {
+            // Store not present is acceptable during cleanup.
+        }
     }
 
     /**
