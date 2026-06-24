@@ -45,7 +45,7 @@ public class BackendProviderFactory {
     private static final Map<String, Class<? extends BackendStoreProvider>> providers;
 
     private static final List<String> ALLOWED_BACKENDS = List.of("memory", "rocksdb", "hbase",
-                                                                 "hstore", "rocksdb-cloud");
+                                                                 "hstore");
 
     static {
         providers = new ConcurrentHashMap<>();
