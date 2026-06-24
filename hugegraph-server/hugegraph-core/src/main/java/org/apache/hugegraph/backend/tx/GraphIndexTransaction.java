@@ -686,11 +686,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 Set<Id> ids = InsertionOrderUtil.newSet();
                 while ((batch == Query.NO_LIMIT || ids.size() < batch) &&
                        entries.hasNext()) {
-                    HugeIndex index = this.readMatchedIndex(indexLabel, query,
-                                                            entries.next());
-                    if (index == null) {
-                        continue;
-                    }
+                    HugeIndex index = this.serializer.readIndex(graph(), query,
+                                                                entries.next());
                     this.removeExpiredIndexIfNeeded(index, query.showExpired());
                     ids.addAll(index.elementIds());
                     Query.checkForceCapacity(ids.size());
@@ -731,11 +728,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
             Set<Id> ids = InsertionOrderUtil.newSet();
             entries = super.query(query).iterator();
             while (entries.hasNext()) {
-                HugeIndex index = this.readMatchedIndex(indexLabel, query,
-                                                        entries.next());
-                if (index == null) {
-                    continue;
-                }
+                HugeIndex index = this.serializer.readIndex(graph(), query,
+                                                            entries.next());
                 this.removeExpiredIndexIfNeeded(index, query.showExpired());
                 ids.addAll(index.elementIds());
                 if (query.reachLimit(ids.size())) {
@@ -761,34 +755,6 @@ public class GraphIndexTransaction extends AbstractTransaction {
             locks.unlock();
             CloseableIterator.closeIterator(entries);
         }
-    }
-
-    private HugeIndex readMatchedIndex(IndexLabel indexLabel,
-                                       ConditionQuery query,
-                                       BackendEntry entry) {
-        HugeIndex index;
-        try {
-            index = this.serializer.readIndex(graph(), query, entry);
-        } catch (IllegalArgumentException e) {
-            if (!missingIndexLabel(e)) {
-                throw e;
-            }
-            LOG.debug("Skip stale index entry with missing index label " +
-                      "while querying index label '{}'", indexLabel.id(), e);
-            return null;
-        }
-        if (!Objects.equals(index.indexLabelId(), indexLabel.id())) {
-            LOG.debug("Skip stale index entry of index label '{}' while " +
-                      "querying index label '{}'",
-                      index.indexLabelId(), indexLabel.id());
-            return null;
-        }
-        return index;
-    }
-
-    private static boolean missingIndexLabel(IllegalArgumentException e) {
-        String message = e.getMessage();
-        return message != null && message.contains("Undefined index label");
     }
 
     @Watched(prefix = "index")

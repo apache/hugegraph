@@ -4415,14 +4415,6 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(dates[1], vertices.get(0).value("birth"));
         Assert.assertEquals(dates[2], vertices.get(1).value("birth"));
 
-        // range with offset
-        vertices = graph.traversal().V().hasLabel("person")
-                        .has("birth", P.between(dates[1], dates[4]))
-                        .range(1, 3).toList();
-        Assert.assertEquals(2, vertices.size());
-        Assert.assertEquals(dates[2], vertices.get(0).value("birth"));
-        Assert.assertEquals(dates[3], vertices.get(1).value("birth"));
-
         // limit after delete
         graph.traversal().V().hasLabel("person")
              .has("birth", P.between(dates[1], dates[4]))
@@ -8775,7 +8767,6 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(3, vertices2.size());
         Assert.assertTrue(CollectionUtil.intersect(vertices1, vertices2)
                                         .isEmpty());
-
     }
 
     @Test

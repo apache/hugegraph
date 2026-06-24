@@ -114,10 +114,15 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
 
     protected static BackendEntryIterator newEntryIterator(
             BackendColumnIterator cols, Query query) {
-        return new BinaryEntryIterator<>(cols, query,
-                                         (entry, col) -> mergeColumn(query,
-                                                                     entry,
-                                                                     col));
+        return new BinaryEntryIterator<>(cols, query, (entry, col) -> {
+            if (entry == null || !entry.belongToMe(col)) {
+                HugeType type = query.resultType();
+                // NOTE: only support BinaryBackendEntry currently
+                entry = new BinaryBackendEntry(type, col.name);
+            }
+            entry.columns(col);
+            return entry;
+        });
     }
 
     protected static BackendEntryIterator newEntryIteratorOlap(
@@ -131,17 +136,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             entry.columns(col);
             return entry;
         });
-    }
-
-    private static BackendEntry mergeColumn(Query query, BackendEntry entry,
-                                            BackendColumn col) {
-        if (entry == null || !entry.belongToMe(col)) {
-            HugeType type = query.resultType();
-            // NOTE: only support BinaryBackendEntry currently
-            entry = new BinaryBackendEntry(type, col.name);
-        }
-        entry.columns(col);
-        return entry;
     }
 
     public static String bytes2String(byte[] bytes) {
@@ -621,11 +615,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
 
     protected BackendColumnIterator queryByRange(Session session,
                                                  IdRangeQuery query) {
-        /*
-         * FIXME: multi-partition HStore range-index paging still needs a
-         * bounded ordered merge in the store-client layer before it can
-         * guarantee globally ordered pages.
-         */
         byte[] start = query.start().asBytes();
         byte[] end = query.end() == null ? null : query.end().asBytes();
         int type = query.inclusiveStart() ?
@@ -637,13 +626,13 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         ConditionQuery cq;
         Query origin = query.originQuery();
         byte[] position = null;
+        if (query.paging() && !query.page().isEmpty()) {
+            position = PageState.fromString(query.page()).position();
+        }
         byte[] ownerStart = this.ownerByQueryDelegate.apply(query.resultType(),
                                                             query.start());
         byte[] ownerEnd = this.ownerByQueryDelegate.apply(query.resultType(),
                                                           query.end());
-        if (query.paging() && !query.page().isEmpty()) {
-            position = PageState.fromString(query.page()).position();
-        }
         if (origin instanceof ConditionQuery &&
             (query.resultType().isEdge() || query.resultType().isVertex())) {
             cq = (ConditionQuery) query.originQuery();
@@ -654,11 +643,11 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             //          this.table(), bytes2String(ownerStart),
             //          bytes2String(ownerEnd), bytes2String(start),
             //          bytes2String(end), type, cq.bytes());
-            return session.scan(this.table(), ownerStart, ownerEnd, start,
-                                end, type, cq.bytes(), position);
+            return session.scan(this.table(), ownerStart,
+                                ownerEnd, start, end, type, cq.bytes(), position);
         }
-        return session.scan(this.table(), ownerStart, ownerEnd, start, end,
-                            type, null, position);
+        return session.scan(this.table(), ownerStart,
+                            ownerEnd, start, end, type, null, position);
     }
 
     protected BackendColumnIterator queryByCond(Session session,
