@@ -39,7 +39,7 @@ import org.mockito.Mockito;
 public class HstoreTableTest {
 
     @Test
-    public void testRangeIndexPageStateIgnoresPrefetchedColumn() {
+    public void testRangeIndexPageStateComesFromBackendIteratorPosition() {
         Query query = new Query(HugeType.RANGE_INT_INDEX);
         query.page("");
         query.limit(1L);
@@ -52,7 +52,7 @@ public class HstoreTableTest {
         Assert.assertArrayEquals(keyBytes(1), entry.id().asBytes());
 
         PageState pageState = PageInfo.pageState(iterator);
-        Assert.assertArrayEquals(keyBytes(1), pageState.position());
+        Assert.assertArrayEquals(keyBytes(2), pageState.position());
         Assert.assertEquals(1L, pageState.total());
     }
 

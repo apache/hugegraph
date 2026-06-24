@@ -114,12 +114,10 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
 
     protected static BackendEntryIterator newEntryIterator(
             BackendColumnIterator cols, Query query) {
-        BiFunction<BackendEntry, BackendColumn, BackendEntry> merger =
-                (entry, col) -> mergeColumn(query, entry, col);
-        if (query.resultType().isRangeIndex()) {
-            return new RangeIndexEntryIterator(cols, query, merger);
-        }
-        return new BinaryEntryIterator<>(cols, query, merger);
+        return new BinaryEntryIterator<>(cols, query,
+                                         (entry, col) -> mergeColumn(query,
+                                                                     entry,
+                                                                     col));
     }
 
     protected static BackendEntryIterator newEntryIteratorOlap(
@@ -144,31 +142,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
         entry.columns(col);
         return entry;
-    }
-
-    private static final class RangeIndexEntryIterator
-            extends BinaryEntryIterator<BackendColumn> {
-
-        private byte[] lastPosition;
-
-        private RangeIndexEntryIterator(
-                BackendColumnIterator cols, Query query,
-                BiFunction<BackendEntry, BackendColumn, BackendEntry> merger) {
-            super(cols, query, merger);
-            this.lastPosition = PageState.EMPTY_BYTES;
-        }
-
-        @Override
-        public BackendEntry next() {
-            BackendEntry entry = super.next();
-            this.lastPosition = entry.id().asBytes();
-            return entry;
-        }
-
-        @Override
-        protected PageState pageState() {
-            return new PageState(this.lastPosition, 0, (int) this.count());
-        }
     }
 
     public static String bytes2String(byte[] bytes) {
