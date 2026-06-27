@@ -51,7 +51,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("/auth/groups")
+@Path("graphspaces/{graphspace}/auth/groups")
 @Singleton
 @Tag(name = "GroupAPI")
 public class GroupAPI extends API {
