@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -16,18 +15,15 @@
 # limitations under the License.
 #
 
-BASE_PATH=$(cd "$(dirname $0)" || exit; pwd)
-DEP_PATH=$BASE_PATH/all_dependencies
-FILE_NAME=${1:-known-dependencies.txt}
+# syntax=docker/dockerfile:1.4
+ARG JAVA_RUNTIME_IMAGE=eclipse-temurin:11-jre
+FROM ${JAVA_RUNTIME_IMAGE}
 
-if [[ -d $DEP_PATH ]];then
-  echo "rm -r -f DEP_PATH"
-  rm -r -f $DEP_PATH
-fi
+WORKDIR /hugegraph-pd
+COPY docker/cloud-storage/.artifacts/pd-dist/ /hugegraph-pd/
+COPY docker/cloud-storage/entrypoints/pd-entrypoint.sh /hugegraph-pd/pd-entrypoint.sh
 
-cd "$BASE_PATH"/../../../ || exit
+RUN chmod +x /hugegraph-pd/pd-entrypoint.sh /hugegraph-pd/bin/*.sh
 
-mvn dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=$DEP_PATH
-
-ls $DEP_PATH | egrep -v "^hg|hugegraph|hubble" | sort -n > $BASE_PATH/$FILE_NAME
-rm -r -f $DEP_PATH
+EXPOSE 8620 8686 8610
+ENTRYPOINT ["/hugegraph-pd/pd-entrypoint.sh"]

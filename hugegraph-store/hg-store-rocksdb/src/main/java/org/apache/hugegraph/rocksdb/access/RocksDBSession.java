@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -431,6 +432,11 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         RocksDBSession.initOptions(hugeConfig, opts, opts, opts, opts);
         dbOptions = new DBOptions(opts);
         dbOptions.setStatistics(rocksDbStats);
+        // Register the factory-level event listener so that table-file events
+        // (onTableFileCreated / onTableFileDeleted) are forwarded to all
+        // RocksdbChangedListener implementations (e.g. cloud storage providers).
+        dbOptions.setListeners(
+                Collections.singletonList(RocksDBFactory.getInstance().getEventListener()));
 
         try {
             List<ColumnFamilyDescriptor> columnFamilyDescriptorList =

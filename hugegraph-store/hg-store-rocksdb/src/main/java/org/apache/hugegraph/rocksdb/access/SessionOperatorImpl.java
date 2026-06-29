@@ -208,7 +208,14 @@ public class SessionOperatorImpl implements SessionOperator {
     @Override
     public byte[] get(String table, byte[] key) throws DBStoreException {
         try (CFHandleLock cf = this.getLock(table)) {
-            return rocksdb().get(cf.get(), key);
+            byte[] value = rocksdb().get(cf.get(), key);
+            if (value != null) {
+                return value;
+            }
+            if (RocksDBFactory.getInstance().onReadMiss(this.session, table, key)) {
+                return rocksdb().get(cf.get(), key);
+            }
+            return null;
         } catch (RocksDBException e) {
             throw new DBStoreException(e);
         }

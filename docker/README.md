@@ -48,6 +48,14 @@ cd docker
 docker compose -f docker-compose.dev.yml up -d
 ```
 
+To run Store with the JDK 17 image profile (useful for ARM64 JNI-heavy workloads):
+
+```bash
+cd docker
+HG_STORE_DOCKERFILE=hugegraph-store/Dockerfile-jdk17 \
+  docker compose -f docker-compose.dev.yml up -d --build
+```
+
 - Images: built from source via `build: context: ..` with Dockerfiles
 - No `pull_policy` — builds locally, doesn't pull
 - Entrypoint scripts are baked into the built image (no volume mounts)

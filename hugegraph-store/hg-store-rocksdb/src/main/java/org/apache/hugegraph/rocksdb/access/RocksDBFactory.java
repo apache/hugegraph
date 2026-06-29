@@ -41,6 +41,9 @@ import org.rocksdb.CompactionJobInfo;
 import org.rocksdb.MemoryUsageType;
 import org.rocksdb.MemoryUtil;
 import org.rocksdb.RocksDB;
+import org.rocksdb.Status;
+import org.rocksdb.TableFileCreationInfo;
+import org.rocksdb.TableFileDeletionInfo;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -49,6 +52,8 @@ public final class RocksDBFactory {
 
     private static final List<RocksdbChangedListener> rocksdbChangedListeners = new ArrayList<>();
     private static RocksDBFactory dbFactory;
+    /** Singleton event listener wired into every new RocksDB instance. */
+    private final RocksdbEventListener rocksdbEventListener = new RocksdbEventListener();
 
     static {
         RocksDB.loadLibrary();
@@ -178,6 +183,46 @@ public final class RocksDBFactory {
         public void onCompactionBegin(final RocksDB db, final CompactionJobInfo compactionJobInfo) {
             log.info("RocksdbEventListener onCompactionBegin");
         }
+
+        /**
+         * Invoked by RocksDB after a new SST (table) file has been successfully created.
+         * Propagates the event to all registered {@link RocksdbChangedListener}s so that
+         * cloud-storage providers can upload the new file.
+         */
+        @Override
+        public void onTableFileCreated(final TableFileCreationInfo info) {
+            if (info.getStatus().getCode() != Status.Code.Ok) {
+                log.warn("onTableFileCreated: skipping failed file creation, path={}, status={}",
+                         info.getFilePath(), info.getStatus().getCodeString());
+                return;
+            }
+            log.debug("onTableFileCreated: db={}, cf={}, path={}, size={}",
+                      info.getDbName(), info.getColumnFamilyName(),
+                      info.getFilePath(), info.getFileSize());
+            rocksdbChangedListeners.forEach(listener ->
+                    listener.onTableFileCreated(info.getDbName(), info.getColumnFamilyName(),
+                                                info.getFilePath(), info.getFileSize())
+            );
+        }
+
+        /**
+         * Invoked by RocksDB after an SST (table) file has been deleted.
+         * Propagates the event to all registered {@link RocksdbChangedListener}s so that
+         * cloud-storage providers can remove the corresponding remote object.
+         */
+        @Override
+        public void onTableFileDeleted(final TableFileDeletionInfo info) {
+            if (info.getStatus().getCode() != Status.Code.Ok) {
+                log.warn("onTableFileDeleted: skipping failed file deletion, path={}, status={}",
+                         info.getFilePath(), info.getStatus().getCodeString());
+                return;
+            }
+            log.debug("onTableFileDeleted: db={}, path={}",
+                      info.getDbName(), info.getFilePath());
+            rocksdbChangedListeners.forEach(listener ->
+                    listener.onTableFileDeleted(info.getDbName(), null, info.getFilePath())
+            );
+        }
     }
 
     public RocksDBSession createGraphDB(String dbPath, String dbName) {
@@ -189,16 +234,30 @@ public final class RocksDBFactory {
             throw new RuntimeException("db closed");
         }
         operateLock.writeLock().lock();
+        boolean isNew = false;
+        RocksDBSession dbSession = null;
         try {
-            RocksDBSession dbSession = dbSessionMap.get(dbName);
+            dbSession = dbSessionMap.get(dbName);
             if (dbSession == null) {
+                String dbOpenPath = dbPath.endsWith(File.separator) ? dbPath + dbName :
+                                    dbPath + File.separator + dbName;
+                rocksdbChangedListeners.forEach(listener -> listener.onDBOpening(dbName, dbOpenPath));
                 log.info("create rocksdb for {}", dbName);
                 dbSession = new RocksDBSession(this.hugeConfig, dbPath, dbName, version);
                 dbSessionMap.put(dbName, dbSession);
+                isNew = true;
             }
             return dbSession.clone();
         } finally {
             operateLock.writeLock().unlock();
+            if (isNew && dbSession != null) {
+                // Notify listeners so they can upload any pre-existing SST files
+                // and flush the MemTable (which may hold WAL-recovered data).
+                final String finalDbName = dbSession.getGraphName();
+                final String finalDbPath = dbSession.getDbPath();
+                rocksdbChangedListeners.forEach(listener ->
+                        listener.onDBCreated(finalDbName, finalDbPath));
+            }
         }
     }
 
@@ -314,9 +373,72 @@ public final class RocksDBFactory {
         rocksdbChangedListeners.add(listener);
     }
 
+    /**
+     * Flushes the MemTable of the named RocksDB session to disk, creating an SST file.
+     * This triggers {@link RocksdbChangedListener#onTableFileCreated} for every registered
+     * listener (including cloud-storage upload).
+     *
+     * @param dbName  the graph / partition name
+     * @param wait    if {@code true} the call blocks until the flush completes
+     */
+    public void flushSession(String dbName, boolean wait) {
+        RocksDBSession session = dbSessionMap.get(dbName);
+        if (session != null) {
+            try {
+                session.flush(wait);
+                log.debug("Flushed RocksDB session for db={}", dbName);
+            } catch (Exception e) {
+                log.warn("Failed to flush RocksDB session for db={}: {}", dbName, e.getMessage());
+            }
+        }
+    }
+
+    public boolean onReadMiss(RocksDBSession session, String table, byte[] key) {
+        if (session == null) {
+            return false;
+        }
+        boolean hydrated = false;
+        for (RocksdbChangedListener listener : rocksdbChangedListeners) {
+            try {
+                if (listener.onReadMiss(session, table, key)) {
+                    hydrated = true;
+                }
+            } catch (Exception e) {
+                log.warn("onReadMiss listener failed for db={}, table={}: {}",
+                         session.getGraphName(), table, e.getMessage());
+            }
+        }
+        return hydrated;
+    }
+
+    /**
+     * Returns the singleton {@link RocksdbEventListener} that should be registered
+     * with every new {@link org.rocksdb.DBOptions} via
+     * {@link org.rocksdb.DBOptions#setListeners}.
+     */
+    public RocksdbEventListener getEventListener() {
+        return rocksdbEventListener;
+    }
+
     public interface RocksdbChangedListener {
 
         default void onCompacted(String dbName) {
+        }
+
+        default void onDBOpening(String dbName, String dbPath) {
+        }
+
+        /**
+         * Called immediately after a new RocksDB instance has been opened for the first time.
+         *
+         * <p>Implementations can use this callback to upload any SST files that already exist
+         * in {@code dbPath} (e.g. from a previous run) and to trigger a MemTable flush so that
+         * any WAL-recovered data is also written to SST files and forwarded to cloud storage.
+         *
+         * @param dbName logical name of the graph / partition
+         * @param dbPath absolute path of the RocksDB directory
+         */
+        default void onDBCreated(String dbName, String dbPath) {
         }
 
         default void onDBDeleteBegin(String dbName, String filePath) {
@@ -326,6 +448,40 @@ public final class RocksDBFactory {
         }
 
         default void onDBSessionReleased(RocksDBSession dbSession) {
+        }
+
+        /**
+         * Called after a new SST file has been successfully created by RocksDB.
+         *
+         * @param dbName   RocksDB instance name
+         * @param cfName   column-family name
+         * @param filePath absolute path of the new SST file
+         * @param fileSize size of the file in bytes
+         */
+        default void onTableFileCreated(String dbName, String cfName,
+                                        String filePath, long fileSize) {
+        }
+
+        /**
+         * Called after an SST file has been deleted by RocksDB.
+         *
+         * @param dbName   RocksDB instance name
+         * @param cfName   column-family name
+         * @param filePath absolute path of the deleted SST file
+         */
+        default void onTableFileDeleted(String dbName, String cfName, String filePath) {
+        }
+
+        /**
+         * Called when a get() operation returns null so listeners can attempt cloud hydration.
+         *
+         * @param session RocksDB session where miss happened
+         * @param table   target column-family/table
+         * @param key     requested key
+         * @return true if listener hydrated new local data and caller should retry get()
+         */
+        default boolean onReadMiss(RocksDBSession session, String table, byte[] key) {
+            return false;
         }
     }
 

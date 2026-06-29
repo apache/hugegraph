@@ -56,7 +56,7 @@ services:
   store:
     build:
       context: ..
-      dockerfile: hugegraph-store/Dockerfile
+      dockerfile: ${HG_STORE_DOCKERFILE:-hugegraph-store/Dockerfile}
     container_name: hg-store
     hostname: store
     restart: unless-stopped

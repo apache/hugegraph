@@ -17,11 +17,16 @@
 
 package org.apache.hugegraph.store.node;
 
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
 import javax.annotation.PostConstruct;
 
+import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
+import org.apache.hugegraph.store.node.cloud.CloudStorageEventListener;
+import org.apache.hugegraph.store.cloud.CloudStorageConfig;
+import org.apache.hugegraph.store.cloud.CloudStorageProviderFactory;
 import org.apache.hugegraph.store.options.JobOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,8 +35,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 
 @Data
+@Slf4j
 @Component
 public class AppConfig {
 
@@ -86,6 +93,9 @@ public class AppConfig {
     @Autowired
     private QueryPushDownConfig queryPushDownConfig;
 
+    @Autowired
+    private CloudStorageSpringConfig cloudStorageSpringConfig;
+
     public String getRaftPath() {
         if (raftPath == null || raftPath.length() == 0) {
             return dataPath;
@@ -115,6 +125,44 @@ public class AppConfig {
         if (!rocksdb.containsKey("write_buffer_size") ||
             "0".equals(rocksdb.get("write_buffer_size"))) {
             rocksdb.put("write_buffer_size", Long.toString(totalMemory / 1000));
+        }
+
+        // ---- Cloud storage initialization ----
+        initCloudStorage();
+    }
+
+    /**
+     * Initialises the cloud storage provider (if enabled) and registers
+     * {@link CloudStorageEventListener} with {@link RocksDBFactory} so that
+     * SST file creation/deletion events are forwarded to cloud storage.
+     *
+     * <p>The resolved absolute data-path is passed to the listener so that
+     * S3 object keys are relative to the store's storage root rather than
+     * being full container-specific absolute paths.
+     */
+    private void initCloudStorage() {
+        CloudStorageConfig cfg = cloudStorageSpringConfig.toCloudStorageConfig();
+        if (!cfg.isEnabled()) {
+            log.info("Cloud storage disabled (cloud.storage.enabled=false)");
+            return;
+        }
+        try {
+            CloudStorageProviderFactory.initialize(cfg);
+            String resolvedDataRoot =
+                    Paths.get(dataPath).toAbsolutePath().normalize().toString();
+            RocksDBFactory.getInstance().addRocksdbChangedListener(
+                    new CloudStorageEventListener(resolvedDataRoot,
+                                                  cfg.isStartupHydrationEnabled(),
+                                                  cfg.getReadMissGuardWindowMs()));
+            log.info("Cloud storage provider '{}' registered with RocksDBFactory "
+                     + "(dataRoot='{}', startupHydration={}, readMissHydration=true, "
+                     + "readMissGuardWindowMs={})",
+                     cfg.getProvider(), resolvedDataRoot,
+                     cfg.isStartupHydrationEnabled(),
+                     cfg.getReadMissGuardWindowMs());
+        } catch (Exception e) {
+            log.error("Failed to initialize cloud storage provider '{}': {}",
+                      cfg.getProvider(), e.getMessage(), e);
         }
     }
 
@@ -310,6 +358,54 @@ public class AppConfig {
     public class RocksdbConfig {
 
         private Map<String, String> rocksdb = new HashMap<>();
+    }
+
+    /**
+     * Spring {@link ConfigurationProperties} wrapper around {@link CloudStorageConfig}.
+     *
+     * <p>Mapped from the {@code cloud.storage.*} YAML namespace. Example:
+     * <pre>
+     * cloud:
+     *   storage:
+     *     enabled: true
+     *     provider: s3
+     *     bucket:  my-bucket
+     *     region:  us-east-1
+     * </pre>
+     */
+    @Data
+    @Configuration
+    @ConfigurationProperties(prefix = "cloud.storage")
+    public class CloudStorageSpringConfig {
+
+        private boolean enabled = false;
+        private String provider = "s3";
+        private String bucket;
+        private String region;
+        private String endpoint;
+        private String accessKey;
+        private String secretKey;
+        private String pathPrefix = "hugegraph";
+        private boolean startupHydrationEnabled = true;
+        private long readMissGuardWindowMs = 3000L;
+        private Map<String, String> extraProperties = new HashMap<>();
+
+        /** Converts this Spring-bound config into a plain {@link CloudStorageConfig} POJO. */
+        public CloudStorageConfig toCloudStorageConfig() {
+            CloudStorageConfig cfg = new CloudStorageConfig();
+            cfg.setEnabled(enabled);
+            cfg.setProvider(provider);
+            cfg.setBucket(bucket);
+            cfg.setRegion(region);
+            cfg.setEndpoint(endpoint);
+            cfg.setAccessKey(accessKey);
+            cfg.setSecretKey(secretKey);
+            cfg.setPathPrefix(pathPrefix);
+            cfg.setStartupHydrationEnabled(startupHydrationEnabled);
+            cfg.setReadMissGuardWindowMs(readMissGuardWindowMs);
+            cfg.setExtraProperties(extraProperties);
+            return cfg;
+        }
     }
 
     public JobOptions getJobOptions() {

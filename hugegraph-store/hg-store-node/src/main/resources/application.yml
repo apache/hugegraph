@@ -49,3 +49,17 @@ logging:
   config: classpath:log4j2-dev.xml
   level:
     root: info
+
+# Cloud storage (disabled by default; see hg-store-dist application.yml for full docs)
+cloud:
+  storage:
+    enabled: false
+    provider: s3
+    bucket:
+    region:
+    endpoint:
+    access-key:
+    secret-key:
+    path-prefix: hugegraph
+    extra-properties: {}
+

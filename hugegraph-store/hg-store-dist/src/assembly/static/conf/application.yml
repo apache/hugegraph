@@ -62,3 +62,34 @@ logging:
   config: 'file:./conf/log4j2.xml'
   level:
     root: info
+
+# ---------------------------------------------------------------------------
+# Cloud Storage (pluggable provider – disabled by default)
+# ---------------------------------------------------------------------------
+# To enable, set enabled=true and add the desired provider JAR to the
+# classpath (e.g. hg-store-cloud-s3-*.jar for Amazon S3 / S3-compatible).
+#
+# cloud:
+#   storage:
+#     enabled: true
+#     provider: s3                         # must match CloudStorageProvider.providerName()
+#     bucket: hugegraph-store              # bucket / container name
+#     region: us-east-1                    # AWS region (leave empty for custom endpoint)
+#     endpoint:                            # custom S3-compatible endpoint (MinIO, Ceph…)
+#     access-key: AKIAIOSFODNN7EXAMPLE     # omit to use the AWS default credentials chain
+#     secret-key: wJalrXUtnFEMI/...        # omit to use the AWS default credentials chain
+#     path-prefix: hugegraph               # key prefix inside the bucket
+#     extra-properties:                    # provider-specific key-value pairs
+#       s3.forcePathStyle: "true"
+cloud:
+  storage:
+    enabled: false
+    provider: s3
+    bucket:
+    region:
+    endpoint:
+    access-key:
+    secret-key:
+    path-prefix: hugegraph
+    extra-properties: {}
+

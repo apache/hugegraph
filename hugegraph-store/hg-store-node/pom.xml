@@ -120,6 +120,10 @@
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hg-store-core</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hg-store-cloud-s3</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>com.taobao.arthas</groupId>

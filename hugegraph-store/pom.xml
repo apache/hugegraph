@@ -21,7 +21,6 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <artifactId>hugegraph-store</artifactId>
-    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <parent>
@@ -41,6 +40,7 @@
         <module>hg-store-node</module>
         <module>hg-store-dist</module>
         <module>hg-store-cli</module>
+        <module>hg-store-cloud-s3</module>
     </modules>
 
     <properties>
@@ -78,6 +78,11 @@
             <dependency>
                 <groupId>org.apache.hugegraph</groupId>
                 <artifactId>hg-store-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.hugegraph</groupId>
+                <artifactId>hg-store-cloud-s3</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -301,6 +306,14 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+
+        <!-- Build the S3 cloud-storage plugin:  mvn install -P cloud-s3 -DskipTests -->
+        <profile>
+            <id>cloud-s3</id>
+            <modules>
+                <module>hg-store-cloud-s3</module>
+            </modules>
         </profile>
     </profiles>
 </project>
