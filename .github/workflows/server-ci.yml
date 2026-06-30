@@ -28,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         BACKEND: [ memory, rocksdb, hbase ]
-        JAVA_VERSION: [ '11' ]
+        JAVA_VERSION: [ '11', '21' ]
 
     steps:
       - name: Checkout

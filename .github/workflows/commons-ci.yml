@@ -18,11 +18,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        JAVA_VERSION: ['11']
+        JAVA_VERSION: ['11', '21']
 
     steps:
       - name: Install JDK ${{ matrix.JAVA_VERSION }}
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: ${{ matrix.JAVA_VERSION }}
           distribution: 'zulu'

@@ -37,6 +37,7 @@ import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.NumericUtil;
+import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
@@ -51,7 +52,7 @@ public abstract class Condition {
         NOT
     }
 
-    public enum RelationType implements BiPredicate<Object, Object> {
+    public enum RelationType implements PBiPredicate<Object, Object> {
 
         EQ("==", RelationType::equals),
 

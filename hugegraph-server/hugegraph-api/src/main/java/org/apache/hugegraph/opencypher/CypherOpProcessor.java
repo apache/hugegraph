@@ -19,7 +19,7 @@ package org.apache.hugegraph.opencypher;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Optional.empty;
-import static org.apache.tinkerpop.gremlin.driver.message.ResponseStatusCode.SERVER_ERROR;
+import static org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode.SERVER_ERROR;
 import static org.opencypher.gremlin.translation.StatementOption.EXPLAIN;
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -33,11 +33,10 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.tinkerpop.gremlin.driver.Tokens;
-import org.apache.tinkerpop.gremlin.driver.message.RequestMessage;
-import org.apache.tinkerpop.gremlin.driver.message.ResponseMessage;
-import org.apache.tinkerpop.gremlin.driver.message.ResponseStatusCode;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.DefaultGraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -123,7 +122,7 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
 
     private void evalCypher(Context context) throws OpProcessorException {
         Map<String, Object> args = context.getRequestMessage().getArgs();
-        String cypher = (String) args.get(Tokens.ARGS_GREMLIN);
+        String cypher = (String) args.get("gremlin");
         logger.trace("Cypher: {}", cypher.replaceAll("\n", " "));
 
         GraphTraversalSource gts = traversal(context);
@@ -183,8 +182,8 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         RequestMessage msg = context.getRequestMessage();
         GraphManager graphManager = context.getGraphManager();
 
-        Optional<Map<String, String>> aliasesOptional = msg.optionalArgs(Tokens.ARGS_ALIASES);
-        String gAlias = aliasesOptional.map(alias -> alias.get(Tokens.VAL_TRAVERSAL_SOURCE_ALIAS))
+        Optional<Map<String, String>> aliasesOptional = msg.optionalArgs("aliases");
+        String gAlias = aliasesOptional.map(alias -> alias.get("g"))
                                        .orElse(null);
 
         if (gAlias == null) {
@@ -220,8 +219,8 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
     @Override
     protected void handleIterator(Context context, Iterator traversal) {
         RequestMessage msg = context.getRequestMessage();
-        final long timeout = msg.getArgs().containsKey(Tokens.ARGS_EVAL_TIMEOUT)
-                             ? ((Number) msg.getArgs().get(Tokens.ARGS_EVAL_TIMEOUT)).longValue()
+        final long timeout = msg.getArgs().containsKey("evaluationTimeout")
+                             ? ((Number) msg.getArgs().get("evaluationTimeout")).longValue()
                              : context.getSettings().evaluationTimeout;
 
         FutureTask<Void> evalFuture = new FutureTask<>(() -> {
@@ -284,8 +283,8 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> getParameters(Map<String, Object> args) {
-        if (args.containsKey(Tokens.ARGS_BINDINGS)) {
-            return (Map<String, Object>) args.get(Tokens.ARGS_BINDINGS);
+        if (args.containsKey("bindings")) {
+            return (Map<String, Object>) args.get("bindings");
         } else {
             return new HashMap<>();
         }

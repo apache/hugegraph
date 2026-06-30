@@ -163,6 +163,7 @@ public final class TraversalUtil {
         step.getTraversal().setGraph(graph);
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
@@ -170,7 +171,8 @@ public final class TraversalUtil {
             step = step.getNextStep();
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
+                for (Object hasObj : holder.getHasContainers()) {
+                    HasContainer has = (HasContainer) hasObj;
                     if (!GraphStep.processHasContainerIds(newStep, has)) {
                         newStep.addHasContainer(has);
                     }
@@ -181,13 +183,15 @@ public final class TraversalUtil {
         } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
         do {
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
-                for (HasContainer has : holder.getHasContainers()) {
+                for (Object hasObj : holder.getHasContainers()) {
+                    HasContainer has = (HasContainer) hasObj;
                     newStep.addHasContainer(has);
                 }
                 TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
@@ -197,6 +201,7 @@ public final class TraversalUtil {
         } while (step instanceof HasStep || step instanceof NoOpBarrierStep);
     }
 
+    @SuppressWarnings("rawtypes")
     public static void extractOrder(Step<?, ?> newStep,
                                     Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
@@ -219,6 +224,7 @@ public final class TraversalUtil {
                  step instanceof IdentityStep);
     }
 
+    @SuppressWarnings("rawtypes")
     public static void extractRange(Step<?, ?> newStep,
                                     Traversal.Admin<?, ?> traversal,
                                     boolean extractOnlyLimit) {
@@ -252,6 +258,7 @@ public final class TraversalUtil {
                  step instanceof NoOpBarrierStep);
     }
 
+    @SuppressWarnings("rawtypes")
     public static void extractCount(Step<?, ?> newStep,
                                     Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep;
@@ -267,6 +274,7 @@ public final class TraversalUtil {
                  step instanceof NoOpBarrierStep);
     }
 
+    @SuppressWarnings("rawtypes")
     public static void extractAggregateFunc(Step<?, ?> newStep,
                                             Traversal.Admin<?, ?> traversal) {
         PropertiesStep<?> propertiesStep = null;
@@ -657,9 +665,11 @@ public final class TraversalUtil {
         }
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public static void convHasStep(HugeGraph graph, HasStep<?> step) {
         HasContainerHolder holder = step;
-        for (HasContainer has : holder.getHasContainers()) {
+        for (Object hasObj : holder.getHasContainers()) {
+            HasContainer has = (HasContainer) hasObj;
             convPredicateValue(graph, has);
         }
     }
@@ -808,6 +818,7 @@ public final class TraversalUtil {
         return page.toString();
     }
 
+    @SuppressWarnings("rawtypes")
     public static QueryHolder rootStep(GraphTraversal<?, ?> traversal) {
         for (final Step<?, ?> step : traversal.asAdmin().getSteps()) {
             if (step instanceof QueryHolder) {
@@ -817,6 +828,7 @@ public final class TraversalUtil {
         return null;
     }
 
+    @SuppressWarnings("rawtypes")
     public static QueryHolder firstPageStep(GraphTraversal<?, ?> traversal) {
         for (final Step<?, ?> step : traversal.asAdmin().getSteps()) {
             if (step instanceof QueryHolder &&

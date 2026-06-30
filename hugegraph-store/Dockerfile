@@ -17,7 +17,7 @@
 
 # Dockerfile for HugeGraph Store
 # 1st stage: build source code
-FROM maven:3.9.0-eclipse-temurin-11 AS build
+FROM maven:3.9.9-eclipse-temurin-21 AS build
 
 COPY . /pkg
 WORKDIR /pkg
@@ -28,7 +28,7 @@ RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.sk
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
-FROM eclipse-temurin:11-jre
+FROM eclipse-temurin:21-jre
 
 COPY --from=build /pkg/hugegraph-store/apache-hugegraph-store-incubating-*/ /hugegraph-store/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"

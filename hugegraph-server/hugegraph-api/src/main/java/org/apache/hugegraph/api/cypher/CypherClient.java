@@ -35,8 +35,7 @@ import org.apache.tinkerpop.gremlin.driver.Client;
 import org.apache.tinkerpop.gremlin.driver.Cluster;
 import org.apache.tinkerpop.gremlin.driver.Result;
 import org.apache.tinkerpop.gremlin.driver.ResultSet;
-import org.apache.tinkerpop.gremlin.driver.Tokens;
-import org.apache.tinkerpop.gremlin.driver.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
 import org.slf4j.Logger;
 
 @ThreadSafe
@@ -90,9 +89,9 @@ public final class CypherClient {
     }
 
     private RequestMessage createRequest(String cypherQuery) {
-        return RequestMessage.build(Tokens.OPS_EVAL)
+        return RequestMessage.build("eval")
                              .processor("cypher")
-                             .add(Tokens.ARGS_GREMLIN, cypherQuery)
+                             .addArg("gremlin", cypherQuery)
                              .create();
     }
 

@@ -17,16 +17,15 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
-import java.util.function.BiPredicate;
-
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 
 public class ConditionP extends P<Object> {
 
     private static final long serialVersionUID = 9094970577400072902L;
 
-    private ConditionP(final BiPredicate<Object, Object> predicate,
+    private ConditionP(final PBiPredicate<Object, Object> predicate,
                        Object value) {
         super(predicate, value);
     }

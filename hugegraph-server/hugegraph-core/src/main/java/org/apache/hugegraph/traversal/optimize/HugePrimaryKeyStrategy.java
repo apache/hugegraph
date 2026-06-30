@@ -24,7 +24,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy.ProviderOptimizationStrategy;
-import org.apache.tinkerpop.gremlin.process.traversal.step.Mutating;
+import org.apache.tinkerpop.gremlin.process.traversal.step.Configuring;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStartStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
@@ -44,20 +44,21 @@ public class HugePrimaryKeyStrategy
     }
 
     @Override
+    @SuppressWarnings("rawtypes")
     public void apply(Traversal.Admin<?, ?> traversal) {
 
         List<Step> removeSteps = new LinkedList<>();
-        Mutating curAddStep = null;
+        Configuring curAddStep = null;
         List<Step> stepList = traversal.getSteps();
 
         for (int i = 0, s = stepList.size(); i < s; i++) {
             Step step = stepList.get(i);
 
             if (i == 0 && step instanceof AddVertexStartStep) {
-                curAddStep = (Mutating) step;
+                curAddStep = (Configuring) step;
                 continue;
             } else if (curAddStep == null && (step) instanceof AddVertexStep) {
-                curAddStep = (Mutating) step;
+                curAddStep = (Configuring) step;
                 continue;
             }
 
