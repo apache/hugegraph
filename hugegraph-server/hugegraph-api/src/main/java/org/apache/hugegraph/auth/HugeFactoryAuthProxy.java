@@ -54,6 +54,7 @@ import org.apache.hugegraph.task.StandardTaskScheduler;
 import org.apache.hugegraph.task.TaskCallable;
 import org.apache.hugegraph.task.TaskCallable.SysTaskCallable;
 import org.apache.hugegraph.task.TaskManager;
+import org.apache.hugegraph.traversal.optimize.HugeConnectiveLabelStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeCountStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeGraphStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeVertexStepStrategy;
@@ -129,7 +130,6 @@ public final class HugeFactoryAuthProxy {
         Reflection.registerFieldsToFilter(StandardAuthenticator.class, "graph");
         Reflection.registerMethodsToFilter(StandardAuthenticator.class, "initAdminUser",
                                            "inputPassword", "graph");
-        Reflection.registerFieldsToFilter(ConfigAuthenticator.class, "tokens");
         Reflection.registerFieldsToFilter(HugeFactoryAuthProxy.class, "PROTECT_METHODS");
         Reflection.registerMethodsToFilter(HugeFactoryAuthProxy.class, "genRegisterPrivateActions",
                                            "registerClass", "registerPrivateActions",
@@ -469,6 +469,10 @@ public final class HugeFactoryAuthProxy {
                                            "createDefaultExecutor", "lambda$start$0", "start");
         Reflection.registerFieldsToFilter(JsonSerializer.class, "LBUF_SIZE", "INSTANCE");
         Reflection.registerMethodsToFilter(JsonSerializer.class, "writeIterator", "instance");
+        Reflection.registerFieldsToFilter(HugeConnectiveLabelStepStrategy.class,
+                                          "serialVersionUID", "INSTANCE");
+        Reflection.registerMethodsToFilter(HugeConnectiveLabelStepStrategy.class,
+                                           "instance");
         Reflection.registerFieldsToFilter(HugeVertexStepStrategy.class, "serialVersionUID",
                                           "INSTANCE");
         Reflection.registerMethodsToFilter(HugeVertexStepStrategy.class, "instance");
@@ -508,7 +512,6 @@ public final class HugeFactoryAuthProxy {
         registerPrivateActions(InheritableThreadLocal.class);
 
         registerPrivateActions(StandardAuthenticator.class);
-        registerPrivateActions(ConfigAuthenticator.class);
         registerPrivateActions(HugeFactoryAuthProxy.class);
         registerPrivateActions(HugeAuthenticator.User.class);
 
@@ -561,6 +564,7 @@ public final class HugeFactoryAuthProxy {
         registerPrivateActions(LockManager.class);
         registerPrivateActions(ServerReporter.class);
         registerPrivateActions(JsonSerializer.class);
+        registerPrivateActions(HugeConnectiveLabelStepStrategy.class);
         registerPrivateActions(HugeVertexStepStrategy.class);
         registerPrivateActions(HugeGraphStepStrategy.class);
         registerPrivateActions(HugeCountStepStrategy.class);

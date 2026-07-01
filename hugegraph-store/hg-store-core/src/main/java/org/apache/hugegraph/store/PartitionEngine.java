@@ -42,6 +42,7 @@ import org.apache.commons.lang.StringUtils;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.raft.RaftReflectionUtil;
 import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.business.BusinessHandlerImpl;
 import org.apache.hugegraph.store.cmd.HgCmdClient;
@@ -1146,51 +1147,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
     }
 
     private Replicator.State getReplicatorState(PeerId peerId) {
-        var replicateGroup = getReplicatorGroup();
-        if (replicateGroup == null) {
-            return null;
-        }
-
-        ThreadId threadId = replicateGroup.getReplicator(peerId);
-        if (threadId == null) {
-            return null;
-        } else {
-            Replicator r = (Replicator) threadId.lock();
-            if (r == null) {
-                return Replicator.State.Probe;
-            }
-            Replicator.State result = getState(r);
-            threadId.unlock();
-            return result;
-        }
-    }
-
-    private ReplicatorGroup getReplicatorGroup() {
-        var clz = this.raftNode.getClass();
-        try {
-            var f = clz.getDeclaredField("replicatorGroup");
-            f.setAccessible(true);
-            var group = (ReplicatorGroup) f.get(this.raftNode);
-            f.setAccessible(false);
-            return group;
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            log.info("getReplicatorGroup: error {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private Replicator.State getState(Replicator r) {
-        var clz = r.getClass();
-        try {
-            var f = clz.getDeclaredField("state");
-            f.setAccessible(true);
-            var state = (Replicator.State) f.get(this.raftNode);
-            f.setAccessible(false);
-            return state;
-        } catch (NoSuchFieldException | IllegalAccessException e) {
-            log.info("getReplicatorGroup: error {}", e.getMessage());
-            return null;
-        }
+        return RaftReflectionUtil.getReplicatorState(this.raftNode, peerId);
     }
 
     class ReplicatorStateListener implements Replicator.ReplicatorStateListener {

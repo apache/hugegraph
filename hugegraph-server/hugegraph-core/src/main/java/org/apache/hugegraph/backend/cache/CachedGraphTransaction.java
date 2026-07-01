@@ -24,6 +24,8 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
@@ -33,6 +35,7 @@ import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStore;
+import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.ram.RamTable;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
@@ -60,11 +63,30 @@ public final class CachedGraphTransaction extends GraphTransaction {
     private static final long AVG_VERTEX_ENTRY_SIZE = 40L;
     private static final long AVG_EDGE_ENTRY_SIZE = 100L;
 
+    /*
+     * Listener lifetime must cover all active transactions for the graph.
+     * The holder is removed from the registry and unregistered from EventHub
+     * only when the last transaction releases it.
+     */
+    private static final ConcurrentMap<String, CacheListenerHolder>
+            GRAPH_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
+
+    /*
+     * Same ref-counted lifecycle for the store event listener registered
+     * on the BackendStoreProvider; see StoreListenerHolder.
+     *
+     * Replaces the removed protected static storeEventListenStatus field
+     * that previously tracked store-listen state on GraphTransaction.
+     */
+    private static final ConcurrentMap<String, StoreListenerHolder>
+            STORE_EVENT_LISTENERS = new ConcurrentHashMap<>();
+
     private final Cache<Id, Object> verticesCache;
     private final Cache<Id, Object> edgesCache;
 
-    private EventListener storeEventListener;
     private EventListener cacheEventListener;
+    private CacheListenerHolder holder;
+    private StoreListenerHolder storeHolder;
 
     public CachedGraphTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -124,7 +146,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         Set<String> storeEvents = ImmutableSet.of(Events.STORE_INIT,
                                                   Events.STORE_CLEAR,
                                                   Events.STORE_TRUNCATE);
-        this.storeEventListener = event -> {
+        EventListener storeListener = event -> {
             if (storeEvents.contains(event.name())) {
                 LOG.debug("Graph {} clear graph cache on event '{}'",
                           this.graph(), event.name());
@@ -133,12 +155,27 @@ public final class CachedGraphTransaction extends GraphTransaction {
             }
             return false;
         };
-        if (storeEventListenStatus.putIfAbsent(this.params().spaceGraphName(), true) == null) {
-            this.store().provider().listen(this.storeEventListener);
-        }
+        BackendStoreProvider provider = this.store().provider();
+        String graphName = this.params().spaceGraphName();
+        StoreListenerHolder storeAcquired = STORE_EVENT_LISTENERS.compute(
+                graphName, (key, existing) -> {
+                    if (existing == null || existing.provider != provider) {
+                        // Graph close/reopen creates a new provider for the
+                        // same graph name; replace the stale holder. Old
+                        // transactions skip decrement via identity check.
+                        if (existing != null) {
+                            existing.provider.unlisten(existing.listener);
+                        }
+                        provider.listen(storeListener);
+                        return new StoreListenerHolder(storeListener, provider);
+                    }
+                    existing.refCount++;
+                    return existing;
+                });
+        this.storeHolder = storeAcquired;
 
         // Listen cache event: "cache"(invalid cache item)
-        this.cacheEventListener = event -> {
+        EventListener listener = event -> {
             LOG.debug("Graph {} received graph cache event: {}",
                       this.graph(), event);
             Object[] args = event.args();
@@ -184,31 +221,72 @@ public final class CachedGraphTransaction extends GraphTransaction {
             }
             return false;
         };
-        if (graphCacheListenStatus.putIfAbsent(this.params().spaceGraphName(), true) == null) {
-            EventHub graphEventHub = this.params().graphEventHub();
-            graphEventHub.listen(Events.CACHE, this.cacheEventListener);
-        }
+        EventHub graphEventHub = this.params().graphEventHub();
+        CacheListenerHolder acquired = GRAPH_CACHE_EVENT_LISTENERS.compute(
+                graphName, (key, existing) -> {
+                    if (existing == null || existing.hub != graphEventHub) {
+                        // Graph close/reopen creates a new EventHub for the
+                        // same graph name; replace the stale holder. Old
+                        // transactions skip decrement via identity check.
+                        if (existing != null) {
+                            existing.hub.unlisten(Events.CACHE,
+                                                  existing.listener);
+                        }
+                        graphEventHub.listen(Events.CACHE, listener);
+                        return new CacheListenerHolder(listener, graphEventHub);
+                    }
+                    existing.refCount++;
+                    return existing;
+                });
+        this.holder = acquired;
+        this.cacheEventListener = acquired.listener;
     }
 
     private void unlistenChanges() {
         String graphName = this.params().spaceGraphName();
-        if (graphCacheListenStatus.remove(graphName) != null) {
-            EventHub graphEventHub = this.params().graphEventHub();
-            graphEventHub.unlisten(Events.CACHE, this.cacheEventListener);
+        CacheListenerHolder ours = this.holder;
+        if (ours != null) {
+            GRAPH_CACHE_EVENT_LISTENERS.compute(graphName, (key, existing) -> {
+                if (existing == null || existing != ours) {
+                    return existing;
+                }
+                existing.refCount--;
+                if (existing.refCount == 0) {
+                    existing.hub.unlisten(Events.CACHE, existing.listener);
+                    return null;
+                }
+                return existing;
+            });
+            this.holder = null;
+            this.cacheEventListener = null;
         }
-        if (storeEventListenStatus.remove(graphName) != null) {
-            this.store().provider().unlisten(this.storeEventListener);
+        StoreListenerHolder storeOurs = this.storeHolder;
+        if (storeOurs != null) {
+            STORE_EVENT_LISTENERS.compute(graphName, (key, existing) -> {
+                if (existing == null || existing != storeOurs) {
+                    return existing;
+                }
+                existing.refCount--;
+                if (existing.refCount == 0) {
+                    existing.provider.unlisten(existing.listener);
+                    return null;
+                }
+                return existing;
+            });
+            this.storeHolder = null;
         }
     }
 
     private void notifyChanges(String action, HugeType type, Id[] ids) {
         EventHub graphEventHub = this.params().graphEventHub();
-        graphEventHub.notify(Events.CACHE, action, type, ids);
+        graphEventHub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                   action, type, ids);
     }
 
     private void notifyChanges(String action, HugeType type) {
         EventHub graphEventHub = this.params().graphEventHub();
-        graphEventHub.notify(Events.CACHE, action, type);
+        graphEventHub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                   action, type);
     }
 
     public void clearCache(HugeType type, boolean notify) {
@@ -220,7 +298,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         if (notify) {
-            this.notifyChanges(Cache.ACTION_CLEARED, null);
+            this.notifyChanges(Cache.ACTION_CLEAR, null);
         }
     }
 
@@ -397,7 +475,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
                     this.verticesCache.invalidate(vertex.id());
                 }
                 if (vertexOffset > 0) {
-                    this.notifyChanges(Cache.ACTION_INVALIDED,
+                    this.notifyChanges(Cache.ACTION_INVALID,
                                        HugeType.VERTEX, vertexIds);
                 }
             }
@@ -411,7 +489,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
             if (invalidEdgesCache && this.enableCacheEdge()) {
                 // TODO: Use a more precise strategy to update the edge cache
                 this.edgesCache.clear();
-                this.notifyChanges(Cache.ACTION_CLEARED, HugeType.EDGE);
+                this.notifyChanges(Cache.ACTION_CLEAR, HugeType.EDGE);
             }
         }
     }
@@ -425,8 +503,31 @@ public final class CachedGraphTransaction extends GraphTransaction {
             if (indexLabel.baseType() == HugeType.EDGE_LABEL) {
                 // TODO: Use a more precise strategy to update the edge cache
                 this.edgesCache.clear();
-                this.notifyChanges(Cache.ACTION_CLEARED, HugeType.EDGE);
+                this.notifyChanges(Cache.ACTION_CLEAR, HugeType.EDGE);
             }
+        }
+    }
+
+    /*
+     * Listener lifetime must cover all active transactions for the graph.
+     * The holder is removed from the registry and unregistered from the
+     * BackendStoreProvider only when the last transaction releases it.
+     * Mirror of CacheListenerHolder for the store event path.
+     */
+    private static final class StoreListenerHolder {
+
+        final EventListener listener;
+        final BackendStoreProvider provider;
+        // Must only be read or written inside ConcurrentMap.compute() for the
+        // enclosing registry; ConcurrentHashMap.compute() serialises per-key
+        // access.
+        int refCount;
+
+        StoreListenerHolder(EventListener listener,
+                            BackendStoreProvider provider) {
+            this.listener = listener;
+            this.provider = provider;
+            this.refCount = 1;
         }
     }
 }

@@ -77,11 +77,14 @@ public final class BytesBuffer extends OutputStream {
 
     public static final int DEFAULT_CAPACITY = 64;
     public static final int MAX_BUFFER_CAPACITY = 128 * 1024 * 1024; // 128M
+    public static final int MAX_BUFFER_CAPACITY_UPPER_BOUND = (int) Bytes.GB;
 
     public static final int BUF_EDGE_ID = 128;
     public static final int BUF_PROPERTY = 64;
 
     public static final byte[] BYTES_EMPTY = new byte[0];
+
+    private static volatile Integer maxBufferCapacity;
 
     private ByteBuffer buffer;
     private final boolean resize;
@@ -91,10 +94,11 @@ public final class BytesBuffer extends OutputStream {
     }
 
     public BytesBuffer(int capacity) {
-        if (capacity > MAX_BUFFER_CAPACITY) {
+        int maxCapacity = maxBufferCapacity();
+        if (capacity > maxCapacity) {
             E.checkArgument(false,
                             "Capacity %s exceeds max buffer capacity: %s",
-                            capacity, MAX_BUFFER_CAPACITY);
+                            capacity, maxCapacity);
         }
         this.buffer = ByteBuffer.allocate(capacity);
         this.resize = true;
@@ -120,6 +124,43 @@ public final class BytesBuffer extends OutputStream {
 
     public static BytesBuffer wrap(byte[] array, int offset, int length) {
         return new BytesBuffer(ByteBuffer.wrap(array, offset, length));
+    }
+
+    public static int maxBufferCapacity() {
+        Integer capacity = maxBufferCapacity;
+        return capacity != null ? capacity : MAX_BUFFER_CAPACITY;
+    }
+
+    public static synchronized void initMaxBufferCapacity(int capacity) {
+        initMaxBufferCapacity(capacity, true);
+    }
+
+    public static synchronized void initMaxBufferCapacity(int capacity,
+                                                          boolean explicit) {
+        E.checkArgument(capacity >= DEFAULT_CAPACITY &&
+                        capacity <= MAX_BUFFER_CAPACITY_UPPER_BOUND,
+                        "Max buffer capacity must be in range [%s, %s], " +
+                        "but got %s",
+                        DEFAULT_CAPACITY, MAX_BUFFER_CAPACITY_UPPER_BOUND,
+                        capacity);
+
+        if (!explicit) {
+            return;
+        }
+
+        if (maxBufferCapacity == null) {
+            maxBufferCapacity = capacity;
+            return;
+        }
+
+        if (maxBufferCapacity == capacity) {
+            return;
+        }
+
+        throw new IllegalArgumentException(String.format(
+                "The process-wide serializer buffer max capacity has been " +
+                "initialized to %s, but got conflicting value %s",
+                maxBufferCapacity, capacity));
     }
 
     public ByteBuffer asByteBuffer() {
@@ -173,14 +214,18 @@ public final class BytesBuffer extends OutputStream {
             E.checkState(false, "Can't resize for wrapped buffer");
         }
 
-        // Extra capacity as buffer
-        int newCapacity = size + this.buffer.limit() + DEFAULT_CAPACITY;
-        if (newCapacity > MAX_BUFFER_CAPACITY) {
+        int maxCapacity = maxBufferCapacity();
+        long requiredCapacity = (long) this.buffer.position() + size;
+        if (requiredCapacity > maxCapacity) {
             E.checkArgument(false,
                             "Capacity %s exceeds max buffer capacity: %s",
-                            newCapacity, MAX_BUFFER_CAPACITY);
+                            requiredCapacity, maxCapacity);
         }
-        ByteBuffer newBuffer = ByteBuffer.allocate(newCapacity);
+
+        // Extra capacity as buffer
+        long newCapacity = Math.min(requiredCapacity + DEFAULT_CAPACITY,
+                                    maxCapacity);
+        ByteBuffer newBuffer = ByteBuffer.allocate((int) newCapacity);
         this.buffer.flip();
         newBuffer.put(this.buffer);
         this.buffer = newBuffer;
@@ -318,7 +363,6 @@ public final class BytesBuffer extends OutputStream {
 
     public BytesBuffer writeBigBytes(byte[] bytes) {
         if (bytes.length > BLOB_LEN_MAX) {
-            // TODO: note the max blob size should be 128MB (due to MAX_BUFFER_CAPACITY)
             E.checkArgument(false,
                             "The max length of bytes is %s, but got %s",
                             BLOB_LEN_MAX, bytes.length);

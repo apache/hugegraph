@@ -22,9 +22,12 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.apache.hugegraph.util.JsonUtil;
+import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableMap;
 
 import jakarta.ws.rs.core.Response;
 
@@ -39,7 +42,7 @@ public class GraphSpaceApiTest extends BaseApiTest {
         Response r = this.client().get(PATH);
         String result = r.readEntity(String.class);
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
-        List<String> spaces = (List<String>) resultMap.get("graphSpaces");
+        List<String> spaces = (List<String>)resultMap.get("graphSpaces");
         for (String space : spaces) {
             if (!"DEFAULT".equals(space)) {
                 this.client().delete(PATH, space);
@@ -51,8 +54,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
     public void testAddSpaceNamespace() {
         String body = "{\n" +
                       "  \"name\": \"test_add_no_ns\",\n" +
-                      "  \"nickname\":\"Test No Namespace\",\n" +
-                      "  \"description\": \"no namespace\",\n" +
+                      "  \"nickname\":\"TestNoNamespace\",\n" +
+                      "  \"description\": \"nonamespace\",\n" +
                       "  \"cpu_limit\": 1000,\n" +
                       "  \"memory_limit\": 1024,\n" +
                       "  \"storage_limit\": 1000,\n" +
@@ -73,8 +76,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
 
         String body2 = "{\n" +
                        "  \"name\": \"test_add_has_ns\",\n" +
-                       "  \"nickname\":\"Test With Namespace\",\n" +
-                       "  \"description\": \"has namespace\",\n" +
+                       "  \"nickname\":\"TestWithNamespace\",\n" +
+                       "  \"description\": \"hasnamespace\",\n" +
                        "  \"cpu_limit\": 1000,\n" +
                        "  \"memory_limit\": 1024,\n" +
                        "  \"storage_limit\": 1000,\n" +
@@ -105,8 +108,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
         String spaceName = "test_delete_space";
         String body = "{"
                       + "\"name\":\"" + spaceName + "\","
-                      + "\"nickname\":\"Test Delete Space\","
-                      + "\"description\":\"Test delete space\","
+                      + "\"nickname\":\"TestDeleteSpace\","
+                      + "\"description\":\"Testdeletespace\","
                       + "\"cpu_limit\":1000,"
                       + "\"memory_limit\":1024,"
                       + "\"storage_limit\":1000,"
@@ -145,8 +148,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
         String spaceName = "duplicate_space";
         String body = "{"
                       + "\"name\":\"" + spaceName + "\","
-                      + "\"nickname\":\"Duplicate Test Space\","
-                      + "\"description\":\"Test duplicate space\","
+                      + "\"nickname\":\"DuplicateTestSpace\","
+                      + "\"description\":\"Testduplicatespace\","
                       + "\"cpu_limit\":1000,"
                       + "\"memory_limit\":1024,"
                       + "\"storage_limit\":1000,"
@@ -179,8 +182,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
         // Test minimum limits
         String minLimitsBody = "{"
                                + "\"name\":\"" + spaceName + "_min\","
-                               + "\"nickname\":\"Minimum Limits Test\","
-                               + "\"description\":\"Test minimum limits\","
+                               + "\"nickname\":\"MinimumLimitsTest\","
+                               + "\"description\":\"Testminimumlimits\","
                                + "\"cpu_limit\":1,"
                                + "\"memory_limit\":1,"
                                + "\"storage_limit\":1,"
@@ -203,8 +206,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
         // Test maximum limits
         String maxLimitsBody = "{"
                                + "\"name\":\"" + spaceName + "_max\","
-                               + "\"nickname\":\"Maximum Limits Test\","
-                               + "\"description\":\"Test maximum limits\","
+                               + "\"nickname\":\"MaximumLimitsTest\","
+                               + "\"description\":\"Testmaximumlimits\","
                                + "\"cpu_limit\":999999,"
                                + "\"memory_limit\":999999,"
                                + "\"storage_limit\":999999,"
@@ -274,5 +277,158 @@ public class GraphSpaceApiTest extends BaseApiTest {
 
         r = this.client().post(PATH, negativeLimitsBody);
         assertResponseStatus(400, r);
+    }
+
+    @Test
+    public void testListProfile() {
+        // Get profile list without prefix
+        Response r = this.client().get(PATH + "/profile");
+        String result = assertResponseStatus(200, r);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> profiles = JsonUtil.fromJson(result, List.class);
+
+        // Should contain at least the DEFAULT space
+        Assert.assertTrue("Expected at least one profile", profiles.size() >= 1);
+
+        // Verify profile structure
+        for (Map<String, Object> profile : profiles) {
+            Assert.assertTrue("Profile should contain 'name'",
+                              profile.containsKey("name"));
+            Assert.assertTrue("Profile should contain 'authed'",
+                              profile.containsKey("authed"));
+            Assert.assertTrue("Profile should contain 'create_time'",
+                              profile.containsKey("create_time"));
+            Assert.assertTrue("Profile should contain 'update_time'",
+                              profile.containsKey("update_time"));
+            Assert.assertTrue("Profile should contain 'default'",
+                              profile.containsKey("default"));
+        }
+    }
+
+    @Test
+    public void testListProfileWithPrefix() {
+        // Create test spaces with different names
+        String space1 = "{"
+                        + "\"name\":\"test_profile_space1\","
+                        + "\"nickname\":\"TestProfileSpace\","
+                        + "\"description\":\"Testprofilelisting\","
+                        + "\"cpu_limit\":1000,"
+                        + "\"memory_limit\":1024,"
+                        + "\"storage_limit\":1000,"
+                        + "\"compute_cpu_limit\":0,"
+                        + "\"compute_memory_limit\":0,"
+                        + "\"oltp_namespace\":null,"
+                        + "\"olap_namespace\":null,"
+                        + "\"storage_namespace\":null,"
+                        + "\"operator_image_path\":\"test\","
+                        + "\"internal_algorithm_image_url\":\"test\","
+                        + "\"max_graph_number\":100,"
+                        + "\"max_role_number\":100,"
+                        + "\"auth\":false,"
+                        + "\"configs\":{}"
+                        + "}";
+
+        // Create a space that should NOT match the prefix filter
+        String space2 = "{"
+                        + "\"name\":\"other_profile_space\","
+                        + "\"nickname\":\"OtherProfileSpace\","
+                        + "\"description\":\"Other profile listing\","
+                        + "\"cpu_limit\":1000,"
+                        + "\"memory_limit\":1024,"
+                        + "\"storage_limit\":1000,"
+                        + "\"compute_cpu_limit\":0,"
+                        + "\"compute_memory_limit\":0,"
+                        + "\"oltp_namespace\":null,"
+                        + "\"olap_namespace\":null,"
+                        + "\"storage_namespace\":null,"
+                        + "\"operator_image_path\":\"test\","
+                        + "\"internal_algorithm_image_url\":\"test\","
+                        + "\"max_graph_number\":100,"
+                        + "\"max_role_number\":100,"
+                        + "\"auth\":false,"
+                        + "\"configs\":{}"
+                        + "}";
+
+        // Create spaces
+        Response r = this.client().post(PATH, space1);
+        assertResponseStatus(201, r);
+        r = this.client().post(PATH, space2);
+        assertResponseStatus(201, r);
+
+        // Test with prefix filter
+        r = this.client().get(PATH + "/profile",
+                              ImmutableMap.of("prefix", "test"));
+        String result = assertResponseStatus(200, r);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> profiles = JsonUtil.fromJson(result, List.class);
+        Assert.assertFalse("Expected non-empty profile list with prefix filter",
+                           profiles.isEmpty());
+
+        // Verify all returned profiles match the prefix
+        for (Map<String, Object> profile : profiles) {
+            String name = Objects.toString(profile.get("name"), "");
+            String nickname = Objects.toString(profile.get("nickname"), "");
+            boolean matchesPrefix = name.startsWith("test") ||
+                                    nickname.startsWith("test") ||
+                                    nickname.startsWith("Test");
+            Assert.assertTrue(
+                    "Profile should match prefix 'test': " + profile,
+                    matchesPrefix);
+
+            // Ensure the non-matching space is excluded
+            Assert.assertNotEquals("Non-matching space should be filtered out",
+                                   "other_profile_space", name);
+        }
+    }
+
+    @Test
+    public void testListProfileWithAuth() {
+        // Create a space with auth enabled
+        String authSpace = "{"
+                           + "\"name\":\"auth_test_space\","
+                           + "\"nickname\":\"AuthTestSpace\","
+                           + "\"description\":\"Test auth in profile\","
+                           + "\"cpu_limit\":1000,"
+                           + "\"memory_limit\":1024,"
+                           + "\"storage_limit\":1000,"
+                           + "\"compute_cpu_limit\":0,"
+                           + "\"compute_memory_limit\":0,"
+                           + "\"oltp_namespace\":null,"
+                           + "\"olap_namespace\":null,"
+                           + "\"storage_namespace\":null,"
+                           + "\"operator_image_path\":\"test\","
+                           + "\"internal_algorithm_image_url\":\"test\","
+                           + "\"max_graph_number\":100,"
+                           + "\"max_role_number\":100,"
+                           + "\"auth\":true,"
+                           + "\"configs\":{}"
+                           + "}";
+
+        Response r = this.client().post(PATH, authSpace);
+        assertResponseStatus(201, r);
+
+        // Get profile list
+        r = this.client().get(PATH + "/profile");
+        String result = assertResponseStatus(200, r);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> profiles = JsonUtil.fromJson(result, List.class);
+
+        // Find the auth_test_space and verify authed field
+        boolean found = false;
+        for (Map<String, Object> profile : profiles) {
+            if ("auth_test_space".equals(profile.get("name"))) {
+                found = true;
+                // Admin user should be authed
+                Assert.assertTrue("Profile should contain 'authed' field",
+                                  profile.containsKey("authed"));
+                Assert.assertEquals("Admin user should be authorized",
+                                    true, profile.get("authed"));
+                break;
+            }
+        }
+        Assert.assertTrue("auth_test_space not found in profile list", found);
     }
 }

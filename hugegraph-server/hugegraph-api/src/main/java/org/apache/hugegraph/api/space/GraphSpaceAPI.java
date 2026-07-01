@@ -19,6 +19,9 @@
 
 package org.apache.hugegraph.api.space;
 
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,6 +29,7 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
+import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
@@ -41,6 +45,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -52,6 +58,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.SecurityContext;
 
@@ -71,6 +78,7 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Object list(@Context GraphManager manager,
                        @Context SecurityContext sc) {
+        ensurePdModeEnabled(manager);
         Set<String> spaces = manager.graphSpaces();
         return ImmutableMap.of("graphSpaces", spaces);
     }
@@ -80,7 +88,9 @@ public class GraphSpaceAPI extends API {
     @Path("{graphspace}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Object get(@Context GraphManager manager,
+                      @Parameter(description = "The name of the graph space")
                       @PathParam("graphspace") String graphSpace) {
+        ensurePdModeEnabled(manager);
         manager.getSpaceStorage(graphSpace);
         GraphSpace gs = space(manager, graphSpace);
 
@@ -93,6 +103,58 @@ public class GraphSpaceAPI extends API {
         return gsInfo;
     }
 
+    @GET
+    @Timed
+    @Path("profile")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"admin"})
+    public Object listProfile(@Context GraphManager manager,
+                              @Parameter(description = "Filter graph spaces by " +
+                                                        "name or nickname prefix")
+                              @QueryParam("prefix") String prefix,
+                              @Context SecurityContext sc) {
+        ensurePdModeEnabled(manager);
+        Set<String> spaces = manager.graphSpaces();
+        List<Map<String, Object>> spaceList = new ArrayList<>();
+        List<Map<String, Object>> result = new ArrayList<>();
+        String user = HugeGraphAuthProxy.username();
+        AuthManager authManager = manager.authManager();
+        // FIXME: defaultSpace related interface is not implemented
+        // String defaultSpace = authManager.getDefaultSpace(user);
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
+        for (String sp : spaces) {
+            manager.getSpaceStorage(sp);
+            GraphSpace gs = space(manager, sp);
+            Map<String, Object> gsProfile = gs.info();
+            boolean isManager = verifyPermission(user, authManager, sp);
+
+            // 设置当前用户的是否允许访问该空间
+            if (gs.auth() && !isManager) {
+                gsProfile.put("authed", false);
+            } else {
+                gsProfile.put("authed", true);
+            }
+
+            gsProfile.put("create_time", format.format(gs.createTime()));
+            gsProfile.put("update_time", format.format(gs.updateTime()));
+            if (!isPrefix(gsProfile, prefix)) {
+                continue;
+            }
+
+            gsProfile.put("default", false);
+            result.add(gsProfile);
+            //boolean defaulted = StringUtils.equals(sp, defaultSpace);
+            //gsProfile.put("default", defaulted);
+            //if (defaulted) {
+            //    result.add(gsProfile);
+            //} else {
+            //    spaceList.add(gsProfile);
+            //}
+        }
+        result.addAll(spaceList);
+        return result;
+    }
+
     @POST
     @Timed
     @Status(Status.CREATED)
@@ -101,10 +163,10 @@ public class GraphSpaceAPI extends API {
     @RolesAllowed({"admin"})
     public String create(@Context GraphManager manager,
                          JsonGraphSpace jsonGraphSpace) {
-
+        ensurePdModeEnabled(manager);
         jsonGraphSpace.checkCreate(false);
 
-        String creator = HugeGraphAuthProxy.getContext().user().username();
+        String creator = HugeGraphAuthProxy.username();
         GraphSpace exist = manager.graphSpace(jsonGraphSpace.name);
         E.checkArgument(exist == null, "The graph space '%s' has existed",
                         jsonGraphSpace.name);
@@ -130,9 +192,10 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public Map<String, Object> manage(@Context GraphManager manager,
+                                      @Parameter(description = "The name of the graph space")
                                       @PathParam("name") String name,
                                       Map<String, Object> actionMap) {
-
+        ensurePdModeEnabled(manager);
         E.checkArgument(actionMap != null && actionMap.size() == 2 &&
                         actionMap.containsKey(GRAPH_SPACE_ACTION),
                         "Invalid request body '%s'", actionMap);
@@ -260,7 +323,9 @@ public class GraphSpaceAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The name of the graph space")
                        @PathParam("name") String name) {
+        ensurePdModeEnabled(manager);
         manager.dropGraphSpace(name);
     }
 
@@ -275,54 +340,79 @@ public class GraphSpaceAPI extends API {
                "_dp" : graphSpace.toLowerCase() + "_dp";
     }
 
+    private boolean verifyPermission(String user, AuthManager authManager, String graphSpace) {
+        return authManager.isAdminManager(user) ||
+               authManager.isSpaceManager(graphSpace, user) ||
+               authManager.isSpaceMember(graphSpace, user);
+    }
+
     private static class JsonGraphSpace implements Checkable {
 
         @JsonProperty("name")
+        @Schema(description = "The name of the graph space", required = true)
         public String name;
         @JsonProperty("nickname")
+        @Schema(description = "The nickname of the graph space")
         public String nickname;
         @JsonProperty("description")
+        @Schema(description = "The description of the graph space")
         public String description;
 
         @JsonProperty("cpu_limit")
+        @Schema(description = "The CPU limit for the graph space", required = true)
         public int cpuLimit;
         @JsonProperty("memory_limit")
+        @Schema(description = "The memory limit for the graph space", required = true)
         public int memoryLimit;
         @JsonProperty("storage_limit")
+        @Schema(description = "The storage limit for the graph space", required = true)
         public int storageLimit;
 
         @JsonProperty("compute_cpu_limit")
+        @Schema(description = "The compute CPU limit for the graph space")
         public int computeCpuLimit = 0;
         @JsonProperty("compute_memory_limit")
+        @Schema(description = "The compute memory limit for the graph space")
         public int computeMemoryLimit = 0;
 
         @JsonProperty("oltp_namespace")
+        @Schema(description = "The OLTP namespace for the graph space")
         public String oltpNamespace = "";
         @JsonProperty("olap_namespace")
+        @Schema(description = "The OLAP namespace for the graph space")
         public String olapNamespace = "";
         @JsonProperty("storage_namespace")
+        @Schema(description = "The storage namespace for the graph space")
         public String storageNamespace = "";
 
         @JsonProperty("max_graph_number")
+        @Schema(description = "The maximum number of graphs allowed in the space", required = true)
         public int maxGraphNumber;
         @JsonProperty("max_role_number")
+        @Schema(description = "The maximum number of roles allowed in the space")
         public int maxRoleNumber;
 
         @JsonProperty("dp_username")
+        @Schema(description = "The data platform username for the graph space")
         public String dpUserName;
         @JsonProperty("dp_password")
+        @Schema(description = "The data platform password for the graph space")
         public String dpPassWord;
 
         @JsonProperty("auth")
+        @Schema(description = "Whether authentication is enabled for the graph space")
         public boolean auth = false;
 
         @JsonProperty("configs")
+        @Schema(description = "Additional configurations for the graph space")
         public Map<String, Object> configs;
 
         @JsonProperty("operator_image_path")
+        @Schema(description = "The operator image path for the graph space")
         public String operatorImagePath = "";
 
         @JsonProperty("internal_algorithm_image_url")
+        @Schema(description = "The internal algorithm image URL for the graph space")
         public String internalAlgorithmImageUrl = "";
 
         @Override
@@ -398,10 +488,13 @@ public class GraphSpaceAPI extends API {
     private static class JsonDefaultRole implements Checkable {
 
         @JsonProperty("user")
+        @Schema(description = "The username")
         private String user;
         @JsonProperty("role")
+        @Schema(description = "The role name")
         private String role;
         @JsonProperty("graph")
+        @Schema(description = "The graph name")
         private String graph;
 
         @Override

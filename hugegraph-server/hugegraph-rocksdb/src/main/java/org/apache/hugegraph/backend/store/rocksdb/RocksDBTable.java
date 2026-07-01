@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
+
 import java.util.List;
 import java.util.Set;
 
@@ -215,6 +216,16 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         ));
     }
 
+    protected BackendColumnIterator queryByIdsWithGet(RocksDBSessions.Session session,
+                                                      Collection<Id> ids) {
+        E.checkState(!session.hasChanges(),
+                     "Can't queryByIds() when RocksDB session has pending changes");
+        if (ids.isEmpty()) {
+            return BackendColumnIterator.empty();
+        }
+        return this.getByIds(session, ids);
+    }
+
     protected BackendColumnIterator getById(RocksDBSessions.Session session, Id id) {
         byte[] value = session.get(this.table(), id.asBytes());
         if (value == null) {
@@ -224,7 +235,8 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
         return BackendColumnIterator.iterator(col);
     }
 
-    protected BackendColumnIterator getByIds(RocksDBSessions.Session session, Set<Id> ids) {
+    protected BackendColumnIterator getByIds(RocksDBSessions.Session session,
+                                             Collection<Id> ids) {
         if (ids.size() == 1) {
             return this.getById(session, ids.iterator().next());
         }
@@ -309,7 +321,7 @@ public class RocksDBTable extends BackendTable<RocksDBSessions.Session, BackendE
     }
 
     protected static BackendEntryIterator newEntryIteratorOlap(
-        BackendColumnIterator cols, Query query, boolean isOlap) {
+            BackendColumnIterator cols, Query query, boolean isOlap) {
         return new BinaryEntryIterator<>(cols, query, (entry, col) -> {
             if (entry == null || !entry.belongToMe(col)) {
                 HugeType type = query.resultType();

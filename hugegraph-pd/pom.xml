@@ -44,7 +44,7 @@
 
     <properties>
         <log4j2.version>2.17.0</log4j2.version>
-        <final.name>apache-${release.name}-pd-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-pd-${project.version}</final.name>
         <commons-lang3.version>3.12.0</commons-lang3.version>
         <junit.version>4.13.2</junit.version>
     </properties>

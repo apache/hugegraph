@@ -41,4 +41,12 @@
         <name>hbase.zookeeper.property.tickTime</name>
         <value>6000</value>
     </property>
+    <property>
+        <name>hbase.cluster.distributed</name>
+        <value>false</value>
+    </property>
+    <property>
+        <name>hbase.unsafe.stream.capability.enforce</name>
+        <value>false</value>
+    </property>
 </configuration>

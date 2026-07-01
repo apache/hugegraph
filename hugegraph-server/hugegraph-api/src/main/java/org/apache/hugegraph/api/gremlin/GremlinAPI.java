@@ -25,6 +25,7 @@ import org.apache.hugegraph.util.E;
 import com.codahale.metrics.Histogram;
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -55,6 +56,7 @@ public class GremlinAPI extends GremlinQueryAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Response post(@Context HugeConfig conf,
                          @Context HttpHeaders headers,
+                         @Parameter(description = "The Gremlin query request body")
                          String request) {
         /* The following code is reserved for forwarding request */
         // context.getRequestDispatcher(location).forward(request, response);

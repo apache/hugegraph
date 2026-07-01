@@ -16,8 +16,7 @@
 #
 
 # gremlin entrance to create graph
-# auth config: org.apache.hugegraph.auth.HugeFactoryAuthProxy
-gremlin.graph=org.apache.hugegraph.HugeFactory
+gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy
 
 # cache config
 #schema.cache_capacity=100000

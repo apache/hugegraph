@@ -178,6 +178,11 @@
             <artifactId>hg-store-client</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hg-pd-core</artifactId>
+            <version>${revision}</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

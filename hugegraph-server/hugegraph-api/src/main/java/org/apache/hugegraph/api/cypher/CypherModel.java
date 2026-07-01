@@ -21,13 +21,20 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * As same as response of GremlinAPI
  */
 public class CypherModel {
 
+    @Schema(description = "The request ID")
     public String requestId;
+
+    @Schema(description = "The response status")
     public Status status = new Status();
+
+    @Schema(description = "The query result")
     public Result result = new Result();
 
     public static CypherModel dataOf(String requestId, List<Object> data) {
@@ -51,14 +58,22 @@ public class CypherModel {
 
     public static class Status {
 
+        @Schema(description = "The status message")
         public String message = "";
+
+        @Schema(description = "The status code")
         public int code;
+
+        @Schema(description = "Additional status attributes")
         public Map<String, Object> attributes = Collections.EMPTY_MAP;
     }
 
     private static class Result {
 
+        @Schema(description = "The result data list")
         public List<Object> data;
+
+        @Schema(description = "The result metadata")
         public Map<String, Object> meta = Collections.EMPTY_MAP;
     }
 

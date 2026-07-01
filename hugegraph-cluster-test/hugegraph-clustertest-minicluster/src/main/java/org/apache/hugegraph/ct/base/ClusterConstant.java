@@ -33,12 +33,12 @@ public class ClusterConstant {
     public static final String PLUGINS_DIR = "plugins";
     public static final String BIN_DIR = "bin";
     public static final String CONF_DIR = "conf";
-    public static final String PD_PACKAGE_PREFIX = "apache-hugegraph-pd-incubating";
+    public static final String PD_PACKAGE_PREFIX = "apache-hugegraph-pd";
     public static final String PD_JAR_PREFIX = "hg-pd-service";
-    public static final String STORE_PACKAGE_PREFIX = "apache-hugegraph-store-incubating";
+    public static final String STORE_PACKAGE_PREFIX = "apache-hugegraph-store";
     public static final String STORE_JAR_PREFIX = "hg-store-node";
-    public static final String SERVER_PACKAGE_PREFIX = "apache-hugegraph-server-incubating";
-    public static final String CT_PACKAGE_PREFIX = "apache-hugegraph-ct-incubating";
+    public static final String SERVER_PACKAGE_PREFIX = "apache-hugegraph-server";
+    public static final String CT_PACKAGE_PREFIX = "apache-hugegraph-ct";
     public static final String APPLICATION_FILE = "application.yml";
     public static final String SERVER_PROPERTIES = "rest-server.properties";
     public static final String HUGEGRAPH_PROPERTIES = "graphs/hugegraph.properties";

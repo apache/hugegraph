@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -72,8 +73,11 @@ public class CypherAPI extends API {
     @CompressInterceptor.Compress(buffer = (1024 * 40))
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public CypherModel query(@Context HttpHeaders headers,
+                             @Parameter(description = "The graph space name")
                              @PathParam("graphspace") String graphspace,
+                             @Parameter(description = "The graph name")
                              @PathParam("graph") String graph,
+                             @Parameter(description = "The cypher query string")
                              @QueryParam("cypher") String cypher) {
 
         return this.queryByCypher(headers, graphspace, graph, cypher);
@@ -86,8 +90,11 @@ public class CypherAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public CypherModel post(@Context HttpHeaders headers,
+                            @Parameter(description = "The graph space name")
                             @PathParam("graphspace") String graphspace,
+                            @Parameter(description = "The graph name")
                             @PathParam("graph") String graph,
+                            @Parameter(description = "The cypher query string")
                             String cypher) {
 
         return this.queryByCypher(headers, graphspace, graph, cypher);

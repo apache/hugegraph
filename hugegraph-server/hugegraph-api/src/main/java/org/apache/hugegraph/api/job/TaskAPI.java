@@ -41,6 +41,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.BadRequestException;
@@ -69,12 +70,18 @@ public class TaskAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Map<String, Object> list(@Context GraphManager manager,
+                                    @Parameter(description = "The graphspace name")
                                     @PathParam("graphspace") String graphSpace,
+                                    @Parameter(description = "The graph name")
                                     @PathParam("graph") String graph,
+                                    @Parameter(description = "The task status to filter")
                                     @QueryParam("status") String status,
+                                    @Parameter(description = "The task ids to filter")
                                     @QueryParam("ids") List<Long> ids,
+                                    @Parameter(description = "The maximum number of tasks")
                                     @QueryParam("limit")
                                     @DefaultValue("100") long limit,
+                                    @Parameter(description = "The page token for pagination")
                                     @QueryParam("page") String page) {
         LOG.debug("Graph [{}] list tasks with status {}, ids {}, " +
                   "limit {}, page {}", graph, status, ids, limit, page);
@@ -95,12 +102,13 @@ public class TaskAPI extends API {
             limit = NO_LIMIT;
             List<Id> idList = ids.stream().map(IdGenerator::of)
                                  .collect(Collectors.toList());
-            iter = scheduler.tasks(idList);
+            iter = scheduler.tasks(idList, false);
         } else {
             if (status == null) {
-                iter = scheduler.tasks(null, limit, page);
+                iter = scheduler.tasks(null, limit, page, false);
             } else {
-                iter = scheduler.tasks(parseStatus(status), limit, page);
+                iter = scheduler.tasks(parseStatus(status), limit, page,
+                                       false);
             }
         }
 
@@ -124,14 +132,22 @@ public class TaskAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Map<String, Object> get(@Context GraphManager manager,
+                                   @Parameter(description = "The graphspace name")
                                    @PathParam("graphspace") String graphSpace,
+                                   @Parameter(description = "The graph name")
                                    @PathParam("graph") String graph,
-                                   @PathParam("id") long id) {
+                                   @Parameter(description = "The task id")
+                                   @PathParam("id") long id,
+                                   @Parameter(description = "Whether to load task result")
+                                   @DefaultValue("true")
+                                   @QueryParam("with_result")
+                                   boolean withResult) {
         LOG.debug("Graph [{}] get task: {}", graph, id);
 
         TaskScheduler scheduler = graph(manager, graphSpace, graph)
                 .taskScheduler();
-        return scheduler.task(IdGenerator.of(id)).asMap();
+        return scheduler.task(IdGenerator.of(id), withResult)
+                        .asMap(true, withResult);
     }
 
     @DELETE
@@ -139,9 +155,13 @@ public class TaskAPI extends API {
     @Path("{id}")
     @RedirectFilter.RedirectMasterRole
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graphspace name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "The task id")
                        @PathParam("id") long id,
+                       @Parameter(description = "Force delete the task even if it's running")
                        @DefaultValue("false") @QueryParam("force") boolean force) {
         LOG.debug("Graph [{}] delete task: {}", graph, id);
 
@@ -158,10 +178,14 @@ public class TaskAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RedirectFilter.RedirectMasterRole
     public Map<String, Object> update(@Context GraphManager manager,
+                                      @Parameter(description = "The graphspace name")
                                       @PathParam("graphspace")
                                       String graphSpace,
+                                      @Parameter(description = "The graph name")
                                       @PathParam("graph") String graph,
+                                      @Parameter(description = "The task id")
                                       @PathParam("id") long id,
+                                      @Parameter(description = "The action to perform on the task")
                                       @QueryParam("action") String action) {
         LOG.debug("Graph [{}] cancel task: {}", graph, id);
 

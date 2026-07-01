@@ -35,6 +35,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -62,6 +64,7 @@ public class AccessAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
                          JsonAccess jsonAccess) {
         LOG.debug("GraphSpace [{}] create access: {}", graphSpace, jsonAccess);
@@ -78,7 +81,9 @@ public class AccessAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The access id")
                          @PathParam("id") String id,
                          JsonAccess jsonAccess) {
         LOG.debug("GraphSpace [{}] update access: {}", graphSpace, jsonAccess);
@@ -99,9 +104,13 @@ public class AccessAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The group id to filter by")
                        @QueryParam("group") String group,
+                       @Parameter(description = "The target id to filter by")
                        @QueryParam("target") String target,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
         LOG.debug("GraphSpace [{}] list accesses by group {} or target {}",
                   graphSpace, group, target);
@@ -126,7 +135,9 @@ public class AccessAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The access id")
                       @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] get access: {}", graphSpace, id);
 
@@ -139,7 +150,9 @@ public class AccessAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The access id")
                        @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] delete access: {}", graphSpace, id);
 
@@ -155,12 +168,16 @@ public class AccessAPI extends API {
     private static class JsonAccess implements Checkable {
 
         @JsonProperty("group")
+        @Schema(description = "The group id", required = true)
         private String group;
         @JsonProperty("target")
+        @Schema(description = "The target id", required = true)
         private String target;
         @JsonProperty("access_permission")
+        @Schema(description = "The access permission", required = true)
         private HugePermission permission;
         @JsonProperty("access_description")
+        @Schema(description = "The access description")
         private String description;
 
         public HugeAccess build(HugeAccess access) {

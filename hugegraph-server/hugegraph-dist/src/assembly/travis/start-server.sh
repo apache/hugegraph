@@ -17,13 +17,12 @@
 #
 set -ev
 
-HOME_DIR=$(pwd)
-TRAVIS_DIR=$(dirname $0)
+TRAVIS_DIR=$(cd "$(dirname "$0")" && pwd)
 BASE_DIR=$1
 BACKEND=$2
 JACOCO_PORT=$3
 
-JACOCO_DIR=${HOME_DIR}/${TRAVIS_DIR}
+JACOCO_DIR=${TRAVIS_DIR}
 JACOCO_JAR=${JACOCO_DIR}/jacocoagent.jar
 
 BIN=$BASE_DIR/bin
@@ -33,27 +32,46 @@ GREMLIN_CONF=$BASE_DIR/conf/gremlin-server.yaml
 
 . "${BIN}"/util.sh
 
-declare -A backend_serializer_map=(["memory"]="text" \
-                                   ["hbase"]="hbase" \
-                                   ["rocksdb"]="binary" \
-                                   ["hstore"]="binary")
+function sed_in_place() {
+    local expression=$1
+    local file=$2
 
-SERIALIZER=${backend_serializer_map[$BACKEND]}
+    case "$(uname)" in
+        Darwin) sed -i '' "$expression" "$file" ;;
+        *) sed -i "$expression" "$file" ;;
+    esac
+}
+
+case "$BACKEND" in
+    memory)
+        SERIALIZER=text
+        ;;
+    hbase)
+        SERIALIZER=hbase
+        ;;
+    rocksdb|hstore)
+        SERIALIZER=binary
+        ;;
+    *)
+        echo "Unsupported backend: $BACKEND"
+        exit 1
+        ;;
+esac
 
 # Set backend and serializer
-sed -i "s/backend=.*/backend=$BACKEND/" $CONF
-sed -i "s/serializer=.*/serializer=$SERIALIZER/" $CONF
+write_property "$CONF" "backend" "$BACKEND"
+write_property "$CONF" "serializer" "$SERIALIZER"
 
 # Set timeout for hbase
 if [ "$BACKEND" == "hbase" ]; then
-    sed -i '$arestserver.request_timeout=200' $REST_CONF
-    sed -i '$agremlinserver.timeout=200' $REST_CONF
-    sed -i 's/evaluationTimeout.*/evaluationTimeout: 200000/' $GREMLIN_CONF
+    echo "restserver.request_timeout=200" >> $REST_CONF
+    echo "gremlinserver.timeout=200" >> $REST_CONF
+    sed_in_place 's/evaluationTimeout.*/evaluationTimeout: 200000/' "$GREMLIN_CONF"
 fi
 
 # Set usePD=true for hstore
 if [ "$BACKEND" == "hstore" ]; then
-    sed -i '$ausePD=true' $REST_CONF
+    echo "usePD=true" >> $REST_CONF
 fi
 
 # Append schema.sync_deletion=true to config file
@@ -65,6 +83,15 @@ if [ -n "$JACOCO_PORT" ]; then
       download "${JACOCO_DIR}" "https://github.com/apache/hugegraph-doc/raw/binary-1.0/dist/server/jacocoagent.jar"
     fi
     JACOCO_OPTION="-javaagent:${JACOCO_JAR}=includes=*,port=${JACOCO_PORT},destfile=jacoco-it.exec,output=tcpserver"
+fi
+
+SERVER_JAVA_OPTIONS="${SERVER_JAVA_OPTIONS:-}"
+if [ -n "$SERVER_JAVA_OPTIONS" ]; then
+    if [ -n "$JACOCO_OPTION" ]; then
+        JACOCO_OPTION="${JACOCO_OPTION} ${SERVER_JAVA_OPTIONS}"
+    else
+        JACOCO_OPTION="${SERVER_JAVA_OPTIONS}"
+    fi
 fi
 
 echo -e "pa" | $BIN/init-store.sh

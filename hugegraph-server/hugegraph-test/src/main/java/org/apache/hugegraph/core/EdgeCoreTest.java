@@ -2684,6 +2684,25 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByNonConsecutiveDuplicateIds() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        List<Edge> allEdges = graph.traversal().E().toList();
+        Assert.assertTrue("need at least 2 edges", allEdges.size() >= 2);
+
+        Object id1 = allEdges.get(0).id();
+        Object id2 = allEdges.get(1).id();
+
+        // Graph API does not guarantee duplicate results for duplicate ids
+        List<Edge> edges = ImmutableList.copyOf(graph.edges(id1, id2, id1));
+        Assert.assertEquals(3, edges.size());
+        Assert.assertEquals(id1, edges.get(0).id());
+        Assert.assertEquals(id2, edges.get(1).id());
+        Assert.assertEquals(id1, edges.get(2).id());
+    }
+
+    @Test
     public void testQueryEdgesByIdWithGraphAPIAndNotCommittedUpdate() {
         HugeGraph graph = graph();
         init18Edges();
@@ -4644,6 +4663,29 @@ public class EdgeCoreTest extends BaseCoreTest {
                     .has("score", 3)
                     .count().next();
         Assert.assertEquals(3L, size);
+    }
+
+    @Test
+    public void testQueryInEdgesOfVertexByConflictingLabels() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        long direct = graph.traversal().V().inE("created")
+                           .hasLabel("created", "look")
+                           .hasLabel("authored")
+                           .count().next();
+        Assert.assertEquals(0L, direct);
+
+        long matched = graph.traversal().V()
+                            .match(__.as("start1")
+                                     .inE("created")
+                                     .as("m1"))
+                            .select("m1")
+                            .hasLabel("created", "look")
+                            .hasLabel("authored")
+                            .count().next();
+        Assert.assertEquals(0L, matched);
+        Assert.assertEquals(matched, direct);
     }
 
     @Test
@@ -7115,6 +7157,165 @@ public class EdgeCoreTest extends BaseCoreTest {
                   .has("tool", "shovel").toList();
         Assert.assertEquals(1, el.size());
         Assert.assertEquals(1, (int) el.get(0).value("id"));
+    }
+
+    @Test
+    public void testQueryEdgeByBooleanRangePredicate() {
+        HugeGraph graph = graph();
+        initStrikeIndex();
+        graph.schema().indexLabel("strikeByArrested").onE("strike").secondary()
+             .by("arrested").create();
+
+        Vertex louise = graph.addVertex(T.label, "person", "name", "Louise",
+                                        "city", "Beijing", "age", 21);
+        Vertex sean = graph.addVertex(T.label, "person", "name", "Sean",
+                                      "city", "Beijing", "age", 23);
+        long current = System.currentTimeMillis();
+        louise.addEdge("strike", sean, "id", 1,
+                       "timestamp", current, "place", "park",
+                       "tool", "shovel", "reason", "jeer",
+                       "arrested", false);
+        louise.addEdge("strike", sean, "id", 2,
+                       "timestamp", current + 1, "place", "street",
+                       "tool", "shovel", "reason", "jeer",
+                       "arrested", true);
+
+        List<Edge> hasLtEdges = graph.traversal().E()
+                                     .has("arrested", P.lt(true))
+                                     .toList();
+        Assert.assertEquals(1, hasLtEdges.size());
+        Assert.assertEquals(1, (int) hasLtEdges.get(0).value("id"));
+
+        List<Edge> whereEdges = graph.traversal().E()
+                                     .where(__.has("arrested", P.lt(true)))
+                                     .toList();
+        Assert.assertEquals(1, whereEdges.size());
+        Assert.assertEquals(1, (int) whereEdges.get(0).value("id"));
+
+        List<Edge> matchEdges = graph.traversal().E()
+                                     .match(__.as("start")
+                                              .where(__.has("arrested",
+                                                            P.lt(true)))
+                                              .as("matched"))
+                                     .<Edge>select("matched")
+                                     .toList();
+        Assert.assertEquals(1, matchEdges.size());
+        Assert.assertEquals(1, (int) matchEdges.get(0).value("id"));
+
+        List<Edge> hasNeqTrueEdges = graph.traversal().E()
+                                          .has("arrested", P.neq(true))
+                                          .toList();
+        Assert.assertEquals(1, hasNeqTrueEdges.size());
+        Assert.assertEquals(1, (int) hasNeqTrueEdges.get(0).value("id"));
+
+        List<Edge> hasNeqFalseEdges = graph.traversal().E()
+                                           .has("arrested", P.neq(false))
+                                           .toList();
+        Assert.assertEquals(1, hasNeqFalseEdges.size());
+        Assert.assertEquals(2, (int) hasNeqFalseEdges.get(0).value("id"));
+
+        List<Edge> hasLteFalseEdges = graph.traversal().E()
+                                           .has("arrested", P.lte(false))
+                                           .toList();
+        Assert.assertEquals(1, hasLteFalseEdges.size());
+        Assert.assertEquals(1, (int) hasLteFalseEdges.get(0).value("id"));
+
+        List<Edge> hasGtFalseEdges = graph.traversal().E()
+                                          .has("arrested", P.gt(false))
+                                          .toList();
+        Assert.assertEquals(1, hasGtFalseEdges.size());
+        Assert.assertEquals(2, (int) hasGtFalseEdges.get(0).value("id"));
+
+        List<Edge> hasGteTrueEdges = graph.traversal().E()
+                                           .has("arrested", P.gte(true))
+                                           .toList();
+        Assert.assertEquals(1, hasGteTrueEdges.size());
+        Assert.assertEquals(2, (int) hasGteTrueEdges.get(0).value("id"));
+
+        List<Edge> hasGteFalseEdges = graph.traversal().E()
+                                            .has("arrested", P.gte(false))
+                                            .toList();
+        Assert.assertEquals(2, hasGteFalseEdges.size());
+        Set<Integer> gteFalseIds = new HashSet<>();
+        for (Edge edge : hasGteFalseEdges) {
+            gteFalseIds.add(edge.value("id"));
+        }
+        Assert.assertEquals(ImmutableSet.of(1, 2), gteFalseIds);
+
+        List<Edge> hasLteTrueEdges = graph.traversal().E()
+                                           .has("arrested", P.lte(true))
+                                           .toList();
+        Assert.assertEquals(2, hasLteTrueEdges.size());
+        Set<Integer> lteTrueIds = new HashSet<>();
+        for (Edge edge : hasLteTrueEdges) {
+            lteTrueIds.add(edge.value("id"));
+        }
+        Assert.assertEquals(ImmutableSet.of(1, 2), lteTrueIds);
+
+        Assert.assertEquals(0, graph.traversal().E()
+                                    .has("arrested", P.lt(false))
+                                    .toList().size());
+        Assert.assertEquals(0, graph.traversal().E()
+                                    .has("arrested", P.gt(true))
+                                    .toList().size());
+    }
+
+    @Test
+    public void testQueryEdgeByBooleanRangePredicateWithoutNullableProperty() {
+        HugeGraph graph = graph();
+        initStrikeIndex();
+        graph.schema().indexLabel("strikeByHurt").onE("strike").secondary()
+             .by("hurt").create();
+
+        Vertex louise = graph.addVertex(T.label, "person", "name", "Louise",
+                                        "city", "Beijing", "age", 21);
+        Vertex sean = graph.addVertex(T.label, "person", "name", "Sean",
+                                      "city", "Beijing", "age", 23);
+        long current = System.currentTimeMillis();
+        louise.addEdge("strike", sean, "id", 1,
+                       "timestamp", current, "place", "park",
+                       "tool", "shovel", "reason", "jeer",
+                       "hurt", false, "arrested", false);
+        louise.addEdge("strike", sean, "id", 2,
+                       "timestamp", current + 1, "place", "street",
+                       "tool", "shovel", "reason", "jeer",
+                       "hurt", true, "arrested", true);
+        louise.addEdge("strike", sean, "id", 3,
+                       "timestamp", current + 2, "place", "mall",
+                       "tool", "shovel", "reason", "jeer",
+                       "arrested", false);
+
+        List<Edge> gteFalseEdges = graph.traversal().E()
+                                        .has("hurt", P.gte(false))
+                                        .toList();
+        Assert.assertEquals(2, gteFalseEdges.size());
+        Set<Integer> gteFalseIds = new HashSet<>();
+        for (Edge edge : gteFalseEdges) {
+            gteFalseIds.add(edge.value("id"));
+        }
+        Assert.assertEquals(ImmutableSet.of(1, 2), gteFalseIds);
+
+        List<Edge> lteTrueEdges = graph.traversal().E()
+                                        .has("hurt", P.lte(true))
+                                        .toList();
+        Assert.assertEquals(2, lteTrueEdges.size());
+        Set<Integer> lteTrueIds = new HashSet<>();
+        for (Edge edge : lteTrueEdges) {
+            lteTrueIds.add(edge.value("id"));
+        }
+        Assert.assertEquals(ImmutableSet.of(1, 2), lteTrueIds);
+
+        List<Edge> lteFalseEdges = graph.traversal().E()
+                                         .has("hurt", P.lte(false))
+                                         .toList();
+        Assert.assertEquals(1, lteFalseEdges.size());
+        Assert.assertEquals(1, (int) lteFalseEdges.get(0).value("id"));
+
+        List<Edge> neqTrueEdges = graph.traversal().E()
+                                       .has("hurt", P.neq(true))
+                                       .toList();
+        Assert.assertEquals(1, neqTrueEdges.size());
+        Assert.assertEquals(1, (int) neqTrueEdges.get(0).value("id"));
     }
 
     @Test

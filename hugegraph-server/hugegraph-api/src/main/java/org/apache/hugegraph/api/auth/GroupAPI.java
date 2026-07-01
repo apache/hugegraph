@@ -34,6 +34,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -79,6 +81,7 @@ public class GroupAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The group id")
                          @PathParam("id") String id,
                          JsonGroup jsonGroup) {
         LOG.debug("update group: {}", jsonGroup);
@@ -100,6 +103,7 @@ public class GroupAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
         LOG.debug("list groups");
 
@@ -113,6 +117,7 @@ public class GroupAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"admin"})
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The group id")
                       @PathParam("id") String id) {
         LOG.debug("get group: {}", id);
 
@@ -126,6 +131,7 @@ public class GroupAPI extends API {
     @Consumes(APPLICATION_JSON)
     @RolesAllowed({"admin"})
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The group id")
                        @PathParam("id") String id) {
         LOG.debug("delete group: {}", id);
 
@@ -141,8 +147,10 @@ public class GroupAPI extends API {
     private static class JsonGroup implements Checkable {
 
         @JsonProperty("group_name")
+        @Schema(description = "The group name", required = true)
         private String name;
         @JsonProperty("group_description")
+        @Schema(description = "The group description")
         private String description;
 
         public HugeGroup build(HugeGroup group) {

@@ -28,7 +28,7 @@
 
     <artifactId>hugegraph-common</artifactId>
     <name>${project.artifactId}</name>
-    <url>https://github.com/apache/incubator-hugegraph-commons/tree/master/hugegraph-common</url>
+    <url>https://github.com/apache/hugegraph-commons/tree/master/hugegraph-common</url>
     <description>
         hugegraph-common is a common module for HugeGraph and its peripheral components.
         hugegraph-common encapsulates locks, configurations, events, iterators, rest and some

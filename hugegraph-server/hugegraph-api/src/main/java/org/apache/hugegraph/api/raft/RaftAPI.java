@@ -40,6 +40,7 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -67,8 +68,11 @@ public class RaftAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member"})
     public Map<String, List<String>> listPeers(@Context GraphManager manager,
+                                               @Parameter(description = "The graph name")
                                                @PathParam("graph") String graph,
+                                               @Parameter(description = "The graph space name")
                                                @PathParam("graphspace") String graphSpace,
+                                               @Parameter(description = "The raft group name")
                                                @QueryParam("group")
                                                @DefaultValue("default")
                                                String group) {
@@ -87,8 +91,11 @@ public class RaftAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member"})
     public Map<String, String> getLeader(@Context GraphManager manager,
+                                         @Parameter(description = "The graph name")
                                          @PathParam("graph") String graph,
+                                         @Parameter(description = "The graph space name")
                                          @PathParam("graphspace") String graphSpace,
+                                         @Parameter(description = "The raft group name")
                                          @QueryParam("group")
                                          @DefaultValue("default")
                                          String group) {
@@ -108,11 +115,15 @@ public class RaftAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member"})
     public Map<String, String> transferLeader(@Context GraphManager manager,
+                                              @Parameter(description = "The graph space name")
                                               @PathParam("graphspace") String graphSpace,
+                                              @Parameter(description = "The graph name")
                                               @PathParam("graph") String graph,
+                                              @Parameter(description = "The raft group name")
                                               @QueryParam("group")
                                               @DefaultValue("default")
                                               String group,
+                                              @Parameter(description = "The endpoint address")
                                               @QueryParam("endpoint")
                                               String endpoint) {
         LOG.debug("Graph [{}] prepare to transfer leader to: {}",
@@ -133,11 +144,17 @@ public class RaftAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member"})
     public Map<String, String> setLeader(@Context GraphManager manager,
+                                         @Parameter(description = "The graph space name")
                                          @PathParam("graphspace") String graphSpace,
+                                         @Parameter(description = "The graph name")
                                          @PathParam("graph") String graph,
+                                         @Parameter(description = "The raft group name")
                                          @QueryParam("group")
                                          @DefaultValue("default")
                                          String group,
+                                         @Parameter(
+                                                 description = "The endpoint address to set as " +
+                                                               "leader")
                                          @QueryParam("endpoint")
                                          String endpoint) {
         LOG.debug("Graph [{}] prepare to set leader to: {}",
@@ -158,10 +175,15 @@ public class RaftAPI extends API {
     @RolesAllowed({"space_member"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> addPeer(@Context GraphManager manager,
+                                   @Parameter(description = "The graph space name")
                                    @PathParam("graphspace") String graphSpace,
+                                   @Parameter(description = "The graph name")
                                    @PathParam("graph") String graph,
+                                   @Parameter(description = "The raft group name")
                                    @QueryParam("group") @DefaultValue("default")
                                    String group,
+                                   @Parameter(
+                                           description = "The endpoint address of the peer to add")
                                    @QueryParam("endpoint") String endpoint) {
         LOG.debug("Graph [{}] prepare to add peer: {}", graph, endpoint);
 
@@ -189,10 +211,16 @@ public class RaftAPI extends API {
     @RolesAllowed({"space_member"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> removePeer(@Context GraphManager manager,
+                                      @Parameter(description = "The graph space name")
                                       @PathParam("graphspace") String graphSpace,
+                                      @Parameter(description = "The graph name")
                                       @PathParam("graph") String graph,
+                                      @Parameter(description = "The raft group name")
                                       @QueryParam("group")
                                       @DefaultValue("default") String group,
+                                      @Parameter(
+                                              description = "The endpoint address of the peer to " +
+                                                            "remove")
                                       @QueryParam("endpoint") String endpoint) {
         LOG.debug("Graph [{}] prepare to remove peer: {}", graph, endpoint);
 

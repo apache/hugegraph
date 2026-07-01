@@ -19,6 +19,7 @@ package org.apache.hugegraph.core;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
@@ -69,6 +70,7 @@ import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.CollectionUtil;
+import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -824,6 +826,63 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals("Movie", vertex.value("fav"));
         Assert.assertEquals(123, vertex.value("cnt"));
         Assert.assertFalse(vertex.values("age").hasNext());
+    }
+
+    @Test
+    public void testAddVertexWithDateDefaultValue() {
+        SchemaManager schema = graph().schema();
+
+        Date joined = DateUtil.parse("2026-05-14 10:11:12.345");
+        schema.propertyKey("joinDate").asDate()
+              .userdata(Userdata.DEFAULT_VALUE, joined).create();
+        schema.vertexLabel("person")
+              .properties("joinDate")
+              .nullableKeys("joinDate").append();
+
+        // No 'joinDate' supplied
+        Vertex vertex = graph().addVertex(T.label, "person",
+                                          "name", "Baby", "city", "Shanghai");
+
+        this.commitTx();
+
+        // Reload from backend then query: the typed default must survive the
+        // JSON serialize/reload round-trip as a Date, not a String (#3028).
+        vertex = graph().vertex(vertex.id());
+        Object value = vertex.value("joinDate");
+        Assert.assertTrue("default 'joinDate' should be a Date, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Date);
+        Assert.assertEquals(joined, value);
+    }
+
+    @Test
+    public void testAddVertexWithDateSetDefaultValue() {
+        SchemaManager schema = graph().schema();
+
+        String dateStr = "2026-05-14 10:11:12.345";
+        Date expected = DateUtil.parse(dateStr);
+
+        // Simulate JSON-deserialized default: ArrayList of Strings with duplicates
+        schema.propertyKey("joinDates").asDate().valueSet()
+              .userdata(Userdata.DEFAULT_VALUE, Arrays.asList(dateStr, dateStr))
+              .create();
+        schema.vertexLabel("person")
+              .properties("joinDates")
+              .nullableKeys("joinDates").append();
+
+        Vertex vertex = graph().addVertex(T.label, "person",
+                                          "name", "Baby", "city", "Shanghai");
+        this.commitTx();
+
+        vertex = graph().vertex(vertex.id());
+        Object raw = vertex.value("joinDates");
+
+        Assert.assertTrue("joinDates should be a Set, was " +
+                          (raw == null ? "null" : raw.getClass()),
+                          raw instanceof Set);
+        Set<?> values = (Set<?>) raw;
+        Assert.assertEquals("duplicates must be collapsed", 1, values.size());
+        Assert.assertTrue(values.contains(expected));
     }
 
     @Test
@@ -6468,6 +6527,87 @@ public class VertexCoreTest extends BaseCoreTest {
         Vertex vertex = graph.traversal().V().has("city", "").next();
         Assert.assertEquals("Baby", vertex.value("name"));
         Assert.assertEquals("", vertex.value("city"));
+    }
+
+    @Test
+    public void testQueryVertexByBooleanPredicate() {
+        HugeGraph graph = graph();
+        Assume.assumeFalse("skip this test for hstore",
+                           Objects.equals("hstore", graph.backend()));
+
+        graph.schema().indexLabel("languageByDynamic").onV("language")
+             .secondary().by("dynamic").create();
+
+        graph.addVertex(T.label, "language", "name", "java",
+                        "dynamic", true);
+        graph.addVertex(T.label, "language", "name", "rust",
+                        "dynamic", false);
+        graph.addVertex(T.label, "language", "name", "c");
+        this.commitTx();
+
+        List<Vertex> neqTrueVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .has("dynamic", P.neq(true))
+                                             .toList();
+        Assert.assertEquals(1, neqTrueVertices.size());
+        Assert.assertEquals("rust", neqTrueVertices.get(0).value("name"));
+
+        List<Vertex> neqFalseVertices = graph.traversal().V()
+                                               .hasLabel("language")
+                                               .has("dynamic", P.neq(false))
+                                               .toList();
+        Assert.assertEquals(1, neqFalseVertices.size());
+        Assert.assertEquals("java", neqFalseVertices.get(0).value("name"));
+
+        List<Vertex> hasLtVertices = graph.traversal().V()
+                                           .hasLabel("language")
+                                           .has("dynamic", P.lt(true))
+                                           .toList();
+        Assert.assertEquals(1, hasLtVertices.size());
+        Assert.assertEquals("rust", hasLtVertices.get(0).value("name"));
+
+        List<Vertex> whereLtVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .where(__.has("dynamic",
+                                                           P.lt(true)))
+                                             .toList();
+        Assert.assertEquals(1, whereLtVertices.size());
+        Assert.assertEquals("rust", whereLtVertices.get(0).value("name"));
+
+        List<Vertex> matchLtVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .match(__.as("start")
+                                                      .where(__.has("dynamic",
+                                                                    P.lt(true)))
+                                                      .as("matched"))
+                                             .<Vertex>select("matched")
+                                             .toList();
+        Assert.assertEquals(1, matchLtVertices.size());
+        Assert.assertEquals("rust", matchLtVertices.get(0).value("name"));
+
+        List<Vertex> compoundOrVertices = graph.traversal().V()
+                                                .hasLabel("language")
+                                                .has("dynamic",
+                                                     P.gt(true).or(P.eq(true)))
+                                                .toList();
+        Assert.assertEquals(1, compoundOrVertices.size());
+        Assert.assertEquals("java", compoundOrVertices.get(0).value("name"));
+
+        Assert.assertEquals(0, graph.traversal().V()
+                                    .hasLabel("language")
+                                    .has("dynamic", P.lt(false))
+                                    .toList().size());
+
+        List<Vertex> gteFalseVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .has("dynamic", P.gte(false))
+                                             .toList();
+        Assert.assertEquals(2, gteFalseVertices.size());
+        Set<String> gteFalseNames = new HashSet<>();
+        for (Vertex vertex : gteFalseVertices) {
+            gteFalseNames.add(vertex.value("name"));
+        }
+        Assert.assertEquals(ImmutableSet.of("java", "rust"), gteFalseNames);
     }
 
     @Test

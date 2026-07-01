@@ -186,6 +186,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     public static Context getContext() {
         // Return task context first
         String taskContext = TaskManager.getContext();
+
         User user = User.fromJson(taskContext);
         if (user != null) {
             return new Context(user);
@@ -953,6 +954,14 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         this.hugegraph.updateTime(updateTime);
     }
 
+    public static String username() {
+        Context context = HugeGraphAuthProxy.getContext();
+        if (context == null) {
+            return "anonymous";
+        }
+        return context.user.username();
+    }
+
     private <V> Cache<Id, V> cache(String prefix, long capacity,
                                    long expiredTime) {
         String name = prefix + "-" + this.hugegraph.spaceGraphName();
@@ -1317,8 +1326,14 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public <V> HugeTask<V> task(Id id) {
+            return this.task(id, true);
+        }
+
+        @Override
+        public <V> HugeTask<V> task(Id id, boolean withResult) {
             return verifyTaskPermission(HugePermission.READ,
-                                        this.taskScheduler.task(id));
+                                        this.taskScheduler.task(id,
+                                                                withResult));
         }
 
         @Override
@@ -1328,17 +1343,35 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public <V> Iterator<HugeTask<V>> tasks(List<Id> ids,
+                                               boolean withResult) {
+            return verifyTaskPermission(HugePermission.READ,
+                                        this.taskScheduler.tasks(ids,
+                                                                 withResult));
+        }
+
+        @Override
         public <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
                                                long limit, String page) {
             Iterator<HugeTask<V>> tasks = this.taskScheduler.tasks(status,
-                                                                   limit, page);
+                                                                   limit,
+                                                                   page);
+            return verifyTaskPermission(HugePermission.READ, tasks);
+        }
+
+        @Override
+        public <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
+                                               long limit, String page,
+                                               boolean withResult) {
+            Iterator<HugeTask<V>> tasks = this.taskScheduler.tasks(
+                    status, limit, page, withResult);
             return verifyTaskPermission(HugePermission.READ, tasks);
         }
 
         @Override
         public <V> HugeTask<V> delete(Id id, boolean force) {
             verifyTaskPermission(HugePermission.DELETE,
-                                 this.taskScheduler.task(id));
+                                 this.taskScheduler.task(id, false));
             return this.taskScheduler.delete(id, force);
         }
 

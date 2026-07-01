@@ -36,6 +36,7 @@ public final class StringEncoding {
     private static final byte[] BYTES_EMPTY = new byte[0];
     private static final String STRING_EMPTY = "";
     private static final int BLOCK_SIZE = 4096;
+    private static final int BCRYPT_WORK_FACTOR = 10;
 
     static {
         final String ALG = "SHA-256";
@@ -140,7 +141,9 @@ public final class StringEncoding {
     }
 
     public static String hashPassword(String password) {
-        return BCrypt.hashpw(password, BCrypt.gensalt(4));
+        // OWASP suggests 10 as a minimum and 12–14 for production;
+        // workFactor 12 is not used by default due to its 200+ ms cost.
+        return BCrypt.hashpw(password, BCrypt.gensalt(BCRYPT_WORK_FACTOR));
     }
 
     public static boolean checkPassword(String candidatePassword, String dbPassword) {

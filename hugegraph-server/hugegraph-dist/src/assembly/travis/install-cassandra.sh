@@ -17,7 +17,7 @@
 #
 set -ev
 
-CASS_DOWNLOAD_ADDRESS="http://archive.apache.org/dist/cassandra"
+CASS_DOWNLOAD_ADDRESS="https://archive.apache.org/dist/cassandra"
 CASS_VERSION="4.0.10"
 CASS_PACKAGE="apache-cassandra-${CASS_VERSION}"
 CASS_TAR="${CASS_PACKAGE}-bin.tar.gz"

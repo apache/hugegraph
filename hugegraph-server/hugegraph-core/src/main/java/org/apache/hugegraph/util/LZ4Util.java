@@ -64,7 +64,7 @@ public class LZ4Util {
         LZ4FastDecompressor decompressor = factory.fastDecompressor();
         ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
         int initBufferSize = Math.min(Math.round(bytes.length * ratio),
-                                      BytesBuffer.MAX_BUFFER_CAPACITY);
+                                      BytesBuffer.maxBufferCapacity());
         BytesBuffer buf = new BytesBuffer(initBufferSize);
         LZ4BlockInputStream lzInput = new LZ4BlockInputStream(bais, decompressor);
         int count;

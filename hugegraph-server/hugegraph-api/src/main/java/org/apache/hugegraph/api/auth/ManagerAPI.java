@@ -37,6 +37,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -62,9 +64,11 @@ public class ManagerAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String createManager(@Context GraphManager manager,
+                                @Parameter(description = "The graph space name")
                                 @PathParam("graphspace") String graphSpace,
                                 JsonManager jsonManager) {
         LOG.debug("Create manager: {}", jsonManager);
+        ensurePdModeEnabled(manager);
         String user = jsonManager.user;
         HugePermission type = jsonManager.type;
         // graphSpace now comes from @PathParam instead of JsonManager
@@ -73,7 +77,7 @@ public class ManagerAPI extends API {
         AuthManager authManager = manager.authManager();
         validUser(authManager, user);
 
-        String creator = HugeGraphAuthProxy.getContext().user().username();
+        String creator = HugeGraphAuthProxy.username();
         switch (type) {
             case SPACE:
                 validGraphSpace(manager, graphSpace);
@@ -113,10 +117,14 @@ public class ManagerAPI extends API {
     @Timed
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The user name")
                        @QueryParam("user") String user,
+                       @Parameter(description = "The manager type: SPACE, SPACE_MEMBER, or ADMIN")
                        @QueryParam("type") HugePermission type) {
         LOG.debug("Delete graph manager: {} {} {}", user, type, graphSpace);
+        ensurePdModeEnabled(manager);
         E.checkArgument(!"admin".equals(user) ||
                         type != HugePermission.ADMIN,
                         "User 'admin' can't be removed from ADMIN");
@@ -124,7 +132,7 @@ public class ManagerAPI extends API {
         AuthManager authManager = manager.authManager();
         validType(type);
         validUser(authManager, user);
-        String actionUser = HugeGraphAuthProxy.getContext().user().username();
+        String actionUser = HugeGraphAuthProxy.username();
 
         switch (type) {
             case SPACE:
@@ -157,10 +165,12 @@ public class ManagerAPI extends API {
     @Timed
     @Consumes(APPLICATION_JSON)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The manager type: SPACE, SPACE_MEMBER or ADMIN")
                        @QueryParam("type") HugePermission type) {
         LOG.debug("list graph manager: {} {}", type, graphSpace);
-
+        ensurePdModeEnabled(manager);
         AuthManager authManager = manager.authManager();
         validType(type);
         List<String> adminManagers;
@@ -187,13 +197,16 @@ public class ManagerAPI extends API {
     @Path("check")
     @Consumes(APPLICATION_JSON)
     public String checkRole(@Context GraphManager manager,
+                            @Parameter(description = "The graph space name")
                             @PathParam("graphspace") String graphSpace,
+                            @Parameter(description = "The manager type: " +
+                                                     "SPACE, SPACE_MEMBER, or ADMIN")
                             @QueryParam("type") HugePermission type) {
         LOG.debug("check if current user is graph manager: {} {}", type, graphSpace);
-
+        ensurePdModeEnabled(manager);
         validType(type);
         AuthManager authManager = manager.authManager();
-        String user = HugeGraphAuthProxy.getContext().user().username();
+        String user = HugeGraphAuthProxy.username();
 
         boolean result;
         switch (type) {
@@ -219,9 +232,12 @@ public class ManagerAPI extends API {
     @Path("role")
     @Consumes(APPLICATION_JSON)
     public String getRolesInGs(@Context GraphManager manager,
+                               @Parameter(description = "The graph space name")
                                @PathParam("graphspace") String graphSpace,
-                               @QueryParam("user") String user) {
+                               @Parameter(description = "The user name") @QueryParam("user")
+                               String user) {
         LOG.debug("get user [{}]'s role in graph space [{}]", user, graphSpace);
+        ensurePdModeEnabled(manager);
         AuthManager authManager = manager.authManager();
         List<HugePermission> result = new ArrayList<>();
         validGraphSpace(manager, graphSpace);
@@ -264,8 +280,10 @@ public class ManagerAPI extends API {
     private static class JsonManager implements Checkable {
 
         @JsonProperty("user")
+        @Schema(description = "The user or group name", required = true)
         private String user;
         @JsonProperty("type")
+        @Schema(description = "The manager type: SPACE, SPACE_MEMBER, or ADMIN", required = true)
         private HugePermission type;
 
         @Override

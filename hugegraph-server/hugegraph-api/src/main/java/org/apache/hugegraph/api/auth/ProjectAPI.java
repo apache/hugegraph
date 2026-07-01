@@ -39,6 +39,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -68,6 +70,7 @@ public class ProjectAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
                          JsonProject jsonProject) {
         LOG.debug("GraphSpace [{}] create project: {}", graphSpace, jsonProject);
@@ -89,8 +92,15 @@ public class ProjectAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The project id")
                          @PathParam("id") String id,
+                         @Parameter(
+                                 description = "The action to perform: " +
+                                               "add_graph, remove_graph, " +
+                                               "or empty for description " +
+                                               "update")
                          @QueryParam("action") String action,
                          JsonProject jsonProject) {
         LOG.debug("GraphSpace [{}] update {} project: {}", graphSpace, action,
@@ -126,7 +136,9 @@ public class ProjectAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
         LOG.debug("GraphSpace [{}] list project", graphSpace);
 
@@ -140,7 +152,9 @@ public class ProjectAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
                       @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The project id")
                       @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] get project: {}", graphSpace, id);
 
@@ -158,7 +172,9 @@ public class ProjectAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
                        @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The project id")
                        @PathParam("id") String id) {
         LOG.debug("GraphSpace [{}] delete project: {}", graphSpace, id);
 
@@ -184,10 +200,13 @@ public class ProjectAPI extends API {
     private static class JsonProject implements Checkable {
 
         @JsonProperty("project_name")
+        @Schema(description = "The project name", required = true)
         private String name;
         @JsonProperty("project_graphs")
+        @Schema(description = "Set of graph names associated with the project")
         private Set<String> graphs;
         @JsonProperty("project_description")
+        @Schema(description = "The project description")
         private String description;
 
         public HugeProject build() {

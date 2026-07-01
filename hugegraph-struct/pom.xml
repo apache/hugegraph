@@ -108,10 +108,12 @@
             <artifactId>fastutil</artifactId>
             <version>8.1.0</version>
         </dependency>
+        <!-- LZ4 version update from 1.7.1 to 1.8.1. For details on the specific changes, please refer to:
+        https://sites.google.com/sonatype.com/vulnerabilities/cve-2025-12183 -->
         <dependency>
             <groupId>org.lz4</groupId>
             <artifactId>lz4-java</artifactId>
-            <version>1.7.1</version>
+            <version>1.8.1</version>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>

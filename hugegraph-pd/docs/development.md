@@ -63,9 +63,8 @@ cd hugegraph-pd
 #### Configure Code Style
 
 1. **File → Settings → Editor → Code Style**
-2. **Import Scheme → IntelliJ IDEA code style XML**
-3. Select `hugegraph-style.xml` from repository root
-4. **Apply** and **OK**
+2. Ensure **Enable EditorConfig support** is checked
+3. **Apply** and **OK**
 
 #### Enable Annotation Processing
 
@@ -277,9 +276,9 @@ ls -lh pd_data/raft/snapshot/
 
 HugeGraph PD follows Apache HugeGraph code style.
 
-**Import Code Style**:
+**IDE Configuration**:
 1. IntelliJ IDEA: **File → Settings → Editor → Code Style**
-2. **Import Scheme** → Select `hugegraph-style.xml` (in repository root)
+2. Ensure **Enable EditorConfig support** is checked
 
 **Key Style Rules**:
 - **Indentation**: 4 spaces (no tabs)

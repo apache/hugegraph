@@ -34,15 +34,21 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.SERVER_PACKAGE_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.SERVER_TEMPLATE_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.isJava11OrHigher;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 public class ServerNodeWrapper extends AbstractNodeWrapper {
 
+    private static List<String> hgJars = loadHgJarsOnce();
     public ServerNodeWrapper(int clusterIndex, int index) {
         super(clusterIndex, index);
         this.fileNames = new ArrayList<>(
@@ -67,6 +73,38 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
         }
     }
 
+    private static void addOrderedJarsToClasspath(File directory, List<String> classpath) {
+        // Add jar starts with hugegraph in proper order
+        String path = directory.getAbsolutePath();
+        for (String jar : hgJars) {
+            classpath.add(path + File.separator + jar);
+        }
+        if (directory.exists() && directory.isDirectory()) {
+            File[] files =
+                    directory.listFiles((dir, name) -> name.endsWith(".jar") && !name.contains(
+                            "hugegraph"));
+            if (files != null) {
+                for (File file : files) {
+                    classpath.add(file.getAbsolutePath());
+                }
+            }
+        }
+    }
+
+    private static List<String> loadHgJarsOnce(){
+        ArrayList<String> jars = new ArrayList<>();
+        try (InputStream is = ServerNodeWrapper.class.getResourceAsStream("/jar.txt");
+             BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                jars.add(line);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return Collections.unmodifiableList(jars);
+    }
+
     @Override
     public void start() {
         try {
@@ -79,7 +117,7 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
             }
 
             List<String> classpath = new ArrayList<>();
-            addJarsToClasspath(new File(workPath + LIB_DIR), classpath);
+            addOrderedJarsToClasspath(new File(workPath + LIB_DIR), classpath);
             addJarsToClasspath(new File(workPath + EXT_DIR), classpath);
             addJarsToClasspath(new File(workPath + PLUGINS_DIR), classpath);
             String storeClassPath = String.join(":", classpath);
@@ -87,6 +125,8 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
             startCmd.addAll(Arrays.asList(
                     "-Dname=HugeGraphServer" + this.index,
                     "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
+                    "--add-modules=jdk.unsupported",
+                    "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
                     "-cp", storeClassPath,
                     "org.apache.hugegraph.dist.HugeGraphServer",
                     "./conf/gremlin-server.yaml",

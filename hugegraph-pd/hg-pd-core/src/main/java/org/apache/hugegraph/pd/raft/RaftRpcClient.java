@@ -60,7 +60,7 @@ public class RaftRpcClient {
     private <V> void internalCallAsyncWithRpc(final Endpoint endpoint,
                                               final RaftRpcProcessor.BaseRequest request,
                                               final FutureClosureAdapter<V> closure) {
-        final InvokeContext invokeCtx = null;
+        final InvokeContext invokeCtx = new InvokeContext();
         final InvokeCallback invokeCallback = new InvokeCallback() {
 
             @Override

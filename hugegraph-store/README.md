@@ -104,12 +104,12 @@ From the project root:
 mvn install -pl hugegraph-struct -am -DskipTests
 
 # Build Store and all dependencies
-mvn clean package -pl hugegraph-store/hugegraph-store-dist -am -DskipTests
+mvn clean package -pl hugegraph-store/hg-store-dist -am -DskipTests
 ```
 
 The assembled distribution will be available at:
 ```
-hugegraph-store/apache-hugegraph-store-incubating-1.7.0/lib/hg-store-node-1.7.0.jar```
+hugegraph-store/apache-hugegraph-store-<version>/lib/hg-store-node-<version>.jar
 ```
 
 ### Configuration
@@ -214,7 +214,9 @@ Start the Store server:
 
 ```bash
 # Replace {version} with your hugegraph version
-cd apache-hugegraph-store-incubating-{version}
+# For historical 1.7.0 and earlier releases, use
+# apache-hugegraph-store-incubating-{version} instead.
+cd apache-hugegraph-store-{version}
 
 # Start Store node
 bin/start-hugegraph-store.sh
@@ -229,11 +231,12 @@ bin/restart-hugegraph-store.sh
 #### Startup Options
 
 ```bash
-bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"]
+bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
 ```
 
 - `-g`: GC type (`g1` or `ZGC`, default: `g1`)
 - `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
+- `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
 
 Default JVM memory settings (defined in `start-hugegraph-store.sh`):
 - Max heap: 32GB
@@ -346,7 +349,7 @@ For development workflows and debugging, see [Development Guide](docs/developmen
 From the project root:
 
 ```bash
-docker build -f hugegraph-store/Dockerfile -t hugegraph-store:latest .
+docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
 ```
 
 ### Run Container
@@ -356,11 +359,12 @@ docker run -d \
   -p 8520:8520 \
   -p 8500:8500 \
   -p 8510:8510 \
-  -v /path/to/conf:/hugegraph-store/conf \
+  -e HG_STORE_PD_ADDRESS=<pd-ip>:8686 \
+  -e HG_STORE_GRPC_HOST=<your-ip> \
+  -e HG_STORE_RAFT_ADDRESS=<your-ip>:8510 \
   -v /path/to/storage:/hugegraph-store/storage \
-  -e PD_ADDRESS=192.168.1.10:8686,192.168.1.11:8686 \
   --name hugegraph-store \
-  hugegraph-store:latest
+  hugegraph/store:latest
 ```
 
 **Exposed Ports**:
@@ -373,8 +377,10 @@ docker run -d \
 For a complete HugeGraph distributed deployment (PD + Store + Server), see:
 
 ```
-hugegraph-server/hugegraph-dist/docker/example/
+docker/docker-compose-3pd-3store-3server.yml
 ```
+
+See [docker/README.md](../docker/README.md) for the full setup guide.
 
 For Docker and Kubernetes deployment details, see [Deployment Guide](docs/deployment-guide.md).
 
@@ -475,6 +481,4 @@ HugeGraph Store is licensed under the [Apache License 2.0](https://www.apache.or
 
 ---
 
-**Status**: BETA (from v1.5.0+)
-
-HugeGraph Store is under active development. While suitable for production use, APIs and configurations may evolve. Please report issues via GitHub or the mailing list.
+HugeGraph Store is under active development. Please report issues via GitHub or the mailing list.

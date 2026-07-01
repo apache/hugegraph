@@ -48,6 +48,7 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.serializer.SerializerFactory;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendProviderFactory;
@@ -231,14 +232,21 @@ public class StandardHugeGraph implements HugeGraph {
         this.readMode = GraphReadMode.OLTP_ONLY;
         this.schedulerType = config.get(CoreOptions.SCHEDULER_TYPE);
 
-        LockUtil.init(this.spaceGraphName());
-
+        // Init process-wide static configs before lock, so that validation
+        // failures won't leave stale lock groups in LockManager.
+        boolean explicitBufferCapacity = config.containsKey(
+                CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY.name());
+        BytesBuffer.initMaxBufferCapacity(
+                config.get(CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY),
+                explicitBufferCapacity);
         MemoryManager.setMemoryMode(
                 MemoryManager.MemoryMode.fromValue(config.get(CoreOptions.MEMORY_MODE)));
         MemoryManager.setMaxMemoryCapacityInBytes(config.get(CoreOptions.MAX_MEMORY_CAPACITY));
         MemoryManager.setMaxMemoryCapacityForOneQuery(
                 config.get(CoreOptions.ONE_QUERY_MAX_MEMORY_CAPACITY));
         RoundUtil.setAlignment(config.get(CoreOptions.MEMORY_ALIGNMENT));
+
+        LockUtil.init(this.spaceGraphName());
 
         try {
             this.storeProvider = this.loadStoreProvider();
@@ -1394,7 +1402,7 @@ public class StandardHugeGraph implements HugeGraph {
                                     "Expect event action argument");
                     String action = (String) args[0];
                     LOG.debug("Event action: {}", action);
-                    if (Cache.ACTION_INVALIDED.equals(action)) {
+                    if (Cache.ACTION_INVALID.equals(action)) {
                         event.checkArgs(String.class, HugeType.class, Object.class);
                         HugeType type = (HugeType) args[1];
                         Object ids = args[2];
@@ -1410,7 +1418,7 @@ public class StandardHugeGraph implements HugeGraph {
                             E.checkArgument(false, "Unexpected argument: %s", ids);
                         }
                         return true;
-                    } else if (Cache.ACTION_CLEARED.equals(action)) {
+                    } else if (Cache.ACTION_CLEAR.equals(action)) {
                         event.checkArgs(String.class, HugeType.class);
                         HugeType type = (HugeType) args[1];
                         LOG.debug("Calling proxy.clear with type: {}", type);
@@ -1435,17 +1443,20 @@ public class StandardHugeGraph implements HugeGraph {
 
         @Override
         public void invalid(HugeType type, Id id) {
-            this.hub.notify(Events.CACHE, Cache.ACTION_INVALID, type, id);
+            this.hub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                  Cache.ACTION_INVALID, type, id);
         }
 
         @Override
         public void invalid2(HugeType type, Object[] ids) {
-            this.hub.notify(Events.CACHE, Cache.ACTION_INVALID, type, ids);
+            this.hub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                  Cache.ACTION_INVALID, type, ids);
         }
 
         @Override
         public void clear(HugeType type) {
-            this.hub.notify(Events.CACHE, Cache.ACTION_CLEAR, type);
+            this.hub.notifyExcept(Events.CACHE, this.cacheEventListener,
+                                  Cache.ACTION_CLEAR, type);
         }
 
         @Override

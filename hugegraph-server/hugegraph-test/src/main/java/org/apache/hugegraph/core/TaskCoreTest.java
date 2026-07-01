@@ -116,6 +116,88 @@ public class TaskCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testTaskWithoutResult() throws TimeoutException {
+        HugeGraph graph = graph();
+        TaskScheduler scheduler = graph.taskScheduler();
+
+        Id id = IdGenerator.of(88889);
+        HugeTask<?> task = new HugeTask<>(id, null, new SleepCallable<>());
+        task.type("test");
+        task.name("metadata-task-in-memory");
+        scheduler.schedule(task);
+
+        try {
+            Whitebox.setInternalState(task, "result", "\"in-memory-result\"");
+
+            HugeTask<?> taskWithoutResult = scheduler.task(id, false);
+            Assert.assertEquals("metadata-task-in-memory",
+                                taskWithoutResult.name());
+            Assert.assertNull(taskWithoutResult.result());
+
+            Iterator<HugeTask<Object>> iter = scheduler.tasks(ImmutableList.of(id),
+                                                              false);
+            Assert.assertTrue(iter.hasNext());
+            taskWithoutResult = iter.next();
+            Assert.assertEquals("metadata-task-in-memory",
+                                taskWithoutResult.name());
+            Assert.assertNull(taskWithoutResult.result());
+            Assert.assertFalse(iter.hasNext());
+        } finally {
+            Whitebox.setInternalState(task, "result", null);
+        }
+
+        scheduler.waitUntilTaskCompleted(id, 10);
+        scheduler.delete(id, false);
+
+        id = IdGenerator.of(88890);
+        task = new HugeTask<>(id, null, new MetadataResultCallable());
+        task.type("test");
+        task.name("metadata-task");
+        scheduler.schedule(task);
+
+        scheduler.waitUntilTaskCompleted(id, 10);
+
+        HugeTask<?> taskWithResult = scheduler.task(id, true);
+        Assert.assertEquals("\"metadata-result\"", taskWithResult.result());
+
+        HugeTask<?> taskWithoutResult = scheduler.task(id, false);
+        Assert.assertEquals("metadata-task", taskWithoutResult.name());
+        Assert.assertNull(taskWithoutResult.result());
+
+        Iterator<HugeTask<Object>> iter = scheduler.tasks(ImmutableList.of(id));
+        Assert.assertTrue(iter.hasNext());
+        taskWithResult = iter.next();
+        Assert.assertEquals("metadata-task", taskWithResult.name());
+        Assert.assertEquals("\"metadata-result\"", taskWithResult.result());
+        Assert.assertFalse(iter.hasNext());
+
+        iter = scheduler.tasks(ImmutableList.of(id), false);
+        Assert.assertTrue(iter.hasNext());
+        taskWithoutResult = iter.next();
+        Assert.assertEquals("metadata-task", taskWithoutResult.name());
+        Assert.assertNull(taskWithoutResult.result());
+        Assert.assertFalse(iter.hasNext());
+
+        iter = scheduler.tasks(TaskStatus.SUCCESS, 10, null, false);
+        Assert.assertTrue(iter.hasNext());
+        taskWithoutResult = iter.next();
+        Assert.assertEquals("metadata-task", taskWithoutResult.name());
+        Assert.assertNull(taskWithoutResult.result());
+
+        iter = scheduler.tasks(TaskStatus.SUCCESS, 10, null);
+        Assert.assertTrue(iter.hasNext());
+        taskWithResult = iter.next();
+        Assert.assertEquals("metadata-task", taskWithResult.name());
+        Assert.assertEquals("\"metadata-result\"", taskWithResult.result());
+
+        Id taskId = id;
+        scheduler.delete(taskId, false);
+        Assert.assertThrows(NotFoundException.class, () -> {
+            scheduler.task(taskId);
+        });
+    }
+
+    @Test
     public void testTaskWithFailure() throws TimeoutException {
         HugeGraph graph = graph();
         TaskScheduler scheduler = graph.taskScheduler();
@@ -707,6 +789,23 @@ public class TaskCoreTest extends BaseCoreTest {
         public V call() throws Exception {
             Thread.sleep(1000);
             return null;
+        }
+
+        @Override
+        public void done() {
+            this.graph().taskScheduler().save(this.task());
+        }
+    }
+
+    public static class MetadataResultCallable extends TaskCallable<String> {
+
+        public MetadataResultCallable() {
+            // pass
+        }
+
+        @Override
+        public String call() {
+            return "metadata-result";
         }
 
         @Override

@@ -22,6 +22,7 @@ import java.util.Map;
 
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.type.define.Action;
+import org.apache.hugegraph.util.DateUtil;
 
 public class Userdata extends HashMap<String, Object> {
 
@@ -35,6 +36,51 @@ public class Userdata extends HashMap<String, Object> {
 
     public Userdata(Map<String, Object> map) {
         this.putAll(map);
+    }
+
+    /**
+     * Normalizes the value before storing so the {@link #CREATE_TIME}-is-Date
+     * invariant holds regardless of how entries are added.
+     */
+    @Override
+    public Object put(String key, Object value) {
+        return super.put(key, normalizeValue(key, value));
+    }
+
+    @Override
+    public void putAll(Map<? extends String, ?> map) {
+        for (Map.Entry<? extends String, ?> e : map.entrySet()) {
+            this.put(e.getKey(), e.getValue());
+        }
+    }
+
+    /**
+     * Normalize internal userdata values whose runtime type can diverge from
+     * their serialized form. The only such key today is {@link #CREATE_TIME}:
+     * it is written as a {@link java.util.Date} but persisted as a formatted
+     * JSON string by the backend serializers, and Jackson cannot re-type a
+     * value to {@code Date} when the target is a raw {@code Map}. This method
+     * restores the original type after deserialization. Idempotent for values
+     * already of the expected type.
+     * <p>
+     * An empty string is passed through unchanged: it is the key-only
+     * placeholder used by the {@code eliminate()}/{@code DELETE} builder flow
+     * (e.g. {@code .userdata(CREATE_TIME, "").eliminate()}), where the value is
+     * ignored and only the key drives {@code removeUserdata}. Parsing it would
+     * fail before the eliminate path can apply its key-only semantics.
+     */
+    public static Object normalizeValue(String key, Object value) {
+        if (CREATE_TIME.equals(key) && value instanceof String &&
+            !((String) value).isEmpty()) {
+            try {
+                return DateUtil.parse((String) value);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(String.format(
+                          "Invalid userdata '%s' value: '%s'",
+                          CREATE_TIME, value), e);
+            }
+        }
+        return value;
     }
 
     public static void check(Userdata userdata, Action action) {

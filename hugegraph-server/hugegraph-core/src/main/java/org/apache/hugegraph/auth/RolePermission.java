@@ -82,7 +82,7 @@ public class RolePermission {
             perm.ordinal() >= HugePermission.READ.ordinal()) {
             role.add(graphSpace, graph, perm, HugeResource.ALL_RES);
         } else {
-            // if perm is not read, write, delete or excute, set resources null
+            // if perm is not read, write, delete or execute, set resources null
             role.add(graphSpace, graph, perm, null);
         }
         return role;
