@@ -98,7 +98,7 @@ public class CountStrategyCoreTest extends BaseCoreTest {
             if (!(step instanceof HasStep)) {
                 continue;
             }
-            HasContainerHolder holder = (HasContainerHolder) step;
+            HasContainerHolder<?, ?> holder = (HasContainerHolder<?, ?>) step;
             for (HasContainer has : holder.getHasContainers()) {
                 if (key.equals(has.getKey())) {
                     return true;
