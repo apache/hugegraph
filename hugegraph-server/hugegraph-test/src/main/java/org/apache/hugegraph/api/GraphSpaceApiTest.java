@@ -41,10 +41,11 @@ public class GraphSpaceApiTest extends BaseApiTest {
                           Objects.equals("hstore", System.getProperty("backend")));
         Response r = this.client().get(PATH);
         String result = r.readEntity(String.class);
+        Assert.assertEquals(result, 200, r.getStatus());
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
         List<String> spaces = (List<String>)resultMap.get("graphSpaces");
-        Assume.assumeTrue("skip this test when graphspace API is unavailable",
-                          spaces != null);
+        Assert.assertNotNull("graphspace API should be available in hstore",
+                             spaces);
         for (String space : spaces) {
             if (!"DEFAULT".equals(space)) {
                 this.client().delete(PATH, space);

@@ -2002,12 +2002,20 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public Id createDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
                                     String graph) {
-            return this.authManager.createDefaultRole(graphSpace, owner, role, graph);
+            try {
+                return this.authManager.createDefaultRole(graphSpace, owner, role, graph);
+            } finally {
+                this.invalidRoleCache();
+            }
         }
 
         @Override
         public Id createSpaceDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
-            return this.authManager.createSpaceDefaultRole(graphSpace, owner, role);
+            try {
+                return this.authManager.createSpaceDefaultRole(graphSpace, owner, role);
+            } finally {
+                this.invalidRoleCache();
+            }
         }
 
         @Override
@@ -2023,13 +2031,21 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
-            this.authManager.deleteDefaultRole(graphSpace, owner, role);
+            try {
+                this.authManager.deleteDefaultRole(graphSpace, owner, role);
+            } finally {
+                this.invalidRoleCache();
+            }
         }
 
         @Override
         public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
                                       String graph) {
-            this.authManager.deleteDefaultRole(graphSpace, owner, role, graph);
+            try {
+                this.authManager.deleteDefaultRole(graphSpace, owner, role, graph);
+            } finally {
+                this.invalidRoleCache();
+            }
         }
 
         @Override
