@@ -35,6 +35,7 @@ import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
+import org.apache.hugegraph.unit.core.MasterServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
 import org.apache.hugegraph.unit.core.QueryTest;
 import org.apache.hugegraph.unit.core.RangeTest;
@@ -42,7 +43,6 @@ import org.apache.hugegraph.unit.core.RolePermissionTest;
 import org.apache.hugegraph.unit.core.RowLockTest;
 import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
-import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
 import org.apache.hugegraph.unit.id.EdgeIdTest;
@@ -104,6 +104,7 @@ import org.junit.runners.Suite;
 
         /* core */
         LocksTableTest.class,
+        MasterServerInfoManagerTest.class,
         RowLockTest.class,
         AnalyzerTest.class,
         BackendMutationTest.class,
@@ -118,7 +119,6 @@ import org.junit.runners.Suite;
         TraversalUtilTest.class,
         PageStateTest.class,
         SystemSchemaStoreTest.class,
-        ServerInfoManagerTest.class,
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
 

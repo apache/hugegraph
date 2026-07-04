@@ -44,11 +44,10 @@ import org.junit.Test;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
-public class ServerInfoManagerTest {
+public class MasterServerInfoManagerTest {
 
     private HugeGraphParams graphParams;
     private GraphTransaction tx;
-    private ServerInfoManager serverInfoManager;
 
     @Before
     public void setup() {
@@ -79,15 +78,6 @@ public class ServerInfoManagerTest {
                .thenReturn(vertex);
         Mockito.when(this.tx.addVertex(vertex)).thenReturn(vertex);
         Mockito.when(this.graphParams.systemTransaction()).thenReturn(this.tx);
-
-        DirectExecutorService executor = new DirectExecutorService();
-        this.serverInfoManager = new ServerInfoManager(this.graphParams,
-                                                       executor);
-    }
-
-    @Test
-    public void testSelfNodeIdReturnsNullWhenNotInitialized() {
-        Assert.assertNull(this.serverInfoManager.selfNodeId());
     }
 
     @Test
