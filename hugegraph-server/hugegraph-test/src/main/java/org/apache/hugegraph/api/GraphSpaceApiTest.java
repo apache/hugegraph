@@ -43,6 +43,8 @@ public class GraphSpaceApiTest extends BaseApiTest {
         String result = r.readEntity(String.class);
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
         List<String> spaces = (List<String>)resultMap.get("graphSpaces");
+        Assume.assumeTrue("skip this test when graphspace API is unavailable",
+                          spaces != null);
         for (String space : spaces) {
             if (!"DEFAULT".equals(space)) {
                 this.client().delete(PATH, space);
@@ -492,6 +494,59 @@ public class GraphSpaceApiTest extends BaseApiTest {
                                               "role", "ANALYST"));
         result = assertResponseStatus(200, r);
         Assert.assertTrue(result.contains("false"));
+    }
+
+    @Test
+    public void testDefaultRoleMutationRequiresSpaceManager() {
+        String space = "default_role_auth_space";
+        String analyst = "default_role_analyst";
+        String target = "default_role_target";
+        String manager = "default_role_manager";
+        createSpace(space, true);
+
+        RestClient analystClient = userClient(analyst);
+        userClient(target);
+        RestClient managerClient = spaceManagerClient(space, manager);
+
+        String rolePath = String.format("graphspaces/%s/role", space);
+        String analystBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
+                                           analyst);
+        Response r = this.client().post(rolePath, analystBody);
+        assertResponseStatus(201, r);
+
+        String grantTargetBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
+                                               target);
+        r = analystClient.post(rolePath, grantTargetBody);
+        assertResponseStatus(403, r);
+
+        r = analystClient.get(rolePath,
+                              ImmutableMap.of("user", target,
+                                              "role", "ANALYST"));
+        assertResponseStatus(403, r);
+
+        r = analystClient.delete(rolePath,
+                                 ImmutableMap.of("user", analyst,
+                                                 "role", "ANALYST"));
+        assertResponseStatus(403, r);
+
+        r = managerClient.post(rolePath, grantTargetBody);
+        assertResponseStatus(201, r);
+
+        r = managerClient.get(rolePath,
+                              ImmutableMap.of("user", target,
+                                              "role", "ANALYST"));
+        String result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains("true"));
+
+        String spaceRoleBody = String.format("{\"user\":\"%s\",\"role\":\"SPACE\"}",
+                                             target);
+        r = managerClient.post(rolePath, spaceRoleBody);
+        assertResponseStatus(403, r);
+
+        r = managerClient.delete(rolePath,
+                                 ImmutableMap.of("user", target,
+                                                 "role", "ANALYST"));
+        assertResponseStatus(204, r);
     }
 
     @Test

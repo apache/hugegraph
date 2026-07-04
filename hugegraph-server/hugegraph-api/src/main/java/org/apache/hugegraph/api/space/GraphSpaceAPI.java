@@ -28,7 +28,6 @@ import java.util.Set;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 
-import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.AuthManager;
@@ -113,10 +112,11 @@ public class GraphSpaceAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @Path("{graphspace}/role")
-    @RolesAllowed({"analyst"})
+    @RolesAllowed({"admin", "space"})
     public String setDefaultRole(@Context GraphManager manager,
                                  @PathParam("graphspace") String name,
                                  JsonDefaultRole jsonRole) {
+        ensurePdModeEnabled(manager);
         E.checkArgumentNotNull(jsonRole, "Request body cannot be null");
         E.checkArgument(StringUtils.isNotEmpty(jsonRole.user),
                         "The 'user' field cannot be null or empty");
@@ -134,18 +134,15 @@ public class GraphSpaceAPI extends API {
         validGraphSpace(manager, name);
         LOG.debug("Create default role: {} {} {}", user, role,
                               name);
-        AuthManager authManager;
-        try {
-            authManager = manager.authManager();
-        } catch (IllegalStateException e) {
-            throw new HugeException(STANDALONE_ERROR);
-        }
+        AuthManager authManager = manager.authManager();
+        String operator = HugeGraphAuthProxy.username();
+        validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
+                        operator, "default_role.create");
         E.checkArgument(authManager.findUser(user) != null ||
                         authManager.findGroup(user) != null,
                         "The user or group is not exist");
         // only admin can set space admin
-        if (!authManager.isAdminManager(HugeGraphAuthProxy.username()) &&
-            role.equals(HugeDefaultRole.SPACE)) {
+        if (!authManager.isAdminManager(operator) && role.equals(HugeDefaultRole.SPACE)) {
             throw new ForbiddenException("Forbidden to set role " + role.toString());
         }
 
@@ -157,7 +154,7 @@ public class GraphSpaceAPI extends API {
             validGraph(manager, name, graph);
         }
 
-        Map <String, String> result = new HashMap<>();
+        Map<String, String> result = new HashMap<>();
         result.put("user", user);
         result.put("role", jsonRole.role);
         result.put("graphSpace", name);
@@ -175,24 +172,20 @@ public class GraphSpaceAPI extends API {
     @GET
     @Timed
     @Path("{graphspace}/role")
-    @RolesAllowed("analyst")
+    @RolesAllowed({"admin", "space"})
     public String checkDefaultRole(@Context GraphManager manager,
                                    @PathParam("graphspace") String name,
                                    @QueryParam("user") String user,
                                    @QueryParam("role") String role,
                                    @QueryParam("graph") String graph) {
+        ensurePdModeEnabled(manager);
         E.checkArgument(StringUtils.isNotEmpty(user),
                         "The 'user' query param cannot be null or empty");
         E.checkArgument(StringUtils.isNotEmpty(role),
                         "The 'role' query param cannot be null or empty");
         LOG.debug("Check space role: {} {} {}", user, role,
                               name);
-        AuthManager authManager;
-        try {
-            authManager = manager.authManager();
-        } catch (IllegalStateException e) {
-            throw new HugeException(STANDALONE_ERROR);
-        }
+        AuthManager authManager = manager.authManager();
 
         HugeDefaultRole defaultRole;
         try {
@@ -202,6 +195,9 @@ public class GraphSpaceAPI extends API {
             defaultRole = null; // unreachable, satisfies compiler
         }
         validGraphSpace(manager, name);
+        String operator = HugeGraphAuthProxy.username();
+        validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
+                        operator, "default_role.check");
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
@@ -223,12 +219,13 @@ public class GraphSpaceAPI extends API {
     @DELETE
     @Timed
     @Path("{graphspace}/role")
-    @RolesAllowed("analyst")
+    @RolesAllowed({"admin", "space"})
     public void deleteDefaultRole(@Context GraphManager manager,
                                   @PathParam("graphspace") String name,
                                   @QueryParam("user") String user,
                                   @QueryParam("role") String role,
                                   @QueryParam("graph") String graph) {
+        ensurePdModeEnabled(manager);
         E.checkArgument(StringUtils.isNotEmpty(user),
                         "The 'user' query param cannot be null or empty");
         E.checkArgument(StringUtils.isNotEmpty(role),
@@ -236,17 +233,16 @@ public class GraphSpaceAPI extends API {
         LOG.debug("Delete space role: {} {} {}", user, role,
                               name);
 
-        AuthManager authManager;
-        try {
-            authManager = manager.authManager();
-        } catch (IllegalStateException e) {
-            throw new HugeException(STANDALONE_ERROR);
-        }
+        AuthManager authManager = manager.authManager();
+        validGraphSpace(manager, name);
+        String operator = HugeGraphAuthProxy.username();
+        validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
+                        operator, "default_role.delete");
         E.checkArgument(authManager.findUser(user) != null ||
                         authManager.findGroup(user) != null,
                         "The user or group is not exist");
 
-        if (!authManager.isAdminManager(HugeGraphAuthProxy.username()) &&
+        if (!authManager.isAdminManager(operator) &&
             role.equalsIgnoreCase(HugeDefaultRole.SPACE.toString())) {
             throw new ForbiddenException("Forbidden to delete role " + role);
         }
@@ -258,7 +254,6 @@ public class GraphSpaceAPI extends API {
             E.checkArgument(false, "Invalid role value '%s'", role);
             defaultRole = null; // unreachable, satisfies compiler
         }
-        validGraphSpace(manager, name);
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");

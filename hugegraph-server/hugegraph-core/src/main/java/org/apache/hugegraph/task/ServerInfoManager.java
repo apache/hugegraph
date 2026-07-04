@@ -136,6 +136,8 @@ public class ServerInfoManager {
                         page = PageInfo.pageInfo(servers);
                     }
                 } while (page != null);
+            } catch (IllegalArgumentException e) {
+                throw e;
             } catch (Exception e) {
                 LOG.warn("Failed to check existing master nodes, " +
                          "may be caused by schema mismatch in shared store: {}",
