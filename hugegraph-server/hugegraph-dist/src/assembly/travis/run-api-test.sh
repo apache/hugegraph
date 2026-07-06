@@ -20,6 +20,7 @@ set -ev
 BACKEND=$1
 REPORT_DIR=$2
 REPORT_FILE=$REPORT_DIR/jacoco-api-test-for-raft.xml
+RUN_GREMLIN_CONSOLE_SMOKE_TEST=${3:-false}
 
 TRAVIS_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$TRAVIS_DIR/../../../../.." && pwd)
@@ -97,6 +98,11 @@ $TRAVIS_DIR/start-server.sh $SERVER_DIR $BACKEND $JACOCO_PORT || (cat $SERVER_DI
 
 # run api-test
 mvn test -pl hugegraph-server/hugegraph-test -am -P api-test,$BACKEND || (cat $SERVER_DIR/logs/hugegraph-server.log && exit 1)
+
+if [ "$RUN_GREMLIN_CONSOLE_SMOKE_TEST" == "true" ]; then
+    bash "$TRAVIS_DIR/run-gremlin-console-smoke-test.sh" "$SERVER_DIR" || \
+        (cat "$SERVER_DIR/logs/hugegraph-server.log" && exit 1)
+fi
 
 $TRAVIS_DIR/build-report.sh $BACKEND $JACOCO_PORT $REPORT_FILE
 

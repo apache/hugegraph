@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
+import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
@@ -99,6 +100,7 @@ import org.junit.runners.Suite;
         CacheTest.LevelCacheTest.class,
         CachedSchemaTransactionTest.class,
         MetaManagerSchemaCacheClearEventTest.class,
+        EtcdMetaDriverTest.class,
         CachedGraphTransactionTest.class,
         CacheManagerTest.class,
         RamTableTest.class,

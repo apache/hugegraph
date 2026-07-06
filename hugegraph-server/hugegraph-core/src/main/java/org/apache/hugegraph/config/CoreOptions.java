@@ -18,6 +18,7 @@
 package org.apache.hugegraph.config;
 
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.Bytes;
@@ -78,6 +79,15 @@ public class CoreOptions extends OptionHolder {
                     "The serializer for backend store, like: text/binary/cassandra.",
                     disallowEmpty(),
                     "text"
+            );
+    public static final ConfigOption<Integer> SERIALIZER_BUFFER_MAX_CAPACITY =
+            new ConfigOption<>(
+                    "serializer.buffer_max_capacity",
+                    "The process-wide max capacity of one serialization " +
+                    "buffer in bytes.",
+                    rangeInt(BytesBuffer.DEFAULT_CAPACITY,
+                             BytesBuffer.MAX_BUFFER_CAPACITY_UPPER_BOUND),
+                    BytesBuffer.MAX_BUFFER_CAPACITY
             );
     public static final ConfigOption<Boolean> RAFT_MODE =
             new ConfigOption<>(

@@ -66,6 +66,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
@@ -97,6 +98,9 @@ import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 import com.google.common.collect.ImmutableList;
 
 public final class TraversalUtil {
+
+    private static final String CONNECTIVE_LABEL_STEP =
+            "~hugegraph.connective-label-step";
 
     public static final String P_CALL = "P.";
 
@@ -174,26 +178,60 @@ public final class TraversalUtil {
             Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
+                boolean connectiveLabelStep =
+                        removeConnectiveLabelStep(step);
                 /*
-                 * Range/neq predicates before match() may trigger a no-index
-                 * query after MatchStep reorders filters. Keep known-indexed
-                 * boolean predicates pushed down, and leave the rest for
-                 * TinkerPop to evaluate.
+                 * Range/neq predicates before match()/connective label filters
+                 * may trigger a no-index query after nested filters add
+                 * labels. Keep known-indexed predicates pushed down, and leave
+                 * the rest for TinkerPop to evaluate.
                  */
-                if (followedByMatchStep(step) &&
-                    hasUnusableMatchPredicate(newStep, holder)) {
-                    List<HasContainer> extracted =
-                            extractUsableHasContainers(newStep, holder);
-                    for (HasContainer has : extracted) {
-                        holder.removeHasContainer(has);
+                boolean followedByMatch = followedByMatchStep(step);
+                Step<?, ?> afterPositiveLabelOrStep = null;
+                if (hasMatchIndexSensitivePredicate(holder)) {
+                    afterPositiveLabelOrStep =
+                            extractPositiveLabelOnlyOrStep(newStep,
+                                                           traversal,
+                                                           step);
+                    if (afterPositiveLabelOrStep != null) {
+                        nextStep = afterPositiveLabelOrStep;
                     }
-                    if (holder.getHasContainers().isEmpty()) {
-                        TraversalHelper.copyLabels(step, step.getPreviousStep(),
-                                                   false);
-                        traversal.removeStep(step);
+                }
+                if (hasUnusableMatchPredicate(newStep, holder)) {
+                    List<HasContainer> extracted;
+                    if (followedByMatch) {
+                        extracted = extractUsableHasContainers(newStep, holder);
+                    } else if (connectiveLabelStep &&
+                               hasLabelAfterUnusablePredicate(newStep, holder)) {
+                        extracted = extractLabelHasContainers(newStep, holder);
+                    } else {
+                        if (afterPositiveLabelOrStep != null) {
+                            step = nextStep;
+                            continue;
+                        }
+                        if (hasUnsupportedLabelContainer(holder)) {
+                            step = nextStep;
+                            continue;
+                        }
+                        extracted = ImmutableList.of();
                     }
-                    step = nextStep;
-                    continue;
+                    if (!extracted.isEmpty()) {
+                        for (HasContainer has : extracted) {
+                            holder.removeHasContainer(has);
+                        }
+                        if (holder.getHasContainers().isEmpty()) {
+                            TraversalHelper.copyLabels(step,
+                                                       step.getPreviousStep(),
+                                                       false);
+                            traversal.removeStep(step);
+                        }
+                        step = nextStep;
+                        continue;
+                    }
+                    if (followedByMatch) {
+                        step = nextStep;
+                        continue;
+                    }
                 }
                 if (extractHasContainers(newStep, holder)) {
                     TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
@@ -212,6 +250,167 @@ public final class TraversalUtil {
             next = next.getNextStep();
         }
         return next instanceof MatchStep;
+    }
+
+    private static Step<?, ?> extractPositiveLabelOnlyOrStep(
+            HugeGraphStep<?, ?> newStep, Traversal.Admin<?, ?> traversal,
+            Step<?, ?> step) {
+        OrStep<?> orStep = positiveLabelOnlyOrStepAfter(step);
+        if (orStep == null) {
+            return null;
+        }
+
+        List<Object> labels = new ArrayList<>();
+        for (Traversal.Admin<?, ?> child : orStep.getLocalChildren()) {
+            if (!collectPositiveLabelValues(child, labels)) {
+                return null;
+            }
+        }
+        if (labels.isEmpty()) {
+            return null;
+        }
+
+        HasContainer has = new HasContainer(T.label.getAccessor(),
+                                            P.within(labels));
+        if (!GraphStep.processHasContainerIds(newStep, has)) {
+            newStep.addHasContainer(has);
+        }
+
+        Step<?, ?> next = orStep.getNextStep();
+        TraversalHelper.copyLabels(orStep, orStep.getPreviousStep(), false);
+        traversal.removeStep(orStep);
+        return next;
+    }
+
+    private static OrStep<?> positiveLabelOnlyOrStepAfter(Step<?, ?> step) {
+        Step<?, ?> next = step.getNextStep();
+        while (next instanceof NoOpBarrierStep ||
+               next instanceof IdentityStep) {
+            next = next.getNextStep();
+        }
+        if (!(next instanceof OrStep)) {
+            return null;
+        }
+        return (OrStep<?>) next;
+    }
+
+    private static boolean collectPositiveLabelValues(
+            Traversal.Admin<?, ?> traversal, List<Object> labels) {
+        if (traversal.getSteps().size() != 1) {
+            return false;
+        }
+        Step<?, ?> step = traversal.getStartStep();
+        if (!(step instanceof HasStep)) {
+            return false;
+        }
+        HasStep<?> hasStep = (HasStep<?>) step;
+        if (hasStep.getHasContainers().size() != 1) {
+            return false;
+        }
+        HasContainer has = hasStep.getHasContainers().get(0);
+        if (!isPositiveLabelContainer(has)) {
+            return false;
+        }
+        addPositiveLabelValues(has, labels);
+        return true;
+    }
+
+    private static void addPositiveLabelValues(HasContainer has,
+                                               List<Object> labels) {
+        P<?> predicate = has.getPredicate();
+        BiPredicate<?, ?> bp = predicate.getBiPredicate();
+        if (bp == Compare.eq) {
+            labels.add(predicate.getValue());
+        } else {
+            assert bp == Contains.within;
+            labels.addAll((Collection<?>) predicate.getValue());
+        }
+    }
+
+    private static boolean hasLabelAfterUnusablePredicate(HugeGraphStep<?, ?> step,
+                                                          HasContainerHolder holder) {
+        HugeGraph graph = tryGetGraph(step);
+        boolean seenUnusablePredicate = false;
+        for (HasContainer has : holder.getHasContainers()) {
+            if (isPositiveLabelContainer(has)) {
+                return seenUnusablePredicate;
+            }
+            if (hasMatchIndexSensitivePredicate(has) &&
+                (graph == null || !hasUsableMatchIndex(graph, step, has))) {
+                seenUnusablePredicate = true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUnsupportedLabelContainer(
+            HasContainerHolder holder) {
+        for (HasContainer has : holder.getHasContainers()) {
+            if (isLabelContainer(has) && !isPositiveLabelContainer(has)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static void markConnectiveLabelStep(Step<?, ?> step) {
+        step.addLabel(CONNECTIVE_LABEL_STEP);
+    }
+
+    private static boolean removeConnectiveLabelStep(Step<?, ?> step) {
+        boolean hasMarker = step.getLabels().contains(CONNECTIVE_LABEL_STEP);
+        if (hasMarker) {
+            step.removeLabel(CONNECTIVE_LABEL_STEP);
+        }
+        return hasMarker;
+    }
+
+    private static List<HasContainer> extractLabelHasContainers(
+            HugeGraphStep<?, ?> step, HasContainerHolder holder) {
+        List<HasContainer> extracted = new ArrayList<>();
+        for (HasContainer has : holder.getHasContainers()) {
+            if (!isPositiveLabelContainer(has)) {
+                continue;
+            }
+            if (!GraphStep.processHasContainerIds(step, has)) {
+                step.addHasContainer(has);
+            }
+            extracted.add(has);
+        }
+        return extracted;
+    }
+
+    private static boolean isLabelContainer(HasContainer has) {
+        return T.label.getAccessor().equals(has.getKey());
+    }
+
+    static boolean isPositiveLabelContainer(HasContainer has) {
+        if (!isLabelContainer(has)) {
+            return false;
+        }
+
+        P<?> predicate = has.getPredicate();
+        BiPredicate<?, ?> bp = predicate.getBiPredicate();
+        if (bp == Compare.eq) {
+            return true;
+        }
+        if (bp != Contains.within) {
+            return false;
+        }
+
+        Object value = predicate.getValue();
+        return value instanceof Collection &&
+               !((Collection<?>) value).isEmpty();
+    }
+
+    private static boolean hasMatchIndexSensitivePredicate(
+            HasContainerHolder holder) {
+        for (HasContainer has : holder.getHasContainers()) {
+            if (hasMatchIndexSensitivePredicate(has)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasUnusableMatchPredicate(HugeGraphStep<?, ?> step,
@@ -407,6 +606,7 @@ public final class TraversalUtil {
         do {
             Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
+                removeConnectiveLabelStep(step);
                 HasContainerHolder holder = (HasContainerHolder) step;
                 if (extractHasContainers(newStep, holder)) {
                     TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
@@ -552,7 +752,7 @@ public final class TraversalUtil {
                 holder.setCount();
             }
         } while (step instanceof CountGlobalStep ||
-                 step instanceof FilterStep ||
+                 (step instanceof FilterStep && !(step instanceof HasStep)) ||
                  step instanceof IdentityStep ||
                  step instanceof NoOpBarrierStep);
     }

@@ -23,6 +23,7 @@ import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
+import org.apache.hugegraph.task.TaskAndResultSchedulerTest;
 import org.apache.hugegraph.testutil.Utils;
 import org.apache.hugegraph.util.Log;
 import org.junit.AfterClass;
@@ -45,6 +46,7 @@ import org.slf4j.Logger;
         PropertyCoreTest.EdgePropertyCoreTest.class,
         RestoreCoreTest.class,
         TaskCoreTest.class,
+        TaskAndResultSchedulerTest.class,
         AuthTest.class,
         MultiGraphsTest.class,
         RamTableTest.class

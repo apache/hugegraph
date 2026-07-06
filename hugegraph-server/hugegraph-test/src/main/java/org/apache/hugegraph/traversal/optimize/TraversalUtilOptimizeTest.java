@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
+import java.util.Collections;
+import java.util.Set;
+
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
@@ -27,13 +30,19 @@ import org.apache.hugegraph.type.define.DataType;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
+import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
+import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
+import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.InlineFilterStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
+import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -141,6 +150,86 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerExtractsPositiveLabelOnlyOrStep() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .or(__.hasLabel("person"),
+                                               __.hasLabel(P.within("software")))
+                                           .asAdmin();
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertFalse(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsUnsupportedOrLabelLocal() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .or(__.hasLabel(P.neq("person")),
+                                               __.hasLabel("software"))
+                                           .asAdmin();
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertFalse(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsNonLabelOrLocal() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .or(__.has("name", "marko"),
+                                               __.hasLabel("software"))
+                                           .asAdmin();
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertFalse(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerRequiresSingleLabelOnlyOrChild() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .or(__.hasLabel("person")
+                                               .has("name", "marko"),
+                                               __.hasLabel("software"))
+                                           .asAdmin();
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertFalse(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerSkipsOrWhenPredicateIsNotSensitive() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("name", "marko")
+                                           .or(__.hasLabel("person"),
+                                               __.hasLabel("software"))
+                                           .asAdmin();
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertFalse(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
     public void testExtractHasContainerKeepsTextBetweenGraphHasStep() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         PropertyKey name = propertyKey(1L, "name", DataType.TEXT);
@@ -207,6 +296,86 @@ public class TraversalUtilOptimizeTest {
         Assert.assertFalse(hasStepExists(traversal));
     }
 
+    @Test
+    public void testIsPositiveLabelContainer() {
+        Assert.assertTrue(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(), P.eq("person"))));
+        Assert.assertTrue(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(),
+                                 P.within("person", "software"))));
+
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer("name", P.eq("person"))));
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(), P.neq("person"))));
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(),
+                                 P.without("person"))));
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(),
+                                 P.within(Collections.emptyList()))));
+    }
+
+    @Test
+    public void testConnectiveLabelStepStrategyApplyPost() {
+        Set<Class<? extends TraversalStrategy.OptimizationStrategy>> post =
+                HugeConnectiveLabelStepStrategy.instance().applyPost();
+
+        Assert.assertEquals(Collections.singleton(InlineFilterStrategy.class),
+                            post);
+    }
+
+    @Test
+    public void testConnectiveLabelStepStrategyMarksAndChildren() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .and(__.hasLabel("person"))
+                                           .asAdmin();
+
+        HugeConnectiveLabelStepStrategy.instance().apply(traversal);
+
+        Assert.assertTrue(hasMarkedLocalChild(traversal, AndStep.class));
+    }
+
+    @Test
+    public void testConnectiveLabelStepStrategyMarksOrChildren() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .or(__.hasLabel("software"),
+                                               __.hasLabel(P.within("person")))
+                                           .asAdmin();
+
+        HugeConnectiveLabelStepStrategy.instance().apply(traversal);
+
+        Assert.assertTrue(hasMarkedLocalChild(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testConnectiveLabelStepStrategySkipsWithoutPreviousHasStep() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .and(__.hasLabel("person"))
+                                           .asAdmin();
+
+        HugeConnectiveLabelStepStrategy.instance().apply(traversal);
+
+        Assert.assertFalse(hasMarkedLocalChild(traversal, AndStep.class));
+    }
+
+    @Test
+    public void testConnectiveLabelStepStrategySkipsUnsupportedChildren() {
+        Traversal.Admin<?, ?> traversal = __.V()
+                                           .has("age", P.gt(18))
+                                           .and(__.has("name", "marko"))
+                                           .or(__.hasLabel(P.without("person")),
+                                               __.has("name", "marko"))
+                                           .asAdmin();
+
+        HugeConnectiveLabelStepStrategy.instance().apply(traversal);
+
+        Assert.assertFalse(hasMarkedLocalChild(traversal, AndStep.class));
+        Assert.assertFalse(hasMarkedLocalChild(traversal, OrStep.class));
+    }
+
     private static PropertyKey propertyKey(long id, String name,
                                            DataType dataType) {
         Id keyId = IdGenerator.of(id);
@@ -250,10 +419,63 @@ public class TraversalUtilOptimizeTest {
         TraversalHelper.replaceStep((Step) origin, (Step) newStep, traversal);
     }
 
+    private static boolean hasContainer(HugeGraphStep<?, ?> step, String key) {
+        for (HasContainer has : step.getHasContainers()) {
+            if (key.equals(has.getKey())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean hasStepExists(Traversal.Admin<?, ?> traversal) {
         for (Step<?, ?> step : traversal.getSteps()) {
             if (step instanceof HasStep) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasStepExists(Traversal.Admin<?, ?> traversal,
+                                         String key) {
+        for (Step<?, ?> step : traversal.getSteps()) {
+            if (!(step instanceof HasStep)) {
+                continue;
+            }
+            HasStep<?> hasStep = (HasStep<?>) step;
+            for (HasContainer has : hasStep.getHasContainers()) {
+                if (key.equals(has.getKey())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean stepExists(Traversal.Admin<?, ?> traversal,
+                                      Class<?> clazz) {
+        for (Step<?, ?> step : traversal.getSteps()) {
+            if (clazz.isInstance(step)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasMarkedLocalChild(Traversal.Admin<?, ?> traversal,
+                                               Class<?> clazz) {
+        for (Step<?, ?> step : traversal.getSteps()) {
+            if (!clazz.isInstance(step)) {
+                continue;
+            }
+            TraversalParent parent = (TraversalParent) step;
+            for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+                for (Step<?, ?> childStep : child.getSteps()) {
+                    if (!childStep.getLabels().isEmpty()) {
+                        return true;
+                    }
+                }
             }
         }
         return false;
