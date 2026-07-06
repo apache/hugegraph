@@ -198,6 +198,11 @@ public class GraphSpaceAPI extends API {
         String operator = HugeGraphAuthProxy.username();
         validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
                         operator, "default_role.check");
+        // Only admin can inspect the space manager default role.
+        if (!authManager.isAdminManager(operator) &&
+            defaultRole.equals(HugeDefaultRole.SPACE)) {
+            throw new ForbiddenException("Forbidden to check role " + role);
+        }
         boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
         E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
                         "Must set a graph for observer");
