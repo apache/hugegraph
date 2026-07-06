@@ -17,9 +17,12 @@
 
 package org.apache.hugegraph.unit.core;
 
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
@@ -28,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
@@ -39,6 +43,8 @@ import org.apache.hugegraph.task.HugeServerInfo;
 import org.apache.hugegraph.task.ServerInfoManager;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.NodeRole;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentMatchers;
@@ -99,6 +105,102 @@ public class MasterServerInfoManagerTest {
 
         Mockito.verify(this.tx, Mockito.never())
                .constructVertex(Mockito.eq(false), ArgumentMatchers.any());
+    }
+
+    @Test
+    public void testInitServerInfoFailsIfExistingMasterCheckFails() {
+        HugeServerInfo existedMaster = Mockito.mock(HugeServerInfo.class);
+        Mockito.when(existedMaster.role()).thenReturn(NodeRole.MASTER);
+        Mockito.when(existedMaster.alive())
+               .thenThrow(new IllegalStateException("failed to check alive"));
+        Mockito.when(existedMaster.id())
+               .thenReturn(GlobalMasterInfo.master("server-1").nodeId());
+        ServerInfoManager manager = new TestServerInfoManager(
+                this.graphParams, new DirectExecutorService(),
+                Collections.singleton(existedMaster));
+
+        Assert.assertThrows(BackendException.class, () -> {
+            manager.initServerInfo(GlobalMasterInfo.master("server-2"));
+        }, e -> {
+            Assert.assertContains("Failed to check existing master nodes",
+                                  e.getMessage());
+        });
+
+        Mockito.verify(this.tx, Mockito.never())
+               .constructVertex(Mockito.eq(false), ArgumentMatchers.any());
+    }
+
+    @Test
+    public void testInitServerInfoFailsIfCurrentServerInfoClockSkews() {
+        GlobalMasterInfo master = GlobalMasterInfo.master("server-2");
+        Date skewedUpdateTime = new Date(System.currentTimeMillis() +
+                                         TimeUnit.MINUTES.toMillis(1L));
+        Vertex vertex = serverInfoVertex(master.nodeId(), NodeRole.MASTER,
+                                         skewedUpdateTime);
+        Mockito.when(this.tx.queryServerInfos(master.nodeId()))
+               .thenReturn(Collections.singleton(vertex).iterator());
+        ServerInfoManager manager = new TestServerInfoManager(
+                this.graphParams, new DirectExecutorService(),
+                Collections.emptyList());
+
+        Assert.assertThrows(BackendException.class, () -> {
+            manager.initServerInfo(master);
+        }, e -> {
+            Assert.assertContains("maybe skew", e.getMessage());
+        });
+
+        Mockito.verify(this.tx, Mockito.never())
+               .constructVertex(Mockito.eq(false), ArgumentMatchers.any());
+    }
+
+    @Test
+    public void testInitServerInfoFailsIfWaitingForCurrentServerInfoInterrupted() {
+        GlobalMasterInfo master = GlobalMasterInfo.master("server-2");
+        Date recentUpdateTime = new Date(System.currentTimeMillis() -
+                                         TimeUnit.SECONDS.toMillis(9L));
+        Vertex vertex = serverInfoVertex(master.nodeId(), NodeRole.MASTER,
+                                         recentUpdateTime);
+        Mockito.when(this.tx.queryServerInfos(master.nodeId()))
+               .thenReturn(Collections.singleton(vertex).iterator());
+        ServerInfoManager manager = new TestServerInfoManager(
+                this.graphParams, new DirectExecutorService(),
+                Collections.emptyList());
+
+        Thread.currentThread().interrupt();
+        try {
+            Assert.assertThrows(BackendException.class, () -> {
+                manager.initServerInfo(master);
+            }, e -> {
+                Assert.assertContains("Interrupted when waiting for server info expired",
+                                      e.getMessage());
+            });
+        } finally {
+            Thread.interrupted();
+        }
+
+        Mockito.verify(this.tx, Mockito.never())
+               .constructVertex(Mockito.eq(false), ArgumentMatchers.any());
+    }
+
+    private static Vertex serverInfoVertex(Id id, NodeRole role,
+                                           Date updateTime) {
+        Vertex vertex = Mockito.mock(Vertex.class);
+        Mockito.when(vertex.id()).thenReturn(id);
+        List<VertexProperty<Object>> properties = Arrays.asList(
+                vertexProperty(HugeServerInfo.P.ROLE, role.code()),
+                vertexProperty(HugeServerInfo.P.UPDATE_TIME, updateTime)
+        );
+        Mockito.when(vertex.properties()).thenAnswer(i -> properties.iterator());
+        return vertex;
+    }
+
+    private static VertexProperty<Object> vertexProperty(String key,
+                                                         Object value) {
+        @SuppressWarnings("unchecked")
+        VertexProperty<Object> property = Mockito.mock(VertexProperty.class);
+        Mockito.when(property.key()).thenReturn(key);
+        Mockito.when(property.value()).thenReturn(value);
+        return property;
     }
 
     private static class TestServerInfoManager extends ServerInfoManager {

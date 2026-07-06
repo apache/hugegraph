@@ -28,6 +28,7 @@ import java.util.concurrent.ExecutorService;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.query.Condition;
@@ -110,12 +111,15 @@ public class ServerInfoManager {
             final long now = DateUtil.now().getTime();
             if (existed.expireTime() > now + 30 * 1000) {
                 LOG.info("The node time maybe skew very much: {}", existed);
-                throw new HugeException("The server with name '%s' maybe skew very much", serverId);
+                throw new BackendException("The server with name '%s' maybe skew very much",
+                                           serverId);
             }
             try {
                 Thread.sleep(existed.expireTime() - now + 1);
             } catch (InterruptedException e) {
-               throw new HugeException("Interrupted when waiting for server info expired", e);
+                Thread.currentThread().interrupt();
+                throw new BackendException("Interrupted when waiting for server info expired",
+                                           e);
             }
         }
         E.checkArgument(existed == null || !existed.alive(),
@@ -139,9 +143,8 @@ public class ServerInfoManager {
             } catch (IllegalArgumentException e) {
                 throw e;
             } catch (Exception e) {
-                LOG.warn("Failed to check existing master nodes, " +
-                         "may be caused by schema mismatch in shared store: {}",
-                         e.getMessage());
+                throw new BackendException("Failed to check existing master nodes",
+                                           e);
             }
         }
 
