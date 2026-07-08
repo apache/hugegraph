@@ -102,13 +102,43 @@ public class CloudStorageConfigTest {
         assertEquals(-1L, config.getReadMissGuardWindowMs());
     }
 
-    @Test
-    public void testUploadRetryDefaults() {
-        // Default 0: no whole-file retries; provider handles its own retries; queue is DLQ-only.
-        assertEquals(0, config.getUploadRetryMaxAttempts());
-        assertEquals(1_000L, config.getUploadRetryInitialDelayMs());
-        assertEquals(60_000L, config.getUploadRetryMaxDelayMs());
-    }
+     @Test
+     public void testUploadRetryDefaults() {
+         // Default 0: no whole-file retries; provider handles its own retries; queue is DLQ-only.
+         assertEquals(0, config.getUploadRetryMaxAttempts());
+         assertEquals(1_000L, config.getUploadRetryInitialDelayMs());
+         assertEquals(60_000L, config.getUploadRetryMaxDelayMs());
+     }
+
+     @Test
+     public void testUploadRetryMaxAttempts() {
+         config.setUploadRetryMaxAttempts(3);
+         assertEquals(3, config.getUploadRetryMaxAttempts());
+
+         config.setUploadRetryMaxAttempts(0);
+         assertEquals(0, config.getUploadRetryMaxAttempts());
+
+         config.setUploadRetryMaxAttempts(10);
+         assertEquals(10, config.getUploadRetryMaxAttempts());
+     }
+
+     @Test
+     public void testUploadRetryInitialDelayMs() {
+         config.setUploadRetryInitialDelayMs(500L);
+         assertEquals(500L, config.getUploadRetryInitialDelayMs());
+
+         config.setUploadRetryInitialDelayMs(2_000L);
+         assertEquals(2_000L, config.getUploadRetryInitialDelayMs());
+     }
+
+     @Test
+     public void testUploadRetryMaxDelayMs() {
+         config.setUploadRetryMaxDelayMs(30_000L);
+         assertEquals(30_000L, config.getUploadRetryMaxDelayMs());
+
+         config.setUploadRetryMaxDelayMs(120_000L);
+         assertEquals(120_000L, config.getUploadRetryMaxDelayMs());
+     }
 
     // ---- Provider properties (cloud.storage.<provider>.* flattened) ----
 

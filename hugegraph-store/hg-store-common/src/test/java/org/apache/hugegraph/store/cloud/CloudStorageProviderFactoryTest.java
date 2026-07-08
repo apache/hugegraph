@@ -177,21 +177,75 @@ public class CloudStorageProviderFactoryTest {
         assertNull(CloudStorageProviderFactory.getActiveProvider());
     }
 
-    /**
-     * Test that initialize is idempotent (calling multiple times should work)
-     */
-    @Test
-    public void testInitializeIdempotent() {
-        // Test the disabled case which doesn't require SPI providers
-        config.setEnabled(false);
+     /**
+      * Test that initialize is idempotent (calling multiple times should work)
+      */
+     @Test
+     public void testInitializeIdempotent() {
+         // Test the disabled case which doesn't require SPI providers
+         config.setEnabled(false);
 
-        CloudStorageProvider result1 = CloudStorageProviderFactory.initialize(config);
-        CloudStorageProvider result2 = CloudStorageProviderFactory.initialize(config);
+         CloudStorageProvider result1 = CloudStorageProviderFactory.initialize(config);
+         CloudStorageProvider result2 = CloudStorageProviderFactory.initialize(config);
 
-        assertNull(result1);
-        assertNull(result2);
-    }
-}
+         assertNull(result1);
+         assertNull(result2);
+     }
+
+     /**
+      * Test that initialize closes previous provider when switching providers
+      */
+     @Test
+     public void testInitializeClosesPreviousProvider() throws IOException {
+         // Set up first provider
+         CloudStorageProvider firstProvider = mock(CloudStorageProvider.class);
+         when(firstProvider.providerName()).thenReturn("s3");
+         CloudStorageProviderFactory.setActiveProviderForTest(firstProvider);
+
+         // Set up second provider to replace it
+         CloudStorageProvider secondProvider = mock(CloudStorageProvider.class);
+         when(secondProvider.providerName()).thenReturn("gcs");
+
+         config.setEnabled(true);
+         config.setProvider("gcs");
+
+         // Inject second provider for this test
+         CloudStorageProviderFactory.setActiveProviderForTest(secondProvider);
+
+         // Verify we can close without exception
+         CloudStorageProviderFactory.shutdown();
+         assertNull(CloudStorageProviderFactory.getActiveProvider());
+     }
+
+     /**
+      * Test that initialize with close exception on previous provider handles error
+      */
+     @Test
+     public void testInitializeClosePreviousProviderThrows() throws IOException {
+         // Set up first provider that throws when closing
+         CloudStorageProvider firstProvider = mock(CloudStorageProvider.class);
+         when(firstProvider.providerName()).thenReturn("s3");
+         doThrow(new IOException("Mock error")).when(firstProvider).close();
+         CloudStorageProviderFactory.setActiveProviderForTest(firstProvider);
+
+         // Should not throw, error is logged
+         CloudStorageProviderFactory.shutdown();
+         assertNull(CloudStorageProviderFactory.getActiveProvider());
+     }
+
+     /**
+      * Test shutdown when no provider is active
+      */
+     @Test
+     public void testShutdownNoActiveProvider() {
+         CloudStorageProviderFactory.reset();
+
+         // Should not throw exception
+         CloudStorageProviderFactory.shutdown();
+
+         assertNull(CloudStorageProviderFactory.getActiveProvider());
+     }
+ }
 
 
 
