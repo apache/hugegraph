@@ -117,11 +117,12 @@ public class GraphsAPI extends API {
                   graphs.size());
         // Filter by user role
         Set<String> filterGraphs = new HashSet<>();
+        boolean adminManager = isAdminManager(manager);
         for (String graph : graphs) {
             LOG.debug("Get graph {} and verify auth", graph);
             String role = RequiredPerm.roleFor(graphSpace, graph,
                                                HugePermission.READ);
-            if (sc.isUserInRole(role)) {
+            if (adminManager || sc.isUserInRole(role)) {
                 try {
                     graph(manager, graphSpace, graph);
                     filterGraphs.add(graph);
@@ -169,10 +170,11 @@ public class GraphsAPI extends API {
         Set<String> graphs = manager.graphs(graphSpace);
         List<Map<String, Object>> profiles = new ArrayList<>();
         List<Map<String, Object>> defaultProfiles = new ArrayList<>();
+        boolean adminManager = isAdminManager(manager);
         for (String graph : graphs) {
             String role = RequiredPerm.roleFor(graphSpace, graph,
                                                HugePermission.READ);
-            if (!sc.isUserInRole(role)) {
+            if (!adminManager && !sc.isUserInRole(role)) {
                 continue;
             }
             try {
@@ -218,6 +220,15 @@ public class GraphsAPI extends API {
         }
         defaultProfiles.addAll(profiles);
         return defaultProfiles;
+    }
+
+    private static boolean isAdminManager(GraphManager manager) {
+        try {
+            return manager.authManager().isAdminManager(
+                    HugeGraphAuthProxy.username());
+        } catch (IllegalStateException ignored) {
+            return false;
+        }
     }
 
     @GET

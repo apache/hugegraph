@@ -2100,14 +2100,16 @@ public final class GraphManager {
             graphs.add(key.split(DELIMITER)[1]);
         }
         if (DEFAULT_GRAPH_SPACE_SERVICE_NAME.equals(graphSpace)) {
-            for (String graph : this.localGraphs) {
+            String prefix = spaceGraphName(graphSpace, "");
+            for (String key : this.graphs.keySet()) {
+                if (!key.startsWith(prefix)) {
+                    continue;
+                }
+                String graph = key.substring(prefix.length());
                 if (SYS_GRAPH.equals(graph)) {
                     continue;
                 }
-                String key = spaceGraphName(graphSpace, graph);
-                if (this.graphs.containsKey(key)) {
-                    graphs.add(graph);
-                }
+                graphs.add(graph);
             }
         }
         return graphs;
