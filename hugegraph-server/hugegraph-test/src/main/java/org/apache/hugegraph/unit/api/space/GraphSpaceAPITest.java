@@ -17,9 +17,15 @@
 
 package org.apache.hugegraph.unit.api.space;
 
+import static org.apache.hugegraph.HugeFactory.SYS_GRAPH;
+
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.hugegraph.api.space.GraphSpaceAPI;
@@ -30,10 +36,12 @@ import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.core.GraphManager;
+import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
+import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -85,6 +93,29 @@ public class GraphSpaceAPITest extends BaseUnitTest {
         Assert.assertThrows(ForbiddenException.class, () -> {
             api.deleteDefaultRole(manager, GRAPHSPACE, TARGET, "SPACE", null);
         });
+    }
+
+    @Test
+    public void testPdGraphsIncludesLoadedLocalConfigGraphs() {
+        GraphManager manager = allocateGraphManager();
+        Whitebox.setInternalState(manager, "PDExist", true);
+        Whitebox.setInternalState(manager, "localGraphs",
+                                  new HashSet<>(Arrays.asList("hugegraph",
+                                                              SYS_GRAPH)));
+        MetaManager metaManager = Mockito.mock(MetaManager.class);
+        Mockito.when(metaManager.graphConfigs("DEFAULT"))
+               .thenReturn(Collections.emptyMap());
+        Whitebox.setInternalState(manager, "metaManager", metaManager);
+
+        Map<String, Graph> graphs = new ConcurrentHashMap<>();
+        graphs.put("DEFAULT-hugegraph", Mockito.mock(Graph.class));
+        graphs.put("DEFAULT-" + SYS_GRAPH, Mockito.mock(Graph.class));
+        Whitebox.setInternalState(manager, "graphs", graphs);
+
+        Set<String> result = manager.graphs("DEFAULT");
+
+        Assert.assertTrue(result.contains("hugegraph"));
+        Assert.assertFalse(result.contains(SYS_GRAPH));
     }
 
     private static GraphManager managerWithDefaultRoleContext(String operator,

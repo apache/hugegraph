@@ -2099,6 +2099,17 @@ public final class GraphManager {
         for (String key : this.metaManager.graphConfigs(graphSpace).keySet()) {
             graphs.add(key.split(DELIMITER)[1]);
         }
+        if (DEFAULT_GRAPH_SPACE_SERVICE_NAME.equals(graphSpace)) {
+            for (String graph : this.localGraphs) {
+                if (SYS_GRAPH.equals(graph)) {
+                    continue;
+                }
+                String key = spaceGraphName(graphSpace, graph);
+                if (this.graphs.containsKey(key)) {
+                    graphs.add(graph);
+                }
+            }
+        }
         return graphs;
     }
 
