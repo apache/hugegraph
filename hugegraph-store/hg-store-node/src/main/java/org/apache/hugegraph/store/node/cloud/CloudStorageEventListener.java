@@ -78,16 +78,22 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     private final Map<String, Long> readMissAttemptTs;
 
     /**
+     * Optional retry queue; when non-null, upload failures are submitted here instead
+     * of just being logged. When null, failures are only logged (no retry).
+     */
+    private final CloudUploadRetryQueue retryQueue;
+
+    /**
      * @param dataRoot absolute path of the store's data directory
      *                 (value of {@code app.data-path}, resolved to an absolute path).
      */
     public CloudStorageEventListener(String dataRoot) {
-        this(dataRoot, true, DEFAULT_READ_MISS_GUARD_WINDOW_MS);
+        this(dataRoot, true, DEFAULT_READ_MISS_GUARD_WINDOW_MS, null);
     }
 
     public CloudStorageEventListener(String dataRoot,
                                      boolean startupHydrationEnabled) {
-        this(dataRoot, startupHydrationEnabled, DEFAULT_READ_MISS_GUARD_WINDOW_MS);
+        this(dataRoot, startupHydrationEnabled, DEFAULT_READ_MISS_GUARD_WINDOW_MS, null);
     }
 
     /**
@@ -97,6 +103,20 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     public CloudStorageEventListener(String dataRoot,
                                      boolean startupHydrationEnabled,
                                      long readMissGuardWindowMs) {
+        this(dataRoot, startupHydrationEnabled, readMissGuardWindowMs, null);
+    }
+
+    /**
+     * Full constructor.
+     *
+     * @param retryQueue optional {@link CloudUploadRetryQueue}; when non-null, upload failures
+     *                   are retried asynchronously and eventually moved to the dead-letter queue.
+     *                   Pass {@code null} to disable retries (failures are only logged).
+     */
+    public CloudStorageEventListener(String dataRoot,
+                                     boolean startupHydrationEnabled,
+                                     long readMissGuardWindowMs,
+                                     CloudUploadRetryQueue retryQueue) {
         String normalised = Paths.get(dataRoot).toAbsolutePath().normalize().toString();
         // Strip trailing separator so substring arithmetic is consistent.
         this.dataRoot = normalised.endsWith(File.separator)
@@ -105,6 +125,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         this.startupHydrationEnabled = startupHydrationEnabled;
         this.readMissGuardWindowMs = Math.max(0L, readMissGuardWindowMs);
         this.readMissAttemptTs = new ConcurrentHashMap<>();
+        this.retryQueue = retryQueue;
     }
 
     // -----------------------------------------------------------------------
@@ -197,10 +218,17 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
             log.debug("Cloud upload success: db={}, cf={}, path={}, size={}",
                       dbName, cfName, filePath, fileSize);
         } catch (Exception e) {
-            log.error("Cloud upload failed: db={}, cf={}, path={}", dbName, cfName, filePath, e);
-            throw new IllegalStateException(
-                    String.format("Cloud upload failed for db=%s cf=%s path=%s",
-                                  dbName, cfName, filePath), e);
+            // NOTE: this callback is invoked via RocksDB's JNI event-listener mechanism.
+            // Any exception thrown here crosses the JNI boundary and is silently swallowed
+            // by the native layer — it will NOT crash the server and the SST file will NOT
+            // be retried automatically. Log the failure and submit to the retry queue (if
+            // configured) so the upload can be retried asynchronously and, after exhausting
+            // all attempts, moved to the dead-letter queue for later inspection / replay.
+            log.error("Cloud upload failed (SST file is local-only, may be missing from cloud): "
+                      + "db={}, cf={}, path={}", dbName, cfName, filePath, e);
+            if (retryQueue != null) {
+                retryQueue.submit(dbName, cfName, filePath, remoteKey, e);
+            }
         }
     }
 

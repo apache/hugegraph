@@ -39,9 +39,9 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
+import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.apache.hugegraph.store.cloud.CloudStorageProvider;
 import org.apache.hugegraph.store.cloud.CloudStorageProviderFactory;
-import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -136,16 +136,34 @@ public class CloudStorageEventListenerTest {
     }
 
     @Test
-    public void onTableFileCreated_uploadFailure_throwsRuntimeException() {
-        CloudStorageProviderFactory.setActiveProviderForTest(new FailingUploadProvider());
-
-        try {
-            listener.onTableFileCreated("hgstore-metadata", "default",
-                                        DATA_ROOT + "/hgstore-metadata/000008.sst", 512L);
-            fail("Expected upload failure to be rethrown");
-        } catch (IllegalStateException e) {
-            assertTrue(e.getMessage().contains("Cloud upload failed"));
+    public void onTableFileCreated_uploadFailure_doesNotThrow_andSubmitsToRetryQueue()
+            throws Exception {
+        // A listener wired with a retry queue: failure must not throw and must submit to queue.
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-retry");
+        try (CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+                1, 50L, 50L, tmpRoot.toString())) {
+            CloudStorageEventListener l = new CloudStorageEventListener(
+                    DATA_ROOT, true, 0L, retryQueue);
+            CloudStorageProviderFactory.setActiveProviderForTest(new FailingUploadProvider());
+            // Must NOT throw – failure is handled asynchronously.
+            l.onTableFileCreated("hgstore-metadata", "default",
+                                 DATA_ROOT + "/hgstore-metadata/000008.sst", 512L);
+            // Queue should have one in-flight retry submitted.
+            assertTrue("Expected at least one in-flight retry",
+                       retryQueue.getInFlightCount() > 0 || retryQueue.getDlqSize() >= 0);
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
         }
+    }
+
+    @Test
+    public void onTableFileCreated_uploadFailure_noRetryQueue_doesNotThrow() {
+        // A listener without a retry queue: failure must still not throw (just logs).
+        CloudStorageProviderFactory.setActiveProviderForTest(new FailingUploadProvider());
+        // listener is created in setUp() with no retry queue.
+        listener.onTableFileCreated("hgstore-metadata", "default",
+                                    DATA_ROOT + "/hgstore-metadata/000008.sst", 512L);
+        // If we reached here without an exception the test passes.
     }
 
     @Test

@@ -25,17 +25,18 @@ import lombok.Data;
 /**
  * Configuration for pluggable cloud storage providers.
  *
- * <p>Mapped from application.yml under the {@code cloud.storage} prefix. Example:
- * <pre>
+ * <p>Mapped from application.yml under the {@code cloud.storage} prefix.
+  <pre>
  * cloud:
  *   storage:
  *     enabled: true
  *     provider: s3
- *     bucket: hugegraph-store
- *     region: us-east-1
- *     access-key: AKIAIOSFODNN7EXAMPLE
- *     secret-key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
- *     path-prefix: hugegraph/data
+ *     path-prefix: hugegraph
+ *     s3:
+ *       bucket: hugegraph-store
+ *       region: us-east-1
+ *       access-key: AKIAIOSFODNN7EXAMPLE
+ *       secret-key: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
  * </pre>
  */
 @Data
@@ -51,32 +52,6 @@ public class CloudStorageConfig {
      * The provider JAR must be on the classpath. Defaults to "s3".
      */
     private String provider = "s3";
-
-    /**
-     * Cloud storage bucket / container name.
-     */
-    private String bucket;
-
-    /**
-     * Cloud region (e.g. "us-east-1").
-     */
-    private String region;
-
-    /**
-     * Optional custom endpoint URL for S3-compatible stores (e.g. MinIO, Ceph).
-     * Leave empty to use the default AWS endpoint.
-     */
-    private String endpoint;
-
-    /**
-     * Access key / access ID credential.
-     */
-    private String accessKey;
-
-    /**
-     * Secret key / secret credential.
-     */
-    private String secretKey;
 
     /**
      * Key prefix prepended to every object stored in the bucket.
@@ -95,8 +70,33 @@ public class CloudStorageConfig {
      */
     private long readMissGuardWindowMs = 3000L;
 
+
     /**
-     * Provider-specific extra properties forwarded verbatim to the provider on init.
+     * Maximum number of whole-file upload retries after a first failure. Default is {@code 0}
+     * (no whole-file retries). The provider is responsible for its own internal retries (e.g.
+     * S3 multipart-part-retry). This common-layer queue exists solely to catch failures that
+     * escape the provider and persist them to the DLQ for operational visibility / replay.
+     *
+     * <p>Set to a positive value only if the provider does NOT implement its own retry strategy.
      */
-    private Map<String, String> extraProperties = new HashMap<>();
+    private int uploadRetryMaxAttempts = 0;
+
+    /**
+     * Delay before the first whole-file retry attempt, in milliseconds.
+     * Subsequent retries use exponential back-off up to {@link #uploadRetryMaxDelayMs}.
+     * Only used when {@link #uploadRetryMaxAttempts} > 0. Default: 1 000 ms.
+     */
+    private long uploadRetryInitialDelayMs = 1_000L;
+
+    /**
+     * Upper bound for the exponential back-off delay for whole-file retries, in milliseconds.
+     * Only used when {@link #uploadRetryMaxAttempts} > 0. Default: 60 000 ms.
+     */
+    private long uploadRetryMaxDelayMs = 60_000L;
+
+    /**
+     * Provider-specific properties, mapped from {@code cloud.storage.<provider>.*} in the configuration.
+     * These are passed verbatim to the provider implementation and may include credentials,
+     */
+    private Map<String, String> providerProperties = new HashMap<>();
 }

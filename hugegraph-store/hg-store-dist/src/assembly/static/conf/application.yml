@@ -73,23 +73,38 @@ logging:
 #   storage:
 #     enabled: true
 #     provider: s3                         # must match CloudStorageProvider.providerName()
-#     bucket: hugegraph-store              # bucket / container name
-#     region: us-east-1                    # AWS region (leave empty for custom endpoint)
-#     endpoint:                            # custom S3-compatible endpoint (MinIO, Ceph…)
-#     access-key: AKIAIOSFODNN7EXAMPLE     # omit to use the AWS default credentials chain
-#     secret-key: wJalrXUtnFEMI/...        # omit to use the AWS default credentials chain
 #     path-prefix: hugegraph               # key prefix inside the bucket
-#     extra-properties:                    # provider-specific key-value pairs
-#       s3.forcePathStyle: "true"
+#     # --- Upload retry & dead-letter queue (common for all providers) ---
+#     upload-retry-max-attempts: 5         # total attempts (initial + retries); default 5
+#     upload-retry-initial-delay-ms: 1000  # delay before first retry (ms); default 1000
+#     upload-retry-max-delay-ms: 60000     # exponential-backoff ceiling (ms); default 60000
+#     # --- S3 provider settings (cloud.storage.s3.*) ---
+#     s3:
+#       bucket: hugegraph-store            # S3 bucket name
+#       region: us-east-1                  # AWS region
+#       endpoint:                          # custom S3-compatible endpoint (MinIO, Ceph...)
+#       access-key: AKIAIOSFODNN7EXAMPLE   # omit to use the AWS default credentials chain
+#       secret-key: wJalrXUtnFEMI/...      # omit to use the AWS default credentials chain
+#       multipart-part-retry-max-attempts: 3
+#       multipart-part-retry-base-backoff-ms: 1000
+#       multipart-exhausted-direct-dlq: false
 cloud:
   storage:
     enabled: false
     provider: s3
-    bucket:
-    region:
-    endpoint:
-    access-key:
-    secret-key:
     path-prefix: hugegraph
-    extra-properties: {}
+    # 0 = no whole-file retries; provider handles its own retries. Queue is DLQ-only.
+    # Set > 0 only for providers without built-in retry strategy.
+    upload-retry-max-attempts: 0
+    upload-retry-initial-delay-ms: 1000
+    upload-retry-max-delay-ms: 60000
+    s3:
+      bucket:
+      region:
+      endpoint:
+      access-key:
+      secret-key:
+      multipart-part-retry-max-attempts: 3
+      multipart-part-retry-base-backoff-ms: 1000
+      multipart-exhausted-direct-dlq: false
 

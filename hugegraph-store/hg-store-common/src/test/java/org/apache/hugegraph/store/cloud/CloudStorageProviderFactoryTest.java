@@ -71,7 +71,7 @@ public class CloudStorageProviderFactoryTest {
     public void testInitializeWithMockProvider() {
         config.setEnabled(true);
         config.setProvider("s3");
-        config.setBucket("test-bucket");
+        config.getProviderProperties().put("bucket", "test-bucket");
 
         // Inject the mock provider for testing (bypass SPI discovery)
         CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);
@@ -84,7 +84,7 @@ public class CloudStorageProviderFactoryTest {
      * Test that multiple setActiveProviderForTest calls work
      */
     @Test
-    public void testMultipleSetActiveProvider() throws IOException {
+    public void testMultipleSetActiveProvider() {
         CloudStorageProvider oldProvider = mock(CloudStorageProvider.class);
         when(oldProvider.providerName()).thenReturn("s3");
 

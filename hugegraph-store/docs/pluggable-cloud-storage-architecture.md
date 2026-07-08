@@ -71,24 +71,78 @@ object store and hydrating missing files back when needed (startup and read-miss
 The pluggable cloud-storage behavior is controlled from `application.yml` under
 `cloud.storage`.
 
-| Configuration                              | Default  | Description                                                                                                         |
-|--------------------------------------------|----------|---------------------------------------------------------------------------------------------------------------------|
-| `cloud.storage.enabled`                    | `false`  | Enables/disables cloud storage integration.                                                                         |
-| `cloud.storage.provider`                   | `s3`     | Active provider name. Must match `CloudStorageProvider#providerName()`.                                            |
-| `cloud.storage.bucket`                     | _(none)_ | Target object storage bucket/container. Required when enabled.                                                      |
-| `cloud.storage.region`                     | _(none)_ | Provider region (for example `us-east-1`).                                                                          |
-| `cloud.storage.endpoint`                   | _(none)_ | Optional custom endpoint for S3-compatible stores (MinIO/Ceph).                                                     |
-| `cloud.storage.access-key`                 | _(none)_ | Access key / access ID credential.                                                                                  |
-| `cloud.storage.secret-key`                 | _(none)_ | Secret key credential.                                                                                              |
-| `cloud.storage.path-prefix`                | `hugegraph` | Prefix prepended to all remote object keys.                                                                      |
-| `cloud.storage.startup-hydration-enabled`  | `true`   | Downloads missing remote files on DB opening before normal serving.                                                 |
-| `cloud.storage.read-miss-guard-window-ms`  | `3000`   | Guard window to throttle repeated read-miss hydration attempts per db/table. Values `<= 0` disable throttling.    |
-| `cloud.storage.extra-properties`           | `{}`     | Provider-specific key/value map passed through during provider initialization.                                      |
+| Configuration                                 | Default     | Description                                                                                                          |
+|-----------------------------------------------|-------------|----------------------------------------------------------------------------------------------------------------------|
+| `cloud.storage.enabled`                       | `false`     | Enables/disables cloud storage integration.                                                                          |
+| `cloud.storage.provider`                      | `s3`        | Active provider name. Must match `CloudStorageProvider#providerName()`.                                              |
+| `cloud.storage.path-prefix`                   | `hugegraph` | Prefix prepended to all remote object keys.                                                                          |
+| `cloud.storage.startup-hydration-enabled`     | `true`      | Downloads missing remote files on DB opening before normal serving.                                                  |
+| `cloud.storage.read-miss-guard-window-ms`     | `3000`      | Guard window to throttle repeated read-miss hydration attempts per db/table. Values `<= 0` disable throttling.       |
+| `cloud.storage.upload-retry-max-attempts`     | `0`         | Whole-file retry attempts after a first upload failure. **Default `0` = no retries; failures go directly to DLQ.** The provider handles its own internal retries (e.g. S3 multipart-part-retry). Set `> 0` only for providers without built-in retry logic. |
+| `cloud.storage.upload-retry-initial-delay-ms` | `1000`      | Delay before first whole-file retry; subsequent retries use exponential backoff. Only used when `upload-retry-max-attempts > 0`. |
+| `cloud.storage.upload-retry-max-delay-ms`     | `60000`     | Upper bound for exponential backoff delay between whole-file retry attempts. Only used when `upload-retry-max-attempts > 0`. |
 
 Notes:
 
-- Keep `bucket` and `path-prefix` stable across restarts to preserve object-key continuity.
+- Keep `path-prefix` stable across restarts to preserve object-key continuity.
 - If `provider` is not found on classpath, initialization fails fast in `CloudStorageProviderFactory`.
+- Upload retry uses a two-layer model: S3 part-level retries (inside one `uploadFile()` call) are handled by the provider; whole-file retries are handled by `CloudUploadRetryQueue` only when `upload-retry-max-attempts > 0`.
+- Failed uploads that exhaust all attempts (or with `maxAttempts=0`) are moved to the dead-letter queue (DLQ) persisted at `<data-path>/.cloud-upload-dlq.tsv`.
+- Provider-specific properties (e.g., bucket, region, credentials) are configured under `cloud.storage.<provider>.*` namespace.
+
+### S3 provider-specific options (`cloud.storage.s3.*`)
+
+For provider `s3`, configure these properties under `cloud.storage.s3`:
+
+| Configuration                                   | Default  | Description                                                                                         |
+|--------------------------------------------------|----------|-----------------------------------------------------------------------------------------------------|
+| `cloud.storage.s3.bucket`                       | _(none)_ | Target S3 bucket name. Required when S3 provider is enabled.                                        |
+| `cloud.storage.s3.region`                       | _(none)_ | AWS region (for example `us-east-1`).                                                               |
+| `cloud.storage.s3.endpoint`                     | _(none)_ | Optional custom endpoint for S3-compatible stores (MinIO/Ceph).                                     |
+| `cloud.storage.s3.access-key`                   | _(none)_ | Access key / AWS Access ID credential. Omit to use AWS default credentials chain.                   |
+| `cloud.storage.s3.secret-key`                   | _(none)_ | Secret key credential. Omit to use AWS default credentials chain.                                   |
+| `cloud.storage.s3.multipart-part-retry-max-attempts`    | `3`     | Max retries for each multipart upload part before the whole file upload fails.                      |
+| `cloud.storage.s3.multipart-part-retry-base-backoff-ms` | `1000`  | Base backoff for part retries (exponential: 1x/2x/4x...).                                           |
+| `cloud.storage.s3.multipart-exhausted-direct-dlq`       | `false` | If `true`, part-retry exhaustion is marked non-retryable so outer SST retry can go directly to DLQ. |
+
+### Sample `application.yml` (`cloud.storage`)
+
+If you want to configure Store directly through `application.yml` (instead of env injection),
+use a snippet like this:
+
+```yaml
+cloud:
+  storage:
+    enabled: true
+    provider: s3
+    path-prefix: hugegraph
+
+    # Hydration controls
+    startup-hydration-enabled: true
+    read-miss-guard-window-ms: 3000
+
+    # S3 provider-specific configuration (cloud.storage.s3.*)
+    s3:
+      bucket: hugegraph-store0
+      region: us-east-1
+      endpoint: http://minio:9000
+      access-key: minioadmin
+      secret-key: minioadmin
+      
+      # Multipart upload retry configuration (S3 part-level, inside one uploadFile() call)
+      multipart-part-retry-max-attempts: 3
+      multipart-part-retry-base-backoff-ms: 1000
+      multipart-exhausted-direct-dlq: false
+```
+
+Notes:
+
+- `upload-retry-max-attempts` defaults to `0` (DLQ-only, no whole-file retries) and is omitted here.
+  Only add it if using a provider without built-in retry logic.
+- In this docker stack, each Store node uses its own bucket (`hugegraph-store0/1/2`).
+- For local MinIO, endpoint is typically `http://minio:9000` inside the docker network.
+- Provider-specific properties are configured under `cloud.storage.<provider>.*` namespace.
+
 
 ## 3) Write Path
 
@@ -187,8 +241,44 @@ Read request result
 
 ### Upload failures (write-critical)
 
-- `onTableFileCreated` upload failure throws `IllegalStateException` (fail-fast).
-- This surfaces cloud-sync write risk immediately instead of silently diverging local/cloud state.
+#### Two-layer retry model
+
+Upload failures use a two-layer retry strategy:
+
+| Layer | Where | What it retries | Config keys |
+|-------|-------|-----------------|-------------|
+| **Part-level** (S3 only) | Inside `S3CloudStorageProvider.uploadFile()` | Individual 512 MB multipart chunks | `cloud.storage.s3.multipart-part-retry-max-attempts`, `multipart-part-retry-base-backoff-ms` |
+| **File-level** (common) | `CloudUploadRetryQueue` (async) | Whole SST file after `uploadFile()` throws | `cloud.storage.upload-retry-max-attempts`, `upload-retry-initial-delay-ms`, `upload-retry-max-delay-ms` |
+
+The default `upload-retry-max-attempts=0` disables whole-file retries. The provider (S3) handles all real retry logic internally. The common queue exists solely as a DLQ safety net.
+
+#### Failure flow (default `upload-retry-max-attempts=0`)
+
+- `onTableFileCreated` calls `provider.uploadFile()`.
+- S3 retries individual parts internally (via `multipart-part-retry-*`).
+- If `uploadFile()` still throws, failure is caught (JNI callback cannot propagate exceptions).
+- `CloudUploadRetryQueue.submit()` is called -> because `maxAttempts=0`, the task goes directly to DLQ.
+- DLQ is persisted to `<data-path>/.cloud-upload-dlq.tsv` and survives restarts.
+
+#### Accessing the DLQ
+
+DLQ entries are persisted on disk and can be inspected directly:
+
+```bash
+cat <app.data-path>/.cloud-upload-dlq.tsv
+```
+
+Format: `failedAt \t attemptCount \t dbName \t cfName \t filePath \t remoteKey \t lastError`
+
+To replay DLQ entries, use the in-process `CloudUploadRetryQueue.replayDlq()` path from Store runtime code.
+
+If whole-file retries are needed (e.g. for a provider without internal retry), set:
+
+```yaml
+cloud.storage.upload-retry-max-attempts: 3   # enable 3 whole-file retry attempts
+cloud.storage.upload-retry-initial-delay-ms: 1000
+cloud.storage.upload-retry-max-delay-ms: 60000
+```
 
 ### Delete failures (non-fatal)
 
@@ -209,12 +299,11 @@ Read request result
 
 Failure-mode and RPO-oriented recovery summary:
 
-| Failure scenario                            | Data loss?                               | RPO                                              | Recovery mechanism                                                                                                                               | Mitigation                                                                                                      |
-|---------------------------------------------|-------------------------------------------|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| Single Store crash                          | No                                        | 0s                                               | 2/3 Raft quorum survives. Leader re-election continues service. In-flight (not SST-flushed) data is recovered from Raft logs; flushed data remains available via local/cloud SSTs. | Keep 3+ replicas across zones, alert on replica loss, and use durable PV-backed store nodes.                  |
-| 2 of 3 Stores crash                         | No (service stalls until quorum restored) | 0s                                               | Surviving replica Raft log bootstraps recovering nodes after restart. In-flight data is recovered from Raft log replay.                         | Enforce anti-affinity and failure-domain isolation to prevent correlated failures.                              |
-| All Stores crash (disks intact)             | No                                        | 0s                                               | Local Raft logs replay on boot and recover non-flushed in-flight data. Local SSTs reopen and cloud sync resumes for pending uploads.          | Ensure orchestrator auto-restart, fast PV reattach, and regular restart drills.                                |
-| Catastrophic loss: all Store disks destroyed | Yes                                      | Seconds to minutes (depends on SST sync mode/interval) | Raft logs and local SSTs are lost. Nodes recover from last completed cloud SST sync; data after that sync is unrecoverable.                   | Use durable disks, scheduled volume snapshots/backups, and synchronous SST upload mode for tighter RPO.        |
+| Failure scenario                              | Data loss?                                 | RPO                                                    | Recovery mechanism                                                                                                                                                                 | Mitigation                                                                                                      |
+|-----------------------------------------------|--------------------------------------------|--------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| Single Store crash                            | No                                         | 0s                                                     | 2/3 Raft quorum survives. Leader re-election continues service. In-flight (not SST-flushed) data is recovered from Raft logs; flushed data remains available via local/cloud SSTs. | Keep 3+ replicas across zones, alert on replica loss, and use durable PV-backed store nodes.                    |
+| 2 of 3 Stores crash                           | No (service stalls until quorum restored)  | 0s                                                     | Surviving replica Raft log bootstraps recovering nodes after restart. In-flight data is recovered from Raft log replay.                                                            | Enforce anti-affinity and failure-domain isolation to prevent correlated failures.                              |
+| Catastrophic loss: all Store disks destroyed  | Yes                                        | Seconds to minutes (depends on SST sync mode/interval) | Raft logs and local SSTs are lost. Nodes recover from last completed cloud SST sync; data after that sync is unrecoverable.                                                        | Use durable disks, scheduled volume snapshots/backups, and synchronous SST upload mode for tighter RPO.         |
 
 Notes:
 
@@ -476,23 +565,50 @@ cloud:
   storage:
     enabled: true
     provider: newprovider  # Must match NewProviderCloudStorageProvider.providerName()
-    bucket: my-container
-    region: myaccount  # Azure account name (using region field)
-    endpoint: https://myaccount.blob.core.windows.net
-    access-key: ${NEWPROVIDER_KEY}
+    path-prefix: hugegraph
+    
+    # Provider-specific configuration (cloud.storage.newprovider.*)
+    newprovider:
+      bucket: my-container
+      region: myaccount  # e.g., Azure account name
+      endpoint: https://myaccount.blob.core.windows.net
+      access-key: ${NEWPROVIDER_KEY}
+      secret-key: ${NEWPROVIDER_SECRET}
 ```
 
-Or via Docker env:
+Or via Docker env (for S3 example):
+
+```bash
+HG_CLOUD_STORAGE_ENABLED=true \
+HG_CLOUD_STORAGE_PROVIDER=s3 \
+HG_CLOUD_STORAGE_PATH_PREFIX=hugegraph \
+HG_CLOUD_STORAGE_S3_BUCKET=hugegraph-store0 \
+HG_CLOUD_STORAGE_S3_REGION=us-east-1 \
+HG_CLOUD_STORAGE_S3_ENDPOINT=http://minio:9000 \
+HG_CLOUD_STORAGE_S3_ACCESS_KEY=minioadmin \
+HG_CLOUD_STORAGE_S3_SECRET_KEY=minioadmin \
+docker run hugegraph-store:latest
+```
+
+Or via Docker env (for custom newprovider):
 
 ```bash
 HG_CLOUD_STORAGE_ENABLED=true \
 HG_CLOUD_STORAGE_PROVIDER=newprovider \
-HG_CLOUD_STORAGE_BUCKET=my-container \
-HG_CLOUD_STORAGE_REGION=myaccount \
-HG_CLOUD_STORAGE_ENDPOINT=https://myaccount.blob.core.windows.net \
-HG_CLOUD_STORAGE_ACCESS_KEY=${NEWPROVIDER_KEY} \
+HG_CLOUD_STORAGE_PATH_PREFIX=hugegraph \
+HG_CLOUD_STORAGE_NEWPROVIDER_BUCKET=my-container \
+HG_CLOUD_STORAGE_NEWPROVIDER_REGION=myaccount \
+HG_CLOUD_STORAGE_NEWPROVIDER_ENDPOINT=https://myaccount.blob.core.windows.net \
+HG_CLOUD_STORAGE_NEWPROVIDER_ACCESS_KEY=${NEWPROVIDER_KEY} \
+HG_CLOUD_STORAGE_NEWPROVIDER_SECRET_KEY=${NEWPROVIDER_SECRET} \
 docker run hugegraph-store:latest
 ```
+
+Notes on property naming conventions:
+
+- **YAML properties**: Use kebab-case with provider-specific namespacing (e.g., `cloud.storage.s3.bucket`, `cloud.storage.newprovider.access-key`)
+- **Environment variables**: Use uppercase with underscores and `HG_CLOUD_STORAGE_*` prefix. Provider-specific options use `HG_CLOUD_STORAGE_<PROVIDER>_*` pattern
+- Kebab-case YAML properties are converted to uppercase with underscores (e.g., `multipart-part-retry-max-attempts` → `MULTIPART_PART_RETRY_MAX_ATTEMPTS`)
 
 ### Testing Your Provider
 
@@ -560,7 +676,7 @@ If your provider isn't loaded:
 1. **Thread safety**: Ensure provider is thread-safe for concurrent upload/download/delete operations.
 2. **Connection pooling**: Reuse client connections; initialize once in `init()`, close in `close()`.
 3. **Path normalization**: Always use `pathPrefix` correctly (see S3 example for reference).
-4. **Error handling**: Throw `IOException` for operational issues; let Store handle retries/logging.
+4. **Error handling**: Throw `IOException` for operational issues. Implement your own internal retry logic (see `S3CloudStorageProvider` for reference). The common `CloudUploadRetryQueue` provides a DLQ safety net but does not retry by default (`upload-retry-max-attempts=0`).
 5. **Logging**: Use SLF4J (via `@Slf4j`) for consistent log levels with Store.
 6. **Configuration validation**: Validate all required fields in `init()` and fail fast.
 

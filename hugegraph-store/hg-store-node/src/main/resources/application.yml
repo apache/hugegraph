@@ -55,11 +55,19 @@ cloud:
   storage:
     enabled: false
     provider: s3
-    bucket:
-    region:
-    endpoint:
-    access-key:
-    secret-key:
     path-prefix: hugegraph
-    extra-properties: {}
+    # 0 = no whole-file retries; provider handles its own retries. Queue is DLQ-only.
+    # Set > 0 only for providers without built-in retry strategy.
+    upload-retry-max-attempts: 0
+    upload-retry-initial-delay-ms: 1000
+    upload-retry-max-delay-ms: 60000
+    s3:
+      bucket:
+      region:
+      endpoint:
+      access-key:
+      secret-key:
+      multipart-part-retry-max-attempts: 3
+      multipart-part-retry-base-backoff-ms: 1000
+      multipart-exhausted-direct-dlq: false
 

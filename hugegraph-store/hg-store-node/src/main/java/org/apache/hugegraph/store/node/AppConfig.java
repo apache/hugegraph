@@ -18,13 +18,17 @@
 package org.apache.hugegraph.store.node;
 
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
 import org.apache.hugegraph.store.node.cloud.CloudStorageEventListener;
+import org.apache.hugegraph.store.node.cloud.CloudUploadRetryQueue;
 import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.apache.hugegraph.store.cloud.CloudStorageProviderFactory;
 import org.apache.hugegraph.store.options.JobOptions;
@@ -32,9 +36,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.AbstractEnvironment;
+import org.springframework.core.env.EnumerablePropertySource;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import lombok.Data;
+import lombok.EqualsAndHashCode;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 @Data
@@ -96,6 +105,9 @@ public class AppConfig {
     @Autowired
     private CloudStorageSpringConfig cloudStorageSpringConfig;
 
+    /** Retry queue created during {@link #initCloudStorage()}; closed on {@link #onDestroy()}. */
+    private volatile CloudUploadRetryQueue cloudUploadRetryQueue;
+
     public String getRaftPath() {
         if (raftPath == null || raftPath.length() == 0) {
             return dataPath;
@@ -150,19 +162,44 @@ public class AppConfig {
             CloudStorageProviderFactory.initialize(cfg);
             String resolvedDataRoot =
                     Paths.get(dataPath).toAbsolutePath().normalize().toString();
+
+            CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+                    cfg.getUploadRetryMaxAttempts(),
+                    cfg.getUploadRetryInitialDelayMs(),
+                    cfg.getUploadRetryMaxDelayMs(),
+                    resolvedDataRoot);
+            this.cloudUploadRetryQueue = retryQueue;
+
             RocksDBFactory.getInstance().addRocksdbChangedListener(
                     new CloudStorageEventListener(resolvedDataRoot,
                                                   cfg.isStartupHydrationEnabled(),
-                                                  cfg.getReadMissGuardWindowMs()));
+                                                  cfg.getReadMissGuardWindowMs(),
+                                                  retryQueue));
             log.info("Cloud storage provider '{}' registered with RocksDBFactory "
                      + "(dataRoot='{}', startupHydration={}, readMissHydration=true, "
-                     + "readMissGuardWindowMs={})",
+                     + "readMissGuardWindowMs={}, uploadRetryMaxAttempts={}, "
+                     + "uploadRetryInitialDelayMs={}, uploadRetryMaxDelayMs={})",
                      cfg.getProvider(), resolvedDataRoot,
                      cfg.isStartupHydrationEnabled(),
-                     cfg.getReadMissGuardWindowMs());
+                     cfg.getReadMissGuardWindowMs(),
+                     cfg.getUploadRetryMaxAttempts(),
+                     cfg.getUploadRetryInitialDelayMs(),
+                     cfg.getUploadRetryMaxDelayMs());
         } catch (Exception e) {
             log.error("Failed to initialize cloud storage provider '{}': {}",
                       cfg.getProvider(), e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Gracefully shuts down the cloud upload retry queue on application stop.
+     */
+    @PreDestroy
+    public void onDestroy() {
+        if (cloudUploadRetryQueue != null) {
+            log.info("Shutting down CloudUploadRetryQueue (dlqSize={}) …",
+                     cloudUploadRetryQueue.getDlqSize());
+            cloudUploadRetryQueue.close();
         }
     }
 
@@ -361,16 +398,23 @@ public class AppConfig {
     }
 
     /**
-     * Spring {@link ConfigurationProperties} wrapper around {@link CloudStorageConfig}.
+     * Spring {@link ConfigurationProperties} wrapper for the common cloud storage properties.
      *
-     * <p>Mapped from the {@code cloud.storage.*} YAML namespace. Example:
+     * <p>Provider-specific keys (e.g. {@code cloud.storage.s3.bucket}) are read
+     * directly from the Spring {@link Environment} at conversion time, so this class
+     * has zero knowledge of any specific cloud provider.
+     *
      * <pre>
      * cloud:
      *   storage:
      *     enabled: true
-     *     provider: s3
-     *     bucket:  my-bucket
-     *     region:  us-east-1
+     *     provider: s3          # selects which sub-namespace to forward to the provider
+     *     path-prefix: hugegraph
+     *     s3:                   # all keys here are forwarded as-is to the S3 provider
+     *       bucket: my-bucket
+     *       region: us-east-1
+     *       access-key: ${AWS_ACCESS_KEY_ID}
+     *       secret-key: ${AWS_SECRET_ACCESS_KEY}
      * </pre>
      */
     @Data
@@ -380,31 +424,66 @@ public class AppConfig {
 
         private boolean enabled = false;
         private String provider = "s3";
-        private String bucket;
-        private String region;
-        private String endpoint;
-        private String accessKey;
-        private String secretKey;
         private String pathPrefix = "hugegraph";
         private boolean startupHydrationEnabled = true;
         private long readMissGuardWindowMs = 3000L;
-        private Map<String, String> extraProperties = new HashMap<>();
+        // 0 = no whole-file retries; provider handles its own retries internally.
+        // Queue is DLQ-only. Set > 0 only for providers without built-in retry.
+        private int uploadRetryMaxAttempts = 0;
+        private long uploadRetryInitialDelayMs = 1_000L;
+        private long uploadRetryMaxDelayMs = 60_000L;
+
+        /**
+         * Injected by Spring; used to read {@code cloud.storage.<provider>.*} properties
+         * without coupling this class to any specific provider.
+         */
+        @Autowired
+        @EqualsAndHashCode.Exclude
+        @ToString.Exclude
+        private Environment environment;
 
         /** Converts this Spring-bound config into a plain {@link CloudStorageConfig} POJO. */
         public CloudStorageConfig toCloudStorageConfig() {
             CloudStorageConfig cfg = new CloudStorageConfig();
             cfg.setEnabled(enabled);
             cfg.setProvider(provider);
-            cfg.setBucket(bucket);
-            cfg.setRegion(region);
-            cfg.setEndpoint(endpoint);
-            cfg.setAccessKey(accessKey);
-            cfg.setSecretKey(secretKey);
             cfg.setPathPrefix(pathPrefix);
             cfg.setStartupHydrationEnabled(startupHydrationEnabled);
             cfg.setReadMissGuardWindowMs(readMissGuardWindowMs);
-            cfg.setExtraProperties(extraProperties);
+            cfg.setUploadRetryMaxAttempts(uploadRetryMaxAttempts);
+            cfg.setUploadRetryInitialDelayMs(uploadRetryInitialDelayMs);
+            cfg.setUploadRetryMaxDelayMs(uploadRetryMaxDelayMs);
+            cfg.setProviderProperties(readProviderProperties());
             return cfg;
+        }
+
+        /**
+         * Reads all {@code cloud.storage.<provider>.*} keys from the Spring Environment
+         * and returns them as a flat map with the provider sub-prefix stripped.
+         *
+         * <p>For example, with {@code provider=s3}, the YAML key
+         * {@code cloud.storage.s3.bucket} becomes {@code bucket} in the returned map.
+         */
+        private Map<String, String> readProviderProperties() {
+            Map<String, String> props = new LinkedHashMap<>();
+            if (!(environment instanceof AbstractEnvironment)) {
+                return props;
+            }
+            String prefix = "cloud.storage." + provider + ".";
+            ((AbstractEnvironment) environment).getPropertySources().stream()
+                    .filter(ps -> ps instanceof EnumerablePropertySource)
+                    .map(ps -> (EnumerablePropertySource<?>) ps)
+                    .flatMap(ps -> Arrays.stream(ps.getPropertyNames()))
+                    .filter(key -> key.startsWith(prefix))
+                    .distinct()
+                    .forEach(key -> {
+                        String shortKey = key.substring(prefix.length());
+                        String value = environment.getProperty(key);
+                        if (value != null) {
+                            props.put(shortKey, value);
+                        }
+                    });
+            return props;
         }
     }
 

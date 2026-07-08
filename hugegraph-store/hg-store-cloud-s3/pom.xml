@@ -78,5 +78,39 @@
             <artifactId>lombok</artifactId>
             <scope>provided</scope>
         </dependency>
+
+        <!-- Test dependencies -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>1.7.36</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Allow long-running benchmarks with sufficient heap -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Default: skip; benchmarks must be run explicitly with -Dtest=S3PerformanceBenchmark -->
+                    <excludes>
+                        <exclude>**/*Benchmark.java</exclude>
+                    </excludes>
+                    <!-- When running explicitly, allow plenty of memory for generating 20 GB of files -->
+                    <argLine>-Xmx512m</argLine>
+                    <!-- Generous timeout for large data volumes (6 hours) -->
+                    <forkedProcessTimeoutInSeconds>21600</forkedProcessTimeoutInSeconds>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

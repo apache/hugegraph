@@ -22,62 +22,70 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.mock.env.MockEnvironment;
 
 public class AppConfigCloudStorageTest {
 
-    private AppConfig appConfig;
     private AppConfig.CloudStorageSpringConfig springConfig;
+    private MockEnvironment mockEnv;
 
     @Before
     public void setUp() {
-        appConfig = new AppConfig();
+        AppConfig appConfig = new AppConfig();
         springConfig = appConfig.new CloudStorageSpringConfig();
+        mockEnv = new MockEnvironment();
+        springConfig.setEnvironment(mockEnv);
     }
 
     /**
-     * Test that CloudStorageSpringConfig correctly converts to CloudStorageConfig
+     * Common fields are bound from {@code cloud.storage.*} and converted correctly.
+     * Provider-specific properties flow from the environment through the provider sub-namespace.
      */
     @Test
     public void testCloudStorageSpringConfigConversion() {
         springConfig.setEnabled(true);
         springConfig.setProvider("s3");
-        springConfig.setBucket("test-bucket");
-        springConfig.setRegion("us-west-2");
-        springConfig.setEndpoint("https://s3.example.com");
-        springConfig.setAccessKey("test-access-key");
-        springConfig.setSecretKey("test-secret-key");
         springConfig.setPathPrefix("test-prefix");
         springConfig.setStartupHydrationEnabled(false);
         springConfig.setReadMissGuardWindowMs(5000L);
 
-        Map<String, String> extraProps = new HashMap<>();
-        extraProps.put("custom-prop", "custom-value");
-        springConfig.setExtraProperties(extraProps);
+        // Simulate cloud.storage.s3.* properties being present in the Spring Environment
+        mockEnv.setProperty("cloud.storage.s3.bucket", "test-bucket");
+        mockEnv.setProperty("cloud.storage.s3.region", "us-west-2");
+        mockEnv.setProperty("cloud.storage.s3.endpoint", "https://s3.example.com");
+        mockEnv.setProperty("cloud.storage.s3.access-key", "test-access-key");
+        mockEnv.setProperty("cloud.storage.s3.secret-key", "test-secret-key");
+        mockEnv.setProperty("cloud.storage.s3.multipart-part-retry-max-attempts", "5");
+        mockEnv.setProperty("cloud.storage.s3.multipart-part-retry-base-backoff-ms", "1500");
+        mockEnv.setProperty("cloud.storage.s3.multipart-exhausted-direct-dlq", "true");
 
         CloudStorageConfig cfg = springConfig.toCloudStorageConfig();
 
+        // Common fields
         assertTrue(cfg.isEnabled());
         assertEquals("s3", cfg.getProvider());
-        assertEquals("test-bucket", cfg.getBucket());
-        assertEquals("us-west-2", cfg.getRegion());
-        assertEquals("https://s3.example.com", cfg.getEndpoint());
-        assertEquals("test-access-key", cfg.getAccessKey());
-        assertEquals("test-secret-key", cfg.getSecretKey());
         assertEquals("test-prefix", cfg.getPathPrefix());
         assertFalse(cfg.isStartupHydrationEnabled());
         assertEquals(5000L, cfg.getReadMissGuardWindowMs());
-        assertEquals(1, cfg.getExtraProperties().size());
-        assertEquals("custom-value", cfg.getExtraProperties().get("custom-prop"));
+
+        // Provider-specific properties forwarded verbatim
+        assertEquals("test-bucket", cfg.getProviderProperties().get("bucket"));
+        assertEquals("us-west-2", cfg.getProviderProperties().get("region"));
+        assertEquals("https://s3.example.com", cfg.getProviderProperties().get("endpoint"));
+        assertEquals("test-access-key", cfg.getProviderProperties().get("access-key"));
+        assertEquals("test-secret-key", cfg.getProviderProperties().get("secret-key"));
+        assertEquals("5", cfg.getProviderProperties().get("multipart-part-retry-max-attempts"));
+        assertEquals("1500",
+                     cfg.getProviderProperties().get("multipart-part-retry-base-backoff-ms"));
+        assertEquals("true",
+                     cfg.getProviderProperties().get("multipart-exhausted-direct-dlq"));
     }
 
     /**
-     * Test CloudStorageSpringConfig defaults
+     * When no provider env properties exist, providerProperties is empty but not null.
      */
     @Test
     public void testCloudStorageSpringConfigDefaults() {
@@ -88,69 +96,20 @@ public class AppConfigCloudStorageTest {
         assertEquals("hugegraph", cfg.getPathPrefix());
         assertTrue(cfg.isStartupHydrationEnabled());
         assertEquals(3000L, cfg.getReadMissGuardWindowMs());
+        assertNotNull(cfg.getProviderProperties());
+        assertTrue(cfg.getProviderProperties().isEmpty());
     }
 
     /**
-     * Test CloudStorageSpringConfig all properties set
+     * Common property setters on CloudStorageSpringConfig work correctly.
      */
     @Test
-    public void testCloudStorageSpringConfigAllPropertiesSet() {
-        springConfig.setEnabled(true);
-        springConfig.setProvider("gcs");
-        springConfig.setBucket("gcs-bucket");
-        springConfig.setRegion("us-central-1");
-        springConfig.setEndpoint("https://storage.googleapis.com");
-        springConfig.setAccessKey("gcs-access");
-        springConfig.setSecretKey("gcs-secret");
-        springConfig.setPathPrefix("data/prefix");
-        springConfig.setStartupHydrationEnabled(false);
-        springConfig.setReadMissGuardWindowMs(10000L);
-
-        Map<String, String> extra = new HashMap<>();
-        extra.put("project-id", "my-gcp-project");
-        springConfig.setExtraProperties(extra);
-
-        CloudStorageConfig cfg = springConfig.toCloudStorageConfig();
-
-        assertTrue(cfg.isEnabled());
-        assertEquals("gcs", cfg.getProvider());
-        assertEquals("gcs-bucket", cfg.getBucket());
-        assertEquals("us-central-1", cfg.getRegion());
-        assertEquals("https://storage.googleapis.com", cfg.getEndpoint());
-        assertEquals("gcs-access", cfg.getAccessKey());
-        assertEquals("gcs-secret", cfg.getSecretKey());
-        assertEquals("data/prefix", cfg.getPathPrefix());
-        assertFalse(cfg.isStartupHydrationEnabled());
-        assertEquals(10000L, cfg.getReadMissGuardWindowMs());
-        assertNotNull(cfg.getExtraProperties());
-    }
-
-    /**
-     * Test CloudStorageSpringConfig getters and setters
-     */
-    @Test
-    public void testCloudStorageSpringConfigGettersSetters() {
-        // Test each setter and getter independently
+    public void testCloudStorageSpringConfigCommonGettersSetters() {
         springConfig.setEnabled(true);
         assertTrue(springConfig.isEnabled());
 
-        springConfig.setProvider("azure");
-        assertEquals("azure", springConfig.getProvider());
-
-        springConfig.setBucket("my-bucket");
-        assertEquals("my-bucket", springConfig.getBucket());
-
-        springConfig.setRegion("westus");
-        assertEquals("westus", springConfig.getRegion());
-
-        springConfig.setEndpoint("https://my-storage.blob.core.windows.net");
-        assertEquals("https://my-storage.blob.core.windows.net", springConfig.getEndpoint());
-
-        springConfig.setAccessKey("my-access-key");
-        assertEquals("my-access-key", springConfig.getAccessKey());
-
-        springConfig.setSecretKey("my-secret-key");
-        assertEquals("my-secret-key", springConfig.getSecretKey());
+        springConfig.setProvider("gcs");
+        assertEquals("gcs", springConfig.getProvider());
 
         springConfig.setPathPrefix("my-prefix");
         assertEquals("my-prefix", springConfig.getPathPrefix());
@@ -161,26 +120,49 @@ public class AppConfigCloudStorageTest {
         springConfig.setReadMissGuardWindowMs(7000L);
         assertEquals(7000L, springConfig.getReadMissGuardWindowMs());
 
-        Map<String, String> props = new HashMap<>();
-        props.put("key", "value");
-        springConfig.setExtraProperties(props);
-        assertNotNull(springConfig.getExtraProperties());
+        springConfig.setUploadRetryMaxAttempts(3);
+        assertEquals(3, springConfig.getUploadRetryMaxAttempts());
+
+        springConfig.setUploadRetryInitialDelayMs(500L);
+        assertEquals(500L, springConfig.getUploadRetryInitialDelayMs());
+
+        springConfig.setUploadRetryMaxDelayMs(30_000L);
+        assertEquals(30_000L, springConfig.getUploadRetryMaxDelayMs());
     }
 
     /**
-     * Test AppConfig getRaftPath
+     * Provider-specific sub-namespace is driven by the {@code provider} field,
+     * so a different provider name reads from a different env sub-namespace.
+     */
+    @Test
+    public void testProviderNamespaceIsDynamic() {
+        springConfig.setProvider("gcs");
+        mockEnv.setProperty("cloud.storage.gcs.bucket", "gcs-bucket");
+        mockEnv.setProperty("cloud.storage.gcs.credentials-file-path", "/path/creds.json");
+        // S3 keys should NOT appear
+        mockEnv.setProperty("cloud.storage.s3.bucket", "s3-bucket");
+
+        CloudStorageConfig cfg = springConfig.toCloudStorageConfig();
+
+        assertEquals("gcs-bucket", cfg.getProviderProperties().get("bucket"));
+        assertEquals("/path/creds.json",
+                     cfg.getProviderProperties().get("credentials-file-path"));
+        assertFalse("s3 keys must not bleed into gcs namespace",
+                    cfg.getProviderProperties().containsKey("cloud.storage.s3.bucket"));
+    }
+
+    /**
+     * Test AppConfig getRaftPath.
      */
     @Test
     public void testGetRaftPath() {
         AppConfig config = new AppConfig();
-        // getRaftPath should not throw, value depends on initialization
-        String result = config.getRaftPath();
-        // Just verify it doesn't throw an exception
-        // The actual value depends on whether dataPath and raftPath are initialized
+        // getRaftPath should not throw; actual value depends on initialization
+        config.getRaftPath();
     }
 
     /**
-     * Test CloudStorageSpringConfig creation and conversion
+     * Test CloudStorageSpringConfig creation and conversion with empty env.
      */
     @Test
     public void testCloudStorageSpringConfigCreation() {
@@ -188,7 +170,3 @@ public class AppConfigCloudStorageTest {
         assertNotNull(springConfig.toCloudStorageConfig());
     }
 }
-
-
-
-

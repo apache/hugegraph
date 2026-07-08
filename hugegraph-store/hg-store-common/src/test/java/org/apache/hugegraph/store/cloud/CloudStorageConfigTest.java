@@ -37,9 +37,8 @@ public class CloudStorageConfigTest {
         config = new CloudStorageConfig();
     }
 
-    /**
-     * Test CloudStorageConfig defaults
-     */
+    // ---- Common fields ----
+
     @Test
     public void testDefaults() {
         assertFalse(config.isEnabled());
@@ -47,12 +46,9 @@ public class CloudStorageConfigTest {
         assertEquals("hugegraph", config.getPathPrefix());
         assertTrue(config.isStartupHydrationEnabled());
         assertEquals(3000L, config.getReadMissGuardWindowMs());
-        assertNotNull(config.getExtraProperties());
+        assertNotNull(config.getProviderProperties());
     }
 
-    /**
-     * Test enabled flag setter and getter
-     */
     @Test
     public void testEnabledFlag() {
         assertFalse(config.isEnabled());
@@ -64,77 +60,15 @@ public class CloudStorageConfigTest {
         assertFalse(config.isEnabled());
     }
 
-    /**
-     * Test provider setter and getter
-     */
     @Test
     public void testProvider() {
         assertEquals("s3", config.getProvider());
-
         config.setProvider("gcs");
         assertEquals("gcs", config.getProvider());
-
-        config.setProvider("azure");
-        assertEquals("azure", config.getProvider());
+        config.setProvider("adls");
+        assertEquals("adls", config.getProvider());
     }
 
-    /**
-     * Test bucket setter and getter
-     */
-    @Test
-    public void testBucket() {
-        config.setBucket("my-bucket");
-        assertEquals("my-bucket", config.getBucket());
-
-        config.setBucket("another-bucket-123");
-        assertEquals("another-bucket-123", config.getBucket());
-    }
-
-    /**
-     * Test region setter and getter
-     */
-    @Test
-    public void testRegion() {
-        config.setRegion("us-east-1");
-        assertEquals("us-east-1", config.getRegion());
-
-        config.setRegion("eu-west-1");
-        assertEquals("eu-west-1", config.getRegion());
-    }
-
-    /**
-     * Test endpoint setter and getter
-     */
-    @Test
-    public void testEndpoint() {
-        config.setEndpoint("https://s3.amazonaws.com");
-        assertEquals("https://s3.amazonaws.com", config.getEndpoint());
-
-        config.setEndpoint("https://minio.example.com");
-        assertEquals("https://minio.example.com", config.getEndpoint());
-    }
-
-    /**
-     * Test accessKey setter and getter
-     */
-    @Test
-    public void testAccessKey() {
-        config.setAccessKey("AKIAIOSFODNN7EXAMPLE");
-        assertEquals("AKIAIOSFODNN7EXAMPLE", config.getAccessKey());
-    }
-
-    /**
-     * Test secretKey setter and getter
-     */
-    @Test
-    public void testSecretKey() {
-        config.setSecretKey("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
-        assertEquals("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", config.getSecretKey());
-    }
-
-    /**
-     * Test pathPrefix setter and getter
-     */
     @Test
     public void testPathPrefix() {
         assertEquals("hugegraph", config.getPathPrefix());
@@ -143,9 +77,6 @@ public class CloudStorageConfigTest {
         assertEquals("myapp/data", config.getPathPrefix());
     }
 
-    /**
-     * Test startupHydrationEnabled setter and getter
-     */
     @Test
     public void testStartupHydrationEnabled() {
         assertTrue(config.isStartupHydrationEnabled());
@@ -157,9 +88,6 @@ public class CloudStorageConfigTest {
         assertTrue(config.isStartupHydrationEnabled());
     }
 
-    /**
-     * Test readMissGuardWindowMs setter and getter
-     */
     @Test
     public void testReadMissGuardWindowMs() {
         assertEquals(3000L, config.getReadMissGuardWindowMs());
@@ -174,56 +102,83 @@ public class CloudStorageConfigTest {
         assertEquals(-1L, config.getReadMissGuardWindowMs());
     }
 
-    /**
-     * Test extraProperties setter and getter
-     */
     @Test
-    public void testExtraProperties() {
-        Map<String, String> props = new HashMap<>();
-        props.put("key1", "value1");
-        props.put("key2", "value2");
-
-        config.setExtraProperties(props);
-
-        assertNotNull(config.getExtraProperties());
-        assertEquals(2, config.getExtraProperties().size());
-        assertEquals("value1", config.getExtraProperties().get("key1"));
-        assertEquals("value2", config.getExtraProperties().get("key2"));
+    public void testUploadRetryDefaults() {
+        // Default 0: no whole-file retries; provider handles its own retries; queue is DLQ-only.
+        assertEquals(0, config.getUploadRetryMaxAttempts());
+        assertEquals(1_000L, config.getUploadRetryInitialDelayMs());
+        assertEquals(60_000L, config.getUploadRetryMaxDelayMs());
     }
 
-    /**
-     * Test complete configuration
-     */
+    // ---- Provider properties (cloud.storage.<provider>.* flattened) ----
+
+    @Test
+    public void testProviderPropertiesDefaults() {
+        assertNotNull(config.getProviderProperties());
+        assertTrue(config.getProviderProperties().isEmpty());
+    }
+
+    @Test
+    public void testProviderPropertiesSetAndGet() {
+        Map<String, String> props = new HashMap<>();
+        props.put("bucket", "my-bucket");
+        props.put("region", "us-east-1");
+        props.put("endpoint", "https://s3.amazonaws.com");
+        props.put("access-key", "AKIAIOSFODNN7EXAMPLE");
+        props.put("secret-key", "secret");
+        props.put("multipart-part-retry-max-attempts", "7");
+
+        config.setProviderProperties(props);
+
+        assertEquals("my-bucket", config.getProviderProperties().get("bucket"));
+        assertEquals("us-east-1", config.getProviderProperties().get("region"));
+        assertEquals("7", config.getProviderProperties()
+                                  .get("multipart-part-retry-max-attempts"));
+    }
+
     @Test
     public void testCompleteConfiguration() {
         config.setEnabled(true);
         config.setProvider("s3");
-        config.setBucket("hugegraph-backup");
-        config.setRegion("us-west-2");
-        config.setEndpoint("https://s3-us-west-2.amazonaws.com");
-        config.setAccessKey("test-access-key");
-        config.setSecretKey("test-secret-key");
         config.setPathPrefix("production/data");
         config.setStartupHydrationEnabled(true);
         config.setReadMissGuardWindowMs(5000L);
+        config.setUploadRetryMaxAttempts(3);
+        config.setUploadRetryInitialDelayMs(500L);
+        config.setUploadRetryMaxDelayMs(30_000L);
 
-        Map<String, String> extra = new HashMap<>();
-        extra.put("enable-versioning", "true");
-        extra.put("enable-encryption", "true");
-        config.setExtraProperties(extra);
+        Map<String, String> providerProps = new HashMap<>();
+        providerProps.put("bucket", "hugegraph-backup");
+        providerProps.put("region", "us-west-2");
+        providerProps.put("endpoint", "https://s3-us-west-2.amazonaws.com");
+        providerProps.put("access-key", "test-access-key");
+        providerProps.put("secret-key", "test-secret-key");
+        providerProps.put("multipart-part-retry-max-attempts", "5");
+        providerProps.put("multipart-part-retry-base-backoff-ms", "1500");
+        providerProps.put("multipart-exhausted-direct-dlq", "false");
+        config.setProviderProperties(providerProps);
 
-        // Verify all settings
+        // Common fields
         assertTrue(config.isEnabled());
         assertEquals("s3", config.getProvider());
-        assertEquals("hugegraph-backup", config.getBucket());
-        assertEquals("us-west-2", config.getRegion());
-        assertEquals("https://s3-us-west-2.amazonaws.com", config.getEndpoint());
-        assertEquals("test-access-key", config.getAccessKey());
-        assertEquals("test-secret-key", config.getSecretKey());
         assertEquals("production/data", config.getPathPrefix());
         assertTrue(config.isStartupHydrationEnabled());
         assertEquals(5000L, config.getReadMissGuardWindowMs());
-        assertEquals(2, config.getExtraProperties().size());
+        assertEquals(3, config.getUploadRetryMaxAttempts());
+        assertEquals(500L, config.getUploadRetryInitialDelayMs());
+        assertEquals(30_000L, config.getUploadRetryMaxDelayMs());
+
+        // Provider-specific fields (cloud.storage.<provider>.*)
+        assertEquals("hugegraph-backup", config.getProviderProperties().get("bucket"));
+        assertEquals("us-west-2", config.getProviderProperties().get("region"));
+        assertEquals("https://s3-us-west-2.amazonaws.com",
+                     config.getProviderProperties().get("endpoint"));
+        assertEquals("test-access-key", config.getProviderProperties().get("access-key"));
+        assertEquals("test-secret-key", config.getProviderProperties().get("secret-key"));
+        assertEquals("5", config.getProviderProperties().get("multipart-part-retry-max-attempts"));
+        assertEquals("1500",
+                     config.getProviderProperties().get("multipart-part-retry-base-backoff-ms"));
+        assertEquals("false", config.getProviderProperties().get("multipart-exhausted-direct-dlq"));
     }
 }
 

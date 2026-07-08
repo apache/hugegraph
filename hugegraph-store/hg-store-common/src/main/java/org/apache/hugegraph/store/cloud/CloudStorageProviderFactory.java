@@ -109,7 +109,8 @@ public final class CloudStorageProviderFactory {
 
         provider.init(config);
         activeProvider = provider;
-        log.info("Cloud storage provider '{}' initialized. bucket={}", name, config.getBucket());
+        log.info("Cloud storage provider '{}' initialized. bucket={}",
+                 name, config.getProviderProperties().getOrDefault("bucket", "N/A"));
         return provider;
     }
 
