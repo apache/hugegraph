@@ -47,8 +47,14 @@ import com.google.common.collect.ImmutableSet;
 
 public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
-    private static final String ID_CACHE_PREFIX = "schema-id";
-    private static final String NAME_CACHE_PREFIX = "schema-name";
+    /*
+     * V1 and V2 transactions can coexist in the same JVM for graphs with the
+     * same name but different backends. Keep their cache entries isolated:
+     * besides holding different schema data, their attachments use different
+     * SchemaCaches classes and therefore can't be shared safely.
+     */
+    private static final String ID_CACHE_PREFIX = "schema-v2-id";
+    private static final String NAME_CACHE_PREFIX = "schema-v2-name";
 
     // MetaDriver doesn't expose unlisten, register the meta listener once.
     // Lifecycle: this JVM-global flag is intentionally never reset by
