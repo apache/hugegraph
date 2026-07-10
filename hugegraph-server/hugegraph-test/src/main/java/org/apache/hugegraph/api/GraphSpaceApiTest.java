@@ -585,6 +585,6 @@ public class GraphSpaceApiTest extends BaseApiTest {
         assertResponseStatus(204, r);
 
         r = this.client().get(path, template);
-        assertResponseStatus(400, r);
+        assertResponseStatus(404, r);
     }
 }
