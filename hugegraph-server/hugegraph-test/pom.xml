@@ -142,11 +142,6 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>2.20</version>
-                <configuration>
-                    <systemPropertyVariables>
-                        <backend>${backend}</backend>
-                    </systemPropertyVariables>
-                </configuration>
                 <executions>
                     <execution>
                         <id>core-test</id>
@@ -175,6 +170,9 @@
                     <execution>
                         <id>api-test</id>
                         <configuration>
+                            <systemPropertyVariables>
+                                <backend>${backend}</backend>
+                            </systemPropertyVariables>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
