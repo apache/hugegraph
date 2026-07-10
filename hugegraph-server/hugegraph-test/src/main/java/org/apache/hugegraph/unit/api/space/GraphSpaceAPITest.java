@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.api.auth.ManagerAPI;
 import org.apache.hugegraph.api.profile.GraphsAPI;
 import org.apache.hugegraph.api.space.GraphSpaceAPI;
 import org.apache.hugegraph.auth.AuthManager;
@@ -56,6 +57,7 @@ public class GraphSpaceAPITest extends BaseUnitTest {
     private static final String ADMIN = "admin";
     private static final String OPERATOR = "space_manager";
     private static final String TARGET = "target_user";
+    private static final String GRAPH = "hugegraph";
 
     @After
     public void tearDown() {
@@ -83,6 +85,51 @@ public class GraphSpaceAPITest extends BaseUnitTest {
                                              "SPACE", null);
 
         Assert.assertContains("\"check\":true", result);
+    }
+
+    @Test
+    public void testManagerDefaultRoleRejectsMissingGraphSpace() {
+        ManagerAPI api = new ManagerAPI();
+        GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
+        Whitebox.setInternalState(manager, "graphSpaces",
+                                  new ConcurrentHashMap<>());
+        setContext(TARGET);
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            api.checkDefaultRole(manager, GRAPHSPACE, "SPACE", null);
+        }, e -> {
+            Assert.assertContains("graph space", e.getMessage());
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+    }
+
+    @Test
+    public void testManagerDefaultRoleRejectsMissingObserverGraph() {
+        ManagerAPI api = new ManagerAPI();
+        GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
+        setContext(TARGET);
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            api.checkDefaultRole(manager, GRAPHSPACE, "OBSERVER", "missing");
+        }, e -> {
+            Assert.assertContains("Graph", e.getMessage());
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+    }
+
+    @Test
+    public void testManagerDefaultRoleAcceptsExistingResources() {
+        ManagerAPI api = new ManagerAPI();
+        GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
+        setContext(TARGET);
+
+        String spaceResult = api.checkDefaultRole(manager, GRAPHSPACE,
+                                                  "SPACE", null);
+        String observerResult = api.checkDefaultRole(manager, GRAPHSPACE,
+                                                     "OBSERVER", GRAPH);
+
+        Assert.assertContains("\"check\":true", spaceResult);
+        Assert.assertContains("\"check\":true", observerResult);
     }
 
     @Test
@@ -156,6 +203,19 @@ public class GraphSpaceAPITest extends BaseUnitTest {
         Map<String, GraphSpace> spaces = new ConcurrentHashMap<>();
         spaces.put(GRAPHSPACE, new GraphSpace(GRAPHSPACE));
         Whitebox.setInternalState(manager, "graphSpaces", spaces);
+
+        MetaManager metaManager = Mockito.mock(MetaManager.class);
+        Mockito.when(metaManager.graphConfigs(GRAPHSPACE))
+               .thenReturn(Collections.emptyMap());
+        Whitebox.setInternalState(manager, "metaManager", metaManager);
+
+        Map<String, Graph> graphs = new ConcurrentHashMap<>();
+        graphs.put(GRAPHSPACE + "-" + GRAPH, Mockito.mock(HugeGraph.class));
+        Whitebox.setInternalState(manager, "graphs", graphs);
+
+        Mockito.when(authManager.isDefaultRole(GRAPHSPACE, GRAPH, TARGET,
+                                               HugeDefaultRole.OBSERVER))
+               .thenReturn(true);
         return manager;
     }
 

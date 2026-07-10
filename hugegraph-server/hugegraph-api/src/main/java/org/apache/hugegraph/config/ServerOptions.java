@@ -659,7 +659,7 @@ public class ServerOptions extends OptionHolder {
                     "memory_monitor.period",
                     "The period in ms of JVM memory usage monitoring, in each period we will " +
                     "detect the jvm memory usage and take corresponding actions.",
-                    nonNegativeInt(),
+                    positiveInt(),
                     2000
             );
     public static ConfigOption<String> K8S_INTERNAL_ALGORITHM_IMAGE_URL =

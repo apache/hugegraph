@@ -104,9 +104,15 @@ public class HugeGraphServer {
                 throw e;
             }
 
-            // Start (In-Heap) Memory Monitor
-            memoryMonitor = new MemoryMonitor(restServerConf);
-            memoryMonitor.start();
+            try {
+                // Start (In-Heap) Memory Monitor
+                memoryMonitor = new MemoryMonitor(restServerConf);
+                memoryMonitor.start();
+            } catch (Throwable e) {
+                LOG.error("MemoryMonitor start error: ", e);
+                rollbackStartup(memoryMonitor, gremlinServer, restServer);
+                throw e;
+            }
         } finally {
             System.setSecurityManager(securityManager);
         }
@@ -123,6 +129,28 @@ public class HugeGraphServer {
             server.stop().get();
         } catch (Throwable t) {
             LOG.error("HugeGremlinServer stop error: ", t);
+        }
+    }
+
+    static void rollbackStartup(MemoryMonitor monitor,
+                                GremlinServer gremlinServer,
+                                RestServer restServer) {
+        if (monitor != null) {
+            try {
+                monitor.stop();
+            } catch (Throwable t) {
+                LOG.error("MemoryMonitor stop error: ", t);
+            }
+        }
+
+        stopPreparedGremlinServer(gremlinServer);
+
+        if (restServer != null) {
+            try {
+                restServer.shutdown().get();
+            } catch (Throwable t) {
+                LOG.error("HugeRestServer stop error: ", t);
+            }
         }
     }
 
