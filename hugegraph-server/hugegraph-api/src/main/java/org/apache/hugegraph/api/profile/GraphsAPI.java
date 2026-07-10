@@ -274,19 +274,6 @@ public class GraphsAPI extends API {
         return ImmutableMap.of("default_graph", defaults.keySet());
     }
 
-    @GET
-    @Timed
-    @Path("{name}/default")
-    @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$name"})
-    public Map<String, Object> setDefaultByGet(@Context GraphManager manager,
-                                               @Parameter(description = "The graph space name")
-                                               @PathParam("graphspace") String graphSpace,
-                                               @Parameter(description = "The graph name")
-                                               @PathParam("name") String name) {
-        return this.setDefault(manager, graphSpace, name);
-    }
-
     @DELETE
     @Timed
     @Path("{name}/default")
@@ -312,19 +299,6 @@ public class GraphsAPI extends API {
         authManager.unsetDefaultGraph(graphSpace, name, user);
         Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
         return ImmutableMap.of("default_graph", defaults.keySet());
-    }
-
-    @GET
-    @Timed
-    @Path("{name}/undefault")
-    @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"space_member", "$owner=$name"})
-    public Map<String, Object> unsetDefaultByGet(@Context GraphManager manager,
-                                                 @Parameter(description = "The graph space name")
-                                                 @PathParam("graphspace") String graphSpace,
-                                                 @Parameter(description = "The graph name")
-                                                 @PathParam("name") String name) {
-        return this.unsetDefault(manager, graphSpace, name);
     }
 
     @GET

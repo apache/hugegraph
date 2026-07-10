@@ -811,6 +811,11 @@ public class StandardAuthManager implements AuthManager {
 
     @Override
     public HugeGroup findGroup(String name) {
+        for (HugeGroup group : this.groups.list(-1L)) {
+            if (name.equals(group.name())) {
+                return group;
+            }
+        }
         return null;
     }
 
@@ -853,12 +858,7 @@ public class StandardAuthManager implements AuthManager {
         // Use a special-named HugeGroup as a marker for the default graph,
         // then create a HugeBelong (user -> marker-group) to persist the binding.
         String markerName = defaultGraphGroupName(graphSpace, graph);
-        Id groupId = IdGenerator.of(markerName);
-        if (!this.groups.exists(groupId)) {
-            HugeGroup markerGroup = new HugeGroup(markerName);
-            markerGroup.creator(user);
-            this.groups.add(markerGroup);
-        }
+        Id groupId = ensureMarkerGroup(markerName, user);
         createBelongBinding(user, groupId);
     }
 
@@ -908,11 +908,13 @@ public class StandardAuthManager implements AuthManager {
 
     private Id ensureMarkerGroup(String markerName, String creator) {
         Id groupId = IdGenerator.of(markerName);
-        if (!this.groups.exists(groupId)) {
-            HugeGroup markerGroup = new HugeGroup(markerName);
-            markerGroup.creator(creator);
-            this.groups.add(markerGroup);
+        HugeGroup markerGroup = this.findGroup(markerName);
+        if (markerGroup != null) {
+            return groupId;
         }
+        markerGroup = new HugeGroup(markerName);
+        markerGroup.creator(creator);
+        this.groups.add(markerGroup);
         return groupId;
     }
 

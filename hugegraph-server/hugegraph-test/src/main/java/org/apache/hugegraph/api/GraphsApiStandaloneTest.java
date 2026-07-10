@@ -33,12 +33,10 @@ import jakarta.ws.rs.core.Response;
 /**
  * Tests for Hubble-compatible graph profile and default graph APIs
  * in standalone (RocksDB) mode:
- *  - GET  /graphspaces/{gs}/graphs/profile        — works, defaultGraphs empty
- *  - POST /graphspaces/{gs}/graphs/{name}/default  — returns 400 standalone
- *  - GET  /graphspaces/{gs}/graphs/{name}/default   — returns 400 standalone
- *  - GET  /graphspaces/{gs}/graphs/{name}/undefault — returns 400 standalone
- *  - DELETE /graphspaces/{gs}/graphs/{name}/default — returns 400 standalone
- *  - GET  /graphspaces/{gs}/graphs/default          — returns 400 standalone
+ *  - GET  /graphspaces/{gs}/graphs/profile         — works with default graph
+ *  - POST /graphspaces/{gs}/graphs/{name}/default  — sets default graph
+ *  - DELETE /graphspaces/{gs}/graphs/{name}/default — unsets default graph
+ *  - GET  /graphspaces/{gs}/graphs/default          — gets default graph
  *  - PUT  /graphspaces/{gs}/graphs/{name}           — update nickname
  */
 public class GraphsApiStandaloneTest extends BaseApiTest {
@@ -60,6 +58,10 @@ public class GraphsApiStandaloneTest extends BaseApiTest {
     @After
     @Override
     public void teardown() throws Exception {
+        client().delete(GRAPHS_PATH + "/" + TEST_GRAPH + "/default",
+                        ImmutableMap.of());
+        client().delete(GRAPHS_PATH + "/" + TEST_GRAPH2 + "/default",
+                        ImmutableMap.of());
         Map<String, Object> drop = ImmutableMap.of(
                 "confirm_message", "I'm sure to drop the graph");
         client().delete(GRAPHS_PATH + "/" + TEST_GRAPH, drop);
@@ -146,9 +148,11 @@ public class GraphsApiStandaloneTest extends BaseApiTest {
     }
 
     @Test
-    public void testListProfileDefaultFieldFalseInStandalone() {
+    public void testListProfileContainsDefaultGraph() {
         Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
         assertResponseStatus(201, r);
+        Response setR = client().post(GRAPHS_PATH + "/" + TEST_GRAPH + "/default", "");
+        assertResponseStatus(200, setR);
 
         Response profile = client().get(PROFILE_PATH);
         String content = assertResponseStatus(200, profile);
@@ -160,63 +164,71 @@ public class GraphsApiStandaloneTest extends BaseApiTest {
                                             .findFirst()
                                             .orElse(null);
         Assert.assertNotNull(entry);
-        // In standalone mode, authManager is unavailable so default is always false
-        Assert.assertEquals("default should be false in standalone mode",
-                            Boolean.FALSE, entry.get("default"));
+        Assert.assertEquals("default graph should be marked in standalone mode",
+                            Boolean.TRUE, entry.get("default"));
     }
 
     // ------------------------------------------------------------------ //
-    //  POST /graphspaces/{gs}/graphs/{name}/default  — standalone error
-    //  DELETE /graphspaces/{gs}/graphs/{name}/default — standalone error
-    //  GET  /graphspaces/{gs}/graphs/default           — standalone error
+    //  Canonical default graph operations work in standalone mode
     // ------------------------------------------------------------------ //
 
     @Test
-    public void testSetDefaultGraphReturnsFriendlyError() {
+    public void testSetDefaultGraph() {
         Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
         assertResponseStatus(201, r);
 
         Response setR = client().post(GRAPHS_PATH + "/" + TEST_GRAPH + "/default", "");
-        String content = assertResponseStatus(400, setR);
-        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+        String content = assertResponseStatus(200, setR);
+        Assert.assertTrue(content.contains(TEST_GRAPH));
+
+        Response repeatedSetR = client().post(GRAPHS_PATH + "/" + TEST_GRAPH +
+                                              "/default", "");
+        content = assertResponseStatus(200, repeatedSetR);
+        Assert.assertTrue(content.contains(TEST_GRAPH));
     }
 
     @Test
-    public void testUnsetDefaultGraphReturnsFriendlyError() {
+    public void testUnsetDefaultGraph() {
         Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
         assertResponseStatus(201, r);
 
+        Response setR = client().post(GRAPHS_PATH + "/" + TEST_GRAPH + "/default", "");
+        assertResponseStatus(200, setR);
+
         Response unsetR = client().delete(GRAPHS_PATH + "/" + TEST_GRAPH + "/default",
                                           ImmutableMap.of());
-        String content = assertResponseStatus(400, unsetR);
-        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+        String content = assertResponseStatus(200, unsetR);
+        Assert.assertFalse(content.contains(TEST_GRAPH));
     }
 
     @Test
-    public void testSetDefaultGraphWithGetCompatibilityReturnsFriendlyError() {
+    public void testSetDefaultGraphWithGetIsNotAllowed() {
         Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
         assertResponseStatus(201, r);
 
         Response setR = client().get(GRAPHS_PATH + "/" + TEST_GRAPH + "/default");
-        String content = assertResponseStatus(400, setR);
-        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+        assertResponseStatus(405, setR);
     }
 
     @Test
-    public void testUnsetDefaultGraphWithGetCompatibilityReturnsFriendlyError() {
+    public void testUnsetDefaultGraphWithGetIsNotFound() {
         Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
         assertResponseStatus(201, r);
 
         Response unsetR = client().get(GRAPHS_PATH + "/" + TEST_GRAPH + "/undefault");
-        String content = assertResponseStatus(400, unsetR);
-        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+        assertResponseStatus(404, unsetR);
     }
 
     @Test
-    public void testGetDefaultGraphReturnsFriendlyError() {
-        Response r = client().get(DEFAULT_PATH);
-        String content = assertResponseStatus(400, r);
-        Assert.assertTrue(content.contains(STANDALONE_ERROR));
+    public void testGetDefaultGraph() {
+        Response r = createGraphInRocksDB(SPACE, TEST_GRAPH);
+        assertResponseStatus(201, r);
+        Response setR = client().post(GRAPHS_PATH + "/" + TEST_GRAPH + "/default", "");
+        assertResponseStatus(200, setR);
+
+        Response getR = client().get(DEFAULT_PATH);
+        String content = assertResponseStatus(200, getR);
+        Assert.assertTrue(content.contains(TEST_GRAPH));
     }
 
     // ------------------------------------------------------------------ //
