@@ -83,7 +83,8 @@ public class MultiGraphsTest extends BaseCoreTest {
 
     @Test
     public void testCopySchemaWithMultiGraphs() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -292,7 +293,8 @@ public class MultiGraphsTest extends BaseCoreTest {
 
     @Test
     public void testCreateGraphWithSameNameDifferentBackends() throws Exception {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
