@@ -17,8 +17,10 @@
 
 package org.apache.hugegraph.unit.core;
 
+import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
+import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.IdPrefixQuery;
 import org.apache.hugegraph.backend.query.IdQuery;
@@ -30,6 +32,7 @@ import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.junit.Test;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
@@ -43,6 +46,53 @@ public class QueryTest {
         query.order(HugeKeys.NAME, Order.ASC);
         Assert.assertEquals(ImmutableMap.of(HugeKeys.NAME, Order.ASC),
                             query.orders());
+    }
+
+    @Test
+    public void testConditionWithEqAndIn() {
+        Id label1 = IdGenerator.of(1);
+        Id label2 = IdGenerator.of(2);
+
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.LABEL, label1);
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(label1, label2)));
+
+        Assert.assertEquals(label1, query.condition(HugeKeys.LABEL));
+    }
+
+    @Test
+    public void testConditionWithConflictingEqAndIn() {
+        Id label1 = IdGenerator.of(1);
+        Id label2 = IdGenerator.of(2);
+        Id label3 = IdGenerator.of(3);
+
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.LABEL, label1);
+        query.eq(HugeKeys.LABEL, label2);
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(label1, label3)));
+
+        Assert.assertNull(query.condition(HugeKeys.LABEL));
+    }
+
+    @Test
+    public void testConditionWithMultipleMatchedInValues() {
+        Id label1 = IdGenerator.of(1);
+        Id label2 = IdGenerator.of(2);
+        Id label3 = IdGenerator.of(3);
+        Id label4 = IdGenerator.of(4);
+
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(label1, label2, label3)));
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(label1, label2, label4)));
+
+        Assert.assertThrows(IllegalStateException.class,
+                            () -> query.condition(HugeKeys.LABEL),
+                            e -> Assert.assertContains("Illegal key 'LABEL'",
+                                                       e.getMessage()));
     }
 
     @Test

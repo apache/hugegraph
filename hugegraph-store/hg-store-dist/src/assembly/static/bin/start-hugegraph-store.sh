@@ -100,14 +100,18 @@ fi
 if [ -z "$OPEN_TELEMETRY" ];then
   OPEN_TELEMETRY="false"
 fi
+if [ -z "$DAEMON" ]; then
+    DAEMON="true"
+fi
 
-while getopts "g:j:y:" arg; do
+while getopts "d:g:j:y:" arg; do
     case ${arg} in
         g) GC_OPTION="$OPTARG" ;;
         j) USER_OPTION="$OPTARG" ;;
         # Telemetry is used to collect metrics, traces and logs
         y) OPEN_TELEMETRY="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        d) DAEMON="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
     esac
 done
 
@@ -221,11 +225,34 @@ fi
 
 echo "Starting HG-StoreServer..."
 
-exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-    -Dspring.config.location=${CONF}/application.yml \
-    ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
-
-PID="$!"
-# Write pid to file
-echo "$PID" > "$PID_FILE"
-echo "[+pid] $PID"
+# Turn on security check
+if [[ $DAEMON == "true" ]]; then
+    echo "Starting HugeGraphStoreServer in daemon mode..."
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar &
+    else
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+    fi
+    PID="$!"
+    # Write pid to file
+    echo "$PID" > "$PID_FILE"
+    echo "[+pid] $PID"
+else
+    echo "Starting HugeGraphStoreServer in foreground mode..."
+    # Write $$ before exec — exec replaces this shell with Java, so $$ becomes Java's PID
+    echo "$$" > "$PID_FILE"
+    echo "[+pid] $$"
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar
+    else
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1
+    fi
+fi

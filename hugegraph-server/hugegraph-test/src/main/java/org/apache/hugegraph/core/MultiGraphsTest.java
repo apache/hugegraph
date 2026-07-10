@@ -248,7 +248,7 @@ public class MultiGraphsTest extends BaseCoreTest {
 
     @Test
     public void testCreateGraphsWithSameName() {
-        List<HugeGraph> graphs = openGraphs("g", "g", "G");
+        List<HugeGraph> graphs = openGraphs("gg", "gg", "GG");
         HugeGraph g1 = graphs.get(0);
         HugeGraph g2 = graphs.get(1);
         HugeGraph g3 = graphs.get(2);
@@ -318,6 +318,14 @@ public class MultiGraphsTest extends BaseCoreTest {
         graph.clearBackend();
 
         destroyGraphs(ImmutableList.of(g1, g2, graph));
+    }
+
+    @Test
+    public void testOpenGraphWithDeprecatedTaskSchedulerType() {
+        HugeGraph graph = openGraphWithBackend("legacySchedulerType",
+                                               "rocksdb", "binary",
+                                               "task.scheduler_type", "local");
+        destroyGraphs(ImmutableList.of(graph));
     }
 
     @Test

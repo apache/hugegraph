@@ -102,12 +102,13 @@ public class TaskAPI extends API {
             limit = NO_LIMIT;
             List<Id> idList = ids.stream().map(IdGenerator::of)
                                  .collect(Collectors.toList());
-            iter = scheduler.tasks(idList);
+            iter = scheduler.tasks(idList, false);
         } else {
             if (status == null) {
-                iter = scheduler.tasks(null, limit, page);
+                iter = scheduler.tasks(null, limit, page, false);
             } else {
-                iter = scheduler.tasks(parseStatus(status), limit, page);
+                iter = scheduler.tasks(parseStatus(status), limit, page,
+                                       false);
             }
         }
 
@@ -136,12 +137,17 @@ public class TaskAPI extends API {
                                    @Parameter(description = "The graph name")
                                    @PathParam("graph") String graph,
                                    @Parameter(description = "The task id")
-                                   @PathParam("id") long id) {
+                                   @PathParam("id") long id,
+                                   @Parameter(description = "Whether to load task result")
+                                   @DefaultValue("true")
+                                   @QueryParam("with_result")
+                                   boolean withResult) {
         LOG.debug("Graph [{}] get task: {}", graph, id);
 
         TaskScheduler scheduler = graph(manager, graphSpace, graph)
                 .taskScheduler();
-        return scheduler.task(IdGenerator.of(id)).asMap();
+        return scheduler.task(IdGenerator.of(id), withResult)
+                        .asMap(true, withResult);
     }
 
     @DELETE

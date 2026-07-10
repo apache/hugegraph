@@ -22,7 +22,7 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.type.define.NodeRole;
 import org.apache.hugegraph.util.E;
 
-// TODO: rename to GlobalNodeRoleInfo
+// TODO: We need to completely delete the startup of master-worker
 public final class GlobalMasterInfo {
 
     private static final NodeInfo NO_MASTER = new NodeInfo(false, "");

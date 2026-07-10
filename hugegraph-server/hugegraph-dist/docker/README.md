@@ -130,3 +130,17 @@ HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml 
 
 See [docker/README.md](../../../docker/README.md) for the full setup guide,
 environment variable reference, and troubleshooting.
+
+## 6. Process Supervision & Health Checks
+
+All four HugeGraph Docker images (PD, Store, Server, Server-hstore) include
+native `HEALTHCHECK` instructions. `docker ps` shows real health status:
+
+| Image | Health endpoint |
+|---|---|
+| `hugegraph/hugegraph` | `GET /versions` on port 8080 |
+| `hugegraph/hugegraph-hstore` | `GET /versions` on port 8080 |
+| `hugegraph/hugegraph-pd` | `GET /v1/health` on port 8620 |
+| `hugegraph/hugegraph-store` | `GET /v1/health` on port 8520 |
+
+The entrypoints supervise the Java process directly — when Java exits, the container exits. If started with a restart policy (the provided compose files use `restart: unless-stopped`), Docker will bring it back automatically. The old cron-based monitor (`-m true`) is for VM/bare-metal deployments only and is not used in Docker images.

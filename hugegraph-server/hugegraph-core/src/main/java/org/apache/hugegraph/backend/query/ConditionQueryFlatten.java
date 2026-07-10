@@ -115,12 +115,23 @@ public final class ConditionQueryFlatten {
                 }
             case AND:
                 Condition.And and = (Condition.And) condition;
-                return new Condition.And(flattenIn(and.left(), supportIn),
-                                         flattenIn(and.right(), supportIn));
+                Condition andLeft = flattenIn(and.left(), supportIn);
+                Condition andRight = flattenIn(and.right(), supportIn);
+                if (andLeft == null || andRight == null) {
+                    return null;
+                }
+                return new Condition.And(andLeft, andRight);
             case OR:
                 Condition.Or or = (Condition.Or) condition;
-                return new Condition.Or(flattenIn(or.left(), supportIn),
-                                        flattenIn(or.right(), supportIn));
+                Condition orLeft = flattenIn(or.left(), supportIn);
+                Condition orRight = flattenIn(or.right(), supportIn);
+                if (orLeft == null) {
+                    return orRight;
+                }
+                if (orRight == null) {
+                    return orLeft;
+                }
+                return new Condition.Or(orLeft, orRight);
             default:
                 throw new AssertionError(String.format("Wrong condition type: '%s'",
                                                        condition.type()));
@@ -427,9 +438,26 @@ public final class ConditionQueryFlatten {
         if (low == null || high == null) {
             return true;
         }
-        return compare(low, high) < 0 || compare(low, high) == 0 &&
-                                         low.relation() == Condition.RelationType.GTE &&
-                                         high.relation() == Condition.RelationType.LTE;
+        int compared = compare(low, high);
+        if (compared > 0) {
+            return false;
+        }
+        if (compared == 0) {
+            return low.relation() == Condition.RelationType.GTE &&
+                   high.relation() == Condition.RelationType.LTE;
+        }
+        return !emptyBooleanRange(low, high);
+    }
+
+    private static boolean emptyBooleanRange(Relation low, Relation high) {
+        if (!(low.value() instanceof Boolean) ||
+            !(high.value() instanceof Boolean)) {
+            return false;
+        }
+        return Boolean.FALSE.equals(low.value()) &&
+               Boolean.TRUE.equals(high.value()) &&
+               low.relation() == Condition.RelationType.GT &&
+               high.relation() == Condition.RelationType.LT;
     }
 
     private static boolean validEq(Relation eq, Relation low, Relation high) {
@@ -507,6 +535,9 @@ public final class ConditionQueryFlatten {
             return NumericUtil.compareNumber(firstValue, (Number) secondValue);
         } else if (firstValue instanceof Date && secondValue instanceof Date) {
             return ((Date) firstValue).compareTo((Date) secondValue);
+        } else if (firstValue instanceof Boolean &&
+                   secondValue instanceof Boolean) {
+            return Boolean.compare((Boolean) firstValue, (Boolean) secondValue);
         } else {
             throw new IllegalArgumentException(String.format("Can't compare between %s and %s",
                                                              first, second));

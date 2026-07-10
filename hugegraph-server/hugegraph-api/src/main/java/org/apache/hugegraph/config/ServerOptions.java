@@ -556,9 +556,9 @@ public class ServerOptions extends OptionHolder {
     public static final ConfigOption<String> SERVER_ID =
             new ConfigOption<>(
                     "server.id",
-                    "The id of hugegraph-server.",
-                    disallowEmpty(),
-                    "server-1"
+                    "The optional legacy id of hugegraph-server.",
+                    null,
+                    ""
             );
     public static final ConfigOption<String> SERVER_ROLE =
             new ConfigOption<>(

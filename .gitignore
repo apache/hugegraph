@@ -92,7 +92,10 @@ hugegraph-server/hugegraph-dist/docker/data/
 
 # AI-IDE prompt files (We only keep AGENTS.md, other files could soft-linked it when needed)
 # Serena MCP memories
-.serena/
+.serena/*
+!.serena/project.yml
+!.serena/memories/
+.mcp.json
 # Claude Projects
 CLAUDE.md
 CLAUDE_*.md
@@ -114,3 +117,4 @@ codeium-instructions.md
 .ai-instructions.md
 *.ai-prompt.md
 WARP.md
+.mcp.json

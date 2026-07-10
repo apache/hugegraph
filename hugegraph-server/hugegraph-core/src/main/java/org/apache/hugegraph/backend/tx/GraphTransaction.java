@@ -28,7 +28,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -140,10 +139,6 @@ public class GraphTransaction extends IndexableTransaction {
 
     private final int verticesCapacity;
     private final int edgesCapacity;
-    protected static final ConcurrentHashMap<String, Boolean> graphCacheListenStatus =
-            new ConcurrentHashMap<>();
-    protected static final ConcurrentHashMap<String, Boolean> storeEventListenStatus =
-            new ConcurrentHashMap<>();
 
     public GraphTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -942,6 +937,7 @@ public class GraphTransaction extends IndexableTransaction {
         // NOTE: allowed duplicated edges if query by duplicated ids
         List<Id> ids = InsertionOrderUtil.newList();
         Map<Id, HugeEdge> edges = new HashMap<>(edgeIds.length);
+        Set<Id> distinctIds = InsertionOrderUtil.newSet(edgeIds.length);
 
         IdQuery query = new IdQuery(HugeType.EDGE);
         for (Object edgeId : edgeIds) {
@@ -968,11 +964,12 @@ public class GraphTransaction extends IndexableTransaction {
                 query.query(id);
             }
             ids.add(id);
+            distinctIds.add(id);
         }
 
         if (!query.empty()) {
             // Query from backend store
-            if (edges.isEmpty() && query.idsSize() == ids.size()) {
+            if (edges.isEmpty() && distinctIds.size() == ids.size()) {
                 /*
                  * Sort at the lower layer and return directly if there is no
                  * local vertex and duplicated id.

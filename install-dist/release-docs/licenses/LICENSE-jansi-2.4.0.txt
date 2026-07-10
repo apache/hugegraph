@@ -1,0 +1,16 @@
+Copyright (c) 2007-2021, the original author(s)
+All rights reserved.
+
+This software is dual-licensed under the Apache License, Version 2.0 and the GNU Lesser General Public License, version 3 or later (LGPL-3.0-or-later).
+
+You may obtain a copy of the Apache License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+You may obtain a copy of the GNU Lesser General Public License at
+
+    http://www.gnu.org/licenses/lgpl-3.0.html
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+
+This product includes software developed by the Jansi project (http://fusesource.github.io/jansi/).

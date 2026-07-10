@@ -7,8 +7,8 @@
 <div align="center">
 
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
-[![HugeGraph-CI](https://github.com/apache/hugegraph/actions/workflows/ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/ci.yml)
-[![License checker](https://github.com/apache/hugegraph/actions/workflows/licence-checker.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/licence-checker.yml)
+[![HugeGraph-Server CI](https://github.com/apache/hugegraph/actions/workflows/server-ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/server-ci.yml)
+[![HugeGraph-PD & Store CI](https://github.com/apache/hugegraph/actions/workflows/pd-store-ci.yml/badge.svg)](https://github.com/apache/hugegraph/actions/workflows/pd-store-ci.yml)
 [![GitHub Releases Downloads](https://img.shields.io/github/downloads/apache/hugegraph/total.svg)](https://github.com/apache/hugegraph/releases)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/apache/hugegraph)
 
@@ -110,8 +110,8 @@ HugeGraph supports both **standalone** and **distributed** deployments:
 | Module | Description |
 |--------|-------------|
 | [hugegraph-server](hugegraph-server) | Core graph engine with REST API, Gremlin/Cypher support, and pluggable backends (RocksDB default) |
-| [hugegraph-pd](hugegraph-pd) | Placement Driver for distributed mode - handles meta storage, partition management and cluster scheduling |
-| [hugegraph-store](hugegraph-store) | Distributed storage with Raft consensus for high availability and horizontal scaling |
+| [hugegraph-pd](hugegraph-pd/README.md) | Placement Driver for distributed mode - handles meta storage, partition management and cluster scheduling |
+| [hugegraph-store](hugegraph-store/README.md) | Distributed storage with Raft consensus for high availability and horizontal scaling |
 | [hugegraph-commons](hugegraph-commons) | Shared utilities, RPC framework and common components |
 
 <details>
@@ -268,9 +268,8 @@ cd hugegraph
 mvn clean package -DskipTests
 
 # Extract built package
-cd install-dist/target
-tar -xzf hugegraph-{version}.tar.gz
-cd hugegraph-{version}
+tar -xzf target/apache-hugegraph-{version}.tar.gz
+cd apache-hugegraph-{version}/apache-hugegraph-server-{version}
 
 # Initialize and start
 bin/init-store.sh

@@ -66,9 +66,35 @@ public class IndexAPI extends API {
         BriefStatistics statistics = new BriefStatistics();
         statistics.leader = RaftEngine.getInstance().getLeaderGrpcAddress();
         statistics.state = pdService.getStoreNodeService().getClusterStats().getState().toString();
+
+        // Use pdService (consistent with cluster()) rather than RaftEngine directly
+        CallStreamObserverWrap<Pdpb.GetMembersResponse> membersResp =
+                new CallStreamObserverWrap<>();
+        pdService.getMembers(Pdpb.GetMembersRequest.newBuilder().build(), membersResp);
+        statistics.memberSize = membersResp.get().get(0).getMembersList().size();
+
         statistics.storeSize = pdService.getStoreNodeService().getActiveStores().size();
-        statistics.graphSize = pdService.getPartitionService().getGraphs().size();
+        // Filter to user-facing graphs only (consistent with cluster())
+        List<Metapb.Graph> graphs = pdRestService.getGraphs();
+        statistics.graphSize = (int) graphs.stream()
+                                           .filter(g -> g.getGraphName() != null &&
+                                                        g.getGraphName().endsWith("/g"))
+                                           .count();
         statistics.partitionSize = pdService.getStoreNodeService().getShardGroups().size();
+
+        // Derive worst partition health state across all graphs
+        Metapb.PartitionState dataState = Metapb.PartitionState.PState_Normal;
+        for (Metapb.Graph graph : graphs) {
+            if (graph.getState() == Metapb.PartitionState.UNRECOGNIZED) {
+                continue;
+            }
+            if (graph.getState() != null &&
+                graph.getState().getNumber() > dataState.getNumber()) {
+                dataState = graph.getState();
+            }
+        }
+        statistics.dataState = dataState.name();
+
         return statistics;
 
     }
@@ -157,9 +183,13 @@ public class IndexAPI extends API {
     class BriefStatistics {
 
         String state;
+        /** Worst partition health state across all graphs (mirrors cluster().dataState) */
+        String dataState;
         String leader;
         int memberSize;
+        /** Active (online) store count only */
         int storeSize;
+        /** User-facing graphs count (graphName ending with /g) */
         int graphSize;
         int partitionSize;
     }

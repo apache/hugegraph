@@ -88,6 +88,28 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testGetWithoutResult() {
+        int taskId = this.gremlinJob("1 + 2");
+
+        waitTaskSuccess(taskId);
+
+        Response r = client().get(PATH, ImmutableMap.of("limit", -1));
+        String content = assertResponseStatus(200, r);
+        Assert.assertFalse(content, content.contains("task_result"));
+
+        r = client().get(PATH, String.valueOf(taskId));
+        content = assertResponseStatus(200, r);
+        assertJsonContains(content, "task_result");
+
+        r = client().get(PATH + taskId,
+                         ImmutableMap.of("with_result", false));
+        content = assertResponseStatus(200, r);
+        assertJsonContains(content, "id");
+        assertJsonContains(content, "task_callable");
+        Assert.assertFalse(content, content.contains("task_result"));
+    }
+
+    @Test
     public void testCancel() {
         // create a task
         int taskId = this.gremlinJob();
@@ -143,8 +165,12 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     private int gremlinJob() {
+        return this.gremlinJob("Thread.sleep(1000L)");
+    }
+
+    private int gremlinJob(String gremlin) {
         String body = "{" +
-                      "\"gremlin\":\"Thread.sleep(1000L)\"," +
+                      "\"gremlin\":\"" + gremlin + "\"," +
                       "\"bindings\":{}," +
                       "\"language\":\"gremlin-groovy\"," +
                       "\"aliases\":{}}";

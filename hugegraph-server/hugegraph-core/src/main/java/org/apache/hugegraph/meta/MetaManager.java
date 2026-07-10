@@ -57,10 +57,15 @@ import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.JsonUtil;
+import org.apache.hugegraph.util.Log;
+import org.slf4j.Logger;
 
 import com.google.common.collect.ImmutableMap;
 
 public class MetaManager {
+
+    private static final Logger LOG = Log.logger(MetaManager.class);
 
     public static final String META_PATH_DELIMITER = "/";
     public static final String META_PATH_JOIN = "-";
@@ -119,6 +124,8 @@ public class MetaManager {
     public static final long LOCK_DEFAULT_LEASE = 30L;
     public static final long LOCK_DEFAULT_TIMEOUT = 10L;
     public static final int RANDOM_USER_ID = 100;
+    private static final String SCHEMA_CACHE_CLEAR_GRAPH_KEY = "graph";
+    private static final String SCHEMA_CACHE_CLEAR_SOURCE_KEY = "source";
     private static final String META_PATH_URLS = "URLS";
     private static final String META_PATH_PD_PEERS = "HSTORE_PD_PEERS";
     private static final MetaManager INSTANCE = new MetaManager();
@@ -380,6 +387,23 @@ public class MetaManager {
         return this.metaDriver.extractValuesFromResponse(response);
     }
 
+    public <T> List<SchemaCacheClearEvent> extractSchemaCacheClearEventsFromResponse(
+            T response) {
+        List<String> values = this.metaDriver.extractValuesFromResponse(response);
+        if (values == null) {
+            return null;
+        }
+
+        List<SchemaCacheClearEvent> events = new ArrayList<>(values.size());
+        for (String value : values) {
+            SchemaCacheClearEvent event = SchemaCacheClearEvent.fromValue(value);
+            if (event != null) {
+                events.add(event);
+            }
+        }
+        return events;
+    }
+
     public <T> Map<String, String> extractKVFromResponse(T response) {
         return this.metaDriver.extractKVFromResponse(response);
     }
@@ -499,7 +523,12 @@ public class MetaManager {
     }
 
     public void notifySchemaCacheClear(String graphSpace, String graph) {
-        this.graphMetaManager.notifySchemaCacheClear(graphSpace, graph);
+        this.notifySchemaCacheClear(graphSpace, graph, null);
+    }
+
+    public void notifySchemaCacheClear(String graphSpace, String graph,
+                                       String source) {
+        this.graphMetaManager.notifySchemaCacheClear(graphSpace, graph, source);
     }
 
     public void notifyGraphCacheClear(String graphSpace, String graph) {
@@ -1285,6 +1314,70 @@ public class MetaManager {
     public void setWhiteIpStatus(boolean status) {
         String key = this.whiteIpStatusKey();
         this.metaDriver.put(key, ((Boolean) status).toString());
+    }
+
+    public static String schemaCacheClearEventValue(String graph,
+                                                    String source) {
+        if (StringUtils.isEmpty(source)) {
+            return graph;
+        }
+        return JsonUtil.toJson(ImmutableMap.of(SCHEMA_CACHE_CLEAR_GRAPH_KEY,
+                                               graph,
+                                               SCHEMA_CACHE_CLEAR_SOURCE_KEY,
+                                               source));
+    }
+
+    public static final class SchemaCacheClearEvent {
+
+        private final String graph;
+        private final String source;
+
+        private SchemaCacheClearEvent(String graph, String source) {
+            this.graph = graph;
+            this.source = source;
+        }
+
+        public String graph() {
+            return this.graph;
+        }
+
+        public String source() {
+            return this.source;
+        }
+
+        @SuppressWarnings("unchecked")
+        static SchemaCacheClearEvent fromValue(String value) {
+            if (StringUtils.isEmpty(value)) {
+                return null;
+            }
+            // Compatibility: events published before source-id support stored
+            // only the graph name as a plain string. Keep accepting that format
+            // so mixed-version clusters can consume old/new schema-cache-clear
+            // events during rolling upgrades.
+            if (value.charAt(0) != '{') {
+                return new SchemaCacheClearEvent(value, null);
+            }
+
+            Map<String, Object> payload;
+            try {
+                payload = JsonUtil.fromJson(value, Map.class);
+            } catch (RuntimeException e) {
+                LOG.debug("Malformed schema-cache-clear payload, ignoring: {}",
+                          value, e);
+                return null;
+            }
+
+            Object graph = payload.get(SCHEMA_CACHE_CLEAR_GRAPH_KEY);
+            if (graph == null) {
+                LOG.debug("Schema-cache-clear payload missing '{}' field: {}",
+                          SCHEMA_CACHE_CLEAR_GRAPH_KEY, value);
+                return null;
+            }
+
+            Object source = payload.get(SCHEMA_CACHE_CLEAR_SOURCE_KEY);
+            String sourceValue = source == null ? null : source.toString();
+            return new SchemaCacheClearEvent(graph.toString(), sourceValue);
+        }
     }
 
     public enum MetaDriverType {

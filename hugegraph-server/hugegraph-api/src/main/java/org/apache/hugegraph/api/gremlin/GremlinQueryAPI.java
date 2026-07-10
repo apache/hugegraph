@@ -43,7 +43,8 @@ public class GremlinQueryAPI extends API {
             "java.util.concurrent.TimeoutException",
             "groovy.lang.",
             "org.codehaus.",
-            "org.apache.hugegraph."
+            "org.apache.hugegraph.",
+            "org.apache.tinkerpop.gremlin.process.traversal.util.FastNoSuchElementException"
     );
 
     @Context
