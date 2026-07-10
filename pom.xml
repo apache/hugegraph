@@ -88,7 +88,6 @@
     <properties>
         <fabric8.version>5.6.0</fabric8.version>
         <revision>1.7.0</revision>
-        <hugegraph-commons.version>1.7.0</hugegraph-commons.version>
         <lombok.version>1.18.30</lombok.version>
         <release.name>hugegraph</release.name>
         <maven.compiler.source>11</maven.compiler.source>

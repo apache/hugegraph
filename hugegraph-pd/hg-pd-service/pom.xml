@@ -142,7 +142,7 @@
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-common</artifactId>
-            <version>${hugegraph-commons.version}</version>
+            <version>${project.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.logging.log4j</groupId>
