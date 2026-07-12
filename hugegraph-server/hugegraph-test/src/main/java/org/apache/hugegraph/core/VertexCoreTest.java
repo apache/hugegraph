@@ -9082,15 +9082,19 @@ public class VertexCoreTest extends BaseCoreTest {
         HugeGraph graph = graph();
         initPersonIndex(true);
         init5Persons();
+        graph.addVertex(T.label, "fan", "name", "unindexed-city-fan",
+                        "age", 20, "city", "Beijing");
+        this.commitTx();
 
         GraphTraversalSource g = graph.traversal();
 
-        List<Vertex> vertices = g.V().has(T.label, P.neq("author"))
-                                 .has("city", "Beijing").toList();
-        Assert.assertEquals(3, vertices.size());
-        for (Vertex vertex : vertices) {
-            Assert.assertEquals("person", vertex.label());
-        }
+        Assert.assertThrows(NoIndexException.class, () -> {
+            g.V().has(T.label, P.neq("author"))
+             .has("city", "Beijing").toList();
+        }, e -> {
+            Assert.assertContains("not-equal condition",
+                                  e.getMessage());
+        });
     }
 
     @Test

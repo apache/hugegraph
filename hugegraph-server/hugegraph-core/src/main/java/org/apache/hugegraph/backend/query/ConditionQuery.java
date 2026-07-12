@@ -679,15 +679,6 @@ public class ConditionQuery extends IdQuery {
         return false;
     }
 
-    public boolean hasUserpropNeqCondition() {
-        for (Condition.Relation r : this.userpropRelations()) {
-            if (r.relation() == RelationType.NEQ) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public boolean matchUserpropKeys(List<Id> keys) {
         Set<Id> conditionKeys = this.userpropKeys();
         return !keys.isEmpty() && conditionKeys.containsAll(keys);

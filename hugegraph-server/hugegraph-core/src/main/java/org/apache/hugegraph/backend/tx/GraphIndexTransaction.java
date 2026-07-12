@@ -956,7 +956,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
     private static Set<IndexLabel> matchSingleOrCompositeIndex(
             ConditionQuery query,
             Set<IndexLabel> indexLabels) {
-        if (query.hasUserpropNeqCondition()) {
+        if (query.hasNeqCondition()) {
             return ImmutableSet.of();
         }
         boolean requireRange = query.hasRangeCondition();
@@ -997,7 +997,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
     private static Set<IndexLabel> matchJointIndexes(
             ConditionQuery query,
             Set<IndexLabel> indexLabels) {
-        if (query.hasUserpropNeqCondition()) {
+        if (query.hasNeqCondition()) {
             return ImmutableSet.of();
         }
         Set<Id> queryPropKeys = query.userpropKeys();

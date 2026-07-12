@@ -133,23 +133,11 @@ public class QueryTest {
         Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
         Assert.assertFalse(query.containsConditionValues(HugeKeys.LABEL));
         Assert.assertTrue(query.hasNeqCondition());
-        Assert.assertFalse(query.hasUserpropNeqCondition());
         Assert.assertEquals(ImmutableSet.of(),
                             query.conditionValues(HugeKeys.LABEL));
         Assert.assertNull(query.uniqueConditionValue(HugeKeys.LABEL));
         Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
         Assert.assertNull(query.condition(HugeKeys.LABEL));
-    }
-
-    @Test
-    public void testConditionWithUserpropNeq() {
-        Id prop = IdGenerator.of(1);
-
-        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
-        query.query(Condition.neq(prop, "Beijing"));
-
-        Assert.assertTrue(query.hasNeqCondition());
-        Assert.assertTrue(query.hasUserpropNeqCondition());
     }
 
     @Test
