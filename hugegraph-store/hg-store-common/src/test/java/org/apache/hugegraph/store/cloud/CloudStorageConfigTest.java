@@ -104,10 +104,25 @@ public class CloudStorageConfigTest {
 
      @Test
      public void testUploadRetryDefaults() {
-         // Default 0: no whole-file retries; provider handles its own retries; queue is DLQ-only.
-         assertEquals(0, config.getUploadRetryMaxAttempts());
+         // Default 3: whole-file retries enabled under the primary-durability model.
+         assertEquals(3, config.getUploadRetryMaxAttempts());
          assertEquals(1_000L, config.getUploadRetryInitialDelayMs());
          assertEquals(60_000L, config.getUploadRetryMaxDelayMs());
+         // Backpressure enabled by default.
+         assertEquals(64, config.getUploadBackpressureHighWatermark());
+     }
+
+     @Test
+     public void testMetadataSyncDefaults() {
+         // Metadata mirroring defaults to flush mode.
+         assertEquals("flush", config.getWalMode());
+     }
+
+     @Test
+     public void testMetadataSyncSetters() {
+
+         config.setWalMode("wal");
+         assertEquals("wal", config.getWalMode());
      }
 
      @Test

@@ -38,6 +38,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.rocksdb.AbstractEventListener;
 import org.rocksdb.Cache;
 import org.rocksdb.CompactionJobInfo;
+import org.rocksdb.LiveFileMetaData;
 import org.rocksdb.MemoryUsageType;
 import org.rocksdb.MemoryUtil;
 import org.rocksdb.RocksDB;
@@ -389,6 +390,176 @@ public final class RocksDBFactory {
                 log.debug("Flushed RocksDB session for db={}", dbName);
             } catch (Exception e) {
                 log.warn("Failed to flush RocksDB session for db={}: {}", dbName, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Returns the live SST files currently referenced by the named RocksDB session, with the
+     * owning column-family name for each. Used by cloud storage to (a) confirm the full live set
+     * is present in cloud before deleting a superseded object, and (b) route read-miss hydration
+     * to the correct column family.
+     *
+     * <p>The returned metadata reflects RocksDB's manifest, so it lists files that RocksDB believes
+     * are live even if the local file has since been evicted from disk.
+     *
+     * @param dbName the graph / partition name
+     * @return live SST files (possibly empty); never {@code null}
+     */
+    public List<LiveSstFile> getLiveSstFiles(String dbName) {
+        RocksDBSession session = dbSessionMap.get(dbName);
+        if (session == null) {
+            return List.of();
+        }
+        RocksDB db = session.getDB();
+        if (db == null) {
+            return List.of();
+        }
+        List<LiveSstFile> result = new ArrayList<>();
+        for (LiveFileMetaData md : db.getLiveFilesMetaData()) {
+            String dir = md.path();
+            String name = md.fileName();
+            if (name == null || !name.endsWith(".sst")) {
+                continue;
+            }
+            String absolutePath;
+            if (name.startsWith(File.separator) || name.startsWith("/")) {
+                absolutePath = dir.endsWith(File.separator) || dir.endsWith("/")
+                               ? dir.substring(0, dir.length() - 1) + name
+                               : dir + name;
+            } else {
+                absolutePath = dir.endsWith(File.separator) || dir.endsWith("/")
+                               ? dir + name
+                               : dir + File.separator + name;
+            }
+            String cfName = new String(md.columnFamilyName(), java.nio.charset.StandardCharsets.UTF_8);
+            result.add(new LiveSstFile(absolutePath, cfName));
+        }
+        return result;
+    }
+
+    /** A live SST file and the column family it belongs to. */
+    public static final class LiveSstFile {
+
+        private final String absolutePath;
+        private final String cfName;
+
+        public LiveSstFile(String absolutePath, String cfName) {
+            this.absolutePath = absolutePath;
+            this.cfName = cfName;
+        }
+
+        public String getAbsolutePath() {
+            return absolutePath;
+        }
+
+        public String getCfName() {
+            return cfName;
+        }
+    }
+
+    /**
+     * Captures a point-in-time, internally-consistent copy of the named DB's RocksDB metadata
+     * ({@code CURRENT}, {@code MANIFEST-*}, {@code OPTIONS-*}, the WAL {@code *.log} tail, and
+     * hard-links to the live {@code *.sst} set) into a temporary sibling directory of the DB, via
+     * RocksDB {@link org.rocksdb.Checkpoint} (the same primitive {@code saveSnapshot} uses).
+     *
+     * <p>This is the capture primitive behind metadata durability: the returned snapshot exposes
+     * the exact {@code {manifest, live-SST-set}} pair as of the checkpoint instant, so a caller can
+     * mirror a consistent set of objects to cloud storage without racing live compaction. The
+     * hard-linked SSTs also pin their content for the lifetime of the snapshot, so an SST cannot be
+     * physically removed by compaction between capture and upload.
+     *
+     * <p>The caller <b>must</b> call {@link MetadataSnapshot#cleanup()} when done to remove the
+     * temporary directory (which only contains metadata copies and SST hard-links — deleting it
+     * never touches the real SST files).
+     *
+     * @param dbName the graph / partition name
+     * @return the captured snapshot, or {@code null} if the session is not open
+     */
+    public MetadataSnapshot captureMetadataSnapshot(String dbName) {
+        RocksDBSession session = dbSessionMap.get(dbName);
+        if (session == null || session.getDB() == null) {
+            return null;
+        }
+        return session.captureMetadataCheckpoint();
+    }
+
+    /**
+     * A consistent snapshot of a RocksDB instance's metadata plus hard-links to its live SST set,
+     * materialised under {@link #getTempDir()} by {@link #captureMetadataSnapshot(String)}.
+     *
+     * <p>File names are relative to the checkpoint directory. {@link #getDbDir()} is the real DB
+     * directory the metadata belongs to — remote keys must be derived from {@code dbDir + name} (not
+     * the temp directory) so a restore lands each file back at its original path.
+     */
+    public static final class MetadataSnapshot {
+
+        private final String dbDir;
+        private final String tempDir;
+        private final String currentFileName;
+        private final String manifestFileName;
+        private final List<String> optionsFileNames;
+        private final List<String> sstFileNames;
+        private final List<String> walFileNames;
+
+        public MetadataSnapshot(String dbDir, String tempDir, String currentFileName,
+                                String manifestFileName, List<String> optionsFileNames,
+                                List<String> sstFileNames, List<String> walFileNames) {
+            this.dbDir = dbDir;
+            this.tempDir = tempDir;
+            this.currentFileName = currentFileName;
+            this.manifestFileName = manifestFileName;
+            this.optionsFileNames = optionsFileNames;
+            this.sstFileNames = sstFileNames;
+            this.walFileNames = walFileNames;
+        }
+
+        /** The real DB directory the captured metadata belongs to (for remote-key derivation). */
+        public String getDbDir() {
+            return dbDir;
+        }
+
+        /** The temporary checkpoint directory holding the metadata copies and SST hard-links. */
+        public String getTempDir() {
+            return tempDir;
+        }
+
+        /** The {@code CURRENT} file name (always {@code "CURRENT"}), or {@code null} if absent. */
+        public String getCurrentFileName() {
+            return currentFileName;
+        }
+
+        /** The {@code MANIFEST-<n>} file name referenced by {@code CURRENT}, or {@code null}. */
+        public String getManifestFileName() {
+            return manifestFileName;
+        }
+
+        /** {@code OPTIONS-<n>} file names present in the checkpoint. */
+        public List<String> getOptionsFileNames() {
+            return optionsFileNames;
+        }
+
+        /** {@code *.sst} file names the captured manifest references (as hard-links). */
+        public List<String> getSstFileNames() {
+            return sstFileNames;
+        }
+
+        /** WAL {@code *.log} file names captured (used by {@code wal} mode). */
+        public List<String> getWalFileNames() {
+            return walFileNames;
+        }
+
+        /** Removes the temporary checkpoint directory. Never touches the real SST files. */
+        public void cleanup() {
+            if (tempDir == null) {
+                return;
+            }
+            try {
+                FileUtils.deleteDirectory(new File(tempDir));
+            } catch (Exception e) {
+                log.warn("Failed to clean up metadata checkpoint temp dir {}: {}",
+                         tempDir, e.getMessage());
             }
         }
     }

@@ -28,6 +28,8 @@ import javax.annotation.PreDestroy;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
 import org.apache.hugegraph.store.node.cloud.CloudStorageEventListener;
+import org.apache.hugegraph.store.node.cloud.CloudStorageMetrics;
+import org.apache.hugegraph.store.node.cloud.CloudSyncTracker;
 import org.apache.hugegraph.store.node.cloud.CloudUploadRetryQueue;
 import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.apache.hugegraph.store.cloud.CloudStorageProviderFactory;
@@ -40,6 +42,8 @@ import org.springframework.core.env.AbstractEnvironment;
 import org.springframework.core.env.EnumerablePropertySource;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
+
+import io.micrometer.core.instrument.MeterRegistry;
 
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -105,6 +109,9 @@ public class AppConfig {
     @Autowired
     private CloudStorageSpringConfig cloudStorageSpringConfig;
 
+    @Autowired(required = false)
+    private MeterRegistry meterRegistry;
+
     /** Retry queue created during {@link #initCloudStorage()}; closed on {@link #onDestroy()}. */
     private volatile CloudUploadRetryQueue cloudUploadRetryQueue;
 
@@ -163,23 +170,43 @@ public class AppConfig {
             String resolvedDataRoot =
                     Paths.get(dataPath).toAbsolutePath().normalize().toString();
 
+            // Shared sync tracker: the listener's delete guard and the retry queue's success
+            // callback both update it, so a superseded cloud object is deleted only once every
+            // live SST file of that DB is confirmed present in cloud.
+            CloudSyncTracker syncTracker = new CloudSyncTracker();
+
             CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
                     cfg.getUploadRetryMaxAttempts(),
                     cfg.getUploadRetryInitialDelayMs(),
                     cfg.getUploadRetryMaxDelayMs(),
-                    resolvedDataRoot);
+                    resolvedDataRoot,
+                    syncTracker::markConfirmed);
             this.cloudUploadRetryQueue = retryQueue;
 
-            RocksDBFactory.getInstance().addRocksdbChangedListener(
-                    new CloudStorageEventListener(resolvedDataRoot,
-                                                  cfg.isStartupHydrationEnabled(),
-                                                  cfg.getReadMissGuardWindowMs(),
-                                                  retryQueue));
+            String storeScopePrefix = buildCloudStoreScopePrefix();
+
+            CloudStorageEventListener listener = new CloudStorageEventListener(
+                    resolvedDataRoot,
+                    cfg.isStartupHydrationEnabled(),
+                    cfg.getReadMissGuardWindowMs(),
+                    retryQueue,
+                    syncTracker,
+                    cfg.getUploadBackpressureHighWatermark(),
+                    "wal".equalsIgnoreCase(cfg.getWalMode()),
+                    storeScopePrefix);
+
+            // Initialize metrics if MeterRegistry is available
+            if (meterRegistry != null) {
+                CloudStorageMetrics.init(meterRegistry, syncTracker);
+            }
+
+            RocksDBFactory.getInstance().addRocksdbChangedListener(listener);
             log.info("Cloud storage provider '{}' registered with RocksDBFactory "
-                     + "(dataRoot='{}', startupHydration={}, readMissHydration=true, "
+                     + "(dataRoot='{}', storeScopePrefix='{}', startupHydration={}, "
+                     + "readMissHydration=true, "
                      + "readMissGuardWindowMs={}, uploadRetryMaxAttempts={}, "
                      + "uploadRetryInitialDelayMs={}, uploadRetryMaxDelayMs={})",
-                     cfg.getProvider(), resolvedDataRoot,
+                     cfg.getProvider(), resolvedDataRoot, storeScopePrefix,
                      cfg.isStartupHydrationEnabled(),
                      cfg.getReadMissGuardWindowMs(),
                      cfg.getUploadRetryMaxAttempts(),
@@ -189,6 +216,36 @@ public class AppConfig {
             log.error("Failed to initialize cloud storage provider '{}': {}",
                       cfg.getProvider(), e.getMessage(), e);
         }
+    }
+
+    /**
+     * Builds a deterministic per-store cloud key prefix so distributed store nodes can safely
+     * share the same bucket/path-prefix without key collisions.
+     */
+    private String buildCloudStoreScopePrefix() {
+        String identity = raft != null ? raft.getAddress() : null;
+        if (identity == null || identity.trim().isEmpty()) {
+            identity = getStoreServerAddress();
+        }
+        return "store-" + sanitizeCloudKeySegment(identity);
+    }
+
+    /** Converts an address-like identifier into a cloud-key-safe path segment. */
+    private static String sanitizeCloudKeySegment(String raw) {
+        if (raw == null || raw.trim().isEmpty()) {
+            return "unknown";
+        }
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' || ch == '.') {
+                sb.append(ch);
+            } else {
+                sb.append('_');
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -427,11 +484,13 @@ public class AppConfig {
         private String pathPrefix = "hugegraph";
         private boolean startupHydrationEnabled = true;
         private long readMissGuardWindowMs = 3000L;
-        // 0 = no whole-file retries; provider handles its own retries internally.
-        // Queue is DLQ-only. Set > 0 only for providers without built-in retry.
-        private int uploadRetryMaxAttempts = 0;
+        // Whole-file upload retries after a first failure. Default 3 under the primary-durability
+        private int uploadRetryMaxAttempts = 3;
         private long uploadRetryInitialDelayMs = 1_000L;
         private long uploadRetryMaxDelayMs = 60_000L;
+        // Backpressure high-watermark on the pending-upload backlog; 0 disables.
+        private int uploadBackpressureHighWatermark = 64;
+        private String walMode = "flush";
 
         /**
          * Injected by Spring; used to read {@code cloud.storage.<provider>.*} properties
@@ -453,6 +512,8 @@ public class AppConfig {
             cfg.setUploadRetryMaxAttempts(uploadRetryMaxAttempts);
             cfg.setUploadRetryInitialDelayMs(uploadRetryInitialDelayMs);
             cfg.setUploadRetryMaxDelayMs(uploadRetryMaxDelayMs);
+            cfg.setUploadBackpressureHighWatermark(uploadBackpressureHighWatermark);
+            cfg.setWalMode(walMode);
             cfg.setProviderProperties(readProviderProperties());
             return cfg;
         }

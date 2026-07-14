@@ -72,14 +72,15 @@ public class CloudStorageConfig {
 
 
     /**
-     * Maximum number of whole-file upload retries after a first failure. Default is {@code 0}
-     * (no whole-file retries). The provider is responsible for its own internal retries (e.g.
-     * S3 multipart-part-retry). This common-layer queue exists solely to catch failures that
-     * escape the provider and persist them to the DLQ for operational visibility / replay.
+     * Maximum number of whole-file upload retries after a first failure. Default is {@code 5}.
+     * Under the primary-durability model an SST that never reaches cloud is at risk on the
+     * ephemeral local disk, so whole-file retries are enabled by default. After all attempts are
+     * exhausted the task is moved to the DLQ for operational visibility / replay.
      *
-     * <p>Set to a positive value only if the provider does NOT implement its own retry strategy.
+     * <p>Set to {@code 0} to disable whole-file retries (failures go straight to the DLQ) when the
+     * provider already implements a sufficient internal retry strategy.
      */
-    private int uploadRetryMaxAttempts = 0;
+    private int uploadRetryMaxAttempts = 3;
 
     /**
      * Delay before the first whole-file retry attempt, in milliseconds.
@@ -93,6 +94,28 @@ public class CloudStorageConfig {
      * Only used when {@link #uploadRetryMaxAttempts} > 0. Default: 60 000 ms.
      */
     private long uploadRetryMaxDelayMs = 60_000L;
+
+    /**
+     * Backpressure high-watermark on the pending-upload backlog (retry-queue in-flight + DLQ).
+     * When {@code > 0} and the backlog exceeds this value, RocksDB's flush/compaction thread is
+     * briefly slowed in {@code onTableFileCreated} so ingestion cannot outrun the cloud mirror,
+     * bounding the amount of local-only (at-risk) data. Default: {@code 64}. {@code 0} disables it.
+     */
+    private int uploadBackpressureHighWatermark = 64;
+
+
+    /**
+     * WAL durability mode for metadata mirroring:
+     * <ul>
+     *   <li>{@code flush} (default): a flush is forced before each metadata capture so the durable
+     *       state is fully in SST files; at most the un-flushed in-memory tail written since the
+     *       last sync is lost on an uncontrolled crash.</li>
+     *   <li>{@code wal}: the active WAL {@code *.log} segments are mirrored alongside the metadata
+     *       and replayed on restore (lower RPO, at the cost of more frequent small uploads).</li>
+     * </ul>
+     */
+    private String walMode = "flush";
+
 
     /**
      * Provider-specific properties, mapped from {@code cloud.storage.<provider>.*} in the configuration.

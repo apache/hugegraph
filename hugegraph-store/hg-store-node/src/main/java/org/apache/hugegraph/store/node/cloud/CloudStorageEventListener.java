@@ -19,18 +19,21 @@ package org.apache.hugegraph.store.node.cloud;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Stream;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
+import org.apache.hugegraph.rocksdb.access.RocksDBFactory.LiveSstFile;
+import org.apache.hugegraph.rocksdb.access.RocksDBFactory.MetadataSnapshot;
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory.RocksdbChangedListener;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.store.cloud.CloudStorageProvider;
@@ -45,10 +48,11 @@ import lombok.extern.slf4j.Slf4j;
  * <p>When cloud storage is enabled:
  * <ul>
  *   <li>{@link #onDBCreated} uploads any SST files that already exist in the DB directory
- *       (e.g. surviving from a previous run) and triggers an async MemTable flush so that
- *       WAL-recovered or recently-written data is also written to SST files.</li>
- *   <li>{@link #onTableFileCreated} uploads newly created SST files.</li>
- *   <li>{@link #onTableFileDeleted} removes the corresponding object from cloud storage.</li>
+ *       (e.g. surviving from a previous run), triggers a non-blocking MemTable flush so
+ *       WAL-recovered or recently-written data is written to SST files (completion is signalled
+ *       event-driven via {@link #onTableFileCreated}), then mirrors metadata inline.</li>
+ *   <li>{@link #onTableFileCreated} uploads newly created SST files and mirrors metadata inline.</li>
+ *   <li>{@link #onTableFileDeleted} mirrors metadata first, then removes the superseded SST object.</li>
  * </ul>
  *
  * <h3>Remote key construction</h3>
@@ -58,8 +62,8 @@ import lombok.extern.slf4j.Slf4j;
  * <pre>
  *   dataRoot  = /hugegraph-store/storage
  *   filePath  = /hugegraph-store/storage/hgstore-metadata/000008.sst
- *   remoteKey = hgstore-metadata/000008.sst
- *   (with path-prefix "hugegraph") → hugegraph/hgstore-metadata/000008.sst
+ *   remoteKey = store-127.0.0.1_8501/hgstore-metadata/000008.sst
+ *   (with path-prefix "hugegraph") → hugegraph/store-127.0.0.1_8501/hgstore-metadata/000008.sst
  * </pre>
  *
  * This listener is registered with {@link RocksDBFactory} during application startup
@@ -70,6 +74,9 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
 
     /** Absolute, normalised path of the store's data root directory. */
     private final String dataRoot;
+
+    /** Optional per-store namespace prefix prepended to every remote cloud key. */
+    private final String storeScopePrefix;
 
     private static final long DEFAULT_READ_MISS_GUARD_WINDOW_MS = 3000L;
 
@@ -82,6 +89,35 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      * of just being logged. When null, failures are only logged (no retry).
      */
     private final CloudUploadRetryQueue retryQueue;
+
+    /** Tracks which SST files are confirmed present in cloud (per-DB Roaring bitmap). */
+    private final CloudSyncTracker syncTracker;
+
+    /**
+     * When {@code > 0}, {@link #onTableFileCreated} slows the RocksDB flush/compaction thread while
+     * the number of not-yet-durable uploads (retry-queue in-flight + DLQ) exceeds this watermark,
+     * so ingestion cannot outrun the cloud mirror. {@code 0} disables backpressure.
+     */
+    private final int backpressureHighWatermark;
+
+    /** Upper bound on how long a single {@link #onTableFileCreated} call will block for backpressure. */
+    private static final long BACKPRESSURE_MAX_WAIT_MS = 30_000L;
+    private static final long BACKPRESSURE_POLL_MS = 50L;
+
+    // -----------------------------------------------------------------------
+    // Metadata (CURRENT/MANIFEST/OPTIONS[/WAL]) mirroring & consistent restore
+    // -----------------------------------------------------------------------
+
+
+    /**
+     * When {@code true} ({@code wal-mode: wal}), the active WAL {@code *.log} segments are mirrored
+     * alongside the metadata and replayed on restore. When {@code false} ({@code wal-mode: flush}),
+     * no WAL is mirrored.
+     */
+    private final boolean walModeEnabled;
+
+    /** Resolved DB directory -> logical DB name, so {@link #onCompacted} resolves path events. */
+    private final Map<String, String> dbNameByDir = new ConcurrentHashMap<>();
 
     /**
      * @param dataRoot absolute path of the store's data directory
@@ -107,8 +143,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     /**
-     * Full constructor.
-     *
      * @param retryQueue optional {@link CloudUploadRetryQueue}; when non-null, upload failures
      *                   are retried asynchronously and eventually moved to the dead-letter queue.
      *                   Pass {@code null} to disable retries (failures are only logged).
@@ -117,6 +151,60 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                                      boolean startupHydrationEnabled,
                                      long readMissGuardWindowMs,
                                      CloudUploadRetryQueue retryQueue) {
+        this(dataRoot, startupHydrationEnabled, readMissGuardWindowMs, retryQueue,
+             new CloudSyncTracker(), 0);
+    }
+
+    /**
+     * Full constructor.
+     *
+     * @param syncTracker               tracks SST files confirmed present in cloud; the delete guard
+     *                                  uses it to avoid deleting a superseded object before its
+     *                                  replacements are durable. Must be shared with the retry queue.
+     * @param backpressureHighWatermark {@code > 0} to slow ingestion while the pending-upload backlog
+     *                                  exceeds this value; {@code 0} disables backpressure.
+     */
+    public CloudStorageEventListener(String dataRoot,
+                                     boolean startupHydrationEnabled,
+                                     long readMissGuardWindowMs,
+                                     CloudUploadRetryQueue retryQueue,
+                                     CloudSyncTracker syncTracker,
+                                     int backpressureHighWatermark) {
+        this(dataRoot, startupHydrationEnabled, readMissGuardWindowMs, retryQueue, syncTracker,
+             backpressureHighWatermark, false);
+    }
+
+    /**
+     * Full constructor including metadata-mirroring parameters.
+     *
+     * @param walModeEnabled         {@code true} for {@code wal-mode: wal} (mirror + replay WAL);
+     *                               {@code false} for {@code wal-mode: flush} (force flush, no WAL)
+     */
+    public CloudStorageEventListener(String dataRoot,
+                                     boolean startupHydrationEnabled,
+                                     long readMissGuardWindowMs,
+                                     CloudUploadRetryQueue retryQueue,
+                                     CloudSyncTracker syncTracker,
+                                     int backpressureHighWatermark,
+                                     boolean walModeEnabled) {
+        this(dataRoot, startupHydrationEnabled, readMissGuardWindowMs, retryQueue, syncTracker,
+             backpressureHighWatermark, walModeEnabled, null);
+    }
+
+    /**
+     * Full constructor including metadata-mirroring and per-store key namespace parameters.
+     *
+     * @param storeScopePrefix optional per-store key prefix to isolate cloud objects across
+     *                         distributed store nodes sharing the same bucket/path-prefix.
+     */
+    public CloudStorageEventListener(String dataRoot,
+                                     boolean startupHydrationEnabled,
+                                     long readMissGuardWindowMs,
+                                     CloudUploadRetryQueue retryQueue,
+                                     CloudSyncTracker syncTracker,
+                                     int backpressureHighWatermark,
+                                     boolean walModeEnabled,
+                                     String storeScopePrefix) {
         String normalised = Paths.get(dataRoot).toAbsolutePath().normalize().toString();
         // Strip trailing separator so substring arithmetic is consistent.
         this.dataRoot = normalised.endsWith(File.separator)
@@ -126,6 +214,10 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         this.readMissGuardWindowMs = Math.max(0L, readMissGuardWindowMs);
         this.readMissAttemptTs = new ConcurrentHashMap<>();
         this.retryQueue = retryQueue;
+        this.syncTracker = syncTracker != null ? syncTracker : new CloudSyncTracker();
+        this.backpressureHighWatermark = Math.max(0, backpressureHighWatermark);
+        this.walModeEnabled = walModeEnabled;
+        this.storeScopePrefix = normaliseKeyPrefix(storeScopePrefix);
     }
 
     // -----------------------------------------------------------------------
@@ -145,36 +237,73 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     /**
-     * Called when a read returns null in RocksDB. We try to hydrate missing SST files from cloud,
-     * ingest them into the target CF, then caller retries get().
+     * Called when a read returns null in RocksDB.
+     *
+     * <p>We restore only the SST files that RocksDB references as <em>live</em> in its manifest but
+     * that are physically missing on local disk, downloading each back to its <em>exact original
+     * path</em> so RocksDB finds it on the next access. This deliberately avoids
+     * {@code ingestExternalFile}, which would (a) risk placing a file into the wrong column family
+     * and (b) assign a fresh sequence number that can resurrect deleted keys. Restricting to the
+     * live set also guarantees superseded / compacted-away objects are never resurrected.
+     *
+     * <p>Note: a genuine key-not-found also arrives here as {@code value == null}; in that case no
+     * live file is missing and we return {@code false} without any cloud I/O.
      */
     @Override
     public boolean onReadMiss(RocksDBSession session, String table, byte[] key) {
-        if (!shouldAttemptReadMissHydration(session.getGraphName(), table)) {
+        String dbName = session.getGraphName();
+        if (!shouldAttemptReadMissHydration(dbName, table)) {
             return false;
         }
         CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
         if (provider == null) {
             return false;
         }
-        List<String> downloaded = downloadMissingSstFiles(provider,
-                                                          session.getGraphName(),
-                                                          session.getDbPath());
-        if (downloaded.isEmpty()) {
-            return false;
-        }
-        try {
-            Map<byte[], List<String>> sstByCf = new HashMap<>();
-            sstByCf.put(table.getBytes(StandardCharsets.UTF_8), downloaded);
-            session.ingestSstFile(sstByCf);
-            log.info("Cloud read-miss hydration succeeded: db={}, table={}, files={}",
-                     session.getGraphName(), table, downloaded.size());
+        int restored = restoreMissingLiveFiles(provider, dbName,
+                                               RocksDBFactory.getInstance().getLiveSstFiles(dbName));
+        if (restored > 0) {
+            log.info("Cloud read-miss hydration: restored {} missing live SST file(s) for db={}",
+                     restored, dbName);
             return true;
-        } catch (Exception e) {
-            log.warn("Cloud read-miss hydration failed: db={}, table={}, reason={}",
-                     session.getGraphName(), table, e.getMessage());
-            return false;
         }
+        return false;
+    }
+
+    /**
+     * Downloads back any SST files that are live in RocksDB's manifest but missing on local disk,
+     * writing each to its original path. Returns the number of files restored.
+     *
+     * <p>Package-private testable seam: caller supplies the live-file set.
+     */
+    int restoreMissingLiveFiles(CloudStorageProvider provider, String dbName,
+                                List<LiveSstFile> liveFiles) {
+        int restored = 0;
+        for (LiveSstFile live : liveFiles) {
+            Path localPath = Paths.get(live.getAbsolutePath());
+            if (Files.exists(localPath)) {
+                continue;
+            }
+            String remoteKey = toRelativeKey(live.getAbsolutePath());
+            try {
+                if (!provider.fileExists(remoteKey)) {
+                    log.warn("Cloud read-miss: live file missing locally AND absent in cloud: "
+                             + "db={}, key={}", dbName, remoteKey);
+                    continue;
+                }
+                Files.createDirectories(localPath.getParent());
+                // Download to a temp file then atomically move into place so a crash mid-download
+                // never leaves RocksDB reading a truncated SST at the expected path.
+                Path tmp = localPath.resolveSibling(localPath.getFileName() + ".hydrate");
+                provider.downloadFile(remoteKey, tmp.toString());
+                Files.move(tmp, localPath, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                syncTracker.markConfirmed(dbName, live.getAbsolutePath());
+                restored++;
+            } catch (IOException e) {
+                log.warn("Cloud read-miss restore failed: db={}, key={}, reason={}",
+                         dbName, remoteKey, e.getMessage());
+            }
+        }
+        return restored;
     }
 
     /**
@@ -189,12 +318,15 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      */
     @Override
     public void onDBCreated(String dbName, String dbPath) {
+        recordDb(dbName, dbPath);
         CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
         if (provider == null) {
             return;
         }
         uploadExistingSstFiles(provider, dbName, dbPath);
         flushDb(dbName);
+        // Mirror metadata immediately after initial upload/flush to keep cloud state recoverable.
+        syncMetadataSnapshotInline(provider, dbName);
     }
 
     /**
@@ -212,24 +344,74 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         if (provider == null) {
             return;
         }
+        recordDb(dbName, parentDir(filePath));
+        CloudStorageMetrics.registerDatabaseMetrics(dbName);
         String remoteKey = toRelativeKey(filePath);
+        long startTimeMs = System.currentTimeMillis();
         try {
             provider.uploadFile(filePath, remoteKey);
-            log.debug("Cloud upload success: db={}, cf={}, path={}, size={}",
-                      dbName, cfName, filePath, fileSize);
+            syncTracker.markConfirmed(dbName, filePath);
+            long syncLatencyMs = System.currentTimeMillis() - startTimeMs;
+            CloudStorageMetrics.recordSyncLatency(dbName, syncLatencyMs);
+            syncMetadataSnapshotInline(provider, dbName);
+            log.debug("Cloud upload success: db={}, cf={}, path={}, size={}, latencyMs={}",
+                      dbName, cfName, filePath, fileSize, syncLatencyMs);
         } catch (Exception e) {
             // NOTE: this callback is invoked via RocksDB's JNI event-listener mechanism.
             // Any exception thrown here crosses the JNI boundary and is silently swallowed
             // by the native layer — it will NOT crash the server and the SST file will NOT
             // be retried automatically. Log the failure and submit to the retry queue (if
-            // configured) so the upload can be retried asynchronously and, after exhausting
-            // all attempts, moved to the dead-letter queue for later inspection / replay.
-            log.error("Cloud upload failed (SST file is local-only, may be missing from cloud): "
-                      + "db={}, cf={}, path={}", dbName, cfName, filePath, e);
+            // configured) so the upload can be retried asynchronously. File remains on disk
+            // and will be retried automatically on the next compaction via the delete guard.
+            String errorType = e.getClass().getSimpleName();
+            CloudStorageMetrics.recordUploadFailure(dbName, cfName, errorType);
+            log.error("Cloud upload failed (will retry on next compaction): "
+                      + "db={}, cf={}, path={}, error={}", dbName, cfName, filePath, e.getMessage());
             if (retryQueue != null) {
                 retryQueue.submit(dbName, cfName, filePath, remoteKey, e);
             }
         }
+        // Apply backpressure AFTER handling this file so the flush/compaction thread slows down
+        // while the cloud mirror is behind, preventing ingestion from outrunning durability.
+        applyBackpressure(dbName);
+    }
+
+    /**
+     * Blocks the calling (RocksDB flush/compaction) thread while the pending-upload backlog exceeds
+     * {@link #backpressureHighWatermark}, up to {@link #BACKPRESSURE_MAX_WAIT_MS}. This is the
+     * durability-tier backpressure: it keeps at-risk local-only data bounded.
+     */
+    private void applyBackpressure(String dbName) {
+        if (backpressureHighWatermark <= 0 || retryQueue == null) {
+            return;
+        }
+        long waited = 0L;
+        boolean logged = false;
+        while (pendingUploadBacklog() > backpressureHighWatermark
+               && waited < BACKPRESSURE_MAX_WAIT_MS) {
+            if (!logged) {
+                log.warn("Cloud upload backpressure: db={}, backlog={} > watermark={}, "
+                         + "slowing ingestion", dbName, pendingUploadBacklog(),
+                         backpressureHighWatermark);
+                logged = true;
+            }
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(BACKPRESSURE_POLL_MS));
+            if (Thread.currentThread().isInterrupted()) {
+                return;
+            }
+            waited += BACKPRESSURE_POLL_MS;
+        }
+        if (logged) {
+            log.info("Cloud upload backpressure released: db={}, backlog={}, waitedMs={}",
+                     dbName, pendingUploadBacklog(), waited);
+        }
+    }
+
+    private int pendingUploadBacklog() {
+        if (retryQueue == null) {
+            return 0;
+        }
+        return retryQueue.getInFlightCount() + retryQueue.getDlqSize();
     }
 
     /**
@@ -245,14 +427,343 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         if (provider == null) {
             return;
         }
+        // DATA-LOSS GUARD: never delete a superseded cloud object until every SST file currently
+        // live in this DB is confirmed present in cloud. During compaction RocksDB deletes the old
+        // inputs and creates the merged output as independent events; if the output upload failed
+        // we must NOT delete the inputs, or the data would exist neither locally-durably nor in
+        // cloud. Confirming (and if necessary re-uploading) the live set first makes the race safe
+        // regardless of upload ordering, and self-heals earlier missed uploads.
+        if (!ensureLiveSetUploaded(provider, dbName)) {
+            log.warn("Delete skipped (live set not fully durable in cloud): db={}, filePath={}",
+                     dbName, filePath);
+            return;
+        }
+
+        // MANIFEST-BEFORE-DELETE INVARIANT: publish an updated MANIFEST+CURRENT that reflects
+        // the post-compaction live set before removing the old SST from cloud.  Without this, a
+        // crash between the SST delete and the next metadata-sync attempt leaves a cloud
+        // MANIFEST that references an object that no longer exists, making recovery impossible.
+        //
+        // We use syncMetadataSnapshotInline (no MemTable flush) because:
+        //   (a) this callback fires on a RocksDB compaction thread — calling flushSession(wait=true)
+        //       here would deadlock against RocksDB background execution;
+        //   (b) a flush is not needed: by the time onTableFileDeleted fires the compaction is
+        //       complete, new SSTs are already on disk and uploaded, and the MANIFEST already
+        //       reflects the post-compaction state.
+        if (!syncMetadataSnapshotInline(provider, dbName)) {
+            log.warn("Delete skipped (metadata sync failed, MANIFEST not yet updated): "
+                     + "db={}, filePath={}", dbName, filePath);
+            return;
+        }
+
         String remoteKey = toRelativeKey(filePath);
         try {
             provider.deleteFile(remoteKey);
+            syncTracker.clearConfirmed(dbName, filePath);
             log.debug("Cloud delete success: db={}, cf={}, path={}", dbName, cfName, filePath);
         } catch (Exception e) {
             // Non-fatal: log and continue.
             log.error("Cloud delete failed: db={}, cf={}, path={}", dbName, cfName, filePath, e);
         }
+    }
+
+    /**
+     * Ensures every live SST file of {@code dbName} is confirmed present in cloud, uploading any
+     * that are not yet confirmed. Returns {@code true} only when the entire live set is durable.
+     *
+     * <h4>Fast path (common case)</h4>
+     * {@link #preHydrateDbFiles} seeds {@link #syncTracker} from the cloud listing on startup,
+     * and {@link #onTableFileCreated} marks every successful upload confirmed. By the time
+     * {@link #onTableFileDeleted} fires the entire live set is normally already confirmed, so
+     * {@link CloudSyncTracker#allConfirmed} returns {@code true} after one lock acquisition with
+     * zero cloud I/O — regardless of live-set size.
+     *
+     * <h4>Why we must check the whole live set, not just the deleted {@code filePath}</h4>
+     * {@code filePath} is the <em>old</em> compaction input being removed from cloud. Its bit
+     * being set in the bitmap only confirms it was uploaded previously — it says nothing about
+     * whether the <em>compaction outputs</em> (the replacement files, which form the new live
+     * set) are also in cloud. Deleting the input before the outputs are durable would leave
+     * data irretrievably lost on a node crash.
+     *
+     * <h4>Slow path (rare)</h4>
+     * Entered only when {@code allConfirmed} returns {@code false} (e.g. a previous upload
+     * failed). Files present locally are uploaded directly without a {@code fileExists} probe
+     * (idempotent PUT). Files absent locally and not confirmed are treated as not-yet-durable
+     * and the delete is held.
+     */
+    private boolean ensureLiveSetUploaded(CloudStorageProvider provider, String dbName) {
+        return ensureLiveSetUploaded(provider, dbName,
+                                     RocksDBFactory.getInstance().getLiveSstFiles(dbName));
+    }
+
+    /** Testable seam: caller supplies the live-file set instead of reading the RocksDB singleton. */
+    boolean ensureLiveSetUploaded(CloudStorageProvider provider, String dbName,
+                                  List<LiveSstFile> liveFiles) {
+        // Fast path: single lock acquisition, zero cloud I/O — the common case.
+        if (syncTracker.allConfirmed(dbName, liveFiles)) {
+            return true;
+        }
+
+        // Slow path: one or more live files not yet confirmed — find and upload them.
+        log.info("Checking live set durability: db={}, liveFileCount={}", dbName, liveFiles.size());
+
+        java.util.List<String> unconfirmedFiles = new java.util.ArrayList<>();
+        boolean allDurable = true;
+
+        for (LiveSstFile live : liveFiles) {
+            String localPath = live.getAbsolutePath();
+            if (syncTracker.isConfirmed(dbName, localPath)) {
+                continue;
+            }
+            unconfirmedFiles.add(localPath);
+            Path localFile = Paths.get(localPath);
+            String remoteKey = toRelativeKey(localPath);
+            if (!Files.exists(localFile)) {
+                // File absent locally and absent from bitmap. Startup hydration (preHydrateDbFiles)
+                // seeds the bitmap from the cloud listing, so reaching here means this file is
+                // genuinely not durable in cloud — hold the delete.
+                allDurable = false;
+                log.warn("Delete guard: live file absent locally and not confirmed in cloud: "
+                         + "db={}, filePath={}", dbName, localPath);
+                continue;
+            }
+            try {
+                // Upload directly — no fileExists probe (idempotent PUT is cheaper than a probe).
+                provider.uploadFile(localPath, remoteKey);
+                syncTracker.markConfirmed(dbName, localPath);
+            } catch (Exception e) {
+                allDurable = false;
+                log.warn("Delete guard: failed to upload live file: db={}, filePath={}, error={}",
+                         dbName, localPath, e.getMessage());
+                if (retryQueue != null) {
+                    retryQueue.submit(dbName, live.getCfName(), localPath, remoteKey, e);
+                }
+            }
+        }
+
+        if (!unconfirmedFiles.isEmpty()) {
+            CloudStorageMetrics.incrementDeleteGuardReupload(dbName);
+            if (allDurable) {
+                log.info("Re-uploaded {} previously unconfirmed live files (delete proceeding): "
+                         + "db={}, files={}", unconfirmedFiles.size(), dbName, unconfirmedFiles);
+            } else {
+                log.warn("Re-upload attempted for {} unconfirmed live files (some still not durable, "
+                         + "delete held): db={}, files={}", unconfirmedFiles.size(), dbName,
+                         unconfirmedFiles);
+            }
+        }
+
+        return allDurable;
+    }
+
+    /**
+     * A compaction changed this DB's live SST set; mirror metadata immediately (event-driven).
+     *
+     * <p>Note: RocksDB delivers the DB <em>directory path</em> here (from {@code db.getName()}),
+     * not the logical name, so we resolve it against {@link #dbNameByDir}.
+     */
+    @Override
+    public void onCompacted(String dbNameOrPath) {
+        CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
+        if (provider == null) {
+            return;
+        }
+        String normalised = Paths.get(dbNameOrPath).toAbsolutePath().normalize().toString();
+        String dbName = dbNameByDir.getOrDefault(normalised, dbNameOrPath);
+        syncMetadataSnapshotInline(provider, dbName);
+    }
+
+    // -----------------------------------------------------------------------
+    // Metadata mirroring
+    // -----------------------------------------------------------------------
+
+    /** Records the resolved DB directory for a logical DB name (idempotent). */
+    private void recordDb(String dbName, String dbDir) {
+        if (dbName == null || dbDir == null) {
+            return;
+        }
+        String normalised = Paths.get(dbDir).toAbsolutePath().normalize().toString();
+        dbNameByDir.put(normalised, dbName);
+    }
+
+    /** Absolute, normalised parent directory of a file path (the DB dir of an SST). */
+    private String parentDir(String filePath) {
+        Path parent = Paths.get(filePath).toAbsolutePath().normalize().getParent();
+        return parent == null ? null : parent.toString();
+    }
+
+
+    /**
+     * Captures a consistent metadata snapshot and mirrors it to cloud without first flushing the
+     * MemTable. Safe to call from any thread, including a RocksDB event/compaction callback.
+     *
+     * <p>By the time a compaction event fires, the MANIFEST already reflects the post-compaction
+     * live SST set — a checkpoint captures that consistent state without needing a flush. In
+     * {@code wal} mode the WAL tail is included in the checkpoint, so un-flushed data is still
+     * recoverable. In {@code flush} mode un-flushed MemTable data written since the last sync is
+     * not captured, but that is acceptable here because the goal is to publish a MANIFEST that
+     * does not reference any cloud object that is about to be deleted.
+     *
+     * <p>Package-private for testability.
+     */
+    boolean syncMetadataSnapshotInline(CloudStorageProvider provider, String dbName) {
+        MetadataSnapshot snapshot = RocksDBFactory.getInstance().captureMetadataSnapshot(dbName);
+        if (snapshot == null) {
+            return false;
+        }
+        try {
+            return uploadMetadataSnapshot(provider, dbName, snapshot);
+        } finally {
+            snapshot.cleanup();
+        }
+    }
+
+    /**
+     * Uploads a captured metadata snapshot to cloud in strict consistency order:
+     * <ol>
+     *   <li>every SST the captured manifest references (from the checkpoint's hard-links);</li>
+     *   <li>the mirrored WAL {@code *.log} tail ({@code wal} mode only);</li>
+     *   <li>the {@code OPTIONS-*} and {@code MANIFEST-<n>} blobs;</li>
+     *   <li><b>last</b>, {@code CURRENT} — the pointer — so a restore that fetches {@code CURRENT}
+     *       never sees it referencing a manifest whose SSTs are not all in cloud;</li>
+     *   <li>only then prune superseded remote {@code MANIFEST-*}/{@code OPTIONS-*}/{@code *.log}.</li>
+     * </ol>
+     * If any referenced SST cannot be made durable, the method aborts before publishing
+     * {@code MANIFEST}/{@code CURRENT} and returns {@code false}, leaving the previous durable
+     * generation intact.
+     */
+    boolean uploadMetadataSnapshot(CloudStorageProvider provider, String dbName,
+                                   MetadataSnapshot snapshot) {
+        String dbDir = snapshot.getDbDir();
+        String tempDir = snapshot.getTempDir();
+
+        // (1) Confirm every manifest-referenced SST is present in cloud.
+        if (!ensureSnapshotSstsUploaded(provider, dbName, snapshot)) {
+            log.warn("Cloud metadata-sync: SST set not fully durable, holding metadata publish "
+                     + "for db={}", dbName);
+            return false;
+        }
+
+        try {
+            // (2) WAL tail (wal mode only).
+            if (walModeEnabled) {
+                for (String walName : snapshot.getWalFileNames()) {
+                    uploadMetaFile(provider, dbDir, tempDir, walName);
+                }
+            }
+            // (3) OPTIONS-* then MANIFEST-<n>.
+            for (String optionsName : snapshot.getOptionsFileNames()) {
+                uploadMetaFile(provider, dbDir, tempDir, optionsName);
+            }
+            if (snapshot.getManifestFileName() != null) {
+                uploadMetaFile(provider, dbDir, tempDir, snapshot.getManifestFileName());
+            }
+            // (4) CURRENT last — the atomic pointer publish.
+            if (snapshot.getCurrentFileName() != null) {
+                uploadMetaFile(provider, dbDir, tempDir, snapshot.getCurrentFileName());
+            }
+        } catch (IOException e) {
+            log.warn("Cloud metadata-sync: failed to publish metadata for db={}: {}",
+                     dbName, e.getMessage());
+            return false;
+        }
+
+        // (5) Prune superseded remote metadata now that the new CURRENT is durable.
+        pruneRemoteMetadata(provider, dbDir, snapshot);
+        log.debug("Cloud metadata-sync published: db={}, manifest={}, options={}, wal={}",
+                  dbName, snapshot.getManifestFileName(), snapshot.getOptionsFileNames().size(),
+                  walModeEnabled ? snapshot.getWalFileNames().size() : 0);
+        return true;
+    }
+
+    /**
+     * Ensures every SST the captured manifest references (the checkpoint's hard-linked {@code *.sst}
+     * set) is present in cloud, uploading from the hard-link when not. The hard-link pins the
+     * content even if compaction removed the original, so this cannot race a concurrent delete.
+     */
+    private boolean ensureSnapshotSstsUploaded(CloudStorageProvider provider, String dbName,
+                                               MetadataSnapshot snapshot) {
+        String dbDir = snapshot.getDbDir();
+        String tempDir = snapshot.getTempDir();
+        boolean allDurable = true;
+        for (String sstName : snapshot.getSstFileNames()) {
+            String realPath = joinPath(dbDir, sstName);
+            String remoteKey = toRelativeKey(realPath);
+            if (syncTracker.isConfirmed(dbName, realPath)) {
+                continue;
+            }
+            try {
+                if (provider.fileExists(remoteKey)) {
+                    syncTracker.markConfirmed(dbName, realPath);
+                    continue;
+                }
+                provider.uploadFile(joinPath(tempDir, sstName), remoteKey);
+                syncTracker.markConfirmed(dbName, realPath);
+            } catch (Exception e) {
+                allDurable = false;
+                log.warn("Cloud metadata-sync: failed to confirm SST db={}, key={}, reason={}",
+                         dbName, remoteKey, e.getMessage());
+                if (retryQueue != null && Files.exists(Paths.get(realPath))) {
+                    retryQueue.submit(dbName, null, realPath, remoteKey, e);
+                }
+            }
+        }
+        return allDurable;
+    }
+
+    /** Uploads one metadata file from the checkpoint temp dir to its real-path-derived remote key. */
+    private void uploadMetaFile(CloudStorageProvider provider, String dbDir, String tempDir,
+                                String fileName) throws IOException {
+        provider.uploadFile(joinPath(tempDir, fileName), toRelativeKey(joinPath(dbDir, fileName)));
+    }
+
+    /**
+     * Deletes remote {@code MANIFEST-*}/{@code OPTIONS-*} (and, always, {@code *.log}) objects for
+     * this DB that are not part of the just-published snapshot, bounding remote metadata growth.
+     * {@code CURRENT} and {@code *.sst} are never pruned here (SST lifecycle is the delete guard's).
+     */
+    private void pruneRemoteMetadata(CloudStorageProvider provider, String dbDir,
+                                     MetadataSnapshot snapshot) {
+        Set<String> keep = new HashSet<>();
+        if (snapshot.getManifestFileName() != null) {
+            keep.add(snapshot.getManifestFileName());
+        }
+        keep.addAll(snapshot.getOptionsFileNames());
+        if (walModeEnabled) {
+            keep.addAll(snapshot.getWalFileNames());
+        }
+        String prefix = dbPrefix(dbDir);
+        List<String> remoteKeys;
+        try {
+            remoteKeys = provider.listFiles(prefix.endsWith("/") ? prefix : prefix + "/");
+        } catch (IOException e) {
+            log.debug("Cloud metadata-sync prune: list failed for prefix={}: {}",
+                      prefix, e.getMessage());
+            return;
+        }
+        for (String remoteKey : remoteKeys) {
+            int slash = remoteKey.lastIndexOf('/');
+            String base = slash >= 0 ? remoteKey.substring(slash + 1) : remoteKey;
+            boolean isSupersededMeta = (base.startsWith("MANIFEST-") || base.startsWith("OPTIONS-")
+                                        || base.endsWith(".log")) && !keep.contains(base);
+            if (!isSupersededMeta) {
+                continue;
+            }
+            try {
+                provider.deleteFile(remoteKey);
+                log.debug("Cloud metadata-sync prune: deleted superseded {}", remoteKey);
+            } catch (IOException e) {
+                log.debug("Cloud metadata-sync prune: delete failed for {}: {}",
+                          remoteKey, e.getMessage());
+            }
+        }
+    }
+
+    /** Joins a directory and a file name with the platform separator. */
+    private static String joinPath(String dir, String name) {
+        return dir.endsWith(File.separator) || dir.endsWith("/")
+               ? dir + name
+               : dir + File.separator + name;
     }
 
     // -----------------------------------------------------------------------
@@ -272,15 +783,18 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      * stripped so the key is still valid (though possibly not ideallyformatted).
      */
     String toRelativeKey(String filePath) {
+        String relative;
         if (filePath.startsWith(dataRoot)) {
             String rel = filePath.substring(dataRoot.length());
             // Strip leading separator produced by the substring.
-            return rel.startsWith("/") || rel.startsWith(File.separator)
-                   ? rel.substring(1)
-                   : rel;
+            relative = rel.startsWith("/") || rel.startsWith(File.separator)
+                       ? rel.substring(1)
+                       : rel;
+            return withStoreScope(relative);
         }
         // Fallback: strip any leading slash so the key does not start with '/'.
-        return filePath.startsWith("/") ? filePath.substring(1) : filePath;
+        relative = filePath.startsWith("/") ? filePath.substring(1) : filePath;
+        return withStoreScope(relative);
     }
 
     /**
@@ -327,6 +841,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                                   dbName, dbPath), e);
         }
 
+        CloudStorageMetrics.registerDatabaseMetrics(dbName);
+
         String prefix = dbPrefix(dbPath);
         List<String> remoteFiles = listRemoteKeys(provider, prefix);
         if (remoteFiles.isEmpty()) {
@@ -352,39 +868,50 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
             }
         }
         if (downloaded > 0) {
-            log.info("Cloud pre-hydration finished: db={}, downloadedFiles={}", dbName, downloaded);
+            log.info("Pre-hydration completed: db={}, downloadedFiles={}", dbName, downloaded);
         }
+
+        int confirmed = 0;
+        for (String remoteKey : remoteFiles) {
+            if (remoteKey.endsWith(".sst")) {
+                syncTracker.markConfirmed(dbName, resolveLocalPath(remoteKey).toString());
+                confirmed++;
+            }
+        }
+        if (confirmed > 0) {
+            log.info("Seeded sync-tracker bitmap with {} confirmed files from remote listing: "
+                     + "db={}", confirmed, dbName);
+        }
+
+        verifyMetadataConsistency(dbName, root);
     }
 
-    private List<String> downloadMissingSstFiles(CloudStorageProvider provider,
-                                                 String dbName,
-                                                 String dbPath) {
-        String prefix = dbPrefix(dbPath);
-        List<String> remoteFiles = listRemoteKeys(provider, prefix);
-        if (remoteFiles.isEmpty()) {
-            return List.of();
+    /**
+     * Consistent-restore guard: if a {@code CURRENT} pointer was mirrored, the {@code MANIFEST-<n>}
+     * it references must be present locally after pre-hydration. Opening RocksDB with a
+     * {@code CURRENT} pointing at a missing manifest would silently yield an empty / partial DB, so
+     * we fail loudly instead. (A manifest-referenced <em>SST</em> that is absent is caught loudly by
+     * RocksDB's own open, which refuses to start on a missing referenced file.)
+     */
+    private void verifyMetadataConsistency(String dbName, Path dbRoot) {
+        Path current = dbRoot.resolve("CURRENT");
+        if (!Files.exists(current)) {
+            // No mirrored metadata (or a genuinely empty prefix) — nothing to verify.
+            return;
         }
-
-        List<String> downloaded = new ArrayList<>();
-        for (String remoteKey : remoteFiles) {
-            if (!remoteKey.endsWith(".sst")) {
-                continue;
-            }
-            Path localPath = resolveLocalPath(remoteKey);
-            if (Files.exists(localPath)) {
-                continue;
-            }
-            try {
-                Files.createDirectories(localPath.getParent());
-                provider.downloadFile(remoteKey, localPath.toString());
-                downloaded.add(localPath.toString());
-            } catch (IOException e) {
-                throw new IllegalStateException(
-                        String.format("Cloud read-miss download failed for db=%s key=%s",
-                                      dbName, remoteKey), e);
-            }
+        String manifestName;
+        try {
+            manifestName = Files.readString(current).trim();
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    String.format("Cloud restore: unreadable CURRENT for db=%s", dbName), e);
         }
-        return downloaded;
+        if (manifestName.isEmpty() || !Files.exists(dbRoot.resolve(manifestName))) {
+            throw new IllegalStateException(String.format(
+                    "Cloud restore inconsistent for db=%s: CURRENT references manifest '%s' which is "
+                    + "absent locally and in cloud. Refusing to open a partial DB.",
+                    dbName, manifestName));
+        }
     }
 
     private List<String> listRemoteKeys(CloudStorageProvider provider, String prefix) {
@@ -402,29 +929,75 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     private Path resolveLocalPath(String remoteKey) {
+        String relative = stripStoreScope(remoteKey);
         Path root = Paths.get(this.dataRoot);
-        Path local = root.resolve(remoteKey).normalize();
+        Path local = root.resolve(relative).normalize();
         if (!local.startsWith(root)) {
             throw new IllegalArgumentException("Invalid remote key outside data root: " + remoteKey);
         }
         return local;
     }
 
+    private String withStoreScope(String relativeKey) {
+        if (storeScopePrefix.isEmpty()) {
+            return relativeKey;
+        }
+        if (relativeKey == null || relativeKey.isEmpty()) {
+            return storeScopePrefix;
+        }
+        return storeScopePrefix + "/" + relativeKey;
+    }
+
+    private String stripStoreScope(String remoteKey) {
+        if (storeScopePrefix.isEmpty()) {
+            return remoteKey;
+        }
+        String scopedPrefix = storeScopePrefix + "/";
+        if (remoteKey.startsWith(scopedPrefix)) {
+            return remoteKey.substring(scopedPrefix.length());
+        }
+        if (remoteKey.equals(storeScopePrefix)) {
+            return "";
+        }
+        throw new IllegalArgumentException(String.format(
+                "Remote key '%s' does not belong to store scope '%s'", remoteKey, storeScopePrefix));
+    }
+
+    private static String normaliseKeyPrefix(String prefix) {
+        if (prefix == null) {
+            return "";
+        }
+        String trimmed = prefix.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        String normalized = trimmed.replace('\\', '/');
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
     /**
-     * Triggers an asynchronous MemTable flush for the named DB via {@link RocksDBFactory}.
-     * This causes any in-memory data (including WAL-recovered entries) to be written to an
-     * SST file, which in turn fires {@link #onTableFileCreated} and uploads the file.
+     * Triggers a non-blocking MemTable flush for the named DB via {@link RocksDBFactory}.
+     * The call returns immediately (fire-and-forget); when RocksDB completes the flush it
+     * fires {@link #onTableFileCreated} via its event-listener mechanism, which then uploads
+     * the resulting SST file to cloud storage. The overall flow is event-driven, not async
+     * in the sense of a background thread managed by this class.
      */
     private void flushDb(String dbName) {
         try {
             RocksDBFactory.getInstance().flushSession(dbName, false);
-            log.debug("Cloud storage: triggered async flush for db={}", dbName);
+            log.debug("Cloud storage: triggered flush (non-blocking, event-driven) for db={}", dbName);
         } catch (Exception e) {
             log.warn("Cloud storage: flush failed for db={}: {}", dbName, e.getMessage());
         }
     }
 
-    private boolean shouldAttemptReadMissHydration(String dbName, String table) {
+    boolean shouldAttemptReadMissHydration(String dbName, String table) {
         if (readMissGuardWindowMs <= 0) {
             return true;
         }

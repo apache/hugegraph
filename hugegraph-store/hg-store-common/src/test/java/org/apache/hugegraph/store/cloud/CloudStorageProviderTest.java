@@ -29,6 +29,7 @@ import org.junit.Test;
 /**
  * Tests for CloudStorageProvider interface default implementations.
  */
+@SuppressWarnings("resource")
 public class CloudStorageProviderTest {
 
     /**
@@ -49,27 +50,27 @@ public class CloudStorageProviderTest {
             }
 
             @Override
-            public void uploadFile(String localPath, String remoteKey) throws IOException {
+            public void uploadFile(String localPath, String remoteKey) {
                 // No-op
             }
 
             @Override
-            public void deleteFile(String remoteKey) throws IOException {
+            public void deleteFile(String remoteKey) {
                 // No-op
             }
 
             @Override
-            public boolean fileExists(String remoteKey) throws IOException {
+            public boolean fileExists(String remoteKey) {
                 return false;
             }
 
             @Override
-            public void downloadFile(String remoteKey, String localPath) throws IOException {
+            public void downloadFile(String remoteKey, String localPath) {
                 // No-op
             }
 
             @Override
-            public void close() throws IOException {
+            public void close() {
                 // No-op
             }
         };
@@ -99,7 +100,7 @@ public class CloudStorageProviderTest {
             }
 
             @Override
-            public void uploadFile(String localPath, String remoteKey) throws IOException {
+            public void uploadFile(String localPath, String remoteKey) {
                 // No-op
             }
 

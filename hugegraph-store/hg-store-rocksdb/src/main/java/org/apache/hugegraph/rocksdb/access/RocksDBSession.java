@@ -699,6 +699,70 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                  System.currentTimeMillis() - startTime);
     }
 
+    /**
+     * Captures a consistent copy of this DB's metadata (CURRENT / MANIFEST-* / OPTIONS-* / WAL) plus
+     * hard-links to the live SST set into a temporary directory, using a RocksDB
+     * {@link Checkpoint}. See {@link RocksDBFactory#captureMetadataSnapshot(String)} for the metadata
+     * rationale.
+     *
+     * <p>The temporary directory is a sibling of the DB directory (same filesystem), so SST files
+     * are hard-linked rather than copied. The caller owns cleanup via
+     * {@link RocksDBFactory.MetadataSnapshot#cleanup()}.
+     *
+     * @return the captured snapshot; never {@code null}
+     * @throws DBStoreException if the checkpoint cannot be created
+     */
+    RocksDBFactory.MetadataSnapshot captureMetadataCheckpoint() throws DBStoreException {
+        String tempDir = this.dbPath + "_cloudmeta_" + System.nanoTime();
+        cfHandleLock.readLock().lock();
+        try (final Checkpoint checkpoint = Checkpoint.create(this.rocksDB)) {
+            final File tempFile = new File(tempDir);
+            FileUtils.deleteDirectory(tempFile);
+            checkpoint.createCheckpoint(tempDir);
+        } catch (final Exception e) {
+            try {
+                FileUtils.deleteDirectory(new File(tempDir));
+            } catch (IOException ignore) {
+                // best-effort cleanup of a partial checkpoint
+            }
+            log.error("Fail to create metadata checkpoint at {}", tempDir, e);
+            throw new DBStoreException(
+                    String.format("Fail to create metadata checkpoint at %s", tempDir));
+        } finally {
+            cfHandleLock.readLock().unlock();
+        }
+        return categoriseCheckpoint(tempDir);
+    }
+
+    /** Classifies the files a checkpoint materialised into the metadata snapshot descriptor. */
+    private RocksDBFactory.MetadataSnapshot categoriseCheckpoint(String tempDir) {
+        String currentFileName = null;
+        String manifestFileName = null;
+        List<String> optionsFileNames = new ArrayList<>();
+        List<String> sstFileNames = new ArrayList<>();
+        List<String> walFileNames = new ArrayList<>();
+        File[] files = new File(tempDir).listFiles();
+        if (files != null) {
+            for (File f : files) {
+                String name = f.getName();
+                if (name.equals("CURRENT")) {
+                    currentFileName = name;
+                } else if (name.startsWith("MANIFEST-")) {
+                    manifestFileName = name;
+                } else if (name.startsWith("OPTIONS-")) {
+                    optionsFileNames.add(name);
+                } else if (name.endsWith(".sst")) {
+                    sstFileNames.add(name);
+                } else if (name.endsWith(".log")) {
+                    walFileNames.add(name);
+                }
+            }
+        }
+        return new RocksDBFactory.MetadataSnapshot(this.dbPath, tempDir, currentFileName,
+                                                   manifestFileName, optionsFileNames,
+                                                   sstFileNames, walFileNames);
+    }
+
     private boolean verifySnapshot(String snapshotPath) {
         try {
             try (final Options options = new Options();

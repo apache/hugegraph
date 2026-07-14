@@ -407,17 +407,35 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
     // Internal – upload strategies
     // -----------------------------------------------------------------------
 
-    /** Single-PUT upload for files ≤ {@link #MULTIPART_THRESHOLD_BYTES}. */
+    /**
+     * Single-PUT upload for files ≤ {@link #MULTIPART_THRESHOLD_BYTES}, with bounded
+     * exponential-backoff retry on transient failures (using the same tuning as multipart parts).
+     * Without this, a single transient network blip on the common small-SST path would surface
+     * immediately and, with whole-file retries disabled, go straight to the DLQ.
+     */
     private void uploadSinglePart(java.nio.file.Path path, String fullKey,
                                   String localPath) throws IOException {
-        try {
-            s3Client.putObject(
-                    PutObjectRequest.builder().bucket(bucket).key(fullKey).build(),
-                    path);
-        } catch (SdkClientException e) {
-            throw new IOException(
-                    "S3 upload failed for local='" + localPath + "' key='" + fullKey + "'", e);
+        SdkClientException last = null;
+        for (int attempt = 1; attempt <= this.partUploadMaxRetries; attempt++) {
+            try {
+                s3Client.putObject(
+                        PutObjectRequest.builder().bucket(bucket).key(fullKey).build(),
+                        path);
+                return;
+            } catch (SdkClientException e) {
+                last = e;
+                if (attempt >= this.partUploadMaxRetries) {
+                    break;
+                }
+                long backoffMs = this.partUploadRetryBaseBackoffMs * (1L << (attempt - 1));
+                log.warn("S3 single-PUT retry: attempt={}/{} key={} reason={} nextBackoffMs={}",
+                         attempt, this.partUploadMaxRetries, fullKey, e.getMessage(), backoffMs);
+                sleepQuietly(backoffMs);
+            }
         }
+        throw new IOException(
+                "S3 upload failed for local='" + localPath + "' key='" + fullKey + "' after "
+                + this.partUploadMaxRetries + " attempt(s)", last);
     }
 
     /**

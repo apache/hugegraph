@@ -64,12 +64,14 @@ export SPRING_APPLICATION_JSON="$(cat <<JSON
     "storage": {
       "enabled": "$(json_escape "${HG_CLOUD_STORAGE_ENABLED}")",
       "provider": "$(json_escape "${HG_CLOUD_STORAGE_PROVIDER}")",
-      "bucket": "$(json_escape "${HG_CLOUD_STORAGE_BUCKET}")",
-      "region": "$(json_escape "${HG_CLOUD_STORAGE_REGION}")",
-      "endpoint": "$(json_escape "${HG_CLOUD_STORAGE_ENDPOINT}")",
-      "access-key": "$(json_escape "${HG_CLOUD_STORAGE_ACCESS_KEY}")",
-      "secret-key": "$(json_escape "${HG_CLOUD_STORAGE_SECRET_KEY}")",
-      "path-prefix": "$(json_escape "${HG_CLOUD_STORAGE_PATH_PREFIX}")"
+      "path-prefix": "$(json_escape "${HG_CLOUD_STORAGE_PATH_PREFIX}")",
+      "s3": {
+        "bucket": "$(json_escape "${HG_CLOUD_STORAGE_BUCKET}")",
+        "region": "$(json_escape "${HG_CLOUD_STORAGE_REGION}")",
+        "endpoint": "$(json_escape "${HG_CLOUD_STORAGE_ENDPOINT}")",
+        "access-key": "$(json_escape "${HG_CLOUD_STORAGE_ACCESS_KEY}")",
+        "secret-key": "$(json_escape "${HG_CLOUD_STORAGE_SECRET_KEY}")"
+      }
     }
   },
   "logging": {

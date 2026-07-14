@@ -101,6 +101,12 @@ public class CloudUploadRetryQueue implements Closeable {
     private final long initialDelayMs;
     private final long maxDelayMs;
 
+    /**
+     * Invoked with {@code (dbName, filePath)} whenever an upload succeeds via retry or DLQ replay,
+     * so the caller can mark the file confirmed-present in cloud. May be a no-op.
+     */
+    private final java.util.function.BiConsumer<String, String> onUploadConfirmed;
+
     // -----------------------------------------------------------------------
     // State
     // -----------------------------------------------------------------------
@@ -135,9 +141,22 @@ public class CloudUploadRetryQueue implements Closeable {
      */
     public CloudUploadRetryQueue(int maxAttempts, long initialDelayMs,
                                  long maxDelayMs, String dataRoot) {
+        this(maxAttempts, initialDelayMs, maxDelayMs, dataRoot, null);
+    }
+
+    /**
+     * @param onUploadConfirmed callback invoked with {@code (dbName, filePath)} on every successful
+     *                          retry / DLQ-replay upload; pass {@code null} for none.
+     */
+    public CloudUploadRetryQueue(int maxAttempts, long initialDelayMs,
+                                 long maxDelayMs, String dataRoot,
+                                 java.util.function.BiConsumer<String, String> onUploadConfirmed) {
         this.maxAttempts = Math.max(0, maxAttempts);
         this.initialDelayMs = Math.max(100L, initialDelayMs);
         this.maxDelayMs = Math.max(this.initialDelayMs, maxDelayMs);
+        this.onUploadConfirmed = onUploadConfirmed != null
+                                 ? onUploadConfirmed
+                                 : (db, path) -> { };
         this.dlqFile = Paths.get(dataRoot, DLQ_FILE_NAME);
 
         this.scheduler = Executors.newScheduledThreadPool(2, r -> {
@@ -249,6 +268,7 @@ public class CloudUploadRetryQueue implements Closeable {
             }
             try {
                 provider.uploadFile(task.getFilePath(), task.getRemoteKey());
+                onUploadConfirmed.accept(task.getDbName(), task.getFilePath());
                 log.info("DLQ replay succeeded: db={}, cf={}, path={}",
                          task.getDbName(), task.getCfName(), task.getFilePath());
                 succeeded++;
@@ -325,6 +345,7 @@ public class CloudUploadRetryQueue implements Closeable {
             }
 
             provider.uploadFile(filePath, remoteKey);
+            onUploadConfirmed.accept(dbName, filePath);
             log.info("Cloud upload retry succeeded: db={}, cf={}, path={}, attempt={}",
                      dbName, cfName, filePath, attempt);
 

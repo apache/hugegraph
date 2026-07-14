@@ -96,6 +96,9 @@ public class AppConfigCloudStorageTest {
         assertEquals("hugegraph", cfg.getPathPrefix());
         assertTrue(cfg.isStartupHydrationEnabled());
         assertEquals(3000L, cfg.getReadMissGuardWindowMs());
+        assertEquals(5, cfg.getUploadRetryMaxAttempts());
+        assertEquals(64, cfg.getUploadBackpressureHighWatermark());
+        assertEquals("flush", cfg.getWalMode());
         assertNotNull(cfg.getProviderProperties());
         assertTrue(cfg.getProviderProperties().isEmpty());
     }
@@ -128,6 +131,16 @@ public class AppConfigCloudStorageTest {
 
         springConfig.setUploadRetryMaxDelayMs(30_000L);
         assertEquals(30_000L, springConfig.getUploadRetryMaxDelayMs());
+
+        springConfig.setUploadBackpressureHighWatermark(128);
+        assertEquals(128, springConfig.getUploadBackpressureHighWatermark());
+        assertEquals(128,
+                     springConfig.toCloudStorageConfig().getUploadBackpressureHighWatermark());
+
+
+        springConfig.setWalMode("wal");
+        assertEquals("wal", springConfig.getWalMode());
+        assertEquals("wal", springConfig.toCloudStorageConfig().getWalMode());
     }
 
     /**

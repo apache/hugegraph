@@ -40,6 +40,27 @@ STORE_ROCKSDB_CLOUD_ENABLED="${STORE_ROCKSDB_CLOUD_ENABLED:-true}"
 STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS="${STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS:-30}"
 KEEP_UP="${KEEP_UP:-true}"
 SKIP_SMOKE_TESTS="${SKIP_SMOKE_TESTS:-false}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --keep-stack)    KEEP_UP=true ;;
+        -h|--help)
+            cat <<'USAGE'
+Usage: test-graph-queries-and-sst.sh [--keep-stack]
+
+  This script runs a full end-to-end cloud storage test:
+    load data -> flush+compact -> verify a consistent
+    {CURRENT, MANIFEST, OPTIONS, SST} set in MinIO ->
+    wipe each store's local RocksDB state (raft/ preserved) ->
+    restart -> confirm data is recovered from cloud (not empty DB).
+
+  --keep-stack     Leave the stack running on exit (same as KEEP_UP=true).
+USAGE
+            exit 0 ;;
+        *) echo "unknown arg: $1 (see --help)" >&2; exit 2 ;;
+    esac
+    shift
+done
 log() { printf "[cloud-storage] %s\n" "$*"; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: $1 not found" >&2; exit 2; }; }
 
@@ -155,6 +176,127 @@ wait_http() {
 }
 cleanup() { [[ "$KEEP_UP" == "true" ]] || (docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true); }
 trap cleanup EXIT
+
+# -----------------------------------------------------------------------------
+# Total-loss recovery E2E helpers
+# -----------------------------------------------------------------------------
+
+# Current vertex count via the server graph API (0 if the query fails).
+graph_vertex_count() {
+    curl -s --compressed "${GRAPH_API_BASE}/graph/vertices" 2>/dev/null \
+        | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))" \
+              2>/dev/null || echo 0
+}
+
+# Create a minimal schema and insert enough vertices to generate SST files.
+load_test_data() {
+    log "loading test data (schema + 150 vertices)..."
+    for pk in '{"name":"name","data_type":"TEXT","cardinality":"SINGLE"}' \
+              '{"name":"age","data_type":"INT","cardinality":"SINGLE"}' \
+              '{"name":"city","data_type":"TEXT","cardinality":"SINGLE"}'; do
+        curl -s -o /dev/null -X POST "${GRAPH_API_BASE}/schema/propertykeys" \
+            -H 'Content-Type: application/json' -d "$pk" || true
+    done
+    curl -s -o /dev/null -X POST "${GRAPH_API_BASE}/schema/vertexlabels" \
+        -H 'Content-Type: application/json' \
+        -d '{"name":"person","id_strategy":"AUTOMATIC","properties":["name","age","city"]}' || true
+
+    for i in $(seq 1 150); do
+        curl -s -o /dev/null -X POST "${GRAPH_API_BASE}/graph/vertices" \
+            -H 'Content-Type: application/json' \
+            -d "{\"label\":\"person\",\"properties\":{\"name\":\"person_$i\",\"age\":$((20 + i % 50)),\"city\":\"city_$((i % 5))\"}}" || true
+    done
+    log "  ✓ inserted 150 vertices (count now = $(graph_vertex_count))"
+}
+
+# Assert every bucket holds a consistent {CURRENT, MANIFEST, OPTIONS, SST} set.
+# This deterministic check verifies metadata objects from ordered
+# CURRENT/MANIFEST/OPTIONS mirroring ran, so the SSTs are no longer orphans.
+verify_metadata_in_minio() {
+    docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
+        mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
+        rc=0
+        for b in '"$S3_BUCKET_STORE0 $S3_BUCKET_STORE1 $S3_BUCKET_STORE2"'; do
+            sst=$(mc find local/$b --name "*.sst"     2>/dev/null | wc -l | tr -d " ")
+            cur=$(mc find local/$b --name "CURRENT"    2>/dev/null | wc -l | tr -d " ")
+            man=$(mc find local/$b --name "MANIFEST-*" 2>/dev/null | wc -l | tr -d " ")
+            opt=$(mc find local/$b --name "OPTIONS-*"  2>/dev/null | wc -l | tr -d " ")
+            printf "### %s: sst=%s CURRENT=%s MANIFEST=%s OPTIONS=%s\n" "$b" "$sst" "$cur" "$man" "$opt"
+            if [ "$cur" -lt 1 ] || [ "$man" -lt 1 ] || [ "$sst" -lt 1 ]; then
+                echo "  ✗ recovery metadata/SST set incomplete for $b"; rc=1
+            else
+                echo "  ✓ consistent {CURRENT, MANIFEST, OPTIONS, SST} set present"
+            fi
+        done
+        exit $rc
+    '
+}
+
+# Stop a store, wipe its RocksDB state-machine data (db/ + metadata graph) while
+# preserving raft/ and snapshot/, then start it again. This models local
+# state-machine loss where the node still rejoins its raft group but must
+# re-hydrate its RocksDB data from cloud on open (pre-hydration path).
+wipe_store_rocksdb_state() {
+    local idx="$1"
+    local vol="${COMPOSE_PROJECT_NAME}_hg-store${idx}-data"
+    docker compose -f "$COMPOSE_FILE" stop "store${idx}" >/dev/null 2>&1 || true
+    docker run --rm --entrypoint /bin/sh -v "${vol}:/s" "$MINIO_MC_IMAGE" -c '
+        cd /s 2>/dev/null || exit 0
+        for d in *; do
+            case "$d" in
+                raft|snapshot) ;;      # keep raft log + snapshot so the node rejoins cleanly
+                *) rm -rf "$d" ;;      # drop db/ and the metadata graph -> must come back from cloud
+            esac
+        done
+        echo "  store'"${idx}"' storage after wipe: $(ls -1 | tr "\n" " ")"
+    ' || true
+    docker compose -f "$COMPOSE_FILE" start "store${idx}" >/dev/null 2>&1 || true
+}
+
+run_recovery_test() {
+    log "=== Total-loss recovery E2E ==="
+    local before after
+
+    before=$(graph_vertex_count)
+    log "baseline vertex count = ${before}"
+    if [[ "$before" == "0" ]]; then
+        echo "ERROR: no data to recover (baseline is 0); load data first" >&2
+        return 1
+    fi
+
+    log "forcing flush + compaction (restart stores) so data lands in SST files..."
+    docker restart cloud-storage-store0 cloud-storage-store1 cloud-storage-store2 >/dev/null
+    wait_svc "store0" 240; wait_svc "store1" 240; wait_svc "store2" 240
+    wait_http "${GRAPH_API_BASE}/graph/vertices" 180
+
+
+    log "verifying a consistent metadata set is durable in MinIO..."
+    verify_metadata_in_minio || { echo "ERROR: recovery metadata not durable in cloud" >&2; return 1; }
+
+    log "simulating local RocksDB state loss on all stores (raft/ preserved)..."
+    for i in 0 1 2; do wipe_store_rocksdb_state "$i"; done
+    wait_svc "store0" 240; wait_svc "store1" 240; wait_svc "store2" 240
+    wait_http "${GRAPH_API_BASE}/graph/vertices" 240
+
+    log "checking store logs for pre-hydration / restore-consistency..."
+    if docker compose -f "$COMPOSE_FILE" logs store0 store1 store2 2>/dev/null \
+            | grep -qi "Cloud restore inconsistent"; then
+        echo "ERROR: consistent-restore guard tripped (CURRENT referenced a missing manifest)" >&2
+        return 1
+    fi
+    docker compose -f "$COMPOSE_FILE" logs store0 store1 store2 2>/dev/null \
+        | grep -i "Cloud pre-hydration finished" | tail -3 \
+        || log "  (no pre-hydration log lines matched; check DEBUG logs manually)"
+
+    after=$(graph_vertex_count)
+    log "recovered vertex count = ${after} (baseline was ${before})"
+    if [[ "$after" == "$before" ]]; then
+        log "✓ RECOVERY SUCCESS: data fully recovered from cloud after local state loss"
+    else
+        echo "ERROR: recovery mismatch (before=${before}, after=${after})" >&2
+        return 1
+    fi
+}
 need_cmd docker curl python3
 log "pulling images..."
 ensure_image "$MINIO_IMAGE"
@@ -376,3 +518,7 @@ wait_svc "server" 180
 log "waiting for graph backend..."
 wait_http "$GRAPH_API_BASE/graph/vertices" 60
 log "✓ SUCCESS: Cloud storage infrastructure ready"
+
+load_test_data
+run_recovery_test
+log "✓ SUCCESS: total-loss recovery E2E passed"

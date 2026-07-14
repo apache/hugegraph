@@ -7,7 +7,11 @@ This stack runs:
 - 3 Store nodes
 - `hg-store-cloud-s3` plugin loaded from local build artifacts
 
-The goal is to validate that RocksDB SST file events are mirrored to S3.
+The goal is to validate that:
+
+1. RocksDB SST files are mirrored to S3.
+2. Recovery metadata (`MANIFEST-*`, `CURRENT`, `OPTIONS-*`) is mirrored alongside SSTs.
+3. Together, these uploaded files are enough for cloud recovery after local RocksDB data loss.
 
 ## Prerequisites
 
@@ -36,11 +40,8 @@ cd "${REPO_ROOT}/docker/cloud-storage"
 chmod +x ./scripts/*.sh ./entrypoints/*.sh
 ./scripts/test-graph-queries-and-sst.sh
 
-# For manual testing steps, keep the stack running after test
+# Keep the stack running after the test for manual inspection
 ./scripts/test-graph-queries-and-sst.sh --keep-stack
-
-# For manual graph creation and testing (infrastructure only, no auto-load)
-./scripts/test-graph-queries-and-sst.sh --no-load
 ```
 
 ## Test Output Files
@@ -83,10 +84,10 @@ echo $REPO_ROOT
 
 ### Step 1: Start Cluster with Infrastructure Only (No Auto-Load)
 
-Use the automated test script to build images, start the cluster, and **skip the automatic data load** so you can create your own graph structure:
+Use the automated test script to build images and start the full end-to-end test (including recovery). Use `--keep-stack` to leave the stack running for manual inspection afterwards:
 
 ```bash
-$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --no-load
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --keep-stack
 ```
 
 After Step 1 starts the stack, resolve the Docker network name for `docker run --network` commands:
@@ -322,23 +323,26 @@ docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-0
               done'
 ```
 
-**What successful upload looks like:**
+**What successful upload looks like** (note the recovery metadata objects — `CURRENT`, `MANIFEST-*`,
+`OPTIONS-*` — mirrored alongside the SSTs so the SSTs are a usable database, not orphans):
 ```
 ### Bucket: hugegraph-store0
-  Total objects: 8
+  Total objects: 9
   SST files:     6
-  Sample SST files (first 3):
-    local/hugegraph-store0/partition-1/0000000001.sst
-    local/hugegraph-store0/partition-1/0000000002.sst
-    local/hugegraph-store0/partition-1/manifest
+  Objects under a partition prefix (paths illustrative; the file names are what matter):
+    local/hugegraph-store0/<prefix>/<partition>/000009.sst
+    local/hugegraph-store0/<prefix>/<partition>/000012.sst
+    local/hugegraph-store0/<prefix>/<partition>/CURRENT
+    local/hugegraph-store0/<prefix>/<partition>/MANIFEST-000011
+    local/hugegraph-store0/<prefix>/<partition>/OPTIONS-000013
 
 ### Bucket: hugegraph-store1
-  Total objects: 9
+  Total objects: 10
   SST files:     7
   ...
 
 ### Bucket: hugegraph-store2
-  Total objects: 8
+  Total objects: 9
   SST files:     6
   ...
 ```
@@ -346,13 +350,151 @@ docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-0
 **Success criteria:**
 - ✅ All three buckets show `Total objects: > 0`
 - ✅ All three buckets show `SST files: > 0`
+- ✅ Each partition prefix contains **exactly one** `CURRENT`, at least one `MANIFEST-*`, and at
+  least one `OPTIONS-*` (the consistent recovery metadata set)
 - ✅ SST counts are roughly balanced across buckets
 - ✅ No errors from mc command
+
+To assert the recovery metadata set explicitly:
+
+```bash
+docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+      for b in hugegraph-store0 hugegraph-store1 hugegraph-store2; do \
+        echo "### $b: CURRENT=$(mc find local/$b --name CURRENT | wc -l)" \
+             "MANIFEST=$(mc find local/$b --name "MANIFEST-*" | wc -l)" \
+             "OPTIONS=$(mc find local/$b --name "OPTIONS-*" | wc -l)" \
+             "SST=$(mc find local/$b --name "*.sst" | wc -l)"; \
+      done'
+```
 
 **If buckets are still empty after flush:**
 1. Check store logs for upload errors: `docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | grep -i "s3\|cloud\|error"`
 2. Verify cloud storage was initialized: `docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | grep -i "Cloud storage provider.*initialized\|S3CloudStorageProvider initialized"`
 3. Check that data was written: `docker exec cloud-storage-store0 sh -lc 'find /hugegraph-store/storage -name "*.sst" | wc -l'`
+
+## Total-Loss Recovery from Cloud
+
+Steps 1–8 prove that SSTs **and** a consistent metadata set (`CURRENT` / `MANIFEST-*` /
+`OPTIONS-*`) reach the object store. This section proves the payoff: a store that loses its local
+RocksDB data reopens **from cloud** with all data intact, rather than as an empty DB.
+
+**Scenario:** write → flush → compact → **wipe local RocksDB state** → restart → recover.
+
+**What is wiped, and why.** Each store keeps two independent trees under
+`/hugegraph-store/storage`: the RocksDB **state machine** (`db/` + the `hgstore-metadata` graph —
+this holds `CURRENT`/`MANIFEST`/`OPTIONS`/SSTs, and is what cloud metadata-sync mirrors) and the **Raft** tree
+(`raft/`, `snapshot/`). This procedure deletes only the state-machine data and **preserves `raft/`**,
+so the node rejoins its Raft group cleanly while RocksDB is forced to re-hydrate its data from cloud
+on open (the `preHydrateDbFiles` path). This isolates and deterministically exercises recovery.
+
+> **Stronger variant — full disk loss.** Deleting the *entire* volume (Raft included) is a harder
+> test: with every replica's Raft state gone the group must re-form, so recovery then also depends
+> on Raft/PD orchestration, not cloud alone. The automated default flow uses the state-machine
+> wipe above; the full-volume variant is described at the end of this section.
+
+### Automated
+
+```bash
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --keep-stack
+```
+
+This loads 150 vertices, restarts the stores to force flush + compaction, waits for
+event-triggered metadata sync to publish `CURRENT`/`MANIFEST`, asserts the consistent set is in every bucket,
+wipes each store's RocksDB state (preserving `raft/`), restarts, and confirms the recovered vertex
+count matches the pre-wipe baseline. It fails loudly if the consistent-restore guard trips
+(`Cloud restore inconsistent`) or the counts differ.
+
+### Manual
+
+Start from a running stack with data loaded (Steps 1–6), then:
+
+#### Step R1: Capture a baseline and force data into SSTs
+
+```bash
+BEFORE=$(curl -s --compressed http://localhost:8080/graphs/hugegraph/graph/vertices \
+  | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))")
+echo "baseline vertex count = $BEFORE"
+
+# Restart stores to flush memtables to SSTs and trigger compaction.
+docker restart cloud-storage-store0 cloud-storage-store1 cloud-storage-store2
+sleep 20
+for i in 0 1 2; do
+  curl -fsS http://127.0.0.1:$((8520 + i))/v1/health >/dev/null 2>&1 && echo "✓ Store$i OK" || echo "✗ Store$i"
+done
+
+# Give event-triggered metadata sync time to publish CURRENT/MANIFEST after
+# restart/compaction callbacks run.
+sleep 120
+```
+
+#### Step R2: Confirm the consistent metadata set is durable in MinIO
+
+```bash
+docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+      for b in hugegraph-store0 hugegraph-store1 hugegraph-store2; do \
+        echo "### $b: CURRENT=$(mc find local/$b --name CURRENT | wc -l)" \
+             "MANIFEST=$(mc find local/$b --name "MANIFEST-*" | wc -l)" \
+             "OPTIONS=$(mc find local/$b --name "OPTIONS-*" | wc -l)" \
+             "SST=$(mc find local/$b --name "*.sst" | wc -l)"; \
+      done'
+```
+
+**Expected:** every bucket reports `CURRENT>=1`, `MANIFEST>=1`, `SST>=1`. This is the concrete
+guarantee — the pointer and manifest that make the SSTs a usable database are present.
+
+#### Step R3: Simulate local RocksDB state loss (preserve Raft)
+
+```bash
+for i in 0 1 2; do
+  vol="cloud-storage-test_hg-store${i}-data"   # 'cloud-storage_hg-store${i}-data' for the static compose
+  docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml stop store$i 2>/dev/null \
+    || docker stop cloud-storage-store$i
+  # Delete db/ and the metadata graph; keep raft/ and snapshot/ so the node rejoins cleanly.
+  docker run --rm --entrypoint /bin/sh -v "${vol}:/s" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    -c 'cd /s && for d in *; do case "$d" in raft|snapshot) ;; *) rm -rf "$d";; esac; done; echo "store'"$i"' left: $(ls -1 | tr "\n" " ")"'
+  docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml start store$i 2>/dev/null \
+    || docker start cloud-storage-store$i
+done
+```
+
+#### Step R4: Verify recovery from cloud
+
+```bash
+# Wait for stores to become healthy again.
+for i in 0 1 2; do
+  for _ in $(seq 1 60); do
+    curl -fsS http://127.0.0.1:$((8520 + i))/v1/health >/dev/null 2>&1 && break || sleep 3
+  done
+done
+
+# Pre-hydration should have run; the consistent-restore guard must NOT have tripped.
+docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 store1 store2 \
+  | grep -iE "Cloud pre-hydration finished|Cloud restore inconsistent" | tail -10
+
+AFTER=$(curl -s --compressed http://localhost:8080/graphs/hugegraph/graph/vertices \
+  | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))")
+echo "recovered vertex count = $AFTER (baseline was $BEFORE)"
+[[ "$AFTER" == "$BEFORE" ]] && echo "✅ RECOVERY SUCCESS" || echo "❌ recovery mismatch"
+```
+
+**Success criteria:**
+- ✅ Logs show `Cloud pre-hydration finished` for the wiped partitions
+- ✅ Logs contain **no** `Cloud restore inconsistent` message (the guard would fire if `CURRENT`
+  pointed at a manifest that never reached cloud)
+- ✅ `AFTER == BEFORE` — the data came back from cloud, not an empty DB
+
+**Full disk-loss variant (stronger).** Replace Step R3 with a full volume wipe:
+
+```bash
+docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml rm -sf store0 store1 store2
+for i in 0 1 2; do docker volume rm cloud-storage-test_hg-store${i}-data 2>/dev/null || true; done
+docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml up -d store0 store1 store2
+```
+
+Recovery then depends on Raft group re-formation in addition to cloud pre-hydration; use it to
+validate the whole-cluster loss path once the state-machine path above passes.
 
 ### Step 9 (Optional): Destroy the Cluster
 
@@ -499,7 +641,7 @@ this is typically seen on ARM64 hosts with JVM + RocksDB startup.
 Simply run without special flags:
 
 ```bash
-$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --no-load
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh
 ```
 
 The script detects your host architecture and applies appropriate defaults automatically.
@@ -513,20 +655,20 @@ HG_DOCKER_DEFAULT_PLATFORM=linux/amd64 \
 HG_PD_JAVA_RUNTIME_IMAGE=eclipse-temurin:17-jre \
 HG_STORE_JAVA_RUNTIME_IMAGE=eclipse-temurin:17-jre \
 HG_STORE_JAVA_OPTS="-XX:+UseSerialGC -XX:-UseCompressedOops -XX:-UseCompressedClassPointers" \
-$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --no-load
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh
 ```
 
 But in most cases, running without overrides should work:
 
 ```bash
-$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --no-load
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh
 ```
 
 If old containers are still running, force recreate with fresh env:
 
 ```bash
 docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml down
-$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --no-load
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh
 
 # Verify container runtime JDK actually changed
 docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml run --rm --entrypoint java store0 -version
@@ -590,9 +732,13 @@ This manual verification process validates the complete SST upload pipeline:
 6. **Step 6:** Verify data distribution across store nodes
 7. **Step 7:** Restart store nodes to flush SST files to disk and upload to MinIO
 8. **Step 8:** Verify SST files are present in MinIO buckets
-9. **Step 9:** Cleanup when done
+9. **Recovery (optional):** [Total-Loss Recovery from Cloud](#total-loss-recovery-from-cloud)
+   — verify the consistent `{CURRENT, MANIFEST, OPTIONS, SST}` set is durable, wipe local RocksDB
+   state, restart, and confirm data is recovered from cloud
+10. **Step 9:** Cleanup when done
 
-**Success = Non-zero SST file counts in all three buckets after Step 8**
+**Success = Non-zero SST file counts in all three buckets after Step 8** (and, for recovery,
+`AFTER == BEFORE` vertex count after the total-loss recovery)
 
 ## What Gets Verified
 
@@ -601,7 +747,9 @@ This manual verification process validates the complete SST upload pipeline:
 ✅ Data distribution across 3 store nodes  
 ✅ RocksDB SST file generation on restart  
 ✅ Cloud storage plugin uploads SST files to MinIO  
-✅ Multiple buckets receive files consistently
+✅ Multiple buckets receive files consistently  
+✅ A consistent `CURRENT` + `MANIFEST-*` + `OPTIONS-*` metadata set is mirrored alongside SSTs  
+✅ A store recovers all data from cloud after losing its local RocksDB state (pre-hydration)
 
 ## Notes
 

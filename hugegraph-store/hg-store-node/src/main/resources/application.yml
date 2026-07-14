@@ -1,3 +1,4 @@
+#file: noinspection SpringBootApplicationYaml
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -56,11 +57,20 @@ cloud:
     enabled: false
     provider: s3
     path-prefix: hugegraph
-    # 0 = no whole-file retries; provider handles its own retries. Queue is DLQ-only.
-    # Set > 0 only for providers without built-in retry strategy.
-    upload-retry-max-attempts: 0
+    # Whole-file upload retries after a first failure (default 5). Set 0 to disable
+    # (failures go straight to the DLQ) when the provider has sufficient internal retry.
+    upload-retry-max-attempts: 3
     upload-retry-initial-delay-ms: 1000
     upload-retry-max-delay-ms: 60000
+    # Backpressure high-watermark on the pending-upload backlog; 0 disables.
+    upload-backpressure-high-watermark: 64
+    # Mirror a consistent CURRENT/MANIFEST/OPTIONS[/WAL] snapshot so cloud objects stay
+    # recoverable (a node that lost its local disk reopens from cloud, not an empty DB).
+    # Metadata sync is always enabled when cloud storage is enabled.
+    # Sync is event-triggered by storage events; there is no background interval scheduler.
+    # WAL durability: 'flush' (force flush before capture; lose only the un-flushed tail on crash)
+    # or 'wal' (also mirror + replay the WAL tail; lower RPO, more frequent small uploads).
+    wal-mode: flush
     s3:
       bucket:
       region:
