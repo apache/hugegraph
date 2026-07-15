@@ -190,48 +190,100 @@ public class CloudStorageConfigTest {
                                   .get("multipart-part-retry-max-attempts"));
     }
 
-    @Test
-    public void testCompleteConfiguration() {
-        config.setEnabled(true);
-        config.setProvider("s3");
-        config.setPathPrefix("production/data");
-        config.setStartupHydrationEnabled(true);
-        config.setReadMissGuardWindowMs(5000L);
-        config.setUploadRetryMaxAttempts(3);
-        config.setUploadRetryInitialDelayMs(500L);
-        config.setUploadRetryMaxDelayMs(30_000L);
+     @Test
+     public void testCompleteConfiguration() {
+         config.setEnabled(true);
+         config.setProvider("s3");
+         config.setPathPrefix("production/data");
+         config.setStartupHydrationEnabled(true);
+         config.setReadMissGuardWindowMs(5000L);
+         config.setUploadRetryMaxAttempts(3);
+         config.setUploadRetryInitialDelayMs(500L);
+         config.setUploadRetryMaxDelayMs(30_000L);
 
-        Map<String, String> providerProps = new HashMap<>();
-        providerProps.put("bucket", "hugegraph-backup");
-        providerProps.put("region", "us-west-2");
-        providerProps.put("endpoint", "https://s3-us-west-2.amazonaws.com");
-        providerProps.put("access-key", "test-access-key");
-        providerProps.put("secret-key", "test-secret-key");
-        providerProps.put("multipart-part-retry-max-attempts", "5");
-        providerProps.put("multipart-part-retry-base-backoff-ms", "1500");
-        providerProps.put("multipart-exhausted-direct-dlq", "false");
-        config.setProviderProperties(providerProps);
+         Map<String, String> providerProps = new HashMap<>();
+         providerProps.put("bucket", "hugegraph-backup");
+         providerProps.put("region", "us-west-2");
+         providerProps.put("endpoint", "https://s3-us-west-2.amazonaws.com");
+         providerProps.put("access-key", "test-access-key");
+         providerProps.put("secret-key", "test-secret-key");
+         providerProps.put("multipart-part-retry-max-attempts", "5");
+         providerProps.put("multipart-part-retry-base-backoff-ms", "1500");
+         providerProps.put("multipart-exhausted-direct-dlq", "false");
+         config.setProviderProperties(providerProps);
 
-        // Common fields
-        assertTrue(config.isEnabled());
-        assertEquals("s3", config.getProvider());
-        assertEquals("production/data", config.getPathPrefix());
-        assertTrue(config.isStartupHydrationEnabled());
-        assertEquals(5000L, config.getReadMissGuardWindowMs());
-        assertEquals(3, config.getUploadRetryMaxAttempts());
-        assertEquals(500L, config.getUploadRetryInitialDelayMs());
-        assertEquals(30_000L, config.getUploadRetryMaxDelayMs());
+         // Common fields
+         assertTrue(config.isEnabled());
+         assertEquals("s3", config.getProvider());
+         assertEquals("production/data", config.getPathPrefix());
+         assertTrue(config.isStartupHydrationEnabled());
+         assertEquals(5000L, config.getReadMissGuardWindowMs());
+         assertEquals(3, config.getUploadRetryMaxAttempts());
+         assertEquals(500L, config.getUploadRetryInitialDelayMs());
+         assertEquals(30_000L, config.getUploadRetryMaxDelayMs());
 
-        // Provider-specific fields (cloud.storage.<provider>.*)
-        assertEquals("hugegraph-backup", config.getProviderProperties().get("bucket"));
-        assertEquals("us-west-2", config.getProviderProperties().get("region"));
-        assertEquals("https://s3-us-west-2.amazonaws.com",
-                     config.getProviderProperties().get("endpoint"));
-        assertEquals("test-access-key", config.getProviderProperties().get("access-key"));
-        assertEquals("test-secret-key", config.getProviderProperties().get("secret-key"));
-        assertEquals("5", config.getProviderProperties().get("multipart-part-retry-max-attempts"));
-        assertEquals("1500",
-                     config.getProviderProperties().get("multipart-part-retry-base-backoff-ms"));
-        assertEquals("false", config.getProviderProperties().get("multipart-exhausted-direct-dlq"));
-    }
+         // Provider-specific fields (cloud.storage.<provider>.*)
+         assertEquals("hugegraph-backup", config.getProviderProperties().get("bucket"));
+         assertEquals("us-west-2", config.getProviderProperties().get("region"));
+         assertEquals("https://s3-us-west-2.amazonaws.com",
+                      config.getProviderProperties().get("endpoint"));
+         assertEquals("test-access-key", config.getProviderProperties().get("access-key"));
+         assertEquals("test-secret-key", config.getProviderProperties().get("secret-key"));
+         assertEquals("5", config.getProviderProperties().get("multipart-part-retry-max-attempts"));
+         assertEquals("1500",
+                      config.getProviderProperties().get("multipart-part-retry-base-backoff-ms"));
+         assertEquals("false", config.getProviderProperties().get("multipart-exhausted-direct-dlq"));
+     }
+
+     @Test
+     public void testMultiplePropertyUpdates() {
+         Map<String, String> props1 = new HashMap<>();
+         props1.put("key1", "value1");
+         config.setProviderProperties(props1);
+         assertEquals("value1", config.getProviderProperties().get("key1"));
+
+         Map<String, String> props2 = new HashMap<>();
+         props2.put("key2", "value2");
+         config.setProviderProperties(props2);
+         assertEquals("value2", config.getProviderProperties().get("key2"));
+     }
+
+     @Test
+     public void testWalModeDefaults() {
+         assertEquals("flush", config.getWalMode());
+     }
+
+     @Test
+     public void testWalModeTransition() {
+         config.setWalMode("wal");
+         assertEquals("wal", config.getWalMode());
+
+         config.setWalMode("flush");
+         assertEquals("flush", config.getWalMode());
+     }
+
+     @Test
+     public void testBackpressureDisabled() {
+         config.setUploadBackpressureHighWatermark(0);
+         assertEquals(0, config.getUploadBackpressureHighWatermark());
+     }
+
+     @Test
+     public void testNegativeReadMissGuardWindow() {
+         config.setReadMissGuardWindowMs(-5000L);
+         assertEquals(-5000L, config.getReadMissGuardWindowMs());
+     }
+
+     @Test
+     public void testProviderPropertiesImmutabilityBehavior() {
+         Map<String, String> props = new HashMap<>();
+         props.put("bucket", "original");
+         config.setProviderProperties(props);
+
+         // Modify the original map
+         props.put("bucket", "modified");
+
+         // The config should have the modified value since it references the same map
+         assertEquals("modified", config.getProviderProperties().get("bucket"));
+     }
 }

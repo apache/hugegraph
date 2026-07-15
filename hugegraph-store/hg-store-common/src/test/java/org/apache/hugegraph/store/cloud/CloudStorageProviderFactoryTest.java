@@ -353,28 +353,89 @@ public class CloudStorageProviderFactoryTest {
          verify(newProvider, times(1)).init(config);
      }
 
-     @Test
-     public void testLoadProvidersKeepsFirstRegistrationOnDuplicateName() {
-         CloudStorageProvider firstRegistration = mock(CloudStorageProvider.class);
-         when(firstRegistration.providerName())
-                 .thenReturn(TestDuplicateNamedProvider.PROVIDER_NAME);
+      @Test
+      public void testLoadProvidersKeepsFirstRegistrationOnDuplicateName() {
+          CloudStorageProvider firstRegistration = mock(CloudStorageProvider.class);
+          when(firstRegistration.providerName())
+                  .thenReturn(TestDuplicateNamedProvider.PROVIDER_NAME);
 
-         boolean duplicateProviderDiscoverable =
-                 ServiceLoader.load(CloudStorageProvider.class,
-                                    CloudStorageProviderFactory.class.getClassLoader())
-                              .stream()
-                              .map(ServiceLoader.Provider::get)
-                              .anyMatch(p -> TestDuplicateNamedProvider.PROVIDER_NAME
-                                      .equals(p.providerName()));
-         if (!duplicateProviderDiscoverable) {
-             fail("Test duplicate provider is not discoverable via ServiceLoader");
-         }
+          boolean duplicateProviderDiscoverable =
+                  ServiceLoader.load(CloudStorageProvider.class,
+                                     CloudStorageProviderFactory.class.getClassLoader())
+                               .stream()
+                               .map(ServiceLoader.Provider::get)
+                               .anyMatch(p -> TestDuplicateNamedProvider.PROVIDER_NAME
+                                       .equals(p.providerName()));
+          if (!duplicateProviderDiscoverable) {
+              fail("Test duplicate provider is not discoverable via ServiceLoader");
+          }
 
-         registry().put(TestDuplicateNamedProvider.PROVIDER_NAME, firstRegistration);
+          registry().put(TestDuplicateNamedProvider.PROVIDER_NAME, firstRegistration);
 
-         invokeLoadProviders();
+          invokeLoadProviders();
 
-         assertSame(firstRegistration,
-                    registry().get(TestDuplicateNamedProvider.PROVIDER_NAME));
-     }
+          assertSame(firstRegistration,
+                     registry().get(TestDuplicateNamedProvider.PROVIDER_NAME));
+      }
+
+      @SuppressWarnings("DataFlowIssue")
+      @Test
+      public void testInitializeWithNullConfigThrowsException() {
+          try {
+              CloudStorageProviderFactory.initialize(null);
+              fail("Should have thrown exception");
+          } catch (Exception e) {
+              // Expected - null config should cause an error
+          }
+      }
+
+      @Test
+      public void testShutdownMultipleTimes() {
+          CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);
+
+          CloudStorageProviderFactory.shutdown();
+          CloudStorageProviderFactory.shutdown(); // Should not throw
+
+          assertNull(CloudStorageProviderFactory.getActiveProvider());
+      }
+
+      @Test
+      public void testResetMultipleTimes() {
+          CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);
+
+          CloudStorageProviderFactory.reset();
+          CloudStorageProviderFactory.reset(); // Should not throw
+
+          assertNull(CloudStorageProviderFactory.getActiveProvider());
+      }
+
+      @Test
+      public void testSetActiveProviderForTestWithNull() {
+          CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);
+          assertEquals(mockProvider, CloudStorageProviderFactory.getActiveProvider());
+
+          CloudStorageProviderFactory.setActiveProviderForTest(null);
+          assertNull(CloudStorageProviderFactory.getActiveProvider());
+      }
+
+      @Test
+      public void testInitializeLogsWhenDisabled() {
+          config.setEnabled(false);
+
+          CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+          assertNull(result);
+      }
+
+      @Test
+      public void testProviderInitializationCalledWithCorrectConfig() {
+          registry().put("s3", mockProvider);
+          config.setEnabled(true);
+          config.setProvider("s3");
+          config.getProviderProperties().put("bucket", "test-bucket");
+
+          CloudStorageProviderFactory.initialize(config);
+
+          verify(mockProvider, times(1)).init(config);
+      }
  }

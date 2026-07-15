@@ -140,5 +140,214 @@ public class CloudStorageProviderTest {
         assertTrue(result.contains("file1.sst"));
         assertTrue(result.contains("file2.sst"));
     }
+
+    @Test
+    public void testDefaultDeletePrefixDeletesAllListedKeys() throws IOException {
+        java.util.List<String> deleted = new java.util.ArrayList<>();
+
+        CloudStorageProvider provider = new CloudStorageProvider() {
+            @Override
+            public String providerName() {
+                return "test";
+            }
+
+            @Override
+            public void init(CloudStorageConfig config) {
+                // No-op
+            }
+
+            @Override
+            public void uploadFile(String localPath, String remoteKey) {
+                // No-op
+            }
+
+            @Override
+            public void deleteFile(String remoteKey) {
+                deleted.add(remoteKey);
+            }
+
+            @Override
+            public boolean fileExists(String remoteKey) {
+                return false;
+            }
+
+            @Override
+            public List<String> listFiles(String remoteDirPrefix) {
+                return java.util.Arrays.asList("a.sst", "b.sst", "c.sst");
+            }
+
+            @Override
+            public void downloadFile(String remoteKey, String localPath) {
+                // No-op
+            }
+
+            @Override
+            public void close() {
+                // No-op
+            }
+        };
+
+        int deletedCount = provider.deletePrefix("some/prefix");
+
+        assertEquals(3, deletedCount);
+        assertEquals(3, deleted.size());
+        assertTrue(deleted.contains("a.sst"));
+        assertTrue(deleted.contains("b.sst"));
+        assertTrue(deleted.contains("c.sst"));
+    }
+
+     @Test
+     public void testDefaultDeletePrefixContinuesOnDeleteFailure() throws IOException {
+         java.util.List<String> attempted = new java.util.ArrayList<>();
+
+         CloudStorageProvider provider = new CloudStorageProvider() {
+             @Override
+             public String providerName() {
+                 return "test";
+             }
+
+             @Override
+             public void init(CloudStorageConfig config) {
+                 // No-op
+             }
+
+             @Override
+             public void uploadFile(String localPath, String remoteKey) {
+                 // No-op
+             }
+
+             @Override
+             public void deleteFile(String remoteKey) throws IOException {
+                 attempted.add(remoteKey);
+                 if ("b.sst".equals(remoteKey)) {
+                     throw new IOException("simulated delete failure");
+                 }
+             }
+
+             @Override
+             public boolean fileExists(String remoteKey) {
+                 return false;
+             }
+
+             @Override
+             public List<String> listFiles(String remoteDirPrefix) {
+                 return java.util.Arrays.asList("a.sst", "b.sst", "c.sst");
+             }
+
+             @Override
+             public void downloadFile(String remoteKey, String localPath) {
+                 // No-op
+             }
+
+             @Override
+             public void close() {
+                 // No-op
+             }
+         };
+
+         int deletedCount = provider.deletePrefix("some/prefix");
+
+         // Default impl is best-effort and returns list size even if one delete fails.
+         assertEquals(3, deletedCount);
+         assertEquals(3, attempted.size());
+         assertEquals("a.sst", attempted.get(0));
+         assertEquals("b.sst", attempted.get(1));
+         assertEquals("c.sst", attempted.get(2));
+     }
+
+     @Test
+     public void testDeletePrefixWithEmptyList() throws IOException {
+         CloudStorageProvider provider = new CloudStorageProvider() {
+             @Override
+             public String providerName() {
+                 return "test";
+             }
+
+             @Override
+             public void init(CloudStorageConfig config) {
+             }
+
+             @Override
+             public void uploadFile(String localPath, String remoteKey) {
+             }
+
+             @Override
+             public void deleteFile(String remoteKey) {
+             }
+
+             @Override
+             public boolean fileExists(String remoteKey) {
+                 return false;
+             }
+
+             @Override
+             public List<String> listFiles(String remoteDirPrefix) {
+                 return java.util.Collections.emptyList();
+             }
+
+             @Override
+             public void downloadFile(String remoteKey, String localPath) {
+             }
+
+             @Override
+             public void close() {
+             }
+         };
+
+         int deletedCount = provider.deletePrefix("some/prefix");
+
+         assertEquals(0, deletedCount);
+     }
+
+     @Test
+     public void testListFilesDefaultWithLargeDataset() throws IOException {
+         CloudStorageProvider provider = new CloudStorageProvider() {
+             @Override
+             public String providerName() {
+                 return "test";
+             }
+
+             @Override
+             public void init(CloudStorageConfig config) {
+             }
+
+             @Override
+             public void uploadFile(String localPath, String remoteKey) {
+             }
+
+             @Override
+             public void deleteFile(String remoteKey) {
+             }
+
+             @Override
+             public boolean fileExists(String remoteKey) {
+                 return false;
+             }
+
+             @Override
+             public List<String> listFiles(String remoteDirPrefix) {
+                 // Simulate large dataset
+                 java.util.List<String> files = new java.util.ArrayList<>();
+                 for (int i = 0; i < 1000; i++) {
+                     files.add("file" + i + ".sst");
+                 }
+                 return files;
+             }
+
+             @Override
+             public void downloadFile(String remoteKey, String localPath) {
+             }
+
+             @Override
+             public void close() {
+             }
+         };
+
+         List<String> result = provider.listFiles("some/prefix");
+
+         assertEquals(1000, result.size());
+         assertTrue(result.contains("file0.sst"));
+         assertTrue(result.contains("file999.sst"));
+     }
 }
 

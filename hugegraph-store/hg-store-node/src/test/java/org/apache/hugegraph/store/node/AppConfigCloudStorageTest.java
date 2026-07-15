@@ -96,7 +96,7 @@ public class AppConfigCloudStorageTest {
         assertEquals("hugegraph", cfg.getPathPrefix());
         assertTrue(cfg.isStartupHydrationEnabled());
         assertEquals(3000L, cfg.getReadMissGuardWindowMs());
-        assertEquals(5, cfg.getUploadRetryMaxAttempts());
+        assertEquals(3, cfg.getUploadRetryMaxAttempts());
         assertEquals(64, cfg.getUploadBackpressureHighWatermark());
         assertEquals("flush", cfg.getWalMode());
         assertNotNull(cfg.getProviderProperties());

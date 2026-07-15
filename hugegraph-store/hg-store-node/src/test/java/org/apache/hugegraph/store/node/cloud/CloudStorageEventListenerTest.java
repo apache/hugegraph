@@ -28,10 +28,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.BooleanSupplier;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory.LiveSstFile;
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory.MetadataSnapshot;
@@ -128,30 +131,55 @@ public class CloudStorageEventListenerTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void onTableFileCreated_delegatesToProvider_withRelativeKey() {
+    public void onTableFileCreated_delegatesToProvider_withRelativeKey() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-created");
+        Path dbDir = tmpRoot.resolve("hgstore-metadata");
+        Files.createDirectories(dbDir);
+        Path sst = dbDir.resolve("000008.sst");
+        Files.write(sst, "sst".getBytes());
+
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
+        CloudStorageEventListener l = new CloudStorageEventListener(tmpRoot.toString());
 
-        listener.onTableFileCreated("hgstore-metadata", "default",
-                                    DATA_ROOT + "/hgstore-metadata/000008.sst", 512L);
+        try {
+            l.onTableFileCreated("hgstore-metadata", "default", sst.toString(), 512L);
 
-        assertEquals(1, provider.uploads.size());
-        assertEquals(DATA_ROOT + "/hgstore-metadata/000008.sst", provider.uploads.get(0)[0]);
-        assertEquals("hgstore-metadata/000008.sst", provider.uploads.get(0)[1]);
+            waitForCondition(() -> provider.uploads.size() == 1,
+                             "expected exactly one async upload");
+
+            assertEquals(1, provider.uploads.size());
+            assertTrue(provider.uploads.get(0)[0].contains("/.cloud-upload-staging/"));
+            assertEquals("hgstore-metadata/000008.sst", provider.uploads.get(0)[1]);
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
     }
 
     @Test
-    public void onTableFileCreated_delegatesToProvider_withStoreScopePrefix() {
+    public void onTableFileCreated_delegatesToProvider_withStoreScopePrefix() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-scoped");
+        Path dbDir = tmpRoot.resolve("0");
+        Files.createDirectories(dbDir);
+        Path sst = dbDir.resolve("000008.sst");
+        Files.write(sst, "sst".getBytes());
+
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
         CloudStorageEventListener l = new CloudStorageEventListener(
-                DATA_ROOT, true, 0L, null, new CloudSyncTracker(), 0,
+                tmpRoot.toString(), true, 0L, null, new CloudSyncTracker(), 0,
                 false, "store-127.0.0.1_8501");
+        try {
+            l.onTableFileCreated("0", "default", sst.toString(), 512L);
 
-        l.onTableFileCreated("0", "default", DATA_ROOT + "/0/000008.sst", 512L);
+            waitForCondition(() -> provider.uploads.size() == 1,
+                             "expected exactly one async upload with store scope prefix");
 
-        assertEquals(1, provider.uploads.size());
-        assertEquals("store-127.0.0.1_8501/0/000008.sst", provider.uploads.get(0)[1]);
+            assertEquals(1, provider.uploads.size());
+            assertEquals("store-127.0.0.1_8501/0/000008.sst", provider.uploads.get(0)[1]);
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
     }
 
     @Test
@@ -222,9 +250,15 @@ public class CloudStorageEventListenerTest {
     public void onTableFileDeleted_delegatesToProvider_withRelativeKey() {
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
+        CloudStorageEventListener l = new CloudStorageEventListener(DATA_ROOT) {
+            @Override
+            boolean syncMetadataSnapshotInline(CloudStorageProvider p, String dbName) {
+                return true;
+            }
+        };
 
-        listener.onTableFileDeleted("hgstore-metadata", "default",
-                                    DATA_ROOT + "/hgstore-metadata/000008.sst");
+        l.onTableFileDeleted("hgstore-metadata", "default",
+                             DATA_ROOT + "/hgstore-metadata/000008.sst");
 
         assertEquals(1, provider.deletes.size());
         assertEquals("hgstore-metadata/000008.sst", provider.deletes.get(0));
@@ -424,13 +458,28 @@ public class CloudStorageEventListenerTest {
         f.delete();
     }
 
+    private void waitForCondition(BooleanSupplier condition, String timeoutMessage)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 2000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            LockSupport.parkNanos(10_000_000L);
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Interrupted while waiting for async cloud callback");
+            }
+        }
+        fail(timeoutMessage);
+    }
+
     /**
      * Minimal {@link CloudStorageProvider} that records upload and delete calls.
      */
     static class CapturingProvider implements CloudStorageProvider {
 
-        final List<String[]> uploads = new ArrayList<>();
-        final List<String> deletes = new ArrayList<>();
+        final List<String[]> uploads = Collections.synchronizedList(new ArrayList<>());
+        final List<String> deletes = Collections.synchronizedList(new ArrayList<>());
         final Map<String, byte[]> remoteFiles = new HashMap<>();
         int listFilesCalls = 0;
 

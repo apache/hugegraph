@@ -21,6 +21,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.BooleanSupplier;
 
 import org.apache.hugegraph.store.cloud.CloudStorageNonRetryableException;
 import org.apache.hugegraph.store.cloud.CloudStorageProvider;
@@ -75,7 +77,7 @@ public class RocksDBCallbackExceptionBehaviorTest {
 
         // Create the listener with retry queue
         this.listener = new CloudStorageEventListener(
-                "/data/hgstore",
+                this.tmpDir.toString(),
                 true,        // startupHydrationEnabled
                 3000L,       // readMissGuardWindowMs
                 this.retryQueue
@@ -114,11 +116,34 @@ public class RocksDBCallbackExceptionBehaviorTest {
         dir.delete();
     }
 
+    private String createSstFile(String dbName, String fileName) throws IOException {
+        Path dbDir = this.tmpDir.resolve(dbName);
+        Files.createDirectories(dbDir);
+        Path sst = dbDir.resolve(fileName);
+        Files.write(sst, new byte[]{1});
+        return sst.toString();
+    }
+
+    private void waitForCondition(BooleanSupplier condition, String timeoutMessage)
+            throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 2000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            LockSupport.parkNanos(10_000_000L);
+            if (Thread.currentThread().isInterrupted()) {
+                throw new InterruptedException("Interrupted while waiting for async cloud callback");
+            }
+        }
+        Assert.fail(timeoutMessage);
+    }
+
     @Test
     public void uploadThrowsException_doesNotCrashRocksDB_submitsToRetryQueue() throws Exception {
         String dbName = "hgstore-metadata";
         String cfName = "default";
-        String filePath = "/data/hgstore/" + dbName + "/000001.sst";
+        String filePath = createSstFile(dbName, "000001.sst");
         long fileSize = 64 * 1024 * 1024; // 64 MB
 
         // Step 1: Configure provider to throw an exception
@@ -136,16 +161,12 @@ public class RocksDBCallbackExceptionBehaviorTest {
         }
 
         // Step 3: Verify retry queue captured the failure
-        List<FailedUploadTask> dlqEntries = this.retryQueue.getDlqEntries();
-        int inFlightCount = this.retryQueue.getInFlightCount();
-
-        Assert.assertTrue(
-                "task should be enqueued for retry (either in-flight or in DLQ after exhaustion)",
-                inFlightCount > 0 || !dlqEntries.isEmpty()
-        );
+        waitForCondition(() -> this.retryQueue.getInFlightCount() > 0
+                             || !this.retryQueue.getDlqEntries().isEmpty(),
+                         "task should be enqueued for retry (either in-flight or in DLQ)");
 
         // Step 4: Verify provider.uploadFile was actually called
-        Mockito.verify(this.mockProvider, Mockito.times(1))
+        Mockito.verify(this.mockProvider, Mockito.timeout(1500).times(1))
                .uploadFile(filePath, dbName + "/000001.sst");
     }
 
@@ -153,7 +174,7 @@ public class RocksDBCallbackExceptionBehaviorTest {
     public void uploadThrowsNonRetryableException_submitsDirectlyToDLQ() throws Exception {
         String dbName = "hgstore-metadata";
         String cfName = "default";
-        String filePath = "/data/hgstore/" + dbName + "/000002.sst";
+        String filePath = createSstFile(dbName, "000002.sst");
         long fileSize = 64 * 1024 * 1024;
 
         // Configure provider to throw a non-retryable exception
@@ -173,8 +194,8 @@ public class RocksDBCallbackExceptionBehaviorTest {
             Assert.fail("onTableFileCreated should not throw; caught: " + e);
         }
 
-        // Wait briefly for async retry queue to process
-        Thread.sleep(500);
+        waitForCondition(() -> !this.retryQueue.getDlqEntries().isEmpty(),
+                         "non-retryable exception should land in DLQ immediately");
 
         // Verify task ended up in DLQ (not retrying)
         List<FailedUploadTask> dlqEntries = this.retryQueue.getDlqEntries();
