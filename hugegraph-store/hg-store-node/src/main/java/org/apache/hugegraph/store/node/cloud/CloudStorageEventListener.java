@@ -26,7 +26,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Stream;
@@ -51,7 +55,11 @@ import lombok.extern.slf4j.Slf4j;
  *       (e.g. surviving from a previous run), triggers a non-blocking MemTable flush so
  *       WAL-recovered or recently-written data is written to SST files (completion is signalled
  *       event-driven via {@link #onTableFileCreated}), then mirrors metadata inline.</li>
- *   <li>{@link #onTableFileCreated} uploads newly created SST files and mirrors metadata inline.</li>
+ *   <li>{@link #onTableFileCreated} pins newly created SST files via a hard link, dispatches
+ *       upload work to a bounded background executor, and mirrors metadata after upload completes.
+ *       If the hard link fails (e.g. cross-device mount, filesystem limits), the upload is routed
+ *       directly to the retry queue using the original SST path — no copy is made, so no extra
+ *       disk space is consumed.</li>
  *   <li>{@link #onTableFileDeleted} mirrors metadata first, then removes the superseded SST object.</li>
  * </ul>
  *
@@ -100,9 +108,25 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      */
     private final int backpressureHighWatermark;
 
+
     /** Upper bound on how long a single {@link #onTableFileCreated} call will block for backpressure. */
     private static final long BACKPRESSURE_MAX_WAIT_MS = 30_000L;
     private static final long BACKPRESSURE_POLL_MS = 50L;
+
+    /** Bounded async upload dispatcher so RocksDB callbacks return quickly. */
+    private static final int ASYNC_UPLOAD_THREADS = 2;
+    private static final int ASYNC_UPLOAD_QUEUE_CAPACITY = 256;
+    private static final ThreadPoolExecutor SHARED_UPLOAD_EXECUTOR =
+            new ThreadPoolExecutor(
+                    ASYNC_UPLOAD_THREADS,
+                    ASYNC_UPLOAD_THREADS,
+                    60L,
+                    TimeUnit.SECONDS,
+                    new ArrayBlockingQueue<>(ASYNC_UPLOAD_QUEUE_CAPACITY),
+                    newUploadThreadFactory(),
+                    new ThreadPoolExecutor.AbortPolicy());
+    private final ThreadPoolExecutor uploadExecutor;
+    private final Path uploadStagingDir;
 
     // -----------------------------------------------------------------------
     // Metadata (CURRENT/MANIFEST/OPTIONS[/WAL]) mirroring & consistent restore
@@ -247,6 +271,16 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         this.backpressureHighWatermark = Math.max(0, backpressureHighWatermark);
         this.walModeEnabled = walModeEnabled;
         this.storeScopePrefix = normaliseKeyPrefix(storeScopePrefix);
+        this.uploadStagingDir = Paths.get(this.dataRoot, ".cloud-upload-staging");
+        this.uploadExecutor = SHARED_UPLOAD_EXECUTOR;
+    }
+
+    private static ThreadFactory newUploadThreadFactory() {
+        return r -> {
+            Thread t = new Thread(r, "cloud-upload-dispatch");
+            t.setDaemon(true);
+            return t;
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -497,7 +531,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     /**
-     * Uploads the newly created SST file to the active cloud storage provider.
+     * Pins and asynchronously uploads the newly created SST file to the active cloud
+     * storage provider.
      *
      * @param dbName   RocksDB instance name (partition id)
      * @param cfName   column-family name
@@ -514,32 +549,106 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         recordDb(dbName, parentDir(filePath));
         CloudStorageMetrics.registerDatabaseMetrics(dbName);
         String remoteKey = toRelativeKey(filePath);
-        long startTimeMs = System.currentTimeMillis();
+
+        Path pinned;
         try {
-            provider.uploadFile(filePath, remoteKey);
-            syncTracker.markConfirmed(dbName, filePath);
-            long syncLatencyMs = System.currentTimeMillis() - startTimeMs;
-            CloudStorageMetrics.recordSyncLatency(dbName, syncLatencyMs);
-             // Skip metadata sync if DB is being truncated or in grace period after truncation
-             // to allow purge to complete cleanly without metadata files being re-uploaded.
-             if (!truncatingDbs.contains(dbName) && !isInTruncationGracePeriod(dbName)) {
-                 syncMetadataSnapshotInline(provider, dbName);
-             }
-            log.debug("Cloud upload success: db={}, cf={}, path={}, size={}, latencyMs={}",
-                      dbName, cfName, filePath, fileSize, syncLatencyMs);
+            pinned = pinForAsyncUpload(filePath);
         } catch (Exception e) {
-            // ...existing code...
             String errorType = e.getClass().getSimpleName();
             CloudStorageMetrics.recordUploadFailure(dbName, cfName, errorType);
-            log.error("Cloud upload failed (will retry on next compaction): "
-                      + "db={}, cf={}, path={}, error={}", dbName, cfName, filePath, e.getMessage());
+            // Hard link failed — no copy fallback, no extra disk use. Route original SST path
+            // to retry queue; retry will upload directly from the original file if still present.
+            log.warn("Cloud upload staging (hard link failed): db={}, cf={}, path={} "
+                     + "— routing original SST to retry queue: {}",
+                     dbName, cfName, filePath, e.getMessage());
             if (retryQueue != null) {
                 retryQueue.submit(dbName, cfName, filePath, remoteKey, e);
             }
+            applyBackpressure(dbName);
+            return;
         }
+
+        try {
+            uploadExecutor.execute(() -> {
+                long startTimeMs = System.currentTimeMillis();
+                try {
+                    provider.uploadFile(pinned.toString(), remoteKey);
+                    syncTracker.markConfirmed(dbName, filePath);
+                    long syncLatencyMs = System.currentTimeMillis() - startTimeMs;
+                    CloudStorageMetrics.recordSyncLatency(dbName, syncLatencyMs);
+                    // Skip metadata sync if DB is being truncated or in grace period after truncation
+                    // to allow purge to complete cleanly without metadata files being re-uploaded.
+                    if (!truncatingDbs.contains(dbName) && !isInTruncationGracePeriod(dbName)) {
+                        syncMetadataSnapshotInline(provider, dbName);
+                    }
+                    log.debug("Cloud upload success: db={}, cf={}, path={}, size={}, latencyMs={}",
+                              dbName, cfName, filePath, fileSize, syncLatencyMs);
+                } catch (Exception e) {
+                    String errorType = e.getClass().getSimpleName();
+                    CloudStorageMetrics.recordUploadFailure(dbName, cfName, errorType);
+                    log.error("Cloud upload failed (will retry on next compaction): "
+                              + "db={}, cf={}, path={}, error={}", dbName, cfName,
+                              filePath, e.getMessage());
+                    if (retryQueue != null) {
+                        // Keep retry semantics unchanged: retries target the original SST path.
+                        retryQueue.submit(dbName, cfName, filePath, remoteKey, e);
+                    }
+                } finally {
+                    try {
+                        Files.deleteIfExists(pinned);
+                    } catch (IOException e) {
+                        log.debug("Failed to cleanup staged upload file {}: {}",
+                                  pinned, e.getMessage());
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            try {
+                Files.deleteIfExists(pinned);
+            } catch (IOException ioe) {
+                log.debug("Failed to cleanup staged upload file {}: {}", pinned, ioe.getMessage());
+            }
+            CloudStorageMetrics.recordUploadFailure(dbName, cfName, "UploadQueueFull");
+            log.error("Cloud upload dispatch rejected (queue full): db={}, cf={}, path={}",
+                      dbName, cfName, filePath);
+            if (retryQueue != null) {
+                retryQueue.submit(dbName, cfName, filePath, remoteKey,
+                                  new IOException("cloud upload dispatch queue full", e));
+            }
+        }
+
         // Apply backpressure AFTER handling this file so the flush/compaction thread slows down
         // while the cloud mirror is behind, preventing ingestion from outrunning durability.
         applyBackpressure(dbName);
+    }
+
+    /**
+     * Creates a stable hard-link snapshot of the SST file for async upload, so the upload worker
+     * can read a consistent source even after RocksDB deletes the original during compaction.
+     *
+     * <p>Hard links share the same inode — no extra data blocks are consumed. If the original is
+     * deleted by compaction before the worker runs, the hard-link still holds the inode alive so
+     * the upload can proceed normally.
+     *
+     * <p>If the hard link fails (e.g. cross-device mount, filesystem hard-link limits), an
+     * {@link IOException} is thrown. The caller ({@link #onTableFileCreated}) catches this and
+     * routes the upload to the retry queue using the original SST path — no copy is made and no
+     * extra disk space is consumed. The retry will succeed as long as the original file still
+     * exists when it fires; if it has been compacted away the retry queue silently drops it.
+     */
+    private Path pinForAsyncUpload(String filePath) throws IOException {
+        Path source = Paths.get(filePath);
+        Files.createDirectories(uploadStagingDir);
+        String fileName = source.getFileName().toString();
+        Path staged = uploadStagingDir.resolve(fileName + ".upload-" + System.nanoTime());
+        try {
+            Files.createLink(staged, source);
+            return staged;
+        } catch (Exception linkEx) {
+            throw new IOException(
+                    "Hard link failed; upload will be retried from original SST path: "
+                    + linkEx.getMessage(), linkEx);
+        }
     }
 
     /**
@@ -574,10 +683,11 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     private int pendingUploadBacklog() {
-        if (retryQueue == null) {
-            return 0;
+        int backlog = uploadExecutor.getQueue().size() + uploadExecutor.getActiveCount();
+        if (retryQueue != null) {
+            backlog += retryQueue.getInFlightCount() + retryQueue.getDlqSize();
         }
-        return retryQueue.getInFlightCount() + retryQueue.getDlqSize();
+        return backlog;
     }
 
     /**

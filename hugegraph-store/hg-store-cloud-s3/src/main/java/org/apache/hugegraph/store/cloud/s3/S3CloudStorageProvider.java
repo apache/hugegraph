@@ -40,8 +40,10 @@ import org.jetbrains.annotations.NotNull;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
-import software.amazon.awssdk.core.exception.SdkClientException;
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.http.ContentStreamProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3ClientBuilder;
@@ -320,8 +322,8 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
             s3Client.deleteObject(
                     DeleteObjectRequest.builder().bucket(bucket).key(fullKey).build());
             log.debug("S3 delete: s3://{}/{}", bucket, fullKey);
-        } catch (SdkClientException e) {
-            throw new IOException("S3 delete failed for key='" + fullKey + "'", e);
+        } catch (SdkException e) {
+            throw classifySdkException("deleteObject", fullKey, e);
         }
     }
 
@@ -370,8 +372,8 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
                         totalDeleted += deleteResp.deleted().size();
                         log.debug("S3 batch delete: deleted {} objects from prefix {}", 
                                  deleteResp.deleted().size(), remoteDirPrefix);
-                    } catch (SdkClientException e) {
-                        log.warn("S3 batch delete failed for prefix='{}': {}", 
+                    } catch (SdkException e) {
+                        log.warn("S3 batch delete failed for prefix='{}': {}",
                                 fullPrefix, e.getMessage());
                         // Fall back to individual deletes for any remaining objects
                         for (ObjectIdentifier obj : toDelete) {
@@ -381,7 +383,7 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
                                                                         .key(obj.key())
                                                                         .build());
                                 totalDeleted++;
-                            } catch (SdkClientException ex) {
+                            } catch (SdkException ex) {
                                 log.debug("S3 fallback delete failed for key='{}': {}",
                                          obj.key(), ex.getMessage());
                             }
@@ -397,8 +399,8 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
             }
             return totalDeleted;
 
-        } catch (SdkClientException e) {
-            throw new IOException("S3 deletePrefix failed for prefix='" + fullPrefix + "'", e);
+        } catch (SdkException e) {
+            throw classifySdkException("deletePrefix", fullPrefix, e);
         }
     }
 
@@ -410,8 +412,14 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
             return true;
         } catch (NoSuchKeyException e) {
             return false;
-        } catch (SdkClientException e) {
-            throw new IOException("S3 headObject failed for key='" + fullKey + "'", e);
+        } catch (AwsServiceException e) {
+            // Some S3-compatible providers return generic service exceptions for 404.
+            if (e.statusCode() == 404) {
+                return false;
+            }
+            throw classifySdkException("headObject", fullKey, e);
+        } catch (SdkException e) {
+            throw classifySdkException("headObject", fullKey, e);
         }
     }
 
@@ -438,8 +446,8 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
                 token = resp.nextContinuationToken();
             } while (token != null && !token.isEmpty());
             return keys;
-        } catch (SdkClientException e) {
-            throw new IOException("S3 listObjects failed for prefix='" + fullPrefix + "'", e);
+        } catch (SdkException e) {
+            throw classifySdkException("listObjectsV2", fullPrefix, e);
         }
     }
 
@@ -453,9 +461,8 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
             s3Client.getObject(
                     GetObjectRequest.builder().bucket(bucket).key(fullKey).build(),
                     destinationPath);
-        } catch (SdkClientException e) {
-            throw new IOException(
-                    "S3 download failed for key='" + fullKey + "' local='" + localPath + "'", e);
+        } catch (SdkException e) {
+            throw classifySdkException("getObject", fullKey, e);
         }
         long elapsedMs = (System.nanoTime() - startNs) / 1_000_000;
         long fileSize = 0;
@@ -495,21 +502,26 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
      */
     private void uploadSinglePart(java.nio.file.Path path, String fullKey,
                                   String localPath) throws IOException {
-        SdkClientException last = null;
+        IOException last = null;
         for (int attempt = 1; attempt <= this.partUploadMaxRetries; attempt++) {
             try {
                 s3Client.putObject(
                         PutObjectRequest.builder().bucket(bucket).key(fullKey).build(),
                         path);
                 return;
-            } catch (SdkClientException e) {
-                last = e;
+            } catch (SdkException e) {
+                IOException classified = classifySdkException("putObject", fullKey, e);
+                if (classified instanceof CloudStorageNonRetryableException) {
+                    throw classified;
+                }
+                last = classified;
                 if (attempt >= this.partUploadMaxRetries) {
                     break;
                 }
                 long backoffMs = this.partUploadRetryBaseBackoffMs * (1L << (attempt - 1));
                 log.warn("S3 single-PUT retry: attempt={}/{} key={} reason={} nextBackoffMs={}",
-                         attempt, this.partUploadMaxRetries, fullKey, e.getMessage(), backoffMs);
+                         attempt, this.partUploadMaxRetries, fullKey,
+                         classified.getMessage(), backoffMs);
                 sleepQuietly(backoffMs);
             }
         }
@@ -544,8 +556,8 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
         try {
             initResp = s3Client.createMultipartUpload(
                     CreateMultipartUploadRequest.builder().bucket(bucket).key(fullKey).build());
-        } catch (SdkClientException e) {
-            throw new IOException("S3 createMultipartUpload failed for key='" + fullKey + "'", e);
+        } catch (SdkException e) {
+            throw classifySdkException("createMultipartUpload", fullKey, e);
         }
         String uploadId = initResp.uploadId();
 
@@ -601,6 +613,9 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
                 log.warn("S3 multipart abort failed: key={} uploadId={} reason={}",
                          fullKey, uploadId, abortEx.getMessage());
             }
+            if (e instanceof CloudStorageNonRetryableException) {
+                throw (CloudStorageNonRetryableException) e;
+            }
             throw new IOException(
                     "S3 multipart upload failed for key='" + fullKey + "'", e);
         }
@@ -608,36 +623,56 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
 
     /**
      * Uploads a single part of a multipart upload and returns its ETag.
-     * Opens a fresh {@link FileInputStream} per part to avoid channel-position
-     * races in concurrent scenarios, then skips to {@code offset}.
+     * Supplies a replayable stream provider so AWS SDK retries can reopen the
+     * exact byte range for each attempt.
      */
     private String uploadOnePart(java.nio.file.Path path, String fullKey,
                                  String uploadId, int partNumber,
                                  long offset, long partLen) throws IOException {
-        try (FileInputStream fis = new FileInputStream(path.toFile())) {
-            // Skip to the start of this part
-            long remaining = offset;
-            while (remaining > 0) {
-                long skipped = fis.skip(remaining);
-                if (skipped <= 0) {
-                    throw new IOException(
-                            "Unexpected EOF while seeking to offset " + offset + " in " + path);
-                }
-                remaining -= skipped;
-            }
-
-            InputStream partStream = new LimitedInputStream(fis, partLen);
+        try {
+            ContentStreamProvider partStreamProvider =
+                    () -> openBoundedPartStream(path, offset, partLen);
             UploadPartResponse resp = s3Client.uploadPart(
                     UploadPartRequest.builder()
                                     .bucket(bucket).key(fullKey)
                                     .uploadId(uploadId).partNumber(partNumber)
                                     .contentLength(partLen)
                                     .build(),
-                    RequestBody.fromInputStream(partStream, partLen));
+                    RequestBody.fromContentProvider(partStreamProvider,
+                                                    partLen,
+                                                    "application/octet-stream"));
             return resp.eTag();
-        } catch (SdkClientException e) {
-            throw new IOException(
-                    "S3 uploadPart failed: key=" + fullKey + " part=" + partNumber, e);
+        } catch (SdkException e) {
+            throw classifySdkException("uploadPart(part=" + partNumber + ")", fullKey, e);
+        }
+    }
+
+    /**
+     * Opens a fresh stream for the exact byte-range of one multipart part.
+     *
+     * <p>Returned stream starts at {@code offset} and is bounded to {@code partLen}
+     * bytes, allowing AWS SDK to recreate request bodies for retries.
+     */
+    private InputStream openBoundedPartStream(java.nio.file.Path path,
+                                              long offset,
+                                              long partLen) {
+        try {
+            FileInputStream fis = new FileInputStream(path.toFile());
+            long remaining = offset;
+            while (remaining > 0) {
+                long skipped = fis.skip(remaining);
+                if (skipped <= 0) {
+                    fis.close();
+                    throw new IOException(
+                            "Unexpected EOF while seeking to offset " + offset + " in " + path);
+                }
+                remaining -= skipped;
+            }
+            return new LimitedInputStream(fis, partLen);
+        } catch (IOException e) {
+            throw new IllegalStateException(
+                    "Failed to open multipart part stream at offset=" + offset +
+                    " length=" + partLen + " path=" + path, e);
         }
     }
 
@@ -657,6 +692,9 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
             try {
                 return uploadOnePart(path, fullKey, uploadId, partNumber, offset, partLen);
             } catch (IOException e) {
+                if (e instanceof CloudStorageNonRetryableException) {
+                    throw e;
+                }
                 last = e;
                 if (attempt >= this.partUploadMaxRetries) {
                     break;
@@ -687,6 +725,47 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Classifies SDK exceptions into retryable/non-retryable provider exceptions.
+     *
+     * <p>Retryable:
+     * <ul>
+     *   <li>client-side transport failures ({@link SdkException});</li>
+     *   <li>service throttling / transient statuses (408/425/429/500/502/503/504).</li>
+     * </ul>
+     * Non-retryable:
+     * <ul>
+     *   <li>permanent service-side statuses (e.g. auth/permission/not-found/validation).</li>
+     * </ul>
+     */
+    private IOException classifySdkException(String operation, String key, SdkException e) {
+        if (e instanceof AwsServiceException) {
+            AwsServiceException ase = (AwsServiceException) e;
+            int status = ase.statusCode();
+            String code = ase.awsErrorDetails() != null ? ase.awsErrorDetails().errorCode() : "";
+            String requestId = ase.requestId();
+            String message = String.format(Locale.US,
+                                           "S3 %s failed: key=%s status=%d code=%s requestId=%s",
+                                           operation, key, status, code, requestId);
+            if (isRetryableServiceFailure(ase)) {
+                return new IOException(message, ase);
+            }
+            return new CloudStorageNonRetryableException(message, ase);
+        }
+
+        // Client-side network/IO/timeout failures are retryable by default.
+        return new IOException("S3 " + operation + " failed for key='" + key + "'", e);
+    }
+
+    private static boolean isRetryableServiceFailure(AwsServiceException e) {
+        if (e.isThrottlingException()) {
+            return true;
+        }
+        int status = e.statusCode();
+        return status == 408 || status == 425 || status == 429 ||
+               status == 500 || status == 502 || status == 503 || status == 504;
     }
 
     // -----------------------------------------------------------------------

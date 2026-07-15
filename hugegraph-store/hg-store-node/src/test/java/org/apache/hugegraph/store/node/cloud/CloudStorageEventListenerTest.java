@@ -186,6 +186,39 @@ public class CloudStorageEventListenerTest {
     }
 
     @Test
+    public void onTableFileCreated_isNonBlocking_returnsQuicklyWithSlowProvider() throws Exception {
+        // Verify that onTableFileCreated does not block on provider.uploadFile(),
+        // even when the provider sleeps for a long duration.
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-nonblocking");
+        Path metadataDir = tmpRoot.resolve("hgstore-metadata");
+        Files.createDirectories(metadataDir);
+        Path sst = metadataDir.resolve("000008.sst");
+        Files.write(sst, "sst".getBytes());
+
+        try {
+            CloudStorageEventListener l = new CloudStorageEventListener(tmpRoot.toString());
+            long sleepDurationMs = 1000L;  // Provider will sleep for 1 second
+            CloudStorageProviderFactory.setActiveProviderForTest(
+                    new SlowUploadProvider(sleepDurationMs));
+
+            // Measure how long onTableFileCreated takes to return
+            long startNs = System.nanoTime();
+            l.onTableFileCreated("hgstore-metadata", "default", sst.toString(), 512L);
+            long callDurationMs = (System.nanoTime() - startNs) / 1_000_000;
+
+            // The callback must return in a fraction of the provider's sleep time.
+            // Allow a small buffer (100ms) for overhead, but the bulk of the sleep
+            // should happen asynchronously in the background executor.
+            assertTrue("onTableFileCreated should return quickly without blocking on upload; "
+                       + "call took " + callDurationMs + "ms (provider sleeps for "
+                       + sleepDurationMs + "ms)",
+                       callDurationMs < 200L);
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
     public void onTableFileDeleted_delegatesToProvider_withRelativeKey() {
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
@@ -482,6 +515,33 @@ public class CloudStorageEventListenerTest {
         @Override
         public void uploadFile(String localPath, String remoteKey) throws IOException {
             throw new IOException("simulated upload failure");
+        }
+    }
+
+    /**
+     * A {@link CloudStorageProvider} that sleeps during upload to simulate a slow provider.
+     * Used to verify that {@code onTableFileCreated} is non-blocking and does not wait for
+     * the provider's upload to complete.
+     */
+    static class SlowUploadProvider extends CapturingProvider {
+
+        private final long sleepMs;
+
+        SlowUploadProvider(long sleepMs) {
+            this.sleepMs = sleepMs;
+        }
+
+        @Override
+        public void uploadFile(String localPath, String remoteKey) throws IOException {
+            // Record the upload call (parent class behavior)
+            super.uploadFile(localPath, remoteKey);
+            // Simulate a slow operation that would block if called synchronously
+            try {
+                Thread.sleep(sleepMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("upload sleep interrupted", e);
+            }
         }
     }
 

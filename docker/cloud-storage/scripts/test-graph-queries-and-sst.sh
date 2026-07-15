@@ -21,6 +21,12 @@ REPO_ROOT="$(cd "${STACK_DIR}/../.." && pwd)"
 GENERATED_DIR="${STACK_DIR}/.generated"
 ARTIFACTS_DIR="${STACK_DIR}/.artifacts"
 COMPOSE_FILE="${GENERATED_DIR}/docker-compose.yml"
+FULL_TEST_REPORT="${GENERATED_DIR}/FULL-TEST-REPORT.txt"
+TEST_REPORT="${GENERATED_DIR}/test-report.txt"
+MINIO_REPORT="${GENERATED_DIR}/minio-verification.txt"
+STORE_CLUSTER_LOG="${GENERATED_DIR}/store-cluster.log"
+CLI_LOAD_LOG="${GENERATED_DIR}/cli-load.log"
+LOAD_DATA_FILE="${GENERATED_DIR}/load-data.tsv"
 export SERVER_GRAPHS_DIR="${GENERATED_DIR}/graphs"
 export SERVER_GRAPH_CONF="${SERVER_GRAPHS_DIR}/hugegraph.properties"
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cloud-storage-test}"
@@ -41,6 +47,13 @@ STORE_ROCKSDB_CLOUD_ENABLED="${STORE_ROCKSDB_CLOUD_ENABLED:-true}"
 STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS="${STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS:-30}"
 KEEP_UP="${KEEP_UP:-true}"
 SKIP_SMOKE_TESTS="${SKIP_SMOKE_TESTS:-false}"
+SCRIPT_START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+RECOVERY_STATUS="NOT_RUN"
+DELETE_CLEANUP_STATUS="NOT_RUN"
+RECREATE_STATUS="NOT_RUN"
+SMOKE_STATUS="NOT_RUN"
+INFRA_READY="false"
+NETWORK=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -75,6 +88,96 @@ USAGE
 done
 log() { printf "[cloud-storage] %s\n" "$*"; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "ERROR: $1 not found" >&2; exit 2; }; }
+
+report_line() {
+    local file="$1"
+    shift
+    printf "%s\n" "$*" >> "$file"
+}
+
+report_event() {
+    local category="$1"
+    shift
+    report_line "$FULL_TEST_REPORT" "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] [$category] $*"
+}
+
+record_phase() {
+    local phase="$1"
+    local status="$2"
+    local details="$3"
+    report_line "$TEST_REPORT" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")\t${phase}\t${status}\t${details}"
+    report_event "$phase" "${status} - ${details}"
+}
+
+init_reports() {
+    mkdir -p "$GENERATED_DIR"
+    : > "$FULL_TEST_REPORT"
+    : > "$TEST_REPORT"
+    : > "$MINIO_REPORT"
+    : > "$STORE_CLUSTER_LOG"
+    : > "$CLI_LOAD_LOG"
+    : > "$LOAD_DATA_FILE"
+
+    report_line "$FULL_TEST_REPORT" "Cloud Storage E2E Test Report"
+    report_line "$FULL_TEST_REPORT" "started_at=${SCRIPT_START_TS}"
+    report_line "$FULL_TEST_REPORT" "script=${BASH_SOURCE[0]}"
+    report_line "$FULL_TEST_REPORT" "compose_project=${COMPOSE_PROJECT_NAME}"
+    report_line "$FULL_TEST_REPORT" ""
+
+    report_line "$TEST_REPORT" "timestamp_utc	phase	status	details"
+    report_line "$MINIO_REPORT" "MinIO Verification Report"
+    report_line "$MINIO_REPORT" "started_at=${SCRIPT_START_TS}"
+    report_line "$MINIO_REPORT" ""
+    report_line "$CLI_LOAD_LOG" "CLI/Data Load Report"
+    report_line "$CLI_LOAD_LOG" "started_at=${SCRIPT_START_TS}"
+    report_line "$CLI_LOAD_LOG" ""
+    report_line "$LOAD_DATA_FILE" "name	age	city"
+}
+
+collect_store_logs() {
+    if [[ -f "$COMPOSE_FILE" ]]; then
+        docker compose -f "$COMPOSE_FILE" logs store0 store1 store2 > "$STORE_CLUSTER_LOG" 2>&1 || true
+    fi
+}
+
+finalize_reports() {
+     local exit_code="$1"
+     local end_ts
+     end_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+     report_line "$FULL_TEST_REPORT" ""
+     report_line "$FULL_TEST_REPORT" "Summary"
+     report_line "$FULL_TEST_REPORT" "ended_at=${end_ts}"
+     report_line "$FULL_TEST_REPORT" "exit_code=${exit_code}"
+     report_line "$FULL_TEST_REPORT" "infra_ready=${INFRA_READY}"
+     report_line "$FULL_TEST_REPORT" "smoke_tests=${SMOKE_STATUS}"
+     report_line "$FULL_TEST_REPORT" "recovery_test=${RECOVERY_STATUS}"
+     report_line "$FULL_TEST_REPORT" "db_deletion_cleanup_test=${DELETE_CLEANUP_STATUS}"
+     report_line "$FULL_TEST_REPORT" "db_recreation_no_orphan_test=${RECREATE_STATUS}"
+     report_line "$FULL_TEST_REPORT" ""
+     report_line "$FULL_TEST_REPORT" "Generated artifacts:"
+     report_line "$FULL_TEST_REPORT" "- ${FULL_TEST_REPORT}"
+     report_line "$FULL_TEST_REPORT" "- ${TEST_REPORT}"
+     report_line "$FULL_TEST_REPORT" "- ${MINIO_REPORT}"
+     report_line "$FULL_TEST_REPORT" "- ${STORE_CLUSTER_LOG}"
+     report_line "$FULL_TEST_REPORT" "- ${CLI_LOAD_LOG}"
+     report_line "$FULL_TEST_REPORT" "- ${LOAD_DATA_FILE}"
+}
+
+assert_all_reports_present() {
+     local missing=0
+     for report_file in "$FULL_TEST_REPORT" "$TEST_REPORT" "$MINIO_REPORT" "$STORE_CLUSTER_LOG" "$CLI_LOAD_LOG" "$LOAD_DATA_FILE"; do
+         if [[ ! -f "$report_file" ]]; then
+             echo "ERROR: expected report file missing: $report_file" >&2
+             missing=$((missing + 1))
+         fi
+     done
+     if (( missing > 0 )); then
+         echo "ERROR: $missing expected report file(s) are missing; CI contract violated" >&2
+         return 1
+     fi
+     return 0
+}
 
 find_dist_dir() {
     local glob="$1"
@@ -218,8 +321,18 @@ clear_graph_with_confirm() {
     rm -f "$resp_file" || true
 }
 
-cleanup() { [[ "$KEEP_UP" == "true" ]] || (docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true); }
-trap cleanup EXIT
+on_exit() {
+     local status=$?
+     local assertion_rc
+     collect_store_logs
+     finalize_reports "$status"
+     assert_all_reports_present
+     assertion_rc=$?
+     # Preserve original exit code unless test passed but assertion failed
+     [[ $status -eq 0 && $assertion_rc -ne 0 ]] && status=$assertion_rc
+     [[ "$KEEP_UP" == "true" ]] || (docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true)
+}
+trap on_exit EXIT
 
 # -----------------------------------------------------------------------------
 # Total-loss recovery E2E helpers
@@ -235,6 +348,14 @@ graph_vertex_count() {
 # Create a minimal schema and insert enough vertices to generate SST files.
 load_test_data() {
     log "loading test data (schema + 150 vertices)..."
+    report_event "graph-load" "starting schema + vertex load"
+    local insert_ok=0 insert_fail=0
+
+    # Create deterministic input file promised by README.
+    for i in $(seq 1 150); do
+        printf "person_%s\t%s\tcity_%s\n" "$i" "$((20 + i % 50))" "$((i % 5))" >> "$LOAD_DATA_FILE"
+    done
+
     for pk in '{"name":"name","data_type":"TEXT","cardinality":"SINGLE"}' \
               '{"name":"age","data_type":"INT","cardinality":"SINGLE"}' \
               '{"name":"city","data_type":"TEXT","cardinality":"SINGLE"}'; do
@@ -245,19 +366,42 @@ load_test_data() {
         -H 'Content-Type: application/json' \
         -d '{"name":"person","id_strategy":"AUTOMATIC","properties":["name","age","city"]}' || true
 
-    for i in $(seq 1 150); do
-        curl -s -o /dev/null -X POST "${GRAPH_API_BASE}/graph/vertices" \
-            -H 'Content-Type: application/json' \
-            -d "{\"label\":\"person\",\"properties\":{\"name\":\"person_$i\",\"age\":$((20 + i % 50)),\"city\":\"city_$((i % 5))\"}}" || true
-    done
-    log "  ✓ inserted 150 vertices (count now = $(graph_vertex_count))"
+    while IFS=$'\t' read -r name age city; do
+        [[ "$name" == "name" ]] && continue
+        local payload code
+        payload="{\"label\":\"person\",\"properties\":{\"name\":\"${name}\",\"age\":${age},\"city\":\"${city}\"}}"
+        code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${GRAPH_API_BASE}/graph/vertices" \
+            -H 'Content-Type: application/json' -d "$payload" || true)
+        if [[ "$code" =~ ^2 ]]; then
+            insert_ok=$((insert_ok + 1))
+            if (( insert_ok % 25 == 0 )); then
+                report_line "$CLI_LOAD_LOG" "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] inserted=${insert_ok} failed=${insert_fail}"
+            fi
+        else
+            insert_fail=$((insert_fail + 1))
+            report_line "$CLI_LOAD_LOG" "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] vertex_insert_failed name=${name} http=${code}"
+        fi
+    done < "$LOAD_DATA_FILE"
+
+    report_line "$CLI_LOAD_LOG" "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] load_complete inserted=${insert_ok} failed=${insert_fail}"
+
+    if (( insert_ok == 0 )); then
+        record_phase "graph-load" "FAIL" "no vertices inserted"
+        echo "ERROR: failed to insert any vertices" >&2
+        return 1
+    fi
+
+    log "  ✓ inserted ${insert_ok} vertices (count now = $(graph_vertex_count))"
+    record_phase "graph-load" "PASS" "inserted=${insert_ok};failed=${insert_fail};vertex_count=$(graph_vertex_count)"
 }
 
 # Assert every bucket holds a consistent {CURRENT, MANIFEST, OPTIONS, SST} set.
 # This deterministic check verifies metadata objects from ordered
 # CURRENT/MANIFEST/OPTIONS mirroring ran, so the SSTs are no longer orphans.
 verify_metadata_in_minio() {
-    docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
+    local out rc
+    set +e
+    out=$(docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
         mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
         rc=0
         for b in '"$S3_BUCKET_STORE0 $S3_BUCKET_STORE1 $S3_BUCKET_STORE2"'; do
@@ -273,7 +417,12 @@ verify_metadata_in_minio() {
             fi
         done
         exit $rc
-    '
+    ' 2>&1)
+    rc=$?
+    set -e
+
+    printf "%s\n" "$out" | tee -a "$MINIO_REPORT"
+    return $rc
 }
 
 # Stop a store, wipe its RocksDB state-machine data (db/ + metadata graph) while
@@ -493,6 +642,8 @@ run_db_deletion_cleanup_test() {
  }
 
 need_cmd docker curl python3
+init_reports
+report_event "bootstrap" "initializing stack and reports"
 log "pulling images..."
 ensure_image "$MINIO_IMAGE"
 ensure_image "$MINIO_MC_IMAGE"
@@ -713,16 +864,54 @@ wait_svc "store2" 180
 wait_svc "server" 180
 log "waiting for graph backend..."
 wait_http "$GRAPH_API_BASE/graph/vertices" 60
+INFRA_READY="true"
+record_phase "infra-health" "PASS" "minio,pd,store0,store1,store2,server healthy"
 log "✓ SUCCESS: Cloud storage infrastructure ready"
 
 if [[ "$SKIP_SMOKE_TESTS" == "true" ]]; then
+    SMOKE_STATUS="SKIPPED"
+    record_phase "smoke-tests" "SKIPPED" "SKIP_SMOKE_TESTS=true"
     log "SKIP_SMOKE_TESTS=true -> skipping data creation and validation phases"
     log "✓ SUCCESS: infrastructure-only mode complete"
     exit 0
 fi
 
-load_test_data
-run_recovery_test
-run_db_deletion_cleanup_test
-run_db_recreation_no_orphan_test
+SMOKE_STATUS="RUNNING"
+if ! load_test_data; then
+    SMOKE_STATUS="FAILED"
+    exit 1
+fi
+
+if run_recovery_test; then
+    RECOVERY_STATUS="PASS"
+    record_phase "recovery-test" "PASS" "vertex count recovered after local state loss"
+else
+    RECOVERY_STATUS="FAIL"
+    record_phase "recovery-test" "FAIL" "recovery workflow failed"
+    SMOKE_STATUS="FAILED"
+    exit 1
+fi
+
+if run_db_deletion_cleanup_test; then
+    DELETE_CLEANUP_STATUS="PASS"
+    record_phase "db-deletion-cleanup" "PASS" "cloud prefix cleaned after clear()"
+else
+    DELETE_CLEANUP_STATUS="FAIL"
+    record_phase "db-deletion-cleanup" "FAIL" "cloud prefix cleanup failed"
+    SMOKE_STATUS="FAILED"
+    exit 1
+fi
+
+if run_db_recreation_no_orphan_test; then
+    RECREATE_STATUS="PASS"
+    record_phase "db-recreation-no-orphan" "PASS" "recreated graph remained empty"
+else
+    RECREATE_STATUS="FAIL"
+    record_phase "db-recreation-no-orphan" "FAIL" "orphan data was rehydrated"
+    SMOKE_STATUS="FAILED"
+    exit 1
+fi
+
+SMOKE_STATUS="PASS"
+record_phase "smoke-tests" "PASS" "all cloud storage E2E tests passed"
 log "✓ SUCCESS: all cloud storage E2E tests passed"
