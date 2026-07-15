@@ -52,11 +52,14 @@ import software.amazon.awssdk.services.s3.model.CompleteMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
 import software.amazon.awssdk.services.s3.model.CreateMultipartUploadResponse;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.model.UploadPartRequest;
@@ -319,6 +322,83 @@ public class S3CloudStorageProvider implements CloudStorageProvider {
             log.debug("S3 delete: s3://{}/{}", bucket, fullKey);
         } catch (SdkClientException e) {
             throw new IOException("S3 delete failed for key='" + fullKey + "'", e);
+        }
+    }
+
+    /**
+     * Deletes all objects under a prefix using S3's DeleteObjects (batch delete) API.
+     *
+     * <p>Much more efficient than individual deletes, especially for prefixes with many objects.
+     * Handles pagination internally if the prefix contains more than 1000 objects.
+     *
+     * @param remoteDirPrefix directory/prefix inside bucket (without provider pathPrefix)
+     * @return number of objects deleted
+     * @throws IOException on I/O or network failure
+     */
+    @Override
+    public int deletePrefix(String remoteDirPrefix) throws IOException {
+        String fullPrefix = buildKey(remoteDirPrefix == null ? "" : remoteDirPrefix);
+        int totalDeleted = 0;
+
+        try {
+            String token = null;
+            do {
+                ListObjectsV2Request.Builder listReq =
+                        ListObjectsV2Request.builder().bucket(bucket).prefix(fullPrefix);
+                if (token != null) {
+                    listReq.continuationToken(token);
+                }
+                ListObjectsV2Response listResp = s3Client.listObjectsV2(listReq.build());
+
+                List<ObjectIdentifier> toDelete = new ArrayList<>();
+                for (S3Object obj : listResp.contents()) {
+                    String key = obj.key();
+                    if (key != null && !key.endsWith("/")) {
+                        toDelete.add(ObjectIdentifier.builder().key(key).build());
+                    }
+                }
+
+                if (!toDelete.isEmpty()) {
+                    try {
+                        DeleteObjectsResponse deleteResp = s3Client.deleteObjects(
+                                DeleteObjectsRequest.builder()
+                                                   .bucket(bucket)
+                                                   .delete(software.amazon.awssdk.services.s3.model.Delete.builder()
+                                                                                                          .objects(toDelete)
+                                                                                                          .build())
+                                                   .build());
+                        totalDeleted += deleteResp.deleted().size();
+                        log.debug("S3 batch delete: deleted {} objects from prefix {}", 
+                                 deleteResp.deleted().size(), remoteDirPrefix);
+                    } catch (SdkClientException e) {
+                        log.warn("S3 batch delete failed for prefix='{}': {}", 
+                                fullPrefix, e.getMessage());
+                        // Fall back to individual deletes for any remaining objects
+                        for (ObjectIdentifier obj : toDelete) {
+                            try {
+                                s3Client.deleteObject(DeleteObjectRequest.builder()
+                                                                        .bucket(bucket)
+                                                                        .key(obj.key())
+                                                                        .build());
+                                totalDeleted++;
+                            } catch (SdkClientException ex) {
+                                log.debug("S3 fallback delete failed for key='{}': {}",
+                                         obj.key(), ex.getMessage());
+                            }
+                        }
+                    }
+                }
+
+                token = listResp.nextContinuationToken();
+            } while (token != null && !token.isEmpty());
+
+            if (totalDeleted > 0) {
+                log.info("S3 prefix delete completed: prefix={}, deleted={}", remoteDirPrefix, totalDeleted);
+            }
+            return totalDeleted;
+
+        } catch (SdkClientException e) {
+            throw new IOException("S3 deletePrefix failed for prefix='" + fullPrefix + "'", e);
         }
     }
 

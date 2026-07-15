@@ -144,6 +144,14 @@ public final class CloudSyncTracker {
         return true;
     }
 
+    /**
+     * Removes all confirmed-sync state for the named database.
+     * Called when a DB is destroyed so the bitmap does not leak memory or bleed into a recreated DB.
+     */
+    public void clearDb(String dbName) {
+        confirmedByDb.remove(dbName);
+    }
+
     /** Number of confirmed SST files for a DB (testing / monitoring). */
     public long confirmedCount(String dbName) {
         Roaring64NavigableMap bm = confirmedByDb.get(dbName);

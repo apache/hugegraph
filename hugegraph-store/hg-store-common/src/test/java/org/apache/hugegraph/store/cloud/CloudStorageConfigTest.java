@@ -155,6 +155,15 @@ public class CloudStorageConfigTest {
          assertEquals(120_000L, config.getUploadRetryMaxDelayMs());
      }
 
+     @Test
+     public void testUploadBackpressureHighWatermark() {
+         config.setUploadBackpressureHighWatermark(128);
+         assertEquals(128, config.getUploadBackpressureHighWatermark());
+
+         config.setUploadBackpressureHighWatermark(0);
+         assertEquals(0, config.getUploadBackpressureHighWatermark());
+     }
+
     // ---- Provider properties (cloud.storage.<provider>.* flattened) ----
 
     @Test
@@ -226,4 +235,3 @@ public class CloudStorageConfigTest {
         assertEquals("false", config.getProviderProperties().get("multipart-exhausted-direct-dlq"));
     }
 }
-

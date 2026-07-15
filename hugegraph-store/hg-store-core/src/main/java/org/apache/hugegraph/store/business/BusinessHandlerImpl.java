@@ -1008,17 +1008,27 @@ public class BusinessHandlerImpl implements BusinessHandler {
     }
 
     /**
-     * Clear map data
+     * Clear map data.
+     *
+     * <p>Fires {@code notifyTruncateBegin} before the key-range delete so that
+     * registered listeners can prepare for truncate and suppress racing callbacks,
+     * and {@code notifyTruncate} afterwards so that listeners can finalize any
+     * post-truncate cleanup — matching the same callback pair fired by
+     * {@link org.apache.hugegraph.rocksdb.access.RocksDBSession#truncate()}.
      */
     @Override
     public void truncate(String graphName, int partId) throws HgStoreException {
         // Each partition corresponds to a rocksdb instance, so the rocksdb instance name is
         // rocksdb + partId
         try (RocksDBSession dbSession = getSession(graphName, partId)) {
+            String dbName = dbSession.getGraphName();
+            String dbPath = dbSession.getDbPath();
+            factory.notifyTruncateBegin(dbName, dbPath);
             dbSession.sessionOp().deleteRange(keyCreator.getStartKey(partId, graphName),
                                               keyCreator.getEndKey(partId, graphName));
             // Release map ID
             keyCreator.delGraphId(partId, graphName);
+            factory.notifyTruncate(dbName, dbPath);
         }
     }
 

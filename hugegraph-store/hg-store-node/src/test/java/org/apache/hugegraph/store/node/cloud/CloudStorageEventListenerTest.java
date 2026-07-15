@@ -456,6 +456,22 @@ public class CloudStorageEventListenerTest {
         public void close() throws IOException {
         }
 
+        @SuppressWarnings("RedundantThrows")
+        @Override
+        public int deletePrefix(String remoteDirPrefix) throws IOException {
+            List<String> result = new ArrayList<>();
+            for (String key : remoteFiles.keySet()) {
+                if (key.startsWith(remoteDirPrefix)) {
+                    result.add(key);
+                }
+            }
+            for (String key : result) {
+                deletes.add(key);
+                remoteFiles.remove(key);
+            }
+            return result.size();
+        }
+
         void putRemoteFile(String key, byte[] content) {
             remoteFiles.put(key, content);
         }
@@ -821,6 +837,195 @@ public class CloudStorageEventListenerTest {
 
         assertEquals("sync must have been called", List.of("sync"), l.callOrder);
         assertTrue("SST must NOT be deleted when metadata sync fails", provider.deletes.isEmpty());
+    }
+
+    // -----------------------------------------------------------------------
+    // onDBDeleteBegin / onDBDeleted — stale-data guard
+    // -----------------------------------------------------------------------
+
+    @Test
+    public void onDBDeleteBegin_writesTombstoneToCloud() {
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(DATA_ROOT);
+        l.onDBDeleteBegin("mydb", DATA_ROOT + "/mydb");
+
+        String expectedTombstone = "mydb/" + CloudStorageEventListener.DB_TOMBSTONE_FILE;
+        boolean tombstoneUploaded = provider.uploads.stream()
+                .anyMatch(pair -> expectedTombstone.equals(pair[1]));
+        assertTrue("Tombstone must be uploaded to cloud prefix", tombstoneUploaded);
+    }
+
+    @Test
+    public void onDBDeleteBegin_tombstoneKeyRespectsStoreScopePrefix() {
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(
+                DATA_ROOT, true, 0L, null, new CloudSyncTracker(), 0, false,
+                "store-127.0.0.1_8501");
+        l.onDBDeleteBegin("mydb", DATA_ROOT + "/mydb");
+
+        String expectedTombstone = "store-127.0.0.1_8501/mydb/"
+                                   + CloudStorageEventListener.DB_TOMBSTONE_FILE;
+        boolean tombstoneUploaded = provider.uploads.stream()
+                .anyMatch(pair -> expectedTombstone.equals(pair[1]));
+        assertTrue("Tombstone must include store scope prefix", tombstoneUploaded);
+    }
+
+    @Test
+    public void onDBDeleted_purgesAllRemoteObjectsUnderPrefix() {
+        CapturingProvider provider = new CapturingProvider();
+        provider.putRemoteFile("mydb/000001.sst", "sst".getBytes());
+        provider.putRemoteFile("mydb/CURRENT", "MANIFEST-1".getBytes());
+        provider.putRemoteFile("mydb/MANIFEST-000001", "body".getBytes());
+        provider.putRemoteFile("mydb/" + CloudStorageEventListener.DB_TOMBSTONE_FILE,
+                               "deleted".getBytes());
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(DATA_ROOT);
+        l.onDBDeleted("mydb", DATA_ROOT + "/mydb");
+
+        // All four remote objects must have been submitted for deletion.
+        List<String> expectedDeleted = List.of(
+                "mydb/000001.sst", "mydb/CURRENT", "mydb/MANIFEST-000001",
+                "mydb/" + CloudStorageEventListener.DB_TOMBSTONE_FILE);
+        for (String key : expectedDeleted) {
+            assertTrue("Remote object must be deleted after DB destroy: " + key,
+                       provider.deletes.contains(key));
+        }
+    }
+
+    @Test
+    public void onDBDeleted_clearsSyncTrackerState() {
+        CloudSyncTracker tracker = new CloudSyncTracker();
+        tracker.markConfirmed("mydb", DATA_ROOT + "/mydb/000001.sst");
+        assertEquals(1L, tracker.confirmedCount("mydb"));
+
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(
+                DATA_ROOT, true, 0L, null, tracker, 0);
+        l.onDBDeleted("mydb", DATA_ROOT + "/mydb");
+
+        assertEquals("Sync tracker must be cleared for the deleted DB",
+                     0L, tracker.confirmedCount("mydb"));
+    }
+
+    @Test
+    public void onDBOpening_skipsHydrationWhenTombstonePresent() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-storage");
+        Path partitionDir = tmpRoot.resolve("mydb");
+        Files.createDirectories(partitionDir);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(tmpRoot.toString(), true);
+        CapturingProvider provider = new CapturingProvider();
+        // Populate cloud with stale data from a previous deleted generation + tombstone.
+        provider.putRemoteFile("mydb/000001.sst", "stale-sst".getBytes());
+        provider.putRemoteFile("mydb/CURRENT", "MANIFEST-000001".getBytes());
+        provider.putRemoteFile("mydb/" + CloudStorageEventListener.DB_TOMBSTONE_FILE,
+                               "deleted".getBytes());
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        try {
+            l.onDBOpening("mydb", partitionDir.toString());
+
+            // Hydration must be skipped — stale SST and CURRENT must NOT be downloaded.
+            assertFalse("Stale SST must not be hydrated when tombstone is present",
+                        Files.exists(partitionDir.resolve("000001.sst")));
+            assertFalse("Stale CURRENT must not be hydrated when tombstone is present",
+                        Files.exists(partitionDir.resolve("CURRENT")));
+            // All stale remote objects must be submitted for deletion during tombstone purge.
+            assertTrue("Stale SST must be purged",
+                       provider.deletes.contains("mydb/000001.sst"));
+            assertTrue("Stale CURRENT must be purged",
+                       provider.deletes.contains("mydb/CURRENT"));
+            assertTrue("Tombstone itself must be purged",
+                       provider.deletes.contains(
+                               "mydb/" + CloudStorageEventListener.DB_TOMBSTONE_FILE));
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void onDBOpening_proceedsNormallyWhenNoTombstone() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-storage");
+        Path partitionDir = tmpRoot.resolve("mydb");
+        Files.createDirectories(partitionDir);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(tmpRoot.toString(), true);
+        CapturingProvider provider = new CapturingProvider();
+        // Normal cloud state — no tombstone.
+        provider.putRemoteFile("mydb/000001.sst", "sst-body".getBytes());
+        provider.putRemoteFile("mydb/CURRENT", "MANIFEST-000001".getBytes());
+        provider.putRemoteFile("mydb/MANIFEST-000001", "manifest".getBytes());
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        try {
+            l.onDBOpening("mydb", partitionDir.toString());
+
+            assertTrue("SST must be hydrated in normal open",
+                       Files.exists(partitionDir.resolve("000001.sst")));
+            assertTrue("CURRENT must be hydrated in normal open",
+                       Files.exists(partitionDir.resolve("CURRENT")));
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void deleteAndRecreate_newDbDoesNotIngestDeletedData() throws Exception {
+        // Simulate the full delete-then-recreate lifecycle:
+        // 1. DB is created and writes data to cloud.
+        // 2. DB is deleted → tombstone written, cloud purged.
+        // 3. DB is recreated at the same path → hydration must find empty prefix, not stale data.
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-storage");
+        Path dbDir = tmpRoot.resolve("graph0");
+        Files.createDirectories(dbDir);
+
+        CapturingProvider provider = new CapturingProvider();
+        // Stale objects from the old generation.
+        provider.putRemoteFile("graph0/000001.sst", "old-data".getBytes());
+        provider.putRemoteFile("graph0/CURRENT", "MANIFEST-000001".getBytes());
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        CloudStorageEventListener l = new CloudStorageEventListener(tmpRoot.toString(), true);
+
+        // Step 1: begin delete — tombstone uploaded.
+        l.onDBDeleteBegin("graph0", dbDir.toString());
+        boolean tombstoneUploaded = provider.uploads.stream()
+                .anyMatch(p -> p[1].equals("graph0/" + CloudStorageEventListener.DB_TOMBSTONE_FILE));
+        assertTrue("Tombstone must be uploaded during deleteBegin", tombstoneUploaded);
+
+        // Simulate tombstone appearing in cloud (as it would after a real upload).
+        provider.putRemoteFile("graph0/" + CloudStorageEventListener.DB_TOMBSTONE_FILE,
+                               "deleted".getBytes());
+
+        // Step 2: deletion complete — cloud purged.
+        l.onDBDeleted("graph0", dbDir.toString());
+        // All three objects must be deleted (including tombstone itself).
+        assertTrue("Old SST must be deleted", provider.deletes.contains("graph0/000001.sst"));
+        assertTrue("Old CURRENT must be deleted", provider.deletes.contains("graph0/CURRENT"));
+        assertTrue("Tombstone must be deleted after purge",
+                   provider.deletes.contains(
+                           "graph0/" + CloudStorageEventListener.DB_TOMBSTONE_FILE));
+
+        // Step 3: cloud is now clean; recreate at same path.
+        // Remove all objects from "cloud" to simulate a clean state.
+        provider.remoteFiles.clear();
+        Files.createDirectories(dbDir);
+        l.onDBOpening("graph0", dbDir.toString());
+
+        // Nothing to hydrate; recreated DB dir must be empty.
+        assertFalse("Stale SST must not be present in recreated DB dir",
+                    Files.exists(dbDir.resolve("000001.sst")));
+        assertFalse("Stale CURRENT must not be present in recreated DB dir",
+                    Files.exists(dbDir.resolve("CURRENT")));
+
+        deleteRecursively(tmpRoot.toFile());
     }
 
 }

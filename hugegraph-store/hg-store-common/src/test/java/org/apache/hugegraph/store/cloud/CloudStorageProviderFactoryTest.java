@@ -20,14 +20,21 @@ package org.apache.hugegraph.store.cloud;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.ServiceLoader;
 
 import org.junit.After;
 import org.junit.Before;
@@ -37,18 +44,46 @@ public class CloudStorageProviderFactoryTest {
 
     private CloudStorageConfig config;
     private CloudStorageProvider mockProvider;
+    private Map<String, CloudStorageProvider> registryBackup;
 
     @Before
     public void setUp() {
         config = new CloudStorageConfig();
         mockProvider = mock(CloudStorageProvider.class);
         when(mockProvider.providerName()).thenReturn("s3");
+
+        // Keep each test isolated from static registry state.
+        registryBackup = new HashMap<>(registry());
+        registry().clear();
     }
 
     @After
     public void tearDown() {
-        // Reset to prevent test interference
+        // Reset static mutable state to prevent test interference.
         CloudStorageProviderFactory.reset();
+        registry().clear();
+        registry().putAll(registryBackup);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, CloudStorageProvider> registry() {
+        try {
+            Field field = CloudStorageProviderFactory.class.getDeclaredField("REGISTRY");
+            field.setAccessible(true);
+            return (Map<String, CloudStorageProvider>) field.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to access CloudStorageProviderFactory.REGISTRY", e);
+        }
+    }
+
+    private static void invokeLoadProviders() {
+        try {
+            Method method = CloudStorageProviderFactory.class.getDeclaredMethod("loadProviders");
+            method.setAccessible(true);
+            method.invoke(null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Unable to invoke CloudStorageProviderFactory.loadProviders", e);
+        }
     }
 
     /**
@@ -196,7 +231,7 @@ public class CloudStorageProviderFactoryTest {
       * Test that initialize closes previous provider when switching providers
       */
      @Test
-     public void testInitializeClosesPreviousProvider() throws IOException {
+     public void testInitializeClosesPreviousProvider() {
          // Set up first provider
          CloudStorageProvider firstProvider = mock(CloudStorageProvider.class);
          when(firstProvider.providerName()).thenReturn("s3");
@@ -245,9 +280,101 @@ public class CloudStorageProviderFactoryTest {
 
          assertNull(CloudStorageProviderFactory.getActiveProvider());
      }
+
+     @Test
+     public void testInitializeUsesRegistryProviderAndSetsActive() {
+         registry().put("s3", mockProvider);
+         config.setEnabled(true);
+         config.setProvider("s3");
+         config.getProviderProperties().put("bucket", "unit-bucket");
+
+         CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+         assertSame(mockProvider, result);
+         assertSame(mockProvider, CloudStorageProviderFactory.getActiveProvider());
+         verify(mockProvider, times(1)).init(config);
+     }
+
+     @Test
+     public void testInitializeWithSameActiveProviderDoesNotCloseIt() throws IOException {
+         registry().put("s3", mockProvider);
+         CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);
+         config.setEnabled(true);
+         config.setProvider("s3");
+
+         CloudStorageProviderFactory.initialize(config);
+
+         verify(mockProvider, never()).close();
+         verify(mockProvider, times(1)).init(config);
+     }
+
+     @Test
+     public void testInitializeSwitchProviderClosesPreviousProvider() throws IOException {
+         CloudStorageProvider oldProvider = mock(CloudStorageProvider.class);
+         when(oldProvider.providerName()).thenReturn("old");
+
+         CloudStorageProvider newProvider = mock(CloudStorageProvider.class);
+         when(newProvider.providerName()).thenReturn("gcs");
+
+         registry().put("gcs", newProvider);
+         CloudStorageProviderFactory.setActiveProviderForTest(oldProvider);
+
+         config.setEnabled(true);
+         config.setProvider("gcs");
+
+         CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+         assertSame(newProvider, result);
+         assertSame(newProvider, CloudStorageProviderFactory.getActiveProvider());
+         verify(oldProvider, times(1)).close();
+         verify(newProvider, times(1)).init(config);
+     }
+
+     @Test
+     public void testInitializeContinuesWhenClosingPreviousProviderFails() throws IOException {
+         CloudStorageProvider oldProvider = mock(CloudStorageProvider.class);
+         when(oldProvider.providerName()).thenReturn("old");
+         doThrow(new IOException("close failed")).when(oldProvider).close();
+
+         CloudStorageProvider newProvider = mock(CloudStorageProvider.class);
+         when(newProvider.providerName()).thenReturn("gcs");
+
+         registry().put("gcs", newProvider);
+         CloudStorageProviderFactory.setActiveProviderForTest(oldProvider);
+
+         config.setEnabled(true);
+         config.setProvider("gcs");
+
+         CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+         assertSame(newProvider, result);
+         assertSame(newProvider, CloudStorageProviderFactory.getActiveProvider());
+         verify(oldProvider, times(1)).close();
+         verify(newProvider, times(1)).init(config);
+     }
+
+     @Test
+     public void testLoadProvidersKeepsFirstRegistrationOnDuplicateName() {
+         CloudStorageProvider firstRegistration = mock(CloudStorageProvider.class);
+         when(firstRegistration.providerName())
+                 .thenReturn(TestDuplicateNamedProvider.PROVIDER_NAME);
+
+         boolean duplicateProviderDiscoverable =
+                 ServiceLoader.load(CloudStorageProvider.class,
+                                    CloudStorageProviderFactory.class.getClassLoader())
+                              .stream()
+                              .map(ServiceLoader.Provider::get)
+                              .anyMatch(p -> TestDuplicateNamedProvider.PROVIDER_NAME
+                                      .equals(p.providerName()));
+         if (!duplicateProviderDiscoverable) {
+             fail("Test duplicate provider is not discoverable via ServiceLoader");
+         }
+
+         registry().put(TestDuplicateNamedProvider.PROVIDER_NAME, firstRegistration);
+
+         invokeLoadProviders();
+
+         assertSame(firstRegistration,
+                    registry().get(TestDuplicateNamedProvider.PROVIDER_NAME));
+     }
  }
-
-
-
-
-

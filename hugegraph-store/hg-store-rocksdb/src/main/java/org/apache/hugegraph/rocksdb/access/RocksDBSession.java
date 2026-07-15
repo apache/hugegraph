@@ -604,8 +604,13 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         tableNames.remove(defaultCF);
 
         log.info("truncate table: {}", String.join(",", tableNames));
+        // Notify listeners before table recreation so they can suppress cloud sync callbacks.
+        RocksDBFactory.getInstance().notifyTruncateBegin(this.graphName, this.dbPath);
         this.dropTables(tableNames.toArray(new String[0]));
         this.createTables(tableNames.toArray(new String[0]));
+
+        // Notify listeners that truncate has completed so they can purge remote state.
+        RocksDBFactory.getInstance().notifyTruncate(this.graphName, this.dbPath);
     }
 
     public void flush(boolean wait) {

@@ -102,16 +102,16 @@ Notes:
 
 For provider `s3`, configure these properties under `cloud.storage.s3`:
 
-| Configuration                                           | Default  | Description                                                                                        |
-|---------------------------------------------------------|----------|----------------------------------------------------------------------------------------------------|
-| `cloud.storage.s3.bucket`                               | _(none)_ | Target S3 bucket name. Required when S3 provider is enabled.                                       |
-| `cloud.storage.s3.region`                               | _(none)_ | AWS region (for example `us-east-1`).                                                              |
-| `cloud.storage.s3.endpoint`                             | _(none)_ | Optional custom endpoint for S3-compatible stores (MinIO/Ceph).                                    |
-| `cloud.storage.s3.access-key`                           | _(none)_ | Access key / AWS Access ID credential. Omit to use AWS default credentials chain.                  |
-| `cloud.storage.s3.secret-key`                           | _(none)_ | Secret key credential. Omit to use AWS default credentials chain.                                  |
-| `cloud.storage.s3.multipart-part-retry-max-attempts`    | `3`     | Max retries for each multipart upload part before the whole file upload fails.                      |
-| `cloud.storage.s3.multipart-part-retry-base-backoff-ms` | `1000`  | Base backoff for part retries (exponential: 1x/2x/4x...).                                           |
-| `cloud.storage.s3.multipart-exhausted-direct-dlq`       | `false` | If `true`, part-retry exhaustion is marked non-retryable so outer SST retry can go directly to DLQ. |
+| Configuration                                           | Default   | Description                                                                                          |
+|---------------------------------------------------------|-----------|------------------------------------------------------------------------------------------------------|
+| `cloud.storage.s3.bucket`                               | _(none)_  | Target S3 bucket name. Required when S3 provider is enabled.                                         |
+| `cloud.storage.s3.region`                               | _(none)_  | AWS region (for example `us-east-1`).                                                                |
+| `cloud.storage.s3.endpoint`                             | _(none)_  | Optional custom endpoint for S3-compatible stores (MinIO/Ceph).                                      |
+| `cloud.storage.s3.access-key`                           | _(none)_  | Access key / AWS Access ID credential. Omit to use AWS default credentials chain.                    |
+| `cloud.storage.s3.secret-key`                           | _(none)_  | Secret key credential. Omit to use AWS default credentials chain.                                    |
+| `cloud.storage.s3.multipart-part-retry-max-attempts`    | `3`       | Max retries for each multipart upload part before the whole file upload fails.                       |
+| `cloud.storage.s3.multipart-part-retry-base-backoff-ms` | `1000`    | Base backoff for part retries (exponential: 1x/2x/4x...).                                            |
+| `cloud.storage.s3.multipart-exhausted-direct-dlq`       | `false`   | If `true`, part-retry exhaustion is marked non-retryable so outer SST retry can go directly to DLQ.  |
 
 ### Sample `application.yml` (`cloud.storage`)
 
@@ -334,6 +334,14 @@ onDBOpening(dbName)
   compaction delete guards use the in-memory bitmap (`allConfirmed`) and do **not** issue
   `provider.fileExists()` round-trips on the hot compaction thread.
 
+### Scope: managed delete vs accidental local loss
+
+- Current behavior intentionally treats a missing local DB directory as a **recovery** case and hydrates from cloud when remote objects exist.
+- Intentional delete/reset is recognized only through the managed deletion flow (`RocksDBFactory.destroyGraphDB()` -> `onDBDeleteBegin`/`onDBDeleted`) that writes and then purges the DB tombstone marker.
+- If a local DB directory is removed outside the managed flow, no tombstone callback is emitted; hydration may restore data from cloud for the same DB path.
+- This is an accepted scope tradeoff for now to prioritize accidental local-loss recovery.
+- Future hardening can add explicit generation/epoch markers to distinguish external manual delete from disaster recovery.
+
 ## 5) Failure Handling
 
 ### Upload failures (write-critical)
@@ -525,6 +533,8 @@ Notes:
 - In-flight data (not yet flushed to SST) is recovered from Raft logs when quorum-replicated.
 - Cloud storage recovery primarily protects flushed SST state and disaster cases involving local disk loss.
 - Synchronous SST upload reduces catastrophic-loss RPO compared with periodic upload mode.
+- Recovery correctness is protected by the metadata-before-delete invariant: before deleting superseded SSTs, Store confirms manifest-referenced SST durability and publishes updated `MANIFEST`/`CURRENT`, preventing stale or missing-manifest references after compaction retries.
+- Policy note: for how managed delete vs accidental local-loss is distinguished during hydration, see `## 4) Read Path` -> `Scope: managed delete vs accidental local loss`.
 
 ## 7) Operational Notes
 

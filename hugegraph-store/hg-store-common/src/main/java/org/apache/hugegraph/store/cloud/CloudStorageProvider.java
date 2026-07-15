@@ -99,6 +99,29 @@ public interface CloudStorageProvider extends Closeable {
     void downloadFile(String remoteKey, String localPath) throws IOException;
 
     /**
+     * Deletes all objects under a prefix in a single best-effort operation.
+     *
+     * <p>Default implementation lists and deletes individually for backward compatibility.
+     * Implementations should override to provide more efficient bulk-delete semantics
+     * where supported by the underlying storage backend (e.g. S3 DeleteObjects API).
+     *
+     * @param remoteDirPrefix directory/prefix inside bucket (without provider pathPrefix)
+     * @return number of objects deleted
+     * @throws IOException on I/O or network failure
+     */
+    default int deletePrefix(String remoteDirPrefix) throws IOException {
+        List<String> keys = listFiles(remoteDirPrefix);
+        for (String key : keys) {
+            try {
+                deleteFile(key);
+            } catch (IOException e) {
+                // Best-effort: continue deleting remaining files
+            }
+        }
+        return keys.size();
+    }
+
+    /**
      * Releases resources held by the provider (e.g. HTTP clients, connections).
      */
     @Override

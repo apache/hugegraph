@@ -120,6 +120,35 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     private final Map<String, String> dbNameByDir = new ConcurrentHashMap<>();
 
     /**
+     * Tracks which DBs are currently being truncated. While a DB is in this set,
+     * metadata sync operations are skipped to allow the purge to complete cleanly
+     * without new metadata files being re-uploaded.
+     */
+    private final Set<String> truncatingDbs = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Tracks the timestamp of recent truncations (DB name -> truncation time in ms).
+     * Used to suppress metadata syncs for a grace period after truncation, allowing
+     * pending RocksDB background operations and callbacks to complete without
+     * re-uploading metadata that was just purged.
+     */
+    private final Map<String, Long> truncationTimes = new ConcurrentHashMap<>();
+
+    /**
+     * Grace period (ms) after truncation during which metadata syncs are suppressed.
+     * This allows pending RocksDB background callbacks to complete without re-uploading
+     * metadata that was purged during truncation.
+     */
+    private static final long TRUNCATION_GRACE_PERIOD_MS = 5_000L;
+
+    /**
+     * Sentinel object key written to the DB prefix during database deletion.
+     * {@link #preHydrateDbFiles} checks for this key and skips hydration when present, preventing
+     * a newly-recreated DB from ingesting data that belonged to a previous deleted generation.
+     */
+    static final String DB_TOMBSTONE_FILE = "_DELETED";
+
+    /**
      * @param dataRoot absolute path of the store's data directory
      *                 (value of {@code app.data-path}, resolved to an absolute path).
      */
@@ -330,6 +359,144 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     /**
+     * Called just before the local RocksDB directory is removed. Writes a small tombstone object
+     * ({@value #DB_TOMBSTONE_FILE}) to the DB's remote prefix so that any subsequent
+     * {@link #preHydrateDbFiles} call for the same path will detect the deleted generation and
+     * skip hydration rather than re-ingesting stale objects.
+     *
+     * <p>This callback fires while the session is still in a pending-destroy list (refcount may
+     * be non-zero). The tombstone write is best-effort: a failure is logged but does not block
+     * the deletion. The cloud purge in {@link #onDBDeleted} provides a second line of defence.
+     *
+     * @param dbName  logical graph/partition name
+     * @param dbPath  absolute path of the RocksDB directory being destroyed
+     */
+    @Override
+    public void onDBDeleteBegin(String dbName, String dbPath) {
+        CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
+        if (provider == null) {
+            return;
+        }
+        String tombstoneKey = dbPrefix(dbPath) + "/" + DB_TOMBSTONE_FILE;
+        Path tmp = null;
+        try {
+            tmp = Files.createTempFile("hgstore-tombstone-", ".tmp");
+            Files.write(tmp, "deleted".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            provider.uploadFile(tmp.toString(), tombstoneKey);
+            log.info("Cloud DB tombstone written: db={}, key={}", dbName, tombstoneKey);
+        } catch (Exception e) {
+            log.warn("Cloud DB tombstone write failed (onDBDeleted will still purge): "
+                     + "db={}, key={}, reason={}", dbName, tombstoneKey, e.getMessage());
+        } finally {
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp);
+                } catch (IOException ignore) {
+                    // best-effort temp-file cleanup
+                }
+            }
+        }
+    }
+
+    /**
+     * Called after the local RocksDB directory has been physically removed. Purges all cloud
+     * objects under the DB prefix (SSTs, metadata, tombstone) so a future creation at the same
+     * path starts with a clean remote state. Also clears all in-memory state for this DB.
+     *
+     * <p>The purge is best-effort: individual delete failures are logged at DEBUG level and do
+     * not throw. Any objects that survive the purge are neutralised by the tombstone check in
+     * {@link #preHydrateDbFiles}: the next open will find the tombstone (or an empty prefix if
+     * the purge was complete), skip hydration, and clean up any leftovers.
+     *
+     * @param dbName  logical graph/partition name
+     * @param dbPath  absolute path of the now-deleted RocksDB directory
+     */
+    @Override
+    public void onDBDeleted(String dbName, String dbPath) {
+        // Clear in-memory tracking so no stale state bleeds into a recreated DB.
+        syncTracker.clearDb(dbName);
+        readMissAttemptTs.entrySet().removeIf(e -> e.getKey().startsWith(dbName + "::"));
+        dbNameByDir.values().removeIf(dbName::equals);
+
+        CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
+        if (provider == null) {
+            return;
+        }
+        purgeRemotePrefix(provider, dbName, dbPrefix(dbPath));
+    }
+
+    /**
+     * Called after a RocksDB has been truncated (all data cleared but directory preserved).
+     * Purges all cloud objects under the DB prefix (SSTs, metadata) so the remote state matches
+     * the now-empty local state. Also clears all in-memory sync tracking for this DB.
+     *
+     * <p>This is triggered by graph.clear() operations to ensure cloud storage is cleaned up
+     * when the graph data is cleared.
+     *
+     * @param dbName  logical graph/partition name
+     * @param dbPath  absolute path of the RocksDB directory
+     */
+    @Override
+    public void onDBTruncateBegin(String dbName, String dbPath) {
+        truncatingDbs.add(dbName);
+        truncationTimes.put(dbName, System.currentTimeMillis());
+        syncTracker.clearDb(dbName);
+        readMissAttemptTs.entrySet().removeIf(e -> e.getKey().startsWith(dbName + "::"));
+    }
+
+    @Override
+    public void onDBTruncated(String dbName, String dbPath) {
+        truncatingDbs.add(dbName);
+        try {
+            CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
+            if (provider == null) {
+                return;
+            }
+            purgeRemotePrefix(provider, dbName, dbPrefix(dbPath));
+        } finally {
+            truncationTimes.put(dbName, System.currentTimeMillis());
+            truncatingDbs.remove(dbName);
+        }
+    }
+
+    /**
+     * Checks if a DB is within the grace period after truncation, during which
+     * metadata syncs should be suppressed to prevent re-uploading purged data.
+     */
+    private boolean isInTruncationGracePeriod(String dbName) {
+        Long truncationTime = truncationTimes.get(dbName);
+        if (truncationTime == null) {
+            return false;
+        }
+        long elapsed = System.currentTimeMillis() - truncationTime;
+        if (elapsed > TRUNCATION_GRACE_PERIOD_MS) {
+            // Grace period expired, remove the record
+            truncationTimes.remove(dbName);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Deletes every remote object under {@code prefix} using an optimized prefix-level delete
+     * if available, falling back to individual file deletion if necessary.
+     * This is called during DB destruction to prevent a recreated DB from hydrating stale data.
+     */
+    private void purgeRemotePrefix(CloudStorageProvider provider, String dbName, String prefix) {
+        String normalizedPrefix = prefix.endsWith("/") ? prefix : prefix + "/";
+        try {
+            int deleted = provider.deletePrefix(normalizedPrefix);
+            if (deleted > 0) {
+                log.info("Cloud DB purge completed: db={}, prefix={}, deleted={}",
+                         dbName, prefix, deleted);
+            }
+        } catch (IOException e) {
+            log.warn("Cloud DB purge failed for db={}, prefix={}: {}",
+                     dbName, prefix, e.getMessage());
+        }
+    }
+
+    /**
      * Uploads the newly created SST file to the active cloud storage provider.
      *
      * @param dbName   RocksDB instance name (partition id)
@@ -353,16 +520,15 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
             syncTracker.markConfirmed(dbName, filePath);
             long syncLatencyMs = System.currentTimeMillis() - startTimeMs;
             CloudStorageMetrics.recordSyncLatency(dbName, syncLatencyMs);
-            syncMetadataSnapshotInline(provider, dbName);
+             // Skip metadata sync if DB is being truncated or in grace period after truncation
+             // to allow purge to complete cleanly without metadata files being re-uploaded.
+             if (!truncatingDbs.contains(dbName) && !isInTruncationGracePeriod(dbName)) {
+                 syncMetadataSnapshotInline(provider, dbName);
+             }
             log.debug("Cloud upload success: db={}, cf={}, path={}, size={}, latencyMs={}",
                       dbName, cfName, filePath, fileSize, syncLatencyMs);
         } catch (Exception e) {
-            // NOTE: this callback is invoked via RocksDB's JNI event-listener mechanism.
-            // Any exception thrown here crosses the JNI boundary and is silently swallowed
-            // by the native layer — it will NOT crash the server and the SST file will NOT
-            // be retried automatically. Log the failure and submit to the retry queue (if
-            // configured) so the upload can be retried asynchronously. File remains on disk
-            // and will be retried automatically on the next compaction via the delete guard.
+            // ...existing code...
             String errorType = e.getClass().getSimpleName();
             CloudStorageMetrics.recordUploadFailure(dbName, cfName, errorType);
             log.error("Cloud upload failed (will retry on next compaction): "
@@ -427,12 +593,13 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         if (provider == null) {
             return;
         }
+        // Skip file deletion during truncation or grace period; the entire DB prefix will be purged anyway
+        if (truncatingDbs.contains(dbName) || isInTruncationGracePeriod(dbName)) {
+            log.debug("Skipping delete during truncation: db={}, path={}", dbName, filePath);
+            return;
+        }
         // DATA-LOSS GUARD: never delete a superseded cloud object until every SST file currently
-        // live in this DB is confirmed present in cloud. During compaction RocksDB deletes the old
-        // inputs and creates the merged output as independent events; if the output upload failed
-        // we must NOT delete the inputs, or the data would exist neither locally-durably nor in
-        // cloud. Confirming (and if necessary re-uploading) the live set first makes the race safe
-        // regardless of upload ordering, and self-heals earlier missed uploads.
+        // live in this DB is confirmed present in cloud.
         if (!ensureLiveSetUploaded(provider, dbName)) {
             log.warn("Delete skipped (live set not fully durable in cloud): db={}, filePath={}",
                      dbName, filePath);
@@ -570,7 +737,10 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         }
         String normalised = Paths.get(dbNameOrPath).toAbsolutePath().normalize().toString();
         String dbName = dbNameByDir.getOrDefault(normalised, dbNameOrPath);
-        syncMetadataSnapshotInline(provider, dbName);
+        // Skip metadata sync during truncation or grace period to allow purge to complete cleanly
+        if (!truncatingDbs.contains(dbName) && !isInTruncationGracePeriod(dbName)) {
+            syncMetadataSnapshotInline(provider, dbName);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -844,6 +1014,26 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         CloudStorageMetrics.registerDatabaseMetrics(dbName);
 
         String prefix = dbPrefix(dbPath);
+
+        // STALE-DATA GUARD: if the remote prefix carries a _DELETED tombstone, the previous
+        // generation of this DB was destroyed but cloud objects were not fully removed. Hydrating
+        // them would silently resurrect deleted data in the new DB. Instead, skip hydration,
+        // trigger a best-effort remote purge so the prefix is clean, and start fresh.
+        String tombstoneKey = prefix + "/" + DB_TOMBSTONE_FILE;
+        try {
+            if (provider.fileExists(tombstoneKey)) {
+                log.warn("Cloud pre-hydration skipped: tombstone found for db={} — previous "
+                         + "generation was deleted. Purging stale remote objects.", dbName);
+                purgeRemotePrefix(provider, dbName, prefix);
+                return;
+            }
+        } catch (IOException e) {
+            // Tombstone check itself failed — cannot safely determine generation; skip hydration.
+            log.warn("Cloud pre-hydration: tombstone check failed for db={}, skipping to avoid "
+                     + "stale-data risk: {}", dbName, e.getMessage());
+            return;
+        }
+
         List<String> remoteFiles = listRemoteKeys(provider, prefix);
         if (remoteFiles.isEmpty()) {
             log.debug("Cloud pre-hydration skipped: no remote files for db={} prefix={}",

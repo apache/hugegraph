@@ -375,6 +375,28 @@ public final class RocksDBFactory {
     }
 
     /**
+     * Notifies all registered listeners that a RocksDB truncate operation is about to start.
+     *
+     * @param dbName  the graph / partition name
+     * @param dbPath  the absolute path of the RocksDB directory
+     */
+    public void notifyTruncateBegin(String dbName, String dbPath) {
+        rocksdbChangedListeners.forEach(listener -> listener.onDBTruncateBegin(dbName, dbPath));
+    }
+
+    /**
+     * Notifies all registered listeners that a RocksDB has been truncated.
+     * This should be called after the database content has been cleared to allow
+     * listeners (e.g., cloud storage) to clean up remote state.
+     *
+     * @param dbName  the graph / partition name
+     * @param dbPath  the absolute path of the RocksDB directory
+     */
+    public void notifyTruncate(String dbName, String dbPath) {
+        rocksdbChangedListeners.forEach(listener -> listener.onDBTruncated(dbName, dbPath));
+    }
+
+    /**
      * Flushes the MemTable of the named RocksDB session to disk, creating an SST file.
      * This triggers {@link RocksdbChangedListener#onTableFileCreated} for every registered
      * listener (including cloud-storage upload).
@@ -616,6 +638,12 @@ public final class RocksDBFactory {
         }
 
         default void onDBDeleted(String dbName, String filePath) {
+        }
+
+        default void onDBTruncateBegin(String dbName, String filePath) {
+        }
+
+        default void onDBTruncated(String dbName, String filePath) {
         }
 
         default void onDBSessionReleased(RocksDBSession dbSession) {
