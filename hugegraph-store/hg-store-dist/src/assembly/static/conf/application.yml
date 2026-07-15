@@ -96,7 +96,10 @@ cloud:
     enabled: false
     provider: s3
     path-prefix: hugegraph
-    # Whole-file upload retries after a first failure (default 5). Set 0 to disable
+    # Hydration controls
+    startup-hydration-enabled: true        # download missing remote files on DB opening before serving
+    read-miss-guard-window-ms: 3000        # guard window (ms) to throttle repeated read-miss hydration attempts
+    # Whole-file upload retries after a first failure (default 3). Set 0 to disable
     # (failures go straight to the DLQ) when the provider has sufficient internal retry.
     upload-retry-max-attempts: 3
     upload-retry-initial-delay-ms: 1000
