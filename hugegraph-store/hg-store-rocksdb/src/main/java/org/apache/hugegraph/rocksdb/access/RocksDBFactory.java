@@ -51,7 +51,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class RocksDBFactory {
 
-    private static final List<RocksdbChangedListener> rocksdbChangedListeners = new ArrayList<>();
+    // CopyOnWriteArrayList: the list is iterated (forEach / for-each) from RocksDB JNI callback
+    // threads (onTableFileCreated/Deleted, compaction) while add/removeRocksdbChangedListener can
+    // mutate it from the main thread (Spring teardown, test @After). A plain ArrayList would throw
+    // ConcurrentModificationException on the callback thread; COW gives each iteration a stable
+    // snapshot and makes mutation safe without locking the hot callback path.
+    private static final List<RocksdbChangedListener> rocksdbChangedListeners =
+            new CopyOnWriteArrayList<>();
     private static RocksDBFactory dbFactory;
     /** Singleton event listener wired into every new RocksDB instance. */
     private final RocksdbEventListener rocksdbEventListener = new RocksdbEventListener();
@@ -63,6 +69,8 @@ public final class RocksDBFactory {
     private final Map<String, RocksDBSession> dbSessionMap = new ConcurrentHashMap<>();
     private final List<DBSessionWatcher> destroyGraphDBs = new CopyOnWriteArrayList<>();
     private final ReentrantReadWriteLock operateLock;
+    /** Names of DBs currently being created (between Phase 1 and Phase 3). Guards the RocksDB LOCK file. */
+    private final Set<String> pendingCreations = new HashSet<>();
     ScheduledExecutorService scheduledExecutor;
     private HugeConfig hugeConfig;
     private AtomicBoolean closing = new AtomicBoolean(false);
@@ -92,6 +100,29 @@ public final class RocksDBFactory {
                 while (itr.hasNext()) {
                     DBSessionWatcher watcher = itr.next();
                     if (0 == watcher.dbSession.getRefCount()) {
+                        // Destroy-then-recreate race guard: a concurrent createGraphDB may have
+                        // re-occupied the same DB name/path (createGraphDB checks dbSessionMap and
+                        // pendingCreations, not destroyGraphDBs). If so, this stale watcher must NOT
+                        // delete the new DB's local files or purge its cloud objects. Check under
+                        // the read lock so it serialises with createGraphDB's write-locked slot
+                        // reservation and map insertion.
+                        String staleName = watcher.dbSession.getGraphName();
+                        boolean superseded;
+                        operateLock.readLock().lock();
+                        try {
+                            superseded = dbSessionMap.containsKey(staleName)
+                                         || pendingCreations.contains(staleName);
+                        } finally {
+                            operateLock.readLock().unlock();
+                        }
+                        if (superseded) {
+                            log.warn("DestroyGraphDB: db={} was recreated at path={} before "
+                                     + "cleanup ran — discarding stale destroy watcher without "
+                                     + "deleting files or purging cloud objects",
+                                     staleName, watcher.dbSession.getDbPath());
+                            destroyGraphDBs.remove(watcher);
+                            continue;
+                        }
                         try {
                             watcher.dbSession.shutdown();
                             FileUtils.deleteDirectory(new File(watcher.dbSession.getDbPath()));
@@ -101,18 +132,30 @@ public final class RocksDBFactory {
                             });
                             log.info("removed db {} and delete files",
                                      watcher.dbSession.getDbPath());
+                            destroyGraphDBs.remove(watcher);
                         } catch (Exception e) {
-                            log.error("DestroyGraphDB exception {}", e);
+                            watcher.deleteAttempts++;
+                            if (watcher.deleteAttempts >= 3) {
+                                // Give up after 3 consecutive failures: continuing to retry
+                                // risks calling onDBDeleted (which purges cloud objects) against
+                                // a DB that may have been recreated at the same path.
+                                log.error("DestroyGraphDB: giving up after {} failed attempts for "
+                                          + "db={}: {}", watcher.deleteAttempts,
+                                          watcher.dbSession.getDbPath(), e);
+                                destroyGraphDBs.remove(watcher);
+                            } else {
+                                log.error("DestroyGraphDB exception (attempt {}), will retry: {}",
+                                          watcher.deleteAttempts, e);
+                            }
                         }
-                        destroyGraphDBs.remove(watcher);
                     } else if (watcher.timestamp < (System.currentTimeMillis() - 1800 * 1000)) {
+                        // Force delete after 30-min timeout: session is stuck with live refs.
+                        watcher.dbSession.forceResetRefCount();
+                    } else {
                         log.warn("DB {}  has not been deleted refCount is {}, time is {} seconds",
                                  watcher.dbSession.getDbPath(),
                                  watcher.dbSession.getRefCount(),
                                  (System.currentTimeMillis() - watcher.timestamp) / 1000);
-                    } else {
-                        // Force delete after timeout (30min)
-                        watcher.dbSession.forceResetRefCount();
                     }
                 }
 
@@ -234,32 +277,89 @@ public final class RocksDBFactory {
         if (closing.get()) {
             throw new RuntimeException("db closed");
         }
+
+        // Phase 1: check the map and, if absent, construct the session under the write lock.
+        // The session is NOT inserted yet — inserting before hydration would let a concurrent
+        // queryGraphDB hand out an un-hydrated session.
+        // Also check pendingCreations: if another thread is already in Phase 2 for this DB,
+        // wait for it to finish rather than opening a second RocksDBSession for the same path
+        // (which would fail with a RocksDB LOCK-file error).
+        RocksDBSession dbSession;
         operateLock.writeLock().lock();
-        boolean isNew = false;
-        RocksDBSession dbSession = null;
         try {
-            dbSession = dbSessionMap.get(dbName);
-            if (dbSession == null) {
-                String dbOpenPath = dbPath.endsWith(File.separator) ? dbPath + dbName :
-                                    dbPath + File.separator + dbName;
-                rocksdbChangedListeners.forEach(listener -> listener.onDBOpening(dbName, dbOpenPath));
-                log.info("create rocksdb for {}", dbName);
-                dbSession = new RocksDBSession(this.hugeConfig, dbPath, dbName, version);
-                dbSessionMap.put(dbName, dbSession);
-                isNew = true;
+            // Spin-wait while another thread holds the pending-creation slot for this DB.
+            while (pendingCreations.contains(dbName)) {
+                operateLock.writeLock().unlock();
+                try { Thread.sleep(10); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted waiting for DB creation: " + dbName, ie);
+                }
+                operateLock.writeLock().lock();
             }
-            return dbSession.clone();
+            RocksDBSession existing = dbSessionMap.get(dbName);
+            if (existing != null) {
+                // Already exists — return a clone with no hydration needed.
+                return existing.clone();
+            }
+            log.info("create rocksdb for {}", dbName);
+            // Reserve the creation slot; construct (which hydrates + opens) OUTSIDE the lock below.
+            pendingCreations.add(dbName);
         } finally {
             operateLock.writeLock().unlock();
-            if (isNew && dbSession != null) {
-                // Notify listeners so they can upload any pre-existing SST files
-                // and flush the MemTable (which may hold WAL-recovered data).
-                final String finalDbName = dbSession.getGraphName();
-                final String finalDbPath = dbSession.getDbPath();
-                rocksdbChangedListeners.forEach(listener ->
-                        listener.onDBCreated(finalDbName, finalDbPath));
+        }
+
+        // Phase 2: construct the session OUTSIDE the write lock so other DBs' queryGraphDB calls
+        // are not blocked during a potentially long S3 hydration. Construction runs the pre-open
+        // hook, which fires onDBOpening to hydrate the DB directory from cloud BEFORE RocksDB opens
+        // it — so a node whose local files were lost opens on the recovered data instead of a fresh
+        // empty DB. Per-DB serialization is provided by the pendingCreations slot reserved above,
+        // so two threads never open the same path concurrently (which would fail on the LOCK file).
+        boolean constructed = false;
+        try {
+            dbSession = new RocksDBSession(
+                    this.hugeConfig, dbPath, dbName, version,
+                    (name, resolvedPath) ->
+                            rocksdbChangedListeners.forEach(l -> l.onDBOpening(name, resolvedPath)));
+            constructed = true;
+        } finally {
+            if (!constructed) {
+                // Hydration or open failed with ANY throwable — including java.lang.Error
+                // (OutOfMemoryError, StackOverflowError) which a plain `catch (Exception)` would
+                // miss. If the slot leaked, every future createGraphDB for this DB would spin-wait
+                // forever (the wait loop has no timeout). A finally clears it on all paths; the
+                // original throwable still propagates. No native handle exists to close (open did
+                // not complete).
+                operateLock.writeLock().lock();
+                try { pendingCreations.remove(dbName); } finally { operateLock.writeLock().unlock(); }
             }
         }
+
+        // Phase 3: insert the hydrated session under the write lock and clear the pending slot
+        // so any thread that was spin-waiting can now proceed (it will find the map entry).
+        operateLock.writeLock().lock();
+        try {
+            pendingCreations.remove(dbName);
+            RocksDBSession existing = dbSessionMap.get(dbName);
+            if (existing != null) {
+                // Race: another thread won Phase 3 first; discard our duplicate.
+                try { dbSession.shutdown(); } catch (Exception ignore) {}
+                return existing.clone();
+            }
+            dbSessionMap.put(dbName, dbSession);
+        } catch (Exception e) {
+            pendingCreations.remove(dbName);
+            try { dbSession.shutdown(); } catch (Exception ignore) {}
+            throw e;
+        } finally {
+            operateLock.writeLock().unlock();
+        }
+
+        // Notify listeners (upload pre-existing SSTs, flush WAL) outside the lock.
+        final String finalDbName = dbSession.getGraphName();
+        final String finalDbPath = dbSession.getDbPath();
+        rocksdbChangedListeners.forEach(listener -> listener.onDBCreated(finalDbName, finalDbPath));
+
+        return dbSession.clone();
     }
 
     /**
@@ -375,6 +475,15 @@ public final class RocksDBFactory {
     }
 
     /**
+     * Removes a previously registered {@link RocksdbChangedListener}. Counterpart to
+     * {@link #addRocksdbChangedListener}; used to detach a listener during shutdown or test
+     * teardown so it no longer receives forwarded RocksDB events.
+     */
+    public void removeRocksdbChangedListener(RocksdbChangedListener listener) {
+        rocksdbChangedListeners.remove(listener);
+    }
+
+    /**
      * Notifies all registered listeners that a RocksDB truncate operation is about to start.
      *
      * @param dbName  the graph / partition name
@@ -394,6 +503,20 @@ public final class RocksDBFactory {
      */
     public void notifyTruncate(String dbName, String dbPath) {
         rocksdbChangedListeners.forEach(listener -> listener.onDBTruncated(dbName, dbPath));
+    }
+
+    /**
+     * Notifies all registered listeners that a RocksDB truncate operation FAILED partway (after
+     * {@link #notifyTruncateBegin} but before completion). Listeners must undo any "truncation in
+     * progress" suppression they applied in {@link RocksdbChangedListener#onDBTruncateBegin}
+     * <em>without</em> purging remote state — the truncate did not complete, so the data that was
+     * meant to be cleared may still be present locally and must remain recoverable.
+     *
+     * @param dbName  the graph / partition name
+     * @param dbPath  the absolute path of the RocksDB directory
+     */
+    public void notifyTruncateAbort(String dbName, String dbPath) {
+        rocksdbChangedListeners.forEach(listener -> listener.onDBTruncateAbort(dbName, dbPath));
     }
 
     /**
@@ -523,18 +646,27 @@ public final class RocksDBFactory {
         private final String manifestFileName;
         private final List<String> optionsFileNames;
         private final List<String> sstFileNames;
-        private final List<String> walFileNames;
+        private final long generation;
 
         public MetadataSnapshot(String dbDir, String tempDir, String currentFileName,
                                 String manifestFileName, List<String> optionsFileNames,
-                                List<String> sstFileNames, List<String> walFileNames) {
+                                List<String> sstFileNames) {
+            this(dbDir, tempDir, currentFileName, manifestFileName,
+                 optionsFileNames, sstFileNames,
+                 parseManifestGeneration(manifestFileName));
+        }
+
+        public MetadataSnapshot(String dbDir, String tempDir, String currentFileName,
+                                String manifestFileName, List<String> optionsFileNames,
+                                List<String> sstFileNames,
+                                long generation) {
             this.dbDir = dbDir;
             this.tempDir = tempDir;
             this.currentFileName = currentFileName;
             this.manifestFileName = manifestFileName;
             this.optionsFileNames = optionsFileNames;
             this.sstFileNames = sstFileNames;
-            this.walFileNames = walFileNames;
+            this.generation = generation;
         }
 
         /** The real DB directory the captured metadata belongs to (for remote-key derivation). */
@@ -567,9 +699,20 @@ public final class RocksDBFactory {
             return sstFileNames;
         }
 
-        /** WAL {@code *.log} file names captured (used by {@code wal} mode). */
-        public List<String> getWalFileNames() {
-            return walFileNames;
+        /** Monotonic capture generation used to reject stale metadata publications. */
+        public long getGeneration() {
+            return generation;
+        }
+
+        private static long parseManifestGeneration(String manifestFileName) {
+            if (manifestFileName == null || !manifestFileName.startsWith("MANIFEST-")) {
+                return -1L;
+            }
+            try {
+                return Long.parseLong(manifestFileName.substring("MANIFEST-".length()));
+            } catch (NumberFormatException ignored) {
+                return -1L;
+            }
         }
 
         /** Removes the temporary checkpoint directory. Never touches the real SST files. */
@@ -646,6 +789,15 @@ public final class RocksDBFactory {
         default void onDBTruncated(String dbName, String filePath) {
         }
 
+        /**
+         * Called when a truncate operation failed after {@link #onDBTruncateBegin} but before
+         * completion. Implementations must clear any "truncation in progress" suppression they
+         * started, WITHOUT purging remote state (the data intended for clearing may still exist
+         * locally and must stay recoverable).
+         */
+        default void onDBTruncateAbort(String dbName, String filePath) {
+        }
+
         default void onDBSessionReleased(RocksDBSession dbSession) {
         }
 
@@ -687,6 +839,7 @@ public final class RocksDBFactory {
     class DBSessionWatcher {
         public RocksDBSession dbSession;
         public Long timestamp;
+        public int deleteAttempts = 0;
 
         public DBSessionWatcher(RocksDBSession dbSession) {
             this.dbSession = dbSession;

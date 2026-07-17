@@ -32,6 +32,12 @@ public final class CloudStorageMetricsConst {
     public static final String RETRY_QUEUE_SIZE = PREFIX + "_retry_queue_size";
     public static final String SYNC_LATENCY_MS = PREFIX + "_sync_latency_ms";
     public static final String DELETE_GUARD_REUPLOAD_COUNT = PREFIX + "_delete_guard_reupload_count";
+    // 1 = DLQ on-disk persistence healthy; 0 = degraded (retry intent may not survive a crash).
+    public static final String DLQ_PERSISTENCE_HEALTHY = PREFIX + "_dlq_persistence_healthy";
+    // 1 = pending-delete marker persistence healthy; 0 = degraded (a marker could not be durably
+    // written, so a DB delete during a provider-unavailable window may not be guarded against
+    // re-hydration after a crash). A hard error state: delete progression is held while degraded.
+    public static final String DELETE_MARKER_HEALTHY = PREFIX + "_delete_marker_healthy";
 
     // Tag names
     public static final String TAG_DB_NAME = "db_name";

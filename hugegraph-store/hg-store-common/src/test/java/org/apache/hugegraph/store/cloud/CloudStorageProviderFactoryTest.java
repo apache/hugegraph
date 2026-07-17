@@ -100,6 +100,45 @@ public class CloudStorageProviderFactoryTest {
     }
 
     /**
+     * Test that initialize with cloud storage disabled deactivates and closes an already-active
+     * provider, so a reconfiguration to {@code enabled=false} cannot leave stale SDK resources
+     * running and still servicing cloud I/O.
+     */
+    @Test
+    public void testInitializeDisabledClosesActiveProvider() throws IOException {
+        CloudStorageProvider active = mock(CloudStorageProvider.class);
+        when(active.providerName()).thenReturn("s3");
+        CloudStorageProviderFactory.setActiveProviderForTest(active);
+
+        config.setEnabled(false);
+        CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+        assertNull(result);
+        assertNull("Active provider must be cleared when cloud storage is disabled",
+                   CloudStorageProviderFactory.getActiveProvider());
+        verify(active, times(1)).close();
+    }
+
+    /**
+     * Test that a failure to close the active provider while disabling is swallowed (best-effort)
+     * and the provider is still deactivated.
+     */
+    @Test
+    public void testInitializeDisabledCloseThrowsStillDeactivates() throws IOException {
+        CloudStorageProvider active = mock(CloudStorageProvider.class);
+        when(active.providerName()).thenReturn("s3");
+        doThrow(new IOException("Mock close error")).when(active).close();
+        CloudStorageProviderFactory.setActiveProviderForTest(active);
+
+        config.setEnabled(false);
+        CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+        assertNull(result);
+        assertNull(CloudStorageProviderFactory.getActiveProvider());
+        verify(active, times(1)).close();
+    }
+
+    /**
      * Test that setActiveProviderForTest allows setting a provider
      */
     @Test
@@ -328,6 +367,56 @@ public class CloudStorageProviderFactoryTest {
          assertSame(newProvider, CloudStorageProviderFactory.getActiveProvider());
          verify(oldProvider, times(1)).close();
          verify(newProvider, times(1)).init(config);
+     }
+
+     @Test
+     public void testInitializeInitFailureLeavesActiveProviderNull() throws IOException {
+         // A new provider whose init() throws must leave the factory in a SAFE state
+         // (activeProvider == null), never referencing a closed/partially-initialized provider.
+         CloudStorageProvider oldProvider = mock(CloudStorageProvider.class);
+         when(oldProvider.providerName()).thenReturn("old");
+         CloudStorageProviderFactory.setActiveProviderForTest(oldProvider);
+
+         CloudStorageProvider failing = mock(CloudStorageProvider.class);
+         when(failing.providerName()).thenReturn("gcs");
+         doThrow(new RuntimeException("init boom")).when(failing).init(config);
+         registry().put("gcs", failing);
+
+         config.setEnabled(true);
+         config.setProvider("gcs");
+
+         try {
+             CloudStorageProviderFactory.initialize(config);
+             org.junit.Assert.fail("initialize must propagate the init failure");
+         } catch (RuntimeException expected) {
+             // expected
+         }
+
+         assertNull("A failed init must not leave a closed/unusable provider active",
+                    CloudStorageProviderFactory.getActiveProvider());
+         // The previous provider was closed as part of the swap and must not remain active.
+         verify(oldProvider, times(1)).close();
+     }
+
+     @Test
+     public void testInitializeSameProviderInitFailureClearsActive() {
+         // Re-init of the SAME active instance that then fails must also clear the active reference
+         // rather than leave a half-initialized provider observable.
+         doThrow(new RuntimeException("reinit boom")).when(mockProvider).init(config);
+         registry().put("s3", mockProvider);
+         CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);
+         config.setEnabled(true);
+         config.setProvider("s3");
+
+         try {
+             CloudStorageProviderFactory.initialize(config);
+             org.junit.Assert.fail("initialize must propagate the init failure");
+         } catch (RuntimeException expected) {
+             // expected
+         }
+
+         assertNull("A failed re-init must clear the active provider",
+                    CloudStorageProviderFactory.getActiveProvider());
      }
 
      @Test

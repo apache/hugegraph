@@ -79,7 +79,13 @@ logging:
 #     upload-retry-initial-delay-ms: 1000  # delay before first retry (ms); default 1000
 #     upload-retry-max-delay-ms: 60000     # exponential-backoff ceiling (ms); default 60000
 #     upload-backpressure-high-watermark: 64  # slow ingestion while pending-upload backlog exceeds this; 0 disables
-#     wal-mode: flush                      # 'flush' (lose un-flushed tail on crash) or 'wal' (mirror+replay WAL tail)
+#     dlq-max-size: 100000                 # max DLQ entries before oldest are evicted; bounds memory/disk on outage
+#     metadata-sync-debounce-ms: 1000      # coalesce per-SST metadata sync; <= 0 publishes on every SST
+#     metadata-sync-max-unpublished: 32    # force a publish after N unmirrored SSTs (count-bounded RPO); <= 0 disables
+#     node-id:                             # stable per-node identity for the cloud key scope; blank = persist
+#                                          # one in the data dir (seeded from address). Set a stable value
+#                                          # (e.g. StatefulSet ordinal / provisioned UUID) for recovery after
+#                                          # IP/hostname change or local disk loss.
 #     # Metadata sync is event-triggered by storage events; no background interval scheduler.
 #     # --- S3 provider settings (cloud.storage.s3.*) ---
 #     s3:
@@ -106,13 +112,27 @@ cloud:
     upload-retry-max-delay-ms: 60000
     # Backpressure high-watermark on the pending-upload backlog; 0 disables.
     upload-backpressure-high-watermark: 64
-    # Mirror a consistent CURRENT/MANIFEST/OPTIONS[/WAL] snapshot so cloud objects stay
+    # Max dead-letter-queue entries retained before the oldest are evicted; bounds memory/disk
+    # during a prolonged provider outage (evicted files stay recoverable via delete guard/backfill).
+    dlq-max-size: 100000
+    # Debounce window (ms) for the per-SST metadata sync; coalesces checkpoint+list/prune cost under
+    # write-heavy load. <= 0 publishes on every SST. Event-driven publishes are never debounced.
+    metadata-sync-debounce-ms: 1000
+    # Force a metadata publish once this many SSTs are uploaded-but-unmirrored, bounding the cloud
+    # recovery point by count (not just time) during heavy-ingestion bursts. <= 0 disables.
+    metadata-sync-max-unpublished: 32
+    # Mirror a consistent CURRENT/MANIFEST/OPTIONS snapshot so cloud objects stay
     # recoverable (a node that lost its local disk reopens from cloud, not an empty DB).
     # Metadata sync is always enabled when cloud storage is enabled.
     # Sync is event-triggered by storage events; there is no background interval scheduler.
-    # WAL durability: 'flush' (force flush before capture; lose only the un-flushed tail on crash)
-    # or 'wal' (also mirror + replay the WAL tail; lower RPO, more frequent small uploads).
-    wal-mode: flush
+    # Capture forces a MemTable flush so the un-flushed tail is persisted into an SST and mirrored;
+    # the RocksDB WAL is disabled under Raft (the Raft log is the tail's durability source), so a
+    # flush is the only way to push recent writes into cloud.
+    # Stable per-node identity for the cloud key scope (store-<node-id>). Blank => a scope is
+    # persisted in the data dir on first start (seeded from the network address), which is stable
+    # across IP/hostname drift but lost with the disk. Set a deployment-stable value here for
+    # guaranteed recovery of prior remote data after an address change or local disk loss.
+    node-id:
     s3:
       bucket:
       region:

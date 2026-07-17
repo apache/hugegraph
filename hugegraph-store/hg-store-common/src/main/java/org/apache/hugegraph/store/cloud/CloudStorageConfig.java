@@ -72,10 +72,10 @@ public class CloudStorageConfig {
 
 
     /**
-     * Maximum number of whole-file upload retries after a first failure. Default is {@code 5}.
-     * Under the primary-durability model an SST that never reaches cloud is at risk on the
-     * ephemeral local disk, so whole-file retries are enabled by default. After all attempts are
-     * exhausted the task is moved to the DLQ for operational visibility / replay.
+     * Maximum number of whole-file upload retries after a first failure. Default is {@code 3}
+     * (whole-file retries enabled). Under the primary-durability model an SST that never reaches
+     * cloud is at risk on the ephemeral local disk, so whole-file retries are on by default. After
+     * all attempts are exhausted the task is moved to the DLQ for operational visibility / replay.
      *
      * <p>Set to {@code 0} to disable whole-file retries (failures go straight to the DLQ) when the
      * provider already implements a sufficient internal retry strategy.
@@ -96,7 +96,13 @@ public class CloudStorageConfig {
     private long uploadRetryMaxDelayMs = 60_000L;
 
     /**
-     * Backpressure high-watermark on the pending-upload backlog (retry-queue in-flight + DLQ).
+     * Backpressure high-watermark on the pending-upload backlog. The backlog is the sum of: the
+     * async upload executor's queued + active uploads, the retry queue's in-flight (scheduled or
+     * executing) retries, and a bounded DLQ <em>enqueue rate</em> — the number of uploads that
+     * exhausted their retries and became local-only within a trailing ~1s window, capped at this
+     * watermark. The DLQ enqueue rate (not the static DLQ depth) is used so backpressure engages
+     * while durability is actively degrading during a sustained outage, yet releases once failures
+     * stop rather than pinning the write path on historical DLQ debt awaiting an explicit replay.
      * When {@code > 0} and the backlog exceeds this value, RocksDB's flush/compaction thread is
      * briefly slowed in {@code onTableFileCreated} so ingestion cannot outrun the cloud mirror,
      * bounding the amount of local-only (at-risk) data. Default: {@code 64}. {@code 0} disables it.
@@ -105,16 +111,42 @@ public class CloudStorageConfig {
 
 
     /**
-     * WAL durability mode for metadata mirroring:
-     * <ul>
-     *   <li>{@code flush} (default): a flush is forced before each metadata capture so the durable
-     *       state is fully in SST files; at most the un-flushed in-memory tail written since the
-     *       last sync is lost on an uncontrolled crash.</li>
-     *   <li>{@code wal}: the active WAL {@code *.log} segments are mirrored alongside the metadata
-     *       and replayed on restore (lower RPO, at the cost of more frequent small uploads).</li>
-     * </ul>
+     * Maximum number of entries retained in the failed-upload dead-letter queue (in memory and,
+     * amortized, on disk). Bounds memory/disk growth during a prolonged provider outage; when
+     * exceeded the oldest entries are evicted (evicted files stay recoverable via the delete guard
+     * and startup SST backfill). Must be {@code > 0}. Default: {@code 100000}.
      */
-    private String walMode = "flush";
+    private int dlqMaxSize = 100_000;
+
+    /**
+     * Debounce window in milliseconds for the per-SST metadata sync triggered by
+     * {@code onTableFileCreated}. Within a window per DB, at most one metadata publish runs (plus a
+     * trailing publish), coalescing the checkpoint + S3 list/prune cost under write-heavy load.
+     * Values {@code <= 0} disable debouncing (publish on every SST). Default: {@code 1000} ms.
+     * Event-driven publishes (delete guard, compaction, DB open) are never debounced.
+     */
+    private long metadataSyncDebounceMs = 1_000L;
+
+    /**
+     * Backlog bound for the metadata-sync debounce: once this many SST uploads accumulate without a
+     * metadata publish for a DB, a publish is forced regardless of {@link #metadataSyncDebounceMs},
+     * bounding the cloud recovery point by count (not just time) during heavy-ingestion bursts.
+     * Values {@code <= 0} disable the count bound (time-only debounce). Default: {@code 32}.
+     */
+    private int metadataSyncMaxUnpublished = 32;
+
+    /**
+     * Stable per-node identity used to derive the cloud key scope ({@code store-<nodeId>}).
+     *
+     * <p>When set, this is the authoritative scope key and is <b>stable across restarts, IP/hostname
+     * changes, and local disk loss</b> — so a node can always find its prior remote objects during
+     * recovery. Leave blank to fall back to a scope persisted in the data directory (stable across
+     * network-identity drift but lost with the disk), which is in turn seeded from the runtime
+     * network address on first start. Operators who need guaranteed post-disk-loss recovery should
+     * set an explicit, deployment-stable value here (e.g. a Kubernetes StatefulSet pod ordinal or a
+     * provisioned node UUID).
+     */
+    private String nodeId = "";
 
 
     /**

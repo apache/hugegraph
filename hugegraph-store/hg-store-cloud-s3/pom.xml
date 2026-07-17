@@ -101,9 +101,15 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- Default: skip; benchmarks must be run explicitly with -Dtest=S3PerformanceBenchmark -->
+                    <!--
+                      Default: skip long-running/live-service tests. They must be run explicitly, e.g.
+                        -Dtest=S3PerformanceBenchmark    (benchmarks)
+                        -Dtest=S3SingleLargeFileE2ETest  (needs a live S3/MinIO endpoint)
+                      Explicit -Dtest=... selection overrides these excludes.
+                    -->
                     <excludes>
                         <exclude>**/*Benchmark.java</exclude>
+                        <exclude>**/*E2ETest.java</exclude>
                     </excludes>
                     <!-- When running explicitly, allow plenty of memory for generating 20 GB of files -->
                     <argLine>-Xmx512m</argLine>

@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.cloud;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
@@ -245,10 +246,15 @@ public class CloudStorageProviderTest {
              }
          };
 
-         int deletedCount = provider.deletePrefix("some/prefix");
+         // The default impl attempts every key (continue-on-failure) but MUST surface a partial
+         // failure by throwing, so callers such as purgeRemotePrefix can preserve the tombstone
+         // guard instead of treating an incomplete purge as success.
+         IOException ex = assertThrows(IOException.class,
+                                       () -> provider.deletePrefix("some/prefix"));
+         assertTrue("Exception must name the failed key: " + ex.getMessage(),
+                    ex.getMessage().contains("b.sst"));
 
-         // Default impl is best-effort and returns list size even if one delete fails.
-         assertEquals(3, deletedCount);
+         // All three keys were still attempted (a failure did not short-circuit later deletes).
          assertEquals(3, attempted.size());
          assertEquals("a.sst", attempted.get(0));
          assertEquals("b.sst", attempted.get(1));

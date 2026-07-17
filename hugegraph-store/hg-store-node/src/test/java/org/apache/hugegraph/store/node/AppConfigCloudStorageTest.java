@@ -21,6 +21,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.junit.Before;
@@ -98,7 +100,6 @@ public class AppConfigCloudStorageTest {
         assertEquals(3000L, cfg.getReadMissGuardWindowMs());
         assertEquals(3, cfg.getUploadRetryMaxAttempts());
         assertEquals(64, cfg.getUploadBackpressureHighWatermark());
-        assertEquals("flush", cfg.getWalMode());
         assertNotNull(cfg.getProviderProperties());
         assertTrue(cfg.getProviderProperties().isEmpty());
     }
@@ -136,11 +137,6 @@ public class AppConfigCloudStorageTest {
         assertEquals(128, springConfig.getUploadBackpressureHighWatermark());
         assertEquals(128,
                      springConfig.toCloudStorageConfig().getUploadBackpressureHighWatermark());
-
-
-        springConfig.setWalMode("wal");
-        assertEquals("wal", springConfig.getWalMode());
-        assertEquals("wal", springConfig.toCloudStorageConfig().getWalMode());
     }
 
     /**
@@ -181,5 +177,104 @@ public class AppConfigCloudStorageTest {
     public void testCloudStorageSpringConfigCreation() {
         assertNotNull(springConfig);
         assertNotNull(springConfig.toCloudStorageConfig());
+    }
+
+    // -----------------------------------------------------------------------
+    // Stable cloud key scope resolution (recovery after IP drift / disk loss)
+    // -----------------------------------------------------------------------
+
+    @Test
+    public void resolveStoreScope_prefersConfiguredNodeId() throws Exception {
+        AppConfig appConfig = new AppConfig();
+        Path dataRoot = Files.createTempDirectory("hgstore-scope");
+        try {
+            String prefix = appConfig.resolveStableStoreScopePrefix("node-A", dataRoot.toString());
+            assertEquals("store-node-A", prefix);
+            // Persisted so a later removal of the config still resolves to the same scope.
+            assertEquals("store-node-A",
+                         Files.readString(dataRoot.resolve(AppConfig.CLOUD_SCOPE_MARKER_FILE))
+                              .trim());
+        } finally {
+            deleteRecursively(dataRoot);
+        }
+    }
+
+    @Test
+    public void resolveStoreScope_sanitizesConfiguredNodeId() throws Exception {
+        AppConfig appConfig = new AppConfig();
+        Path dataRoot = Files.createTempDirectory("hgstore-scope");
+        try {
+            // Unsafe key characters must be replaced so the scope is a valid single path segment.
+            assertEquals("store-pod_1_2",
+                         appConfig.resolveStableStoreScopePrefix("pod/1:2", dataRoot.toString()));
+        } finally {
+            deleteRecursively(dataRoot);
+        }
+    }
+
+    @Test
+    public void resolveStoreScope_reusesPersistedMarkerAcrossIdentityDrift() throws Exception {
+        AppConfig appConfig = new AppConfig();
+        Path dataRoot = Files.createTempDirectory("hgstore-scope");
+        try {
+            // A marker written under a PREVIOUS network identity must be honored on a later start
+            // (blank node-id), even though the current runtime address may differ — this is the
+            // property that lets a node find its prior remote data after an IP/hostname change.
+            Files.writeString(dataRoot.resolve(AppConfig.CLOUD_SCOPE_MARKER_FILE),
+                              "store-original_1_1");
+            String prefix = appConfig.resolveStableStoreScopePrefix("", dataRoot.toString());
+            assertEquals("store-original_1_1", prefix);
+        } finally {
+            deleteRecursively(dataRoot);
+        }
+    }
+
+    @Test
+    public void resolveStoreScope_seedsAndPersistsOnFirstStart() throws Exception {
+        AppConfig appConfig = new AppConfig();
+        Path dataRoot = Files.createTempDirectory("hgstore-scope");
+        try {
+            // No node-id and no marker: seed from identity, persist, and reuse on the next start.
+            String first = appConfig.resolveStableStoreScopePrefix(null, dataRoot.toString());
+            assertTrue("Seeded scope must use the store- prefix", first.startsWith("store-"));
+            assertTrue("First start must persist the marker",
+                       Files.exists(dataRoot.resolve(AppConfig.CLOUD_SCOPE_MARKER_FILE)));
+            String second = appConfig.resolveStableStoreScopePrefix(null, dataRoot.toString());
+            assertEquals("Second start must reuse the persisted scope", first, second);
+        } finally {
+            deleteRecursively(dataRoot);
+        }
+    }
+
+    @Test
+    public void resolveStoreScope_configuredNodeIdOverridesPersistedMarker() throws Exception {
+        AppConfig appConfig = new AppConfig();
+        Path dataRoot = Files.createTempDirectory("hgstore-scope");
+        try {
+            Files.writeString(dataRoot.resolve(AppConfig.CLOUD_SCOPE_MARKER_FILE), "store-seeded");
+            String prefix = appConfig.resolveStableStoreScopePrefix("explicit", dataRoot.toString());
+            assertEquals("An explicit node-id must win over a persisted marker",
+                         "store-explicit", prefix);
+            assertEquals("The marker must be updated to the configured scope", "store-explicit",
+                         Files.readString(dataRoot.resolve(AppConfig.CLOUD_SCOPE_MARKER_FILE))
+                              .trim());
+        } finally {
+            deleteRecursively(dataRoot);
+        }
+    }
+
+    private static void deleteRecursively(Path dir) throws Exception {
+        if (!Files.exists(dir)) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (Exception ignore) {
+                    // best-effort test cleanup
+                }
+            });
+        }
     }
 }

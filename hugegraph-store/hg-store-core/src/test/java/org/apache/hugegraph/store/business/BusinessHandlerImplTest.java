@@ -18,16 +18,20 @@
 package org.apache.hugegraph.store.business;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -39,7 +43,6 @@ import java.util.Map;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.SessionOperator;
 import org.apache.hugegraph.pd.grpc.Metapb;
-import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.PartitionManager;
 import org.apache.hugegraph.store.pd.PdProvider;
 import org.apache.hugegraph.store.util.HgStoreException;
@@ -51,8 +54,10 @@ import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.MemoryUsageType;
 
 /**
- * Comprehensive unit tests for BusinessHandlerImpl covering static utility methods,
- * partition operations, and core business logic.
+ * Consolidated unit tests for {@link BusinessHandlerImpl}, including the former
+ * {@code BusinessHandlerImplExtendedTest} scenarios.
+ *
+ * <p>Covers static utility methods, partition operations, and core business logic.
  */
 public class BusinessHandlerImplTest {
 
@@ -71,11 +76,17 @@ public class BusinessHandlerImplTest {
          }
      }
 
+     /** Reads the private static {@code indexDataSize} field so setter behavior is observable. */
+     private static long readIndexDataSize() throws Exception {
+         Field field = BusinessHandlerImpl.class.getDeclaredField("indexDataSize");
+         field.setAccessible(true);
+         return (Long) field.get(null);
+     }
+
      private BusinessHandlerImpl handler;
      private PartitionManager mockPartitionManager;
-     private RocksDBSession mockSession;
 
-     @BeforeClass
+    @BeforeClass
      public static void setUpClass() {
          // Initialize static resources if needed
      }
@@ -83,7 +94,7 @@ public class BusinessHandlerImplTest {
      @Before
      public void setUp() {
          mockPartitionManager = mock(PartitionManager.class);
-         mockSession = mock(RocksDBSession.class);
+         RocksDBSession mockSession = mock(RocksDBSession.class);
 
          handler = new BusinessHandlerImpl(mockPartitionManager);
 
@@ -92,7 +103,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testFnvHashDeterministicAndSensitiveToInput() {
+     public void testFnvHashIsDeterministicAndSensitiveToInput() {
          byte[] keyA = "abc".getBytes(StandardCharsets.UTF_8);
          byte[] keyB = "abd".getBytes(StandardCharsets.UTF_8);
 
@@ -112,7 +123,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testFnvHashSensitiveToByteOrder() {
+     public void testFnvHashIsSensitiveToByteOrder() {
          byte[] key1 = new byte[]{1, 2, 3};
          byte[] key2 = new byte[]{3, 2, 1};
 
@@ -123,7 +134,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testFnvHashLargeInput() {
+     public void testFnvHashLargeInputReturnsHash() {
          byte[] largeInput = new byte[10000];
          for (int i = 0; i < largeInput.length; i++) {
              largeInput[i] = (byte) (i % 256);
@@ -152,7 +163,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testGetDbNameCachingBehavior() {
+     public void testGetDbNameReturnsCachedValueForSameId() {
          String first = BusinessHandlerImpl.getDbName(999);
          String second = BusinessHandlerImpl.getDbName(999);
          String third = BusinessHandlerImpl.getDbName(999);
@@ -163,33 +174,33 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testSetIndexDataSizeAcceptsPositiveAndIgnoresNonPositive() {
+     public void testSetIndexDataSizeStoresPositiveValue() throws Exception {
+         long original = readIndexDataSize();
          try {
-             BusinessHandlerImpl.setIndexDataSize(1L);
-             BusinessHandlerImpl.setIndexDataSize(1024L);
-             BusinessHandlerImpl.setIndexDataSize(Long.MAX_VALUE);
+             BusinessHandlerImpl.setIndexDataSize(100 * 1024L);
+             assertEquals(100 * 1024L, readIndexDataSize());
+         } finally {
+             BusinessHandlerImpl.setIndexDataSize(original);
+         }
+     }
 
-             // Non-positive values are documented as no-op and should not throw.
+     @Test
+     public void testSetIndexDataSizeIgnoresNonPositiveValue() throws Exception {
+         long original = readIndexDataSize();
+         try {
+             BusinessHandlerImpl.setIndexDataSize(64 * 1024L);
+             // Zero and negative values are documented no-ops: the previous value must survive.
              BusinessHandlerImpl.setIndexDataSize(0L);
+             assertEquals(64 * 1024L, readIndexDataSize());
              BusinessHandlerImpl.setIndexDataSize(-10L);
-             BusinessHandlerImpl.setIndexDataSize(Long.MIN_VALUE);
-         } catch (Exception e) {
-             fail("setIndexDataSize should not throw for tested inputs: " + e.getMessage());
+             assertEquals(64 * 1024L, readIndexDataSize());
+         } finally {
+             BusinessHandlerImpl.setIndexDataSize(original);
          }
      }
 
      @Test
-     public void testSetIndexDataSizeSmallPositiveValue() {
-         try {
-             BusinessHandlerImpl.setIndexDataSize(1L);
-             BusinessHandlerImpl.setIndexDataSize(1024L);
-         } catch (Exception e) {
-             fail("setIndexDataSize should accept small positive values: " + e.getMessage());
-         }
-     }
-
-     @Test
-     public void testGetCompactionPoolIsNotNull() {
+     public void testGetCompactionPoolReturnsInitializedPool() {
          var pool = BusinessHandlerImpl.getCompactionPool();
 
          assertNotNull(pool);
@@ -198,7 +209,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testGetCompactionPoolConsistency() {
+     public void testGetCompactionPoolReturnsSameInstance() {
          var pool1 = BusinessHandlerImpl.getCompactionPool();
          var pool2 = BusinessHandlerImpl.getCompactionPool();
 
@@ -208,14 +219,7 @@ public class BusinessHandlerImplTest {
      // ========== Tests for doPut/doGet ==========
 
      @Test
-     public void testDoPutSuccessfully() throws HgStoreException {
-         // This test verifies the method signature exists and is callable
-         // Complete testing would require mocking internal RocksDB sessions
-         // which requires complex setup with actual RocksDB structures
-     }
-
-     @Test
-     public void testDoPutThrowsExceptionOnInternalError() {
+     public void testDoPutInternalErrorWrapsAsHgStoreException() {
          PartitionManager partitionManager = mock(PartitionManager.class);
          PdProvider pdProvider = mock(PdProvider.class);
          when(partitionManager.getPdProvider()).thenReturn(pdProvider);
@@ -242,16 +246,30 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testDoGetReturnsNullWhenPartitionNotManaged() throws HgStoreException {
-         when(mockPartitionManager.hasPartition("test-graph", 1)).thenReturn(false);
+     public void testDoGetPartitionNotManagedReturnsNull() throws HgStoreException {
+         PartitionManager partitionManager = mock(PartitionManager.class);
+         PdProvider pdProvider = mock(PdProvider.class);
+         when(partitionManager.getPdProvider()).thenReturn(pdProvider);
 
-         // Full test would need complete partition manager setup
+         Metapb.Partition partition = Metapb.Partition.newBuilder().setId(7).build();
+         when(pdProvider.getPartitionByCode("g", 1)).thenReturn(partition);
+         // Partition 7 is not managed by this store, so doGet must short-circuit to null without
+         // ever opening a RocksDB session.
+         when(partitionManager.hasPartition("g", 7)).thenReturn(false);
+
+         RocksDBSession session = mock(RocksDBSession.class);
+         BusinessHandlerImpl localHandler =
+                 new SessionOverridingBusinessHandler(partitionManager, session);
+
+         assertNull(localHandler.doGet("g", 1, "g+v", new byte[]{1}));
+         verify(partitionManager, times(1)).hasPartition("g", 7);
+         verify(session, never()).sessionOp();
      }
 
      // ========== Tests for getLeaderPartitionIds ==========
 
      @Test
-     public void testGetLeaderPartitionIds() {
+     public void testGetLeaderPartitionIdsDelegatesToPartitionManager() {
          String graph = "test-graph";
          List<Integer> expectedIds = Arrays.asList(1, 2, 3);
          when(mockPartitionManager.getLeaderPartitionIds(graph)).thenReturn(expectedIds);
@@ -263,7 +281,7 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testGetLeaderPartitionIdsReturnsEmptyList() {
+     public void testGetLeaderPartitionIdsReturnsEmptyListWhenNoLeaders() {
          String graph = "empty-graph";
          when(mockPartitionManager.getLeaderPartitionIds(graph)).thenReturn(Collections.emptyList());
 
@@ -276,7 +294,7 @@ public class BusinessHandlerImplTest {
      // ========== Tests for getLeaderPartitionIdSet ==========
 
      @Test
-     public void testGetLeaderPartitionIdSet() {
+     public void testGetLeaderPartitionIdSetDelegatesToPartitionManager() {
          when(mockPartitionManager.getLeaderPartitionIdSet()).thenReturn(
                  Collections.singleton(1));
 
@@ -290,51 +308,43 @@ public class BusinessHandlerImplTest {
      // ========== Tests for Table operations ==========
 
      @Test
-     public void testExistsTableReturnsTrue() {
-         String table = "g+v";
+     public void testExistsTableReturnsSessionResult() {
+         RocksDBSession session = mock(RocksDBSession.class);
+         when(session.tableIsExist("g+v")).thenReturn(true);
+         when(session.tableIsExist("missing")).thenReturn(false);
 
-         when(mockSession.tableIsExist(table)).thenReturn(true);
+         BusinessHandlerImpl localHandler =
+                 new SessionOverridingBusinessHandler(mockPartitionManager, session);
 
-         // Full test would require session mocking
+         assertTrue(localHandler.existsTable("g", 1, "g+v"));
+         assertFalse(localHandler.existsTable("g", 1, "missing"));
      }
 
      @Test
-     public void testGetTableNames() {
-         List<String> expectedTables = Arrays.asList("g+v", "g+e", "g+index");
+     public void testGetTableNamesReturnsSessionTableKeys() {
          Map<String, ColumnFamilyHandle> tableMap = new HashMap<>();
-         expectedTables.forEach(t -> tableMap.put(t, mock(ColumnFamilyHandle.class)));
+         for (String t : Arrays.asList("g+v", "g+e", "g+index")) {
+             tableMap.put(t, mock(ColumnFamilyHandle.class));
+         }
 
-         when(mockSession.getTables()).thenReturn(tableMap);
+         RocksDBSession session = mock(RocksDBSession.class);
+         when(session.getTables()).thenReturn(tableMap);
+         BusinessHandlerImpl localHandler =
+                 new SessionOverridingBusinessHandler(mockPartitionManager, session);
 
-         // Full test would require session mocking and setup
+         List<String> names = localHandler.getTableNames("g", 1);
+
+         assertNotNull(names);
+         assertEquals(3, names.size());
+         assertTrue(names.containsAll(Arrays.asList("g+v", "g+e", "g+index")));
      }
 
      // ========== Tests for Partition operations ==========
 
-     @Test
-     public void testCleanPartitionCallsPartitionManager() {
-         String graph = "test-graph";
-         int partId = 1;
-
-         Partition mockPartition = mock(Partition.class);
-         when(mockPartitionManager.getPartitionFromPD(graph, partId)).thenReturn(mockPartition);
-         when(mockPartition.getStartKey()).thenReturn(0L);
-         when(mockPartition.getEndKey()).thenReturn(100L);
-
-         // This tests that the method properly delegates to partition manager
-         // Full implementation requires extensive mocking
-     }
-
-     @Test
-     public void testDeletePartition() {
-         // Verifies method exists and can be called
-         // Full testing requires RocksDB session management
-     }
-
      // ========== Tests for Metric operations ==========
 
      @Test
-     public void testGetApproximateMemoryUsageByType() {
+     public void testGetApproximateMemoryUsageByTypeReturnsNonNullMap() {
          List<Cache> caches = new ArrayList<>();
 
          Map<MemoryUsageType, Long> result = handler.getApproximateMemoryUsageByType(caches);
@@ -343,69 +353,25 @@ public class BusinessHandlerImplTest {
          // Empty map on exception is expected behavior
      }
 
-     // ========== Tests for additional FNV Hash scenarios ==========
-
-     @Test
-     public void testFnvHashConsistency() {
-         byte[] input = "test-data".getBytes();
-         Long hash1 = BusinessHandlerImpl.fnvHash(input);
-         Long hash2 = BusinessHandlerImpl.fnvHash(input);
-
-         assertEquals(hash1, hash2);
-     }
-
-     @Test
-     public void testFnvHashDifferentInputs() {
-         byte[] input1 = "test1".getBytes();
-         byte[] input2 = "test2".getBytes();
-
-         Long hash1 = BusinessHandlerImpl.fnvHash(input1);
-         Long hash2 = BusinessHandlerImpl.fnvHash(input2);
-
-         assertNotEquals(hash1, hash2);
-     }
-
-     // ========== Tests for additional index data size scenarios ==========
-
-     @Test
-     public void testSetIndexDataSizePositive() {
-         long newSize = 100 * 1024L;
-         BusinessHandlerImpl.setIndexDataSize(newSize);
-         // Verify through reflection or static state inspection
-     }
-
-     @Test
-     public void testSetIndexDataSizeNegativeIgnored() {
-         long originalSize = 50 * 1024L;
-         BusinessHandlerImpl.setIndexDataSize(originalSize);
-
-         // Setting negative value should be ignored
-         BusinessHandlerImpl.setIndexDataSize(-1);
-         // Size should remain unchanged
-     }
-
-     @Test
-     public void testSetIndexDataSizeZeroIgnored() {
-         long originalSize = 50 * 1024L;
-         BusinessHandlerImpl.setIndexDataSize(originalSize);
-
-         // Setting zero should be ignored
-         BusinessHandlerImpl.setIndexDataSize(0);
-         // Size should remain unchanged
-     }
-
      // ========== Tests for transaction operations ==========
 
      @Test
-     public void testTxBuilderCreatesBuilder() {
-         // This verifies the method exists and returns a TxBuilder
-         // Full testing requires RocksDB session setup
+     public void testTxBuilderReturnsBuilderBackedBySession() throws HgStoreException {
+         RocksDBSession session = mock(RocksDBSession.class);
+         // TxBuilderImpl's constructor opens and prepares an operator on the session.
+         SessionOperator op = mock(SessionOperator.class);
+         when(session.sessionOp()).thenReturn(op);
+         BusinessHandlerImpl localHandler =
+                 new SessionOverridingBusinessHandler(mockPartitionManager, session);
+
+         assertNotNull(localHandler.txBuilder("g", 1));
+         verify(op, times(1)).prepare();
      }
 
      // ========== Tests for database operations ==========
 
      @Test
-     public void testCloseDB() {
+     public void testCloseDbBasicPathIsInvocable() {
          int partId = 1;
 
          // Verifies the method can be called
@@ -414,19 +380,19 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testFlushAll() {
+     public void testFlushAllBasicPathIsInvocable() {
          // Verifies the method can be called without throwing
          handler.flushAll();
      }
 
      @Test
-     public void testCloseAll() {
+     public void testCloseAllBasicPathIsInvocable() {
          // Verifies the method can be called without throwing
          handler.closeAll();
      }
 
      @Test
-     public void testGetPartitionIds() {
+     public void testGetPartitionIdsDelegatesToPartitionManager() {
          String graph = "test-graph";
          List<Integer> expectedIds = Arrays.asList(1, 2, 3);
          when(mockPartitionManager.getPartitionIds(graph)).thenReturn(expectedIds);
@@ -436,30 +402,10 @@ public class BusinessHandlerImplTest {
          assertEquals(expectedIds, result);
      }
 
-     // ========== Tests for state management ==========
-
-     @Test
-     public void testSetAndNotifyState() {
-         // Verifies method exists and basic functionality
-         // Full testing requires proper initialization of compactionState
-     }
-
-     @Test
-     public void testGetState() {
-         // Verifies method exists
-         // Full testing requires proper state setup
-     }
-
      // ========== Tests for lock operations ==========
 
      @Test
-     public void testUnlock() {
-         // Verifies method exists
-         // Full testing requires proper pathLock setup
-     }
-
-     @Test
-     public void testGetLockPath() {
+     public void testGetLockPathDelegatesToPartitionManager() {
          int partitionId = 1;
          when(mockPartitionManager.getDbDataPath(partitionId))
                  .thenReturn("/data/partition/00001");

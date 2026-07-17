@@ -20,10 +20,13 @@ package org.apache.hugegraph.store.cloud.s3;
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.Socket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -106,6 +109,14 @@ public class S3SingleLargeFileE2ETest {
     private static final String PROP_PATH_PREFIX = "s3.perf.pathPrefix";
     private static final String PROP_SINGLE_FILE_GB = "s3.perf.singleFileSizeGb";
     private static final String PROP_SKIP_CLEANUP = "s3.perf.skipCleanup";
+    /**
+     * When set truthy (system property {@code s3.perf.integration} or env
+     * {@code S3_PERF_INTEGRATION}), an unreachable endpoint FAILS the test instead of skipping it.
+     * CI's S3-integration profile must set this so a broken endpoint/credentials cannot masquerade
+     * as a green build. Unset (local/IDE runs) preserves the graceful skip when MinIO is absent.
+     */
+    private static final String PROP_INTEGRATION_REQUIRED = "s3.perf.integration";
+    private static final String ENV_INTEGRATION_REQUIRED = "S3_PERF_INTEGRATION";
 
     // Defaults for zero-config local MinIO runs (e.g. running the test directly from an IDE).
     // These values match the standard MinIO Docker quickstart:
@@ -133,13 +144,25 @@ public class S3SingleLargeFileE2ETest {
         String ak       = System.getProperty(PROP_ACCESS_KEY, DEFAULT_ACCESS_KEY);
         String sk       = System.getProperty(PROP_SECRET_KEY, DEFAULT_SECRET_KEY);
 
-        // Verify the endpoint is reachable — skip gracefully if MinIO / S3 is not running
-        Assume.assumeTrue(
-            "Skipping S3SingleLargeFileE2ETest: S3 endpoint not reachable at " + endpoint
-            + ". Start MinIO with: docker run -p 9000:9000 "
-            + "-e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin "
-            + "minio/minio server /data",
-            isEndpointReachable(endpoint));
+        // Endpoint reachability gate. In an integration profile (flag set) an unreachable endpoint
+        // is a HARD FAILURE — CI must not stay green while real S3 integration is broken. Otherwise
+        // (local/IDE runs, default CI) skip gracefully when MinIO / S3 is not running.
+        boolean reachable = isEndpointReachable(endpoint);
+        if (integrationRequired()) {
+            Assert.assertTrue(
+                "S3 integration profile is enabled (" + PROP_INTEGRATION_REQUIRED + "/"
+                + ENV_INTEGRATION_REQUIRED + ") but the S3 endpoint is not reachable at " + endpoint
+                + " — failing hard so a broken S3 integration cannot pass CI.",
+                reachable);
+        } else {
+            Assume.assumeTrue(
+                "Skipping S3SingleLargeFileE2ETest: S3 endpoint not reachable at " + endpoint
+                + ". Start MinIO with: docker run -p 9000:9000 "
+                + "-e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin "
+                + "minio/minio server /data. To require this test (fail instead of skip), set -D"
+                + PROP_INTEGRATION_REQUIRED + "=true.",
+                reachable);
+        }
 
         // Build an admin S3 client for bucket management
         this.adminS3Client = buildAdminS3Client(endpoint, region, ak, sk);
@@ -215,6 +238,11 @@ public class S3SingleLargeFileE2ETest {
         long dstSize = Files.size(localDst);
         Assert.assertEquals("downloaded file size mismatch", srcSize, dstSize);
 
+        byte[] srcDigest = sha256(localSrc);
+        byte[] dstDigest = sha256(localDst);
+        Assert.assertArrayEquals("downloaded file content mismatch (SHA-256 differs)", srcDigest,
+                                 dstDigest);
+
         double uploadMBps = srcSize > 0 && uploadMs > 0
                             ? (srcSize / 1_048_576.0) / (uploadMs / 1000.0)
                             : 0.0;
@@ -254,6 +282,23 @@ public class S3SingleLargeFileE2ETest {
             block[i] = (byte) ((i * 1103515245 + 12345) & 0xFF);
         }
         return block;
+    }
+
+    private static byte[] sha256(Path file) throws IOException {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            final int bufSize = 64 * 1024 * 1024;
+            byte[] buf = new byte[bufSize];
+            try (InputStream in = Files.newInputStream(file)) {
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    md.update(buf, 0, n);
+                }
+            }
+            return md.digest();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 not available", e);
+        }
     }
 
     private static String humanSize(long bytes) {
@@ -299,6 +344,19 @@ public class S3SingleLargeFileE2ETest {
             return def;
         }
         return Boolean.parseBoolean(v.trim());
+    }
+
+    /**
+     * True when an S3 integration profile is active (system property {@code s3.perf.integration} or
+     * env {@code S3_PERF_INTEGRATION} set truthy), in which case an unreachable endpoint must FAIL
+     * rather than skip.
+     */
+    private static boolean integrationRequired() {
+        if (boolProp(PROP_INTEGRATION_REQUIRED, false)) {
+            return true;
+        }
+        String env = System.getenv(ENV_INTEGRATION_REQUIRED);
+        return env != null && !env.isBlank() && Boolean.parseBoolean(env.trim());
     }
 
     /**

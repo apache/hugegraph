@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.cloud;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -111,12 +112,18 @@ public interface CloudStorageProvider extends Closeable {
      */
     default int deletePrefix(String remoteDirPrefix) throws IOException {
         List<String> keys = listFiles(remoteDirPrefix);
+        List<String> failures = new ArrayList<>();
         for (String key : keys) {
             try {
                 deleteFile(key);
             } catch (IOException e) {
-                // Best-effort: continue deleting remaining files
+                failures.add(key + ": " + e.getMessage());
             }
+        }
+        if (!failures.isEmpty()) {
+            throw new IOException("deletePrefix failed for " + failures.size() + " of "
+                                  + keys.size() + " objects under '" + remoteDirPrefix
+                                  + "': " + failures);
         }
         return keys.size();
     }

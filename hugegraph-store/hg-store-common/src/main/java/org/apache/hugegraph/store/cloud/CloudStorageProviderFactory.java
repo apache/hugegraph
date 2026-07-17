@@ -85,7 +85,24 @@ public final class CloudStorageProviderFactory {
      */
     public static synchronized CloudStorageProvider initialize(CloudStorageConfig config) {
         if (!config.isEnabled()) {
-            log.info("Cloud storage is disabled (cloud.storage.enabled=false)");
+            // Disabling cloud storage must deactivate any currently active provider: otherwise a
+            // reconfiguration/context refresh that flips enabled=false would leave the old provider
+            // (and its live SDK resources) running and still servicing cloud I/O. Close it
+            // best-effort, drop the reference, and log the deactivation explicitly.
+            CloudStorageProvider previous = activeProvider;
+            if (previous != null) {
+                try {
+                    previous.close();
+                } catch (IOException e) {
+                    log.warn("Error closing cloud storage provider '{}' while disabling cloud storage",
+                             previous.providerName(), e);
+                }
+                activeProvider = null;
+                log.info("Cloud storage disabled (cloud.storage.enabled=false) — deactivated and "
+                         + "closed provider '{}'", previous.providerName());
+            } else {
+                log.info("Cloud storage is disabled (cloud.storage.enabled=false)");
+            }
             return null;
         }
 
@@ -98,10 +115,16 @@ public final class CloudStorageProviderFactory {
                     "Make sure the provider JAR (e.g. hg-store-cloud-s3) is on the classpath.");
         }
 
-        // Close any previously active provider
-        if (activeProvider != null && activeProvider != provider) {
+        // Clear the active reference BEFORE closing the previous provider or initializing the new
+        // one. If init(config) throws, the factory must be left in a safe state (activeProvider ==
+        // null) rather than still referencing a now-closed / partially-initialized provider —
+        // callers would otherwise observe a non-null but unusable provider after a failed
+        // reconfiguration. activeProvider is only re-set once init succeeds.
+        CloudStorageProvider previous = activeProvider;
+        activeProvider = null;
+        if (previous != null && previous != provider) {
             try {
-                activeProvider.close();
+                previous.close();
             } catch (IOException e) {
                 log.warn("Error closing previous cloud storage provider", e);
             }

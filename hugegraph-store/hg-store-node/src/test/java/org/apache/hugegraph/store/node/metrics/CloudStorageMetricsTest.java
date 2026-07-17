@@ -15,16 +15,20 @@
  * limitations under the License.
  */
 
-package org.apache.hugegraph.store.node.cloud;
+package org.apache.hugegraph.store.node.metrics;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 import java.lang.reflect.Field;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.hugegraph.store.node.cloud.CloudStorageMetrics;
+import org.apache.hugegraph.store.node.cloud.CloudStorageMetricsConst;
+import org.apache.hugegraph.store.node.cloud.CloudSyncTracker;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -36,6 +40,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 /**
  * Unit tests for {@link CloudStorageMetrics}.
+ * Includes the former lifecycle/cardinality checks from
+ * {@code CloudStorageMetricsLifecycleTest}.
  *
  * <p>Because {@link CloudStorageMetrics} uses static singleton state, each test
  * resets all static fields via reflection in {@link #tearDown()} so that tests
@@ -63,7 +69,7 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void init_registersGlobalMetrics() {
+    public void testInitRegistersGlobalMetrics() {
         CloudStorageMetrics.init(registry, syncTracker);
 
         assertNotNull("upload failures counter must be registered",
@@ -75,7 +81,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void init_isIdempotent_secondCallIsNoOp() {
+    public void testInitIsIdempotentSecondCallIsNoOp() {
         CloudStorageMetrics.init(registry, syncTracker);
 
         // A second registry should be ignored
@@ -89,12 +95,12 @@ public class CloudStorageMetricsTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void init_nullRegistry_throwsIllegalArgument() {
+    public void testInitNullRegistryThrowsIllegalArgument() {
         CloudStorageMetrics.init(null, syncTracker);
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void init_nullTracker_throwsIllegalArgument() {
+    public void testInitNullTrackerThrowsIllegalArgument() {
         CloudStorageMetrics.init(registry, null);
     }
 
@@ -103,14 +109,14 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void registerDatabaseMetrics_beforeInit_isNoOp() {
+    public void testRegisterDatabaseMetricsBeforeInitIsNoOp() {
         // No init — should not throw and registry must remain empty
         CloudStorageMetrics.registerDatabaseMetrics("db1");
         assertEquals(0, registry.getMeters().size());
     }
 
     @Test
-    public void registerDatabaseMetrics_registersConfirmedFilesGauge() {
+    public void testRegisterDatabaseMetricsRegistersConfirmedFilesGauge() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.registerDatabaseMetrics("mydb");
 
@@ -121,7 +127,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void registerDatabaseMetrics_registersDeleteGuardReuploadGauge() {
+    public void testRegisterDatabaseMetricsRegistersDeleteGuardReuploadGauge() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.registerDatabaseMetrics("mydb");
 
@@ -133,7 +139,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void registerDatabaseMetrics_isIdempotent_secondCallIsNoOp() {
+    public void testRegisterDatabaseMetricsIsIdempotentSecondCallIsNoOp() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.registerDatabaseMetrics("mydb");
 
@@ -146,7 +152,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void registerDatabaseMetrics_multipleDatabases_eachGetsSeparateGauges() {
+    public void testRegisterDatabaseMetricsMultipleDatabasesEachGetsSeparateGauges() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.registerDatabaseMetrics("db-alpha");
         CloudStorageMetrics.registerDatabaseMetrics("db-beta");
@@ -162,13 +168,13 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void recordUploadFailure_beforeInit_isNoOp() {
+    public void testRecordUploadFailureBeforeInitIsNoOp() {
         // Must not throw
         CloudStorageMetrics.recordUploadFailure("db1", "default", "timeout");
     }
 
     @Test
-    public void recordUploadFailure_incrementsCounter() {
+    public void testRecordUploadFailureIncrementsCounter() {
         CloudStorageMetrics.init(registry, syncTracker);
 
         CloudStorageMetrics.recordUploadFailure("db1", "default", "timeout");
@@ -180,7 +186,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void recordUploadFailure_multipleCallsAccumulate() {
+    public void testRecordUploadFailureMultipleCallsAccumulate() {
         CloudStorageMetrics.init(registry, syncTracker);
 
         for (int i = 0; i < 5; i++) {
@@ -197,13 +203,13 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void recordSyncLatency_beforeInit_isNoOp() {
+    public void testRecordSyncLatencyBeforeInitIsNoOp() {
         // Must not throw
         CloudStorageMetrics.recordSyncLatency("db1", 250L);
     }
 
     @Test
-    public void recordSyncLatency_recordsMeasurement() {
+    public void testRecordSyncLatencyRecordsMeasurement() {
         CloudStorageMetrics.init(registry, syncTracker);
 
         CloudStorageMetrics.recordSyncLatency("db1", 100L);
@@ -216,7 +222,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void recordSyncLatency_zeroLatency_isRecorded() {
+    public void testRecordSyncLatencyZeroLatencyIsRecorded() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.recordSyncLatency("db1", 0L);
 
@@ -230,12 +236,12 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void getConfirmedFileCount_beforeInit_returnsZero() {
+    public void testGetConfirmedFileCountBeforeInitReturnsZero() {
         assertEquals(0L, CloudStorageMetrics.getConfirmedFileCount("db1"));
     }
 
     @Test
-    public void getConfirmedFileCount_afterInit_delegatesToSyncTracker() {
+    public void testGetConfirmedFileCountAfterInitDelegatesToSyncTracker() {
         // Confirm a file in the tracker then query via metrics
         syncTracker.markConfirmed("db1", "db1/000001.sst");
         syncTracker.markConfirmed("db1", "db1/000002.sst");
@@ -246,7 +252,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void getConfirmedFileCount_unknownDb_returnsZero() {
+    public void testGetConfirmedFileCountUnknownDbReturnsZero() {
         CloudStorageMetrics.init(registry, syncTracker);
         assertEquals(0L, CloudStorageMetrics.getConfirmedFileCount("no-such-db"));
     }
@@ -256,12 +262,12 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void getDeleteGuardReuploadCount_unknownDb_returnsZero() {
+    public void testGetDeleteGuardReuploadCountUnknownDbReturnsZero() {
         assertEquals(0L, CloudStorageMetrics.getDeleteGuardReuploadCount("unknown-db"));
     }
 
     @Test
-    public void incrementDeleteGuardReupload_incrementsCountForDb() {
+    public void testIncrementDeleteGuardReuploadIncrementsCountForDb() {
         CloudStorageMetrics.incrementDeleteGuardReupload("db1");
         CloudStorageMetrics.incrementDeleteGuardReupload("db1");
         CloudStorageMetrics.incrementDeleteGuardReupload("db1");
@@ -270,7 +276,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void incrementDeleteGuardReupload_countsAreIsolatedPerDb() {
+    public void testIncrementDeleteGuardReuploadCountsAreIsolatedPerDb() {
         CloudStorageMetrics.incrementDeleteGuardReupload("db-a");
         CloudStorageMetrics.incrementDeleteGuardReupload("db-a");
         CloudStorageMetrics.incrementDeleteGuardReupload("db-b");
@@ -280,14 +286,14 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void incrementDeleteGuardReupload_beforeRegisterDb_stillWorks() {
+    public void testIncrementDeleteGuardReuploadBeforeRegisterDbStillWorks() {
         // Incrementing before registerDatabaseMetrics() should still track the count
         CloudStorageMetrics.incrementDeleteGuardReupload("db-new");
         assertEquals(1L, CloudStorageMetrics.getDeleteGuardReuploadCount("db-new"));
     }
 
     @Test
-    public void deleteGuardReuploadGauge_reflectsLiveCount() {
+    public void testDeleteGuardReuploadGaugeReflectsLiveCount() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.registerDatabaseMetrics("mydb");
 
@@ -302,7 +308,7 @@ public class CloudStorageMetricsTest {
     }
 
     @Test
-    public void confirmedFilesGauge_reflectsTrackerState() {
+    public void testConfirmedFilesGaugeReflectsTrackerState() {
         CloudStorageMetrics.init(registry, syncTracker);
         CloudStorageMetrics.registerDatabaseMetrics("mydb");
 
@@ -322,10 +328,50 @@ public class CloudStorageMetricsTest {
     // -----------------------------------------------------------------------
 
     @Test
-    public void setRetryQueueSize_doesNotThrow() {
+    public void testSetRetryQueueSizeDoesNotThrow() {
         CloudStorageMetrics.setRetryQueueSize(0);
         CloudStorageMetrics.setRetryQueueSize(42);
         CloudStorageMetrics.setRetryQueueSize(Integer.MAX_VALUE);
+    }
+
+    // -----------------------------------------------------------------------
+    // unregisterDatabaseMetrics() — per-DB meter cleanup (cardinality bound)
+    // -----------------------------------------------------------------------
+    // Ensures per-database meters are removed when a DB is deleted, so meter cardinality does not
+    // grow without bound as databases are created and destroyed (partition rebalancing, graph drops).
+
+    @Test
+    public void testPerDbMetricsAreRemovedOnUnregister() {
+        CloudStorageMetrics.init(registry, syncTracker);
+        CloudStorageMetrics.registerDatabaseMetrics("db-A");
+        CloudStorageMetrics.registerDatabaseMetrics("db-B");
+
+        assertEquals("both DBs must have per-DB meters registered",
+                     2, registeredDbMetricCount());
+        assertNotNull("db-A confirmed-files gauge must exist", confirmedFilesGaugeFor("db-A"));
+        assertNotNull("db-B confirmed-files gauge must exist", confirmedFilesGaugeFor("db-B"));
+
+        // Simulate DB deletion for db-A.
+        CloudStorageMetrics.unregisterDatabaseMetrics("db-A");
+
+        assertEquals("only db-B must remain after db-A is unregistered",
+                     1, registeredDbMetricCount());
+        assertNull("db-A gauge must be removed from the registry (no cardinality leak)",
+                   confirmedFilesGaugeFor("db-A"));
+        assertNotNull("db-B gauge must be untouched", confirmedFilesGaugeFor("db-B"));
+    }
+
+    @Test
+    public void testUnregisterThenReregisterWorksForRecreatedDb() {
+        CloudStorageMetrics.init(registry, syncTracker);
+        CloudStorageMetrics.registerDatabaseMetrics("db-A");
+        CloudStorageMetrics.unregisterDatabaseMetrics("db-A");
+        assertNull(confirmedFilesGaugeFor("db-A"));
+
+        // A DB recreated at the same name must get fresh metrics.
+        CloudStorageMetrics.registerDatabaseMetrics("db-A");
+        assertNotNull("recreated DB must re-register its metrics", confirmedFilesGaugeFor("db-A"));
+        assertEquals(1, registeredDbMetricCount());
     }
 
     // -----------------------------------------------------------------------
@@ -348,6 +394,10 @@ public class CloudStorageMetricsTest {
                     .getDeclaredField("deleteGuardReuploadPerDb");
             mapField.setAccessible(true);
             ((ConcurrentHashMap<String, AtomicLong>) mapField.get(null)).clear();
+
+            Field perDbMetersField = CloudStorageMetrics.class.getDeclaredField("perDbMeters");
+            perDbMetersField.setAccessible(true);
+            ((java.util.Map<?, ?>) perDbMetersField.get(null)).clear();
         } catch (Exception e) {
             throw new RuntimeException("Failed to reset CloudStorageMetrics static state", e);
         }
@@ -358,6 +408,27 @@ public class CloudStorageMetricsTest {
         Field field = CloudStorageMetrics.class.getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(null, (Object) null);
+    }
+
+    private Gauge confirmedFilesGaugeFor(String dbName) {
+        return registry.find(CloudStorageMetricsConst.CONFIRMED_FILES)
+                       .tag(CloudStorageMetricsConst.TAG_DB_NAME, dbName)
+                       .gauge();
+    }
+
+    /**
+     * Number of databases with registered per-DB meters. Read via reflection on {@code perDbMeters}
+     * because this test lives outside {@code CloudStorageMetrics}'s package and cannot call the
+     * package-private {@code registeredDbMetricCountForTest()} helper.
+     */
+    private static int registeredDbMetricCount() {
+        try {
+            Field f = CloudStorageMetrics.class.getDeclaredField("perDbMeters");
+            f.setAccessible(true);
+            return ((java.util.Map<?, ?>) f.get(null)).size();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to read CloudStorageMetrics.perDbMeters", e);
+        }
     }
 }
 

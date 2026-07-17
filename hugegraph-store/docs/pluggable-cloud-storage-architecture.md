@@ -33,7 +33,7 @@ object store and hydrating missing files back when needed (startup and read-miss
 | Store Cluster (Raft replication)             |
 |                                              |
 | +-----------------------------------------+  |
-| | WAL + MemTable -> Local RocksDB SST     |  |
+| | Raft log + MemTable -> Local RocksDB SST|  |
 | +--------------------+--------------------+  |
 |                      |                       |
 |                      v                       |
@@ -58,7 +58,7 @@ object store and hydrating missing files back when needed (startup and read-miss
 - `HugeGraph Server`: API/query layer that routes graph requests to PD and Store.
 - `PD Cluster`: Placement/metadata control plane (partition mapping, leader scheduling).
 - `Store Cluster`: Raft-based data plane where writes are replicated and persisted.
-- `WAL + MemTable -> Local RocksDB SST`: Local durability and compaction pipeline in each Store node.
+- `Raft log + MemTable -> Local RocksDB SST`: Local write pipeline in each Store node. The Raft log is the durability source for recent writes (the RocksDB WAL is disabled under Raft); the MemTable is flushed/compacted into SSTs.
 - `Pluggable Cloud Storage Workflow (NEW)`: SST lifecycle hook path for upload/delete/download/list.
 - `CloudStorageEventListener (NEW)`: Captures RocksDB file events and triggers cloud operations.
 - `CloudStorageProviderFactory (NEW)`: SPI loader that selects and initializes the active provider.
@@ -81,8 +81,11 @@ The pluggable cloud-storage behavior is controlled from `application.yml` under
 | `cloud.storage.upload-retry-max-attempts`            | `3`         | Whole-file retry attempts after a first upload failure. Default `3` retries are enabled to protect against transient network errors. <br/>Set to `0` to disable whole-file retries (failures go directly to DLQ) when the provider already has sufficient internal retry logic. `CloudStorageNonRetryableException` always bypasses retries and goes directly to DLQ regardless of this value. |
 | `cloud.storage.upload-retry-initial-delay-ms`        | `1000`      | Delay before first whole-file retry; subsequent retries use exponential backoff. Only used when `upload-retry-max-attempts > 0`.                                                                                                                                                                                                                                                               |
 | `cloud.storage.upload-retry-max-delay-ms`            | `60000`     | Upper bound for exponential backoff delay between whole-file retry attempts. Only used when `upload-retry-max-attempts > 0`.                                                                                                                                                                                                                                                                   |
-| `cloud.storage.upload-backpressure-high-watermark`   | `64`        | When `> 0`, slows the RocksDB flush/compaction thread in `onTableFileCreated` while the pending-upload backlog (retry-queue in-flight + DLQ size) exceeds this value, bounding the amount of local-only at-risk data. Blocked at most 30 s per event. `0` disables backpressure.                                                                                                               |
-| `cloud.storage.wal-mode`                             | `flush`     | WAL durability mode for metadata mirroring. `flush` forces a MemTable flush before each capture; at most the un-flushed tail since the last sync is lost on an uncontrolled crash. `wal` also mirrors active `*.log` WAL segments alongside metadata and replays them on restore (lower RPO, at the cost of more frequent small uploads).                                                      |
+| `cloud.storage.upload-backpressure-high-watermark`   | `64`        | When `> 0`, slows the RocksDB flush/compaction thread in `onTableFileCreated` while the pending-upload backlog exceeds this value, bounding the amount of local-only at-risk data. Blocked at most 30 s per event. `0` disables backpressure. The backlog is `async-upload queued+active` + `retry-queue in-flight` + a bounded **DLQ enqueue rate** (uploads that exhausted retries within a trailing ~1 s window, capped at this watermark) — the enqueue *rate*, not the static DLQ depth, so backpressure engages while durability is actively degrading and releases once failures stop, rather than pinning the write path on historical DLQ debt.                                                                                                               |
+| `cloud.storage.dlq-max-size`                         | `100000`    | Maximum entries retained in the file-backed dead-letter queue (in memory and, amortized, on disk at `<data-root>/.cloud-upload-dlq.tsv`). Bounds memory/disk growth during a prolonged provider outage; when exceeded the oldest entries are evicted (evicted files stay recoverable via the delete guard and startup SST backfill). Must be `> 0`.                                            |
+| `cloud.storage.metadata-sync-debounce-ms`            | `1000`      | Debounce window for the per-SST metadata sync triggered by `onTableFileCreated`. Within a window per DB at most one metadata publish runs (plus a trailing publish), coalescing checkpoint + list/prune cost under write-heavy load. `<= 0` publishes on every SST (pre-debounce behavior). Event-driven publishes (delete guard, compaction, DB open) are **never** debounced.               |
+| `cloud.storage.metadata-sync-max-unpublished`        | `32`        | Count bound on the debounce: once this many SST uploads accumulate without a metadata publish for a DB, a publish is forced regardless of `metadata-sync-debounce-ms`, bounding the cloud recovery point by count (not just time) during heavy-ingestion bursts. `<= 0` disables the count bound (time-only debounce).                                                                        |
+| `cloud.storage.node-id`                              | _(blank)_   | Stable per-node identity used to derive the cloud key scope (`store-<node-id>`). When set, it is authoritative and stable across restarts, IP/hostname changes, **and** local disk loss, so recovery always finds prior remote objects — recommended for production (e.g. a StatefulSet pod ordinal or provisioned node UUID). Blank falls back to a scope persisted in the data root (`.cloud-store-scope`), which is stable across network-identity drift but lost with the disk, and is in turn seeded from the runtime network address on first start. See "Cloud key scope resolution" below.            |
 
 Notes:
 
@@ -92,11 +95,59 @@ Notes:
 - `CloudStorageNonRetryableException` thrown by a provider bypasses immediate retries. The file remains unconfirmed and is automatically retried on the next compaction via the delete guard.
 - Failed uploads are tracked via metrics (`cloud_storage_upload_failures_total`) and structured logs. Automatic retry occurs on subsequent compactions; no manual recovery needed.
 - Backpressure blocks the RocksDB compaction thread for at most 30 s (`BACKPRESSURE_MAX_WAIT_MS`) even if the backlog remains above the watermark after that window.
-- Metadata sync publishes a consistent `CURRENT`/`MANIFEST`/`OPTIONS` (plus WAL tail when `wal-mode: wal`) snapshot so a full-disk-loss node can reopen from cloud.
+- Metadata sync publishes a consistent `CURRENT`/`MANIFEST`/`OPTIONS` snapshot so a full-disk-loss node can reopen from cloud. Capture forces a MemTable flush so the un-flushed tail is persisted into an SST and mirrored (the RocksDB WAL is disabled under Raft — the Raft log is the tail's durability source — so a flush is the only path that pushes recent writes to cloud).
 - Metadata sync is always enabled when cloud storage is enabled.
-- Metadata sync is event-triggered by storage events; there is no background interval scheduler.
+- Metadata sync is event-triggered by storage events; there is no background interval scheduler. The per-SST sync is debounced (`metadata-sync-debounce-ms`) and bounded by count (`metadata-sync-max-unpublished`); event-driven publishes (delete guard, compaction, DB open) are never debounced.
+- Uploads that exhaust whole-file retries land in a bounded, file-backed DLQ (`dlq-max-size`, persisted at `<data-root>/.cloud-upload-dlq.tsv`); DLQ persistence health is exposed via `cloud_storage_dlq_persistence_healthy`.
+- Set a stable `cloud.storage.node-id` for production so the cloud key scope survives IP/hostname changes and local disk loss (see "Cloud key scope resolution").
 - Provider-specific properties (e.g., bucket, region, credentials) are configured under `cloud.storage.<provider>.*` namespace.
 - **Operational observability**: Monitor metrics and logs to track sync progress (see "Observability: Metrics & Logs" section above).
+
+### Metadata capture, the sync window, and RPO
+
+> **The RocksDB WAL is disabled in HStore.** The state-machine write path calls
+> `dbSession.setDisableWAL(true)` (`BusinessHandlerImpl`, comment: *"raft mode, disable rocksdb
+> log"*) because the **Raft log** — replicated across the partition's peers — is the durability
+> source for recent writes, not the RocksDB WAL. RocksDB `*.log` segments therefore stay empty, and
+> cloud storage never mirrors a WAL; the discussion below is about how recent writes reach cloud and
+> how current the cloud copy is.
+
+#### How recent writes reach cloud (force-flush-and-mirror)
+
+Each metadata capture uses RocksDB `Checkpoint.createCheckpoint`, which flushes the MemTable,
+persisting the un-flushed tail into a new L0 SST that is then mirrored. Because the RocksDB WAL is
+disabled, this forced flush is the **only** mechanism that proactively pushes recent
+(still-in-MemTable) writes into cloud. When the MemTable is empty the flush is a no-op.
+
+- *Cloud RPO for the recent tail:* bounded by the metadata-sync cadence
+  (`metadata-sync-debounce-ms` / `metadata-sync-max-unpublished`).
+- *Cost:* a small extra L0 SST per non-empty capture (write amplification + cloud object churn +
+  compaction pressure), whose frequency is bounded by the debounce window. The Raft log is the
+  tail's durability source for any single/partial-node loss regardless of cloud cadence.
+
+#### Is the metadata-sync debounce a data-loss window?
+
+No uploaded SST bytes are ever lost to the debounce. In `SstUploadTask.run()` the SST object is
+uploaded to cloud **first** (the code notes *"the SST is already durable in cloud"*); only the
+subsequent `CURRENT`/`MANIFEST` **pointer publish** is debounced. So the window is a **bounded
+metadata / recovery-point lag, not a byte-loss hole**:
+
+- The newest uploaded SST(s) may exist in cloud but not yet be *referenced* by the mirrored MANIFEST
+  for up to `metadata-sync-debounce-ms` (default 1 s) **or** `metadata-sync-max-unpublished` SSTs
+  (default 32), whichever comes first. A leading-edge + trailing publish guarantees the final state
+  is always published even if writes then stop; `onCompacted` / `onDBCreated` / delete-guard /
+  shutdown-drain publish **inline** (never debounced).
+- This lag becomes observable data loss **only** under a total, simultaneous loss of *all* Raft
+  peers' local state followed by a cloud-only restore that lands inside that ≤1 s / ≤32-SST window —
+  then the newest unreferenced SSTs are orphans not in the restored set.
+- For any lesser failure (single / partial node loss) the **Raft log** holds the committed tail and
+  is the primary recovery source, so the cloud metadata lag is irrelevant. Restore is also
+  fail-closed consistent (the "Cloud restore inconsistent" guard never restores a `CURRENT` that
+  references a missing MANIFEST — worst case an older but fully consistent point).
+
+To tighten the cloud recovery point — at the cost of more frequent metadata publishes and forced
+flushes — lower `metadata-sync-debounce-ms` (`0` = publish on every SST)
+and/or `metadata-sync-max-unpublished`.
 
 ### S3 provider-specific options (`cloud.storage.s3.*`)
 
@@ -112,6 +163,7 @@ For provider `s3`, configure these properties under `cloud.storage.s3`:
 | `cloud.storage.s3.multipart-part-retry-max-attempts`    | `3`       | Max retries for each multipart upload part before the whole file upload fails.                       |
 | `cloud.storage.s3.multipart-part-retry-base-backoff-ms` | `1000`    | Base backoff for part retries (exponential: 1x/2x/4x...).                                            |
 | `cloud.storage.s3.multipart-exhausted-direct-dlq`       | `false`   | If `true`, part-retry exhaustion is marked non-retryable so outer SST retry can go directly to DLQ.  |
+| `cloud.storage.s3.multipart-stale-abort-on-init`        | `true`    | If `true`, the provider sweeps for and aborts incomplete multipart uploads older than 24h at initialization. The sweep is scoped to `path-prefix` and is **skipped entirely when `path-prefix` is empty**, so it can never abort unrelated in-flight uploads across the whole bucket. Set `false` when multiple writers share the same `path-prefix` and rely on an S3 `AbortIncompleteMultipartUpload` lifecycle rule instead. |
 
 ### Sample `application.yml` (`cloud.storage`)
 
@@ -138,9 +190,20 @@ cloud:
     # Blocks at most 30 s per event; 0 disables
     upload-backpressure-high-watermark: 64
 
-    # Metadata durability (CURRENT/MANIFEST/OPTIONS[/WAL])
+    # Dead-letter queue: max entries before oldest are evicted (bounds memory/disk on outage).
+    # DLQ is file-backed at <data-root>/.cloud-upload-dlq.tsv; evicted files stay recoverable
+    # via the delete guard / startup backfill.
+    dlq-max-size: 100000
+
+    # Metadata durability (CURRENT/MANIFEST/OPTIONS)
     # Metadata sync is always enabled when cloud storage is enabled
-    wal-mode: flush                        # 'flush' or 'wal' (lower RPO, more uploads)
+    metadata-sync-debounce-ms: 1000        # coalesce per-SST metadata sync; <= 0 = publish on every SST
+    metadata-sync-max-unpublished: 32      # force publish after N unmirrored SSTs; <= 0 disables count bound
+
+    # Stable per-node identity for the cloud key scope (store-<node-id>). Blank => persist one in the
+    # data root (seeded from the network address). Set a deployment-stable value (e.g. StatefulSet
+    # ordinal / provisioned UUID) for guaranteed recovery after address change or local disk loss.
+    node-id:
 
     # S3 provider-specific configuration (cloud.storage.s3.*)
     s3:
@@ -154,6 +217,9 @@ cloud:
       multipart-part-retry-max-attempts: 3
       multipart-part-retry-base-backoff-ms: 1000
       multipart-exhausted-direct-dlq: false
+      # Abort incomplete multipart uploads > 24h old at init (scoped to path-prefix; skipped when
+      # path-prefix is empty). Set false when writers share a path-prefix + use an S3 lifecycle rule.
+      multipart-stale-abort-on-init: true
 ```
 
 Notes:
@@ -184,7 +250,7 @@ HugeGraph Server
   v
 Store Node (RocksDB)
   |
-  | 3) WAL append + MemTable update
+  | 3) Raft log append + MemTable update (RocksDB WAL disabled)
   | 4) Flush/compaction creates *.sst
   v
 CloudStorageEventListener
@@ -243,10 +309,12 @@ Object Storage: old SST deleted
 
 - On DB creation (`onDBCreated`), existing local SST files are scanned and uploaded if missing in cloud.
   A MemTable flush is triggered via `onDBCreated` (event-driven, not a background async task) so
-  WAL-recovered/in-memory data materializes into SST files and gets mirrored to cloud.
+  in-memory data (recovered by replaying the Raft log on open) materializes into SST files and gets
+  mirrored to cloud.
 - Remote object key is always scoped per store node:
   **`<path-prefix>/<store-scope-prefix>/<relative-path>`** e.g. `hugegraph/store-127.0.0.1_8501/0/000001.sst`.
-  `store-scope-prefix` is derived from `raft.address` at startup (see `AppConfig.buildCloudStoreScopePrefix()`).
+  `store-scope-prefix` is `store-<node-id>`, resolved at startup by
+  `AppConfig.resolveStableStoreScopePrefix()` (see "Cloud key scope resolution" below).
   This guarantees key uniqueness across nodes even when multiple Store nodes share the same bucket.
 - After every successful upload, `syncTracker.markConfirmed(dbName, fileNumber)` sets the corresponding
   bit in a per-`dbName` in-memory bitmap (`CloudSyncTracker`). This bitmap is the fast path used by the
@@ -256,6 +324,22 @@ Object Storage: old SST deleted
   (replacement files) are durable. Only when every live file is confirmed does the delete proceed.
 - MANIFEST/CURRENT is published to cloud **before** the old SST is deleted, so that a recovery attempt
   always has a consistent metadata + data state to restore from.
+
+### Cloud key scope resolution
+
+The `store-scope-prefix` that isolates each node's objects is resolved by
+`AppConfig.resolveStableStoreScopePrefix()` in precedence order, most-durable first:
+
+1. **Configured `cloud.storage.node-id`** — authoritative. Lives in deployment config, so it is stable
+   across restarts, IP/hostname changes, **and** local disk loss. Recovery always finds prior objects.
+   Recommended for production (e.g. StatefulSet pod ordinal, provisioned node UUID). When set, it is
+   also written to the persisted marker so a later removal of the config value still resolves the same scope.
+2. **Persisted marker** `<primary-data-root>/.cloud-store-scope` — written on first start. Keeps the
+   scope stable across network-identity (IP/hostname) drift, but is **lost with the disk**.
+3. **Runtime network address** — legacy fallback used to *seed* the marker on first start (keeps upgrades
+   migration-safe: an existing deployment already keyed by `store-<host_port>` resolves to the same scope).
+   A `WARN` is logged advising an explicit `node-id` for durable recovery, since a later address change
+   would otherwise read a different scope.
 
 ## 4) Read Path
 
@@ -337,10 +421,13 @@ onDBOpening(dbName)
 ### Scope: managed delete vs accidental local loss
 
 - Current behavior intentionally treats a missing local DB directory as a **recovery** case and hydrates from cloud when remote objects exist.
-- Intentional delete/reset is recognized only through the managed deletion flow (`RocksDBFactory.destroyGraphDB()` -> `onDBDeleteBegin`/`onDBDeleted`) that writes and then purges the DB tombstone marker.
-- If a local DB directory is removed outside the managed flow, no tombstone callback is emitted; hydration may restore data from cloud for the same DB path.
-- This is an accepted scope tradeoff for now to prioritize accidental local-loss recovery.
-- Future hardening can add explicit generation/epoch markers to distinguish external manual delete from disaster recovery.
+- Intentional delete/reset is recognized through the managed deletion flow (`RocksDBFactory.destroyGraphDB()` -> `onDBDeleted`).
+- **Anti-resurrection guard (implemented).** On managed delete, `onDBDeleted`:
+  1. **First** persists a local *pending-delete marker* — this is the durable guard. If the marker cannot be durably written, the delete is **held** (`deleteMarkerHealthy` flips to `0`) rather than risking a re-hydration after a crash.
+  2. Writes a sibling *tombstone* object (`<scope>/<path-prefix>/<db>_DELETED`) alongside the data prefix, then purges the remote DB prefix (SSTs, metadata, tombstone).
+  - If the provider is unavailable, the purge/tombstone is deferred but the local pending-delete marker still blocks re-hydration (`onDBOpening`/`preHydrateDbFiles` detect the deleted generation and skip hydration), and an async retry completes the tombstone + purge once a provider returns.
+- Store tracks the last successfully published RocksDB **generation** per DB, so a re-create during a provider outage still cannot re-hydrate the deleted generation.
+- If a local DB directory is removed **outside** the managed flow, no delete callback is emitted; hydration may still restore data from cloud for the same DB path — this remains an accepted scope tradeoff prioritizing accidental local-loss recovery.
 
 ## 5) Failure Handling
 
@@ -367,15 +454,19 @@ The default `upload-retry-max-attempts=3` enables whole-file retries for transie
 
 #### Observability: Metrics & Logs
 
-Instead of a persistent DLQ, the system provides real-time observability through metrics and structured logs:
+A bounded, file-backed dead-letter queue (DLQ) captures uploads that exhaust all whole-file retries
+(see "Dead-letter queue" below); alongside it, the system provides real-time observability through
+metrics and structured logs:
 
 **Metrics (exposed to Prometheus/monitoring):**
 
 - `cloud_storage_unconfirmed_files_total` (gauge, labeled by `db_name`) — Count of SST files not yet confirmed in cloud bitmap. High value → uploads are failing or slow.
 - `cloud_storage_upload_failures_total` (counter, labeled by `db_name`, `cf_name`, `error_type`) — Total upload failures (transient + permanent). Tracks upload problem frequency.
-- `cloud_storage_retry_queue_size` (gauge) — Files waiting in the upload retry queue. Indicates backlog of pending uploads.
+- `cloud_storage_retry_queue_size` (gauge) — Files waiting in the upload retry queue. Bound to the live queue (`retryQueue.getInFlightCount()`), so it reflects the real backlog rather than a constant `0`.
 - `cloud_storage_sync_latency_ms` (histogram, labeled by `db_name`) — Time from SST file creation (onTableFileCreated) to bitmap confirmation (markConfirmed). Measures sync speed.
 - `cloud_storage_delete_guard_reupload_count` (counter, labeled by `db_name`) — Number of files re-uploaded by the delete guard when live set was not fully durable. Indicates frequent upload failures.
+- `cloud_storage_dlq_persistence_healthy` (gauge, `1`=healthy / `0`=degraded) — Health of the DLQ's on-disk persistence. `0` means a DLQ append/rewrite failed, so retry intent may not survive a crash. Alert on `0`.
+- `cloud_storage_delete_marker_healthy` (gauge, `1`=healthy / `0`=degraded) — Health of pending-delete marker persistence. `0` means a marker could not be durably written, so a DB delete during a provider-unavailable window may not be guarded against re-hydration after a crash. This is a hard error state: **delete progression is held while degraded.** Alert on `0`.
 
 **Structured Logs:**
 
@@ -427,7 +518,13 @@ kubectl logs -l app=hugegraph-store | grep "Upload failed permanently"
 kubectl logs -l app=hugegraph-store | grep "filePath=/path/to/000123.sst"
 ```
 
-**Automatic retry without DLQ:**
+**Dead-letter queue (file-backed):**
+
+- Uploads that exhaust all whole-file retries (or are thrown as `CloudStorageNonRetryableException`) are moved to a dead-letter queue held in memory and persisted at `<data-root>/.cloud-upload-dlq.tsv`.
+- The DLQ is bounded by `cloud.storage.dlq-max-size` (default `100000`). When exceeded, the oldest entries are evicted — evicted files are **not** lost: they stay recoverable via the delete guard and startup SST backfill.
+- On-disk persistence lets retry intent survive a process restart; its health is surfaced via `cloud_storage_dlq_persistence_healthy` (alert on `0`).
+
+**Automatic retry (delete guard, no manual replay):**
 
 - Files that fail to upload remain unconfirmed in the bitmap.
 - On the next compaction that touches the same DB, the delete guard calls `ensureLiveSetUploaded`, which:
@@ -435,6 +532,7 @@ kubectl logs -l app=hugegraph-store | grep "filePath=/path/to/000123.sst"
   2. For any unconfirmed file, attempts upload again (idempotent PUT)
   3. On success, updates bitmap; on failure, logs and holds delete
 - This cycle repeats automatically; no manual DLQ replay needed.
+- After a retry / DLQ-replay upload becomes durable, `onRetryUploadDurable` publishes `CURRENT`/`MANIFEST` so the mirrored recovery point advances even on an idle DB.
 - Upload success rate and retry frequency are tracked via metrics and logs.
 
 **Tuning:**
@@ -467,7 +565,11 @@ cloud.storage.upload-retry-max-attempts: 0   # No immediate retries; rely on del
 
 - Unknown provider name or missing plugin JAR fails initialization in `CloudStorageProviderFactory`.
 - Provider switching/re-init is handled with close-and-reinitialize semantics.
+- **Disabling cloud storage deactivates the active provider.** A reconfiguration/context refresh that flips `enabled=false` closes the currently active provider (best-effort) and drops the reference, so no stale provider keeps servicing cloud I/O or leaks SDK resources.
+- **Init failure leaves a safe state.** The factory clears `activeProvider` *before* closing the previous provider or initializing the new one, and only re-sets it once `init()` succeeds. A failed reconfiguration therefore leaves `activeProvider == null` rather than a non-null-but-unusable provider.
+- **Failed `@PostConstruct` cleanup.** If cloud-storage wiring throws during startup, `AppConfig` closes the retry queue and calls `CloudStorageProviderFactory.shutdown()` so a failed init does not leak the provider's client/threads (Spring does not invoke `@PreDestroy` when `@PostConstruct` throws), then fails startup.
 - If no active provider is found at runtime (provider is `null`), all event callbacks (`onTableFileCreated`, `onTableFileDeleted`, `onReadMiss`) return immediately without error, so RocksDB continues normally without cloud mirroring.
+- **`deletePrefix` now surfaces failures.** The default `CloudStorageProvider.deletePrefix()` still attempts every key, but throws an `IOException` summarizing the failed keys if any deletion failed (previously it swallowed per-key errors best-effort), so callers such as the DB-purge path can detect an incomplete purge and keep the tombstone + local marker.
 
 ### Non-retryable upload failures (`CloudStorageNonRetryableException`)
 
@@ -479,7 +581,7 @@ cloud.storage.upload-retry-max-attempts: 0   # No immediate retries; rely on del
 
 ### Backpressure timeout
 
-- When `upload-backpressure-high-watermark > 0` and the pending-upload backlog (retry-queue in-flight + DLQ size) exceeds the watermark, `onTableFileCreated` parks the RocksDB flush/compaction thread in 50 ms increments.
+- When `upload-backpressure-high-watermark > 0` and the pending-upload backlog exceeds the watermark, `onTableFileCreated` parks the RocksDB flush/compaction thread in 50 ms increments. The backlog is `async-upload queued+active` + `retry-queue in-flight` + a bounded **DLQ enqueue rate** (retries-exhausted uploads within a trailing ~1 s window) — the enqueue rate, not the static DLQ depth, so backpressure releases once failures stop instead of pinning the write path on historical DLQ debt.
 - After `30 000 ms` (`BACKPRESSURE_MAX_WAIT_MS`) the backpressure wait exits unconditionally and the new SST upload is attempted regardless, to prevent a permanent RocksDB stall.
 - A warning log is emitted when backpressure starts, and an info log when it is released.
 
@@ -526,13 +628,17 @@ Failure-mode and RPO-oriented recovery summary:
 |-----------------------------------------------|--------------------------------------------|--------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
 | Single Store crash                            | No                                         | 0s                                                     | 2/3 Raft quorum survives. Leader re-election continues service. In-flight (not SST-flushed) data is recovered from Raft logs; flushed data remains available via local/cloud SSTs. | Keep 3+ replicas across zones, alert on replica loss, and use durable PV-backed store nodes.                    |
 | 2 of 3 Stores crash                           | No (service stalls until quorum restored)  | 0s                                                     | Surviving replica Raft log bootstraps recovering nodes after restart. In-flight data is recovered from Raft log replay.                                                            | Enforce anti-affinity and failure-domain isolation to prevent correlated failures.                              |
-| Catastrophic loss: all Store disks destroyed  | Yes                                        | Seconds to minutes (depends on SST sync mode/interval) | Raft logs and local SSTs are lost. Nodes recover from last completed cloud SST sync; data after that sync is unrecoverable.                                                        | Use durable disks, scheduled volume snapshots/backups, and synchronous SST upload mode for tighter RPO.         |
+| Catastrophic loss: all Store disks destroyed  | Yes                                        | Seconds to minutes (bounded by flush/compaction cadence + async upload latency + the metadata-sync window) | Raft logs and local SSTs are lost. Nodes recover from the last cloud-mirrored `CURRENT`/`MANIFEST` + SST set; data written after that publish is unrecoverable.                                                        | Use durable disks, scheduled volume snapshots/backups, and a tighter `metadata-sync-debounce-ms` / `metadata-sync-max-unpublished` for a smaller recovery point.         |
 
 Notes:
 
 - In-flight data (not yet flushed to SST) is recovered from Raft logs when quorum-replicated.
 - Cloud storage recovery primarily protects flushed SST state and disaster cases involving local disk loss.
-- Synchronous SST upload reduces catastrophic-loss RPO compared with periodic upload mode.
+- SST upload is always asynchronous and event-triggered: each `onTableFileCreated` (flush/compaction)
+  eagerly uploads the new SST on the shared upload executor, with failures routed to the retry queue /
+  DLQ. There is no periodic/interval uploader and no synchronous-upload mode. The cloud recovery point
+  is bounded by how soon the SSTs upload and the subsequent debounced `CURRENT`/`MANIFEST` publish
+  lands (`metadata-sync-debounce-ms` / `metadata-sync-max-unpublished`).
 - Recovery correctness is protected by the metadata-before-delete invariant: before deleting superseded SSTs, Store confirms manifest-referenced SST durability and publishes updated `MANIFEST`/`CURRENT`, preventing stale or missing-manifest references after compaction retries.
 - Policy note: for how managed delete vs accidental local-loss is distinguished during hydration, see `## 4) Read Path` -> `Scope: managed delete vs accidental local loss`.
 
@@ -572,6 +678,20 @@ Cloud storage health is exposed through metrics and logs. Set up monitoring for:
   annotations:
     summary: "Store node {{ $labels.instance }} 95th percentile sync latency is {{ $value }}ms"
     action: "Check network link to cloud provider; consider tuning upload concurrency"
+
+# Alert if the DLQ can no longer persist to disk (retry intent may not survive a crash)
+- alert: CloudStorageDlqPersistenceDegraded
+  expr: cloud_storage_dlq_persistence_healthy == 0
+  annotations:
+    summary: "Store node {{ $labels.instance }} DLQ on-disk persistence is degraded"
+    action: "Check data-root disk space/permissions for .cloud-upload-dlq.tsv"
+
+# Alert if a pending-delete marker could not be persisted (DB delete progression is held)
+- alert: CloudStorageDeleteMarkerDegraded
+  expr: cloud_storage_delete_marker_healthy == 0
+  annotations:
+    summary: "Store node {{ $labels.instance }} pending-delete marker persistence is degraded"
+    action: "DB delete is held to preserve the anti-resurrection guard; check data-root disk/permissions"
 ```
 
 **Logs to monitor:**
@@ -984,7 +1104,7 @@ If your provider isn't loaded:
 1. **Thread safety**: Ensure provider is thread-safe for concurrent upload/download/delete operations.
 2. **Connection pooling**: Reuse client connections; initialize once in `init()`, close in `close()`.
 3. **Path normalization**: Always use `pathPrefix` correctly (see S3 example for reference).
-4. **Error handling**: Throw `IOException` for operational issues. Implement your own internal retry logic (see `S3CloudStorageProvider` for reference). The common `CloudUploadRetryQueue` provides a DLQ safety net but does not retry by default (`upload-retry-max-attempts=0`).
+4. **Error handling**: Throw `IOException` for operational (retryable) issues, or `CloudStorageNonRetryableException` for permanent failures that should skip whole-file retries. Implement your own internal retry logic where useful (see `S3CloudStorageProvider` for reference). The common `CloudUploadRetryQueue` performs whole-file retries by default (`upload-retry-max-attempts=3`) and backs them with a bounded, file-backed DLQ.
 5. **Logging**: Use SLF4J (via `@Slf4j`) for consistent log levels with Store.
 6. **Configuration validation**: Validate all required fields in `init()` and fail fast.
 

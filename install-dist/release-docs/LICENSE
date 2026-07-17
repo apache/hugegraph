@@ -376,6 +376,7 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.11 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.13 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.15 -> Apache 2.0
+    https://central.sonatype.com/artifact/commons-codec/commons-codec/1.17.1 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-codec/commons-codec/1.9 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-collections/commons-collections/3.2.2 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-configuration/commons-configuration/1.10 -> Apache 2.0
@@ -452,38 +453,38 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/io.netty/netty-all/4.1.42.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-all/4.1.44.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-all/4.1.61.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-buffer/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec-http/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec-http2/4.1.72.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec-socks/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec-socks/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-codec/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-common/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-common/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-common/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-common/4.1.72.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-handler-proxy/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-handler-proxy/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-handler/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-resolver/4.1.72.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-tcnative-boringssl-static/2.0.25.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-tcnative-boringssl-static/2.0.36.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-tcnative-classes/2.0.46.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-transport-classes-epoll/4.1.108.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-transport-native-unix-common/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-transport-classes-epoll/4.1.126.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-transport-native-unix-common/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-transport-native-unix-common/4.1.72.Final -> Apache 2.0
-    https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.108.Final -> Apache 2.0
+    https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.126.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.52.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.netty/netty-transport/4.1.72.Final -> Apache 2.0
     https://central.sonatype.com/artifact/io.opentracing/opentracing-api/0.22.0 -> Apache 2.0
@@ -565,6 +566,7 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/org.apache.htrace/htrace-core4/4.2.0-incubating -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.httpcomponents/httpclient/4.5.13 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.httpcomponents/httpcore/4.4.13 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.httpcomponents/httpcore/4.4.16 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.ivy/ivy/2.4.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-admin/2.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.kerby/kerb-client/2.0.0 -> Apache 2.0
@@ -770,6 +772,7 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/software.amazon.awssdk/crt-core/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/endpoints-spi/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth-aws/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth-aws-eventstream/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth-spi/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/http-auth/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/http-client-spi/2.33.8 -> Apache 2.0
@@ -780,9 +783,12 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/software.amazon.awssdk/profiles/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/protocol-core/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/regions/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/retries/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/retries-spi/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/s3/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/sdk-core/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/third-party-jackson-core/2.33.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/software.amazon.awssdk/url-connection-client/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.awssdk/utils/2.33.8 -> Apache 2.0
     https://central.sonatype.com/artifact/software.amazon.eventstream/eventstream/1.0.1 -> Apache 2.0
 

@@ -113,19 +113,6 @@ public class CloudStorageConfigTest {
      }
 
      @Test
-     public void testMetadataSyncDefaults() {
-         // Metadata mirroring defaults to flush mode.
-         assertEquals("flush", config.getWalMode());
-     }
-
-     @Test
-     public void testMetadataSyncSetters() {
-
-         config.setWalMode("wal");
-         assertEquals("wal", config.getWalMode());
-     }
-
-     @Test
      public void testUploadRetryMaxAttempts() {
          config.setUploadRetryMaxAttempts(3);
          assertEquals(3, config.getUploadRetryMaxAttempts());
@@ -246,20 +233,6 @@ public class CloudStorageConfigTest {
          props2.put("key2", "value2");
          config.setProviderProperties(props2);
          assertEquals("value2", config.getProviderProperties().get("key2"));
-     }
-
-     @Test
-     public void testWalModeDefaults() {
-         assertEquals("flush", config.getWalMode());
-     }
-
-     @Test
-     public void testWalModeTransition() {
-         config.setWalMode("wal");
-         assertEquals("wal", config.getWalMode());
-
-         config.setWalMode("flush");
-         assertEquals("flush", config.getWalMode());
      }
 
      @Test

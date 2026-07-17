@@ -46,6 +46,12 @@ public class S3CloudStorageConfig {
 
     public static final int DEFAULT_MULTIPART_PART_RETRY_MAX_ATTEMPTS = 3;
     public static final long DEFAULT_MULTIPART_PART_RETRY_BASE_BACKOFF_MS = 1000L;
+    /**
+     * Default for the init-time stale-multipart sweep. Enabled by default, but the sweep only
+     * runs when {@code pathPrefix} is non-empty (see {@code S3CloudStorageProvider}) so it can
+     * never abort every in-flight upload in a shared bucket.
+     */
+    public static final boolean DEFAULT_MULTIPART_STALE_ABORT_ON_INIT = true;
 
     public static final String KEY_BUCKET = "bucket";
     public static final String KEY_REGION = "region";
@@ -58,6 +64,8 @@ public class S3CloudStorageConfig {
             "multipart-part-retry-base-backoff-ms";
     public static final String KEY_MULTIPART_EXHAUSTED_DIRECT_DLQ =
             "multipart-exhausted-direct-dlq";
+    public static final String KEY_MULTIPART_STALE_ABORT_ON_INIT =
+            "multipart-stale-abort-on-init";
 
     /**
      * S3 bucket name.
@@ -105,6 +113,16 @@ public class S3CloudStorageConfig {
      * SST retry can move directly to DLQ without further whole-file attempts.
      */
     private boolean multipartExhaustedDirectDlq = false;
+
+    /**
+     * If true (default), the provider sweeps for and aborts incomplete multipart uploads older
+     * than 24h at initialisation. The sweep is scoped to {@code pathPrefix} and is skipped
+     * entirely when {@code pathPrefix} is empty, so it cannot abort unrelated in-flight uploads
+     * across the whole bucket. Set to false in deployments where multiple writers share the same
+     * {@code pathPrefix} and rely on an S3 {@code AbortIncompleteMultipartUpload} lifecycle rule
+     * instead.
+     */
+    private boolean multipartStaleAbortOnInit = DEFAULT_MULTIPART_STALE_ABORT_ON_INIT;
 
 }
 

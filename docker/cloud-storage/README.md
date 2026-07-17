@@ -391,17 +391,42 @@ remote DB prefix so stale data is not rehydrated later.
 > the recovery scenario in the next section.
 
 ```bash
+run_step_8_5_clear_cleanup() {
 GRAPH_NAME=hugegraph
-BUCKET=hugegraph-store0
+BUCKETS=(hugegraph-store0 hugegraph-store1 hugegraph-store2)
+BUCKET=""
 
-# Detect one cloud DB prefix for this graph from CURRENT objects.
-DB_PREFIX=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-      mc find local/'"$BUCKET"' --name CURRENT 2>/dev/null' \
-  | grep "/${GRAPH_NAME}/" | head -n1 | sed "s#^local/${BUCKET}/##" | sed 's#/CURRENT$##')
+# Resolve Docker network if HG_NET is not already set.
+if [[ -z "${HG_NET:-}" ]]; then
+  if docker network inspect cloud-storage-test_hg-net >/dev/null 2>&1; then
+    HG_NET="cloud-storage-test_hg-net"
+  elif docker network inspect cloud-storage-net >/dev/null 2>&1; then
+    HG_NET="cloud-storage-net"
+  else
+    HG_NET=$(docker inspect cloud-storage-minio --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' 2>/dev/null | head -n1)
+  fi
+fi
 
-echo "Detected DB prefix: ${DB_PREFIX}"
-[[ -n "$DB_PREFIX" ]] || { echo "Failed to detect DB prefix for ${GRAPH_NAME}"; exit 1; }
+echo "Using Docker network: ${HG_NET}"
+[[ -n "${HG_NET}" ]] || { echo "Failed to resolve HG_NET; ensure Step 1 stack is running"; return 1; }
+
+# Detect one cloud DB prefix for this graph across all buckets.
+DB_PREFIX=""
+for CANDIDATE_BUCKET in "${BUCKETS[@]}"; do
+  MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+        mc find local/'"$CANDIDATE_BUCKET"' --name CURRENT 2>/dev/null' \
+    | grep "/${GRAPH_NAME}/" | head -n1 || true)
+  if [[ -n "$MATCH" ]]; then
+    BUCKET="$CANDIDATE_BUCKET"
+    DB_PREFIX="${MATCH#local/${CANDIDATE_BUCKET}/}"
+    DB_PREFIX="${DB_PREFIX%/CURRENT}"
+    break
+  fi
+done
+
+echo "Detected DB prefix: bucket=${BUCKET}, prefix=${DB_PREFIX}"
+[[ -n "$BUCKET" && -n "$DB_PREFIX" ]] || { echo "Failed to detect DB prefix for ${GRAPH_NAME} in any bucket"; return 1; }
 
 # Add a probe object under the DB prefix so cleanup is easy to validate.
 docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
@@ -428,6 +453,9 @@ docker restart cloud-storage-store0 cloud-storage-store1 cloud-storage-store2
 sleep 20
 curl -s --compressed "http://localhost:8080/graphs/${GRAPH_NAME}/graph/vertices" \
   | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))"
+}
+
+run_step_8_5_clear_cleanup
 ```
 
 **Success criteria:**
@@ -441,36 +469,154 @@ This step validates the DB-destroy lifecycle callbacks (not truncate/clear):
 - `onDBDeleteBegin` writes a tombstone object (`_DELETED`) for the DB prefix
 - `onDBDeleted` purges the DB prefix from cloud storage
 
-It uses the Store test endpoint `/test/raftDelete/{groupId}` to destroy one partition engine,
-which triggers `destroyGraphDB(...)` internally.
+It uses the **test-only** Store endpoint `/test/raftDelete/{groupId}` to destroy one partition
+engine, which triggers `destroyGraphDB(...)` internally.
+
+> **Important:** This is a **simulation of GraphDB deletion** via an internal test endpoint.
+> It is useful for callback behavior verification, but it is not the production graph-delete API path.
+> Use Step 8.5 to validate production managed delete/clear semantics.
 
 > **Warning:** This is destructive and intended only for callback verification. Run it near the
 > end of manual testing. After this step, restart from Step 1 for a fresh cluster state.
 
 ```bash
-BUCKET=hugegraph-store0
+run_step_8_6_delete_callbacks() {
+# Resolve Docker network used by the cloud-storage stack.
+if [[ -z "${HG_NET:-}" ]]; then
+  if docker network inspect cloud-storage-test_hg-net >/dev/null 2>&1; then
+    HG_NET="cloud-storage-test_hg-net"
+  elif docker network inspect cloud-storage-net >/dev/null 2>&1; then
+    HG_NET="cloud-storage-net"
+  else
+    HG_NET=$(docker inspect cloud-storage-minio --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' 2>/dev/null | head -n1)
+  fi
+fi
 
-# Pick one partition group id from store0.
-PART_ID=$(curl -s http://127.0.0.1:8520/v1/partitions \
-  | python3 -c 'import sys,json; d=json.load(sys.stdin); p=d.get("partitions") or []; print(p[0].get("id", "") if p else "")')
+echo "Using Docker network: ${HG_NET}"
+[[ -n "${HG_NET}" ]] || { echo "Failed to resolve HG_NET; ensure Step 1 stack is running"; return 1; }
 
-echo "Selected partition id: ${PART_ID}"
-[[ -n "$PART_ID" ]] || { echo "No partition id found"; exit 1; }
+BUCKETS=(hugegraph-store0 hugegraph-store1 hugegraph-store2)
 
-# RocksDB dbName is zero-padded partition id (e.g. 3 -> 00003).
-DB_NAME=$(printf "%05d" "$PART_ID")
+# Pick one partition group id from any store endpoint.
+extract_partition_id() {
+  python3 -c 'import sys, json
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
 
-# Detect one cloud DB prefix for this partition from CURRENT objects.
-DB_PREFIX=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-      mc find local/'"$BUCKET"' --name CURRENT 2>/dev/null' \
-  | sed "s#^local/${BUCKET}/##" \
-  | grep "/${DB_NAME}/CURRENT$" \
-  | head -n1 \
-  | sed 's#/CURRENT$##')
+def from_partitions(obj, out):
+    if isinstance(obj, dict):
+        parts = obj.get("partitions")
+        if isinstance(parts, list):
+            for item in parts:
+                if isinstance(item, dict) and "id" in item:
+                    value = str(item.get("id", "")).strip()
+                    if value.isdigit():
+                        out.append(value)
+        for value in obj.values():
+            from_partitions(value, out)
+    elif isinstance(obj, list):
+        for item in obj:
+            from_partitions(item, out)
 
-echo "Detected DB prefix: ${DB_PREFIX}"
-[[ -n "$DB_PREFIX" ]] || { echo "Failed to detect cloud prefix for db ${DB_NAME}"; exit 1; }
+items = []
+from_partitions(data, items)
+seen = set()
+for value in items:
+    if value not in seen:
+        seen.add(value)
+        print(value)'
+}
+
+detect_scope_prefix() {
+  local TARGET_BUCKET="$1"
+  local SCOPE
+  SCOPE=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+        mc ls local/'"$TARGET_BUCKET"' 2>/dev/null | awk "NR==1 {print \$NF}" | sed "s#/$##"' \
+    2>/dev/null || true)
+  SCOPE="${SCOPE//$'\r'/}"
+  SCOPE="${SCOPE//$'\n'/}"
+  [[ -z "$SCOPE" ]] && SCOPE="hugegraph"
+  echo "$SCOPE"
+}
+
+PART_ID=""
+PART_PORT=""
+BUCKET=""
+DB_PREFIX=""
+FIRST_ID=""
+FIRST_PORT=""
+for PORT in 8520 8521 8522; do
+  IDS=$(curl -s "http://127.0.0.1:${PORT}/v1/partitions" 2>/dev/null | extract_partition_id || true)
+  while IFS= read -r ID; do
+    ID="${ID//[^0-9]/}"
+    [[ -z "$ID" ]] && continue
+    if [[ -z "$FIRST_ID" ]]; then
+      FIRST_ID="$ID"
+      FIRST_PORT="$PORT"
+    fi
+    DB_NAME=$(printf "%05d" "$ID")
+    for CANDIDATE_BUCKET in "${BUCKETS[@]}"; do
+      MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+        -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+            mc find local/'"$CANDIDATE_BUCKET"' --name CURRENT 2>/dev/null' \
+        | grep "/${DB_NAME}/CURRENT$" \
+        | head -n1 || true)
+      if [[ -z "$MATCH" ]]; then
+        MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+          -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+              mc find local/'"$CANDIDATE_BUCKET"' --name "*.sst" 2>/dev/null' \
+          | grep "/db/${DB_NAME}/" \
+          | head -n1 || true)
+      fi
+      if [[ -n "$MATCH" ]]; then
+        PART_ID="$ID"
+        PART_PORT="$PORT"
+        BUCKET="$CANDIDATE_BUCKET"
+        if [[ "$MATCH" == *"/CURRENT" ]]; then
+          DB_PREFIX="${MATCH#local/${CANDIDATE_BUCKET}/}"
+          DB_PREFIX="${DB_PREFIX%/CURRENT}"
+        else
+          REL="${MATCH#local/${CANDIDATE_BUCKET}/}"
+          DB_PREFIX="${REL%/*}"
+        fi
+        break 3
+      fi
+    done
+  done <<< "$IDS"
+done
+
+if [[ -z "$PART_ID" && -n "$FIRST_ID" ]]; then
+  PART_ID="$FIRST_ID"
+  PART_PORT="$FIRST_PORT"
+  DB_NAME=$(printf "%05d" "$PART_ID")
+  case "$PART_PORT" in
+    8520) BUCKET="hugegraph-store0"; STORE_NODE="store0" ;;
+    8521) BUCKET="hugegraph-store1"; STORE_NODE="store1" ;;
+    8522) BUCKET="hugegraph-store2"; STORE_NODE="store2" ;;
+    *) BUCKET="" ;;
+  esac
+  if [[ -n "$BUCKET" ]]; then
+    SCOPE_PREFIX=$(detect_scope_prefix "$BUCKET")
+    DB_PREFIX="${SCOPE_PREFIX}/store-${STORE_NODE}_8510/db/${DB_NAME}"
+    echo "WARNING: no existing cloud prefix found; using derived prefix ${DB_PREFIX}"
+  fi
+fi
+
+echo "Selected partition id: ${PART_ID} (from endpoint :${PART_PORT})"
+if [[ -z "$PART_ID" ]]; then
+  echo "No partition id with detectable cloud prefix found from store endpoints 8520/8521/8522"
+  for PORT in 8520 8521 8522; do
+    SAMPLE=$(curl -s "http://127.0.0.1:${PORT}/v1/partitions" 2>/dev/null | head -c 300 || true)
+    [[ -n "$SAMPLE" ]] && echo "Endpoint :${PORT} sample: ${SAMPLE}"
+  done
+  return 1
+fi
+
+echo "Detected DB prefix: bucket=${BUCKET}, prefix=${DB_PREFIX}"
+[[ -n "$BUCKET" && -n "$DB_PREFIX" ]] || { echo "Failed to detect cloud prefix for db ${DB_NAME} in any bucket"; return 1; }
 
 # Add a probe object so purge verification is deterministic.
 docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
@@ -483,23 +629,64 @@ echo "Objects before db delete:" \
           mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
 
 # Trigger partition destroy path (calls destroyGraphDB internally).
-curl -s "http://127.0.0.1:8520/test/raftDelete/${PART_ID}"; echo
-sleep 8
+DELETE_RESP=$(curl -s "http://127.0.0.1:${PART_PORT}/test/raftDelete/${PART_ID}" 2>/dev/null || true)
+printf "%s\n" "$DELETE_RESP"
+[[ "$DELETE_RESP" == *"OK"* ]] || { echo "raftDelete did not return OK"; return 1; }
 
-# Callback evidence from logs.
-docker logs cloud-storage-store0 2>&1 \
-  | grep -E "Cloud DB tombstone written|Cloud DB purge completed" \
-  | tail -10
+# onDBDeleteBegin is immediate, onDBDeleted is asynchronous:
+# RocksDBFactory's destroy watcher runs every 60s, so a short sleep is flaky.
+# Poll store logs (all nodes) for both callback markers with timeout.
+CALLBACK_OK="no"
+POLL_START_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+for i in $(seq 1 24); do
+  LOGS=$(
+    docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store0 2>&1
+    docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store1 2>&1
+    docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store2 2>&1
+  )
+  if echo "$LOGS" | grep -q "Cloud DB tombstone written" \
+     && echo "$LOGS" | grep -q "Cloud DB purge completed"; then
+    CALLBACK_OK="yes"
+    break
+  fi
+  sleep 5
+done
 
-echo "Objects after db delete:" \
-  $(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-      -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-          mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
+if [[ "$CALLBACK_OK" == "yes" ]]; then
+  echo "  ✓ callback log markers observed (tombstone written + purge completed)"
+else
+  echo "  WARNING: callback log markers not seen within timeout — may have fired before polling or partition had no active session"
+  echo "  checking recent logs for any evidence..."
+  docker logs --tail 200 cloud-storage-store0 2>&1 | grep -E "Cloud DB tombstone|Cloud DB purge" | tail -10 || true
+  docker logs --tail 200 cloud-storage-store1 2>&1 | grep -E "Cloud DB tombstone|Cloud DB purge" | tail -10 || true
+  docker logs --tail 200 cloud-storage-store2 2>&1 | grep -E "Cloud DB tombstone|Cloud DB purge" | tail -10 || true
+fi
+
+# Print recent callback evidence.
+(docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store0 2>&1
+ docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store1 2>&1
+ docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store2 2>&1) \
+  | grep -E "Cloud DB tombstone written|Cloud DB purge completed" | tail -20
+
+COUNT_AFTER=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+      mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
+COUNT_AFTER="${COUNT_AFTER//[^0-9]/}"
+printf "\nObjects after db delete: %s\n" "$COUNT_AFTER"
+if [[ "$COUNT_AFTER" == "0" || -z "$COUNT_AFTER" ]]; then
+  echo "✓ DB DELETE CALLBACKS SUCCESS: prefix purged (count=0)"
+else
+  echo "ERROR: partition cloud prefix not purged after callbacks (remaining=${COUNT_AFTER})"
+  return 1
+fi
+}
+
+run_step_8_6_delete_callbacks
 ```
 
 **Success criteria:**
 - ✅ Logs include `Cloud DB tombstone written` (from `onDBDeleteBegin`)
-- ✅ Logs include `Cloud DB purge completed` (from `onDBDeleted`)
+- ✅ Logs include `Cloud DB purge completed` (from `onDBDeleted`, may appear up to ~60s later)
 - ✅ `Objects after db delete` is `0` for the detected DB prefix
 
 ## Total-Loss Recovery from Cloud
