@@ -103,6 +103,21 @@ public class QueryTest {
     }
 
     @Test
+    public void testConditionWithEmptyInValues() {
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.query(Condition.in(HugeKeys.LABEL, ImmutableList.of()));
+
+        Assert.assertTrue(query.containsCondition(HugeKeys.LABEL));
+        Assert.assertTrue(query.containsConditionValues(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableSet.of(),
+                            query.conditionValues(HugeKeys.LABEL));
+        Assert.assertNull(query.uniqueConditionValue(HugeKeys.LABEL));
+        Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
+        Assert.assertEquals(ImmutableList.of(),
+                            query.condition(HugeKeys.LABEL));
+    }
+
+    @Test
     public void testConditionWithConflictingEqAndIn() {
         Id label1 = IdGenerator.of(1);
         Id label2 = IdGenerator.of(2);

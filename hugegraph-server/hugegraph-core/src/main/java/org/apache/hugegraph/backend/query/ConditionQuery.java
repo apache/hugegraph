@@ -262,9 +262,13 @@ public class ConditionQuery extends IdQuery {
      * This method keeps the historical behavior for existing callers:
      * <ul>
      * <li>returns {@code null} if no top-level EQ/IN relation exists</li>
-     * <li>returns {@code null} if top-level EQ/IN relations resolve to empty</li>
-     * <li>returns the single value if only one value is resolved</li>
-     * <li>returns the raw IN list if there is exactly one top-level IN relation</li>
+     * <li>returns the single EQ value if there is exactly one top-level EQ
+     * relation and no top-level IN relation</li>
+     * <li>returns the raw IN list, including an empty list, if there is exactly
+     * one top-level IN relation and no top-level EQ relation</li>
+     * <li>returns {@code null} if several top-level EQ/IN relations resolve to
+     * an empty set</li>
+     * <li>returns the single value if several relations resolve to one value</li>
      * <li>throws if multiple values remain after resolving several relations</li>
      * </ul>
      *

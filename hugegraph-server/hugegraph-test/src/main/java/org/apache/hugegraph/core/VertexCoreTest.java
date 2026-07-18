@@ -9112,6 +9112,56 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByMixedConnectiveLabel() {
+        HugeGraph graph = graph();
+        init10Vertices();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Vertex> vertices = g.V()
+                                 .has(T.label, P.eq("language")
+                                                .or(P.neq("author")))
+                                 .toList();
+        Assert.assertEquals(8, vertices.size());
+        for (Vertex vertex : vertices) {
+            Assert.assertNotEquals("author", vertex.label());
+        }
+
+        vertices = g.V()
+                    .has(T.label, P.eq("language")
+                                   .and(P.neq("author")))
+                    .toList();
+        Assert.assertEquals(3, vertices.size());
+        for (Vertex vertex : vertices) {
+            Assert.assertEquals("language", vertex.label());
+        }
+    }
+
+    @Test
+    public void testQueryByMultipleNegativeLabelContainers() {
+        HugeGraph graph = graph();
+        init10Vertices();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Vertex> vertices = g.V().hasLabel("language")
+                                 .has(T.label, P.neq("author"))
+                                 .toList();
+        Assert.assertEquals(3, vertices.size());
+        for (Vertex vertex : vertices) {
+            Assert.assertEquals("language", vertex.label());
+        }
+
+        vertices = g.V().has(T.label, P.neq("author"))
+                    .has(T.label, P.neq("book"))
+                    .toList();
+        Assert.assertEquals(3, vertices.size());
+        for (Vertex vertex : vertices) {
+            Assert.assertEquals("language", vertex.label());
+        }
+    }
+
+    @Test
     public void testCollectMatchedIndexesByJointLabelsWithIndexedProperties() {
         HugeGraph graph = graph();
         initPersonIndex(true);

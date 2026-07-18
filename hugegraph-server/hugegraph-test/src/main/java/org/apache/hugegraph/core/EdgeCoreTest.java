@@ -3634,6 +3634,57 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByMixedConnectiveLabel() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Edge> edges = g.E()
+                            .has(T.label, P.eq("created")
+                                           .or(P.neq("authored")))
+                            .toList();
+        Assert.assertEquals(15, edges.size());
+        for (Edge edge : edges) {
+            Assert.assertNotEquals("authored", edge.label());
+        }
+
+        edges = g.E()
+                 .has(T.label, P.eq("created")
+                                .and(P.neq("authored")))
+                 .toList();
+        Assert.assertEquals(2, edges.size());
+        for (Edge edge : edges) {
+            Assert.assertEquals("created", edge.label());
+        }
+    }
+
+    @Test
+    public void testQueryEdgesByMultipleNegativeLabelContainers() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Edge> edges = g.E().hasLabel("created")
+                            .has(T.label, P.neq("authored"))
+                            .toList();
+        Assert.assertEquals(2, edges.size());
+        for (Edge edge : edges) {
+            Assert.assertEquals("created", edge.label());
+        }
+
+        edges = g.E().has(T.label, P.neq("created"))
+                 .has(T.label, P.neq("authored"))
+                 .toList();
+        Assert.assertEquals(13, edges.size());
+        for (Edge edge : edges) {
+            Assert.assertNotEquals("created", edge.label());
+            Assert.assertNotEquals("authored", edge.label());
+        }
+    }
+
+    @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithRange() {
         // FIXME: skip this test for hstore
         Assume.assumeTrue("skip this test for hstore",
