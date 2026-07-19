@@ -9088,13 +9088,33 @@ public class VertexCoreTest extends BaseCoreTest {
 
         GraphTraversalSource g = graph.traversal();
 
-        Assert.assertThrows(NoIndexException.class, () -> {
-            g.V().has(T.label, P.neq("author"))
-             .has("city", "Beijing").toList();
-        }, e -> {
-            Assert.assertContains("not-equal condition",
-                                  e.getMessage());
-        });
+        List<Object> names = g.V().has(T.label, P.neq("author"))
+                              .has("city", "Beijing")
+                              .values("name").toList();
+        Assert.assertEquals(4, names.size());
+        Assert.assertEquals(ImmutableSet.of("James", "Tom Cat", "Lisa",
+                                            "unindexed-city-fan"),
+                            ImmutableSet.copyOf(names));
+    }
+
+    @Test
+    public void testQueryByIndexedPropertyAndNonEqLabel() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        init5Persons();
+        graph.addVertex(T.label, "fan", "name", "unindexed-city-fan",
+                        "age", 20, "city", "Beijing");
+        this.commitTx();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Object> names = g.V().has("city", "Beijing")
+                              .has(T.label, P.neq("author"))
+                              .values("name").toList();
+        Assert.assertEquals(4, names.size());
+        Assert.assertEquals(ImmutableSet.of("James", "Tom Cat", "Lisa",
+                                            "unindexed-city-fan"),
+                            ImmutableSet.copyOf(names));
     }
 
     @Test
