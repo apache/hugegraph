@@ -210,6 +210,40 @@ public class CountStrategyCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testWhereCountNestedConnectivePredicate() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>outside(1L, 18L)
+                                          .and(P.gte(0L))))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testWhereCountNegatedNestedConnectivePredicate() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.not(P.<Long>outside(1L, 18L)
+                                                 .and(P.gte(0L)))))
+                            .count().next();
+
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
     public void testRepeatAfterTextRangeFilterWithEmptyResult() {
         this.initTextRangeSchema(true);
 

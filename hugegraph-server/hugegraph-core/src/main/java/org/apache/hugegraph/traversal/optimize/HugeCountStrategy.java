@@ -272,10 +272,28 @@ public final class HugeCountStrategy
             return false;
         }
 
+        final P<?> predicate = ((IsStep<?>) step.getNextStep()).getPredicate();
+        if (this.hasNestedConnectivePredicate(predicate)) {
+            return false;
+        }
+
         final Step parent = step.getTraversal().getParent().asStep();
         return (parent instanceof FilterStep || parent.getLabels().isEmpty()) &&
                !(parent.getNextStep() instanceof MatchStep.MatchEndStep &&
                  ((MatchStep.MatchEndStep) parent.getNextStep())
                          .getMatchKey().isPresent());
+    }
+
+    private boolean hasNestedConnectivePredicate(P<?> predicate) {
+        if (!(predicate instanceof ConnectiveP)) {
+            return false;
+        }
+
+        for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+            if (child instanceof ConnectiveP) {
+                return true;
+            }
+        }
+        return false;
     }
 }
