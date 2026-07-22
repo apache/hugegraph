@@ -118,3 +118,6 @@ codeium-instructions.md
 *.ai-prompt.md
 WARP.md
 .mcp.json
+hugegraph-riscv64-ctx.*/
+rocks-smoke.*/
+.riscv64-smoke-tmp/
