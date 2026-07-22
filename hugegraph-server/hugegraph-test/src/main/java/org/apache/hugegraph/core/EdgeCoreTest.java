@@ -3634,6 +3634,24 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByNonEqLabelAndIndexedPropertyAcrossBarrier() {
+        HugeGraph graph = graph();
+        initEdgeLabelQueryEdges();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Edge> edges = g.E().has(T.label, P.neq("reviewed"))
+                            .barrier().has("score", 2).toList();
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals("recommended", edges.get(0).label());
+
+        edges = g.E().has("score", 2).barrier()
+                 .has(T.label, P.neq("reviewed")).toList();
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals("recommended", edges.get(0).label());
+    }
+
+    @Test
     public void testQueryEdgesByMixedConnectiveLabel() {
         HugeGraph graph = graph();
         init18Edges();
@@ -7807,6 +7825,8 @@ public class EdgeCoreTest extends BaseCoreTest {
               .link("person", "book")
               .enableLabelIndex(false)
               .create();
+        schema.indexLabel("reviewedByScore").onE("reviewed")
+              .secondary().by("score").create();
 
         Vertex reader = graph.addVertex(T.label, "person",
                                         "name", "edge-label-reader",

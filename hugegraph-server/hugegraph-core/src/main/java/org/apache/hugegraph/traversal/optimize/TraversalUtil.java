@@ -170,6 +170,9 @@ public final class TraversalUtil {
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep.getNextStep();
+        if (hasUnsafeLabelInChain(step)) {
+            return;
+        }
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
             Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
@@ -403,6 +406,9 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
+        if (hasUnsafeLabelInChain(newStep.getNextStep())) {
+            return;
+        }
         Step<?, ?> step = newStep;
         do {
             Step<?, ?> nextStep = step.getNextStep();
@@ -445,20 +451,39 @@ public final class TraversalUtil {
 
     private static boolean canExtractHasContainers(HugeGraph graph,
                                                    HasContainerHolder holder) {
-        List<HasContainer> hasContainers = holder.getHasContainers();
         // Keep unsafe labels and their sibling properties for local filtering.
-        for (HasContainer has : hasContainers) {
-            if (has.getKey().equals(T.label.getAccessor()) &&
-                !isEqInLabelPredicate(has)) {
-                return false;
-            }
+        if (hasUnsafeLabelPredicate(holder)) {
+            return false;
         }
+        List<HasContainer> hasContainers = holder.getHasContainers();
         for (HasContainer has : hasContainers) {
             if (!canExtractHasContainer(graph, has)) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean hasUnsafeLabelInChain(Step<?, ?> step) {
+        // Partial pushdown can lose candidates before local label filtering.
+        while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
+            if (step instanceof HasStep &&
+                hasUnsafeLabelPredicate((HasContainerHolder) step)) {
+                return true;
+            }
+            step = step.getNextStep();
+        }
+        return false;
+    }
+
+    private static boolean hasUnsafeLabelPredicate(HasContainerHolder holder) {
+        for (HasContainer has : holder.getHasContainers()) {
+            if (has.getKey().equals(T.label.getAccessor()) &&
+                !isEqInLabelPredicate(has)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isEqInLabelPredicate(HasContainer has) {

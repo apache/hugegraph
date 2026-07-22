@@ -34,6 +34,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
+import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -175,6 +176,33 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerKeepsGraphChainWithUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has(T.label, P.neq("author")).barrier()
+                  .has("age", 18), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+
+        traversal = traversal(
+                __.V().has("age", 18).barrier()
+                  .has(T.label, P.neq("author")), graph);
+        newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+    }
+
+    @Test
     public void testExtractHasContainerKeepsTextRangeVertexHasStep() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         PropertyKey name = propertyKey(1L, "name", DataType.TEXT);
@@ -205,6 +233,33 @@ public class TraversalUtilOptimizeTest {
 
         Assert.assertEquals(1, newStep.getHasContainers().size());
         Assert.assertFalse(hasStepExists(traversal));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsVertexChainWithUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().out().has(T.label, P.neq("author")).barrier()
+                  .has("age", 18), graph);
+        HugeVertexStep<?> newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+
+        traversal = traversal(
+                __.V().out().has("age", 18).barrier()
+                  .has(T.label, P.neq("author")), graph);
+        newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
     }
 
     private static PropertyKey propertyKey(long id, String name,
@@ -251,11 +306,16 @@ public class TraversalUtilOptimizeTest {
     }
 
     private static boolean hasStepExists(Traversal.Admin<?, ?> traversal) {
+        return countHasSteps(traversal) > 0;
+    }
+
+    private static int countHasSteps(Traversal.Admin<?, ?> traversal) {
+        int count = 0;
         for (Step<?, ?> step : traversal.getSteps()) {
             if (step instanceof HasStep) {
-                return true;
+                count++;
             }
         }
-        return false;
+        return count;
     }
 }
