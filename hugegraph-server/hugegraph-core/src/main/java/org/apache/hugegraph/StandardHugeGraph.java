@@ -177,7 +177,6 @@ public class StandardHugeGraph implements HugeGraph {
     private final BackendStoreProvider storeProvider;
     private final TinkerPopTransaction tx;
     private final RamTable ramtable;
-    private final String schedulerType;
     private volatile boolean started;
     private volatile boolean closed;
     private volatile GraphMode mode;
@@ -226,11 +225,18 @@ public class StandardHugeGraph implements HugeGraph {
 
         this.taskManager = TaskManager.instance();
         this.name = config.get(CoreOptions.STORE);
+
+        // Keep old config files upgrade-safe while ignoring the legacy scheduler.
+        if (config.containsKey("task.scheduler_type")) {
+            LOG.warn("Config key 'task.scheduler_type' is deprecated and " +
+                     "ignored. The scheduler is auto-selected by backend " +
+                     "type (hstore -> distributed, others -> local).");
+        }
+
         this.started = false;
         this.closed = false;
         this.mode = GraphMode.NONE;
         this.readMode = GraphReadMode.OLTP_ONLY;
-        this.schedulerType = config.get(CoreOptions.SCHEDULER_TYPE);
 
         // Init process-wide static configs before lock, so that validation
         // failures won't leave stale lock groups in LockManager.
@@ -323,6 +329,7 @@ public class StandardHugeGraph implements HugeGraph {
         return this.storeProvider.type();
     }
 
+    @Override
     public BackendStoreInfo backendStoreInfo() {
         // Just for trigger Tx.getOrNewTransaction, then load 3 stores
         // TODO: pass storeProvider.metaStore()
@@ -340,11 +347,10 @@ public class StandardHugeGraph implements HugeGraph {
         LOG.info("Init system info for graph '{}'", this.spaceGraphName());
         this.initSystemInfo();
 
-        LOG.info("Init server info [{}-{}] for graph '{}'...",
-                 nodeInfo.nodeId(), nodeInfo.nodeRole(), this.spaceGraphName());
-        this.serverInfoManager().initServerInfo(nodeInfo);
-
-        this.initRoleStateMachine(nodeInfo.nodeId());
+        if (nodeInfo != null && nodeInfo.nodeId() != null) {
+            this.serverInfoManager().initServerInfo(nodeInfo);
+            this.initRoleStateMachine(nodeInfo.nodeId());
+        }
 
         // TODO: check necessary?
         LOG.info("Check olap property-key tables for graph '{}'", this.spaceGraphName());
@@ -473,6 +479,7 @@ public class StandardHugeGraph implements HugeGraph {
         this.updateTime = updateTime;
     }
 
+    @Override
     public void waitStarted() {
         // Just for trigger Tx.getOrNewTransaction, then load 3 stores
         this.schemaTransaction();
@@ -489,9 +496,7 @@ public class StandardHugeGraph implements HugeGraph {
         try {
             this.storeProvider.init();
             /*
-             * NOTE: The main goal is to write the serverInfo to the central
-             * node, such as etcd, and also create the system schema in memory,
-             * which has no side effects
+             * NOTE: Create system schema in memory, which has no side effects.
              */
             this.initSystemInfo();
         } finally {
@@ -532,8 +537,7 @@ public class StandardHugeGraph implements HugeGraph {
         LockUtil.lock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         try {
             this.storeProvider.truncate();
-            // TODO: remove this after serverinfo saved in etcd
-            this.serverStarted(this.serverInfoManager().globalNodeRoleInfo());
+            this.serverStarted(null);
         } finally {
             LockUtil.unlock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         }
@@ -555,7 +559,6 @@ public class StandardHugeGraph implements HugeGraph {
     public void initSystemInfo() {
         try {
             this.taskScheduler().init();
-            this.serverInfoManager().init();
             this.authManager().init();
         } finally {
             this.closeTx();
@@ -1640,7 +1643,9 @@ public class StandardHugeGraph implements HugeGraph {
 
         @Override
         public String schedulerType() {
-            return StandardHugeGraph.this.schedulerType;
+            // Use distributed scheduler for hstore backend, otherwise use local
+            // After the merger of rocksdb and hstore, consider whether to change this logic
+            return StandardHugeGraph.this.isHstore() ? "distributed" : "local";
         }
     }
 

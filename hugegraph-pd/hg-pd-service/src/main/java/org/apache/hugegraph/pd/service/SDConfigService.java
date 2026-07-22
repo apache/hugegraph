@@ -22,7 +22,6 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -33,6 +32,7 @@ import org.apache.hugegraph.pd.common.HgAssert;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.util.StoreRestAddressUtil;
 import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfo;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfos;
@@ -206,44 +206,13 @@ public class SDConfigService {
         }
         if (stores != null) {
             stores.stream().forEach(e -> {
-                String buf = getRestAddress(e);
+                String buf = StoreRestAddressUtil.getRestAddress(e);
                 if (buf != null) {
                     res.add(buf);
                 }
             });
         }
         return res;
-    }
-
-    // TODO: optimized store registry data, to add host:port of REST server.
-    private String getRestAddress(Metapb.Store store) {
-        String address = store.getAddress();
-        if (address == null || address.isEmpty()) {
-            return null;
-        }
-        try {
-            Optional<String> port = store.getLabelsList().stream().map(
-                    e -> {
-                        if ("rest.port".equals(e.getKey())) {
-                            return e.getValue();
-                        }
-                        return null;
-                    }).filter(e -> e != null).findFirst();
-
-            if (port.isPresent()) {
-                java.net.URI uri = address.contains("://")
-                                   ? java.net.URI.create(address)
-                                   : java.net.URI.create("http://" + address);
-                String host = uri.getHost() != null ? uri.getHost() : address;
-                String hostPart =
-                        host.contains(":") && !host.startsWith("[") ? "[" + host + "]" : host;
-                address = hostPart + ":" + port.get().trim();
-            }
-        } catch (Throwable t) {
-            log.error("Failed to extract the REST address of store, cause by:", t);
-        }
-        return address;
-
     }
 
     public List<SDConfig> getConfigs(String appName, String path) {

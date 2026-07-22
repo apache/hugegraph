@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.api;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -86,8 +87,15 @@ public class API {
             MetricsUtil.registerMeter(API.class, "expected-error");
     private static final Meter unknownErrorMeter =
             MetricsUtil.registerMeter(API.class, "unknown-error");
-    private static final String STANDALONE_ERROR =
+    protected static final String STANDALONE_ERROR =
             "GraphSpace management is not supported in standalone mode";
+
+    /**
+     * Shared date formatter for API response timestamps (thread-safe, reusable).
+     * Example output: {@code "2024-05-01 12:30:00"}
+     */
+    protected static final DateTimeFormatter DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public static HugeGraph graph(GraphManager manager, String graphSpace,
                                   String graph) {
@@ -280,6 +288,28 @@ public class API {
             throw new jakarta.ws.rs.ForbiddenException(
                     String.format("The user [%s] has no permission to [%s].", user, action));
         }
+    }
+
+    /**
+     * Returns {@code true} if the profile's {@code "name"} or {@code "nickname"}
+     * field starts with the given prefix.  Returns {@code true} when prefix is
+     * null or empty (i.e. no filtering).
+     *
+     * <p>Used by {@code GraphsAPI.listProfile} and {@code GraphSpaceAPI.listProfile}
+     * to filter results by a user-supplied prefix string.
+     *
+     * @param profile a map containing at least a {@code "name"} key
+     * @param prefix  the prefix to match against; ignored when blank
+     * @return whether the entry matches the prefix filter
+     */
+    protected static boolean isPrefix(Map<String, Object> profile, String prefix) {
+        if (prefix == null || prefix.isEmpty()) {
+            return true;
+        }
+        String name = profile.get("name").toString();
+        Object nicknameObj = profile.get("nickname");
+        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
+        return name.startsWith(prefix) || nickname.startsWith(prefix);
     }
 
     public static class ApiMeasurer {

@@ -170,6 +170,12 @@
                     <execution>
                         <id>api-test</id>
                         <configuration>
+                            <!-- FIXME: HStore core guards and capability failures are tracked in
+                                 https://github.com/apache/hugegraph/issues/3090.
+                                 Keep backend scoped to API tests until the issue is resolved. -->
+                            <systemPropertyVariables>
+                                <backend>${backend}</backend>
+                            </systemPropertyVariables>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/

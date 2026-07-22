@@ -1,35 +1,37 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.api.space;
 
-import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
+
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.AuthManager;
+import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
@@ -38,10 +40,10 @@ import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.Log;
-import org.apache.logging.log4j.util.Strings;
 import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
@@ -52,6 +54,7 @@ import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
@@ -103,6 +106,172 @@ public class GraphSpaceAPI extends API {
         return gsInfo;
     }
 
+    @POST
+    @Timed
+    @Status(Status.CREATED)
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @Path("{graphspace}/role")
+    @RolesAllowed({"admin", "space"})
+    public String setDefaultRole(@Context GraphManager manager,
+                                 @PathParam("graphspace") String name,
+                                 JsonDefaultRole jsonRole) {
+        ensurePdModeEnabled(manager);
+        E.checkArgumentNotNull(jsonRole, "Request body cannot be null");
+        E.checkArgument(StringUtils.isNotEmpty(jsonRole.user),
+                        "The 'user' field cannot be null or empty");
+        E.checkArgument(StringUtils.isNotEmpty(jsonRole.role),
+                        "The 'role' field cannot be null or empty");
+        String user = jsonRole.user;
+        String graph = jsonRole.graph;
+        HugeDefaultRole role;
+        try {
+            role = HugeDefaultRole.valueOf(jsonRole.role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", jsonRole.role);
+            role = null; // unreachable, satisfies compiler
+        }
+        validGraphSpace(manager, name);
+        LOG.debug("Create default role: {} {} {}", user, role,
+                              name);
+        AuthManager authManager = manager.authManager();
+        String operator = HugeGraphAuthProxy.username();
+        validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
+                        operator, "default_role.create");
+        E.checkArgument(authManager.findUser(user) != null ||
+                        authManager.findGroup(user) != null,
+                        "The user or group is not exist");
+        // only admin can set space admin
+        if (!authManager.isAdminManager(operator) && role.equals(HugeDefaultRole.SPACE)) {
+            throw new ForbiddenException("Forbidden to set role " + role.toString());
+        }
+
+        boolean hasGraph = role.equals(HugeDefaultRole.OBSERVER);
+
+        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
+                        "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, name, graph);
+        }
+
+        Map<String, String> result = new HashMap<>();
+        result.put("user", user);
+        result.put("role", jsonRole.role);
+        result.put("graphSpace", name);
+
+        if (hasGraph) {
+            authManager.createDefaultRole(name, user, role, graph);
+            result.put("graph", graph);
+        } else {
+            authManager.createSpaceDefaultRole(name, user, role);
+        }
+
+        return manager.serializer().writeMap(result);
+    }
+
+    @GET
+    @Timed
+    @Path("{graphspace}/role")
+    @RolesAllowed({"admin", "space"})
+    public String checkDefaultRole(@Context GraphManager manager,
+                                   @PathParam("graphspace") String name,
+                                   @QueryParam("user") String user,
+                                   @QueryParam("role") String role,
+                                   @QueryParam("graph") String graph) {
+        ensurePdModeEnabled(manager);
+        E.checkArgument(StringUtils.isNotEmpty(user),
+                        "The 'user' query param cannot be null or empty");
+        E.checkArgument(StringUtils.isNotEmpty(role),
+                        "The 'role' query param cannot be null or empty");
+        LOG.debug("Check space role: {} {} {}", user, role,
+                              name);
+        AuthManager authManager = manager.authManager();
+
+        HugeDefaultRole defaultRole;
+        try {
+            defaultRole = HugeDefaultRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", role);
+            defaultRole = null; // unreachable, satisfies compiler
+        }
+        validGraphSpace(manager, name);
+        String operator = HugeGraphAuthProxy.username();
+        validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
+                        operator, "default_role.check");
+        // Only admin can inspect the space manager default role.
+        if (!authManager.isAdminManager(operator) &&
+            defaultRole.equals(HugeDefaultRole.SPACE)) {
+            throw new ForbiddenException("Forbidden to check role " + role);
+        }
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
+        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
+                        "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, name, graph);
+        }
+
+        boolean result;
+        if (hasGraph) {
+            result = authManager.isDefaultRole(name, graph, user,
+                                               defaultRole);
+        } else {
+            result = authManager.isDefaultRole(name, user,
+                                               defaultRole);
+        }
+        return manager.serializer().writeMap(ImmutableMap.of("check", result));
+    }
+
+    @DELETE
+    @Timed
+    @Path("{graphspace}/role")
+    @RolesAllowed({"admin", "space"})
+    public void deleteDefaultRole(@Context GraphManager manager,
+                                  @PathParam("graphspace") String name,
+                                  @QueryParam("user") String user,
+                                  @QueryParam("role") String role,
+                                  @QueryParam("graph") String graph) {
+        ensurePdModeEnabled(manager);
+        E.checkArgument(StringUtils.isNotEmpty(user),
+                        "The 'user' query param cannot be null or empty");
+        E.checkArgument(StringUtils.isNotEmpty(role),
+                        "The 'role' query param cannot be null or empty");
+        LOG.debug("Delete space role: {} {} {}", user, role,
+                              name);
+
+        AuthManager authManager = manager.authManager();
+        validGraphSpace(manager, name);
+        String operator = HugeGraphAuthProxy.username();
+        validPermission(hasAdminOrSpaceManagerPerm(manager, name, operator),
+                        operator, "default_role.delete");
+        E.checkArgument(authManager.findUser(user) != null ||
+                        authManager.findGroup(user) != null,
+                        "The user or group is not exist");
+
+        if (!authManager.isAdminManager(operator) &&
+            role.equalsIgnoreCase(HugeDefaultRole.SPACE.toString())) {
+            throw new ForbiddenException("Forbidden to delete role " + role);
+        }
+
+        HugeDefaultRole defaultRole;
+        try {
+            defaultRole = HugeDefaultRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", role);
+            defaultRole = null; // unreachable, satisfies compiler
+        }
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
+        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
+                        "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, name, graph);
+        }
+        if (hasGraph) {
+            authManager.deleteDefaultRole(name, user, defaultRole, graph);
+        } else {
+            authManager.deleteDefaultRole(name, user, defaultRole);
+        }
+    }
+
     @GET
     @Timed
     @Path("profile")
@@ -121,7 +290,6 @@ public class GraphSpaceAPI extends API {
         AuthManager authManager = manager.authManager();
         // FIXME: defaultSpace related interface is not implemented
         // String defaultSpace = authManager.getDefaultSpace(user);
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd hh:mm:ss");
         for (String sp : spaces) {
             manager.getSpaceStorage(sp);
             GraphSpace gs = space(manager, sp);
@@ -135,8 +303,12 @@ public class GraphSpaceAPI extends API {
                 gsProfile.put("authed", true);
             }
 
-            gsProfile.put("create_time", format.format(gs.createTime()));
-            gsProfile.put("update_time", format.format(gs.updateTime()));
+            gsProfile.put("create_time",
+                          DATE_FORMATTER.format(LocalDateTime.ofInstant(
+                                  gs.createTime().toInstant(), ZoneId.systemDefault())));
+            gsProfile.put("update_time",
+                          DATE_FORMATTER.format(LocalDateTime.ofInstant(
+                                  gs.updateTime().toInstant(), ZoneId.systemDefault())));
             if (!isPrefix(gsProfile, prefix)) {
                 continue;
             }
@@ -175,15 +347,6 @@ public class GraphSpaceAPI extends API {
         return manager.serializer().writeGraphSpace(space);
     }
 
-    public boolean isPrefix(Map<String, Object> profile, String prefix) {
-        if (StringUtils.isEmpty(prefix)) {
-            return true;
-        }
-        // graph name or nickname is not empty
-        String name = profile.get("name").toString();
-        String nickname = profile.get("nickname").toString();
-        return name.startsWith(prefix) || nickname.startsWith(prefix);
-    }
 
     @PUT
     @Timed
@@ -225,13 +388,13 @@ public class GraphSpaceAPI extends API {
                 }
 
                 String nickname = (String) graphSpaceMap.get("nickname");
-                if (!Strings.isEmpty(nickname)) {
+                if (!StringUtils.isEmpty(nickname)) {
                     GraphManager.checkNickname(nickname);
                     exist.nickname(nickname);
                 }
 
                 String description = (String) graphSpaceMap.get("description");
-                if (!Strings.isEmpty(description)) {
+                if (!StringUtils.isEmpty(description)) {
                     exist.description(description);
                 }
 
@@ -272,31 +435,31 @@ public class GraphSpaceAPI extends API {
                 String oltpNamespace =
                         (String) graphSpaceMap.get("oltp_namespace");
                 if (oltpNamespace != null &&
-                    !Strings.isEmpty(oltpNamespace)) {
+                    !StringUtils.isEmpty(oltpNamespace)) {
                     exist.oltpNamespace(oltpNamespace);
                 }
                 String olapNamespace =
                         (String) graphSpaceMap.get("olap_namespace");
                 if (olapNamespace != null &&
-                    !Strings.isEmpty(olapNamespace)) {
+                    !StringUtils.isEmpty(olapNamespace)) {
                     exist.olapNamespace(olapNamespace);
                 }
                 String storageNamespace =
                         (String) graphSpaceMap.get("storage_namespace");
                 if (storageNamespace != null &&
-                    !Strings.isEmpty(storageNamespace)) {
+                    !StringUtils.isEmpty(storageNamespace)) {
                     exist.storageNamespace(storageNamespace);
                 }
 
                 String operatorImagePath = (String) graphSpaceMap
                         .getOrDefault("operator_image_path", "");
-                if (!Strings.isEmpty(operatorImagePath)) {
+                if (!StringUtils.isEmpty(operatorImagePath)) {
                     exist.operatorImagePath(operatorImagePath);
                 }
 
                 String internalAlgorithmImageUrl = (String) graphSpaceMap
                         .getOrDefault("internal_algorithm_image_url", "");
-                if (!Strings.isEmpty(internalAlgorithmImageUrl)) {
+                if (!StringUtils.isEmpty(internalAlgorithmImageUrl)) {
                     exist.internalAlgorithmImageUrl(internalAlgorithmImageUrl);
                 }
 
@@ -346,6 +509,18 @@ public class GraphSpaceAPI extends API {
                authManager.isSpaceMember(graphSpace, user);
     }
 
+    private static void validGraphSpace(GraphManager manager, String graphSpace) {
+        E.checkArgument(manager.graphSpace(graphSpace) != null,
+                        "The graph space '%s' does not exist", graphSpace);
+    }
+
+    private static void validGraph(GraphManager manager, String graphSpace,
+                                   String graph) {
+        E.checkArgument(manager.graph(graphSpace, graph) != null,
+                        "Graph '%s/%s' does not exist", graphSpace, graph);
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class JsonGraphSpace implements Checkable {
 
         @JsonProperty("name")

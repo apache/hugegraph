@@ -3704,7 +3704,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithRange() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -3802,7 +3803,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithPrefix() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -3900,7 +3902,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithPrefixInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -4015,7 +4018,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithMoreFields() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -4236,7 +4240,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithMoreFieldsInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -5364,7 +5369,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testScanEdgeInPaging() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 

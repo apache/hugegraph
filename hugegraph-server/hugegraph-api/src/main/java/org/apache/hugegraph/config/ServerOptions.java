@@ -556,9 +556,9 @@ public class ServerOptions extends OptionHolder {
     public static final ConfigOption<String> SERVER_ID =
             new ConfigOption<>(
                     "server.id",
-                    "The id of hugegraph-server.",
-                    disallowEmpty(),
-                    "server-1"
+                    "The optional legacy id of hugegraph-server.",
+                    null,
+                    ""
             );
     public static final ConfigOption<String> SERVER_ROLE =
             new ConfigOption<>(
@@ -659,7 +659,7 @@ public class ServerOptions extends OptionHolder {
                     "memory_monitor.period",
                     "The period in ms of JVM memory usage monitoring, in each period we will " +
                     "detect the jvm memory usage and take corresponding actions.",
-                    nonNegativeInt(),
+                    positiveInt(),
                     2000
             );
     public static ConfigOption<String> K8S_INTERNAL_ALGORITHM_IMAGE_URL =

@@ -33,6 +33,7 @@ import org.apache.hugegraph.pd.model.StoreRestRequest;
 import org.apache.hugegraph.pd.model.TimeRangeRequest;
 import org.apache.hugegraph.pd.service.PDRestService;
 import org.apache.hugegraph.pd.util.DateUtil;
+import org.apache.hugegraph.pd.util.StoreRestAddressUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -278,6 +279,7 @@ public class StoreAPI extends API {
         // store statistics
         String storeId;
         String address;
+        String restAddress;
         String raftAddress;
         String version;
         String state;
@@ -302,6 +304,7 @@ public class StoreAPI extends API {
             if (store != null) {
                 storeId = String.valueOf(store.getId());
                 address = store.getAddress();
+                restAddress = StoreRestAddressUtil.getRestAddress(store);
                 raftAddress = store.getRaftAddress();
                 state = String.valueOf(store.getState());
                 version = store.getVersion();

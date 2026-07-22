@@ -58,7 +58,6 @@ import org.apache.hugegraph.auth.StandardAuthenticator;
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheManager;
-import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.store.AbstractBackendStoreProvider;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.config.ConfigOption;
@@ -68,6 +67,7 @@ import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.config.TypedOption;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.exception.ExistedException;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.exception.NotSupportException;
 import org.apache.hugegraph.io.HugeGraphSONModule;
 import org.apache.hugegraph.k8s.K8sDriver;
@@ -195,8 +195,6 @@ public final class GraphManager {
     public GraphManager(HugeConfig conf, EventHub hub) {
         LOG.info("Init graph manager");
         E.checkArgumentNotNull(conf, "The config can't be null");
-        String server = conf.get(ServerOptions.SERVER_ID);
-        String role = conf.get(ServerOptions.SERVER_ROLE);
 
         this.config = conf;
         this.url = conf.get(ServerOptions.REST_SERVER_URL);
@@ -206,10 +204,6 @@ public final class GraphManager {
                 conf.get(ServerOptions.SERVER_DEPLOY_IN_K8S);
         this.startIgnoreSingleGraphError = conf.get(
                 ServerOptions.SERVER_START_IGNORE_SINGLE_GRAPH_ERROR);
-        E.checkArgument(server != null && !server.isEmpty(),
-                        "The server name can't be null or empty");
-        E.checkArgument(role != null && !role.isEmpty(),
-                        "The server role can't be null or empty");
         this.graphsDir = conf.get(ServerOptions.GRAPHS);
         this.cluster = conf.get(ServerOptions.CLUSTER);
         this.graphSpaces = new ConcurrentHashMap<>();
@@ -1557,6 +1551,9 @@ public final class GraphManager {
         String raftGroupPeers = this.conf.get(ServerOptions.RAFT_GROUP_PEERS);
         config.addProperty(ServerOptions.RAFT_GROUP_PEERS.name(),
                            raftGroupPeers);
+
+        this.transferPdPeersConfig(config);
+
         this.transferRoleWorkerConfig(config);
 
         Graph graph = GraphFactory.open(config);
@@ -1572,6 +1569,19 @@ public final class GraphManager {
             !(graph instanceof HugeGraphAuthProxy)) {
             LOG.warn("You may need to support access control for '{}' with {}",
                      graphConfPath, HugeFactoryAuthProxy.GRAPH_FACTORY);
+        }
+    }
+
+    private void transferPdPeersConfig(HugeConfig config) {
+        if (config.containsKey(CoreOptions.PD_PEERS.name())) {
+            return;
+        }
+
+        String backend = config.get(CoreOptions.BACKEND);
+        boolean needPdPeers = this.conf.get(ServerOptions.USE_PD) ||
+                              StringUtils.equalsIgnoreCase("hstore", backend);
+        if (needPdPeers) {
+            config.addProperty(CoreOptions.PD_PEERS.name(), this.pdPeers);
         }
     }
 
@@ -1635,23 +1645,21 @@ public final class GraphManager {
     }
 
     private void initNodeRole() {
-        String id = config.get(ServerOptions.SERVER_ID);
+        boolean enableRoleElection = config.get(
+                ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
+        if (enableRoleElection) {
+            LOG.warn("The server.role_election option is deprecated and no " +
+                     "longer supported (removed with server_info persistence). " +
+                     "The configured server.role is still used for local node " +
+                     "role initialization. Set server.role_election=false to " +
+                     "suppress this warning.");
+        }
+
         String role = config.get(ServerOptions.SERVER_ROLE);
-        E.checkArgument(StringUtils.isNotEmpty(id),
-                        "The server name can't be null or empty");
         E.checkArgument(StringUtils.isNotEmpty(role),
                         "The server role can't be null or empty");
 
         NodeRole nodeRole = NodeRole.valueOf(role.toUpperCase());
-        boolean supportRoleElection = !nodeRole.computer() &&
-                                      this.supportRoleElection() &&
-                                      config.get(ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
-        if (supportRoleElection) {
-            // Init any server as Worker role, then do role election
-            nodeRole = NodeRole.WORKER;
-        }
-
-        this.globalNodeRoleInfo.initNodeId(IdGenerator.of(id));
         this.globalNodeRoleInfo.initNodeRole(nodeRole);
     }
 
@@ -1663,7 +1671,7 @@ public final class GraphManager {
         }
         if (!this.globalNodeRoleInfo.nodeRole().computer() && this.supportRoleElection() &&
             config.get(ServerOptions.ENABLE_SERVER_ROLE_ELECTION)) {
-            this.initRoleStateMachine();
+            LOG.info("Skip role state machine init (deprecated with server_info)");
         }
     }
 
@@ -1856,6 +1864,17 @@ public final class GraphManager {
         if (StringUtils.isNotEmpty((String) configs.get(CoreOptions.ALIAS_NAME.name()))) {
             return attachedConfigs;
         }
+        if (this.config.containsKey(CoreOptions.SCHEMA_CACHE_CAPACITY.name())) {
+            attachedConfigs.putIfAbsent(
+                    CoreOptions.SCHEMA_CACHE_CAPACITY.name(),
+                    this.config.get(CoreOptions.SCHEMA_CACHE_CAPACITY));
+        }
+        if (this.config.containsKey(
+                CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY.name())) {
+            attachedConfigs.putIfAbsent(
+                    CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY.name(),
+                    this.config.get(CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY));
+        }
         Object value = this.config.get(CoreOptions.VERTEX_CACHE_EXPIRE);
         if (Objects.nonNull(value)) {
             attachedConfigs.putIfAbsent(CoreOptions.VERTEX_CACHE_EXPIRE.name(),
@@ -1937,26 +1956,29 @@ public final class GraphManager {
     public HugeGraph graph(String graphSpace, String name) {
         String key = String.join(DELIMITER, graphSpace, name);
         Graph graph = this.graphs.get(key);
-        if (graph == null && isPDEnabled()) {
-            Map<String, Map<String, Object>> configs =
-                    this.metaManager.graphConfigs(graphSpace);
-            // If current server registered graph space is not DEFAULT, only load graph creation
-            // under registered graph space
-            if (!configs.containsKey(key) ||
-                (!"DEFAULT".equals(this.serviceGraphSpace) &&
-                 !graphSpace.equals(this.serviceGraphSpace))) {
-                return null;
+        if (graph == null) {
+            if (isPDEnabled()) {
+                Map<String, Map<String, Object>> configs =
+                        this.metaManager.graphConfigs(graphSpace);
+                // If current server registered graph space is not DEFAULT, only load graph creation
+                // under registered graph space
+                if (!configs.containsKey(key) ||
+                    (!"DEFAULT".equals(this.serviceGraphSpace) &&
+                     !graphSpace.equals(this.serviceGraphSpace))) {
+                    return null;
+                }
+                Map<String, Object> config = configs.get(key);
+                String creator = String.valueOf(config.get("creator"));
+                Date createTime = parseDate(config.get("create_time"));
+                Date updateTime = parseDate(config.get("update_time"));
+                HugeGraph graph1 = this.createGraph(graphSpace, name,
+                                                    creator, config, false);
+                graph1.createTime(createTime);
+                graph1.updateTime(updateTime);
+                this.graphs.put(key, graph1);
+                return graph1;
             }
-            Map<String, Object> config = configs.get(key);
-            String creator = String.valueOf(config.get("creator"));
-            Date createTime = parseDate(config.get("create_time"));
-            Date updateTime = parseDate(config.get("update_time"));
-            HugeGraph graph1 = this.createGraph(graphSpace, name,
-                                                creator, config, false);
-            graph1.createTime(createTime);
-            graph1.updateTime(updateTime);
-            this.graphs.put(key, graph1);
-            return graph1;
+            throw new NotFoundException(String.format("Graph '%s' does not exist", name));
         } else if (graph instanceof HugeGraph) {
             return (HugeGraph) graph;
         }
@@ -2099,6 +2121,19 @@ public final class GraphManager {
         for (String key : this.metaManager.graphConfigs(graphSpace).keySet()) {
             graphs.add(key.split(DELIMITER)[1]);
         }
+        if (DEFAULT_GRAPH_SPACE_SERVICE_NAME.equals(graphSpace)) {
+            String prefix = spaceGraphName(graphSpace, "");
+            for (String key : this.graphs.keySet()) {
+                if (!key.startsWith(prefix)) {
+                    continue;
+                }
+                String graph = key.substring(prefix.length());
+                if (SYS_GRAPH.equals(graph)) {
+                    continue;
+                }
+                graphs.add(graph);
+            }
+        }
         return graphs;
     }
 
@@ -2108,7 +2143,14 @@ public final class GraphManager {
         }
         GraphSpace space = this.graphSpaces.get(name);
         if (space == null) {
+            // Cache miss: try to load from etcd and populate the local cache
+            // so that subsequent calls (e.g. validGraphSpace checks) don't fail
+            // due to a race between the graphspace-create event and the listener
+            // updating this.graphSpaces.
             space = this.metaManager.graphSpace(name);
+            if (space != null) {
+                this.graphSpaces.putIfAbsent(name, space);
+            }
         }
         return space;
     }
@@ -2136,9 +2178,27 @@ public final class GraphManager {
         if (StringUtils.isEmpty(nickname)) {
             return false;
         }
+        if (!isPDEnabled()) {
+            // In non-PD mode, metaManager is not initialized.
+            // Check nickname against in-memory graphs (same pattern as graphs()).
+            for (Map.Entry<String, Graph> entry : this.graphs.entrySet()) {
+                String key = entry.getKey();
+                String[] parts = key.split(DELIMITER, 2);
+                if (parts.length == 2 && parts[0].equals(graphSpace) &&
+                    entry.getValue() instanceof HugeGraph) {
+                    HugeGraph hg = (HugeGraph) entry.getValue();
+                    if (nickname.equals(hg.nickname())) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        // PD mode: check via metaManager
         for (Map<String, Object> graphConfig :
                 this.metaManager.graphConfigs(graphSpace).values()) {
-            if (nickname.equals(graphConfig.get("nickname").toString())) {
+            Object nick = graphConfig.get("nickname");
+            if (nick != null && nickname.equals(nick.toString())) {
                 return true;
             }
         }
@@ -2174,12 +2234,93 @@ public final class GraphManager {
         return this.metaManager.getGraphConfig(graphSpace, graphName);
     }
 
+    /**
+     * Update the nickname of a graph.
+     * In non-PD mode (standalone RocksDB), only the in-memory instance is updated
+     * since local config files cannot be hot-reloaded.
+     * In PD mode, the change is also persisted to the meta storage so it
+     * survives restarts.
+     */
+    public void updateGraphNickname(String graphSpace, String graphName,
+                                    String nickname) {
+        // Always update the in-memory graph instance first
+        HugeGraph g = this.graph(graphSpace, graphName);
+        // Capture the old nickname so we can restore it on failure
+        String oldNickname = g != null ? g.nickname() : null;
+        if (g != null) {
+            g.nickname(nickname);
+        }
+        if (!isPDEnabled()) {
+            // Non-PD mode: in-memory only, acceptable for standalone RocksDB
+            return;
+        }
+        Map<String, Object> configs;
+        try {
+            configs = this.metaManager.getGraphConfig(graphSpace, graphName);
+            if (configs == null) {
+                return;
+            }
+            configs.put("nickname", nickname);
+            this.metaManager.updateGraphConfig(graphSpace, graphName, configs);
+        } catch (Exception e) {
+            // Roll back only if the PD metadata write did not succeed.
+            if (g != null) {
+                g.nickname(oldNickname);
+            }
+            throw new HugeException("Failed to persist nickname for graph " +
+                                    "'%s/%s'", e, graphSpace, graphName);
+        }
+        try {
+            this.metaManager.notifyGraphUpdate(graphSpace, graphName);
+        } catch (Exception e) {
+            LOG.warn("Failed to notify graph nickname update for graph '{}/{}'",
+                     graphSpace, graphName, e);
+        }
+    }
+
     public String pdPeers() {
         return this.pdPeers;
     }
 
     public String cluster() {
         return this.cluster;
+    }
+
+    public Set<String> schemaTemplates(String graphSpace) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        return this.metaManager.schemaTemplates(graphSpace);
+    }
+
+    public void createSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        checkSchemaTemplateName(template.name());
+        this.metaManager.addSchemaTemplate(graphSpace, template);
+    }
+
+    public void dropSchemaTemplate(String graphSpace, String name) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        this.metaManager.removeSchemaTemplate(graphSpace, name);
+    }
+
+    public void updateSchemaTemplate(String graphSpace, SchemaTemplate template) {
+        if (!isPDEnabled()) {
+            throw new HugeException("Schema templates are not supported in " +
+                                    "standalone (non-PD) mode");
+        }
+        this.metaManager.updateSchemaTemplate(graphSpace, template);
+    }
+
+    private static void checkSchemaTemplateName(String name) {
+        checkName(name, "schema template");
     }
 
     private enum PdRegisterType {

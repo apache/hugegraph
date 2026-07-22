@@ -18,7 +18,7 @@
 
 # Dockerfile for HugeGraph Server
 # 1st stage: build source code
-FROM maven:3.9.0-eclipse-temurin-11 AS build
+FROM --platform=$BUILDPLATFORM maven:3.9.0-eclipse-temurin-11 AS build
 
 WORKDIR /pkg
 

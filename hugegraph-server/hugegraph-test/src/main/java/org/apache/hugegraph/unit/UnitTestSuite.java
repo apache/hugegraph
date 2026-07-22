@@ -17,13 +17,20 @@
 
 package org.apache.hugegraph.unit;
 
+import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
+import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
+import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
+import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
+import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
+import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
 import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
+import org.apache.hugegraph.unit.api.space.GraphSpaceAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
 import org.apache.hugegraph.unit.cache.CacheManagerTest;
 import org.apache.hugegraph.unit.cache.CacheTest;
@@ -39,6 +46,7 @@ import org.apache.hugegraph.unit.core.ConditionTest;
 import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
+import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
 import org.apache.hugegraph.unit.core.QueryTest;
@@ -50,6 +58,7 @@ import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
+import org.apache.hugegraph.unit.core.TaskSchedulerServerInfoTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
 import org.apache.hugegraph.unit.id.EdgeIdTest;
 import org.apache.hugegraph.unit.id.IdTest;
@@ -89,10 +98,19 @@ import org.junit.runners.Suite;
 @Suite.SuiteClasses({
         /* api filter */
         LoadDetectFilterTest.class,
+        LoginAPITest.class,
         PathFilterTest.class,
 
         /* api gremlin */
         GremlinQueryAPITest.class,
+        WsAndHttpBasicAuthHandlerTest.class,
+        GraphSpaceGroupAPITest.class,
+        GraphSpaceAuthPayloadTest.class,
+        StandardAuthManagerV2Test.class,
+        AuthMetaManagerTest.class,
+
+        /* api space */
+        GraphSpaceAPITest.class,
 
         /* cache */
         CacheTest.RamCacheTest.class,
@@ -128,12 +146,14 @@ import org.junit.runners.Suite;
         SecurityManagerTest.class,
         RolePermissionTest.class,
         ExceptionTest.class,
+        GraphManagerConfigTest.class,
         BackendStoreInfoTest.class,
         TraversalUtilTest.class,
         TraversalUtilOptimizeTest.class,
         PageStateTest.class,
         SystemSchemaStoreTest.class,
         ServerInfoManagerTest.class,
+        TaskSchedulerServerInfoTest.class,
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
         SchemaElementTest.class,

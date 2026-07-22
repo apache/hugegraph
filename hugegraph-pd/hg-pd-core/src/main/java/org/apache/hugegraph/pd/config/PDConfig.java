@@ -31,6 +31,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * PD profile
@@ -69,6 +70,7 @@ public class PDConfig {
     private ThreadPoolGrpc threadPoolGrpc;
 
     @Value("${auth.secret-key: 'FXQXbJtbCLxODc6tGci732pkH1cyf8Qg'}")
+    @ToString.Exclude
     private String secretKey;
 
     @Autowired

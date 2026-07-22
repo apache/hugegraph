@@ -46,6 +46,7 @@ import com.google.common.collect.ImmutableMap;
  * Base class of task & result scheduler
  */
 public abstract class TaskAndResultScheduler implements TaskScheduler {
+
     /**
      * Which graph the scheduler belongs to
      */
@@ -61,8 +62,8 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     private final ServerInfoManager serverManager;
 
     public TaskAndResultScheduler(
-        HugeGraphParams graph,
-        ExecutorService serverInfoDbExecutor) {
+            HugeGraphParams graph,
+            ExecutorService serverInfoDbExecutor) {
         E.checkNotNull(graph, "graph");
 
         this.graph = graph;
@@ -90,7 +91,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
         // Save result outcome
         if (rawResult != null) {
             HugeTaskResult result =
-                new HugeTaskResult(HugeTaskResult.genId(task.id()));
+                    new HugeTaskResult(HugeTaskResult.genId(task.id()));
             result.result(rawResult);
 
             this.call(() -> {
@@ -193,7 +194,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
             }
             Iterator<Vertex> vertices = this.tx().queryTaskInfos(query);
             Iterator<HugeTask<V>> tasks =
-                new MapperIterator<>(vertices, HugeTask::fromVertex);
+                    new MapperIterator<>(vertices, HugeTask::fromVertex);
             // Convert iterator to list to avoid across thread tx accessed
             return QueryResults.toList(tasks);
         });
@@ -209,16 +210,16 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
 
     protected <V> Iterator<HugeTask<V>> queryTask(List<Id> ids) {
         ListIterator<HugeTask<V>> ts = this.call(
-            () -> {
-                Object[] idArray = ids.toArray(new Id[ids.size()]);
-                Iterator<Vertex> vertices = this.tx()
-                                                .queryTaskInfos(idArray);
-                Iterator<HugeTask<V>> tasks =
-                    new MapperIterator<>(vertices,
-                                         HugeTask::fromVertex);
-                // Convert iterator to list to avoid across thread tx accessed
-                return QueryResults.toList(tasks);
-            });
+                () -> {
+                    Object[] idArray = ids.toArray(new Id[ids.size()]);
+                    Iterator<Vertex> vertices = this.tx()
+                                                    .queryTaskInfos(idArray);
+                    Iterator<HugeTask<V>> tasks =
+                            new MapperIterator<>(vertices,
+                                                 HugeTask::fromVertex);
+                    // Convert iterator to list to avoid across thread tx accessed
+                    return QueryResults.toList(tasks);
+                });
 
         Iterator<HugeTaskResult> results = queryTaskResult(ids);
 
@@ -230,7 +231,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
 
         return new MapperIterator<>(ts, (task) -> {
             HugeTaskResult taskResult =
-                resultCaches.get(HugeTaskResult.genId(task.id()));
+                    resultCaches.get(HugeTaskResult.genId(task.id()));
             if (taskResult != null) {
                 task.result(taskResult);
             }
@@ -247,6 +248,10 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
             }
             return HugeTask.fromVertex(vertex, false);
         });
+
+        if (result == null) {
+            throw new NotFoundException("Can't find task with id '%s'", id);
+        }
 
         return result;
     }
@@ -281,7 +286,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     }
 
     protected <V> Iterator<HugeTask<V>> queryTaskWithoutResult(Map<String,
-        Object> conditions, long limit, String page) {
+            Object> conditions, long limit, String page) {
         return this.call(() -> {
             ConditionQuery query = new ConditionQuery(HugeType.TASK);
             if (page != null) {
@@ -319,7 +324,7 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     protected HugeTaskResult queryTaskResult(Id taskid) {
         HugeTaskResult result = this.call(() -> {
             Iterator<Vertex> vertices =
-                this.tx().queryTaskInfos(HugeTaskResult.genId(taskid));
+                    this.tx().queryTaskInfos(HugeTaskResult.genId(taskid));
             Vertex vertex = QueryResults.one(vertices);
             if (vertex == null) {
                 return null;
@@ -334,12 +339,12 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     protected Iterator<HugeTaskResult> queryTaskResult(List<Id> taskIds) {
         return this.call(() -> {
             Object[] idArray =
-                taskIds.stream().map(HugeTaskResult::genId).toArray();
+                    taskIds.stream().map(HugeTaskResult::genId).toArray();
             Iterator<Vertex> vertices = this.tx()
                                             .queryTaskInfos(idArray);
             Iterator<HugeTaskResult> tasks =
-                new MapperIterator<>(vertices,
-                                     HugeTaskResult::fromVertex);
+                    new MapperIterator<>(vertices,
+                                         HugeTaskResult::fromVertex);
             // Convert iterator to list to avoid across thread tx accessed
             return QueryResults.toList(tasks);
         });

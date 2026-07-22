@@ -707,7 +707,7 @@ public class BaseApiTest {
     public static RestClient userClient(String username) {
         String user1 = "{\"user_name\":\"%s\"," +
                        "\"user_password\":\"%s\"}";
-        Response r = client.post("auth/users",
+        Response r = client.post("graphspaces/DEFAULT/auth/users",
                                  String.format(user1, username, username));
         assertResponseStatus(201, r);
 
@@ -721,11 +721,12 @@ public class BaseApiTest {
 
         String spaceBody = "{\n" +
                            "  \"user\": \"%s\",\n" +
-                           "  \"type\": \"SPACE\",\n" +
-                           "  \"graphspace\": \"%s\"\n" +
+                           "  \"type\": \"SPACE\"\n" +
                            "}";
-        client.post("auth/managers", String.format(spaceBody, username,
-                                                   graphSpace));
+        Response r = client.post(String.format("graphspaces/%s/auth/managers",
+                                               graphSpace),
+                                 String.format(spaceBody, username));
+        assertResponseStatus(201, r);
         return spaceClient;
     }
 

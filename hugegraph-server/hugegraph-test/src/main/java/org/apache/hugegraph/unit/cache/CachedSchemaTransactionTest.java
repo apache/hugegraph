@@ -397,16 +397,15 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         String graphName = "DEFAULT-unit-test-v2";
         String otherGraphName = "DEFAULT-other-v2";
 
-        Cache<Id, Object> idCache = CacheManager.instance()
-                                                .cache("schema-id-" +
-                                                       graphName, 10L);
-        Cache<Id, Object> nameCache = CacheManager.instance()
-                                                  .cache("schema-name-" +
-                                                         graphName, 10L);
-        Cache<Id, Object> otherIdCache = CacheManager.instance()
-                                                     .cache("schema-id-" +
-                                                            otherGraphName,
-                                                            10L);
+        Cache<Id, Object> idCache = v2IdCache(graphName);
+        Cache<Id, Object> nameCache = v2NameCache(graphName);
+        Cache<Id, Object> otherIdCache = v2IdCache(otherGraphName);
+        Cache<Id, Object> v1IdCache = CacheManager.instance()
+                                                    .cache("schema-id-" +
+                                                           graphName, 10L);
+        Cache<Id, Object> v1NameCache = CacheManager.instance()
+                                                      .cache("schema-name-" +
+                                                             graphName, 10L);
         Object arrayCaches = idCache.attachment(newV2SchemaCaches(10));
         Id arrayCacheId = IdGenerator.of(1);
         SchemaElement arrayCacheSchema =
@@ -420,10 +419,16 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
             idCache.update(IdGenerator.of(1), "fake-pk-by-id");
             nameCache.update(IdGenerator.of("fake-pk"), "fake-pk-by-name");
             otherIdCache.update(IdGenerator.of(2), "other-pk-by-id");
+            v1IdCache.update(IdGenerator.of(3), "v1-pk-by-id");
+            v1NameCache.update(IdGenerator.of("v1-pk"), "v1-pk-by-name");
 
+            Assert.assertNotSame(v1IdCache, idCache);
+            Assert.assertNotSame(v1NameCache, nameCache);
             Assert.assertEquals(1L, idCache.size());
             Assert.assertEquals(1L, nameCache.size());
             Assert.assertEquals(1L, otherIdCache.size());
+            Assert.assertEquals(1L, v1IdCache.size());
+            Assert.assertEquals(1L, v1NameCache.size());
             Assert.assertSame(arrayCacheSchema,
                               getV2SchemaCache(arrayCaches,
                                                HugeType.PROPERTY_KEY,
@@ -436,6 +441,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
             Assert.assertEquals(0L, idCache.size());
             Assert.assertEquals(0L, nameCache.size());
             Assert.assertEquals(1L, otherIdCache.size());
+            Assert.assertEquals(1L, v1IdCache.size());
+            Assert.assertEquals(1L, v1NameCache.size());
             Assert.assertNull(getV2SchemaCache(arrayCaches,
                                                HugeType.PROPERTY_KEY,
                                                arrayCacheId));
@@ -444,7 +451,26 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
             idCache.clear();
             nameCache.clear();
             otherIdCache.clear();
+            v1IdCache.clear();
+            v1NameCache.clear();
         }
+    }
+
+    private static Cache<Id, Object> v2IdCache(String graphName) {
+        return v2Cache("ID_CACHE_PREFIX", graphName);
+    }
+
+    private static Cache<Id, Object> v2NameCache(String graphName) {
+        return v2Cache("NAME_CACHE_PREFIX", graphName);
+    }
+
+    private static Cache<Id, Object> v2Cache(String prefixField,
+                                             String graphName) {
+        // Keep test fixtures aligned with the private cache namespace used by
+        // CachedSchemaTransactionV2 without duplicating production literals.
+        String prefix = Whitebox.getInternalState(
+                CachedSchemaTransactionV2.class, prefixField);
+        return CacheManager.instance().cache(prefix + "-" + graphName, 10L);
     }
 
     private static Object newV2SchemaCaches(int size) {
@@ -534,10 +560,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         // IntObjectMap (pks/vls/els/ils) inside the array attachment so
         // stale entries are not served after a meta event.
         String graphName = "DEFAULT-unit-test-v2-array";
-        Cache<Id, Object> idCache =
-                CacheManager.instance().cache("schema-id-" + graphName, 10L);
-        Cache<Id, Object> nameCache =
-                CacheManager.instance().cache("schema-name-" + graphName, 10L);
+        Cache<Id, Object> idCache = v2IdCache(graphName);
+        Cache<Id, Object> nameCache = v2NameCache(graphName);
         // Size must comfortably exceed the largest id below: IntObjectMap
         // grows by doubling and refuses to write past currentSize even after
         // a single expansion, so a small capacity rejects mid-range keys.
@@ -598,11 +622,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
     public void testHandleSchemaCacheClearEventSkipsLocalSource()
             throws Exception {
         String graphName = "DEFAULT-meta-local-source-v2";
-        Cache<Id, Object> idCache =
-                CacheManager.instance().cache("schema-id-" + graphName, 10L);
-        Cache<Id, Object> nameCache =
-                CacheManager.instance()
-                            .cache("schema-name-" + graphName, 10L);
+        Cache<Id, Object> idCache = v2IdCache(graphName);
+        Cache<Id, Object> nameCache = v2NameCache(graphName);
 
         MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
         Object localResponse = new Object();
@@ -658,13 +679,9 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         String targetGraph = "DEFAULT-meta-target-v2";
         String otherGraph = "DEFAULT-meta-other-v2";
 
-        Cache<Id, Object> targetIdCache =
-                CacheManager.instance().cache("schema-id-" + targetGraph, 10L);
-        Cache<Id, Object> targetNameCache =
-                CacheManager.instance()
-                            .cache("schema-name-" + targetGraph, 10L);
-        Cache<Id, Object> otherIdCache =
-                CacheManager.instance().cache("schema-id-" + otherGraph, 10L);
+        Cache<Id, Object> targetIdCache = v2IdCache(targetGraph);
+        Cache<Id, Object> targetNameCache = v2NameCache(targetGraph);
+        Cache<Id, Object> otherIdCache = v2IdCache(otherGraph);
 
         MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
         Object response = new Object();
@@ -703,8 +720,7 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         // A response that yields no graph names (extractor returns null) must
         // be a strict noop: caches stay populated.
         String graphName = "DEFAULT-meta-noop-v2";
-        Cache<Id, Object> idCache =
-                CacheManager.instance().cache("schema-id-" + graphName, 10L);
+        Cache<Id, Object> idCache = v2IdCache(graphName);
 
         MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
         Object response = new Object();
@@ -735,10 +751,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         // them must have its V2 caches cleared.
         String graphA = "DEFAULT-meta-multi-a";
         String graphB = "DEFAULT-meta-multi-b";
-        Cache<Id, Object> idA =
-                CacheManager.instance().cache("schema-id-" + graphA, 10L);
-        Cache<Id, Object> idB =
-                CacheManager.instance().cache("schema-id-" + graphB, 10L);
+        Cache<Id, Object> idA = v2IdCache(graphA);
+        Cache<Id, Object> idB = v2IdCache(graphB);
 
         MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
         Object response = new Object();
@@ -811,11 +825,8 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         // MetaDriver, then invoke it as the watch would and assert the V2
         // caches for the named graph are cleared.
         String graphName = "DEFAULT-end-to-end-v2";
-        Cache<Id, Object> idCache =
-                CacheManager.instance().cache("schema-id-" + graphName, 10L);
-        Cache<Id, Object> nameCache =
-                CacheManager.instance()
-                            .cache("schema-name-" + graphName, 10L);
+        Cache<Id, Object> idCache = v2IdCache(graphName);
+        Cache<Id, Object> nameCache = v2NameCache(graphName);
 
         MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
         Object response = new Object();

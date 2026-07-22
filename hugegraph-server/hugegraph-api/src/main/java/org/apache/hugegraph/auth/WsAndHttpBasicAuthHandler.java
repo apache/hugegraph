@@ -31,9 +31,11 @@ import java.util.Map;
 
 import org.apache.tinkerpop.gremlin.server.Settings;
 import org.apache.tinkerpop.gremlin.server.auth.AuthenticationException;
+import org.apache.tinkerpop.gremlin.server.auth.AuthenticatedUser;
 import org.apache.tinkerpop.gremlin.server.auth.Authenticator;
 import org.apache.tinkerpop.gremlin.server.handler.AbstractAuthenticationHandler;
 import org.apache.tinkerpop.gremlin.server.handler.SaslAuthenticationHandler;
+import org.apache.tinkerpop.gremlin.server.handler.StateKey;
 
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandler;
@@ -53,7 +55,6 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
 
     private static final String AUTHENTICATOR = "authenticator";
     private static final String HTTP_AUTH = "http-authentication";
-
     public WsAndHttpBasicAuthHandler(Authenticator authenticator,
                                      Settings settings) {
         super(authenticator, settings);
@@ -88,7 +89,7 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
     private static class HttpBasicAuthHandler
             extends AbstractAuthenticationHandler {
 
-        private final Base64.Decoder decoder = Base64.getUrlDecoder();
+        private final Base64.Decoder decoder = Base64.getDecoder();
 
         public HttpBasicAuthHandler(Authenticator authenticator) {
             super(authenticator);
@@ -103,28 +104,21 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
                     return;
                 }
 
-                // strip off "Basic " from the Authorization header (RFC 2617)
-                final String basic = "Basic ";
                 final String header = request.headers().get("Authorization");
-                if (!header.startsWith(basic)) {
+                final Map<String, String> credentials = new HashMap<>();
+                int separator = header.indexOf(' ');
+                if (separator <= 0 || separator == header.length() - 1) {
                     sendError(ctx, msg);
                     return;
                 }
-                byte[] userPass = null;
-                try {
-                    final String encoded = header.substring(basic.length());
-                    userPass = this.decoder.decode(encoded);
-                } catch (IndexOutOfBoundsException iae) {
-                    sendError(ctx, msg);
-                    return;
-                } catch (IllegalArgumentException iae) {
-                    sendError(ctx, msg);
-                    return;
-                }
-                String authorization = new String(userPass,
-                                                  StandardCharsets.UTF_8);
-                String[] split = authorization.split(":");
-                if (split.length != 2) {
+                String scheme = header.substring(0, separator);
+                String payload = header.substring(separator + 1);
+                if ("Basic".equalsIgnoreCase(scheme)) {
+                    if (!parseBasicCredentials(payload, credentials)) {
+                        sendError(ctx, msg);
+                        return;
+                    }
+                } else {
                     sendError(ctx, msg);
                     return;
                 }
@@ -134,18 +128,35 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
                     address = address.substring(1);
                 }
 
-                final Map<String, String> credentials = new HashMap<>();
-                credentials.put(PROPERTY_USERNAME, split[0]);
-                credentials.put(PROPERTY_PASSWORD, split[1]);
                 credentials.put(HugeAuthenticator.KEY_ADDRESS, address);
 
                 try {
-                    this.authenticator.authenticate(credentials);
+                    AuthenticatedUser user =
+                            this.authenticator.authenticate(credentials);
+                    ctx.channel().attr(StateKey.AUTHENTICATED_USER).set(user);
                     ctx.fireChannelRead(request);
                 } catch (AuthenticationException ae) {
                     sendError(ctx, msg);
                 }
             }
+        }
+
+        private boolean parseBasicCredentials(String encoded,
+                                              Map<String, String> credentials) {
+            byte[] userPass;
+            try {
+                userPass = this.decoder.decode(encoded);
+            } catch (IllegalArgumentException e) {
+                return false;
+            }
+            String authorization = new String(userPass, StandardCharsets.UTF_8);
+            String[] split = authorization.split(":", 2);
+            if (split.length != 2) {
+                return false;
+            }
+            credentials.put(PROPERTY_USERNAME, split[0]);
+            credentials.put(PROPERTY_PASSWORD, split[1]);
+            return true;
         }
 
         private void sendError(ChannelHandlerContext context, Object msg) {

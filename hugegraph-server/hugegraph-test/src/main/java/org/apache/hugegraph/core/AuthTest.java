@@ -29,6 +29,7 @@ import javax.security.sasl.AuthenticationException;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAccess;
 import org.apache.hugegraph.auth.HugeBelong;
@@ -39,10 +40,12 @@ import org.apache.hugegraph.auth.HugeResource;
 import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.RolePermission;
+import org.apache.hugegraph.auth.StandardAuthManager;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.JsonUtil;
@@ -536,6 +539,8 @@ public class AuthTest extends BaseCoreTest {
         target = authManager.getTarget(id);
         Assert.assertEquals("graph1", target.name());
         Assert.assertEquals("127.0.0.1:8080", target.url());
+        Assert.assertEquals("DEFAULT", target.graphSpace());
+        Assert.assertNull(target.description());
         Assert.assertEquals(target.create(), target.update());
 
         HashMap<String, Object> expected = new HashMap<>();
@@ -545,9 +550,204 @@ public class AuthTest extends BaseCoreTest {
                                         "target_creator", "admin"));
         expected.putAll(ImmutableMap.of("target_create", target.create(),
                                         "target_update", target.update(),
-                                        "id", target.id()));
+                                        "id", target.id(),
+                                        "graphspace", "DEFAULT"));
 
         Assert.assertEquals(expected, target.asMap());
+    }
+
+    @Test
+    public void testTargetScopedRoundTripAfterAuthManagerReopen() {
+        AuthManager authManager = graph().authManager();
+        Assume.assumeTrue(authManager instanceof StandardAuthManager);
+
+        HugeTarget target = makeTarget("target-scoped", "url");
+        target.graphSpace("DEFAULT");
+        target.description("description");
+        Id id = authManager.createTarget("DEFAULT", target);
+
+        StandardAuthManager reopened = new StandardAuthManager(params());
+        reopened.init();
+        HugeTarget stored = reopened.getTarget("DEFAULT", id);
+
+        Assert.assertEquals("DEFAULT", stored.graphSpace());
+        Assert.assertEquals("description", stored.description());
+        reopened.close();
+    }
+
+    @Test
+    public void testTargetSchemaUpgradeAddsNullableScopedProperties() {
+        LegacyTargetSchema schema = new LegacyTargetSchema(params());
+        schema.initLegacySchema();
+        VertexLabel legacy = graph().vertexLabel(LegacyTargetSchema.LABEL);
+        List<String> legacyProperties = graph().mapPkId2Name(
+                                        legacy.properties());
+        Assert.assertFalse(legacyProperties.contains(HugeTarget.P.GRAPHSPACE));
+        Assert.assertFalse(legacyProperties.contains(
+                HugeTarget.P.DESCRIPTION));
+
+        schema.initSchemaIfNeeded();
+
+        VertexLabel upgraded = graph().vertexLabel(LegacyTargetSchema.LABEL);
+        Id graphSpace = graph().propertyKey(HugeTarget.P.GRAPHSPACE).id();
+        Id description = graph().propertyKey(HugeTarget.P.DESCRIPTION).id();
+        Assert.assertTrue(upgraded.properties().contains(graphSpace));
+        Assert.assertTrue(upgraded.properties().contains(description));
+        Assert.assertTrue(upgraded.nullableKeys().contains(graphSpace));
+        Assert.assertTrue(upgraded.nullableKeys().contains(description));
+    }
+
+    @Test
+    public void testStandaloneScopedOverloadsRejectForeignGraphSpace() {
+        AuthManager authManager = graph().authManager();
+        Assume.assumeTrue(authManager instanceof StandardAuthManager);
+        authManager.init();
+
+        Id fake = IdGenerator.of("fake");
+        HugeTarget target = makeTarget("foreign-target", "url");
+        HugeBelong belong = makeBelong(fake, fake);
+        HugeAccess access = makeAccess(fake, fake, HugePermission.READ);
+        List<Runnable> operations = ImmutableList.of(
+                () -> authManager.createTarget("FOREIGN", target),
+                () -> authManager.updateTarget("FOREIGN", target),
+                () -> authManager.deleteTarget("FOREIGN", fake),
+                () -> authManager.getTarget("FOREIGN", fake),
+                () -> authManager.listAllTargets("FOREIGN", -1),
+                () -> authManager.createBelong("FOREIGN", belong),
+                () -> authManager.updateBelong("FOREIGN", belong),
+                () -> authManager.deleteBelong("FOREIGN", fake),
+                () -> authManager.getBelong("FOREIGN", fake),
+                () -> authManager.listAllBelong("FOREIGN", -1),
+                () -> authManager.listBelongByUser("FOREIGN", fake, -1),
+                () -> authManager.listBelongByGroup("FOREIGN", fake, -1),
+                () -> authManager.createAccess("FOREIGN", access),
+                () -> authManager.updateAccess("FOREIGN", access),
+                () -> authManager.deleteAccess("FOREIGN", fake),
+                () -> authManager.getAccess("FOREIGN", fake),
+                () -> authManager.listAllAccess("FOREIGN", -1),
+                () -> authManager.listAccessByGroup("FOREIGN", fake, -1),
+                () -> authManager.listAccessByTarget("FOREIGN", fake, -1));
+
+        for (Runnable operation : operations) {
+            Assert.assertThrows(IllegalArgumentException.class,
+                                operation::run,
+                                e -> Assert.assertContains("DEFAULT",
+                                                           e.getMessage()));
+        }
+        Assert.assertEquals(0, authManager.listAllTargets(-1).size());
+        Assert.assertEquals(0, authManager.listAllBelong(-1).size());
+        Assert.assertEquals(0, authManager.listAllAccess(-1).size());
+    }
+
+    @Test
+    public void testStandaloneScopedWritesRejectForeignEntityGraphSpace() {
+        AuthManager authManager = graph().authManager();
+        Assume.assumeTrue(authManager instanceof StandardAuthManager);
+        authManager.init();
+
+        Id fake = IdGenerator.of("fake");
+        HugeTarget target = makeTarget("foreign-target", "url");
+        target.graphSpace("FOREIGN");
+        HugeBelong belong = new HugeBelong("FOREIGN", fake, fake,
+                                            null, HugeBelong.UG);
+        HugeAccess access = new HugeAccess("FOREIGN", fake, fake,
+                                           HugePermission.READ);
+        List<Runnable> operations = ImmutableList.of(
+                () -> authManager.createTarget("DEFAULT", target),
+                () -> authManager.updateTarget("DEFAULT", target),
+                () -> authManager.createBelong("DEFAULT", belong),
+                () -> authManager.updateBelong("DEFAULT", belong),
+                () -> authManager.createAccess("DEFAULT", access),
+                () -> authManager.updateAccess("DEFAULT", access));
+
+        for (Runnable operation : operations) {
+            Assert.assertThrows(IllegalArgumentException.class,
+                                operation::run,
+                                e -> Assert.assertContains("DEFAULT",
+                                                           e.getMessage()));
+        }
+        Assert.assertEquals(0, authManager.listAllTargets(-1).size());
+        Assert.assertEquals(0, authManager.listAllBelong(-1).size());
+        Assert.assertEquals(0, authManager.listAllAccess(-1).size());
+    }
+
+    @Test
+    public void testStandaloneScopedOverloadsPreserveDefaultCompatibility() {
+        AuthManager authManager = graph().authManager();
+        Assume.assumeTrue(authManager instanceof StandardAuthManager);
+        authManager.init();
+
+        Id user = authManager.createUser(makeUser("default-user", "pass"));
+        Id group = authManager.createGroup(makeGroup("default-group"));
+        HugeTarget target = makeTarget("default-target", "url");
+        Id targetId = authManager.createTarget("DEFAULT", target);
+        HugeBelong belong = makeBelong(user, group);
+        Id belongId = authManager.createBelong("DEFAULT", belong);
+        HugeAccess access = makeAccess(group, targetId, HugePermission.READ);
+        Id accessId = authManager.createAccess("DEFAULT", access);
+
+        Assert.assertEquals(targetId,
+                            authManager.getTarget("DEFAULT", targetId).id());
+        Assert.assertEquals(belongId,
+                            authManager.getBelong("DEFAULT", belongId).id());
+        Assert.assertEquals(accessId,
+                            authManager.getAccess("DEFAULT", accessId).id());
+        Assert.assertEquals(1,
+                            authManager.listAllTargets("DEFAULT", -1).size());
+        Assert.assertEquals(1,
+                            authManager.listAllBelong("DEFAULT", -1).size());
+        Assert.assertEquals(1,
+                            authManager.listAllAccess("DEFAULT", -1).size());
+    }
+
+    @Test
+    public void testStandaloneScopedReadsHidePreexistingForeignTarget() {
+        AuthManager authManager = graph().authManager();
+        Assume.assumeTrue(authManager instanceof StandardAuthManager);
+        authManager.init();
+
+        HugeTarget target = makeTarget("legacy-foreign-target", "url");
+        target.graphSpace("FOREIGN");
+        Id id = authManager.createTarget(target);
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            authManager.getTarget("DEFAULT", id);
+        });
+        Assert.assertEquals(0,
+                            authManager.listAllTargets("DEFAULT", -1).size());
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            authManager.deleteTarget("DEFAULT", id);
+        });
+        Assert.assertNotNull(authManager.getTarget(id));
+    }
+
+    private static final class LegacyTargetSchema extends HugeTarget.Schema {
+
+        private static final String LABEL = HugeTarget.P.TARGET +
+                                            "_upgrade_test";
+
+        private LegacyTargetSchema(HugeGraphParams graph) {
+            super(graph, LABEL);
+        }
+
+        private void initLegacySchema() {
+            List<String> properties = new ArrayList<>();
+            properties.add(createPropertyKey(HugeTarget.P.NAME));
+            properties.add(createPropertyKey(HugeTarget.P.GRAPH));
+            properties.add(createPropertyKey(HugeTarget.P.URL));
+            properties.add(createPropertyKey(HugeTarget.P.RESS));
+            String[] all = super.initProperties(properties);
+
+            VertexLabel label = this.schema()
+                                    .vertexLabel(LABEL)
+                                    .properties(all)
+                                    .usePrimaryKeyId()
+                                    .primaryKeys(HugeTarget.P.NAME)
+                                    .nullableKeys(HugeTarget.P.RESS)
+                                    .enableLabelIndex(true)
+                                    .build();
+            this.graph.schemaTransaction().addVertexLabel(label);
+        }
     }
 
     @Test

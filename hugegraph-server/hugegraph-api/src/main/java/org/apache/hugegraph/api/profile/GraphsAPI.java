@@ -18,16 +18,22 @@
 package org.apache.hugegraph.api.profile;
 
 import java.io.File;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter;
+import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAuthenticator.RequiredPerm;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
@@ -36,10 +42,10 @@ import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
+import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.Log;
-import org.apache.logging.log4j.util.Strings;
 import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
@@ -74,12 +80,22 @@ public class GraphsAPI extends API {
     private static final String CONFIRM_DROP = "I'm sure to drop the graph";
     private static final String GRAPH_DESCRIPTION = "description";
     private static final String GRAPH_ACTION = "action";
+    private static final String UPDATE = "update";
     private static final String GRAPH_ACTION_RELOAD = "reload";
 
     private static Map<String, Object> convConfig(Map<String, Object> config) {
         Map<String, Object> result = new HashMap<>(config.size());
         for (Map.Entry<String, Object> entry : config.entrySet()) {
-            result.put(entry.getKey(), entry.getValue().toString());
+            Object value = entry.getValue();
+            E.checkArgument(value != null,
+                            "The config value for '%s' cannot be null",
+                            entry.getKey());
+            E.checkArgument(value instanceof CharSequence ||
+                            value instanceof Number ||
+                            value instanceof Boolean,
+                            "The config value for '%s' must be scalar",
+                            entry.getKey());
+            result.put(entry.getKey(), value.toString());
         }
         return result;
     }
@@ -101,11 +117,12 @@ public class GraphsAPI extends API {
                   graphs.size());
         // Filter by user role
         Set<String> filterGraphs = new HashSet<>();
+        boolean adminManager = isAdminManager(manager);
         for (String graph : graphs) {
             LOG.debug("Get graph {} and verify auth", graph);
             String role = RequiredPerm.roleFor(graphSpace, graph,
                                                HugePermission.READ);
-            if (sc.isUserInRole(role)) {
+            if (adminManager || sc.isUserInRole(role)) {
                 try {
                     graph(manager, graphSpace, graph);
                     filterGraphs.add(graph);
@@ -122,6 +139,100 @@ public class GraphsAPI extends API {
 
     @GET
     @Timed
+    @Path("profile")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
+    public Object listProfile(@Context GraphManager manager,
+                              @Parameter(description = "The graph space name")
+                              @PathParam("graphspace") String graphSpace,
+                              @Parameter(description = "Filter graphs by name or nickname prefix")
+                              @QueryParam("prefix") String prefix,
+                              @Context SecurityContext sc) {
+        LOG.debug("List graph profiles in graph space {}", graphSpace);
+        if (null == manager.graphSpace(graphSpace)) {
+            throw new HugeException("Graphspace not exist!");
+        }
+        GraphSpace gs = manager.graphSpace(graphSpace);
+        // graphSpace.nickname() may be null in non-PD mode (GraphManager returns
+        // a placeholder GraphSpace without a nickname set)
+        String gsNickname = gs.nickname() != null ? gs.nickname() : graphSpace;
+
+        String user = HugeGraphAuthProxy.username();
+        Map<String, Date> defaultGraphs;
+        try {
+            AuthManager authManager = manager.authManager();
+            defaultGraphs = authManager.getDefaultGraph(graphSpace, user);
+        } catch (IllegalStateException ignored) {
+            // authManager is not configured (standalone mode without auth)
+            defaultGraphs = Collections.emptyMap();
+        }
+
+        Set<String> graphs = manager.graphs(graphSpace);
+        List<Map<String, Object>> profiles = new ArrayList<>();
+        List<Map<String, Object>> defaultProfiles = new ArrayList<>();
+        boolean adminManager = isAdminManager(manager);
+        for (String graph : graphs) {
+            String role = RequiredPerm.roleFor(graphSpace, graph,
+                                               HugePermission.READ);
+            if (!adminManager && !sc.isUserInRole(role)) {
+                continue;
+            }
+            try {
+                HugeGraph hg = graph(manager, graphSpace, graph);
+                HugeConfig config = (HugeConfig) hg.configuration();
+                String configResp = ConfigUtil.writeConfigToString(config);
+                Map<String, Object> profile =
+                        JsonUtil.fromJson(configResp, Map.class);
+                profile.put("name", graph);
+                profile.put("nickname", hg.nickname());
+                if (!isPrefix(profile, prefix)) {
+                    continue;
+                }
+                profile.put("graphspace_nickname", gsNickname);
+
+                boolean isDefault = defaultGraphs.containsKey(graph);
+                profile.put("default", isDefault);
+                if (isDefault) {
+                    Date defaultUpdateTime = defaultGraphs.get(graph);
+                    if (defaultUpdateTime != null) {
+                        LocalDateTime ldt = defaultUpdateTime.toInstant()
+                                .atZone(ZoneId.systemDefault()).toLocalDateTime();
+                        profile.put("default_update_time",
+                                    DATE_FORMATTER.format(ldt));
+                    }
+                }
+
+                Date createTime = hg.createTime();
+                if (createTime != null) {
+                    LocalDateTime ldt = createTime.toInstant()
+                            .atZone(ZoneId.systemDefault()).toLocalDateTime();
+                    profile.put("create_time", DATE_FORMATTER.format(ldt));
+                }
+
+                if (isDefault) {
+                    defaultProfiles.add(profile);
+                } else {
+                    profiles.add(profile);
+                }
+            } catch (ForbiddenException ignored) {
+                // ignore graphs the current user has no access to
+            }
+        }
+        defaultProfiles.addAll(profiles);
+        return defaultProfiles;
+    }
+
+    private static boolean isAdminManager(GraphManager manager) {
+        try {
+            return manager.authManager().isAdminManager(
+                    HugeGraphAuthProxy.username());
+        } catch (IllegalStateException ignored) {
+            return false;
+        }
+    }
+
+    @GET
+    @Timed
     @Path("{name}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$name"})
@@ -134,6 +245,80 @@ public class GraphsAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, name);
         return ImmutableMap.of("name", g.name(), "backend", g.backend());
+    }
+
+    @POST
+    @Timed
+    @Path("{name}/default")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$owner=$name"})
+    public Map<String, Object> setDefault(@Context GraphManager manager,
+                                          @Parameter(description = "The graph space name")
+                                          @PathParam("graphspace") String graphSpace,
+                                          @Parameter(description = "The graph name")
+                                          @PathParam("name") String name) {
+        LOG.debug("Set default graph '{}' in graph space '{}'", name, graphSpace);
+        E.checkArgument(manager.graphSpace(graphSpace) != null,
+                        "The graph space '%s' does not exist", graphSpace);
+        E.checkArgument(manager.graph(graphSpace, name) != null,
+                        "Graph '%s/%s' does not exist", graphSpace, name);
+        String user = HugeGraphAuthProxy.username();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
+        authManager.setDefaultGraph(graphSpace, name, user);
+        Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
+        return ImmutableMap.of("default_graph", defaults.keySet());
+    }
+
+    @DELETE
+    @Timed
+    @Path("{name}/default")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$owner=$name"})
+    public Map<String, Object> unsetDefault(@Context GraphManager manager,
+                                            @Parameter(description = "The graph space name")
+                                            @PathParam("graphspace") String graphSpace,
+                                            @Parameter(description = "The graph name")
+                                            @PathParam("name") String name) {
+        LOG.debug("Unset default graph '{}' in graph space '{}'", name, graphSpace);
+        E.checkArgument(manager.graphSpace(graphSpace) != null,
+                        "The graph space '%s' does not exist", graphSpace);
+        E.checkArgument(manager.graph(graphSpace, name) != null,
+                        "Graph '%s/%s' does not exist", graphSpace, name);
+        String user = HugeGraphAuthProxy.username();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
+        authManager.unsetDefaultGraph(graphSpace, name, user);
+        Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
+        return ImmutableMap.of("default_graph", defaults.keySet());
+    }
+
+    @GET
+    @Timed
+    @Path("default")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$dynamic"})
+    public Map<String, Object> getDefault(@Context GraphManager manager,
+                                          @Parameter(description = "The graph space name")
+                                          @PathParam("graphspace") String graphSpace) {
+        LOG.debug("Get default graphs in graph space '{}'", graphSpace);
+        String user = HugeGraphAuthProxy.username();
+        AuthManager authManager;
+        try {
+            authManager = manager.authManager();
+        } catch (IllegalStateException e) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
+        Map<String, Date> defaults = authManager.getDefaultGraph(graphSpace, user);
+        return ImmutableMap.of("default_graph", defaults.keySet());
     }
 
     @DELETE
@@ -157,6 +342,89 @@ public class GraphsAPI extends API {
 
     @PUT
     @Timed
+    @Path("{name}")
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space"})
+    public Map<String, String> manage(@Context GraphManager manager,
+                                      @Parameter(description = "The graph space name")
+                                      @PathParam("graphspace") String graphSpace,
+                                      @Parameter(description = "The graph name")
+                                      @PathParam("name") String name,
+                                      @Parameter(description = "Action map: {'action':'update','update':{...}}")
+                                      Map<String, Object> actionMap) {
+        LOG.debug("Manage graph '{}' with action '{}'", name, actionMap);
+        E.checkArgument(actionMap != null && actionMap.containsKey(GRAPH_ACTION),
+                        "Invalid request body '%s'", actionMap);
+        Object value = actionMap.get(GRAPH_ACTION);
+        E.checkArgument(value instanceof String,
+                        "Invalid action type '%s', must be string",
+                        value == null ? "null" : value.getClass().getSimpleName());
+        String action = (String) value;
+        switch (action) {
+            case UPDATE:
+                E.checkArgument(actionMap.containsKey(UPDATE),
+                                "Please pass '%s' for graph update",
+                                UPDATE);
+                value = actionMap.get(UPDATE);
+                E.checkArgument(value instanceof Map,
+                                "The '%s' must be map, but got %s",
+                                UPDATE,
+                                value == null ? "null" : value.getClass().getSimpleName());
+                @SuppressWarnings("unchecked")
+                Map<String, Object> graphMap = (Map<String, Object>) value;
+                Object graphNameValue = graphMap.get("name");
+                E.checkArgument(graphNameValue == null ||
+                                graphNameValue instanceof String,
+                                "The 'name' must be string, but got %s",
+                                graphNameValue == null ? "null" :
+                                graphNameValue.getClass().getSimpleName());
+                String graphName = (String) graphNameValue;
+                E.checkArgument(graphName != null && graphName.equals(name),
+                                "Different name in update body '%s' with path '%s'",
+                                graphName, name);
+                HugeGraph exist = graph(manager, graphSpace, name);
+                Object nicknameValue = graphMap.get("nickname");
+                E.checkArgument(nicknameValue == null ||
+                                nicknameValue instanceof String,
+                                "The 'nickname' must be string, but got %s",
+                                nicknameValue == null ? "null" :
+                                nicknameValue.getClass().getSimpleName());
+                String nickname = (String) nicknameValue;
+                if (!StringUtils.isEmpty(nickname)) {
+                    GraphManager.checkNickname(nickname);
+                    boolean existedNickname;
+                    if (manager.isPDEnabled()) {
+                        existedNickname = manager.isExistedGraphNickname(graphSpace, nickname);
+                    } else {
+                        existedNickname = false;
+                        for (String existedGraphName : manager.graphs(graphSpace)) {
+                            if (name.equals(existedGraphName)) {
+                                continue;
+                            }
+                            HugeGraph graph = manager.graph(graphSpace, existedGraphName);
+                            if (graph != null && nickname.equals(graph.nickname())) {
+                                existedNickname = true;
+                                break;
+                            }
+                        }
+                    }
+                    E.checkArgument(!existedNickname || nickname.equals(exist.nickname()),
+                                    "Nickname '%s' has already existed in graphspace '%s'",
+                                    nickname, graphSpace);
+                    // Delegate to GraphManager: handles both in-memory update and
+                    // PD-mode persistence (non-PD mode is in-memory only).
+                    manager.updateGraphNickname(graphSpace, name, nickname);
+                }
+                return ImmutableMap.of(name, "updated");
+            default:
+                E.checkArgument(false, "Invalid graph action: '%s'", action);
+                return ImmutableMap.of(name, "invalid");
+        }
+    }
+
+    @PUT
+    @Timed
     @Path("manage")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"analyst"})
@@ -174,8 +442,8 @@ public class GraphsAPI extends API {
             manager.reload();
             return ImmutableMap.of("graphs", "reloaded");
         }
-        throw new AssertionError(String.format(
-                "Invalid graphs action: '%s'", action));
+        E.checkArgument(false, "Invalid graphs action: '%s'", action);
+        return ImmutableMap.of("graphs", "invalid");
     }
 
     @POST
@@ -207,11 +475,32 @@ public class GraphsAPI extends API {
         if (StringUtils.isEmpty(clone)) {
             // Only check required parameters when creating new graph, not when cloning
             E.checkArgument(configs != null, "Config parameters cannot be null");
-            String[] requiredKeys = {"backend", "serializer", "store"};
-            for (String key : requiredKeys) {
-                Object value = configs.get(key);
-                E.checkArgument(value instanceof String && !StringUtils.isEmpty((String) value),
-                                "Required parameter '%s' is missing or empty", key);
+            // Always required by TinkerPop's GraphFactory.open()
+            configs.putIfAbsent("gremlin.graph",
+                                "org.apache.hugegraph.HugeFactory");
+            if (manager.isPDEnabled()) {
+                // Auto-fill HStore/PD mode defaults only when in distributed mode
+                configs.putIfAbsent("backend", "hstore");
+            } else {
+                // Auto-fill standalone (RocksDB) mode defaults
+                configs.putIfAbsent("backend", "rocksdb");
+            }
+            configs.putIfAbsent("serializer", "binary");
+            // 'store' is safe to default to graph name in both PD and non-PD modes
+            configs.putIfAbsent("store", name);
+            // Map frontend 'schema' field to backend config key
+            boolean hasSchema = configs.containsKey("schema");
+            Object schema = configs.remove("schema");
+            if (hasSchema) {
+                E.checkArgument(schema != null,
+                                "The config value for 'schema' cannot be null");
+                E.checkArgument(schema instanceof CharSequence ||
+                                schema instanceof Number ||
+                                schema instanceof Boolean,
+                                "The config value for 'schema' must be scalar");
+            }
+            if (schema != null && !schema.toString().isEmpty()) {
+                configs.put("schema.init_template", schema.toString());
             }
         }
 
@@ -220,15 +509,19 @@ public class GraphsAPI extends API {
         if (StringUtils.isNotEmpty(clone)) {
             // Clone from existing graph
             LOG.debug("Clone graph '{}' to '{}' in graph space '{}'", clone, name, graphSpace);
-            graph = manager.cloneGraph(graphSpace, clone, name, convConfig(configs));
+            Map<String, Object> cloneConfigs = configs != null ? configs : new HashMap<>();
+            graph = manager.cloneGraph(graphSpace, clone, name, convConfig(cloneConfigs));
         } else {
             // Create new graph
             graph = manager.createGraph(graphSpace, name, creator,
                                         convConfig(configs), true);
         }
-        String description = (String) configs.get(GRAPH_DESCRIPTION);
+        Object descriptionValue = (configs != null) ?
+                                  configs.get(GRAPH_DESCRIPTION) : null;
+        String description = descriptionValue != null ?
+                             descriptionValue.toString() : null;
         if (description == null) {
-            description = Strings.EMPTY;
+            description = StringUtils.EMPTY;
         }
         Object result = ImmutableMap.of("name", graph.name(),
                                         "nickname", graph.nickname(),
@@ -238,6 +531,37 @@ public class GraphsAPI extends API {
                  "[{}]", creator, name, graphSpace, configs);
         return result;
     }
+
+    /**
+     * Create graph via text/plain (hugegraph-client compatibility).
+     * Client sends: POST /graphspaces/{graphspace}/graphs/{name}
+     * with Content-Type: text/plain and body containing JSON config string.
+     */
+    @POST
+    @Timed
+    @Path("{name}")
+    @StatusFilter.Status(StatusFilter.Status.CREATED)
+    @Consumes("text/plain")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space"})
+    public Object createByText(@Context GraphManager manager,
+                               @Parameter(description = "The graph space name")
+                               @PathParam("graphspace") String graphSpace,
+                               @Parameter(description = "The graph name to create")
+                               @PathParam("name") String name,
+                               @Parameter(description = "The graph name to clone from (optional)")
+                               @QueryParam("clone_graph_name") String clone,
+                               String configText) {
+        LOG.debug("Create graph {} with text config in graph space '{}'",
+                  name, graphSpace);
+        Map<String, Object> configs = null;
+        if (configText != null && !configText.isEmpty()) {
+            configs = JsonUtil.fromJson(configText, Map.class);
+        }
+        return create(manager, graphSpace, name, clone, configs);
+    }
+
+
 
     @GET
     @Timed

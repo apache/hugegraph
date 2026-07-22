@@ -104,6 +104,10 @@ public class HugeTarget extends Entity {
         return this.graphSpace;
     }
 
+    public void graphSpace(String graphSpace) {
+        this.graphSpace = graphSpace;
+    }
+
     public String graph() {
         return this.graph;
     }
@@ -157,6 +161,9 @@ public class HugeTarget extends Entity {
             return true;
         }
         switch (key) {
+            case P.GRAPHSPACE:
+                this.graphSpace = (String) value;
+                break;
             case P.NAME:
                 this.name = (String) value;
                 break;
@@ -165,6 +172,9 @@ public class HugeTarget extends Entity {
                 break;
             case P.URL:
                 this.url = (String) value;
+                break;
+            case P.DESCRIPTION:
+                this.description = (String) value;
                 break;
             case P.RESS:
                 if (value instanceof String) {
@@ -208,6 +218,16 @@ public class HugeTarget extends Entity {
         list.add(P.URL);
         list.add(this.url);
 
+        if (this.graphSpace != null) {
+            list.add(P.GRAPHSPACE);
+            list.add(this.graphSpace);
+        }
+
+        if (this.description != null) {
+            list.add(P.DESCRIPTION);
+            list.add(this.description);
+        }
+
         if (!this.isResourceEmpty()) {
             list.add(P.RESS);
             list.add(JsonUtil.toJson(this.resources));
@@ -226,9 +246,14 @@ public class HugeTarget extends Entity {
 
         Map<String, Object> map = new HashMap<>();
 
+        map.put(Hidden.unHide(P.GRAPHSPACE), this.graphSpace);
         map.put(Hidden.unHide(P.NAME), this.name);
         map.put(Hidden.unHide(P.GRAPH), this.graph);
         map.put(Hidden.unHide(P.URL), this.url);
+
+        if (this.description != null) {
+            map.put(Hidden.unHide(P.DESCRIPTION), this.description);
+        }
 
         if (this.resources != null && this.resources != EMPTY) {
             map.put(Hidden.unHide(P.RESS), this.resources);
@@ -253,9 +278,11 @@ public class HugeTarget extends Entity {
         public static final String ID = T.id.getAccessor();
         public static final String LABEL = T.label.getAccessor();
 
+        public static final String GRAPHSPACE = "~graphspace";
         public static final String NAME = "~target_name";
         public static final String GRAPH = "~target_graph";
         public static final String URL = "~target_url";
+        public static final String DESCRIPTION = "~target_description";
         public static final String RESS = "~target_resources";
 
         public static String unhide(String key) {
@@ -267,15 +294,20 @@ public class HugeTarget extends Entity {
         }
     }
 
-    public static final class Schema extends SchemaDefine {
+    public static class Schema extends SchemaDefine {
 
         public Schema(HugeGraphParams graph) {
-            super(graph, P.TARGET);
+            this(graph, P.TARGET);
+        }
+
+        protected Schema(HugeGraphParams graph, String label) {
+            super(graph, label);
         }
 
         @Override
         public void initSchemaIfNeeded() {
             if (this.existVertexLabel(this.label)) {
+                this.upgradeSchemaIfNeeded();
                 return;
             }
 
@@ -286,10 +318,39 @@ public class HugeTarget extends Entity {
                                     .properties(properties)
                                     .usePrimaryKeyId()
                                     .primaryKeys(P.NAME)
-                                    .nullableKeys(P.RESS)
+                                    .nullableKeys(P.GRAPHSPACE, P.DESCRIPTION,
+                                                  P.RESS)
                                     .enableLabelIndex(true)
                                     .build();
             this.graph.schemaTransaction().addVertexLabel(label);
+        }
+
+        private void upgradeSchemaIfNeeded() {
+            VertexLabel label = this.graph.graph().vertexLabel(this.label);
+            boolean changed = this.ensureNullableProperty(label,
+                                                          P.GRAPHSPACE);
+            changed |= this.ensureNullableProperty(label, P.DESCRIPTION);
+            if (changed) {
+                this.graph.schemaTransaction().updateVertexLabel(label);
+            }
+        }
+
+        private boolean ensureNullableProperty(VertexLabel label,
+                                                String property) {
+            if (!this.graph.graph().existsPropertyKey(property)) {
+                createPropertyKey(property);
+            }
+            Id propertyId = this.graph.graph().propertyKey(property).id();
+            boolean changed = false;
+            if (!label.properties().contains(propertyId)) {
+                label.property(propertyId);
+                changed = true;
+            }
+            if (!label.nullableKeys().contains(propertyId)) {
+                label.nullableKey(propertyId);
+                changed = true;
+            }
+            return changed;
         }
 
         private String[] initProperties() {
@@ -298,6 +359,8 @@ public class HugeTarget extends Entity {
             props.add(createPropertyKey(P.NAME));
             props.add(createPropertyKey(P.GRAPH));
             props.add(createPropertyKey(P.URL));
+            props.add(createPropertyKey(P.GRAPHSPACE));
+            props.add(createPropertyKey(P.DESCRIPTION));
             props.add(createPropertyKey(P.RESS));
 
             return super.initProperties(props);
