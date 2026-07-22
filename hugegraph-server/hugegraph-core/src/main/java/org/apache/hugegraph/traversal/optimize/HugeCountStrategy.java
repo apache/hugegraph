@@ -175,6 +175,11 @@ public final class HugeCountStrategy
                     }
                 }
 
+                if (isStepPredicate instanceof ConnectiveP) {
+                    useNotStep = false;
+                    dismissCountIs = false;
+                }
+
                 /*
                  * HugeGraph extracts RangeGlobalStep into backend queries. A
                  * negative upper bound is never useful for count(), and would
@@ -273,7 +278,7 @@ public final class HugeCountStrategy
         }
 
         final P<?> predicate = ((IsStep<?>) step.getNextStep()).getPredicate();
-        if (predicate instanceof ConnectiveP) {
+        if (this.hasNestedConnectivePredicate(predicate)) {
             return false;
         }
 
@@ -282,5 +287,18 @@ public final class HugeCountStrategy
                !(parent.getNextStep() instanceof MatchStep.MatchEndStep &&
                  ((MatchStep.MatchEndStep) parent.getNextStep())
                          .getMatchKey().isPresent());
+    }
+
+    private boolean hasNestedConnectivePredicate(P<?> predicate) {
+        if (!(predicate instanceof ConnectiveP)) {
+            return false;
+        }
+
+        for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+            if (child instanceof ConnectiveP) {
+                return true;
+            }
+        }
+        return false;
     }
 }

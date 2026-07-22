@@ -23,11 +23,14 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.traversal.optimize.HugeGraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
+import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
+import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -300,6 +303,38 @@ public class CountStrategyCoreTest extends BaseCoreTest {
                                      .is(P.<Long>eq(0L).or(P.neq(0L))))
                             .count().next();
 
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatConnectiveStillGetsRangeBound() {
+        this.initSchema();
+        this.initGraph();
+
+        GraphTraversal<Vertex, Long> traversal = graph().traversal().V()
+                                                        .where(__.out().count()
+                                                                 .is(P.between(1, 18)))
+                                                        .count();
+        traversal.asAdmin().applyStrategies();
+
+        boolean foundRangeStep = false;
+        for (Step<?, ?> step : traversal.asAdmin().getSteps()) {
+            if (step instanceof TraversalParent) {
+                for (Traversal.Admin<?, ?> inner :
+                     ((TraversalParent) step).getLocalChildren()) {
+                    for (Step<?, ?> innerStep : inner.getSteps()) {
+                        if (innerStep instanceof RangeGlobalStep) {
+                            foundRangeStep = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Assert.assertTrue("Expected RangeGlobalStep for flat ConnectiveP " +
+                          "between(1,18)", foundRangeStep);
+
+        long count = traversal.next();
         Assert.assertEquals(1L, count);
     }
 
