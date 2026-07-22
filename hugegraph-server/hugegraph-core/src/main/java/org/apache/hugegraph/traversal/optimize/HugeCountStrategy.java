@@ -273,7 +273,7 @@ public final class HugeCountStrategy
         }
 
         final P<?> predicate = ((IsStep<?>) step.getNextStep()).getPredicate();
-        if (this.hasNestedConnectivePredicate(predicate)) {
+        if (predicate instanceof ConnectiveP) {
             return false;
         }
 
@@ -282,18 +282,5 @@ public final class HugeCountStrategy
                !(parent.getNextStep() instanceof MatchStep.MatchEndStep &&
                  ((MatchStep.MatchEndStep) parent.getNextStep())
                          .getMatchKey().isPresent());
-    }
-
-    private boolean hasNestedConnectivePredicate(P<?> predicate) {
-        if (!(predicate instanceof ConnectiveP)) {
-            return false;
-        }
-
-        for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
-            if (child instanceof ConnectiveP) {
-                return true;
-            }
-        }
-        return false;
     }
 }

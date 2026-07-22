@@ -244,6 +244,66 @@ public class CountStrategyCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testWhereCountFlatAndContradictionEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).and(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatAndContradictionNonEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).and(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatOrTautologyEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).or(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatOrTautologyNonEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).or(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
     public void testRepeatAfterTextRangeFilterWithEmptyResult() {
         this.initTextRangeSchema(true);
 
