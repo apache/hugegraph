@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit.config;
 
 import org.apache.commons.configuration2.PropertiesConfiguration;
+import org.apache.hugegraph.config.ConfigException;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.config.ServerOptions;
@@ -118,5 +119,26 @@ public class ServerOptionsTest {
         HugeConfig config = new HugeConfig(conf);
         Assert.assertEquals("https://127.0.0.1:8080",
                             config.get(ServerOptions.REST_SERVER_URL));
+    }
+
+    @Test
+    public void testMemoryMonitorPeriodMustBePositive() {
+        PropertiesConfiguration conf = new PropertiesConfiguration();
+        conf.setProperty("memory_monitor.period", "0");
+
+        Assert.assertThrows(ConfigException.class, () -> {
+            new HugeConfig(conf);
+        });
+    }
+
+    @Test
+    public void testMemoryMonitorThresholdOneIsValid() {
+        PropertiesConfiguration conf = new PropertiesConfiguration();
+        conf.setProperty("memory_monitor.threshold", "1.0");
+
+        HugeConfig config = new HugeConfig(conf);
+
+        Assert.assertEquals(1.0D,
+                            config.get(ServerOptions.JVM_MEMORY_MONITOR_THRESHOLD));
     }
 }

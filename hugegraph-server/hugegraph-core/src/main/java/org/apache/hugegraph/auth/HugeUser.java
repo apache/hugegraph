@@ -146,6 +146,9 @@ public class HugeUser extends Entity {
             case P.NAME:
                 this.name = (String) value;
                 break;
+            case P.NICKNAME:
+                this.nickname = (String) value;
+                break;
             case P.PASSWORD:
                 this.password = (String) value;
                 break;
@@ -172,7 +175,7 @@ public class HugeUser extends Entity {
         E.checkState(this.name != null, "User name can't be null");
         E.checkState(this.password != null, "User password can't be null");
 
-        List<Object> list = new ArrayList<>(18);
+        List<Object> list = new ArrayList<>(20);
 
         list.add(T.label);
         list.add(P.USER);
@@ -182,6 +185,11 @@ public class HugeUser extends Entity {
 
         list.add(P.PASSWORD);
         list.add(this.password);
+
+        if (this.nickname != null) {
+            list.add(P.NICKNAME);
+            list.add(this.nickname);
+        }
 
         if (this.phone != null) {
             list.add(P.PHONE);
@@ -215,6 +223,10 @@ public class HugeUser extends Entity {
 
         map.put(Hidden.unHide(P.NAME), this.name);
         map.put(Hidden.unHide(P.PASSWORD), this.password);
+
+        if (this.nickname != null) {
+            map.put(Hidden.unHide(P.NICKNAME), this.nickname);
+        }
 
         if (this.phone != null) {
             map.put(Hidden.unHide(P.PHONE), this.phone);
@@ -253,6 +265,7 @@ public class HugeUser extends Entity {
         public static final String LABEL = T.label.getAccessor();
 
         public static final String NAME = "~user_name";
+        public static final String NICKNAME = "~user_nickname";
         public static final String PASSWORD = "~user_password";
         public static final String PHONE = "~user_phone";
         public static final String EMAIL = "~user_email";
@@ -277,6 +290,8 @@ public class HugeUser extends Entity {
         @Override
         public void initSchemaIfNeeded() {
             if (this.existVertexLabel(this.label)) {
+                // Schema already exists: do incremental upgrade for new properties
+                upgradeSchemaIfNeeded();
                 return;
             }
 
@@ -287,16 +302,29 @@ public class HugeUser extends Entity {
                                     .properties(properties)
                                     .usePrimaryKeyId()
                                     .primaryKeys(P.NAME)
-                                    .nullableKeys(P.PHONE, P.EMAIL, P.AVATAR, P.DESCRIPTION)
+                                    .nullableKeys(P.NICKNAME, P.PHONE, P.EMAIL, P.AVATAR, P.DESCRIPTION)
                                     .enableLabelIndex(true)
                                     .build();
             this.graph.schemaTransaction().addVertexLabel(label);
+        }
+
+        private void upgradeSchemaIfNeeded() {
+            // Add user_nickname property key if missing (new in this version)
+            if (!this.graph.graph().existsPropertyKey(P.NICKNAME)) {
+                createPropertyKey(P.NICKNAME);
+                VertexLabel vl = this.graph.graph().vertexLabel(this.label);
+                Id nickname = this.graph.graph().propertyKey(P.NICKNAME).id();
+                vl.property(nickname);
+                vl.nullableKey(nickname);
+                this.graph.schemaTransaction().updateVertexLabel(vl);
+            }
         }
 
         private String[] initProperties() {
             List<String> props = new ArrayList<>();
 
             props.add(createPropertyKey(P.NAME));
+            props.add(createPropertyKey(P.NICKNAME));
             props.add(createPropertyKey(P.PASSWORD));
             props.add(createPropertyKey(P.PHONE));
             props.add(createPropertyKey(P.EMAIL));

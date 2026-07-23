@@ -33,6 +33,7 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_USER;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -52,6 +53,7 @@ import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
+import org.apache.tinkerpop.gremlin.structure.Graph.Hidden;
 
 public class AuthMetaManager extends AbstractMetaManager {
 
@@ -372,7 +374,7 @@ public class AuthMetaManager extends AbstractMetaManager {
 
         // only url, graph, description, resources and update-time could be updated
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        HugeTarget ori = HugeTarget.fromMap(map);
+        HugeTarget ori = deserializeTarget(graphSpace, map);
         ori.update(new Date());
         ori.url(target.url());
         ori.graph(target.graph());
@@ -393,10 +395,12 @@ public class AuthMetaManager extends AbstractMetaManager {
                                                       id.asString()));
         E.checkArgument(StringUtils.isNotEmpty(result),
                         "The target name '%s' is not existed", id.asString());
-        this.metaDriver.delete(targetKey(graphSpace, id.asString()));
-        this.putAuthEvent(new MetaManager.AuthEvent("DELETE", "TARGET", id.asString()));
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        return HugeTarget.fromMap(map);
+        HugeTarget target = deserializeTarget(graphSpace, map);
+        this.metaDriver.delete(targetKey(graphSpace, id.asString()));
+        this.putAuthEvent(new MetaManager.AuthEvent("DELETE", "TARGET",
+                                                    id.asString()));
+        return target;
     }
 
     @SuppressWarnings("unchecked")
@@ -407,7 +411,7 @@ public class AuthMetaManager extends AbstractMetaManager {
             return null;
         }
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        return HugeTarget.fromMap(map);
+        return deserializeTarget(graphSpace, map);
     }
 
     @SuppressWarnings("unchecked")
@@ -419,7 +423,7 @@ public class AuthMetaManager extends AbstractMetaManager {
         E.checkArgument(StringUtils.isNotEmpty(result),
                         "The target name '%s' is not existed", id.asString());
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        return HugeTarget.fromMap(map);
+        return deserializeTarget(graphSpace, map);
     }
 
     @SuppressWarnings("unchecked")
@@ -435,7 +439,7 @@ public class AuthMetaManager extends AbstractMetaManager {
                                                               id.asString()));
                 Map<String, Object> map = JsonUtil.fromJson(targetString,
                                                             Map.class);
-                HugeTarget target = HugeTarget.fromMap(map);
+                HugeTarget target = deserializeTarget(graphSpace, map);
                 result.add(target);
             }
         }
@@ -456,11 +460,25 @@ public class AuthMetaManager extends AbstractMetaManager {
             }
             Map<String, Object> map = JsonUtil.fromJson(item.getValue(),
                                                         Map.class);
-            HugeTarget target = HugeTarget.fromMap(map);
+            HugeTarget target = deserializeTarget(graphSpace, map);
             result.add(target);
         }
 
         return result;
+    }
+
+    private static HugeTarget deserializeTarget(String graphSpace,
+                                                 Map<String, Object> map) {
+        String key = Hidden.unHide(HugeTarget.P.GRAPHSPACE);
+        Map<String, Object> scoped = new HashMap<>(map);
+        if (!scoped.containsKey(key)) {
+            scoped.put(key, graphSpace);
+        } else {
+            E.checkArgument(graphSpace.equals(scoped.get(key)),
+                            "The target graphspace '%s' does not match '%s'",
+                            scoped.get(key), graphSpace);
+        }
+        return HugeTarget.fromMap(scoped);
     }
 
     public Id createBelong(String graphSpace, HugeBelong belong)

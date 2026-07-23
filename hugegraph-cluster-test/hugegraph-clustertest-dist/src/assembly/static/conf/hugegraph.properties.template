@@ -45,7 +45,6 @@ store=hugegraph
 pd.peers=$PD_PEERS_LIST$
 
 # task config
-task.scheduler_type=local
 task.schedule_period=10
 task.retry=0
 task.wait_timeout=10

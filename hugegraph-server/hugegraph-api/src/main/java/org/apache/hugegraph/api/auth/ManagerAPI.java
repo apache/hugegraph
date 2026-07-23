@@ -22,9 +22,12 @@ package org.apache.hugegraph.api.auth;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.commons.lang3.StringUtils;
+
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter;
 import org.apache.hugegraph.auth.AuthManager;
+import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.core.GraphManager;
@@ -259,6 +262,49 @@ public class ManagerAPI extends API {
                                 result));
     }
 
+    @GET
+    @Timed
+    @Path("default")
+    public String checkDefaultRole(@Context GraphManager manager,
+                                   @PathParam("graphspace") String graphSpace,
+                                   @QueryParam("role") String role,
+                                   @QueryParam("graph") String graph) {
+        LOG.debug("check if current user is default role: {} {} {}",
+                  role, graphSpace, graph);
+        ensurePdModeEnabled(manager);
+        AuthManager authManager = manager.authManager();
+        String user = HugeGraphAuthProxy.username();
+
+        E.checkArgument(StringUtils.isNotEmpty(role) &&
+                        StringUtils.isNotEmpty(graphSpace),
+                        "Must pass graphspace and role params");
+
+        HugeDefaultRole defaultRole;
+        try {
+            defaultRole = HugeDefaultRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            E.checkArgument(false, "Invalid role value '%s'", role);
+            defaultRole = null; // unreachable, satisfies compiler
+        }
+        validGraphSpace(manager, graphSpace);
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
+        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
+                        "Must set a graph for observer");
+        if (hasGraph) {
+            validGraph(manager, graphSpace, graph);
+        }
+
+        boolean result;
+        if (hasGraph) {
+            result = authManager.isDefaultRole(graphSpace, graph, user,
+                                               defaultRole);
+        } else {
+            result = authManager.isDefaultRole(graphSpace, user,
+                                               defaultRole);
+        }
+        return manager.serializer().writeMap(ImmutableMap.of("check", result));
+    }
+
     private void validUser(AuthManager authManager, String user) {
         E.checkArgument(authManager.findUser(user) != null ||
                         authManager.findGroup(user) != null,
@@ -274,7 +320,13 @@ public class ManagerAPI extends API {
 
     private void validGraphSpace(GraphManager manager, String graphSpace) {
         E.checkArgument(manager.graphSpace(graphSpace) != null,
-                        "The graph space is not exist");
+                        "The graph space '%s' does not exist", graphSpace);
+    }
+
+    private void validGraph(GraphManager manager, String graphSpace,
+                            String graph) {
+        E.checkArgument(manager.graph(graphSpace, graph) != null,
+                        "Graph '%s/%s' does not exist", graphSpace, graph);
     }
 
     private static class JsonManager implements Checkable {

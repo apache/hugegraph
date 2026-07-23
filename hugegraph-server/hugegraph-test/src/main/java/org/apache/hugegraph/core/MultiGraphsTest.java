@@ -83,7 +83,8 @@ public class MultiGraphsTest extends BaseCoreTest {
 
     @Test
     public void testCopySchemaWithMultiGraphs() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -248,7 +249,7 @@ public class MultiGraphsTest extends BaseCoreTest {
 
     @Test
     public void testCreateGraphsWithSameName() {
-        List<HugeGraph> graphs = openGraphs("g", "g", "G");
+        List<HugeGraph> graphs = openGraphs("gg", "gg", "GG");
         HugeGraph g1 = graphs.get(0);
         HugeGraph g2 = graphs.get(1);
         HugeGraph g3 = graphs.get(2);
@@ -292,7 +293,8 @@ public class MultiGraphsTest extends BaseCoreTest {
 
     @Test
     public void testCreateGraphWithSameNameDifferentBackends() throws Exception {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -318,6 +320,14 @@ public class MultiGraphsTest extends BaseCoreTest {
         graph.clearBackend();
 
         destroyGraphs(ImmutableList.of(g1, g2, graph));
+    }
+
+    @Test
+    public void testOpenGraphWithDeprecatedTaskSchedulerType() {
+        HugeGraph graph = openGraphWithBackend("legacySchedulerType",
+                                               "rocksdb", "binary",
+                                               "task.scheduler_type", "local");
+        destroyGraphs(ImmutableList.of(graph));
     }
 
     @Test

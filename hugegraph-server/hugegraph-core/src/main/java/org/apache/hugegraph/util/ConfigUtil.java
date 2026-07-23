@@ -23,6 +23,8 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -187,5 +189,42 @@ public final class ConfigUtil {
         E.checkArgument(graphName.matches("^[a-zA-Z0-9_\\-]+$"),
                         "Graph name can only contain letters, numbers, hyphens and underscores: %s",
                         graphName);
+    }
+
+    /**
+     * Serialize a HugeConfig to a JSON string for frontend consumption.
+     * <p>
+     * Sensitive configuration keys (containing keywords such as "password",
+     * "secret", "token", "credential", "auth.key") are excluded to prevent
+     * accidental exposure of credentials through the API response.
+     */
+    public static String writeConfigToString(HugeConfig config) {
+        Map<String, Object> configMap = new HashMap<>();
+        Iterator<String> iterator = config.getKeys();
+        while (iterator.hasNext()) {
+            String key = iterator.next();
+            if (isSensitiveKey(key)) {
+                continue;
+            }
+            configMap.put(key, config.getProperty(key));
+        }
+        return JsonUtil.toJson(configMap);
+    }
+
+    /**
+     * Returns true if the config key looks like it may contain sensitive data.
+     * Uses a case-insensitive keyword blacklist.
+     */
+    private static boolean isSensitiveKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        String lower = key.toLowerCase();
+        return lower.contains("password") ||
+               lower.contains("secret")   ||
+               lower.contains("token")    ||
+               lower.contains("credential") ||
+               lower.contains("private_key") ||
+               lower.contains("auth.key");
     }
 }

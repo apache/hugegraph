@@ -31,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 @Suite.SuiteClasses({
         MetadataKeyHelperTest.class,
         HgKVStoreImplTest.class,
+        PDConfigTest.class,
         ConfigServiceTest.class,
         IdServiceTest.class,
         KvServiceTest.class,

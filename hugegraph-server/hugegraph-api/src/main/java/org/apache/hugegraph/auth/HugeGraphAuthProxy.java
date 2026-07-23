@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -1499,6 +1500,11 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             this.authManager = origin;
         }
 
+        @Override
+        public boolean supportsGraphSpaceAuth() {
+            return this.authManager.supportsGraphSpaceAuth();
+        }
+
         private AuthElement updateCreator(AuthElement elem) {
             String username = currentUsername();
             if (username != null && elem.creator() == null) {
@@ -1610,6 +1616,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public HugeGroup deleteGroup(String graphSpace, Id id) {
+            this.invalidRoleCache();
+            return this.authManager.deleteGroup(graphSpace, id);
+        }
+
+        @Override
         public HugeGroup getGroup(Id id) {
             return this.authManager.getGroup(id);
         }
@@ -1633,11 +1645,27 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public Id createTarget(String graphSpace, HugeTarget target) {
+            this.updateCreator(target);
+            verifyUserPermission(HugePermission.WRITE, target);
+            this.invalidRoleCache();
+            return this.authManager.createTarget(graphSpace, target);
+        }
+
+        @Override
         public Id updateTarget(HugeTarget target) {
             this.updateCreator(target);
             verifyUserPermission(HugePermission.WRITE, target);
             this.invalidRoleCache();
             return this.authManager.updateTarget(target);
+        }
+
+        @Override
+        public Id updateTarget(String graphSpace, HugeTarget target) {
+            this.updateCreator(target);
+            verifyUserPermission(HugePermission.WRITE, target);
+            this.invalidRoleCache();
+            return this.authManager.updateTarget(graphSpace, target);
         }
 
         @Override
@@ -1649,9 +1677,24 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public HugeTarget deleteTarget(String graphSpace, Id id) {
+            verifyUserPermission(HugePermission.DELETE,
+                                 this.authManager.getTarget(graphSpace, id));
+            this.invalidRoleCache();
+            return this.authManager.deleteTarget(graphSpace, id);
+        }
+
+        @Override
         public HugeTarget getTarget(Id id) {
             return verifyUserPermission(HugePermission.READ,
                                         this.authManager.getTarget(id));
+        }
+
+        @Override
+        public HugeTarget getTarget(String graphSpace, Id id) {
+            return verifyUserPermission(
+                    HugePermission.READ,
+                    this.authManager.getTarget(graphSpace, id));
         }
 
         @Override
@@ -1667,11 +1710,26 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public List<HugeTarget> listAllTargets(String graphSpace, long limit) {
+            return verifyUserPermission(
+                    HugePermission.READ,
+                    this.authManager.listAllTargets(graphSpace, limit));
+        }
+
+        @Override
         public Id createBelong(HugeBelong belong) {
             this.updateCreator(belong);
             verifyUserPermission(HugePermission.WRITE, belong);
             this.invalidRoleCache();
             return this.authManager.createBelong(belong);
+        }
+
+        @Override
+        public Id createBelong(String graphSpace, HugeBelong belong) {
+            this.updateCreator(belong);
+            verifyUserPermission(HugePermission.WRITE, belong);
+            this.invalidRoleCache();
+            return this.authManager.createBelong(graphSpace, belong);
         }
 
         @Override
@@ -1683,6 +1741,14 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public Id updateBelong(String graphSpace, HugeBelong belong) {
+            this.updateCreator(belong);
+            verifyUserPermission(HugePermission.WRITE, belong);
+            this.invalidRoleCache();
+            return this.authManager.updateBelong(graphSpace, belong);
+        }
+
+        @Override
         public HugeBelong deleteBelong(Id id) {
             verifyUserPermission(HugePermission.DELETE,
                                  this.authManager.getBelong(id));
@@ -1691,9 +1757,24 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public HugeBelong deleteBelong(String graphSpace, Id id) {
+            verifyUserPermission(HugePermission.DELETE,
+                                 this.authManager.getBelong(graphSpace, id));
+            this.invalidRoleCache();
+            return this.authManager.deleteBelong(graphSpace, id);
+        }
+
+        @Override
         public HugeBelong getBelong(Id id) {
             return verifyUserPermission(HugePermission.READ,
                                         this.authManager.getBelong(id));
+        }
+
+        @Override
+        public HugeBelong getBelong(String graphSpace, Id id) {
+            return verifyUserPermission(
+                    HugePermission.READ,
+                    this.authManager.getBelong(graphSpace, id));
         }
 
         @Override
@@ -1709,9 +1790,24 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public List<HugeBelong> listAllBelong(String graphSpace, long limit) {
+            return verifyUserPermission(
+                    HugePermission.READ,
+                    this.authManager.listAllBelong(graphSpace, limit));
+        }
+
+        @Override
         public List<HugeBelong> listBelongByUser(Id user, long limit) {
             List<HugeBelong> r = this.authManager.listBelongByUser(user, limit);
             return verifyUserPermission(HugePermission.READ, r);
+        }
+
+        @Override
+        public List<HugeBelong> listBelongByUser(String graphSpace, Id user,
+                                                long limit) {
+            List<HugeBelong> result = this.authManager.listBelongByUser(
+                    graphSpace, user, limit);
+            return verifyUserPermission(HugePermission.READ, result);
         }
 
         @Override
@@ -1719,6 +1815,14 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             List<HugeBelong> r = this.authManager.listBelongByGroup(group,
                                                                     limit);
             return verifyUserPermission(HugePermission.READ, r);
+        }
+
+        @Override
+        public List<HugeBelong> listBelongByGroup(String graphSpace, Id group,
+                                                 long limit) {
+            List<HugeBelong> result = this.authManager.listBelongByGroup(
+                    graphSpace, group, limit);
+            return verifyUserPermission(HugePermission.READ, result);
         }
 
         @Override
@@ -1730,11 +1834,27 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public Id createAccess(String graphSpace, HugeAccess access) {
+            this.updateCreator(access);
+            verifyUserPermission(HugePermission.WRITE, access);
+            this.invalidRoleCache();
+            return this.authManager.createAccess(graphSpace, access);
+        }
+
+        @Override
         public Id updateAccess(HugeAccess access) {
             this.updateCreator(access);
             verifyUserPermission(HugePermission.WRITE, access);
             this.invalidRoleCache();
             return this.authManager.updateAccess(access);
+        }
+
+        @Override
+        public Id updateAccess(String graphSpace, HugeAccess access) {
+            this.updateCreator(access);
+            verifyUserPermission(HugePermission.WRITE, access);
+            this.invalidRoleCache();
+            return this.authManager.updateAccess(graphSpace, access);
         }
 
         @Override
@@ -1746,9 +1866,24 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public HugeAccess deleteAccess(String graphSpace, Id id) {
+            verifyUserPermission(HugePermission.DELETE,
+                                 this.authManager.getAccess(graphSpace, id));
+            this.invalidRoleCache();
+            return this.authManager.deleteAccess(graphSpace, id);
+        }
+
+        @Override
         public HugeAccess getAccess(Id id) {
             return verifyUserPermission(HugePermission.READ,
                                         this.authManager.getAccess(id));
+        }
+
+        @Override
+        public HugeAccess getAccess(String graphSpace, Id id) {
+            return verifyUserPermission(
+                    HugePermission.READ,
+                    this.authManager.getAccess(graphSpace, id));
         }
 
         @Override
@@ -1764,6 +1899,13 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public List<HugeAccess> listAllAccess(String graphSpace, long limit) {
+            return verifyUserPermission(
+                    HugePermission.READ,
+                    this.authManager.listAllAccess(graphSpace, limit));
+        }
+
+        @Override
         public List<HugeAccess> listAccessByGroup(Id group, long limit) {
             List<HugeAccess> r = this.authManager.listAccessByGroup(group,
                                                                     limit);
@@ -1771,10 +1913,26 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public List<HugeAccess> listAccessByGroup(String graphSpace, Id group,
+                                                 long limit) {
+            List<HugeAccess> result = this.authManager.listAccessByGroup(
+                    graphSpace, group, limit);
+            return verifyUserPermission(HugePermission.READ, result);
+        }
+
+        @Override
         public List<HugeAccess> listAccessByTarget(Id target, long limit) {
             List<HugeAccess> r = this.authManager.listAccessByTarget(target,
                                                                      limit);
             return verifyUserPermission(HugePermission.READ, r);
+        }
+
+        @Override
+        public List<HugeAccess> listAccessByTarget(String graphSpace, Id target,
+                                                  long limit) {
+            List<HugeAccess> result = this.authManager.listAccessByTarget(
+                    graphSpace, target, limit);
+            return verifyUserPermission(HugePermission.READ, result);
         }
 
         @Override
@@ -1871,7 +2029,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                     return this.authManager.validateUser(token);
                 });
             } catch (Exception e) {
-                LOG.error("Failed to validate token {} with error: ", token, e);
+                LOG.error("Failed to validate token with error: ", e);
                 throw e;
             } finally {
                 setContext(context);
@@ -2008,6 +2166,70 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         @Override
+        public void setDefaultGraph(String graphSpace, String graph, String user) {
+            this.authManager.setDefaultGraph(graphSpace, graph, user);
+        }
+
+        @Override
+        public void unsetDefaultGraph(String graphSpace, String graph, String user) {
+            this.authManager.unsetDefaultGraph(graphSpace, graph, user);
+        }
+
+        @Override
+        public Map<String, Date> getDefaultGraph(String graphSpace, String user) {
+            return this.authManager.getDefaultGraph(graphSpace, user);
+        }
+
+        @Override
+        public Id createDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
+                                    String graph) {
+            try {
+                return this.authManager.createDefaultRole(graphSpace, owner, role, graph);
+            } finally {
+                this.invalidRoleCache();
+            }
+        }
+
+        @Override
+        public Id createSpaceDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
+            try {
+                return this.authManager.createSpaceDefaultRole(graphSpace, owner, role);
+            } finally {
+                this.invalidRoleCache();
+            }
+        }
+
+        @Override
+        public boolean isDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
+            return this.authManager.isDefaultRole(graphSpace, owner, role);
+        }
+
+        @Override
+        public boolean isDefaultRole(String graphSpace, String graph, String owner,
+                                     HugeDefaultRole role) {
+            return this.authManager.isDefaultRole(graphSpace, graph, owner, role);
+        }
+
+        @Override
+        public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role) {
+            try {
+                this.authManager.deleteDefaultRole(graphSpace, owner, role);
+            } finally {
+                this.invalidRoleCache();
+            }
+        }
+
+        @Override
+        public void deleteDefaultRole(String graphSpace, String owner, HugeDefaultRole role,
+                                      String graph) {
+            try {
+                this.authManager.deleteDefaultRole(graphSpace, owner, role, graph);
+            } finally {
+                this.invalidRoleCache();
+            }
+        }
+
+        @Override
         public String loginUser(String username, String password) {
             return this.loginUser(username, password, -1L);
         }
@@ -2024,7 +2246,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public void logoutUser(String token) {
-            this.authManager.logoutUser(token);
+            try {
+                this.authManager.logoutUser(token);
+            } finally {
+                HugeGraphAuthProxy.this.usersRoleCache.invalidate(
+                        IdGenerator.of(token));
+            }
         }
 
         private void switchAuthManager(AuthManager authManager) {

@@ -51,6 +51,20 @@ public class ServerInfoManagerTest {
     }
 
     @Test
+    public void testInitDoesNotAccessBackendStore() {
+        HugeGraphParams graphParams = Mockito.mock(HugeGraphParams.class);
+        ExecutorService executor = Mockito.mock(ExecutorService.class);
+        ServerInfoManager manager = new ServerInfoManager(graphParams, executor);
+
+        manager.init();
+
+        Mockito.verify(graphParams, Mockito.never()).systemTransaction();
+        Mockito.verify(graphParams, Mockito.never()).backendStoreFeatures();
+        Mockito.verify(graphParams, Mockito.never()).graph();
+        Mockito.verify(graphParams, Mockito.never()).closeTx();
+    }
+
+    @Test
     public void testSelfNodeIdScopedByGraphWithSameNodeId() {
         GlobalMasterInfo nodeInfo = GlobalMasterInfo.master("server-1");
 
@@ -72,5 +86,23 @@ public class ServerInfoManagerTest {
     @Test
     public void testSelfNodeIdReturnsNullWhenNotInitialized() {
         Assert.assertNull(this.sysGraphManager.selfNodeId());
+    }
+
+    @Test
+    public void testSelfNodeIdReturnsNullWhenNodeIdMissing() {
+        Whitebox.setInternalState(this.sysGraphManager,
+                                  "globalNodeInfo", new GlobalMasterInfo());
+
+        Assert.assertNull(this.sysGraphManager.selfNodeId());
+    }
+
+    @Test
+    public void testInitServerInfoDoesNotAccessBackendStore() {
+        GlobalMasterInfo nodeInfo = GlobalMasterInfo.master("server-1");
+
+        this.sysGraphManager.initServerInfo(nodeInfo);
+
+        Assert.assertEquals("DEFAULT-~sys_graph/server-1",
+                            this.sysGraphManager.selfNodeId().asString());
     }
 }

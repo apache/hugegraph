@@ -41,8 +41,11 @@ public class GraphSpaceApiTest extends BaseApiTest {
                           Objects.equals("hstore", System.getProperty("backend")));
         Response r = this.client().get(PATH);
         String result = r.readEntity(String.class);
+        Assert.assertEquals(result, 200, r.getStatus());
         Map<String, Object> resultMap = JsonUtil.fromJson(result, Map.class);
         List<String> spaces = (List<String>)resultMap.get("graphSpaces");
+        Assert.assertNotNull("graphspace API should be available in hstore",
+                             spaces);
         for (String space : spaces) {
             if (!"DEFAULT".equals(space)) {
                 this.client().delete(PATH, space);
@@ -430,5 +433,158 @@ public class GraphSpaceApiTest extends BaseApiTest {
             }
         }
         Assert.assertTrue("auth_test_space not found in profile list", found);
+    }
+
+    @Test
+    public void testDefaultGraphLifecycle() {
+        String space = "default_graph_space";
+        String graph = "default_graph_test";
+        createSpace(space, true);
+        Response r = createGraph(space, graph, "DefaultGraphNick");
+        assertResponseStatus(201, r);
+
+        String graphsPath = String.format("graphspaces/%s/graphs", space);
+        r = this.client().post(graphsPath + "/" + graph + "/default", "");
+        String result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains(graph));
+
+        r = this.client().get(graphsPath + "/default");
+        result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains(graph));
+
+        r = this.client().get(graphsPath + "/profile");
+        result = assertResponseStatus(200, r);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> profiles = JsonUtil.fromJson(result, List.class);
+        Map<String, Object> profile = profiles.stream()
+                                              .filter(p -> graph.equals(p.get("name")))
+                                              .findFirst()
+                                              .orElse(null);
+        Assert.assertNotNull("Default graph should appear in profile list", profile);
+        Assert.assertEquals(Boolean.TRUE, profile.get("default"));
+
+        r = this.client().delete(graphsPath + "/" + graph + "/default",
+                                 ImmutableMap.of());
+        result = assertResponseStatus(200, r);
+        Assert.assertFalse(result.contains(graph));
+    }
+
+    @Test
+    public void testDefaultRoleLifecycle() {
+        String space = "default_role_space";
+        createSpace(space, true);
+
+        String rolePath = String.format("graphspaces/%s/role", space);
+        String body = "{\"user\":\"admin\",\"role\":\"ANALYST\"}";
+        Response r = this.client().post(rolePath, body);
+        assertResponseStatus(201, r);
+
+        r = this.client().get(rolePath,
+                              ImmutableMap.of("user", "admin",
+                                              "role", "ANALYST"));
+        String result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains("true"));
+
+        r = this.client().delete(rolePath,
+                                 ImmutableMap.of("user", "admin",
+                                                 "role", "ANALYST"));
+        assertResponseStatus(204, r);
+
+        r = this.client().get(rolePath,
+                              ImmutableMap.of("user", "admin",
+                                              "role", "ANALYST"));
+        result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains("false"));
+    }
+
+    @Test
+    public void testDefaultRoleMutationRequiresSpaceManager() {
+        String space = "default_role_auth_space";
+        String analyst = "default_role_analyst";
+        String target = "default_role_target";
+        String manager = "default_role_manager";
+        createSpace(space, true);
+
+        RestClient analystClient = userClient(analyst);
+        userClient(target);
+        RestClient managerClient = spaceManagerClient(space, manager);
+
+        String rolePath = String.format("graphspaces/%s/role", space);
+        String analystBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
+                                           analyst);
+        Response r = this.client().post(rolePath, analystBody);
+        assertResponseStatus(201, r);
+
+        String grantTargetBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
+                                               target);
+        r = analystClient.post(rolePath, grantTargetBody);
+        assertResponseStatus(403, r);
+
+        r = analystClient.get(rolePath,
+                              ImmutableMap.of("user", target,
+                                              "role", "ANALYST"));
+        assertResponseStatus(403, r);
+
+        r = analystClient.delete(rolePath,
+                                 ImmutableMap.of("user", analyst,
+                                                 "role", "ANALYST"));
+        assertResponseStatus(403, r);
+
+        r = managerClient.post(rolePath, grantTargetBody);
+        assertResponseStatus(201, r);
+
+        r = managerClient.get(rolePath,
+                              ImmutableMap.of("user", target,
+                                              "role", "ANALYST"));
+        String result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains("true"));
+
+        String spaceRoleBody = String.format("{\"user\":\"%s\",\"role\":\"SPACE\"}",
+                                             target);
+        r = managerClient.post(rolePath, spaceRoleBody);
+        assertResponseStatus(403, r);
+
+        r = managerClient.delete(rolePath,
+                                 ImmutableMap.of("user", target,
+                                                 "role", "ANALYST"));
+        assertResponseStatus(204, r);
+    }
+
+    @Test
+    public void testSchemaTemplateLifecycle() {
+        String space = "schema_template_space";
+        String template = "hubble_schema_template";
+        String schema = "schema.propertyKey('name').asText().ifNotExist().create();";
+        String path = String.format("graphspaces/%s/schematemplates", space);
+        createSpace(space, true);
+
+        String body = String.format("{\"name\":\"%s\",\"schema\":\"%s\"}",
+                                    template, schema);
+        Response r = this.client().post(path, body);
+        String result = assertResponseStatus(201, r);
+        Assert.assertTrue(result.contains(template));
+
+        r = this.client().get(path, template);
+        result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains(template));
+
+        r = this.client().get(path);
+        result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains(template));
+
+        String updated = "schema.propertyKey('age').asInt().ifNotExist().create();";
+        body = String.format("{\"schema\":\"%s\"}", updated);
+        r = this.client().target(baseUrl())
+                         .path(path + "/" + template)
+                         .request()
+                         .put(jakarta.ws.rs.client.Entity.json(body));
+        result = assertResponseStatus(200, r);
+        Assert.assertTrue(result.contains("age"));
+
+        r = this.client().delete(path, template);
+        assertResponseStatus(204, r);
+
+        r = this.client().get(path, template);
+        assertResponseStatus(404, r);
     }
 }

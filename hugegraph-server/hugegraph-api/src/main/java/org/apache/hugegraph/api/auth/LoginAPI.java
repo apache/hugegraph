@@ -87,7 +87,7 @@ public class LoginAPI extends API {
                        @HeaderParam(HttpHeaders.AUTHORIZATION) String auth) {
         E.checkArgument(StringUtils.isNotEmpty(auth),
                         "Request header Authorization must not be null");
-        LOG.debug("user logout: {}", auth);
+        LOG.debug("User logout requested");
 
         if (!auth.startsWith(AuthenticationFilter.BEARER_TOKEN_PREFIX)) {
             throw new BadRequestException("Only HTTP Bearer authentication is supported");
@@ -107,7 +107,7 @@ public class LoginAPI extends API {
                               @HeaderParam(HttpHeaders.AUTHORIZATION) String token) {
         E.checkArgument(StringUtils.isNotEmpty(token),
                         "Request header Authorization must not be null");
-        LOG.debug("get user: {}", token);
+        LOG.debug("User token verification requested");
 
         if (!token.startsWith(AuthenticationFilter.BEARER_TOKEN_PREFIX)) {
             throw new BadRequestException("Only HTTP Bearer authentication is supported");

@@ -319,12 +319,20 @@ public class HugeTask<V> extends FutureTask<V> {
     public boolean cancel(boolean mayInterruptIfRunning) {
         // NOTE: Gremlin sleep() can't be interrupted by default
         // https://mrhaki.blogspot.com/2016/10/groovy-goodness-interrupted-sleeping.html
+        TaskStatus prevStatus = this.status;
         boolean cancelled = super.cancel(mayInterruptIfRunning);
         if (!cancelled) {
             return cancelled;
         }
 
         try {
+            // If the task is being deleted, don't transition to CANCELLED or
+            // fire cancelled() callback — let cronSchedule() handle the actual
+            // DB deletion. Prevents an async save() from resurrecting the task
+            // after deleteFromDB() has already removed it.
+            if (prevStatus == TaskStatus.DELETING) {
+                return cancelled;
+            }
             if (this.status(TaskStatus.CANCELLED)) {
                 // Callback for saving status to store
                 this.callable.cancelled();

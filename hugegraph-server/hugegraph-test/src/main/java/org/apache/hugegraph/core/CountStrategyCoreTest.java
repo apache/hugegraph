@@ -23,11 +23,14 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.traversal.optimize.HugeGraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
+import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
+import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -207,6 +210,132 @@ public class CountStrategyCoreTest extends BaseCoreTest {
                             .count().next();
 
         Assert.assertEquals(4L, count);
+    }
+
+    @Test
+    public void testWhereCountNestedConnectivePredicate() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>outside(1L, 18L)
+                                          .and(P.gte(0L))))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testWhereCountNegatedNestedConnectivePredicate() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.not(P.<Long>outside(1L, 18L)
+                                                 .and(P.gte(0L)))))
+                            .count().next();
+
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatAndContradictionEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).and(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatAndContradictionNonEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).and(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatOrTautologyEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).or(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatOrTautologyNonEmpty() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex target = graph().addVertex(T.label, "person", "name", "target");
+        source.addEdge("knows", target);
+        commitTx();
+
+        long count = graph().traversal().V(source.id())
+                            .where(__.both("knows").count()
+                                     .is(P.<Long>eq(0L).or(P.neq(0L))))
+                            .count().next();
+
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
+    public void testWhereCountFlatConnectiveStillGetsRangeBound() {
+        this.initSchema();
+        this.initGraph();
+
+        GraphTraversal<Vertex, Long> traversal = graph().traversal().V()
+                                                        .where(__.out().count()
+                                                                 .is(P.between(1, 18)))
+                                                        .count();
+        traversal.asAdmin().applyStrategies();
+
+        boolean foundRangeStep = false;
+        for (Step<?, ?> step : traversal.asAdmin().getSteps()) {
+            if (step instanceof TraversalParent) {
+                for (Traversal.Admin<?, ?> inner :
+                     ((TraversalParent) step).getLocalChildren()) {
+                    for (Step<?, ?> innerStep : inner.getSteps()) {
+                        if (innerStep instanceof RangeGlobalStep) {
+                            foundRangeStep = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Assert.assertTrue("Expected RangeGlobalStep for flat ConnectiveP " +
+                          "between(1,18)", foundRangeStep);
+
+        long count = traversal.next();
+        Assert.assertEquals(1L, count);
     }
 
     @Test

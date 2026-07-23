@@ -2241,7 +2241,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testAddOlapSecondaryProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2332,7 +2333,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testAddOlapRangeProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2458,7 +2460,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testAddOlapRangeAndOlapSecondaryProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2632,7 +2635,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOlapRangeAndRegularSecondaryProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2761,7 +2765,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOlapWithUpdates() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -7734,7 +7739,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testScanVertexInPaging() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -8480,7 +8486,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryByPropertyInPageWithLimitGtPageSize() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -8560,7 +8567,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryBySingleRangePropertyInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -8709,7 +8717,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryByRangeIndexInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
