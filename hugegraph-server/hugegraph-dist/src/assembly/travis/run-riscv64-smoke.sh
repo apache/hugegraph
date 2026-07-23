@@ -53,8 +53,21 @@ REPO_ROOT=$(cd "$(dirname "$0")/../../../../.." && pwd)
 mkdir -p "$TMPDIR"
 export TMPDIR
 
+# Portable in-place sed: avoids GNU sed -i which breaks on macOS/BSD.
+sedi() {
+    local expr="$1" file="$2"
+    local tmp; tmp=$(mktemp "${TMPDIR:-/tmp}/sedi.XXXXXX")
+    if sed "$expr" "$file" > "$tmp"; then
+        mv "$tmp" "$file"
+    else
+        rm -f "$tmp"
+        return 1
+    fi
+}
+
 # Unique, traceable names so cleanup removes only our own resources.
-STAMP=$(date +%Y%m%d%H%M%S)
+# Timestamp + random hex: collision-resistant, still human-readable for debugging.
+STAMP=$(date +%Y%m%d%H%M%S)-$(head -c 4 /dev/urandom | od -An -tx1 | tr -d ' \n')
 TAG="hugegraph-riscv64-smoke:${STAMP}"
 # KEEP: don't auto-cleanup so a failed/finished run stays pokeable.
 VOL="hugegraph-riscv64-data-${STAMP}"
@@ -76,8 +89,8 @@ container_alive() {
 }
 
 # Run docker exec with container-liveness guard + exit-code logging.
-# Usage: safe_exec $DOCKER exec <container> <cmd> [args...]
-# Handles multi-word DOCKER values (e.g. "sudo docker") via eval.
+# Usage: safe_exec exec <container> <cmd> [args...]
+# DOCKER is split into words without eval; handles "docker" or "sudo docker".
 # Returns the command's output on stdout; logs failures to stderr.
 safe_exec() {
     local rc
@@ -87,7 +100,8 @@ safe_exec() {
         return 1
     fi
     set +e
-    eval "$@"
+    local -a docker_parts=($DOCKER)
+    "${docker_parts[@]}" "$@"
     rc=$?
     set -e
     if [[ $rc -ne 0 ]]; then
@@ -148,7 +162,7 @@ _exit_handler() {
 _cleanup() {
     # KEEP=1: leave everything standing for live poking. Still dump logs so a
     # failure's root cause is visible; skip all teardown.
-    if [[ -n "${KEEP:-}" ]]; then
+    if [[ "${KEEP:-}" == "1" ]]; then
         echo "==> KEEP=1 set — skipping cleanup. Resources left standing:" >&2
         echo "    container: $CONTAINER" >&2
         echo "    volume:    $VOL" >&2
@@ -167,14 +181,20 @@ _cleanup() {
             | tar -xO 2>/dev/null | tail -n 80 >&2 || true
         echo "----- end hugegraph-server.log -----" >&2
     fi
-    $DOCKER rm -f "$CONTAINER" >/dev/null 2>&1 || true
+    local ok=1
+    $DOCKER rm -f "$CONTAINER" >/dev/null 2>&1 || ok=0
     # Only remove the volume we created.
-    $DOCKER volume rm "$VOL" >/dev/null 2>&1 || true
+    $DOCKER volume rm "$VOL" >/dev/null 2>&1 || ok=0
     # Only remove the image we tagged; never prune the host's image store.
-    $DOCKER rmi "$TAG" >/dev/null 2>&1 || true
+    $DOCKER rmi "$TAG" >/dev/null 2>&1 || ok=0
     # Remove disk-backed temp work dirs (build context holds the ~1GB extract).
     [[ -n "$BUILD_CTX"   && -d "$BUILD_CTX"   ]] && rm -rf "$BUILD_CTX"
     [[ -n "$ROCKS_BUILD" && -d "$ROCKS_BUILD" ]] && rm -rf "$ROCKS_BUILD"
+    if [[ "$ok" == "1" ]]; then
+        pass "cleanup: container, volume, and image removed"
+    else
+        fail "cleanup: some resources may remain (container=$CONTAINER vol=$VOL image=$TAG)"
+    fi
 }
 trap _exit_handler EXIT
 
@@ -183,11 +203,16 @@ need docker
 # buildx is required: the legacy builder ignores --platform.
 $DOCKER buildx version >/dev/null 2>&1 || { fail "docker buildx is required (pacman -S docker-buildx)"; exit 1; }
 
-# Register QEMU user-mode emulation for riscv64 if the kernel can't already run
-# it (otherwise the build/run fails with 'exec format error'). binfmt handlers
-# do NOT survive reboots, so a fresh checkout needs this — makes the smoke test
-# self-contained on any x86 host. Pinned tag: :latest 403s on Docker Hub.
-if ! ls /proc/sys/fs/binfmt_misc/qemu-riscv64 >/dev/null 2>&1; then
+# Register QEMU user-mode emulation for riscv64 if the Docker daemon can't
+# already run it (otherwise the build/run fails with 'exec format error').
+# binfmt handlers do NOT survive reboots, so a fresh checkout needs this —
+# makes the smoke test self-contained on any x86 host. Pinned tag: :latest
+# 403s on Docker Hub.
+#
+# Probe through the Docker daemon, not the host /proc: Docker Desktop keeps
+# binfmt inside its Linux VM; a remote context can have the opposite state.
+if ! $DOCKER run --rm --platform "$PLATFORM" "$BASE_IMAGE" uname -m 2>/dev/null \
+        | grep -q riscv64; then
     echo "==> Registering QEMU riscv64 emulation (binfmt)"
     $DOCKER run --privileged --rm tonistiigi/binfmt:qemu-v8.1.5 --install riscv64 >/dev/null
 fi
@@ -210,7 +235,7 @@ echo "==> Using distribution: $DIST_TAR"
 
 # Extract straight into the build context's server/ dir — no second copy
 # (the extracted tree is ~1GB; copying it twice doubled the temp footprint).
-BUILD_CTX=$(mktemp -d "hugegraph-riscv64-ctx.XXXXXX")
+BUILD_CTX=$(mktemp -d "${TMPDIR:-/tmp}/hugegraph-riscv64-ctx.XXXXXX")
 SERVER_DIR="$BUILD_CTX/server"
 mkdir -p "$SERVER_DIR"
 tar -xzf "$DIST_TAR" -C "$SERVER_DIR" --strip-components=1
@@ -218,10 +243,10 @@ tar -xzf "$DIST_TAR" -C "$SERVER_DIR" --strip-components=1
 # Force the RocksDB backend for the smoke run.
 CONF="$SERVER_DIR/conf/graphs/hugegraph.properties"
 grep -qE '^[[:space:]]*backend[[:space:]]*=' "$CONF" \
-    && sed -i 's/^[[:space:]]*backend[[:space:]]*=.*/backend=rocksdb/' "$CONF" \
+    && sedi 's/^[[:space:]]*backend[[:space:]]*=.*/backend=rocksdb/' "$CONF" \
     || echo "backend=rocksdb" >> "$CONF"
 grep -qE '^[[:space:]]*serializer[[:space:]]*=' "$CONF" \
-    && sed -i 's/^[[:space:]]*serializer[[:space:]]*=.*/serializer=binary/' "$CONF" \
+    && sedi 's/^[[:space:]]*serializer[[:space:]]*=.*/serializer=binary/' "$CONF" \
     || echo "serializer=binary" >> "$CONF"
 
 # 2. Build a tiny RISC-V runtime image on top of the glibc base.
@@ -238,7 +263,7 @@ cp "$REPO_ROOT/hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh" \
 # The entrypoint hardcodes 'start-hugegraph.sh ... -t 120'. Under QEMU emulation
 # the analyzer dictionary loads twice (~3.5 min each) plus Gremlin/Groovy warmup,
 # so the server needs well over 600s to bind 8080. Raise the startup timeout.
-sed -i 's/-t 120/-t 1800/' "$BUILD_CTX/server/docker-entrypoint.sh"
+sedi 's/-t 120/-t 1800/' "$BUILD_CTX/server/docker-entrypoint.sh"
 cat > "$BUILD_CTX/Dockerfile" <<EOF
 FROM ${BASE_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive
@@ -282,8 +307,9 @@ wait_health() {
     # Under QEMU the analyzer dictionary loads once during initialization and
     # again during server startup, so the full end-to-end wait needs to exceed
     # the entrypoint's 1800s startup timeout as well as initialization time.
-    local elapsed=0 limit=3600
-    while (( elapsed < limit )); do
+    local limit=3600
+    local start=$SECONDS
+    while (( SECONDS - start < limit )); do
         # Bail fast if the container died instead of polling a corpse for 10 min.
         if ! $DOCKER ps --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
             echo "==> container '$CONTAINER' is no longer running" >&2
@@ -292,10 +318,11 @@ wait_health() {
         fi
         local code
         code=$($DOCKER exec "$CONTAINER" \
-            curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/graphs 2>/dev/null || true)
+            curl -s --connect-timeout 10 --max-time 60 \
+            -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/graphs 2>/dev/null || true)
         code=${code:-000}
         [[ "$code" == "200" ]] && return 0
-        sleep 5; elapsed=$((elapsed+5))
+        sleep 5
     done
     echo "==> health check timed out after ${limit}s (last /graphs HTTP status: $code)" >&2
     dump_health_diagnostics
@@ -337,7 +364,7 @@ ROCKSJAR=$($DOCKER exec "$CONTAINER" sh -c 'ls /server/lib/rocksdbjni-*.jar 2>/d
 # Compile the smoke class on the HOST (which has a JDK); the runtime image
 # ships only a JRE (no javac). The .class is arch-independent bytecode,
 # so an x86-compiled class runs fine under the riscv64 JRE.
-ROCKS_BUILD=$(mktemp -d "rocks-smoke.XXXXXX")
+ROCKS_BUILD=$(mktemp -d "${TMPDIR:-/tmp}/rocks-smoke.XXXXXX")
 echo "$ROCKS_TEST" > "$ROCKS_BUILD/RocksSmoke.java"
 javac -cp "$SERVER_DIR"/lib/rocksdbjni-*.jar "$ROCKS_BUILD/RocksSmoke.java" -d "$ROCKS_BUILD" \
     || { fail "failed to compile RocksSmoke on host (need a JDK)"; exit 1; }
@@ -345,12 +372,16 @@ $DOCKER cp "$ROCKS_BUILD/RocksSmoke.class" "$CONTAINER:/tmp/RocksSmoke.class"
 # ponytail: set +e around the pipeline so pipefail doesn't kill the script
 # before the grep below can report the actual failure.
 set +e
-safe_exec "$DOCKER exec $CONTAINER java -cp /tmp:$ROCKSJAR RocksSmoke" 2>&1 \
+safe_exec exec "$CONTAINER" java -cp "/tmp:$ROCKSJAR" RocksSmoke 2>&1 \
     | tee "$ROCKS_BUILD/rocks-out.log"
 JAVA_RC=${PIPESTATUS[0]}
 set -e
 grep -q "ROCKS_OK" "$ROCKS_BUILD/rocks-out.log" || {
     fail "RocksDB open/put/get/close failed (java exit=$JAVA_RC, check JNI/libatomic linkage)"
+    exit 1
+}
+[[ "$JAVA_RC" == "0" ]] || {
+    fail "RocksDB JVM exited with $JAVA_RC despite printing ROCKS_OK"
     exit 1
 }
 pass "RocksDB: open / put / get / close"
@@ -366,7 +397,7 @@ container_alive || { fail "container died before REST phase"; exit 1; }
 # may pass before the REST API layer is fully initialized.
 REST_READY=""
 for _retry in 1 2 3 4 5 6 7 8 9 10; do
-    REST_READY=$($DOCKER exec "$CONTAINER" sh -c 'curl -s --max-time 30 http://localhost:8080/versions && echo' || true)
+    REST_READY=$($DOCKER exec "$CONTAINER" sh -c 'curl -s --connect-timeout 10 --max-time 30 http://localhost:8080/versions && echo' || true)
     if [[ "$REST_READY" == *'"core"'* ]]; then break; fi
     echo "  waiting for REST API (attempt $_retry)..." >&2
     sleep 10
@@ -382,7 +413,8 @@ echo "==> REST schema + CRUD"
 rest_post() { # $1=path $2=json
     local body code response rc
     set +e
-    response=$($DOCKER exec "$CONTAINER" curl -sS -w $'\n%{http_code}' -X POST \
+    response=$($DOCKER exec "$CONTAINER" curl -sS --connect-timeout 10 --max-time 300 \
+        -w $'\n%{http_code}' -X POST \
         "http://localhost:8080/graphs/hugegraph/$1" \
         -H 'Content-Type: application/json' -d "$2")
     rc=$?
@@ -407,7 +439,9 @@ rest_post() { # $1=path $2=json
 # Sets REST_BODY (response body) and REST_CODE (HTTP status).
 rest_get() {
     local rsp
-    rsp=$($DOCKER exec "$CONTAINER" curl -sS --compressed -w $'\n%{http_code}' \
+    rsp=$($DOCKER exec "$CONTAINER" curl -sS --compressed \
+        --connect-timeout 10 --max-time 300 \
+        -w $'\n%{http_code}' \
         -H 'Accept: application/json' "$@")
     REST_CODE=${rsp##*$'\n'}
     REST_BODY=${rsp%$'\n'*}
@@ -448,7 +482,9 @@ pass "HugeGraph: REST CRUD (vertex + edge created)"
 # 7. Gremlin query — proves the full TinkerPop/Gremlin stack runs on JDK 11.
 echo "==> Gremlin query"
 container_alive || { fail "container died before Gremlin query"; exit 1; }
-GREM=$($DOCKER exec "$CONTAINER" curl -s --compressed -X POST http://localhost:8182/ \
+GREM=$($DOCKER exec "$CONTAINER" curl -s --compressed \
+    --connect-timeout 10 --max-time 300 \
+    -X POST http://localhost:8182/ \
     -H 'Content-Type: application/json' \
     -d '{"gremlin":"g.V().hasLabel(\"person\").count()","language":"gremlin-groovy","aliases":{"g":"__g_DEFAULT-hugegraph"}}')
 # Use jq to check the count — handles whitespace and type variations.
@@ -463,7 +499,15 @@ $DOCKER restart "$CONTAINER" >/dev/null
 wait_health || { fail "server not healthy after restart"; exit 1; }
 container_alive || { fail "container died after restart health check"; exit 1; }
 rest_get "http://localhost:8080/graphs/hugegraph/graph/vertices"
-assert_json '.vertices | length > 0'
+assert_json '.vertices | length >= 2'
+# Verify both created vertices survived (by name, not just count).
+# Properties are flat objects: {"properties":{"name":"alice"}}.
+assert_json '.vertices | map(.properties.name) | index("alice") != null'
+assert_json '.vertices | map(.properties.name) | index("bob") != null'
+rest_get "http://localhost:8080/graphs/hugegraph/graph/edges"
+assert_json '.edges | length >= 1'
+# Verify the "knows" edge between person vertices survived.
+assert_json '.edges | any(.label == "knows" and .outVLabel == "person" and .inVLabel == "person")'
 pass "HugeGraph: restart / persistence"
 
 # 9. Final summary (matches the issue's expected output format).
@@ -471,4 +515,4 @@ echo ""
 pass "architecture: riscv64"
 pass "RocksDB: open / put / get / close"
 pass "HugeGraph: init / health / REST CRUD / Gremlin / restart / persistence"
-pass "cleanup: container, volume, and image removed"
+# cleanup PASS is printed by _cleanup() after verifying teardown succeeded.
