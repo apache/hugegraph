@@ -24,6 +24,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -389,6 +390,38 @@ public class BusinessHandlerImplTest {
      public void testCloseAllBasicPathIsInvocable() {
          // Verifies the method can be called without throwing
          handler.closeAll();
+     }
+
+     @Test
+     public void testTruncateFiresTruncateCallbacksAroundKeyRangeDelete() throws Exception {
+         RocksDBSession session = mock(RocksDBSession.class);
+         SessionOperator op = mock(SessionOperator.class);
+         when(session.sessionOp()).thenReturn(op);
+         when(session.getGraphName()).thenReturn("g");
+         when(session.getDbPath()).thenReturn("/data/db/00001");
+
+         BusinessHandlerImpl localHandler =
+                 new SessionOverridingBusinessHandler(mockPartitionManager, session);
+
+         // Replace the real InnerKeyCreator with a mock so getStartKey/getEndKey/delGraphId do not
+         // touch RocksDB or the graph-id metadata store; truncate() must still run to completion so
+         // the notifyTruncateBegin / notifyTruncate callbacks around the delete are both invoked.
+         InnerKeyCreator mockKeyCreator = mock(InnerKeyCreator.class);
+         Field keyCreatorField = BusinessHandlerImpl.class.getDeclaredField("keyCreator");
+         keyCreatorField.setAccessible(true);
+         keyCreatorField.set(localHandler, mockKeyCreator);
+
+         localHandler.truncate("g", 1);
+
+         // The key-range delete runs between the begin/after truncate callbacks...
+         verify(op, times(1)).deleteRange(any(), any());
+         // ...the graph id is released...
+         verify(mockKeyCreator, times(1)).delGraphId(1, "g");
+         // ...and the callback pair reads the db identity from the session.
+         verify(session, times(1)).getGraphName();
+         verify(session, times(1)).getDbPath();
+         // The session opened by truncate() is closed by try-with-resources.
+         verify(session, times(1)).close();
      }
 
      @Test

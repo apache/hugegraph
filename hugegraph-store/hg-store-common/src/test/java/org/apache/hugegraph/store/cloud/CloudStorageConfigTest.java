@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.cloud;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -149,6 +150,65 @@ public class CloudStorageConfigTest {
 
          config.setUploadBackpressureHighWatermark(0);
          assertEquals(0, config.getUploadBackpressureHighWatermark());
+     }
+
+     @Test
+     public void testDlqMaxSize() {
+         assertEquals(100_000, config.getDlqMaxSize());
+
+         config.setDlqMaxSize(500);
+         assertEquals(500, config.getDlqMaxSize());
+     }
+
+     @Test
+     public void testMetadataSyncDebounceMs() {
+         assertEquals(1_000L, config.getMetadataSyncDebounceMs());
+
+         config.setMetadataSyncDebounceMs(250L);
+         assertEquals(250L, config.getMetadataSyncDebounceMs());
+
+         config.setMetadataSyncDebounceMs(0L);
+         assertEquals(0L, config.getMetadataSyncDebounceMs());
+     }
+
+     @Test
+     public void testMetadataSyncMaxUnpublished() {
+         assertEquals(32, config.getMetadataSyncMaxUnpublished());
+
+         config.setMetadataSyncMaxUnpublished(8);
+         assertEquals(8, config.getMetadataSyncMaxUnpublished());
+
+         config.setMetadataSyncMaxUnpublished(0);
+         assertEquals(0, config.getMetadataSyncMaxUnpublished());
+     }
+
+     @Test
+     public void testNodeId() {
+         assertEquals("", config.getNodeId());
+
+         config.setNodeId("store-node-7");
+         assertEquals("store-node-7", config.getNodeId());
+     }
+
+     /**
+      * Exercises the Lombok {@code @Data}-generated {@code equals}/{@code hashCode}/{@code toString}
+      * so the generated methods on the class declaration are covered.
+      */
+     @Test
+     public void testEqualsHashCodeAndToString() {
+         CloudStorageConfig a = new CloudStorageConfig();
+         CloudStorageConfig b = new CloudStorageConfig();
+
+         assertEquals(a, b);
+         assertEquals(a.hashCode(), b.hashCode());
+         assertEquals(a, a);
+         assertNotEquals(null, a);
+         assertNotEquals("not-a-config", a);
+         assertNotNull(a.toString());
+
+         b.setProvider("gcs");
+         assertNotEquals(a, b);
+         assertNotEquals(a.hashCode(), b.hashCode());
      }
 
     // ---- Provider properties (cloud.storage.<provider>.* flattened) ----

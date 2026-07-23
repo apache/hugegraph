@@ -180,9 +180,19 @@ public final class CloudStorageProviderFactory {
 
     /** Scans the classpath for {@link CloudStorageProvider} implementations via SPI. */
     private static void loadProviders() {
+        loadProviders(CloudStorageProviderFactory.class.getClassLoader());
+    }
+
+    /**
+     * Scans {@code classLoader} for {@link CloudStorageProvider} implementations via SPI.
+     *
+     * <p>Package-private overload so tests can drive discovery with a classloader that exposes no
+     * providers (exercising the "no providers found" path) without depending on the ambient
+     * classpath.
+     */
+    static void loadProviders(ClassLoader classLoader) {
         ServiceLoader<CloudStorageProvider> loader =
-                ServiceLoader.load(CloudStorageProvider.class,
-                                   CloudStorageProviderFactory.class.getClassLoader());
+                ServiceLoader.load(CloudStorageProvider.class, classLoader);
         for (CloudStorageProvider p : loader) {
             String name = p.providerName();
             if (REGISTRY.containsKey(name)) {

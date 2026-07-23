@@ -21,6 +21,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -465,6 +466,23 @@ public class CloudStorageProviderFactoryTest {
 
           assertSame(firstRegistration,
                      registry().get(TestDuplicateNamedProvider.PROVIDER_NAME));
+      }
+
+      /**
+       * When SPI discovery finds no providers, {@code loadProviders} must leave the registry empty
+       * and log that cloud storage is unavailable (the "no providers found" branch). An isolated
+       * classloader with a {@code null} parent exposes no {@code META-INF/services} entries, so no
+       * provider is discovered.
+       */
+      @Test
+      public void testLoadProvidersWithNoProvidersLeavesRegistryEmpty() {
+          registry().clear();
+
+          ClassLoader emptyClassLoader = new java.net.URLClassLoader(new java.net.URL[0], null);
+          CloudStorageProviderFactory.loadProviders(emptyClassLoader);
+
+          assertTrue("No providers should be discovered from an empty classloader",
+                     registry().isEmpty());
       }
 
       @SuppressWarnings("DataFlowIssue")
