@@ -43,6 +43,7 @@ set -euo pipefail
 ARCH=riscv64
 PLATFORM="linux/${ARCH}"
 # Ubuntu 24.04 publishes openjdk-11-jre-headless for linux/riscv64 (glibc).
+# TODO: Pin to a SHA256 digest for reproducibility (e.g. ubuntu@sha256:...).
 BASE_IMAGE="ubuntu:24.04"
 
 REPO_ROOT=$(cd "$(dirname "$0")/../../../../.." && pwd)
@@ -107,7 +108,7 @@ safe_exec() {
     if [[ $rc -ne 0 ]]; then
         fail "command failed (exit $rc): $*"
         dump_health_diagnostics
-        return 1
+        return "$rc"
     fi
 }
 
@@ -138,7 +139,6 @@ dump_health_diagnostics() {
     echo "----- end health-check diagnostics -----" >&2
 }
 
-_EXIT_CODE=0
 _exit_handler() {
     local rc=$?
     # If the script failed, log the exit code so the root cause isn't lost.
@@ -157,29 +157,34 @@ _exit_handler() {
         fi
     fi
     _cleanup
+    # Propagate cleanup failure: if the main run succeeded but cleanup failed,
+    # exit nonzero so CI records the resource leak.
+    if [[ $rc -eq 0 && $_CLEANUP_OK -ne 0 ]]; then
+        exit 1
+    fi
+    exit "$rc"
 }
 
 _cleanup() {
-    # KEEP=1: leave everything standing for live poking. Still dump logs so a
-    # failure's root cause is visible; skip all teardown.
+    _CLEANUP_OK=0
+    # Dump container logs first so a failure's root cause isn't destroyed by cleanup.
+    # This runs even with KEEP=1 so the user gets diagnostics.
+    if $DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
+        echo "----- container logs ($CONTAINER) -----" >&2
+        $DOCKER logs --tail 60 "$CONTAINER" >&2 || true
+        echo "----- end logs -----" >&2
+        echo "----- hugegraph-server.log -----" >&2
+        $DOCKER cp "$CONTAINER:/server/logs/hugegraph-server.log" - 2>/dev/null \
+            | tar -xO 2>/dev/null | tail -n 80 >&2 || true
+        echo "----- end hugegraph-server.log -----" >&2
+    fi
+    # KEEP=1: leave everything standing for live poking; skip teardown.
     if [[ "${KEEP:-}" == "1" ]]; then
         echo "==> KEEP=1 set — skipping cleanup. Resources left standing:" >&2
         echo "    container: $CONTAINER" >&2
         echo "    volume:    $VOL" >&2
         echo "    image:     $TAG" >&2
         return 0
-    fi
-    # Dump container logs first so a failure's root cause isn't destroyed by cleanup.
-    if $DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$CONTAINER"; then
-        echo "----- container logs ($CONTAINER) -----" >&2
-        $DOCKER logs --tail 60 "$CONTAINER" >&2 || true
-        echo "----- end logs -----" >&2
-        # The startup wrapper hides the real error in the server log file; dump it
-        # from the stopped container (docker cp works on exited containers).
-        echo "----- hugegraph-server.log -----" >&2
-        $DOCKER cp "$CONTAINER:/server/logs/hugegraph-server.log" - 2>/dev/null \
-            | tar -xO 2>/dev/null | tail -n 80 >&2 || true
-        echo "----- end hugegraph-server.log -----" >&2
     fi
     local ok=1
     $DOCKER rm -f "$CONTAINER" >/dev/null 2>&1 || ok=0
@@ -188,26 +193,34 @@ _cleanup() {
     # Only remove the image we tagged; never prune the host's image store.
     $DOCKER rmi "$TAG" >/dev/null 2>&1 || ok=0
     # Remove disk-backed temp work dirs (build context holds the ~1GB extract).
-    [[ -n "$BUILD_CTX"   && -d "$BUILD_CTX"   ]] && rm -rf "$BUILD_CTX"
-    [[ -n "$ROCKS_BUILD" && -d "$ROCKS_BUILD" ]] && rm -rf "$ROCKS_BUILD"
+    if [[ -n "$BUILD_CTX" && -d "$BUILD_CTX" ]]; then
+        rm -rf "$BUILD_CTX" || ok=0
+    fi
+    if [[ -n "$ROCKS_BUILD" && -d "$ROCKS_BUILD" ]]; then
+        rm -rf "$ROCKS_BUILD" || ok=0
+    fi
     if [[ "$ok" == "1" ]]; then
         pass "cleanup: container, volume, and image removed"
     else
         fail "cleanup: some resources may remain (container=$CONTAINER vol=$VOL image=$TAG)"
+        _CLEANUP_OK=1
     fi
 }
-trap _exit_handler EXIT
+trap _exit_handler EXIT INT TERM
 
 need() { command -v "$1" >/dev/null 2>&1 || { fail "missing required command: $1"; exit 1; }; }
+
+# Preflight host tools before any privileged operations.
 need docker
-# buildx is required: the legacy builder ignores --platform.
 $DOCKER buildx version >/dev/null 2>&1 || { fail "docker buildx is required (pacman -S docker-buildx)"; exit 1; }
+command -v mvn >/dev/null 2>&1 || { fail "mvn is required to build the distribution"; exit 1; }
+command -v javac >/dev/null 2>&1 || { fail "javac is required to compile the RocksDB smoke test"; exit 1; }
 
 # Register QEMU user-mode emulation for riscv64 if the Docker daemon can't
 # already run it (otherwise the build/run fails with 'exec format error').
 # binfmt handlers do NOT survive reboots, so a fresh checkout needs this —
-# makes the smoke test self-contained on any x86 host. Pinned tag: :latest
-# 403s on Docker Hub.
+# makes the smoke test self-contained on any x86 host.
+# TODO: Pin to a SHA256 digest for reproducibility (e.g. tonistiigi/binfmt@sha256:...).
 #
 # Probe through the Docker daemon, not the host /proc: Docker Desktop keeps
 # binfmt inside its Linux VM; a remote context can have the opposite state.
@@ -297,7 +310,8 @@ $DOCKER buildx build --platform "$PLATFORM" -t "$TAG" "$BUILD_CTX" --load
 # 3. Start the server in the background; trap handles cleanup.
 echo "==> Starting server container on ${PLATFORM}"
 $DOCKER run -d --name "$CONTAINER" --platform "$PLATFORM" \
-    -p 8080 --memory=4g -v "$VOL:/server" "$TAG"
+    --memory=4g --cap-drop ALL --security-opt no-new-privileges \
+    -v "$VOL:/server" "$TAG"
 
 # Wait until /graphs answers 200 (server auto-inits + starts via entrypoint).
 # This is the same readiness endpoint used by start-hugegraph.sh. /versions is
@@ -445,6 +459,10 @@ rest_get() {
         -H 'Accept: application/json' "$@")
     REST_CODE=${rsp##*$'\n'}
     REST_BODY=${rsp%$'\n'*}
+    [[ "$REST_CODE" == 2* ]] || {
+        fail "REST GET failed (HTTP $REST_CODE): ${REST_BODY:0:300}"
+        exit 1
+    }
 }
 
 # Assert a jq expression against the last REST_BODY.
@@ -468,6 +486,9 @@ BOB=$(rest_post "graph/vertices" '{"label":"person","properties":{"name":"bob"}}
 ALICE_ID=$(printf '%s\n' "$ALICE" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 BOB_ID=$(printf '%s\n' "$BOB" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 [[ -n "$ALICE_ID" && -n "$BOB_ID" ]] || { fail "REST vertex response did not contain IDs"; exit 1; }
+# Validate IDs are safe for JSON interpolation (no quotes/backslashes).
+[[ "$ALICE_ID" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { fail "ALICE_ID contains unsafe characters: $ALICE_ID"; exit 1; }
+[[ "$BOB_ID" =~ ^[a-zA-Z0-9_.:-]+$ ]] || { fail "BOB_ID contains unsafe characters: $BOB_ID"; exit 1; }
 rest_post "graph/edges" \
     "{\"label\":\"knows\",\"outV\":\"$ALICE_ID\",\"outVLabel\":\"person\",\"inV\":\"$BOB_ID\",\"inVLabel\":\"person\",\"properties\":{}}" >/dev/null
 
@@ -482,11 +503,15 @@ pass "HugeGraph: REST CRUD (vertex + edge created)"
 # 7. Gremlin query — proves the full TinkerPop/Gremlin stack runs on JDK 11.
 echo "==> Gremlin query"
 container_alive || { fail "container died before Gremlin query"; exit 1; }
-GREM=$($DOCKER exec "$CONTAINER" curl -s --compressed \
+GREM_RSP=$($DOCKER exec "$CONTAINER" curl -sS --compressed \
     --connect-timeout 10 --max-time 300 \
+    -w $'\n%{http_code}' \
     -X POST http://localhost:8182/ \
     -H 'Content-Type: application/json' \
     -d '{"gremlin":"g.V().hasLabel(\"person\").count()","language":"gremlin-groovy","aliases":{"g":"__g_DEFAULT-hugegraph"}}')
+GREM_CODE=${GREM_RSP##*$'\n'}
+GREM=${GREM_RSP%$'\n'*}
+[[ "$GREM_CODE" == 2* ]] || { fail "Gremlin query failed (HTTP $GREM_CODE): $GREM"; exit 1; }
 # Use jq to check the count — handles whitespace and type variations.
 echo "$GREM" | $DOCKER exec -i "$CONTAINER" jq -e '.result.data[0] == 2' >/dev/null 2>&1 \
     || { fail "Gremlin query did not return expected count (got: $GREM)"; exit 1; }
@@ -497,7 +522,6 @@ echo "==> Restart + persistence check"
 container_alive || { fail "container died before restart"; exit 1; }
 $DOCKER restart "$CONTAINER" >/dev/null
 wait_health || { fail "server not healthy after restart"; exit 1; }
-container_alive || { fail "container died after restart health check"; exit 1; }
 rest_get "http://localhost:8080/graphs/hugegraph/graph/vertices"
 assert_json '.vertices | length >= 2'
 # Verify both created vertices survived (by name, not just count).
