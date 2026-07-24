@@ -31,7 +31,7 @@
     <artifactId>hg-pd-cli</artifactId>
 
     <properties>
-        <jackson.version>2.15.2</jackson.version>
+        <jackson.version>2.18.9</jackson.version>
     </properties>
 
     <dependencies>
