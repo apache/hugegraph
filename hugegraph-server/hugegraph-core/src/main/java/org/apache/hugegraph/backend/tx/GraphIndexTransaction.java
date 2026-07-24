@@ -1565,13 +1565,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
         Set<Id> indexLabelIds = element.schemaLabel().indexLabels();
 
         for (Id id : indexLabelIds) {
-            try {
-                IndexLabel indexLabel = element.graph().indexLabel(id);
-                indexLabels.add(indexLabel);
-            } catch (IllegalArgumentException e) {
-                LOG.debug("Skip missing related index label '{}' of element {}",
-                          id, element.id(), e);
-            }
+            IndexLabel indexLabel = element.graph().indexLabel(id);
+            indexLabels.add(indexLabel);
         }
         return indexLabels;
     }
