@@ -30,7 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -59,7 +59,10 @@ import org.apache.hugegraph.store.meta.Store;
 import org.apache.hugegraph.store.meta.TaskManager;
 import org.apache.hugegraph.store.options.HgStoreEngineOptions;
 import org.apache.hugegraph.store.options.PartitionEngineOptions;
+import org.apache.hugegraph.store.partition.LeaseEpochValidator;
+import org.apache.hugegraph.store.partition.PartitionLeaseManager;
 import org.apache.hugegraph.store.raft.DefaultRaftClosure;
+import org.apache.hugegraph.store.raft.PartitionLeaseStateListener;
 import org.apache.hugegraph.store.raft.PartitionStateMachine;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
@@ -76,7 +79,6 @@ import com.alipay.sofa.jraft.Closure;
 import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.RaftGroupService;
-import com.alipay.sofa.jraft.ReplicatorGroup;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.DefaultJRaftServiceFactory;
@@ -91,7 +93,6 @@ import com.alipay.sofa.jraft.storage.LogStorage;
 import com.alipay.sofa.jraft.storage.impl.RocksDBLogStorage;
 import com.alipay.sofa.jraft.storage.log.RocksDBSegmentLogStorage;
 import com.alipay.sofa.jraft.util.Endpoint;
-import com.alipay.sofa.jraft.util.ThreadId;
 import com.alipay.sofa.jraft.util.Utils;
 import com.alipay.sofa.jraft.util.internal.ThrowUtil;
 import com.google.protobuf.CodedInputStream;
@@ -105,12 +106,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftStateListener {
 
-    private static final ThreadPoolExecutor raftLogWriteExecutor = null;
     public final String raftPrefix = "hg_";
 
     private final HgStoreEngine storeEngine;
     private final PartitionManager partitionManager;
-    private final List<PartitionStateListener> stateListeners;
+    private final List stateListeners;
     private final ShardGroup shardGroup;
     private final AtomicBoolean changingPeer;
     private final AtomicBoolean snapshotFlag;
@@ -124,6 +124,8 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
     private SnapshotHandler snapshotHandler;
     private Node raftNode;
     private volatile boolean started;
+    private PartitionLeaseManager partitionLeaseManager;
+    private final Map<String, RaftStateListener> partitionLeaseListeners;
 
     public PartitionEngine(HgStoreEngine storeEngine, ShardGroup shardGroup) {
         this.storeEngine = storeEngine;
@@ -131,7 +133,8 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         this.changingPeer = new AtomicBoolean(false);
         this.snapshotFlag = new AtomicBoolean(false);
         partitionManager = storeEngine.getPartitionManager();
-        stateListeners = Collections.synchronizedList(new ArrayList());
+        stateListeners = Collections.synchronizedList(new ArrayList<>());
+        partitionLeaseListeners = new ConcurrentHashMap<>();
     }
 
     /**
@@ -183,6 +186,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
 
         // Listen for changes in the group leader
         this.stateMachine.addStateListener(this);
+        initPartitionLeaseSupport();
 
         new File(options.getRaftDataPath()).mkdirs();
 
@@ -449,6 +453,11 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         if (!this.started) {
             return;
         }
+        if (this.partitionLeaseManager != null) {
+            this.partitionLeaseManager.shutdown();
+            this.partitionLeaseManager = null;
+        }
+        this.partitionLeaseListeners.clear();
         if (this.raftGroupService != null) {
             this.raftGroupService.shutdown();
             try {
@@ -604,6 +613,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
     @Override
     public void onLeaderStart(long newTerm) {
         log.info("Raft {} onLeaderStart newTerm is {}", getGroupId(), newTerm);
+        registerLeaseListenersForLocalPartitions();
         // Update shard group object
         shardGroup.changeLeader(partitionManager.getStore().getId());
 
@@ -616,10 +626,67 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
 
     @Override
     public void onStartFollowing(final PeerId newLeaderId, final long newTerm) {
+        registerLeaseListenersForLocalPartitions();
         onConfigurationCommitted(getCurrentConf());
         synchronized (leaderChangedEvent) {
             leaderChangedEvent.notifyAll();
         }
+    }
+
+    private void initPartitionLeaseSupport() {
+        HgStoreEngineOptions storeOptions = this.storeEngine.getOption();
+        if (storeOptions == null || !storeOptions.isPartitionLeaseEnabled()) {
+            return;
+        }
+        Store localStore = partitionManager.getStore();
+        if (localStore == null || localStore.getId() <= 0L) {
+            log.warn("Raft {} lease manager is enabled but local store id is unavailable", getGroupId());
+            return;
+        }
+        this.partitionLeaseManager = new PartitionLeaseManager(
+                this.storeEngine.getPdProvider(),
+                localStore.getId(),
+                true,
+                storeOptions.getPartitionLeaseTtlSeconds(),
+                storeOptions.getPartitionLeaseRenewIntervalSeconds());
+        LeaseEpochValidator leaseEpochValidator =
+                new LeaseEpochValidator(this.partitionLeaseManager);
+        registerLeaseListenersForLocalPartitions();
+        log.info("Raft {} lease manager initialized with ttl={}s renew={}s",
+                 getGroupId(),
+                 storeOptions.getPartitionLeaseTtlSeconds(),
+                 storeOptions.getPartitionLeaseRenewIntervalSeconds());
+    }
+
+    private void registerLeaseListenersForLocalPartitions() {
+        if (this.partitionLeaseManager == null || !this.partitionLeaseManager.isEnabled()) {
+            return;
+        }
+        List<Partition> partitions = partitionManager.getPartitionList(getGroupId());
+        for (Partition partition : partitions) {
+            if (partition == null) {
+                continue;
+            }
+            String graphName = partition.getGraphName();
+            int partitionId = partition.getId();
+            String listenerKey = graphName + "#" + partitionId;
+            partitionLeaseListeners.computeIfAbsent(listenerKey, key -> {
+                PartitionLeaseStateListener listener =
+                        new PartitionLeaseStateListener(graphName, partitionId,
+                                                        partitionLeaseManager);
+                stateMachine.addStateListener(listener);
+                return listener;
+            });
+        }
+    }
+
+    public boolean isLeaseManagerEnabled() {
+        return this.partitionLeaseManager != null && this.partitionLeaseManager.isEnabled();
+    }
+
+    public int getActivePartitionLeaseCount() {
+        return this.partitionLeaseManager != null ? this.partitionLeaseManager.getActiveLeaseCount() :
+               0;
     }
 
     /**

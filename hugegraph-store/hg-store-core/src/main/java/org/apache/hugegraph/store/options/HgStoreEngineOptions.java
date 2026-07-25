@@ -70,6 +70,12 @@ public class HgStoreEngineOptions {
     // Data Migration Service
     private DataManager dataTransfer;
     private JobOptions jobConfig;
+    // Enable PD partition lease-based write fencing for distributed rocksdb-cloud mode
+    private boolean partitionLeaseEnabled = false;
+    // Lease ttl in seconds when requesting ownership from PD
+    private int partitionLeaseTtlSeconds = 30;
+    // Lease renew interval in seconds
+    private int partitionLeaseRenewIntervalSeconds = 20;
 
     @Data
     public static class FakePdOptions {

@@ -400,6 +400,101 @@ public class RocksDBOptions extends OptionHolder {
     public static final String BLOCK_CACHE = "rocksdb.block_cache";
     public static final String WRITE_CACHE = "rocksdb.write_cache";
     public static final String ENV = "rocksdb.env";
+
+    // ── RocksDB cloud storage options ──────────────────────────────────────────
+    public static final ConfigOption<Boolean> CLOUD_ENABLED =
+            new ConfigOption<>(
+                    "rocksdb.cloud.enabled",
+                    "Enable cloud storage sync for this store node's RocksDB data. " +
+                    "When true, SST files are synced on a configurable schedule.",
+                    null,
+                    false
+            );
+
+    public static final ConfigOption<String> CLOUD_BUCKET_NAME =
+            new ConfigOption<>(
+                    "rocksdb.cloud.bucket_name",
+                    "Cloud storage bucket name for RocksDB cloud storage.",
+                    null,
+                    "hugegraph-rocksdb"
+            );
+
+    public static final ConfigOption<String> CLOUD_REGION =
+            new ConfigOption<>(
+                    "rocksdb.cloud.region",
+                    "Region of the cloud storage bucket.",
+                    null,
+                    "us-east-1"
+            );
+
+    public static final ConfigOption<String> CLOUD_OBJECT_PREFIX =
+            new ConfigOption<>(
+                    "rocksdb.cloud.object_prefix",
+                    "Object prefix for this store's RocksDB files. " +
+                    "Use a per-node prefix (e.g. 'store0/') to avoid collisions.",
+                    null,
+                    "store/"
+            );
+
+    public static final ConfigOption<String> CLOUD_AWS_ACCESS_KEY_ID =
+            new ConfigOption<>(
+                    "rocksdb.cloud.aws_access_key_id",
+                    "AWS access key ID. Leave empty to use IAM role or env credentials.",
+                    null,
+                    ""
+            );
+
+    public static final ConfigOption<String> CLOUD_AWS_SECRET_ACCESS_KEY =
+            new ConfigOption<>(
+                    "rocksdb.cloud.aws_secret_access_key",
+                    "AWS secret access key. Leave empty to use IAM role or env credentials.",
+                    null,
+                    ""
+            );
+
+    public static final ConfigOption<String> CLOUD_ENDPOINT =
+            new ConfigOption<>(
+                    "rocksdb.cloud.endpoint",
+                    "Custom S3-compatible endpoint URL. " +
+                    "Leave empty for standard AWS endpoints.",
+                    null,
+                    ""
+            );
+
+    public static final ConfigOption<Boolean> CLOUD_PATH_STYLE_ACCESS =
+            new ConfigOption<>(
+                    "rocksdb.cloud.path_style_access",
+                    "Use path-style access for S3-compatible providers.",
+                    null,
+                    false
+            );
+
+    public static final ConfigOption<Integer> CLOUD_SYNC_INTERVAL_SECONDS =
+            new ConfigOption<>(
+                    "rocksdb.cloud.sync_interval_seconds",
+                    "Periodic cloud storage sync interval in seconds. 0 = disabled.",
+                    null,
+                    60
+            );
+
+
+     public static final ConfigOption<Boolean> CLOUD_SYNC_INCREMENTAL =
+             new ConfigOption<>(
+                     "rocksdb.cloud.sync_incremental",
+                     "Only upload new/changed SST files (incremental sync). " +
+                     "Greatly reduces cloud storage API costs.",
+                     null,
+                     true
+             );
+
+     public static final ConfigOption<String> CLOUD_SYNC_MODE =
+             new ConfigOption<>(
+                     "rocksdb.cloud.sync_mode",
+                     "Cloud storage sync mode: 'async' (background) or 'sync' (cloud-first, inline on every write commit).",
+                     null,
+                     "async"
+             );
+
     private static volatile RocksDBOptions instance;
 
     private RocksDBOptions() {

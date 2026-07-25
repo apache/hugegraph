@@ -147,6 +147,7 @@ public class RegisterUtil {
 
             if (!VersionUtil.match(CoreVersion.VERSION, minVersion,
                                    maxVersion)) {
+                assert CoreVersion.VERSION != null;
                 LOG.warn("Skip loading plugin '{}' due to the version range " +
                          "'[{}, {})' that it's supported doesn't cover " +
                          "current core version '{}'", plugin.name(),

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -713,6 +714,30 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
             metrics.put(Integer.toString(k), v.getNodeMetrics());
         });
         return metrics;
+    }
+
+    public Map<String, Object> getPartitionLeaseMetrics() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("partitionLeaseEnabled", options != null && options.isPartitionLeaseEnabled());
+        result.put("raftGroupCount", partitionEngines.size());
+
+        int activeLeaseCount = 0;
+        int leaseEnabledGroups = 0;
+        Map<String, Integer> groups = new LinkedHashMap<>();
+        for (Map.Entry<Integer, PartitionEngine> entry : partitionEngines.entrySet()) {
+            PartitionEngine engine = entry.getValue();
+            int leases = engine.getActivePartitionLeaseCount();
+            activeLeaseCount += leases;
+            if (engine.isLeaseManagerEnabled()) {
+                leaseEnabledGroups++;
+            }
+            groups.put(Integer.toString(entry.getKey()), leases);
+        }
+
+        result.put("leaseEnabledGroups", leaseEnabledGroups);
+        result.put("activeLeaseCount", activeLeaseCount);
+        result.put("groups", groups);
+        return result;
     }
 
     /**

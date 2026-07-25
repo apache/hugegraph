@@ -240,6 +240,46 @@ public class FakePdServiceProvider implements PdProvider {
     }
 
     @Override
+    public Metapb.PartitionLease acquirePartitionLease(String graphName, int partitionId,
+                                                       long storeId,
+                                                       int leaseTtlSeconds) {
+        return Metapb.PartitionLease.newBuilder()
+                                    .setGraphName(graphName)
+                                    .setPartitionId(partitionId)
+                                    .setLeaseOwnerStoreId(storeId)
+                                    .setLeaseEpoch(1L)
+                                    .setLeaseExpireTimestamp(
+                                            System.currentTimeMillis() + leaseTtlSeconds * 1000L)
+                                    .build();
+    }
+
+    @Override
+    public Metapb.PartitionLease renewPartitionLease(String graphName, int partitionId,
+                                                     long storeId, long leaseEpoch,
+                                                     int leaseTtlSeconds) {
+        return Metapb.PartitionLease.newBuilder()
+                                    .setGraphName(graphName)
+                                    .setPartitionId(partitionId)
+                                    .setLeaseOwnerStoreId(storeId)
+                                    .setLeaseEpoch(leaseEpoch + 1)
+                                    .setLeaseExpireTimestamp(
+                                            System.currentTimeMillis() + leaseTtlSeconds * 1000L)
+                                    .build();
+    }
+
+    @Override
+    public void releasePartitionLease(String graphName, int partitionId, long storeId,
+                                      long leaseEpoch) {
+        // no-op for fake provider
+    }
+
+    @Override
+    public String resolvePartitionBucket(String graphName, int partitionId, long storeId,
+                                         long leaseEpoch) {
+        return "store-" + storeId;
+    }
+
+    @Override
     public PDClient getPDClient() {
         return null;
     }

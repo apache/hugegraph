@@ -193,13 +193,32 @@ public final class RocksDBFactory {
             RocksDBSession dbSession = dbSessionMap.get(dbName);
             if (dbSession == null) {
                 log.info("create rocksdb for {}", dbName);
-                dbSession = new RocksDBSession(this.hugeConfig, dbPath, dbName, version);
+                if (cloudEnabled(this.hugeConfig)) {
+                    dbSession = new RocksDBCloudSession(this.hugeConfig, dbPath, dbName, version);
+                } else {
+                    dbSession = new RocksDBSession(this.hugeConfig, dbPath, dbName, version);
+                }
                 dbSessionMap.put(dbName, dbSession);
             }
             return dbSession.clone();
         } finally {
             operateLock.writeLock().unlock();
         }
+    }
+
+    private static boolean cloudEnabled(HugeConfig config) {
+        if (config == null) {
+            return false;
+        }
+        if (config.containsKey("rocksdb.cloud_enabled")) {
+            return Boolean.parseBoolean(String.valueOf(
+                    config.getProperty("rocksdb.cloud_enabled")));
+        }
+        if (config.containsKey("rocksdb.cloud.enabled")) {
+            return Boolean.parseBoolean(String.valueOf(
+                    config.getProperty("rocksdb.cloud.enabled")));
+        }
+        return config.get(RocksDBOptions.CLOUD_ENABLED);
     }
 
     /**

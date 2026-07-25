@@ -67,6 +67,7 @@ import org.apache.hugegraph.rocksdb.access.RocksDBOptions;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 import org.apache.hugegraph.rocksdb.access.SessionOperator;
+import org.apache.hugegraph.rocksdb.access.cloud.RocksDBStoreCloudOptions;
 import org.apache.hugegraph.serializer.BinaryElementSerializer;
 import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.serializer.DirectBinarySerializer;
@@ -176,7 +177,10 @@ public class BusinessHandlerImpl implements BusinessHandler {
                                          RocksdbChangedListener listener) {
         // Register rocksdb configuration
         OptionSpace.register("rocksdb", "org.apache.hugegraph.rocksdb.access.RocksDBOptions");
+        OptionSpace.register("rocksdb-cloud-store",
+                             "org.apache.hugegraph.rocksdb.access.cloud.RocksDBStoreCloudOptions");
         RocksDBOptions.instance();
+        RocksDBStoreCloudOptions.instance();
         HugeConfig hConfig = new HugeConfig(rocksdbConfig);
         factory.setHugeConfig(hConfig);
         if (listener != null) {

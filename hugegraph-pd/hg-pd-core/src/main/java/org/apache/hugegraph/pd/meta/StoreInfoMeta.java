@@ -184,6 +184,57 @@ public class StoreInfoMeta extends MetadataRocksDBStore {
         return stats;
     }
 
+    public Metapb.PartitionLease getPartitionLease(String graphName,
+                                                   int partitionId) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionLeaseKey(graphName, partitionId);
+        return getOne(Metapb.PartitionLease.parser(), key);
+    }
+
+    public void updatePartitionLease(Metapb.PartitionLease lease) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionLeaseKey(lease.getGraphName(),
+                                                            lease.getPartitionId());
+        put(key, lease.toByteArray());
+    }
+
+    public void removePartitionLease(String graphName, int partitionId) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionLeaseKey(graphName, partitionId);
+        remove(key);
+    }
+
+    public List<Metapb.PartitionLease> getPartitionLeases() throws PDException {
+        byte[] prefix = MetadataKeyHelper.getPartitionLeasePrefix();
+        return scanPrefix(Metapb.PartitionLease.parser(), prefix);
+    }
+
+    public Metapb.PartitionCheckpoint getPartitionCheckpoint(String graphName,
+                                                             int partitionId) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionCheckpointKey(graphName, partitionId);
+        return getOne(Metapb.PartitionCheckpoint.parser(), key);
+    }
+
+    public void updatePartitionCheckpoint(Metapb.PartitionCheckpoint checkpoint) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionCheckpointKey(checkpoint.getGraphName(),
+                                                                 checkpoint.getPartitionId());
+        put(key, checkpoint.toByteArray());
+    }
+
+    public PartitionBucketRecord getPartitionBucketRecord(String graphName,
+                                                          int partitionId) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionBucketKey(graphName, partitionId);
+        return PartitionBucketRecord.fromBytes(getOne(key));
+    }
+
+    public void updatePartitionBucketRecord(PartitionBucketRecord record) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionBucketKey(record.getGraphName(),
+                                                             record.getPartitionId());
+        put(key, record.toBytes());
+    }
+
+    public void removePartitionBucketRecord(String graphName, int partitionId) throws PDException {
+        byte[] key = MetadataKeyHelper.getPartitionBucketKey(graphName, partitionId);
+        remove(key);
+    }
+
     /**
      * @return store and status information
      * @throws PDException

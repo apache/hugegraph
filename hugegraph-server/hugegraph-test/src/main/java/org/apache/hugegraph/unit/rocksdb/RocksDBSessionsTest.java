@@ -19,6 +19,8 @@ package org.apache.hugegraph.unit.rocksdb;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBMetrics;
@@ -91,7 +93,7 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
     }
 
     @Test
-    public void testCompactRange() throws RocksDBException {
+    public void testCompactRange() {
         this.rocks.session().put(TABLE, getBytes("person:1gname"), getBytes("James"));
         this.rocks.session().put(TABLE, getBytes("person:2gname"), getBytes("James2"));
         this.commit();
@@ -106,7 +108,22 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
     }
 
     @Test
-    public void testSnapshot() throws RocksDBException, IOException {
+    public void testFlushAll() throws RocksDBException {
+        this.rocks.session().put(TABLE, getBytes("person:1gname"), getBytes("James"));
+        this.rocks.session().put(TABLE, getBytes("person:2gname"), getBytes("James2"));
+        this.commit();
+
+        Assert.assertTrue(this.rocks instanceof RocksDBStdSessions);
+        ((RocksDBStdSessions) this.rocks).flushAll();
+
+        String value = getString(this.rocks.session().get(TABLE, getBytes("person:1gname")));
+        Assert.assertEquals("James", value);
+        value = getString(this.rocks.session().get(TABLE, getBytes("person:2gname")));
+        Assert.assertEquals("James2", value);
+    }
+
+    @Test
+    public void testSnapshot() throws IOException {
         this.rocks.session().put(TABLE, getBytes("person:1gname"), getBytes("James"));
         this.rocks.session().commit();
 
@@ -155,6 +172,32 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
         copy.close();
         Assert.assertTrue(copy.closed());
         Assert.assertFalse(this.rocks.closed());
+    }
+
+    @Test
+    public void testCopySessionsRefCount() throws Exception {
+        Assert.assertTrue(this.rocks instanceof RocksDBStdSessions);
+        RocksDBStdSessions origin = (RocksDBStdSessions) this.rocks;
+        AtomicInteger refCount = refCount(origin);
+        int refsBeforeCopy = refCount.get();
+
+        RocksDBSessions copy = origin.copy(FakeObjects.newConfig(), "db3", "store3");
+        try {
+            Assert.assertTrue(copy instanceof RocksDBStdSessions);
+            Assert.assertNotEquals(origin, copy);
+            copy.session();
+            Assert.assertEquals(refsBeforeCopy + 1, refCount.get());
+        } finally {
+            copy.close();
+        }
+
+        Assert.assertEquals(refsBeforeCopy, refCount.get());
+    }
+
+    private static AtomicInteger refCount(RocksDBStdSessions sessions) throws Exception {
+        Field field = RocksDBStdSessions.class.getDeclaredField("refCount");
+        field.setAccessible(true);
+        return (AtomicInteger) field.get(sessions);
     }
 
     @Test

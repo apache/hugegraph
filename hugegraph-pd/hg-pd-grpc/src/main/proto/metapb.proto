@@ -409,3 +409,32 @@ message BuildIndexParam {
     bool label_index = 13; // rebuild all index
   }
 }
+
+// Storage mode for a graph/partition data plane.
+enum CloudStorageMode {
+  CloudStorageMode_Unknown = 0;
+  // Existing local-disk backed store behavior.
+  CloudStorageMode_LocalOnly = 1;
+  // PD-coordinated distributed mode with cloud checkpointing.
+  CloudStorageMode_CloudDistributed = 2;
+}
+
+// Lease metadata for a partition leader used to fence stale writers.
+message PartitionLease {
+  string graph_name = 1;
+  uint32 partition_id = 2;
+  uint64 lease_owner_store_id = 3;
+  uint64 lease_epoch = 4;
+  uint64 lease_expire_timestamp = 5;
+}
+
+// Pointer to a committed cloud checkpoint manifest for a partition.
+message PartitionCheckpoint {
+  string graph_name = 1;
+  uint32 partition_id = 2;
+  uint64 checkpoint_epoch = 3;
+  string manifest_key = 4;
+  uint64 checkpoint_timestamp = 5;
+  string manifest_etag = 6;
+}
+

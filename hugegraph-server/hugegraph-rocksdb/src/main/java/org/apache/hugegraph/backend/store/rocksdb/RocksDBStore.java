@@ -776,11 +776,11 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         }
     }
 
-    private final Collection<RocksDBSessions> sessions() {
+    private Collection<RocksDBSessions> sessions() {
         return this.dbs.values();
     }
 
-    private final List<RocksDBSessions.Session> session() {
+    private List<RocksDBSessions.Session> session() {
         this.checkDbOpened();
 
         // Collect session of standard disk

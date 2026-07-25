@@ -41,6 +41,16 @@ service PD {
   rpc GetPartitionByCode(GetPartitionByCodeRequest) returns (GetPartitionResponse) {}
   // Return partition by PartitionID
   rpc GetPartitionByID(GetPartitionByIDRequest) returns (GetPartitionResponse) {}
+  // Acquire leader lease for partition write fencing (cloud-distributed mode)
+  rpc AcquirePartitionLease(AcquirePartitionLeaseRequest) returns (AcquirePartitionLeaseResponse) {}
+  // Renew a previously acquired partition lease
+  rpc RenewPartitionLease(RenewPartitionLeaseRequest) returns (RenewPartitionLeaseResponse) {}
+  // Release an owned partition lease
+  rpc ReleasePartitionLease(ReleasePartitionLeaseRequest) returns (ReleasePartitionLeaseResponse) {}
+  // Get latest committed checkpoint manifest pointer for partition restore
+  rpc GetPartitionCheckpoint(GetPartitionCheckpointRequest) returns (GetPartitionCheckpointResponse) {}
+  // Publish new committed checkpoint manifest pointer
+  rpc UpdatePartitionCheckpoint(UpdatePartitionCheckpointRequest) returns (UpdatePartitionCheckpointResponse) {}
   rpc ScanPartitions(ScanPartitionsRequest) returns (ScanPartitionsResponse) {}
   // Update partition information, mainly used to update partition key range, call this interface carefully, otherwise data loss will occur.
   rpc UpdatePartition(UpdatePartitionRequest) returns (UpdatePartitionResponse) {}
@@ -164,6 +174,12 @@ enum ErrorType {
 
   // Invalid number of splits
   Invalid_Split_Partition_Count = 1011;
+  // Partition lease is held by another store or request epoch is stale.
+  LEASE_CONFLICT = 1012;
+  // Partition lease not found.
+  LEASE_NOT_FOUND = 1013;
+  // Partition checkpoint manifest not found.
+  CHECKPOINT_NOT_FOUND = 1014;
 }
 
 message Error {
@@ -262,6 +278,68 @@ message GetPartitionResponse {
   metapb.Shard leader = 3;
   // Offline Shards
   repeated metapb.Shard offline_shards = 4;
+}
+
+message AcquirePartitionLeaseRequest {
+  RequestHeader header = 1;
+  string graph_name = 2;
+  uint32 partition_id = 3;
+  uint64 store_id = 4;
+  uint32 lease_ttl_seconds = 5;
+}
+
+message AcquirePartitionLeaseResponse {
+  ResponseHeader header = 1;
+  metapb.PartitionLease lease = 2;
+}
+
+message RenewPartitionLeaseRequest {
+  RequestHeader header = 1;
+  string graph_name = 2;
+  uint32 partition_id = 3;
+  uint64 store_id = 4;
+  uint64 lease_epoch = 5;
+  uint32 lease_ttl_seconds = 6;
+}
+
+message RenewPartitionLeaseResponse {
+  ResponseHeader header = 1;
+  metapb.PartitionLease lease = 2;
+}
+
+message ReleasePartitionLeaseRequest {
+  RequestHeader header = 1;
+  string graph_name = 2;
+  uint32 partition_id = 3;
+  uint64 store_id = 4;
+  uint64 lease_epoch = 5;
+}
+
+message ReleasePartitionLeaseResponse {
+  ResponseHeader header = 1;
+}
+
+message GetPartitionCheckpointRequest {
+  RequestHeader header = 1;
+  string graph_name = 2;
+  uint32 partition_id = 3;
+}
+
+message GetPartitionCheckpointResponse {
+  ResponseHeader header = 1;
+  metapb.PartitionCheckpoint checkpoint = 2;
+}
+
+message UpdatePartitionCheckpointRequest {
+  RequestHeader header = 1;
+  metapb.PartitionCheckpoint checkpoint = 2;
+  uint64 store_id = 3;
+  uint64 lease_epoch = 4;
+}
+
+message UpdatePartitionCheckpointResponse {
+  ResponseHeader header = 1;
+  metapb.PartitionCheckpoint checkpoint = 2;
 }
 
 message GetPartitionByIDRequest {

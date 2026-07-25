@@ -19,6 +19,9 @@ package org.apache.hugegraph.store.pd;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.pd.client.PDClient;
@@ -65,6 +68,11 @@ public class DefaultPdProvider implements PdProvider {
     private PDPulse.Notifier<PartitionHeartbeatRequest.Builder> pdPulse;
     private Processors processors;
     private GraphManager graphManager = null;
+    private final Map<String, Long> partitionLeaseEpochs = new ConcurrentHashMap<>();
+    private final Map<String, String> partitionBuckets = new ConcurrentHashMap<>();
+
+    // Placeholder until PD bucket-resolution RPC is exposed to clients.
+    private static final String PER_STORE_BUCKET_PREFIX = "store-";
 
     public static String name = "store";
     public static String authority = "default";
@@ -377,6 +385,61 @@ public class DefaultPdProvider implements PdProvider {
     }
 
     @Override
+    public Metapb.PartitionLease acquirePartitionLease(String graphName, int partitionId,
+                                                       long storeId,
+                                                       int leaseTtlSeconds) throws PDException {
+        Metapb.PartitionLease lease =
+                pdClient.acquirePartitionLease(graphName, partitionId, storeId, leaseTtlSeconds);
+        String key = partitionCacheKey(graphName, partitionId);
+        partitionLeaseEpochs.put(key, lease.getLeaseEpoch());
+        // New owner/epoch should resolve a fresh bucket binding.
+        partitionBuckets.remove(key);
+        return lease;
+    }
+
+    @Override
+    public Metapb.PartitionLease renewPartitionLease(String graphName, int partitionId,
+                                                     long storeId, long leaseEpoch,
+                                                     int leaseTtlSeconds) throws PDException {
+        Metapb.PartitionLease lease = pdClient.renewPartitionLease(graphName, partitionId, storeId,
+                                                                    leaseEpoch,
+                                                                    leaseTtlSeconds);
+        partitionLeaseEpochs.put(partitionCacheKey(graphName, partitionId), lease.getLeaseEpoch());
+        return lease;
+    }
+
+    @Override
+    public void releasePartitionLease(String graphName, int partitionId, long storeId,
+                                      long leaseEpoch) throws PDException {
+        pdClient.releasePartitionLease(graphName, partitionId, storeId, leaseEpoch);
+        clearPartitionLeaseCache(graphName, partitionId, leaseEpoch);
+    }
+
+    @Override
+    public String resolvePartitionBucket(String graphName, int partitionId, long storeId,
+                                         long leaseEpoch) {
+        String key = partitionCacheKey(graphName, partitionId);
+        Long currentEpoch = partitionLeaseEpochs.get(key);
+        if (currentEpoch == null || currentEpoch.longValue() != leaseEpoch) {
+            return null;
+        }
+        String bucket = partitionBuckets.computeIfAbsent(key,
+                                                         k -> PER_STORE_BUCKET_PREFIX + storeId);
+        updatePartitionBucket(graphName, partitionId, leaseEpoch, bucket);
+        return bucket;
+    }
+
+    public void updatePartitionBucket(String graphName, int partitionId, long leaseEpoch,
+                                      String bucket) {
+        String key = partitionCacheKey(graphName, partitionId);
+        Long currentEpoch = partitionLeaseEpochs.get(key);
+        if (currentEpoch != null && currentEpoch.longValue() == leaseEpoch && bucket != null &&
+            !bucket.isEmpty()) {
+            partitionBuckets.put(key, bucket);
+        }
+    }
+
+    @Override
     public PDClient getPDClient() {
         return this.pdClient;
     }
@@ -482,5 +545,18 @@ public class DefaultPdProvider implements PdProvider {
     @Override
     public void resetPulseClient() {
         pulseClient.resetStub(pdClient.getLeaderIp(), pdPulse);
+    }
+
+    private String partitionCacheKey(String graphName, int partitionId) {
+        return graphName + "#" + partitionId;
+    }
+
+    private void clearPartitionLeaseCache(String graphName, int partitionId, long leaseEpoch) {
+        String key = partitionCacheKey(graphName, partitionId);
+        Long currentEpoch = partitionLeaseEpochs.get(key);
+        if (Objects.equals(currentEpoch, leaseEpoch)) {
+            partitionLeaseEpochs.remove(key);
+            partitionBuckets.remove(key);
+        }
     }
 }
