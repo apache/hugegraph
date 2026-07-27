@@ -40,7 +40,7 @@
         <lucene.version>8.11.2</lucene.version>
         <jieba-analysis.version>1.0.2</jieba-analysis.version>
         <ikanalyzer.version>2012_u6</ikanalyzer.version>
-        <commons-compress.version>1.21</commons-compress.version>
+        <commons-compress.version>1.26.0</commons-compress.version>
         <eclipse-collections.version>11.1.0</eclipse-collections.version>
         <fastutil.version>8.5.9</fastutil.version>
         <jjwt.version>0.11.5</jjwt.version>
