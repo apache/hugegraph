@@ -4792,6 +4792,38 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByRepeatedRangePredicates() {
+        HugeGraph graph = graph();
+        SchemaManager schema = graph.schema();
+
+        schema.indexLabel("transferByTimestamp").onE("transfer").range()
+              .by("timestamp").create();
+
+        Vertex source = graph.addVertex(T.label, "person", "name", "source",
+                                        "city", "Beijing", "age", 20);
+        Vertex target = graph.addVertex(T.label, "person", "name", "target",
+                                        "city", "Beijing", "age", 21);
+        source.addEdge("transfer", target, "id", 1, "amount", 1.0F,
+                       "timestamp", -4L, "message", "test");
+        graph.tx().commit();
+
+        List<Edge> edges = graph.traversal().E()
+                                .has("timestamp", -4L)
+                                .has("timestamp", P.lte(4L)).toList();
+        Assert.assertEquals(1, edges.size());
+
+        long count = graph.traversal().E()
+                          .has("timestamp", -4L)
+                          .has("timestamp", P.lte(4L)).count().next();
+        Assert.assertEquals(1L, count);
+
+        count = graph.traversal().E()
+                     .has("timestamp", P.lte(4L))
+                     .has("timestamp", -4L).count().next();
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
     public void testQueryByNegativeFloatProperty() {
         HugeGraph graph = graph();
         SchemaManager schema = graph.schema();
