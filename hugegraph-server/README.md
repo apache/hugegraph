@@ -8,7 +8,26 @@ HugeGraph Server consists of two layers of functionality: the graph engine layer
   - Backend Interface: Implements the storage of graph data to the backend.
 
 - Storage Layer:
-  - Storage Backend: Supports multiple built-in storage backends (RocksDB/Memory/HStore/HBase/...) and allows users to extend custom backends without modifying the existing source code.
+  - Storage Backend: Includes RocksDB (default, embedded), HStore (distributed), HBase (deprecated and planned for removal in 2.0), and the test-only Memory backend. Users can extend custom backends without modifying the existing source code.
+
+## Backend Evolution and Compatibility
+
+The current mainline does not include implementations for the historical backends. The following timeline distinguishes current support from legacy compatibility guidance:
+
+```text
+┌─────────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
+│           1.0           │     │           1.5           │     │           2.x           │
+│     Historical era      │     │ Compatibility boundary  │     │     Future roadmap      │
+│                         │     │            ↓            │     │                         │
+│    MySQL · PostgreSQL   │────▶│    1.7–2.0 mainline     │────▶│    RocksDB · HStore     │
+│   Cassandra · ScyllaDB  │     │    RocksDB · HStore     │     │                         │
+│       Palo · HBase      │     │    HBase: deprecated    │     │    (HBase: removed)     │
+└─────────────────────────┘     └─────────────────────────┘     └─────────────────────────┘
+```
+
+Memory remains a test-only backend throughout. Historical backend users must operate and
+maintain a compatible release; these implementations are not restored to the current source
+tree or distribution packages.
 
 ## Docker
 
@@ -30,3 +49,8 @@ HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml 
 ```
 
 See [docker/README.md](../docker/README.md) for the full setup guide.
+
+## RISC-V Development and Testing
+
+The [RISC-V Server CI](../.github/workflows/riscv64-ci.yml) validates a RocksDB-only Server build and runtime smoke test on 64-bit Linux RISC-V through QEMU. It is a correctness check,
+not a performance benchmark. (other backends & non-64-bit Linux RISC-V environments are out of scope)

@@ -53,7 +53,6 @@ import org.apache.hugegraph.store.HgStoreSession;
 import org.apache.hugegraph.store.client.grpc.KvCloseableIterator;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.grpc.common.ScanOrderType;
-import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
@@ -128,8 +127,9 @@ public class HstoreSessionsImpl extends HstoreSessions {
             synchronized (infoInitializedGraph) {
                 if (!infoInitializedGraph.contains(this.graphName)) {
                     Integer partitionCount = this.config.get(HstoreOptions.PARTITION_COUNT);
-                    Assert.assertTrue("The value of hstore.partition_count" +
-                                      " cannot be less than 0.", partitionCount > -1);
+                    E.checkArgument(partitionCount > -1,
+                                    "The value of hstore.partition_count " +
+                                    "cannot be less than 0.");
                     defaultPdClient.setGraph(Metapb.Graph.newBuilder()
                                                          .setGraphName(this.graphName)
                                                          .setPartitionCount(partitionCount)

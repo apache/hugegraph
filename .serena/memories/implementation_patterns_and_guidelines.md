@@ -4,8 +4,7 @@
 - Backends implement `BackendStore` interface from `hugegraph-core`
 - Each backend = separate Maven module under `hugegraph-server/`
 - Configured via `hugegraph.properties` → `backend` property
-- **Active backends (focus here)**: RocksDB (default/embedded), HStore (distributed)
-- **Legacy backends** (deprecated, excluded from Serena context): MySQL, PostgreSQL, Cassandra, ScyllaDB, HBase, Palo
+- **Supported backends**: RocksDB (default/embedded), HStore (distributed), HBase (deprecated; planned for removal in 2.0)
 
 ## GraphSpace Multi-Tenancy
 - Core: `hugegraph-core/.../space/` (GraphSpace, SchemaTemplate, Service, register/)

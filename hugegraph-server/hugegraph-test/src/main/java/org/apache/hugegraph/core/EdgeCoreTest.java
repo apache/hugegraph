@@ -499,27 +499,7 @@ public class EdgeCoreTest extends BaseCoreTest {
         });
 
         String backend = graph.backend();
-        if (backend.equals("postgresql")) {
-            Assert.assertThrows(BackendException.class, () -> {
-                james.addEdge("write", book, "time", "2017-5-27\u0000");
-                graph.tx().commit();
-            }, e -> {
-                // pgsql need to clear and reset state (like auto-commit)
-                graph.tx().rollback();
-                Assert.assertContains("invalid byte sequence for encoding " +
-                                      "\"UTF8\": 0x00",
-                                      e.getCause().getMessage());
-            });
-
-            Assert.assertThrows(BackendException.class, () -> {
-                graph.traversal().V(james.id())
-                     .outE("write").has("time", "2017-5-27\u0000")
-                     .toList();
-            }, e -> {
-                Assert.assertContains("Zero bytes may not occur in string " +
-                                      "parameters", e.getCause().getMessage());
-            });
-        } else if (ImmutableSet.of("rocksdb", "hbase", "hstore").contains(backend)) {
+        if (ImmutableSet.of("rocksdb", "hbase", "hstore").contains(backend)) {
             Assert.assertThrows(IllegalArgumentException.class, () -> {
                 james.addEdge("write", book, "time", "2017-5-27\u0000");
                 graph.tx().commit();
@@ -2930,9 +2910,6 @@ public class EdgeCoreTest extends BaseCoreTest {
         Assert.assertEquals(3, edges.get(0).value("score"));
         Assert.assertEquals(3, edges.get(1).value("score"));
 
-        // TODO: Seems Cassandra Bug if contains null value #862
-        //edges = graph.traversal().E().hasValue(3).toList();
-        //Assert.assertEquals(3, edges.size());
     }
 
     @Test
@@ -5265,14 +5242,9 @@ public class EdgeCoreTest extends BaseCoreTest {
         ConditionQuery query = new ConditionQuery(HugeType.EDGE);
 
         String backend = graph.backend();
-        if (backend.equals("cassandra") || backend.equals("scylladb")) {
-            query.scan(String.valueOf(Long.MIN_VALUE),
-                       String.valueOf(Long.MAX_VALUE));
-        } else {
-            // QUESTION: The query method may not be well adapted
-            query.scan(BackendTable.ShardSplitter.START,
-                       BackendTable.ShardSplitter.END);
-        }
+        // QUESTION: The query method may not be well adapted
+        query.scan(BackendTable.ShardSplitter.START,
+                   BackendTable.ShardSplitter.END);
 
         query.limit(1);
         String page = PageInfo.PAGE_NONE;
@@ -5896,8 +5868,7 @@ public class EdgeCoreTest extends BaseCoreTest {
         Assert.assertEquals(3, edges.get(0).value("id"));
 
         String backend = graph.backend();
-        Set<String> nonZeroBackends = ImmutableSet.of("postgresql",
-                                                      "rocksdb", "hbase", "hstore");
+        Set<String> nonZeroBackends = ImmutableSet.of("rocksdb", "hbase", "hstore");
         if (nonZeroBackends.contains(backend)) {
             Assert.assertThrows(Exception.class, () -> {
                 louise.addEdge("strike", sean, "id", 4,

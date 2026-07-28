@@ -18,12 +18,10 @@
 package org.apache.hugegraph.cmd;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import org.apache.commons.collections.map.MultiValueMap;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.StandardAuthenticator;
@@ -43,22 +41,6 @@ import org.slf4j.Logger;
 public class InitStore {
 
     private static final Logger LOG = Log.logger(InitStore.class);
-
-    // 6~8 retries may be needed under high load for Cassandra backend
-    private static final int RETRIES = 10;
-    // Less than 5000 may cause mismatch exception with Cassandra backend
-    private static final long RETRY_INTERVAL = 5000;
-
-    private static final MultiValueMap EXCEPTIONS = new MultiValueMap();
-
-    static {
-        EXCEPTIONS.put("OperationTimedOutException",
-                       "Timed out waiting for server response");
-        EXCEPTIONS.put("NoHostAvailableException",
-                       "All host(s) tried for query failed");
-        EXCEPTIONS.put("InvalidQueryException", "does not exist");
-        EXCEPTIONS.put("InvalidQueryException", "unconfigured table");
-    }
 
     public static void main(String[] args) throws Exception {
         E.checkArgument(args.length == 1,
@@ -129,33 +111,8 @@ public class InitStore {
         return graph;
     }
 
-    private static void initBackend(final HugeGraph graph)
-            throws InterruptedException {
-        int retries = RETRIES;
-        retry:
-        do {
-            try {
-                graph.initBackend();
-            } catch (Exception e) {
-                String clz = e.getClass().getSimpleName();
-                String message = e.getMessage();
-                if (EXCEPTIONS.containsKey(clz) && retries > 0) {
-                    @SuppressWarnings("unchecked")
-                    Collection<String> keywords = EXCEPTIONS.getCollection(clz);
-                    for (String keyword : keywords) {
-                        if (message.contains(keyword)) {
-                            LOG.info("Init failed with exception '{} : {}', " +
-                                     "retry  {}...",
-                                     clz, message, RETRIES - retries + 1);
-
-                            Thread.sleep(RETRY_INTERVAL);
-                            continue retry;
-                        }
-                    }
-                }
-                throw e;
-            }
-            break;
-        } while (retries-- > 0);
+    private static void initBackend(final HugeGraph graph) {
+        // Only explicitly transient backend failures can be retried safely
+        graph.initBackend();
     }
 }

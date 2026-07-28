@@ -62,7 +62,7 @@ public class CoreOptions extends OptionHolder {
     public static final ConfigOption<String> STORE =
             new ConfigOption<>(
                     "store",
-                    "The database name like Cassandra Keyspace.",
+                    "The backend database namespace.",
                     disallowEmpty(),
                     "hugegraph"
             );
@@ -76,7 +76,7 @@ public class CoreOptions extends OptionHolder {
     public static final ConfigOption<String> SERIALIZER =
             new ConfigOption<>(
                     "serializer",
-                    "The serializer for backend store, like: text/binary/cassandra.",
+                    "The serializer for backend store, like: text/binary.",
                     disallowEmpty(),
                     "text"
             );

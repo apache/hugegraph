@@ -131,8 +131,8 @@ public abstract class Condition {
         SCAN("scan", (v1, v2) -> {
             assert v2 != null;
             /*
-             * TODO: we still have no way to determine accurately, since
-             *       some backends may scan with token(column) like cassandra.
+             * TODO: we still have no way to determine accurately for all
+             *       backend scan implementations.
              */
             return true;
         });

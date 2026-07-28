@@ -2275,8 +2275,7 @@ public class GraphTransaction extends IndexableTransaction {
                 while (iter.hasNext()) {
                     consumer.accept(iter.next());
                     /*
-                     * Commit per batch to avoid too much data in a single commit,
-                     * especially for Cassandra backend
+                     * Commit per batch to avoid too much data in a single commit.
                      */
                     this.commitIfGtSize(GraphTransaction.COMMIT_BATCH);
                 }
@@ -2301,7 +2300,7 @@ public class GraphTransaction extends IndexableTransaction {
                             consumer.accept(e);
                             /*
                              * Commit per batch to avoid too much data in a single
-                             * commit, especially for Cassandra backend
+                             * commit.
                              */
                             this.commitIfGtSize(GraphTransaction.COMMIT_BATCH);
                         }

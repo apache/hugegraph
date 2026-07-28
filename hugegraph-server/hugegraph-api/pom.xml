@@ -70,7 +70,7 @@
                     <groupId>com.alipay.sofa</groupId>
                     <artifactId>hessian</artifactId>
                 </exclusion>
-                <!-- conflict with cassandra-netty/tinkerpop-server  -->
+                <!-- avoid netty version conflicts with tinkerpop-server -->
                 <exclusion>
                     <groupId>io.netty</groupId>
                     <artifactId>netty-all</artifactId>

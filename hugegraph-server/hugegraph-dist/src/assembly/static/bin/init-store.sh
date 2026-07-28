@@ -33,6 +33,7 @@ PLUGINS="$TOP/plugins"
 
 . "${BIN}"/util.sh
 
+configure_riscv64_libatomic || exit 1
 ensure_path_writable "${PLUGINS}"
 
 if [[ -n "$JAVA_HOME" ]]; then

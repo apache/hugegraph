@@ -203,3 +203,8 @@ jobs:
           if [ -f "$SERVER_DIR/bin/pid" ]; then
             $TRAVIS_DIR/stop-server.sh $SERVER_DIR || true
           fi
+
+  build-server-riscv64:
+    uses: ./.github/workflows/riscv64-ci.yml
+    permissions:
+      contents: read

@@ -25,6 +25,45 @@ function command_available() {
     fi
 }
 
+function configure_riscv64_libatomic() {
+    if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "riscv64" ]]; then
+        return 0
+    fi
+
+    if [[ "${LD_PRELOAD:-}" == *"libatomic.so.1"* ]]; then
+        return 0
+    fi
+
+    local libatomic=""
+    if command_available "ldconfig"; then
+        libatomic=$(ldconfig -p 2>/dev/null | \
+                    awk '/libatomic\.so\.1 .*=>/ && !path {path=$NF}
+                         END {if (path) print path}')
+    fi
+
+    if [[ -z "$libatomic" ]]; then
+        local candidate
+        for candidate in /lib/riscv64-linux-gnu/libatomic.so.1 \
+                         /usr/lib/riscv64-linux-gnu/libatomic.so.1 \
+                         /lib64/lp64d/libatomic.so.1 \
+                         /usr/lib64/lp64d/libatomic.so.1 \
+                         /lib64/libatomic.so.1 \
+                         /usr/lib64/libatomic.so.1; do
+            if [[ -r "$candidate" ]]; then
+                libatomic="$candidate"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "$libatomic" ]]; then
+        echo "RISC-V RocksDB requires libatomic.so.1; install libatomic1" >&2
+        return 1
+    fi
+
+    export LD_PRELOAD="${LD_PRELOAD:+${LD_PRELOAD}:}${libatomic}"
+}
+
 # read a property from .properties file
 function read_property() {
     # file path

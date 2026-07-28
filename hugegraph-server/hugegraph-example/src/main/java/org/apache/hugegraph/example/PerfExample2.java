@@ -22,14 +22,11 @@ import java.util.List;
 import java.util.Random;
 
 import org.apache.hugegraph.HugeFactory;
-import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.slf4j.Logger;
-
-import com.datastax.driver.core.exceptions.NoHostAvailableException;
 
 /**
  * Perf test for: vertex without properties
@@ -108,15 +105,7 @@ public class PerfExample2 extends PerfExampleBase {
                 graph.getVertex(p3).addEdge("created", graph.getVertex(s1));
             }
 
-            try {
-                graph.tx().commit();
-            } catch (BackendException e) {
-                if (e.getCause() instanceof NoHostAvailableException) {
-                    LOG.warn("Failed to commit tx: {}", e.getMessage());
-                } else {
-                    throw e;
-                }
-            }
+            graph.tx().commit();
 
             this.vertices.addAll(personIds);
             this.vertices.addAll(softwareIds);

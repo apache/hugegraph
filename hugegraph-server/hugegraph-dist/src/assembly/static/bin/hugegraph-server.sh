@@ -45,6 +45,8 @@ GITHUB="https://github.com"
 export HUGEGRAPH_HOME="$TOP"
 . "${BIN}"/util.sh
 
+configure_riscv64_libatomic || exit 1
+
 # Parse the server arguments in array way
 SERVER_ARGS=("$@")
 GREMLIN_SERVER_CONF="${SERVER_ARGS[0]:-}"
