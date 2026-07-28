@@ -307,13 +307,5 @@
                 </plugins>
             </build>
         </profile>
-
-        <!-- Build the S3 cloud-storage plugin:  mvn install -P cloud-s3 -DskipTests -->
-        <profile>
-            <id>cloud-s3</id>
-            <modules>
-                <module>hg-store-cloud-s3</module>
-            </modules>
-        </profile>
     </profiles>
 </project>

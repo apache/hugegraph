@@ -793,8 +793,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                 // best-effort cleanup of a partial checkpoint
             }
             log.error("Fail to create metadata checkpoint at {}", tempDir, e);
-            throw new DBStoreException(
-                    String.format("Fail to create metadata checkpoint at %s", tempDir));
+            throw new DBStoreException("Fail to create metadata checkpoint at %s", e, tempDir);
         } finally {
             cfHandleLock.readLock().unlock();
         }

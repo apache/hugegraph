@@ -207,15 +207,23 @@ public class SessionOperatorImpl implements SessionOperator {
 
     @Override
     public byte[] get(String table, byte[] key) throws DBStoreException {
+        byte[] value;
         try (CFHandleLock cf = this.getLock(table)) {
-            byte[] value = rocksdb().get(cf.get(), key);
+            value = rocksdb().get(cf.get(), key);
             if (value != null) {
                 return value;
             }
-            if (RocksDBFactory.getInstance().onReadMiss(this.session, table, key)) {
-                return rocksdb().get(cf.get(), key);
-            }
+        } catch (RocksDBException e) {
+            throw new DBStoreException(e);
+        }
+
+        // Cloud hydration can perform slow I/O, so run it after releasing the CF handle lock.
+        if (!RocksDBFactory.getInstance().onReadMiss(this.session, table, key)) {
             return null;
+        }
+
+        try (CFHandleLock cf = this.getLock(table)) {
+            return rocksdb().get(cf.get(), key);
         } catch (RocksDBException e) {
             throw new DBStoreException(e);
         }

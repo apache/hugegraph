@@ -485,14 +485,13 @@ public class CloudStorageProviderFactoryTest {
                      registry().isEmpty());
       }
 
-      @SuppressWarnings("DataFlowIssue")
       @Test
-      public void testInitializeWithNullConfigThrowsException() {
+      public void testInitializeWithNullConfigThrowsIllegalArgumentException() {
           try {
               CloudStorageProviderFactory.initialize(null);
-              fail("Should have thrown exception");
-          } catch (Exception e) {
-              // Expected - null config should cause an error
+              fail("Should have thrown IllegalArgumentException");
+          } catch (IllegalArgumentException e) {
+              assertEquals("cloud storage config must not be null", e.getMessage());
           }
       }
 

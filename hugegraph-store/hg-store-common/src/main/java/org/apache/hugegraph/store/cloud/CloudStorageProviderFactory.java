@@ -80,10 +80,15 @@ public final class CloudStorageProviderFactory {
      * @param config cloud storage configuration
      * @return the initialized provider, or {@code null} when
      *         {@link CloudStorageConfig#isEnabled()} is {@code false}
-     * @throws IllegalArgumentException if no provider matching {@code config.getProvider()}
+     * @throws IllegalArgumentException if {@code config} is {@code null}, or if no provider
+     *                                  matching {@code config.getProvider()}
      *                                  was found on the classpath
      */
     public static synchronized CloudStorageProvider initialize(CloudStorageConfig config) {
+        if (config == null) {
+            throw new IllegalArgumentException("cloud storage config must not be null");
+        }
+
         if (!config.isEnabled()) {
             // Disabling cloud storage must deactivate any currently active provider: otherwise a
             // reconfiguration/context refresh that flips enabled=false would leave the old provider
