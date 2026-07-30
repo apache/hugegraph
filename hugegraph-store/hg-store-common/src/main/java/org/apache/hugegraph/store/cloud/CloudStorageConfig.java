@@ -150,8 +150,9 @@ public class CloudStorageConfig {
 
 
     /**
-     * Provider-specific properties, mapped from {@code cloud.storage.<provider>.*} in the configuration.
-     * These are passed verbatim to the provider implementation and may include credentials,
+     * Provider-specific properties, mapped from {@code cloud.storage.<provider>.*} in the
+     * configuration. These are passed verbatim to the provider implementation and may include
+     * credentials, endpoint overrides, regions, or SDK tuning keys expected by that provider.
      */
     private Map<String, String> providerProperties = new HashMap<>();
 }

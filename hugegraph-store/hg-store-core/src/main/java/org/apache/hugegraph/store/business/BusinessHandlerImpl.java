@@ -1020,25 +1020,25 @@ public class BusinessHandlerImpl implements BusinessHandler {
     public void truncate(String graphName, int partId) throws HgStoreException {
         // Each partition corresponds to a rocksdb instance, so the rocksdb instance name is
         // rocksdb + partId
-try (RocksDBSession dbSession = getSession(graphName, partId)) {
-    String dbName = dbSession.getGraphName();
-    String dbPath = dbSession.getDbPath();
-    factory.notifyTruncateBegin(dbName, dbPath);
-    boolean truncated = false;
-    try {
-        dbSession.sessionOp().deleteRange(keyCreator.getStartKey(partId, graphName),
-                                          keyCreator.getEndKey(partId, graphName));
-        // Release map ID
-        keyCreator.delGraphId(partId, graphName);
-        truncated = true;
-    } finally {
-        if (truncated) {
-            factory.notifyTruncate(dbName, dbPath);
-        } else {
-            factory.notifyTruncateAbort(dbName, dbPath);
+        try (RocksDBSession dbSession = getSession(graphName, partId)) {
+            String dbName = dbSession.getGraphName();
+            String dbPath = dbSession.getDbPath();
+            factory.notifyTruncateBegin(dbName, dbPath);
+            boolean truncated = false;
+            try {
+                dbSession.sessionOp().deleteRange(keyCreator.getStartKey(partId, graphName),
+                                                  keyCreator.getEndKey(partId, graphName));
+                // Release map ID
+                keyCreator.delGraphId(partId, graphName);
+                truncated = true;
+            } finally {
+                if (truncated) {
+                    factory.notifyTruncate(dbName, dbPath);
+                } else {
+                    factory.notifyTruncateAbort(dbName, dbPath);
+                }
+            }
         }
-    }
-}
     }
 
     @Override
