@@ -1,0 +1,158 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hugegraph.pd.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pd
+spec:
+  serviceName: {{ include "hugegraph.pd.name" . }}
+  replicas: {{ .Values.pd.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: pd
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: pd
+        {{- with .Values.pd.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.pd.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: {{ get (get .Values.pd "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
+      serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.pd "name" (include "hugegraph.pd.name" .) ) }}
+      {{- with .Values.pd.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.pd.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.pd.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pd.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pd.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pd.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.pd.affinity }}
+      affinity:
+        {{- toYaml .Values.pd.affinity | nindent 8 }}
+      {{- else }}
+      {{- with include "hugegraph.antiAffinity" (dict "mode" .Values.pd.antiAffinity "component" "pd" "labels" (include "hugegraph.selectorLabels" . | fromYaml)) }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- end }}
+      containers:
+        - name: pd
+          image: "{{ .Values.pd.image.repository }}:{{ .Values.pd.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.pd.image.pullPolicy }}
+          {{- with .Values.pd.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.pd.ports.grpc }}
+            - name: rest
+              containerPort: {{ .Values.pd.ports.rest }}
+            - name: raft
+              containerPort: {{ .Values.pd.ports.raft }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HG_PD_GRPC_HOST
+              value: "$(POD_NAME).{{ include "hugegraph.pd.name" . }}.$(NAMESPACE).svc"
+            - name: HG_PD_GRPC_PORT
+              value: {{ .Values.pd.ports.grpc | quote }}
+            - name: HG_PD_REST_PORT
+              value: {{ .Values.pd.ports.rest | quote }}
+            - name: HG_PD_RAFT_ADDRESS
+              value: "$(POD_NAME).{{ include "hugegraph.pd.name" . }}.$(NAMESPACE).svc:{{ .Values.pd.ports.raft }}"
+            - name: HG_PD_RAFT_PEERS_LIST
+              value: {{ include "hugegraph.pd.raftPeersList" . | quote }}
+            - name: HG_PD_INITIAL_STORE_LIST
+              value: {{ include "hugegraph.store.initialStoreList" . | quote }}
+            - name: HG_PD_INITIAL_STORE_COUNT
+              value: {{ .Values.store.replicas | quote }}
+            - name: HG_PD_DATA_PATH
+              value: {{ .Values.pd.dataPath | quote }}
+            {{- with .Values.pd.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
+            {{- with include "hugegraph.javaOptsEnv" .Values.pd.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
+          volumeMounts:
+            - name: pd-data
+              mountPath: {{ .Values.pd.dataPath }}
+          startupProbe:
+            httpGet:
+              path: /v1/health
+              port: rest
+            failureThreshold: {{ .Values.pd.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.pd.probes.startup.periodSeconds }}
+            {{- with include "hugegraph.probeTuning" .Values.pd.probes.startup }}{{ . | trim | nindent 12 }}{{- end }}
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: rest
+            periodSeconds: {{ .Values.pd.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.pd.probes.readiness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.pd.probes.readiness }}{{ . | trim | nindent 12 }}{{- end }}
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: rest
+            periodSeconds: {{ .Values.pd.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.pd.probes.liveness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.pd.probes.liveness }}{{ . | trim | nindent 12 }}{{- end }}
+          {{- with .Values.pd.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: pd-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.pd.storage.storageClassName }}
+        storageClassName: {{ .Values.pd.storage.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.pd.storage.size }}

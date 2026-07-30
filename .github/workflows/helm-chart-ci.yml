@@ -1,0 +1,82 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: "Helm Chart CI"
+
+on:
+  push:
+    branches: [ master, 'release-*' ]
+    paths: [ 'helm/**', '.github/workflows/helm-chart-ci.yml' ]
+  pull_request:
+    paths: [ 'helm/**', '.github/workflows/helm-chart-ci.yml' ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+
+      - name: helm lint
+        run: |
+          helm lint helm/hugegraph
+          helm lint helm/hugegraph -f helm/hugegraph/values-single.yaml
+          helm lint helm/hugegraph -f helm/hugegraph/values-cluster.yaml
+
+      - name: helm template
+        run: |
+          for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
+            helm template ci helm/hugegraph $preset > /dev/null
+          done
+
+      - name: reject invalid values
+        run: |
+          # each of these must fail; the schema and helpers are the contract
+          ! helm template ci helm/hugegraph --set pd.replicas=100 2>/dev/null
+          ! helm template ci helm/hugegraph --set pd.pdb.minAvailable=3 2>/dev/null
+          ! helm template ci helm/hugegraph --set server.hpa.enabled=true 2>/dev/null
+          ! helm template ci helm/hugegraph --set server.auth.enabled=true 2>/dev/null
+
+      - name: kubeconform
+        shell: bash
+        run: |
+          set -o pipefail
+          curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kc.tar.gz -C /tmp
+          for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
+            helm template ci helm/hugegraph $preset | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+          done
+
+      - name: legacy --reuse-values compatibility
+        run: |
+          # A release created before a field existed must still render. This has
+          # regressed five times, so it is guarded here rather than by review.
+          # `-f` is NOT equivalent: it merges over the new defaults, whereas
+          # --reuse-values discards them, so the fixture must become values.yaml.
+          cp -R helm/hugegraph /tmp/legacy
+          cp helm/hugegraph/testdata/values-pre-hardening.yaml /tmp/legacy/values.yaml
+          helm template legacy /tmp/legacy > /dev/null
+          helm install legacy /tmp/legacy --dry-run=client > /dev/null
+
+      - name: helm package
+        run: helm package helm/hugegraph -d /tmp/chart

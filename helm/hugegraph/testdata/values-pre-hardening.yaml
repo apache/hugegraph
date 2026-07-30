@@ -1,0 +1,128 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Values shape shipped before the production-hardening fields were added.
+# validate-chart.sh installs this as the chart default values to emulate a
+# Helm --reuse-values upgrade whose stored release values lack all new keys.
+
+fullnameOverride: ""
+nameOverride: ""
+
+imagePullSecrets: []
+
+pd:
+  replicas: 3
+  image:
+    repository: hugegraph/pd
+    tag: latest
+    pullPolicy: IfNotPresent
+  ports:
+    grpc: 8686
+    rest: 8620
+    raft: 8610
+  dataPath: /hugegraph-pd/pd_data
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  resources: {}
+  antiAffinity: required
+  pdb:
+    enabled: true
+    minAvailable: 2
+  probes:
+    startup:
+      failureThreshold: 30
+      periodSeconds: 10
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+
+store:
+  replicas: 3
+  image:
+    repository: hugegraph/store
+    tag: latest
+    pullPolicy: IfNotPresent
+  ports:
+    grpc: 8500
+    raft: 8510
+    rest: 8520
+  dataPath: /hugegraph-store/storage
+  storage:
+    size: 50Gi
+    storageClassName: ""
+  resources: {}
+  antiAffinity: required
+  pdb:
+    enabled: true
+    minAvailable: 2
+  waitImage: curlimages/curl:8.5.0
+  probes:
+    startup:
+      failureThreshold: 40
+      periodSeconds: 10
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+
+server:
+  replicas: 3
+  image:
+    repository: hugegraph/server
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8080
+  backend: hstore
+  resources: {}
+  waitImage: curlimages/curl:8.5.0
+  initStoreEnabled: false
+  auth:
+    enabled: false
+    existingSecret: ""
+  ingress:
+    enabled: false
+    className: ""
+    hosts:
+      - host: hugegraph.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  hpa:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  probes:
+    startup:
+      failureThreshold: 30
+      periodSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+
+networkPolicy:
+  enabled: false

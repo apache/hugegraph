@@ -1,0 +1,256 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Default values for HugeGraph HStore Helm chart.
+# See values-single.yaml and values-cluster.yaml for presets.
+
+fullnameOverride: ""
+nameOverride: ""
+
+imagePullSecrets: []
+
+pd:
+  replicas: 3
+  image:
+    repository: hugegraph/pd
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    pullPolicy: Always
+  # Empty preserves the image entrypoint's automatic JVM sizing.
+  javaOpts: ""
+  ports:
+    grpc: 8686
+    rest: 8620
+    raft: 8610
+  dataPath: /hugegraph-pd/pd_data
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  resources: {}
+  # Pod-level and container-level securityContext. Empty by default because the
+  # published images run as root; set these to satisfy a restricted namespace.
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  # required | preferred | disabled
+  antiAffinity: required
+  # Scheduling. `affinity` takes precedence over the antiAffinity preset.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the pd container.
+  extraEnv: []
+  # Gives a JVM with an on-disk store time to shut down cleanly on drain.
+  terminationGracePeriodSeconds: 300
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  pdb:
+    enabled: true
+    minAvailable: 2
+  # Startup can take a while during Raft bootstrap
+  probes:
+    startup:
+      failureThreshold: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+store:
+  replicas: 3
+  image:
+    repository: hugegraph/store
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    pullPolicy: Always
+  # Empty preserves the image entrypoint's automatic JVM sizing.
+  javaOpts: ""
+  ports:
+    grpc: 8500
+    raft: 8510
+    rest: 8520
+  dataPath: /hugegraph-store/storage
+  storage:
+    size: 50Gi
+    storageClassName: ""
+  resources: {}
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  antiAffinity: required
+  # Scheduling. `affinity` takes precedence over the antiAffinity preset.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the store container.
+  extraEnv: []
+  # Gives a JVM with an on-disk store time to shut down cleanly on drain.
+  terminationGracePeriodSeconds: 300
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  pdb:
+    enabled: true
+    minAvailable: 2
+  waitImage: curlimages/curl:8.5.0
+  # Bound the PD-quorum wait so a cluster that never reaches quorum fails
+  # visibly instead of sitting in Init:0/1 forever.
+  waitTimeoutSeconds: 900
+  # Optional bounds for the PD-quorum wait init container.
+  waitResources: {}
+  probes:
+    startup:
+      failureThreshold: 40
+      periodSeconds: 10
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+server:
+  replicas: 3
+  image:
+    repository: hugegraph/server
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    pullPolicy: Always
+  # Empty preserves the image entrypoint's automatic JVM sizing.
+  javaOpts: ""
+  port: 8080
+  backend: hstore
+  resources: {}
+  # Server is stateless and may scale past the node count via HPA, so the
+  # default only prefers spreading. Use "required" when replicas are always
+  # fewer than schedulable nodes.
+  # required | preferred | disabled
+  antiAffinity: preferred
+  # Scheduling. `affinity` takes precedence over the antiAffinity preset.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the server container.
+  extraEnv: []
+  # Gives a JVM with an on-disk store time to shut down cleanly on drain.
+  terminationGracePeriodSeconds: 60
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  # Server has no quorum to preserve, so no PodDisruptionBudget by default.
+  pdb:
+    enabled: false
+    minAvailable: 2
+  # Image used by the Helm test hook.
+  waitImage: curlimages/curl:8.5.0
+  restServer:
+    # Empty preserves the image's restserver.min_free_memory default.
+    minFreeMemory: ""
+    # Empty preserves the image's batch.max_write_threads default.
+    batchMaxWriteThreads: ""
+  # Distributed HStore: the init-store gate must be explicitly false, so that
+  # concurrent Server replicas never initialize the same backend. No
+  # HG_SERVER_SKIP_INIT and no init Job.
+  initStoreEnabled: false
+  auth:
+    enabled: false
+    # Secret must contain key "password"
+    existingSecret: ""
+  service:
+    type: ClusterIP
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: hugegraph.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  hpa:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  probes:
+    startup:
+      # 450s covers the 300s storage wait and Server process startup.
+      failureThreshold: 90
+      periodSeconds: 5
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# No init Job; see README.md for the HStore initialization contract.
+# Install with: helm install ... --wait   (no --wait-for-jobs)

@@ -1,0 +1,193 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "hugegraph.store.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: store
+spec:
+  serviceName: {{ include "hugegraph.store.name" . }}
+  replicas: {{ .Values.store.replicas }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: store
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: store
+        {{- with .Values.store.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.store.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: {{ get (get .Values.store "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
+      serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.store "name" (include "hugegraph.store.name" .) ) }}
+      {{- with .Values.store.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.store.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.store.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.store.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.store.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.store.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.store.affinity }}
+      affinity:
+        {{- toYaml .Values.store.affinity | nindent 8 }}
+      {{- else }}
+      {{- with include "hugegraph.antiAffinity" (dict "mode" .Values.store.antiAffinity "component" "store" "labels" (include "hugegraph.selectorLabels" . | fromYaml)) }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-pd
+          image: {{ .Values.store.waitImage | quote }}
+          {{- with .Values.store.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              REQUIRED={{ include "hugegraph.pd.quorum" . }}
+              HEALTH_PEERS=$(echo "{{ include "hugegraph.pd.restPeersList" . }}" | tr ',' ' ')
+              TIMEOUT={{ .Values.store.waitTimeoutSeconds | default 900 }}
+              DEADLINE=$(( $(date +%s) + TIMEOUT ))
+              echo "Waiting for PD quorum (${REQUIRED}) among: ${HEALTH_PEERS}"
+              until [ "$(
+                ok=0
+                for peer in ${HEALTH_PEERS}; do
+                  if curl -fsS "http://${peer}/v1/health" >/dev/null 2>&1; then
+                    ok=$((ok+1))
+                  fi
+                done
+                echo "$ok"
+              )" -ge "${REQUIRED}" ]; do
+                if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
+                  echo "Timed out after ${TIMEOUT}s waiting for PD quorum (${REQUIRED}) among: ${HEALTH_PEERS}" >&2
+                  echo "Check PD Pods: kubectl get pods -l app.kubernetes.io/component=pd" >&2
+                  exit 1
+                fi
+                echo "Waiting for PD quorum..."
+                sleep 5
+              done
+              echo "PD quorum reached."
+          {{- with .Values.store.waitResources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      containers:
+        - name: store
+          image: "{{ .Values.store.image.repository }}:{{ .Values.store.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.store.image.pullPolicy }}
+          {{- with .Values.store.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.store.ports.grpc }}
+            - name: raft
+              containerPort: {{ .Values.store.ports.raft }}
+            - name: rest
+              containerPort: {{ .Values.store.ports.rest }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: HG_STORE_PD_ADDRESS
+              value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
+            - name: HG_STORE_GRPC_HOST
+              value: "$(POD_NAME).{{ include "hugegraph.store.name" . }}.$(NAMESPACE).svc"
+            - name: HG_STORE_GRPC_PORT
+              value: {{ .Values.store.ports.grpc | quote }}
+            - name: HG_STORE_REST_PORT
+              value: {{ .Values.store.ports.rest | quote }}
+            - name: HG_STORE_RAFT_ADDRESS
+              value: "$(POD_NAME).{{ include "hugegraph.store.name" . }}.$(NAMESPACE).svc:{{ .Values.store.ports.raft }}"
+            - name: HG_STORE_DATA_PATH
+              value: {{ .Values.store.dataPath | quote }}
+            {{- with .Values.store.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
+            {{- with include "hugegraph.javaOptsEnv" .Values.store.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
+          volumeMounts:
+            - name: store-data
+              mountPath: {{ .Values.store.dataPath }}
+          startupProbe:
+            httpGet:
+              path: /v1/health
+              port: rest
+            failureThreshold: {{ .Values.store.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.store.probes.startup.periodSeconds }}
+            {{- with include "hugegraph.probeTuning" .Values.store.probes.startup }}{{ . | trim | nindent 12 }}{{- end }}
+          readinessProbe:
+            httpGet:
+              path: /v1/health
+              port: rest
+            periodSeconds: {{ .Values.store.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.store.probes.readiness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.store.probes.readiness }}{{ . | trim | nindent 12 }}{{- end }}
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: rest
+            periodSeconds: {{ .Values.store.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.store.probes.liveness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.store.probes.liveness }}{{ . | trim | nindent 12 }}{{- end }}
+          {{- with .Values.store.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: store-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.store.storage.storageClassName }}
+        storageClassName: {{ .Values.store.storage.storageClassName | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.store.storage.size }}

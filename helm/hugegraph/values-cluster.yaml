@@ -1,0 +1,86 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Production starting point: 3 Server + 3 PD + 3 Store.
+# Size this profile again for the real graph, traffic, and failure budget.
+# Usage: helm install hg ./helm/hugegraph -f values-cluster.yaml
+
+pd:
+  replicas: 3
+  javaOpts: >-
+    -Xms256m -Xmx512m
+    -XX:MaxMetaspaceSize=256m
+    -XX:MaxDirectMemorySize=256m
+    -XX:+UseContainerSupport
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  antiAffinity: required
+  pdb:
+    enabled: true
+    minAvailable: 2
+  storage:
+    size: 10Gi
+
+store:
+  replicas: 3
+  javaOpts: >-
+    -Xms512m -Xmx1024m
+    -XX:MaxMetaspaceSize=256m
+    -XX:MaxDirectMemorySize=512m
+    -XX:+UseContainerSupport
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 4Gi
+  waitResources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 64Mi
+  antiAffinity: required
+  pdb:
+    enabled: true
+    minAvailable: 2
+  storage:
+    size: 50Gi
+
+server:
+  replicas: 3
+  javaOpts: >-
+    -Xms512m -Xmx1024m
+    -XX:MaxMetaspaceSize=256m
+    -XX:MaxDirectMemorySize=256m
+    -XX:+UseContainerSupport
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 2Gi
+  hpa:
+    enabled: false

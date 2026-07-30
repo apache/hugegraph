@@ -1,0 +1,46 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one or more
+contributor license agreements.  See the NOTICE file distributed with
+this work for additional information regarding copyright ownership.
+The ASF licenses this file to You under the Apache License, Version 2.0
+(the "License"); you may not use this file except in compliance with
+the License.  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+{{ .Release.Name }} installed in namespace {{ .Release.Namespace }}.
+
+  PD      {{ .Values.pd.replicas }} replica(s)
+  Store   {{ .Values.store.replicas }} replica(s)
+  Server  {{ if .Values.server.hpa.enabled }}HPA {{ .Values.server.hpa.minReplicas }}-{{ .Values.server.hpa.maxReplicas }}{{ else }}{{ .Values.server.replicas }} replica(s){{ end }}
+
+Watch the cluster come up:
+
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+PD reaches Raft quorum before Store registers, so Store Pods stay in Init until
+PD is ready.
+
+Verify the release:
+
+  helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}
+
+Reach the Server API:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hugegraph.server.name" . }} {{ .Values.server.port }}:{{ .Values.server.port }}
+  curl http://127.0.0.1:{{ .Values.server.port }}/versions
+{{- if not .Values.server.auth.enabled }}
+
+Authentication is disabled. Do not expose this release to untrusted networks.
+{{- end }}
+{{- if or (empty .Values.pd.resources) (empty .Values.store.resources) (empty .Values.server.resources) }}
+
+One or more components have no resource requests or limits. Set them before
+production use; see values-cluster.yaml.
+{{- end }}

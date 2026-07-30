@@ -1,0 +1,242 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{- include "hugegraph.validateValues" . }}
+{{- $restServer := .Values.server.restServer | default dict }}
+{{- $minFreeMemory := "" }}
+{{- $batchMaxWriteThreads := "" }}
+{{- if hasKey $restServer "minFreeMemory" }}
+{{- $minFreeMemory = toString (get $restServer "minFreeMemory") }}
+{{- end }}
+{{- if hasKey $restServer "batchMaxWriteThreads" }}
+{{- $batchMaxWriteThreads = toString (get $restServer "batchMaxWriteThreads") }}
+{{- end }}
+{{- $customPort := ne (int .Values.server.port) 8080 }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hugegraph.server.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if not .Values.server.hpa.enabled }}
+  replicas: {{ .Values.server.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+        {{- with .Values.server.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.server.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: {{ get (get .Values.server "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
+      serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.server "name" (include "hugegraph.server.name" .) ) }}
+      {{- with .Values.server.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.server.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.server.affinity }}
+      affinity:
+        {{- toYaml .Values.server.affinity | nindent 8 }}
+      {{- else }}
+      {{- with include "hugegraph.antiAffinity" (dict "mode" (.Values.server.antiAffinity | default "preferred") "component" "server" "labels" (include "hugegraph.selectorLabels" . | fromYaml)) }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          {{- with .Values.server.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.server.auth.enabled
+                    $customPort
+                    (ne $minFreeMemory "")
+                    (ne $batchMaxWriteThreads "") }}
+          command:
+            - /usr/bin/dumb-init
+            - --
+            - /bin/bash
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              {{- if .Values.server.auth.enabled }}
+              : "${PASSWORD:?auth Secret key 'password' must not be empty}"
+              {{- end }}
+              CONF=./conf/rest-server.properties
+              TMP=$(mktemp)
+              {{- if .Values.server.auth.enabled }}
+              FOUND_USE_PD=false
+              FOUND_PD_PEERS=false
+              {{- end }}
+              {{- if $customPort }}
+              FOUND_RESTSERVER_URL=false
+              {{- end }}
+              {{- if ne $minFreeMemory "" }}
+              FOUND_MIN_FREE_MEMORY=false
+              {{- end }}
+              {{- if ne $batchMaxWriteThreads "" }}
+              FOUND_BATCH_MAX_WRITE_THREADS=false
+              {{- end }}
+              while IFS= read -r LINE || [[ -n "${LINE}" ]]; do
+                case "${LINE}" in
+                  {{- if .Values.server.auth.enabled }}
+                  usePD=*)
+                    printf 'usePD=true\n' >>"${TMP}"
+                    FOUND_USE_PD=true
+                    ;;
+                  pd.peers=*)
+                    printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
+                    FOUND_PD_PEERS=true
+                    ;;
+                  {{- end }}
+                  {{- if $customPort }}
+                  restserver.url=*)
+                    printf 'restserver.url=http://0.0.0.0:%s\n' \
+                      {{ .Values.server.port | quote }} >>"${TMP}"
+                    FOUND_RESTSERVER_URL=true
+                    ;;
+                  {{- end }}
+                  {{- if ne $minFreeMemory "" }}
+                  restserver.min_free_memory=*)
+                    printf 'restserver.min_free_memory=%s\n' \
+                      {{ $minFreeMemory | quote }} >>"${TMP}"
+                    FOUND_MIN_FREE_MEMORY=true
+                    ;;
+                  {{- end }}
+                  {{- if ne $batchMaxWriteThreads "" }}
+                  batch.max_write_threads=*)
+                    printf 'batch.max_write_threads=%s\n' \
+                      {{ $batchMaxWriteThreads | quote }} >>"${TMP}"
+                    FOUND_BATCH_MAX_WRITE_THREADS=true
+                    ;;
+                  {{- end }}
+                  *)
+                    printf '%s\n' "${LINE}" >>"${TMP}"
+                    ;;
+                esac
+              done <"${CONF}"
+              {{- if .Values.server.auth.enabled }}
+              if [[ "${FOUND_USE_PD}" == false ]]; then
+                printf 'usePD=true\n' >>"${TMP}"
+              fi
+              if [[ "${FOUND_PD_PEERS}" == false ]]; then
+                printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if $customPort }}
+              if [[ "${FOUND_RESTSERVER_URL}" == false ]]; then
+                printf 'restserver.url=http://0.0.0.0:%s\n' \
+                  {{ .Values.server.port | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if ne $minFreeMemory "" }}
+              if [[ "${FOUND_MIN_FREE_MEMORY}" == false ]]; then
+                printf 'restserver.min_free_memory=%s\n' \
+                  {{ $minFreeMemory | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if ne $batchMaxWriteThreads "" }}
+              if [[ "${FOUND_BATCH_MAX_WRITE_THREADS}" == false ]]; then
+                printf 'batch.max_write_threads=%s\n' \
+                  {{ $batchMaxWriteThreads | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              chmod 600 "${TMP}"
+              mv "${TMP}" "${CONF}"
+              exec ./docker-entrypoint.sh
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+          env:
+            - name: HG_SERVER_BACKEND
+              value: {{ .Values.server.backend | quote }}
+            - name: HG_SERVER_PD_PEERS
+              value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
+            - name: HG_SERVER_PD_REST_ENDPOINT
+              value: {{ include "hugegraph.pd.restPeersList" . | quote }}
+            - name: STORE_REST
+              value: {{ include "hugegraph.store.restPrimary" . | quote }}
+            - name: HG_SERVER_INIT_STORE_ENABLED
+              value: {{ .Values.server.initStoreEnabled | quote }}
+            {{- with .Values.server.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
+            {{- with include "hugegraph.javaOptsEnv" .Values.server.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
+            {{- if and .Values.server.auth.enabled .Values.server.auth.existingSecret }}
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.auth.existingSecret | quote }}
+                  key: password
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /versions
+              port: http
+            failureThreshold: {{ include "hugegraph.server.startupFailureThreshold" . }}
+            periodSeconds: {{ .Values.server.probes.startup.periodSeconds }}
+            {{- with include "hugegraph.probeTuning" .Values.server.probes.startup }}{{ . | trim | nindent 12 }}{{- end }}
+          readinessProbe:
+            httpGet:
+              path: /versions
+              port: http
+            periodSeconds: {{ .Values.server.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.server.probes.readiness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.server.probes.readiness }}{{ . | trim | nindent 12 }}{{- end }}
+          livenessProbe:
+            httpGet:
+              path: /versions
+              port: http
+            periodSeconds: {{ .Values.server.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.server.probes.liveness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.server.probes.liveness }}{{ . | trim | nindent 12 }}{{- end }}
+          {{- with .Values.server.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
