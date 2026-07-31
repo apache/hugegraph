@@ -30,6 +30,8 @@ BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
 GRAPH_CONF="$TOP/conf/graphs/hugegraph.properties"
 WAIT_STORAGE_TIMEOUT_S=300
+WAIT_STORAGE_PD_CONNECT_TIMEOUT_S=2
+WAIT_STORAGE_PD_MAX_TIMEOUT_S=3
 
 . "$BIN"/util.sh
 
@@ -99,7 +101,10 @@ if env | grep '^hugegraph\.' > /dev/null; then
 
               check_any_pd_stores() {
                 for peer in \$(echo \"\$PD_REST_LIST\" | tr ',' ' '); do
-                  if curl ${PD_AUTH_ARGS} -f -s http://\${peer}/v1/stores 2>/dev/null | \
+                  if curl ${PD_AUTH_ARGS} -f -s \
+                     --connect-timeout ${WAIT_STORAGE_PD_CONNECT_TIMEOUT_S} \
+                     --max-time ${WAIT_STORAGE_PD_MAX_TIMEOUT_S} \
+                     http://\${peer}/v1/stores 2>/dev/null | \
                      grep -qi '\"state\"[[:space:]]*:[[:space:]]*\"Up\"'; then
                     echo \"\$peer\"
                     return 0

@@ -57,6 +57,12 @@ assert_contract() {
     if grep -Fv -- '-u test-user:test-password' "${ARGS_LOG}" | grep -q .; then
         fail "authentication arguments were not preserved"
     fi
+    if grep -Fv -- '--connect-timeout 2' "${ARGS_LOG}" | grep -q .; then
+        fail "per-peer connect timeout was not preserved"
+    fi
+    if grep -Fv -- '--max-time 3' "${ARGS_LOG}" | grep -q .; then
+        fail "per-peer maximum timeout was not preserved"
+    fi
     assert_equal "outer timeout" "300s" "$(cat "${TIMEOUT_LOG}")"
 }
 
@@ -138,6 +144,18 @@ printf '%s\n' "${count}" > "${MOCK_COUNT_FILE}"
 if [[ "${MOCK_SCENARIO}" == "pd1-up" && \
       "${url}" == "http://pd1:8620/v1/stores" ]]; then
     printf '{"stores":[{"state":"Up"}]}\n'
+elif [[ "${MOCK_SCENARIO}" == "hanging-first" && \
+        "${url}" == "http://pd0:8620/v1/stores" ]]; then
+    if [[ " $* " == *" --connect-timeout 2 "* && \
+          " $* " == *" --max-time 3 "* ]]; then
+        /bin/sleep 0.05
+    else
+        /bin/sleep 10
+    fi
+    exit 28
+elif [[ "${MOCK_SCENARIO}" == "hanging-first" && \
+        "${url}" == "http://pd1:8620/v1/stores" ]]; then
+    printf '{"stores":[{"state":"Up"}]}\n'
 elif [[ "${MOCK_SCENARIO}" == "retry" && "${count}" -eq 3 && \
         "${url}" == "http://pd0:8620/v1/stores" ]]; then
     exit 7
@@ -171,6 +189,13 @@ assert_equal "stop after first Up peer" "${PD1}" "$(cat "${CALL_LOG}")"
 assert_contract
 echo "  PASS reversed peer order"
 
+run_case "hanging-first" "pd0:8620,pd1:8620" 4
+assert_equal "hanging first peer rc" "0" "${CASE_RC}"
+assert_equal "healthy peer after per-peer timeout" "${TWO_CALLS}" "$(cat "${CALL_LOG}")"
+assert_output "Store registration check PASSED via pd1:8620"
+assert_contract
+echo "  PASS hanging first peer"
+
 run_case "retry" "pd0:8620,pd1:8620" 8
 assert_equal "retry rc" "0" "${CASE_RC}"
 assert_equal "complete peer rescan" "${FOUR_CALLS}" "$(cat "${CALL_LOG}")"
@@ -185,4 +210,4 @@ assert_output "ERROR: Timeout waiting for storage backend"
 assert_contract
 echo "  PASS all-unready timeout"
 
-echo "4 passed, 0 failed"
+echo "5 passed, 0 failed"
