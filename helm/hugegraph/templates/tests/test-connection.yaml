@@ -28,10 +28,26 @@ metadata:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
+  automountServiceAccountToken: false
   restartPolicy: Never
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: curl
       image: {{ .Values.server.waitImage | quote }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 100
+      {{- with .Values.server.testResources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if .Values.server.auth.enabled }}
       env:
         - name: PASSWORD

@@ -209,6 +209,17 @@ default
 {{- end }}
 
 {{/*
+The minimum Server replica count that a PDB must remain valid against.
+*/}}
+{{- define "hugegraph.server.replicaFloor" -}}
+{{- if .Values.server.hpa.enabled -}}
+{{- .Values.server.hpa.minReplicas -}}
+{{- else -}}
+{{- .Values.server.replicas -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Cross-field validation that JSON Schema draft-07 cannot express.
 */}}
 {{- define "hugegraph.validateValues" -}}
@@ -246,8 +257,9 @@ and must not be failed for a value that has no effect.
 {{- fail "server.service.nodePort requires server.service.type to be NodePort or LoadBalancer" -}}
 {{- end -}}
 {{- $serverPdb := get .Values.server "pdb" | default dict -}}
-{{- if and (get $serverPdb "enabled" | default false) (gt (int .Values.server.replicas) 1) (ge (int (get $serverPdb "minAvailable" | default 1)) (int .Values.server.replicas)) -}}
-{{- fail "server.pdb.minAvailable must be less than server.replicas, otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
+{{- $serverReplicaFloor := include "hugegraph.server.replicaFloor" . | int -}}
+{{- if and (get $serverPdb "enabled" | default false) (gt $serverReplicaFloor 1) (ge (int (get $serverPdb "minAvailable" | default 1)) $serverReplicaFloor) -}}
+{{- fail "server.pdb.minAvailable must be less than the active Server replica floor (server.hpa.minReplicas when HPA is enabled, otherwise server.replicas), otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
 {{- end -}}
 {{- end }}
 

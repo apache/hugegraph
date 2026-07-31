@@ -220,7 +220,7 @@ default values.
 | `server.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
 | `server.securityContext` | Container-level securityContext. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
 | `server.pdb.enabled` | Create a PodDisruptionBudget for Server. Off by default: Server holds no quorum | `false` |
-| `server.pdb.minAvailable` | Must be strictly less than `server.replicas` | `2` |
+| `server.pdb.minAvailable` | Must be less than `server.hpa.minReplicas` when HPA is enabled, otherwise less than `server.replicas` | `2` |
 | `server.antiAffinity` | One of `required`, `preferred`, `disabled`. Defaults to `preferred` rather than `required` because HPA may scale Server past the node count; set `required` when replicas always stay below it | `preferred` |
 | `server.nodeSelector` | Node selector for server Pods | `{}` |
 | `server.tolerations` | Tolerations for server Pods | `[]` |
@@ -236,6 +236,7 @@ default values.
 | `server.serviceAccount.annotations` | Annotations on the created ServiceAccount | `{}` |
 | `server.serviceAccount.automountServiceAccountToken` | Mount an API token. The chart makes no API calls | `false` |
 | `server.waitImage` | Image for the Helm test hook | `curlimages/curl:8.5.0` |
+| `server.testResources` | Resources for the Helm test hook container | `{}` |
 | `server.restServer.minFreeMemory` | Empty preserves the image default | `""` |
 | `server.restServer.batchMaxWriteThreads` | Empty preserves the image default | `""` |
 | `server.initStoreEnabled` | Must remain `false` for distributed HStore | `false` |
@@ -371,7 +372,7 @@ kubectl describe pod <pod> | grep -A5 "Last State"
 Helm itself rejects release names longer than 53 characters, before this chart
 renders anything:
 
-```
+```text
 invalid release name ... the length must not be longer than 53
 ```
 

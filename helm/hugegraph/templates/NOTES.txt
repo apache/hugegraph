@@ -34,7 +34,12 @@ Verify the release:
 Reach the Server API:
 
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hugegraph.server.name" . }} {{ .Values.server.port }}:{{ .Values.server.port }}
+{{- if .Values.server.auth.enabled }}
+  PASSWORD="$(kubectl get secret -n {{ .Release.Namespace }} {{ .Values.server.auth.existingSecret }} -o jsonpath='{.data.password}' | base64 --decode)"
+  curl --user "admin:${PASSWORD}" http://127.0.0.1:{{ .Values.server.port }}/versions
+{{- else }}
   curl http://127.0.0.1:{{ .Values.server.port }}/versions
+{{- end }}
 {{- if not .Values.server.auth.enabled }}
 
 Authentication is disabled. Do not expose this release to untrusted networks.

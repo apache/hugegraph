@@ -32,6 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: azure/setup-helm@v4
         with:
@@ -55,6 +57,12 @@ jobs:
           ! helm template ci helm/hugegraph --set pd.replicas=100 2>/dev/null
           ! helm template ci helm/hugegraph --set pd.pdb.minAvailable=3 2>/dev/null
           ! helm template ci helm/hugegraph --set server.hpa.enabled=true 2>/dev/null
+          ! helm template ci helm/hugegraph \
+            --set server.hpa.enabled=true \
+            --set server.hpa.minReplicas=2 \
+            --set server.resources.requests.cpu=100m \
+            --set server.pdb.enabled=true \
+            --set server.pdb.minAvailable=2 2>/dev/null
           ! helm template ci helm/hugegraph --set server.auth.enabled=true 2>/dev/null
 
       - name: kubeconform

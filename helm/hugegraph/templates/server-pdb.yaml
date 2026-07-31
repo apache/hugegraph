@@ -16,7 +16,8 @@
 #
 
 {{- $pdb := get .Values.server "pdb" | default dict }}
-{{- if and (get $pdb "enabled" | default false) (gt (int .Values.server.replicas) 1) }}
+{{- $replicaFloor := include "hugegraph.server.replicaFloor" . | int }}
+{{- if and (get $pdb "enabled" | default false) (gt $replicaFloor 1) }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

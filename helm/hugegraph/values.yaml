@@ -185,7 +185,7 @@ server:
   podLabels: {}
   # Extra environment variables appended to the server container.
   extraEnv: []
-  # Gives a JVM with an on-disk store time to shut down cleanly on drain.
+  # Allows in-flight requests to drain before the Server is stopped.
   terminationGracePeriodSeconds: 60
   serviceAccount:
     create: true
@@ -206,6 +206,8 @@ server:
     minAvailable: 2
   # Image used by the Helm test hook.
   waitImage: curlimages/curl:8.5.0
+  # Optional resources for the Helm test hook container.
+  testResources: {}
   restServer:
     # Empty preserves the image's restserver.min_free_memory default.
     minFreeMemory: ""

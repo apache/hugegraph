@@ -31,14 +31,6 @@
     },
     "global": {
       "type": "object"
-    },
-    "networkPolicy": {
-      "type": "object",
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
-      }
     }
   },
   "definitions": {
@@ -576,6 +568,7 @@
         },
         "ingress": {
           "type": "object",
+          "additionalProperties": false,
           "required": [
             "enabled",
             "className",
@@ -733,6 +726,9 @@
               "type": "boolean"
             }
           }
+        },
+        "testResources": {
+          "type": "object"
         },
         "service": {
           "type": "object",
