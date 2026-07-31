@@ -50,12 +50,12 @@
         <!--
           Required in docker/cloud-storage runtime: CloudStorageEventListener hooks into
           RocksDB event callback types (FlushJobInfo/TableFileCreationInfo).
-          Keep this aligned with hg-store-rocksdb to avoid NoClassDefFoundError.
+          Version is parent-managed to stay aligned with hg-store-rocksdb and avoid
+          NoClassDefFoundError.
         -->
         <dependency>
             <groupId>org.rocksdb</groupId>
             <artifactId>rocksdbjni</artifactId>
-            <version>7.7.3</version>
             <scope>runtime</scope>
         </dependency>
 

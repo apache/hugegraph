@@ -336,6 +336,20 @@ public class CloudStorageProviderFactoryTest {
      }
 
      @Test
+     public void testInitializeWithNullProviderProperties() {
+         registry().put("s3", mockProvider);
+         config.setEnabled(true);
+         config.setProvider("s3");
+         config.setProviderProperties(null);
+
+         CloudStorageProvider result = CloudStorageProviderFactory.initialize(config);
+
+         assertSame(mockProvider, result);
+         assertSame(mockProvider, CloudStorageProviderFactory.getActiveProvider());
+         verify(mockProvider, times(1)).init(config);
+     }
+
+     @Test
      public void testInitializeWithSameActiveProviderDoesNotCloseIt() throws IOException {
          registry().put("s3", mockProvider);
          CloudStorageProviderFactory.setActiveProviderForTest(mockProvider);

@@ -137,8 +137,11 @@ public final class CloudStorageProviderFactory {
 
         provider.init(config);
         activeProvider = provider;
+        Map<String, String> providerProperties = config.getProviderProperties();
+        String bucket = providerProperties == null ?
+                        "N/A" : providerProperties.getOrDefault("bucket", "N/A");
         log.info("Cloud storage provider '{}' initialized. bucket={}",
-                 name, config.getProviderProperties().getOrDefault("bucket", "N/A"));
+                 name, bucket);
         return provider;
     }
 

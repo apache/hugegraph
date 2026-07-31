@@ -45,6 +45,7 @@
 
     <properties>
         <log4j2.version>2.15.0</log4j2.version>
+        <rocksdbjni.version>7.7.3</rocksdbjni.version>
         <final.name>apache-${release.name}-store-${project.version}</final.name>
     </properties>
 
@@ -89,6 +90,11 @@
                 <groupId>org.apache.hugegraph</groupId>
                 <artifactId>hg-store-transfer</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.rocksdb</groupId>
+                <artifactId>rocksdbjni</artifactId>
+                <version>${rocksdbjni.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
