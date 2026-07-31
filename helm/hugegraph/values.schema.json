@@ -728,7 +728,7 @@
           }
         },
         "testResources": {
-          "type": "object"
+          "$ref": "#/definitions/resources"
         },
         "service": {
           "type": "object",
