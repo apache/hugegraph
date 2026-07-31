@@ -76,7 +76,7 @@ jobs:
           cp -R helm/hugegraph /tmp/legacy
           cp helm/hugegraph/testdata/values-pre-hardening.yaml /tmp/legacy/values.yaml
           helm template legacy /tmp/legacy > /dev/null
-          helm install legacy /tmp/legacy --dry-run=client > /dev/null
+          helm template legacy /tmp/legacy --is-upgrade > /dev/null
 
       - name: helm package
         run: helm package helm/hugegraph -d /tmp/chart
