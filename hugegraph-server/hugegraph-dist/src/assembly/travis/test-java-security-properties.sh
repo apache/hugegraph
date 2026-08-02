@@ -55,11 +55,13 @@ if [[ -n "${JAVA_HOME:-}" ]]; then
 else
     JAVA_BIN="java"
 fi
-# Select the version line the same way the launcher does: a preamble such as
-# "Picked up JAVA_TOOL_OPTIONS: ..." precedes it whenever JAVA_TOOL_OPTIONS or
-# _JAVA_OPTIONS is set, and parsing that would silently drop the option below.
+# Select the JVM banner line the same way the launcher does, anchored to its
+# "java version"/"openjdk version" prefix: a preamble such as "Picked up
+# JAVA_TOOL_OPTIONS: ..." precedes it whenever JAVA_TOOL_OPTIONS or
+# _JAVA_OPTIONS is set, and an agent loaded that way may print its own
+# 'version "..."' banner that an unanchored match would read instead.
 JAVA_MAJOR=$($JAVA_BIN -version 2>&1 |
-             awk -F'"' '/version "/ {print $2; exit}' |
+             awk -F'"' '/^(java|openjdk) version "/ {print $2; exit}' |
              sed 's/^1\.//' | cut -d'.' -f1)
 JAVA_MAJOR="${JAVA_MAJOR%%[!0-9]*}"
 if [[ -z "$JAVA_MAJOR" ]]; then
@@ -451,6 +453,37 @@ if JAVA_HOME="$MOCK_JAVA_HOME" MOCK_JAVA_VERSION=24 \
 fi
 grep -Fq "JDK 24+ removed the Security Manager" "$PREAMBLE_JDK24_ERROR" ||
     fail "version preamble defeated the JDK 24 guard"
+
+# An agent loaded through JAVA_TOOL_OPTIONS may print its own banner containing
+# 'version "..."' ahead of the JVM's. Reading the agent's version instead of
+# the runtime's would reject a supported JDK when the agent version is low ...
+AGENT_PREAMBLE=$'Picked up JAVA_TOOL_OPTIONS: -javaagent:apm-agent.jar\nElastic APM agent version "7.2.0" is starting'
+
+AGENT_JDK21_CAPTURE="${TEMP_DIR}/agent-preamble-jdk21.args"
+CAPTURE_FILE="$AGENT_JDK21_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    MOCK_JAVA_VERSION=21 MOCK_JAVA_PREAMBLE="$AGENT_PREAMBLE" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_argument "-Djava.security.manager=allow" "$AGENT_JDK21_CAPTURE"
+
+# ... and trip the JDK 24+ security guard when the agent version is high.
+HIGH_AGENT_PREAMBLE=$'Picked up JAVA_TOOL_OPTIONS: -javaagent:apm-agent.jar\nAPM agent version "24.0.1" is starting'
+
+HIGH_AGENT_CAPTURE="${TEMP_DIR}/agent-preamble-jdk11.args"
+HIGH_AGENT_ERROR="${TEMP_DIR}/agent-preamble-jdk11.err"
+CAPTURE_FILE="$HIGH_AGENT_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    MOCK_JAVA_VERSION=11 MOCK_JAVA_PREAMBLE="$HIGH_AGENT_PREAMBLE" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
+    >/dev/null 2>"$HIGH_AGENT_ERROR"
+
+if grep -Fq "JDK 24+ removed the Security Manager" "$HIGH_AGENT_ERROR"; then
+    fail "agent banner version tripped the JDK 24+ guard on a supported JDK"
+fi
+assert_argument \
+    "org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap" "$HIGH_AGENT_CAPTURE"
+assert_no_argument '^-Djava\.security\.manager=' "$HIGH_AGENT_CAPTURE"
 
 JDK24_DISABLED_CAPTURE="${TEMP_DIR}/jdk24-disabled.args"
 CAPTURE_FILE="$JDK24_DISABLED_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \

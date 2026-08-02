@@ -97,11 +97,14 @@ else
     JAVA="$JAVA_HOME/bin/java -server"
 fi
 
-# Pick the version line explicitly: the JVM prints a preamble such as
-# "Picked up JAVA_TOOL_OPTIONS: ..." before it whenever JAVA_TOOL_OPTIONS or
-# _JAVA_OPTIONS is set, and reading that line instead would leave JAVA_VERSION
-# unusable and silently skip every version-gated option below.
-JAVA_VERSION=$($JAVA -version 2>&1 | awk -F'"' '/version "/ {print $2; exit}' |
+# Pick the JVM banner line explicitly, anchored to its "java version"/"openjdk
+# version" prefix: whenever JAVA_TOOL_OPTIONS or _JAVA_OPTIONS is set the JVM
+# prints a preamble first ("Picked up JAVA_TOOL_OPTIONS: ..."), and an agent
+# loaded that way may print its own banner containing 'version "..."' (an APM
+# agent, for example), so matching any line with 'version "' can read the
+# agent version instead of the runtime version.
+JAVA_VERSION=$($JAVA -version 2>&1 |
+               awk -F'"' '/^(java|openjdk) version "/ {print $2; exit}' |
                sed 's/^1\.//' | cut -d'.' -f1)
 # Drop any pre-release suffix, e.g. "24-ea" -> "24"
 JAVA_VERSION="${JAVA_VERSION%%[!0-9]*}"
