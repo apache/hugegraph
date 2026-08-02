@@ -176,7 +176,10 @@ EOF
         # An operator may deliberately replace the bundled policy with their own
         # -Djava.security.properties=<file>, which the JVM applies last and which
         # makes a missing bundled file harmless. Track the last such option, since
-        # an empty value clears any earlier override.
+        # an empty value clears any earlier override. The override itself is not
+        # validated here: only the JVM's own properties parsing decides what it
+        # loads to, so the bootstrap stays the single validator and mirrors its
+        # rejection into the server log (see hugegraph.bootstrap.error.log below).
         SECURITY_PROPERTIES_OVERRIDDEN="false"
         for OPTION in ${JAVA_OPTIONS} ${_JAVA_OPTIONS:-}; do
             case "${OPTION}" in
@@ -243,6 +246,14 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     # Make sure the otel-collector is running before starting HugeGraphServer.
     export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:4317
     export OTEL_RESOURCE_ATTRIBUTES=service.name=server
+fi
+
+if [[ "${STDOUT_MODE:-false}" != "true" ]]; then
+    # Daemon stderr only reaches hugegraph-server-stdout.log, so a bootstrap
+    # rejection of the effective DNS policy (a broken operator override
+    # included) would be invisible in the log start-hugegraph.sh points
+    # operators at. Let the bootstrap mirror its fatal errors there.
+    JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
 fi
 
 # Turn on security check

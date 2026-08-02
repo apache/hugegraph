@@ -358,6 +358,39 @@ assert_launcher_rejects_security_properties "$INVALID_UNICODE"
 assert_launcher_accepts_security_properties "$OPERATOR_PROPERTIES"
 assert_launcher_skips_security_validation
 
+# In daemon mode stderr only reaches the stdout log, so when the bootstrap
+# rejects a broken operator override, the cause and the override path must be
+# mirrored into the server log that start-hugegraph.sh points operators at.
+SERVER_LOG="${SERVER_ROOT}/logs/hugegraph-server.log"
+
+assert_daemon_launcher_rejects_override() {
+    local properties_path="$1"
+    local label="$2"
+    : > "$SERVER_LOG"
+    if JAVA_OPTIONS="" "$SERVER_SCRIPT" \
+       "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
+       "-Djava.security.properties=${properties_path}" >/dev/null 2>&1; then
+        fail "daemon launcher accepted a ${label} security properties override"
+    fi
+    grep -Fq "networkaddress.cache.ttl must load as a finite positive integer" \
+             "$SERVER_LOG" ||
+        fail "${label} override rejection did not reach hugegraph-server.log"
+    grep -Fq -- "${properties_path}" "$SERVER_LOG" ||
+        fail "${label} override path was not named in hugegraph-server.log"
+}
+
+# Invalid content behind the removed read permission keeps this case failing
+# even where permission bits do not apply, e.g. when running as root.
+UNREADABLE_OVERRIDE="${TEMP_DIR}/unreadable-security.properties"
+echo "networkaddress.cache.ttl=-1" > "$UNREADABLE_OVERRIDE"
+chmod 000 "$UNREADABLE_OVERRIDE"
+
+assert_daemon_launcher_rejects_override "$MISSING_OVERRIDE" "missing"
+assert_daemon_launcher_rejects_override "$UNREADABLE_OVERRIDE" "unreadable"
+assert_daemon_launcher_rejects_override "$INFINITE_PROPERTIES" "infinite-TTL"
+
+chmod 600 "$UNREADABLE_OVERRIDE"
+
 MISSING_DEFAULT="${TEMP_DIR}/missing-default-security.properties"
 MISSING_DEFAULT_TTL=$("$JAVA_BIN" \
     -Djava.security.properties="$MISSING_DEFAULT" \
@@ -539,7 +572,6 @@ mv "$SECURITY_PROPERTIES" "$SECURITY_PROPERTIES_BACKUP"
 
 # An upgrade that reuses an older conf/ must say which file is missing, in the
 # log that start-hugegraph.sh points operators at rather than only on stderr.
-SERVER_LOG="${SERVER_ROOT}/logs/hugegraph-server.log"
 : > "$SERVER_LOG"
 CAPTURE_FILE="${TEMP_DIR}/missing-bundled.args" JAVA_HOME="$MOCK_JAVA_HOME" \
     STDOUT_MODE=true "$SERVER_SCRIPT" \

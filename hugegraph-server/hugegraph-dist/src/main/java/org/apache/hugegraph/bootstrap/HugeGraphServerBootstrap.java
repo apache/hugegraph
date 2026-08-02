@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.bootstrap;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.security.Security;
 
 import org.apache.hugegraph.dist.HugeGraphServer;
@@ -40,13 +42,12 @@ public final class HugeGraphServerBootstrap {
                 validateDnsCacheTtl(
                         Security.getProperty("networkaddress.cache.ttl"));
             } catch (Throwable e) {
-                System.err.println("ERROR: Java security property " +
-                                   "networkaddress.cache.ttl must load as a " +
-                                   "finite positive integer " +
-                                   "(java.security.properties=" +
-                                   System.getProperty(
-                                           "java.security.properties") +
-                                   "): " + e);
+                reportFatal("ERROR: Java security property " +
+                            "networkaddress.cache.ttl must load as a " +
+                            "finite positive integer " +
+                            "(java.security.properties=" +
+                            System.getProperty("java.security.properties") +
+                            "): " + e);
                 System.exit(1);
                 return;
             }
@@ -59,8 +60,8 @@ public final class HugeGraphServerBootstrap {
                             "Unexpected security manager");
                 }
             } catch (Throwable e) {
-                System.err.println("ERROR: Failed to install " +
-                                   "HugeSecurityManager: " + e);
+                reportFatal("ERROR: Failed to install " +
+                            "HugeSecurityManager: " + e);
                 System.exit(1);
                 return;
             }
@@ -80,6 +81,28 @@ public final class HugeGraphServerBootstrap {
         int ttl = Integer.parseInt(value);
         if (ttl <= 0) {
             throw new IllegalArgumentException("DNS cache TTL must be positive");
+        }
+    }
+
+    /**
+     * In daemon mode the launcher redirects stderr to the stdout log, so a
+     * fatal error printed only there never reaches the server log that
+     * start-hugegraph.sh points operators at. The launcher passes that log's
+     * path so the cause can be appended to both. This runs before the
+     * security manager is installed and must not touch the logging framework:
+     * the DNS policy being validated here is the very policy logging-time
+     * hostname resolution would cache.
+     */
+    private static void reportFatal(String message) {
+        System.err.println(message);
+        String errorLog = System.getProperty("hugegraph.bootstrap.error.log");
+        if (errorLog == null || errorLog.isEmpty()) {
+            return;
+        }
+        try (FileWriter writer = new FileWriter(errorLog, true)) {
+            writer.write(message + System.lineSeparator());
+        } catch (IOException ignored) {
+            // Best effort only: stderr already carries the message
         }
     }
 }
