@@ -70,6 +70,19 @@ This deploys 3 PD + 3 Store + 3 Server, preserves the image's automatic JVM
 sizing, and sets no resource requests or limits. Set resources before
 production use.
 
+The default anti-affinity for `pd`, `store`, and `server` is `preferred`
+(Server always was; Hubble has no anti-affinity knob because it is
+single-replica by design), so the chart schedules even on clusters with
+fewer nodes than replicas. Production should pin `pd.antiAffinity` and
+`store.antiAffinity` to `required`, as `values-cluster.yaml` does, so one
+node failure cannot take out the PD quorum or co-locate shard replicas; see
+Scheduling below.
+
+A fresh install seeds PD with a partition shard count of 3 when
+`store.replicas` is at least 3, and 1 otherwise, instead of the image
+default of 1. The seed applies at first bootstrap only; see Partition
+Sharding below.
+
 This first chart is version `0.1.0`. While the contribution is a draft, its
 component image tags and `appVersion` track `latest` with pull policy `Always`.
 Before stable publication, pin all three component tags and `appVersion` to the
@@ -86,9 +99,9 @@ helm test hugegraph --namespace hugegraph
 
 | File | Purpose |
 |---|---|
-| `values.yaml` | Default 3+3+3 topology |
+| `values.yaml` | Default 3+3+3 topology with preferred anti-affinity, so it schedules on clusters of any node count |
 | `values-single.yaml` | Single-node 1+1+1 example |
-| `values-cluster.yaml` | Production 3+3+3 starting point with JVM/resources, PD/Store PDBs, and required anti-affinity; Hubble stays opt-in because the preset does not enable authentication |
+| `values-cluster.yaml` | Production 3+3+3 starting point with JVM/resources, PD/Store PDBs, and required anti-affinity for PD and Store; Hubble stays opt-in because the preset does not enable authentication |
 
 `values-cluster.yaml` is a production starting point, not a capacity
 guarantee. Recalculate capacity for the graph size, traffic, failure budget,
@@ -103,10 +116,27 @@ helm upgrade hugegraph ./helm/hugegraph --namespace hugegraph --reuse-values
 Every optional field stays optional, so a release created by an earlier
 revision continues to render under `--reuse-values`. Note that `--reuse-values`
 keeps the old release's values as the complete base, so a release created
-before a field existed does **not** pick up its new default — including the
+before a field existed does **not** pick up its new default, including the
 hardened `securityContext`, ServiceAccounts, and `terminationGracePeriodSeconds`.
-Pod-level token mounting is the one exception: it is disabled unconditionally.
 Use `-f` with your own values, or `--reset-then-reuse-values`, to adopt them.
+That rule covers values-sourced defaults only; the asymmetry is that
+template-derived settings **are** applied even under `--reuse-values`,
+because they are computed at render time from whatever values are in effect.
+Pod-level token mounting (disabled unconditionally) and the derived
+`-Dpartition.default-shard-count` in the PD `JAVA_OPTS` are the current
+cases. On an already-initialized cluster the seeded shard count is inert
+either way; see Partition Sharding.
+
+Upgrading an existing release to this chart version rolls the PD StatefulSet
+once: PD Pods now always carry a `JAVA_OPTS` environment variable with the
+chart-derived partition properties, where previous versions set the variable
+only when `pd.javaOpts` was non-empty.
+
+The `pd.antiAffinity` and `store.antiAffinity` defaults changed from
+`required` to `preferred` in this version. `--reuse-values` keeps the old
+effective value, but installs that relied on the old `required` default
+while supplying their own values files must now pin `antiAffinity: required`
+explicitly.
 
 PD and Store resource names reserve room for their StatefulSet ordinal before truncation, so
 identities stay fixed across replica changes and scaling never renames a
@@ -142,7 +172,9 @@ default values.
 | `pd.image.repository` | PD image repository | `hugegraph/pd` |
 | `pd.image.tag` | PD image tag. Tracks the development image until the next release is pinned | `latest` |
 | `pd.image.pullPolicy` | PD image pull policy | `Always` |
-| `pd.javaOpts` | Empty preserves the image's automatic JVM sizing | `""` |
+| `pd.javaOpts` | Extra JVM flags, rendered after the chart-derived `-D` properties below so an explicit duplicate here wins. The image's automatic heap sizing is preserved unless heap flags are set | `""` |
+| `pd.partition.defaultShardCount` | Shard replicas per partition, seeded into PD's persisted config at first bootstrap only; inert on an initialized cluster (see Partition Sharding). Empty derives 3 when `store.replicas` is at least 3, else 1. An explicit value must be odd and must not exceed `store.replicas` | `""` |
+| `pd.partition.storeMaxShardCount` | Maximum shards per Store, seeded at first bootstrap only. Also fixes the initial partition count, `store.replicas x storeMaxShardCount / shardCount` (see Partition Sharding). Empty preserves the image default of `12` | `""` |
 | `pd.ports.grpc` | PD gRPC port | `8686` |
 | `pd.ports.rest` | PD REST port, also used by probes | `8620` |
 | `pd.ports.raft` | PD Raft port | `8610` |
@@ -152,7 +184,7 @@ default values.
 | `pd.resources` | PD container resources. Set these for production | `{}` |
 | `pd.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
 | `pd.securityContext` | Container-level securityContext. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
-| `pd.antiAffinity` | One of `required`, `preferred`, `disabled` | `required` |
+| `pd.antiAffinity` | One of `required`, `preferred`, `disabled`. `preferred` schedules on clusters with fewer nodes than replicas; production should use `required` so one node failure cannot take out the PD quorum | `preferred` |
 | `pd.nodeSelector` | Node selector for pd Pods | `{}` |
 | `pd.tolerations` | Tolerations for pd Pods | `[]` |
 | `pd.affinity` | Raw affinity; overrides `pd.antiAffinity` when set | `{}` |
@@ -193,7 +225,7 @@ default values.
 | `store.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
 | `store.securityContext` | Container-level securityContext; also applied to the PD-quorum init container. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
 | `store.waitTimeoutSeconds` | Bound on the PD-quorum wait before the init container fails | `900` |
-| `store.antiAffinity` | One of `required`, `preferred`, `disabled` | `required` |
+| `store.antiAffinity` | One of `required`, `preferred`, `disabled`. `preferred` schedules on clusters with fewer nodes than replicas; production should use `required` so one node failure cannot co-locate shard replicas | `preferred` |
 | `store.nodeSelector` | Node selector for store Pods | `{}` |
 | `store.tolerations` | Tolerations for store Pods | `[]` |
 | `store.affinity` | Raw affinity; overrides `store.antiAffinity` when set | `{}` |
@@ -375,7 +407,15 @@ before anything reaches the cluster:
   `HG_SERVER_INIT_STORE_ENABLED` or the PD/Store identity and topology
   variables): entries render after the chart-owned variables and the last
   duplicate wins, so an override would silently bypass a validated contract.
+  `JAVA_OPTS` and `JAVA_OPTIONS` are reserved for the same reason: the
+  component start scripts skip automatic heap sizing and drop the chart's
+  `JAVA_OPTS` flags entirely when `JAVA_OPTIONS` arrives preset.
 - `pd.replicas` and `store.replicas` are capped at 99.
+- `pd.partition.defaultShardCount` and `pd.partition.storeMaxShardCount`
+  must each be empty or a positive integer. An explicit shard count must
+  also be odd (PD's config API rejects even values, and PD clamps 2 to 1)
+  and must not exceed `store.replicas`, past which PD would silently clamp
+  it to the live store count.
 - `hubble.port` must be a valid port, `hubble.persistence.size` must be
   non-empty, and `hubble.service.nodePort` requires a `NodePort` or
   `LoadBalancer` Service type.
@@ -411,6 +451,107 @@ curl http://127.0.0.1:8080/graphs
 
 All ports are configurable through `values.yaml`. Changing `server.port` updates
 the listener, container port, and Service together.
+
+---
+
+### Scheduling
+
+Every component (`pd`, `store`, `server`, `hubble`) exposes the full set of
+scheduling controls: `nodeSelector`, `tolerations`, `affinity`,
+`topologySpreadConstraints`, and `priorityClassName`. For example, pinning
+Store to labeled nodes is just:
+
+```yaml
+store:
+  nodeSelector:
+    hugegraph/role: storage
+```
+
+`antiAffinity` (`required` | `preferred` | `disabled`) renders a hostname
+pod-anti-affinity preset for `pd`, `store`, and `server`; Hubble has no
+`antiAffinity` key because it is single-replica by design. Setting a raw
+`affinity` replaces the preset entirely. All three default to `preferred`
+(Server always did; the pd and store defaults changed from `required`), so
+the chart schedules on clusters with fewer nodes than replicas (including
+single-node development clusters). The trade: `preferred` lets the
+scheduler co-locate replicas under node pressure, so a single node failure
+can then take more than one PD or Store replica with it. Production
+clusters with enough nodes should pin `pd.antiAffinity` and
+`store.antiAffinity` to `required`, as `values-cluster.yaml` does.
+
+### Partition Sharding
+
+A fresh install seeds PD's persisted configuration with a partition shard
+count of 3 when `store.replicas` is at least 3, and 1 otherwise. Without
+this the PD image's `conf/application.yml` would pin
+`partition.default-shard-count` to 1, leaving chart-deployed clusters
+without store-level HA. The derivation never produces 2 because PD clamps a
+shard count of 2 to 1: two shards cannot elect a leader.
+
+The chart renders the setting as `-Dpartition.default-shard-count` in the PD
+container's `JAVA_OPTS`; system properties outrank the shipped config file,
+and the PD start script appends `JAVA_OPTS` after its automatically computed
+heap flags, so the image's JVM auto-sizing is unaffected.
+
+**The seed applies at first bootstrap only.** PD persists the shard count
+into its own metadata the first time it starts with empty storage, and from
+then on the stored value is authoritative: every PD leader change re-reads
+it from storage, overwriting whatever the `-D` flag says. Changing
+`pd.partition.defaultShardCount` later, or scaling `store.replicas` across
+the derivation boundary, therefore has **no** effect on an initialized
+cluster. Nor is the value frozen at partition creation: PD reconciles
+existing shard groups toward the stored value whenever a partition patrol
+runs. To change the shard count of a running cluster, use PD's own config
+API (which accepts only odd values not exceeding the live store count) and
+then trigger `GET /v1/task/patrolPartitions`; expect shard-group
+reallocation when the counts differ.
+
+The shard count also fixes the initial partition count:
+`store.replicas x storeMaxShardCount / shardCount`, computed once at
+bootstrap. With the image's `store-max-shard-count` default of 12, the
+derived shard count moves a default 3-store install from 36 partitions
+(shard count 1) to 12 (shard count 3). Set
+`pd.partition.storeMaxShardCount` higher to compensate when more partitions
+are wanted; it is likewise seeded at first bootstrap only.
+
+An explicit `pd.partition.defaultShardCount` must be odd and at most
+`store.replicas`. The chart rejects other values at render time: PD would
+silently clamp a value above the live store count, clamp 2 to 1, and reject
+even values at its config API, so an accepted render would not mean an
+honored setting.
+
+### Disaster Recovery
+
+What PD automates on current builds is narrow. A scheduled patrol runs on a
+hardcoded 60-second cadence and only marks Stores that stopped sending
+heartbeats as `Offline`; it does not touch partitions. There is **no
+automatic re-replication**: re-placing the replicas of a lost Store,
+reconciling shard groups against the stored shard count, and processing
+tombstoned Stores all run only when a partition patrol is triggered
+explicitly. PD's configuration binds `pd.patrol-interval` and
+`store.max-down-time` keys, but no code path on current builds reads
+either, which is why this chart does not expose them.
+
+Recovery and rebalancing are operator-triggered. PD exposes REST triggers,
+reachable through the PD client Service:
+
+```bash
+kubectl port-forward -n hugegraph svc/hugegraph-pd-client 8620:8620
+curl http://127.0.0.1:8620/v1/task/patrolPartitions   # reconcile shard groups, process tombstoned Stores
+curl http://127.0.0.1:8620/v1/task/balanceLeaders     # spread Raft leaders
+curl http://127.0.0.1:8620/v1/task/balancePartitions  # spread partition data
+```
+
+Run `patrolPartitions` after replacing a Store that is not coming back,
+`balancePartitions` once the cluster is stable again, and `balanceLeaders`
+after restarts that skewed leader placement.
+
+Periodic balancing and shard-sync progress metrics do not exist upstream
+yet and are out of scope for this chart. Periodic leader balancing is
+tracked in
+[apache/hugegraph#3135](https://github.com/apache/hugegraph/issues/3135);
+disaster-recovery metrics are tracked in
+[apache/hugegraph#3136](https://github.com/apache/hugegraph/issues/3136).
 
 ---
 
@@ -458,6 +599,25 @@ graph is fully able to serve index-backed queries. Confirm the graph is live:
 kubectl exec <server-pod> -c server -- curl -s localhost:8080/graphs
 ```
 
+### Queries Fail with "Could not rebind" Right After Creating a Graph
+
+Creating a graph returns before every Server replica has opened and bound it.
+The creating Server writes the graph to PD metadata and registers its own
+Gremlin binding; the other replicas converge independently through a PD watch
+plus a local graph open. Until they do, a Gremlin query routed through the
+load-balanced Service to a not-yet-converged replica fails with a 400 error
+such as `Could not rebind [g]`. This is upstream behavior, not a chart
+setting. Mitigations:
+
+- Retry with backoff in the client; the window normally closes in seconds.
+- Use sticky routing (or `kubectl port-forward` to one Pod) for
+  create-then-verify flows, so follow-up queries hit the creating replica.
+- Poll `/graphs` on each replica until the new graph appears everywhere
+  before opening query traffic.
+
+The underlying fix, orchestrating graph creation through PD, is upstream
+work.
+
 ### Pods OOM Killed or Restarting
 
 The default `values.yaml` sets **no** resource requests or limits and preserves
@@ -489,7 +649,12 @@ independently of the release name.
 ## Limitations
 
 - No TLS, backups, Operator, multi-cluster support, automatic leader transfer,
-  or a complete monitoring stack.
+  or a complete monitoring stack. Store recovery is manual on current builds:
+  re-replication after Store loss, leader balancing, and partition
+  rebalancing run only when triggered (see Disaster Recovery); periodic
+  balancing and shard-sync metrics are upstream feature work.
+- Newly created graphs are visible on all Server replicas only after a short
+  propagation window (see Troubleshooting: "Could not rebind").
 - The published images run as root, so `runAsNonRoot` and
   `readOnlyRootFilesystem` are not chart defaults. The container
   `securityContext` does default to `allowPrivilegeEscalation: false`,

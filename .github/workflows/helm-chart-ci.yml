@@ -70,6 +70,19 @@ jobs:
             --set hubble.persistence.enabled=true \
             --set hubble.ingress.enabled=true \
             --set hubble.ingress.allowPlainHttp=true > /dev/null
+          # PD sharding knobs rendered as -D system properties, including
+          # the values-file shape where the count arrives as a numeric string
+          helm template ci helm/hugegraph \
+            --set pd.partition.defaultShardCount=3 \
+            --set pd.partition.storeMaxShardCount=12 > /dev/null
+          helm template ci helm/hugegraph \
+            --set-string pd.partition.defaultShardCount=3 > /dev/null
+          # The derived shard count must land in the PD JAVA_OPTS verbatim:
+          # 3 on the default topology, 1 on the single-node preset
+          helm template ci helm/hugegraph \
+            | grep -qF 'value: "-Dpartition.default-shard-count=3"'
+          helm template ci helm/hugegraph -f helm/hugegraph/values-single.yaml \
+            | grep -qF 'value: "-Dpartition.default-shard-count=1"'
 
       - name: reject invalid values
         run: |
@@ -111,6 +124,14 @@ jobs:
             --set pd.replicas=5 --set pd.pdb.minAvailable=3 > /dev/null
           helm template ci helm/hugegraph \
             --set pd.replicas=5 --set pd.pdb.minAvailable=4 > /dev/null
+          # PD sharding knobs: empty or a positive integer; an explicit
+          # shard count must be odd and stay within the store count
+          must_fail --set pd.partition.defaultShardCount=0
+          must_fail --set pd.partition.defaultShardCount=-1
+          must_fail --set-string pd.partition.defaultShardCount=abc
+          must_fail --set pd.partition.defaultShardCount=2
+          must_fail --set pd.partition.defaultShardCount=5
+          must_fail --set pd.partition.storeMaxShardCount=0
           # extraEnv must not override chart-managed variables
           must_fail --set 'server.extraEnv[0].name=HG_SERVER_INIT_STORE_ENABLED' \
             --set 'server.extraEnv[0].value=true'
@@ -118,6 +139,10 @@ jobs:
             --set 'pd.extraEnv[0].value=x'
           must_fail --set 'store.extraEnv[0].name=HG_STORE_PD_ADDRESS' \
             --set 'store.extraEnv[0].value=x'
+          # JAVA_OPTIONS is reserved: a preset value makes the start scripts
+          # skip auto heap sizing and drop the chart's JAVA_OPTS entirely
+          must_fail --set 'pd.extraEnv[0].name=JAVA_OPTIONS' \
+            --set 'pd.extraEnv[0].value=-Xmx1g'
 
       - name: kubeconform
         shell: bash
@@ -142,6 +167,10 @@ jobs:
             --set hubble.enabled=true \
             --set server.auth.enabled=true \
             --set server.auth.existingSecret=ci-auth \
+            | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+          helm template ci helm/hugegraph \
+            --set pd.partition.defaultShardCount=3 \
+            --set pd.partition.storeMaxShardCount=12 \
             | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
 
       - name: legacy --reuse-values compatibility

@@ -31,8 +31,32 @@ pd:
     # Pin the release tag and switch to IfNotPresent before stable publication.
     tag: latest
     pullPolicy: Always
-  # Empty preserves the image entrypoint's automatic JVM sizing.
+  # Empty preserves the image entrypoint's automatic JVM sizing. The chart
+  # renders its partition settings below as -D system properties ahead of
+  # this value, so flags placed here win on conflict.
   javaOpts: ""
+  # Partition sharding, rendered as -D system properties that outrank the
+  # image's conf/application.yml. PD copies both values into its own
+  # persisted metadata at first bootstrap only; from then on the stored
+  # values are authoritative, so changing these later (or scaling
+  # store.replicas across the derivation boundary) has no effect on an
+  # initialized cluster. Post-bootstrap changes go through PD's config API
+  # and take effect on existing shard groups only when a partition patrol
+  # is triggered; see the README's Partition Sharding section.
+  partition:
+    # Shard replicas per partition, seeding PD at first bootstrap only.
+    # Empty derives 3 when store.replicas is at least 3, else 1, so a fresh
+    # multi-store install gets store-level HA instead of the image default
+    # of 1. The derivation skips 2 because PD clamps a shard count of 2 to
+    # 1 (two shards cannot elect a leader). An explicit value must be odd
+    # and must not exceed store.replicas.
+    defaultShardCount: ""
+    # Maximum shards per store, seeding PD at first bootstrap only. Also
+    # fixes the initial partition count: store.replicas x this value /
+    # shard count. The derived shard count of 3 gives the default topology
+    # 12 partitions instead of 36; raise this value to compensate when more
+    # partitions are wanted. Empty preserves the image default of 12.
+    storeMaxShardCount: ""
   ports:
     grpc: 8686
     rest: 8620
@@ -51,8 +75,10 @@ pd:
       drop: ["ALL"]
     seccompProfile:
       type: RuntimeDefault
-  # required | preferred | disabled
-  antiAffinity: required
+  # required | preferred | disabled. "preferred" schedules on clusters with
+  # fewer nodes than replicas; production should use "required" (see
+  # values-cluster.yaml) so one node failure cannot take out PD quorum.
+  antiAffinity: preferred
   # Scheduling. `affinity` takes precedence over the antiAffinity preset.
   nodeSelector: {}
   tolerations: []
@@ -115,7 +141,10 @@ store:
       drop: ["ALL"]
     seccompProfile:
       type: RuntimeDefault
-  antiAffinity: required
+  # required | preferred | disabled. "preferred" schedules on clusters with
+  # fewer nodes than replicas; production should use "required" (see
+  # values-cluster.yaml) so one node failure cannot co-locate shard replicas.
+  antiAffinity: preferred
   # Scheduling. `affinity` takes precedence over the antiAffinity preset.
   nodeSelector: {}
   tolerations: []

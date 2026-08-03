@@ -37,6 +37,18 @@
     }
   },
   "definitions": {
+    "optionalPositiveInteger": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "pattern": "^([1-9][0-9]*)?$"
+        }
+      ]
+    },
     "image": {
       "type": "object",
       "additionalProperties": false,
@@ -239,6 +251,18 @@
         },
         "javaOpts": {
           "type": "string"
+        },
+        "partition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultShardCount": {
+              "$ref": "#/definitions/optionalPositiveInteger"
+            },
+            "storeMaxShardCount": {
+              "$ref": "#/definitions/optionalPositiveInteger"
+            }
+          }
         },
         "ports": {
           "$ref": "#/definitions/ports"

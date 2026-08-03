@@ -116,7 +116,7 @@ spec:
             - name: HG_PD_DATA_PATH
               value: {{ .Values.pd.dataPath | quote }}
             {{- with .Values.pd.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
-            {{- with include "hugegraph.javaOptsEnv" .Values.pd.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
+            {{- with include "hugegraph.javaOptsEnv" (include "hugegraph.pd.effectiveJavaOpts" .) }}{{ . | trim | nindent 12 }}{{- end }}
           volumeMounts:
             - name: pd-data
               mountPath: {{ .Values.pd.dataPath }}

@@ -33,6 +33,7 @@ pd:
     limits:
       cpu: "2"
       memory: 2Gi
+  # Pinned to "required": production must not co-locate PD quorum members.
   antiAffinity: required
   pdb:
     enabled: true
@@ -61,6 +62,7 @@ store:
     limits:
       cpu: 250m
       memory: 64Mi
+  # Pinned to "required": production must not co-locate shard replicas.
   antiAffinity: required
   pdb:
     enabled: true

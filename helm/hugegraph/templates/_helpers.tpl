@@ -204,6 +204,80 @@ image entrypoint's existing automatic JVM sizing behavior.
 {{- end }}
 
 {{/*
+String form of a possibly-absent scalar value, preserving zero. sprig's
+`default` treats 0 as unset, which would let a zero slip past the named
+validation below, so absence is detected explicitly instead. Numbers from a
+values file arrive as float64, whose toString switches to scientific
+notation at 1e6 or higher (1000000 becomes "1e+06"), so integral float64
+values are formatted without an exponent. Non-integral floats keep their
+raw form on purpose: the schema already rejects them, and the raw form
+fails the named validation instead of being silently rounded.
+*/}}
+{{- define "hugegraph.optionalScalar" -}}
+{{- if not (kindIs "invalid" .) -}}
+{{- if and (kindIs "float64" .) (eq (floor .) .) -}}{{- printf "%.0f" . -}}{{- else -}}{{- trim (toString .) -}}{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Effective PD JAVA_OPTS: chart-derived -D system properties, then pd.javaOpts.
+
+The -D route is the grounded override mechanism: the PD image's
+docker-entrypoint.sh forwards JAVA_OPTS via `-j` into
+bin/start-hugegraph-pd.sh, which places it on the java command line ahead of
+-Dspring.config.location, and Spring system properties outrank the shipped
+conf/application.yml (which pins partition.default-shard-count to 1).
+
+The shard count is always derived, so PD Pods always carry a JAVA_OPTS
+variable, which shadows the PD image's `ENV JAVA_OPTS` default
+(-XX:MaxRAMPercentage=50, -XX:+UseContainerSupport, -XshowSettings:vm).
+That is acceptable: the start script always computes explicit -Xms/-Xmx
+heap flags when the separate JAVA_OPTIONS variable is unset, which makes
+MaxRAMPercentage moot, and only the -XshowSettings:vm startup diagnostics
+are lost.
+
+JVM auto-sizing is preserved, verified against the PD dist start script:
+`-j` lands in USER_OPTION, while the automatic heap sizing branch is gated on
+the separate JAVA_OPTIONS variable and appends USER_OPTION after the computed
+-Xms/-Xmx flags. A JAVA_OPTS holding only -D flags therefore still gets
+automatic heap sizing, and heap flags in pd.javaOpts land later on the
+command line, so they win. The derived -D flags come first for the same
+reason: an explicit duplicate in pd.javaOpts overrides them.
+
+Both -D properties seed PD's persisted config at first bootstrap only:
+ConfigService.loadConfig persists them when no stored config exists, and
+every leader change re-reads the stored values (updatePDConfig), so on an
+initialized cluster the flags are inert and the authoritative values live
+in PD metadata, changeable only through PD's own config API. PD reconciles
+existing shard groups toward the stored value when a partition patrol is
+triggered (TaskScheduleService reallocShards). The empty-value derivation
+is 3 when store.replicas is at least 3, else 1, because PD clamps a shard
+count of 2 to 1 (two shards cannot elect a leader) and its config API
+accepts only odd values. store-max-shard-count is rendered only when set,
+keeping the image default. All lookups tolerate absent keys so releases
+stored before these values existed keep rendering under --reuse-values.
+*/}}
+{{- define "hugegraph.pd.effectiveJavaOpts" -}}
+{{- $pd := .Values.pd -}}
+{{- $partition := get $pd "partition" | default dict -}}
+{{- $flags := list -}}
+{{- $shardCount := include "hugegraph.optionalScalar" (get $partition "defaultShardCount") -}}
+{{- if eq $shardCount "" -}}
+{{- $shardCount = ternary "3" "1" (ge (int .Values.store.replicas) 3) -}}
+{{- end -}}
+{{- $flags = append $flags (printf "-Dpartition.default-shard-count=%s" $shardCount) -}}
+{{- $maxShard := include "hugegraph.optionalScalar" (get $partition "storeMaxShardCount") -}}
+{{- if ne $maxShard "" -}}
+{{- $flags = append $flags (printf "-Dpartition.store-max-shard-count=%s" $maxShard) -}}
+{{- end -}}
+{{- $userOpts := trim (get $pd "javaOpts" | default "") -}}
+{{- if ne $userOpts "" -}}
+{{- $flags = append $flags $userOpts -}}
+{{- end -}}
+{{- join " " $flags -}}
+{{- end }}
+
+{{/*
 Keep the startup probe alive for the 300-second storage wait, the Server's
 120-second start timeout, and 30 seconds of process overhead. Older stored
 values remain accepted, but their rendered threshold is raised to this floor.
@@ -290,10 +364,37 @@ and must not be failed for a value that has no effect.
 {{- fail "pd.pdb.minAvailable must be less than pd.replicas, otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
 {{- end -}}
 {{- if and .Values.pd.pdb.enabled (gt (int .Values.pd.replicas) 1) (lt (int .Values.pd.pdb.minAvailable) (include "hugegraph.pd.quorum" . | int)) -}}
-{{- fail "pd.pdb.minAvailable must be at least the PD Raft majority, floor(replicas/2)+1, otherwise the budget permits voluntary evictions that drop PD below quorum" -}}
+{{- fail "pd.pdb.minAvailable must be at least the PD Raft majority, floor(replicas/2)+1, otherwise the budget permits voluntary disruptions that drop PD below quorum. Note a PDB only limits voluntary disruption such as drains and evictions; it cannot protect quorum from node failure" -}}
 {{- end -}}
 {{- if and .Values.store.pdb.enabled (gt (int .Values.store.replicas) 1) (ge (int .Values.store.pdb.minAvailable) (int .Values.store.replicas)) -}}
 {{- fail "store.pdb.minAvailable must be less than store.replicas, otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
+{{- end -}}
+{{/*
+PD -D system properties must be empty or a positive integer. The schema
+enforces the types; these checks add a named failure for zero, negative, and
+nonsense values, and check an explicit shard count against PD's real
+constraints: PD's config API accepts only odd shard counts, PD clamps a
+count of 2 to 1 (two shards cannot elect a leader), and PD clamps the
+effective count to the number of live stores. All lookups tolerate absent
+keys for releases stored before the values existed.
+*/}}
+{{- $pdPartition := get .Values.pd "partition" | default dict -}}
+{{- $pdProps := dict
+      "pd.partition.defaultShardCount" (include "hugegraph.optionalScalar" (get $pdPartition "defaultShardCount"))
+      "pd.partition.storeMaxShardCount" (include "hugegraph.optionalScalar" (get $pdPartition "storeMaxShardCount")) -}}
+{{- range $label, $raw := $pdProps -}}
+{{- if and (ne $raw "") (or (not (regexMatch "^[0-9]+$" $raw)) (eq (int $raw) 0)) -}}
+{{- fail (printf "%s must be empty or a positive integer" $label) -}}
+{{- end -}}
+{{- end -}}
+{{- $explicitShards := include "hugegraph.optionalScalar" (get $pdPartition "defaultShardCount") -}}
+{{- if regexMatch "^[1-9][0-9]*$" $explicitShards -}}
+{{- if eq (mod (int $explicitShards) 2) 0 -}}
+{{- fail "pd.partition.defaultShardCount must be odd: PD's config API rejects even shard counts, and PD clamps a bootstrap value of 2 to 1 because two shards cannot elect a leader" -}}
+{{- end -}}
+{{- if gt (int $explicitShards) (int .Values.store.replicas) -}}
+{{- fail "pd.partition.defaultShardCount is greater than store.replicas: PD would clamp the effective shard count to the number of live stores, so the extra replicas would silently never be placed. Raise store.replicas or lower the shard count" -}}
+{{- end -}}
 {{- end -}}
 {{- $svc := get .Values.server "service" | default dict -}}
 {{- if and (get $svc "nodePort") (not (has (get $svc "type" | default "ClusterIP") (list "NodePort" "LoadBalancer"))) -}}
@@ -312,12 +413,16 @@ and must not be failed for a value that has no effect.
 extraEnv entries render after the chart-owned variables and Kubernetes lets
 the last duplicate win, so a duplicate name would silently override a
 validated contract (for example re-enabling init-store across Server
-replicas). Reserved names are rejected instead.
+replicas). Reserved names are rejected instead. JAVA_OPTIONS is reserved
+for pd, store, and server because each component's start script skips its
+automatic heap sizing and drops the chart's JAVA_OPTS flags entirely when
+JAVA_OPTIONS arrives preset in the environment (verified in
+start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 */}}
 {{- $reservedEnv := dict
-      "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "JAVA_OPTS")
-      "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS")
-      "server" (list "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "JAVA_OPTS")
+      "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
+      "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
+      "server" (list "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "JAVA_OPTS" "JAVA_OPTIONS")
       "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}

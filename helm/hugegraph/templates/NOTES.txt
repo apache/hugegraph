@@ -70,6 +70,14 @@ Hubble Pod is replaced. Graph data is unaffected.
 
 Authentication is disabled. Do not expose this release to untrusted networks.
 {{- end }}
+{{- if and (gt (int .Values.pd.replicas) 1) (ne (get .Values.pd "antiAffinity" | default "") "required") (empty (get .Values.pd "affinity")) }}
+
+pd.antiAffinity is not "required", so the scheduler may co-locate PD quorum
+members on one node and a single node loss can take down the PD quorum. The
+PD PodDisruptionBudget only limits voluntary disruption (drains, evictions),
+not node failure. On clusters with at least {{ .Values.pd.replicas }} nodes,
+set pd.antiAffinity=required; see values-cluster.yaml.
+{{- end }}
 {{- if or (empty .Values.pd.resources) (empty .Values.store.resources) (empty .Values.server.resources) }}
 
 One or more components have no resource requests or limits. Set them before
