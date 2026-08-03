@@ -35,9 +35,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: azure/setup-helm@v4
-        with:
-          version: v3.16.2
+      # azure/setup-helm is not on the ASF-approved actions allowlist, which
+      # fails the workflow at startup; install the pinned release directly.
+      - name: install helm
+        run: |
+          curl -fsSL https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version
 
       - name: helm lint
         run: |
@@ -48,6 +52,7 @@ jobs:
       - name: helm template
         run: |
           for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
+            # shellcheck disable=SC2086 # $preset intentionally splits into flags
             helm template ci helm/hugegraph $preset > /dev/null
           done
           # Positive coverage for every hubble wrapper branch: pd mode with
@@ -88,15 +93,15 @@ jobs:
             --set server.pdb.minAvailable=2
           must_fail --set server.auth.enabled=true
           must_fail --set hubble.enabled=true
-          A="--set hubble.enabled=true --set hubble.allowWithoutServerAuth=true"
-          must_fail $A --set hubble.port=0
-          must_fail $A \
+          A=(--set hubble.enabled=true --set hubble.allowWithoutServerAuth=true)
+          must_fail "${A[@]}" --set hubble.port=0
+          must_fail "${A[@]}" \
             --set hubble.persistence.enabled=true \
             --set hubble.persistence.size=""
-          must_fail $A --set hubble.service.nodePort=30080
-          must_fail $A --set hubble.mode=bogus
-          must_fail $A --set hubble.image.tag=""
-          must_fail $A --set hubble.ingress.enabled=true
+          must_fail "${A[@]}" --set hubble.service.nodePort=30080
+          must_fail "${A[@]}" --set hubble.mode=bogus
+          must_fail "${A[@]}" --set hubble.image.tag=""
+          must_fail "${A[@]}" --set hubble.ingress.enabled=true
           must_fail --set server.ingress.enabled=true \
             --set server.ingress.allowPlainHttp=true
           # PD PDB must keep the Raft majority: floor(replicas/2)+1
@@ -121,6 +126,7 @@ jobs:
           curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
           tar -xzf /tmp/kc.tar.gz -C /tmp
           for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
+            # shellcheck disable=SC2086 # $preset intentionally splits into flags
             helm template ci helm/hugegraph $preset | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
           done
           helm template ci helm/hugegraph \
