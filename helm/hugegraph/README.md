@@ -367,6 +367,14 @@ before anything reaches the cluster:
   `server.resources.requests.cpu`.
 - `pdb.minAvailable` must be less than the matching `replicas`, so a
   PodDisruptionBudget cannot permanently block node drains.
+- `pd.pdb.minAvailable` must also be at least the PD Raft majority,
+  `floor(replicas/2)+1`, so the budget cannot permit evictions that drop PD
+  below quorum. With 2 PD replicas no valid budget exists (the majority is
+  the whole membership); disable the PD PDB or use an odd replica count.
+- `extraEnv` must not set chart-managed variable names (for example
+  `HG_SERVER_INIT_STORE_ENABLED` or the PD/Store identity and topology
+  variables): entries render after the chart-owned variables and the last
+  duplicate wins, so an override would silently bypass a validated contract.
 - `pd.replicas` and `store.replicas` are capped at 99.
 - `hubble.port` must be a valid port, `hubble.persistence.size` must be
   non-empty, and `hubble.service.nodePort` requires a `NodePort` or

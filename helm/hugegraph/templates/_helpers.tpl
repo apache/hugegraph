@@ -289,6 +289,9 @@ and must not be failed for a value that has no effect.
 {{- if and .Values.pd.pdb.enabled (gt (int .Values.pd.replicas) 1) (ge (int .Values.pd.pdb.minAvailable) (int .Values.pd.replicas)) -}}
 {{- fail "pd.pdb.minAvailable must be less than pd.replicas, otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
 {{- end -}}
+{{- if and .Values.pd.pdb.enabled (gt (int .Values.pd.replicas) 1) (lt (int .Values.pd.pdb.minAvailable) (include "hugegraph.pd.quorum" . | int)) -}}
+{{- fail "pd.pdb.minAvailable must be at least the PD Raft majority, floor(replicas/2)+1, otherwise the budget permits voluntary evictions that drop PD below quorum" -}}
+{{- end -}}
 {{- if and .Values.store.pdb.enabled (gt (int .Values.store.replicas) 1) (ge (int .Values.store.pdb.minAvailable) (int .Values.store.replicas)) -}}
 {{- fail "store.pdb.minAvailable must be less than store.replicas, otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
 {{- end -}}
@@ -304,6 +307,25 @@ and must not be failed for a value that has no effect.
 {{- $serverIngress := get .Values.server "ingress" | default dict -}}
 {{- if hasKey $serverIngress "allowPlainHttp" -}}
 {{- fail "server.ingress.allowPlainHttp has no effect; the plain-HTTP opt-in applies to hubble.ingress only" -}}
+{{- end -}}
+{{/*
+extraEnv entries render after the chart-owned variables and Kubernetes lets
+the last duplicate win, so a duplicate name would silently override a
+validated contract (for example re-enabling init-store across Server
+replicas). Reserved names are rejected instead.
+*/}}
+{{- $reservedEnv := dict
+      "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "JAVA_OPTS")
+      "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS")
+      "server" (list "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "JAVA_OPTS")
+      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
+{{- range $component, $reserved := $reservedEnv -}}
+{{- $componentValues := get $.Values $component | default dict -}}
+{{- range $entry := get $componentValues "extraEnv" | default list -}}
+{{- if has (get $entry "name") $reserved -}}
+{{- fail (printf "%s.extraEnv must not set the chart-managed variable %s" $component (get $entry "name")) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- $hubble := get .Values "hubble" | default dict -}}
 {{- if get $hubble "enabled" | default false -}}

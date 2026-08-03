@@ -99,6 +99,20 @@ jobs:
           must_fail $A --set hubble.ingress.enabled=true
           must_fail --set server.ingress.enabled=true \
             --set server.ingress.allowPlainHttp=true
+          # PD PDB must keep the Raft majority: floor(replicas/2)+1
+          must_fail --set pd.replicas=5 --set pd.pdb.minAvailable=2
+          must_fail --set pd.replicas=4 --set pd.pdb.minAvailable=2
+          helm template ci helm/hugegraph \
+            --set pd.replicas=5 --set pd.pdb.minAvailable=3 > /dev/null
+          helm template ci helm/hugegraph \
+            --set pd.replicas=5 --set pd.pdb.minAvailable=4 > /dev/null
+          # extraEnv must not override chart-managed variables
+          must_fail --set 'server.extraEnv[0].name=HG_SERVER_INIT_STORE_ENABLED' \
+            --set 'server.extraEnv[0].value=true'
+          must_fail --set 'pd.extraEnv[0].name=HG_PD_RAFT_PEERS_LIST' \
+            --set 'pd.extraEnv[0].value=x'
+          must_fail --set 'store.extraEnv[0].name=HG_STORE_PD_ADDRESS' \
+            --set 'store.extraEnv[0].value=x'
 
       - name: kubeconform
         shell: bash
