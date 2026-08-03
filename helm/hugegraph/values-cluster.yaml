@@ -84,3 +84,21 @@ server:
       memory: 2Gi
   hpa:
     enabled: false
+
+# The optional Hubble UI is not enabled here: this preset does not enable
+# server authentication, and current Hubble images cannot complete their
+# login against an auth-less cluster. Enable it together with server.auth,
+# starting from:
+#
+# hubble:
+#   enabled: true
+#   persistence:
+#     enabled: true
+#     size: 1Gi
+#   resources:
+#     requests:
+#       cpu: 250m
+#       memory: 768Mi
+#     limits:
+#       cpu: "1"
+#       memory: 1536Mi

@@ -219,7 +219,9 @@ server:
   initStoreEnabled: false
   auth:
     enabled: false
-    # Secret must contain key "password"
+    # Secret must contain key "password" (no newlines). Applied as
+    # auth.admin_pa when the admin account is first created; changing the
+    # Secret later does not rotate an existing cluster's password.
     existingSecret: ""
   service:
     type: ClusterIP
@@ -243,6 +245,92 @@ server:
     startup:
       # 450s covers the 300s storage wait and Server process startup.
       failureThreshold: 90
+      periodSeconds: 5
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# Optional Hubble UI. Serves plain HTTP; keep it on a ClusterIP Service or
+# behind an HTTPS-terminating Ingress, never directly on an untrusted network.
+hubble:
+  enabled: false
+  # pd: discover the cluster through PD (enables the cluster operations view).
+  # direct: talk to the Server client Service only, without PD discovery.
+  # Current Hubble images require server.auth to be enabled: the UI login
+  # authenticates against the cluster, so rendering fails otherwise unless
+  # allowWithoutServerAuth explicitly overrides for images that support it.
+  mode: pd
+  allowWithoutServerAuth: false
+  image:
+    repository: hugegraph/hubble
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    pullPolicy: Always
+  port: 8088
+  # Hubble keeps UI connection metadata, including any graph credentials
+  # entered in the UI, in an embedded per-instance H2 database, so the
+  # Deployment is fixed at a single replica (pointing SPRING_DATASOURCE_URL
+  # at an external database via extraEnv is not a supported configuration).
+  # Without persistence that metadata is lost on Pod replacement; graph data
+  # is unaffected. size and storageClassName apply at install time only, and
+  # the PVC is kept on helm uninstall.
+  persistence:
+    enabled: false
+    size: 1Gi
+    storageClassName: ""
+  resources: {}
+  # When persistence is enabled and the pod runs as non-root, set a matching
+  # fsGroup here so H2 can write /hubble-data.
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the hubble container.
+  extraEnv: []
+  terminationGracePeriodSeconds: 30
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  service:
+    type: ClusterIP
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: hubble.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+    # Hubble serves plain HTTP, so an Ingress without tls is rejected at
+    # render time unless this is explicitly set to true for a trusted
+    # network.
+    allowPlainHttp: false
+  probes:
+    startup:
+      failureThreshold: 30
       periodSeconds: 5
       timeoutSeconds: 5
     readiness:

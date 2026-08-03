@@ -1,0 +1,268 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{- if get (get .Values "hubble" | default dict) "enabled" | default false }}
+{{- include "hugegraph.validateValues" . }}
+{{- $customPort := ne (int .Values.hubble.port) 8088 }}
+{{- $mode := .Values.hubble.mode | default "pd" }}
+{{- if not (has $mode (list "pd" "direct")) }}
+{{- fail "hubble.mode must be one of: pd, direct" }}
+{{- end }}
+{{- $pdMode := eq $mode "pd" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hugegraph.hubble.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hubble
+spec:
+  # Hubble keeps its connection metadata in an embedded per-instance H2
+  # database, so this Deployment is fixed at one replica and replaces the Pod
+  # instead of rolling, which also keeps a persistent volume single-attached.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: hubble
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hubble
+        {{- with .Values.hubble.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.hubble.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: {{ get (get .Values.hubble "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
+      serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.hubble "name" (include "hugegraph.hubble.name" .) ) }}
+      {{- with .Values.hubble.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.hubble.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.hubble.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hubble.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hubble.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hubble.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.hubble.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hubble
+          image: "{{ .Values.hubble.image.repository }}:{{ .Values.hubble.image.tag }}"
+          imagePullPolicy: {{ .Values.hubble.image.pullPolicy }}
+          {{- with .Values.hubble.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # The Hubble image reads conf/hugegraph-hubble.properties only; it
+          # has no environment mapping for these keys, so the wrapper rewrites
+          # them before handing off to the image's own start script. The image
+          # ships no dumb-init; start-hubble.sh -f execs java, which then
+          # receives signals directly.
+          command:
+            - /bin/bash
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              CONF=./conf/hugegraph-hubble.properties
+              if [[ ! -r "${CONF}" ]]; then
+                echo "missing or unreadable ${CONF}; refusing to write a stub config" >&2
+                exit 1
+              fi
+              TMP=$(mktemp)
+              FOUND_PD_ENABLED=false
+              {{- if $pdMode }}
+              FOUND_PD_PEERS=false
+              FOUND_PD_SERVER=false
+              FOUND_STORE_TARGETS=false
+              {{- else }}
+              FOUND_DIRECT_URL=false
+              {{- end }}
+              FOUND_SERVER_HOST=false
+              {{- if $customPort }}
+              FOUND_HUBBLE_PORT=false
+              FOUND_SERVER_PORT=false
+              {{- end }}
+              while IFS= read -r LINE || [[ -n "${LINE}" ]]; do
+                case "${LINE}" in
+                  pd.enabled=*)
+                    printf 'pd.enabled={{ $pdMode }}\n' >>"${TMP}"
+                    FOUND_PD_ENABLED=true
+                    ;;
+                  {{- if $pdMode }}
+                  pd.peers=*)
+                    printf 'pd.peers=%s\n' "${HG_HUBBLE_PD_PEERS}" >>"${TMP}"
+                    FOUND_PD_PEERS=true
+                    ;;
+                  pd.server=*)
+                    printf 'pd.server=%s\n' "${HG_HUBBLE_PD_SERVER}" >>"${TMP}"
+                    FOUND_PD_SERVER=true
+                    ;;
+                  operations.store.allowed_targets=*)
+                    printf 'operations.store.allowed_targets=%s\n' \
+                      "${HG_HUBBLE_STORE_TARGETS}" >>"${TMP}"
+                    FOUND_STORE_TARGETS=true
+                    ;;
+                  {{- else }}
+                  server.direct_url=*)
+                    printf 'server.direct_url=%s\n' "${HG_HUBBLE_SERVER_URL}" >>"${TMP}"
+                    FOUND_DIRECT_URL=true
+                    ;;
+                  {{- end }}
+                  server.host=*)
+                    printf 'server.host=0.0.0.0\n' >>"${TMP}"
+                    FOUND_SERVER_HOST=true
+                    ;;
+                  {{- if $customPort }}
+                  hubble.port=*)
+                    printf 'hubble.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"
+                    FOUND_HUBBLE_PORT=true
+                    ;;
+                  server.port=*)
+                    printf 'server.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"
+                    FOUND_SERVER_PORT=true
+                    ;;
+                  {{- end }}
+                  *)
+                    printf '%s\n' "${LINE}" >>"${TMP}"
+                    ;;
+                esac
+              done <"${CONF}"
+              if [[ "${FOUND_PD_ENABLED}" == false ]]; then
+                printf 'pd.enabled={{ $pdMode }}\n' >>"${TMP}"
+              fi
+              {{- if $pdMode }}
+              if [[ "${FOUND_PD_PEERS}" == false ]]; then
+                printf 'pd.peers=%s\n' "${HG_HUBBLE_PD_PEERS}" >>"${TMP}"
+              fi
+              if [[ "${FOUND_PD_SERVER}" == false ]]; then
+                printf 'pd.server=%s\n' "${HG_HUBBLE_PD_SERVER}" >>"${TMP}"
+              fi
+              if [[ "${FOUND_STORE_TARGETS}" == false ]]; then
+                printf 'operations.store.allowed_targets=%s\n' \
+                  "${HG_HUBBLE_STORE_TARGETS}" >>"${TMP}"
+              fi
+              {{- else }}
+              if [[ "${FOUND_DIRECT_URL}" == false ]]; then
+                printf 'server.direct_url=%s\n' "${HG_HUBBLE_SERVER_URL}" >>"${TMP}"
+              fi
+              {{- end }}
+              # Current Hubble binds server.host, which defaults to
+              # localhost; the shipped conf's hubble.host=0.0.0.0 line is
+              # legacy, is ignored by current images, and is preserved
+              # verbatim above for images that still read it.
+              if [[ "${FOUND_SERVER_HOST}" == false ]]; then
+                printf 'server.host=0.0.0.0\n' >>"${TMP}"
+              fi
+              {{- if $customPort }}
+              if [[ "${FOUND_HUBBLE_PORT}" == false ]]; then
+                printf 'hubble.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"
+              fi
+              if [[ "${FOUND_SERVER_PORT}" == false ]]; then
+                printf 'server.port=%s\n' {{ .Values.hubble.port | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              chmod 600 "${TMP}"
+              mv "${TMP}" "${CONF}"
+              exec ./bin/start-hubble.sh -f
+          ports:
+            - name: http
+              containerPort: {{ .Values.hubble.port }}
+          env:
+            {{- if $pdMode }}
+            - name: HG_HUBBLE_PD_PEERS
+              value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
+            - name: HG_HUBBLE_PD_SERVER
+              value: {{ include "hugegraph.pd.restClientEndpoint" . | quote }}
+            - name: HG_HUBBLE_STORE_TARGETS
+              value: {{ include "hugegraph.store.restOriginsList" . | quote }}
+            {{- else }}
+            - name: HG_HUBBLE_SERVER_URL
+              value: {{ include "hugegraph.server.clientUrl" . | quote }}
+            {{- end }}
+            {{- if .Values.hubble.persistence.enabled }}
+            # Hubble's H2 location is fixed to ./db inside the image classpath
+            # config; Spring Boot's environment binding is the supported way to
+            # point it into the mounted volume.
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:h2:file:/hubble-data/db;DB_CLOSE_ON_EXIT=FALSE"
+            {{- end }}
+            {{- with .Values.hubble.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
+          {{- if .Values.hubble.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /hubble-data
+          {{- end }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            failureThreshold: {{ .Values.hubble.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.hubble.probes.startup.periodSeconds }}
+            {{- with include "hugegraph.probeTuning" .Values.hubble.probes.startup }}{{ . | trim | nindent 12 }}{{- end }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: {{ .Values.hubble.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.hubble.probes.readiness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.hubble.probes.readiness }}{{ . | trim | nindent 12 }}{{- end }}
+          # TCP for liveness: /actuator/health aggregates datasource health,
+          # and a transiently slow persistent volume must not get a healthy
+          # JVM killed (Recreate + RWO makes an overlapping restart worse).
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: {{ .Values.hubble.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.hubble.probes.liveness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.hubble.probes.liveness }}{{ . | trim | nindent 12 }}{{- end }}
+          {{- with .Values.hubble.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- if .Values.hubble.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "hugegraph.hubble.dataName" . }}
+      {{- end }}
+{{- end }}

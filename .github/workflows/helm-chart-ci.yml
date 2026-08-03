@@ -50,20 +50,55 @@ jobs:
           for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
             helm template ci helm/hugegraph $preset > /dev/null
           done
+          # Positive coverage for every hubble wrapper branch: pd mode with
+          # auth, direct mode with a custom port, and a TLS-less ingress with
+          # the explicit opt-in.
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set server.auth.enabled=true \
+            --set server.auth.existingSecret=ci-auth > /dev/null
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set hubble.allowWithoutServerAuth=true \
+            --set hubble.mode=direct \
+            --set hubble.port=9090 \
+            --set hubble.persistence.enabled=true \
+            --set hubble.ingress.enabled=true \
+            --set hubble.ingress.allowPlainHttp=true > /dev/null
 
       - name: reject invalid values
         run: |
-          # each of these must fail; the schema and helpers are the contract
-          ! helm template ci helm/hugegraph --set pd.replicas=100 2>/dev/null
-          ! helm template ci helm/hugegraph --set pd.pdb.minAvailable=3 2>/dev/null
-          ! helm template ci helm/hugegraph --set server.hpa.enabled=true 2>/dev/null
-          ! helm template ci helm/hugegraph \
+          # Each case must fail to render; the schema and helpers are the
+          # contract. `! cmd` alone is NOT enforced under `set -e` (errexit
+          # ignores inverted commands), so every case checks explicitly.
+          must_fail() {
+            if helm template ci helm/hugegraph "$@" >/dev/null 2>&1; then
+              echo "expected render failure for: $*" >&2
+              exit 1
+            fi
+          }
+          must_fail --set pd.replicas=100
+          must_fail --set pd.pdb.minAvailable=3
+          must_fail --set server.hpa.enabled=true
+          must_fail \
             --set server.hpa.enabled=true \
             --set server.hpa.minReplicas=2 \
             --set server.resources.requests.cpu=100m \
             --set server.pdb.enabled=true \
-            --set server.pdb.minAvailable=2 2>/dev/null
-          ! helm template ci helm/hugegraph --set server.auth.enabled=true 2>/dev/null
+            --set server.pdb.minAvailable=2
+          must_fail --set server.auth.enabled=true
+          must_fail --set hubble.enabled=true
+          A="--set hubble.enabled=true --set hubble.allowWithoutServerAuth=true"
+          must_fail $A --set hubble.port=0
+          must_fail $A \
+            --set hubble.persistence.enabled=true \
+            --set hubble.persistence.size=""
+          must_fail $A --set hubble.service.nodePort=30080
+          must_fail $A --set hubble.mode=bogus
+          must_fail $A --set hubble.image.tag=""
+          must_fail $A --set hubble.ingress.enabled=true
+          must_fail --set server.ingress.enabled=true \
+            --set server.ingress.allowPlainHttp=true
 
       - name: kubeconform
         shell: bash
@@ -74,6 +109,20 @@ jobs:
           for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
             helm template ci helm/hugegraph $preset | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
           done
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set hubble.allowWithoutServerAuth=true \
+            --set hubble.mode=direct \
+            --set hubble.port=9090 \
+            --set hubble.persistence.enabled=true \
+            --set hubble.ingress.enabled=true \
+            --set hubble.ingress.allowPlainHttp=true \
+            | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set server.auth.enabled=true \
+            --set server.auth.existingSecret=ci-auth \
+            | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
 
       - name: legacy --reuse-values compatibility
         run: |

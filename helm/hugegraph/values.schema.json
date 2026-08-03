@@ -31,6 +31,9 @@
     },
     "global": {
       "type": "object"
+    },
+    "hubble": {
+      "$ref": "#/definitions/hubble"
     }
   },
   "definitions": {
@@ -567,72 +570,7 @@
           ]
         },
         "ingress": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "enabled",
-            "className",
-            "hosts",
-            "tls"
-          ],
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "className": {
-              "type": "string"
-            },
-            "hosts": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "host",
-                  "paths"
-                ],
-                "properties": {
-                  "host": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "paths": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "required": [
-                        "path",
-                        "pathType"
-                      ],
-                      "properties": {
-                        "path": {
-                          "type": "string"
-                        },
-                        "pathType": {
-                          "type": "string",
-                          "enum": [
-                            "Exact",
-                            "Prefix",
-                            "ImplementationSpecific"
-                          ]
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "tls": {
-              "type": "array",
-              "items": {
-                "type": "object"
-              }
-            },
-            "annotations": {
-              "type": "object"
-            }
-          }
+          "$ref": "#/definitions/ingress"
         },
         "hpa": {
           "type": "object",
@@ -731,29 +669,225 @@
           "$ref": "#/definitions/resources"
         },
         "service": {
+          "$ref": "#/definitions/service"
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "nodePort": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 30000,
+          "maximum": 32767
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "className",
+        "hosts",
+        "tls"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "host",
+              "paths"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "pathType"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "enum": [
+                        "Exact",
+                        "Prefix",
+                        "ImplementationSpecific"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "allowPlainHttp": {
+          "type": "boolean"
+        }
+      }
+    },
+    "hubble": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "mode",
+        "image",
+        "port",
+        "persistence",
+        "resources",
+        "service",
+        "ingress",
+        "probes"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "pd",
+            "direct"
+          ]
+        },
+        "allowWithoutServerAuth": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "persistence": {
           "type": "object",
           "additionalProperties": false,
+          "required": [
+            "enabled",
+            "size",
+            "storageClassName"
+          ],
           "properties": {
-            "type": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "size": {
               "type": "string",
-              "enum": [
-                "ClusterIP",
-                "NodePort",
-                "LoadBalancer"
-              ]
+              "minLength": 1
+            },
+            "storageClassName": {
+              "type": "string"
+            }
+          }
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "podSecurityContext": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "topologySpreadConstraints": {
+          "type": "array"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "podAnnotations": {
+          "type": "object"
+        },
+        "podLabels": {
+          "type": "object"
+        },
+        "extraEnv": {
+          "type": "array"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
             },
             "annotations": {
               "type": "object"
             },
-            "nodePort": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "minimum": 30000,
-              "maximum": 32767
+            "automountServiceAccountToken": {
+              "type": "boolean"
             }
           }
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        },
+        "ingress": {
+          "$ref": "#/definitions/ingress"
+        },
+        "probes": {
+          "$ref": "#/definitions/probes"
         }
       }
     }

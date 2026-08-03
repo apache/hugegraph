@@ -26,6 +26,16 @@
 {{- $batchMaxWriteThreads = toString (get $restServer "batchMaxWriteThreads") }}
 {{- end }}
 {{- $customPort := ne (int .Values.server.port) 8080 }}
+{{- $hubble := get .Values "hubble" | default dict }}
+{{- $hubblePdMode := and (get $hubble "enabled" | default false) (ne (get $hubble "mode" | default "pd") "direct") }}
+{{/*
+PD meta mode (usePD) is required on two paths: the built-in authenticator
+creates the admin on the PD startup path, and PD-mode Hubble discovers the
+Server through the service URL the Server registers with PD. Both need the
+same four properties, so they share one condition.
+*/}}
+{{- $pdMeta := or .Values.server.auth.enabled $hubblePdMode }}
+{{- $wrapper := or $pdMeta $customPort (ne $minFreeMemory "") (ne $batchMaxWriteThreads "") }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -94,10 +104,7 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or .Values.server.auth.enabled
-                    $customPort
-                    (ne $minFreeMemory "")
-                    (ne $batchMaxWriteThreads "") }}
+          {{- if $wrapper }}
           command:
             - /usr/bin/dumb-init
             - --
@@ -108,12 +115,34 @@ spec:
               set -euo pipefail
               {{- if .Values.server.auth.enabled }}
               : "${PASSWORD:?auth Secret key 'password' must not be empty}"
+              # The value is written into a Java properties file, whose parser
+              # treats CR as a line terminator, unescapes backslashes, and
+              # skips whitespace after the separator, so these shapes would
+              # inject config lines or silently store a password that differs
+              # from the Secret.
+              case "${PASSWORD}" in
+                *$'\n'* | *$'\r'* | *\\* | ' '* | $'\t'*)
+                  echo "auth Secret key 'password' must not contain newlines," \
+                       "carriage returns, or backslashes, or start with" \
+                       "whitespace" >&2
+                  exit 1
+                  ;;
+              esac
               {{- end }}
               CONF=./conf/rest-server.properties
+              if [[ ! -r "${CONF}" ]]; then
+                echo "missing or unreadable ${CONF}; refusing to write a stub config" >&2
+                exit 1
+              fi
               TMP=$(mktemp)
-              {{- if .Values.server.auth.enabled }}
+              {{- if $pdMeta }}
               FOUND_USE_PD=false
               FOUND_PD_PEERS=false
+              FOUND_URLS_TO_PD=false
+              FOUND_DEPLOY_IN_K8S=false
+              {{- end }}
+              {{- if .Values.server.auth.enabled }}
+              FOUND_AUTH_ADMIN_PA=false
               {{- end }}
               {{- if $customPort }}
               FOUND_RESTSERVER_URL=false
@@ -126,7 +155,7 @@ spec:
               {{- end }}
               while IFS= read -r LINE || [[ -n "${LINE}" ]]; do
                 case "${LINE}" in
-                  {{- if .Values.server.auth.enabled }}
+                  {{- if $pdMeta }}
                   usePD=*)
                     printf 'usePD=true\n' >>"${TMP}"
                     FOUND_USE_PD=true
@@ -134,6 +163,20 @@ spec:
                   pd.peers=*)
                     printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
                     FOUND_PD_PEERS=true
+                    ;;
+                  server.urls_to_pd=*)
+                    printf 'server.urls_to_pd=%s\n' "${HG_SERVER_URLS_TO_PD}" >>"${TMP}"
+                    FOUND_URLS_TO_PD=true
+                    ;;
+                  server.deploy_in_k8s=*)
+                    printf 'server.deploy_in_k8s=true\n' >>"${TMP}"
+                    FOUND_DEPLOY_IN_K8S=true
+                    ;;
+                  {{- end }}
+                  {{- if .Values.server.auth.enabled }}
+                  auth.admin_pa=*)
+                    printf 'auth.admin_pa=%s\n' "${PASSWORD}" >>"${TMP}"
+                    FOUND_AUTH_ADMIN_PA=true
                     ;;
                   {{- end }}
                   {{- if $customPort }}
@@ -162,12 +205,27 @@ spec:
                     ;;
                 esac
               done <"${CONF}"
-              {{- if .Values.server.auth.enabled }}
+              {{- if $pdMeta }}
               if [[ "${FOUND_USE_PD}" == false ]]; then
                 printf 'usePD=true\n' >>"${TMP}"
               fi
               if [[ "${FOUND_PD_PEERS}" == false ]]; then
                 printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
+              fi
+              # PD hands this URL to discovery clients such as Hubble. The
+              # k8s branch is taken only when server.deploy_in_k8s is true;
+              # otherwise the announcement falls back to restserver.url,
+              # whose 0.0.0.0 is never resolvable from another Pod.
+              if [[ "${FOUND_URLS_TO_PD}" == false ]]; then
+                printf 'server.urls_to_pd=%s\n' "${HG_SERVER_URLS_TO_PD}" >>"${TMP}"
+              fi
+              if [[ "${FOUND_DEPLOY_IN_K8S}" == false ]]; then
+                printf 'server.deploy_in_k8s=true\n' >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if .Values.server.auth.enabled }}
+              if [[ "${FOUND_AUTH_ADMIN_PA}" == false ]]; then
+                printf 'auth.admin_pa=%s\n' "${PASSWORD}" >>"${TMP}"
               fi
               {{- end }}
               {{- if $customPort }}
@@ -206,6 +264,10 @@ spec:
               value: {{ include "hugegraph.store.restPrimary" . | quote }}
             - name: HG_SERVER_INIT_STORE_ENABLED
               value: {{ .Values.server.initStoreEnabled | quote }}
+            {{- if $pdMeta }}
+            - name: HG_SERVER_URLS_TO_PD
+              value: {{ include "hugegraph.server.clientUrl" . | quote }}
+            {{- end }}
             {{- with .Values.server.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
             {{- with include "hugegraph.javaOptsEnv" .Values.server.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
             {{- if and .Values.server.auth.enabled .Values.server.auth.existingSecret }}

@@ -43,10 +43,18 @@ so operators do not have to:
   300 seconds waiting for storage and a further 120 seconds in the start
   command. A lower configured `failureThreshold` is raised to this floor rather
   than being rejected.
-- **The image entrypoint keeps ownership of `PASSWORD` handling and
-  `auth.admin_pa`.** When authentication or a custom port or REST tuning is
-  configured, the chart's wrapper only ensures `usePD=true` and `pd.peers` are
-  present, then hands off to the image entrypoint.
+- **The wrapper writes `auth.admin_pa` from the auth Secret.** With
+  `init_store.enabled=false` the admin credential is created on the PD startup
+  path from `auth.admin_pa`, not from the Docker `PASSWORD` stdin path. When
+  authentication is enabled, the chart's wrapper therefore writes
+  `auth.admin_pa` from the mounted Secret alongside `usePD=true` and
+  `pd.peers`, then hands off to the image entrypoint. Two caveats:
+  `auth.admin_pa` applies only when the admin is first created, so changing the
+  Secret does not rotate an existing cluster's password, and the value lands in
+  `rest-server.properties` inside the container (file mode 600). Because the
+  Java properties parser reinterprets them, the Secret value must not contain
+  newlines, carriage returns, or backslashes; the wrapper refuses to start if
+  it does.
 - **Resource names reserve their suffix and StatefulSet ordinal before
   truncation,** so a long release name cannot produce colliding or over-long
   Pod and Service names, and PD/Store identities stay fixed when replicas
@@ -80,7 +88,7 @@ helm test hugegraph --namespace hugegraph
 |---|---|
 | `values.yaml` | Default 3+3+3 topology |
 | `values-single.yaml` | Single-node 1+1+1 example |
-| `values-cluster.yaml` | Production 3+3+3 starting point with JVM/resources, PD/Store PDBs, and required anti-affinity |
+| `values-cluster.yaml` | Production 3+3+3 starting point with JVM/resources, PD/Store PDBs, and required anti-affinity; Hubble stays opt-in because the preset does not enable authentication |
 
 `values-cluster.yaml` is a production starting point, not a capacity
 guarantee. Recalculate capacity for the graph size, traffic, failure budget,
@@ -262,6 +270,82 @@ Helm upgrade does not overwrite the autoscaler's live replica count. Enabling
 utilization-based HPA requires a strictly positive
 `server.resources.requests.cpu`.
 
+### Hubble (optional UI)
+
+Set `hubble.enabled=true` to deploy [HugeGraph Hubble](https://hugegraph.apache.org/docs/quickstart/toolchain/hugegraph-hubble/),
+the web UI for graph management, schema browsing, Gremlin queries, and the
+cluster operations view. `hubble.mode` selects the wiring. In the default
+`pd` mode the chart points `pd.peers` at the PD gRPC peers, `pd.server` at
+the PD client Service REST port, and the Store metrics allow-list at the
+Store REST endpoints, so the cluster view works without manual wiring; the
+Server is additionally configured to register its client Service URL with PD
+(see below). In `direct` mode Hubble only receives `server.direct_url`
+pointing at the Server client Service; there is no PD discovery and no
+operations view. Everything else in `hugegraph-hubble.properties` keeps the
+image default.
+
+Enabling `pd`-mode Hubble switches the Server into PD meta mode (`usePD`,
+`server.urls_to_pd`, `server.deploy_in_k8s`) so that PD can hand Hubble a
+resolvable Server address; auth-enabled installs already run in this mode.
+On an existing release this change rolls the Server Deployment once. The
+Store allow-list is computed from `store.replicas` at render time, so scale
+Store with `helm upgrade`, not `kubectl scale`, or the list goes stale until
+the next upgrade.
+
+Hubble is one replica by design: it keeps UI connection metadata, including
+any graph credentials entered in the UI, in an embedded per-instance H2
+database. Enable `hubble.persistence` to keep that metadata across Pod
+replacement; the chart then redirects the H2 location into the mounted
+volume through Spring's environment binding. The Deployment uses the
+`Recreate` strategy so two Hubble instances never attach the same database.
+The PVC is kept on `helm uninstall` (delete it explicitly to discard the
+stored metadata), `size` and `storageClassName` apply at install time only,
+and a non-root `podSecurityContext` needs a matching `fsGroup` so H2 can
+write the volume.
+
+**Enable `server.auth` when using Hubble.** Current Hubble images gate the
+UI behind a login that authenticates against the cluster; with server
+authentication disabled the login cannot complete (the server rejects
+`/auth/login` with "Unconfigured authenticator"), so Hubble is only useful
+on an auth-enabled deployment, where the admin credential from
+`server.auth.existingSecret` logs in. The chart therefore refuses to render
+`hubble.enabled=true` without `server.auth` unless
+`hubble.allowWithoutServerAuth=true` explicitly overrides it for images
+whose login does not need cluster authentication.
+
+**Hubble serves plain HTTP.** Reach it with `kubectl port-forward` or behind
+an HTTPS-terminating Ingress; never expose the port directly to an untrusted
+network. An Ingress without `tls` is rejected at render time unless
+`hubble.ingress.allowPlainHttp=true` explicitly accepts plain HTTP for a
+trusted network.
+
+| Parameter | Description | Default |
+|---|---|---|
+| `hubble.enabled` | Deploy the Hubble UI. Requires `server.auth` (see below) | `false` |
+| `hubble.mode` | `pd` discovers the cluster through PD and enables the operations view; `direct` talks to the Server client Service only | `pd` |
+| `hubble.allowWithoutServerAuth` | Renders Hubble without `server.auth`, for future images whose login does not require cluster authentication | `false` |
+| `hubble.image.repository` | Hubble image repository | `hugegraph/hubble` |
+| `hubble.image.tag` | Hubble image tag. Tracks the development image until the next release is pinned | `latest` |
+| `hubble.image.pullPolicy` | Hubble image pull policy | `Always` |
+| `hubble.port` | Hubble HTTP port, container port, and Service port | `8088` |
+| `hubble.persistence.enabled` | Persist UI connection metadata in a PVC | `false` |
+| `hubble.persistence.size` | PVC size | `1Gi` |
+| `hubble.persistence.storageClassName` | Empty uses the cluster default StorageClass | `""` |
+| `hubble.resources` | Hubble resources | `{}` |
+| `hubble.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
+| `hubble.securityContext` | Container-level securityContext, hardened like the other components | see `values.yaml` |
+| `hubble.service.type` | Hubble Service type | `ClusterIP` |
+| `hubble.service.annotations` | Hubble Service annotations | `{}` |
+| `hubble.service.nodePort` | Requires a `NodePort` or `LoadBalancer` Service type | unset |
+| `hubble.ingress.*` | Same Ingress keys as `server.ingress.*`, plus `allowPlainHttp`, which applies to the Hubble Ingress only | `enabled: false` |
+| `hubble.serviceAccount.*` | Same ServiceAccount keys as the other components | `create: true` |
+| `hubble.nodeSelector` / `tolerations` / `affinity` / `topologySpreadConstraints` | Scheduling controls | unset |
+| `hubble.priorityClassName` | PriorityClass for the hubble Pod | `""` |
+| `hubble.podAnnotations` / `hubble.podLabels` | Extra Pod metadata | `{}` |
+| `hubble.extraEnv` | Extra environment variables for the hubble container | `[]` |
+| `hubble.terminationGracePeriodSeconds` | Shutdown grace period | `30` |
+| `hubble.probes.*` | Same probe keys as PD; startup and readiness check `/actuator/health`, liveness is a TCP check | see `values.yaml` |
+
 Specify each parameter with `--set`, or supply a YAML file with `-f`:
 
 ```bash
@@ -284,6 +368,16 @@ before anything reaches the cluster:
 - `pdb.minAvailable` must be less than the matching `replicas`, so a
   PodDisruptionBudget cannot permanently block node drains.
 - `pd.replicas` and `store.replicas` are capped at 99.
+- `hubble.port` must be a valid port, `hubble.persistence.size` must be
+  non-empty, and `hubble.service.nodePort` requires a `NodePort` or
+  `LoadBalancer` Service type.
+- `hubble.image.tag` must be non-empty (the chart `appVersion` tracks the
+  Server release, not Hubble), and a Hubble Ingress without `tls` is rejected
+  unless `hubble.ingress.allowPlainHttp=true`.
+- `hubble.enabled` without `server.auth.enabled` is rejected unless
+  `hubble.allowWithoutServerAuth=true`, and setting
+  `server.ingress.allowPlainHttp` is rejected because the plain-HTTP opt-in
+  applies to the Hubble Ingress only.
 
 ## Deep Dive
 
@@ -395,3 +489,11 @@ independently of the release name.
   valid for a root image; `podSecurityContext` and `securityContext` are fully
   configurable per component.
 - `values-cluster.yaml` is a starting point, not a capacity guarantee.
+- The auth Secret sets the admin password only at first creation via
+  `auth.admin_pa`; the chart cannot rotate an existing cluster's admin
+  password.
+- Hubble is single-replica, serves plain HTTP, requires `server.auth` to be
+  enabled for its login to complete, and keeps UI connection metadata,
+  including any graph credentials entered in the UI, in an embedded H2
+  database that is lost on Pod replacement unless `hubble.persistence` is
+  enabled.

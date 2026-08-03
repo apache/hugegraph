@@ -14,11 +14,15 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */}}
+{{- $hubbleEnabled := get (get .Values "hubble" | default dict) "enabled" | default false }}
 {{ .Release.Name }} installed in namespace {{ .Release.Namespace }}.
 
   PD      {{ .Values.pd.replicas }} replica(s)
   Store   {{ .Values.store.replicas }} replica(s)
   Server  {{ if .Values.server.hpa.enabled }}HPA {{ .Values.server.hpa.minReplicas }}-{{ .Values.server.hpa.maxReplicas }}{{ else }}{{ .Values.server.replicas }} replica(s){{ end }}
+{{- if $hubbleEnabled }}
+  Hubble  1 replica (UI)
+{{- end }}
 
 Watch the cluster come up:
 
@@ -39,6 +43,28 @@ Reach the Server API:
   curl --user "admin:${PASSWORD}" http://127.0.0.1:{{ .Values.server.port }}/versions
 {{- else }}
   curl http://127.0.0.1:{{ .Values.server.port }}/versions
+{{- end }}
+{{- if $hubbleEnabled }}
+
+Reach the Hubble UI:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "hugegraph.hubble.name" . }} {{ .Values.hubble.port }}:{{ .Values.hubble.port }}
+
+  then open http://127.0.0.1:{{ .Values.hubble.port }}
+
+{{- if not .Values.server.auth.enabled }}
+
+Server authentication is disabled, so the Hubble login cannot complete on
+this release: current Hubble images authenticate against the cluster.
+Enable server.auth to use Hubble.
+{{- end }}
+
+Hubble serves plain HTTP. Reach it through port-forward or an
+HTTPS-terminating Ingress; never expose it directly to an untrusted network.
+{{- if not .Values.hubble.persistence.enabled }}
+Hubble persistence is disabled: UI connection metadata is lost when the
+Hubble Pod is replaced. Graph data is unaffected.
+{{- end }}
 {{- end }}
 {{- if not .Values.server.auth.enabled }}
 

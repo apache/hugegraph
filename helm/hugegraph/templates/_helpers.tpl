@@ -70,6 +70,14 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-server" (include "hugegraph.fullname" . | trunc 56 | trimSuffix "-") }}
 {{- end }}
 
+{{- define "hugegraph.hubble.name" -}}
+{{- printf "%s-hubble" (include "hugegraph.fullname" . | trunc 56 | trimSuffix "-") }}
+{{- end }}
+
+{{- define "hugegraph.hubble.dataName" -}}
+{{- printf "%s-hubble-data" (include "hugegraph.fullname" . | trunc 51 | trimSuffix "-") }}
+{{- end }}
+
 {{- define "hugegraph.test.name" -}}
 {{- printf "%s-test-connection" (include "hugegraph.fullname" . | trunc 47 | trimSuffix "-") }}
 {{- end }}
@@ -142,6 +150,38 @@ First store REST endpoint for STORE_REST / wait-partition.
 {{- $name := include "hugegraph.store.name" . -}}
 {{- $ns := .Release.Namespace -}}
 {{- printf "%s-0.%s.%s.svc:%d" $name $name $ns (int .Values.store.ports.rest) -}}
+{{- end }}
+
+{{/*
+Server REST URL reached through the client Service. Announced to PD via
+server.urls_to_pd so PD-discovered clients (Hubble) get a resolvable address
+instead of the in-pod 0.0.0.0 default.
+*/}}
+{{- define "hugegraph.server.clientUrl" -}}
+{{- printf "http://%s.%s.svc:%d" (include "hugegraph.server.name" .) .Release.Namespace (int .Values.server.port) -}}
+{{- end }}
+
+{{/*
+PD REST endpoint reached through the client Service, for Hubble's pd.server.
+*/}}
+{{- define "hugegraph.pd.restClientEndpoint" -}}
+{{- printf "%s.%s.svc:%d" (include "hugegraph.pd.clientName" .) .Release.Namespace (int .Values.pd.ports.rest) -}}
+{{- end }}
+
+{{/*
+Store REST origins in Hubble's bracketed allow-list form:
+[http://store-0.svc.ns.svc:8520,...]
+*/}}
+{{- define "hugegraph.store.restOriginsList" -}}
+{{- $origins := list -}}
+{{- $replicas := int .Values.store.replicas -}}
+{{- $name := include "hugegraph.store.name" . -}}
+{{- $ns := .Release.Namespace -}}
+{{- $port := int .Values.store.ports.rest -}}
+{{- range $i := until $replicas -}}
+  {{- $origins = append $origins (printf "http://%s-%d.%s.%s.svc:%d" $name $i $name $ns $port) -}}
+{{- end -}}
+{{- printf "[%s]" (join "," $origins) -}}
 {{- end }}
 
 {{/*
@@ -260,6 +300,28 @@ and must not be failed for a value that has no effect.
 {{- $serverReplicaFloor := include "hugegraph.server.replicaFloor" . | int -}}
 {{- if and (get $serverPdb "enabled" | default false) (gt $serverReplicaFloor 1) (ge (int (get $serverPdb "minAvailable" | default 1)) $serverReplicaFloor) -}}
 {{- fail "server.pdb.minAvailable must be less than the active Server replica floor (server.hpa.minReplicas when HPA is enabled, otherwise server.replicas), otherwise the PDB permanently blocks voluntary disruptions such as node drains" -}}
+{{- end -}}
+{{- $serverIngress := get .Values.server "ingress" | default dict -}}
+{{- if hasKey $serverIngress "allowPlainHttp" -}}
+{{- fail "server.ingress.allowPlainHttp has no effect; the plain-HTTP opt-in applies to hubble.ingress only" -}}
+{{- end -}}
+{{- $hubble := get .Values "hubble" | default dict -}}
+{{- if get $hubble "enabled" | default false -}}
+{{- if and (not .Values.server.auth.enabled) (not (get $hubble "allowWithoutServerAuth" | default false)) -}}
+{{- fail "hubble.enabled requires server.auth: current Hubble images authenticate against the cluster and cannot complete their login on an auth-less deployment. Enable server.auth, or set hubble.allowWithoutServerAuth=true for images that support it" -}}
+{{- end -}}
+{{- $hubbleSvc := get $hubble "service" | default dict -}}
+{{- if and (get $hubbleSvc "nodePort") (not (has (get $hubbleSvc "type" | default "ClusterIP") (list "NodePort" "LoadBalancer"))) -}}
+{{- fail "hubble.service.nodePort requires hubble.service.type to be NodePort or LoadBalancer" -}}
+{{- end -}}
+{{- $hubbleImage := get $hubble "image" | default dict -}}
+{{- if eq (trim (get $hubbleImage "tag" | default "")) "" -}}
+{{- fail "hubble.image.tag must not be empty: the chart appVersion tracks the Server release, not Hubble, so there is no meaningful fallback" -}}
+{{- end -}}
+{{- $hubbleIngress := get $hubble "ingress" | default dict -}}
+{{- if and (get $hubbleIngress "enabled" | default false) (empty (get $hubbleIngress "tls")) (not (get $hubbleIngress "allowPlainHttp" | default false)) -}}
+{{- fail "hubble.ingress.enabled without tls publishes the plain-HTTP, unauthenticated Hubble UI; configure hubble.ingress.tls, or set hubble.ingress.allowPlainHttp=true to accept that on a trusted network" -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
