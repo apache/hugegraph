@@ -26,6 +26,7 @@ on:
     paths:
       - '**/Dockerfile*'
       - '.dockerignore'
+      - 'hugegraph-server/hugegraph-dist/src/assembly/static/bin/util.sh'
 
 jobs:
   docker-build:
@@ -47,6 +48,28 @@ jobs:
         run: |
           IMAGE_ID=$(docker build -q -f ${{ matrix.dockerfile }} .)
           echo "Built: $IMAGE_ID"
+          echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
           echo "Healthcheck: $HC"
           [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
+
+      # The startup preflight needs a socket-table tool, and the base image
+      # ships none of its own.  Without one every start reports "unknown" and
+      # a duplicate start is no longer refused, so assert the image can
+      # actually answer.  Only the server images run check_port.
+      # TODO(docker-ci): this pins the probe dependency, not the behaviour it
+      # protects.  A full duplicate-start/stop check needs a booted server with
+      # a backend, which belongs with the e2e job rather than the image build.
+      - name: Port preflight can answer inside ${{ matrix.dockerfile }}
+        if: ${{ startsWith(matrix.dockerfile, 'hugegraph-server/') }}
+        run: |
+          STATE=$(docker run --rm "$IMAGE_ID" bash -c \
+            'source /hugegraph-server/bin/util.sh && port_listen_state 8080')
+          echo "port_listen_state 8080 -> $STATE"
+          # Assert a positive answer rather than "not unknown": an empty $STATE
+          # would otherwise satisfy the check.  The step's default `bash -e`
+          # already aborts on a failed `docker run`, so this only states intent.
+          [[ "$STATE" == "free" || "$STATE" == "busy" ]] || {
+            echo "ERROR: no usable socket-table tool (ss/netstat) in ${{ matrix.dockerfile }}"
+            exit 1
+          }
