@@ -1353,7 +1353,7 @@ public final class GraphManager {
         }
 
         // Let gremlin server and rest server context add graph
-        this.eventHub.notify(Events.GRAPH_CREATE, graph);
+        this.notifyAndWaitEvent(Events.GRAPH_CREATE, graph);
 
         if (init) {
             String schema = propConfig.getString(
