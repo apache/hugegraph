@@ -130,14 +130,27 @@ public class ContextGremlinServer extends GremlinServer {
         GremlinExecutor executor = this.getServerGremlinExecutor()
                                        .getGremlinExecutor();
 
-        manager.putGraph(name, graph);
+        try {
+            manager.putGraph(name, graph);
 
-        GraphTraversalSource g = manager.getGraph(name).traversal();
-        manager.putTraversalSource(G_PREFIX + name, g);
+            GraphTraversalSource g = manager.getGraph(name).traversal();
+            manager.putTraversalSource(G_PREFIX + name, g);
 
-        Whitebox.invoke(executor, "globalBindings",
-                        new Class<?>[]{String.class, Object.class},
-                        "put", name, graph);
+            Whitebox.invoke(executor, "globalBindings",
+                            new Class<?>[]{String.class, Object.class},
+                            "put", name, graph);
+        } catch (Throwable e) {
+            /*
+             * The graph create event is notified without waiting for it, so a
+             * failure here reaches nobody: tell the graph manager, otherwise
+             * the graph is left reported as loading for good
+             */
+            this.eventHub.notify(Events.GRAPH_BIND_FAILED, graph);
+            throw e;
+        }
+
+        // The graph can serve requests only after all bindings are done
+        this.eventHub.notify(Events.GRAPH_BOUND, graph);
     }
 
     private void removeGraph(String name) {

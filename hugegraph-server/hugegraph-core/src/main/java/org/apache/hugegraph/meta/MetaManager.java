@@ -78,6 +78,7 @@ public class MetaManager {
     public static final String META_PATH_SERVICE = "SERVICE";
     public static final String META_PATH_SERVICE_CONF = "SERVICE_CONF";
     public static final String META_PATH_GRAPH_CONF = "GRAPH_CONF";
+    public static final String META_PATH_GRAPH_STATUS = "GRAPH_STATUS";
     public static final String META_PATH_CONF = "CONF";
     public static final String META_PATH_GRAPH = "GRAPH";
     public static final String META_PATH_SCHEMA = "SCHEMA";
@@ -448,6 +449,29 @@ public class MetaManager {
 
     public void removeSysGraphConfig() {
         this.graphMetaManager.removeSysGraphConfig();
+    }
+
+    public void updateGraphStatus(String graphSpace, String graph,
+                                  GraphStatusEntry entry) {
+        this.graphMetaManager.updateGraphStatus(graphSpace, graph, entry);
+    }
+
+    public Map<String, GraphStatusEntry> getGraphStatus(String graphSpace,
+                                                        String graph) {
+        return this.graphMetaManager.getGraphStatus(graphSpace, graph);
+    }
+
+    public void removeGraphStatus(String graphSpace, String graph,
+                                  String server) {
+        this.graphMetaManager.removeGraphStatus(graphSpace, graph, server);
+    }
+
+    public void clearGraphStatus(String graphSpace, String graph) {
+        this.graphMetaManager.clearGraphStatus(graphSpace, graph);
+    }
+
+    public void clearGraphSpaceStatus(String graphSpace) {
+        this.graphMetaManager.clearGraphSpaceStatus(graphSpace);
     }
 
     public GraphSpace graphSpace(String name) {

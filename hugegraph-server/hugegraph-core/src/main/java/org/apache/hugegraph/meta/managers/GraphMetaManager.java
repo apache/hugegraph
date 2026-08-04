@@ -26,6 +26,7 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_EVENT;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_GRAPH;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_GRAPHSPACE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_GRAPH_CONF;
+import static org.apache.hugegraph.meta.MetaManager.META_PATH_GRAPH_STATUS;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_HUGEGRAPH;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_JOIN;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_REMOVE;
@@ -39,6 +40,7 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hugegraph.meta.GraphStatusEntry;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.JsonUtil;
@@ -165,6 +167,46 @@ public class GraphMetaManager extends AbstractMetaManager {
         this.metaDriver.delete(this.sysGraphConfKey());
     }
 
+    public void updateGraphStatus(String graphSpace, String graph,
+                                  GraphStatusEntry entry) {
+        this.metaDriver.put(this.graphStatusKey(graphSpace, graph,
+                                                entry.server()),
+                            JsonUtil.toJson(entry));
+    }
+
+    public Map<String, GraphStatusEntry> getGraphStatus(String graphSpace,
+                                                        String graph) {
+        Map<String, GraphStatusEntry> status =
+                CollectionFactory.newMap(CollectionType.EC);
+        Map<String, String> keyValues = this.metaDriver.scanWithPrefix(
+                this.graphStatusPrefix(graphSpace, graph));
+        for (Map.Entry<String, String> entry : keyValues.entrySet()) {
+            GraphStatusEntry value = GraphStatusEntry.fromValue(
+                    entry.getValue());
+            if (value == null) {
+                continue;
+            }
+            String[] parts = entry.getKey().split(META_PATH_DELIMITER);
+            status.put(parts[parts.length - 1], value);
+        }
+        return status;
+    }
+
+    public void removeGraphStatus(String graphSpace, String graph,
+                                  String server) {
+        this.metaDriver.delete(this.graphStatusKey(graphSpace, graph, server));
+    }
+
+    public void clearGraphStatus(String graphSpace, String graph) {
+        this.metaDriver.deleteWithPrefix(this.graphStatusPrefix(graphSpace,
+                                                                graph));
+    }
+
+    public void clearGraphSpaceStatus(String graphSpace) {
+        this.metaDriver.deleteWithPrefix(
+                this.graphSpaceStatusPrefix(graphSpace));
+    }
+
     public <T> void listenGraphAdd(Consumer<T> consumer) {
         this.listen(this.graphAddKey(), consumer);
     }
@@ -220,6 +262,34 @@ public class GraphMetaManager extends AbstractMetaManager {
                            META_PATH_GRAPHSPACE,
                            META_PATH_DEFAULT_GS,
                            META_PATH_SYS_GRAPH_CONF);
+    }
+
+    private String graphSpaceStatusPrefix(String graphSpace) {
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphspace}/GRAPH_STATUS/
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_GRAPHSPACE,
+                           graphSpace,
+                           META_PATH_GRAPH_STATUS,
+                           Strings.EMPTY);
+    }
+
+    private String graphStatusPrefix(String graphSpace, String graph) {
+        return this.graphStatusKey(graphSpace, graph, Strings.EMPTY);
+    }
+
+    private String graphStatusKey(String graphSpace, String graph,
+                                  String server) {
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphspace}/GRAPH_STATUS/{graph}/{server}
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_GRAPHSPACE,
+                           graphSpace,
+                           META_PATH_GRAPH_STATUS,
+                           graph,
+                           server);
     }
 
     private String graphAddKey() {

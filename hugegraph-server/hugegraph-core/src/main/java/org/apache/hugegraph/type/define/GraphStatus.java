@@ -15,21 +15,31 @@
  * limitations under the License.
  */
 
-package org.apache.hugegraph.util;
+package org.apache.hugegraph.type.define;
 
-public final class Events {
+/**
+ * The status of one graph on one server. It describes that single server
+ * only, the status of the graph across the cluster is the aggregate of the
+ * status reported by every server.
+ */
+public enum GraphStatus {
 
-    public static final String CACHE = "cache";
+    /*
+     * The server started to open the graph and has not finished yet, it
+     * can't answer requests against the graph.
+     */
+    LOADING,
 
-    public static final String STORE_OPEN = "store.open";
-    public static final String STORE_CLOSE = "store.close";
-    public static final String STORE_INIT = "store.init";
-    public static final String STORE_CLEAR = "store.clear";
-    public static final String STORE_TRUNCATE = "store.truncate";
-    public static final String STORE_INITED = "store.inited";
+    /*
+     * The server opened the graph and bound it to its gremlin server, so it
+     * can answer requests against the graph. It says nothing about the other
+     * servers, and nothing about the schema of the graph being initialized.
+     */
+    READY,
 
-    public static final String GRAPH_CREATE = "graph.create";
-    public static final String GRAPH_DROP = "graph.drop";
-    public static final String GRAPH_BOUND = "graph.bound";
-    public static final String GRAPH_BIND_FAILED = "graph.bind_failed";
+    /*
+     * The server failed to open the graph, the cause is carried by the
+     * status message.
+     */
+    FAILED
 }

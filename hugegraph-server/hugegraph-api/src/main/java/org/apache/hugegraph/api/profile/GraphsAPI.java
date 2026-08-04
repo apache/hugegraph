@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,9 +40,13 @@ import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
+import org.apache.hugegraph.exception.NotFoundException;
+import org.apache.hugegraph.meta.GraphStatusAggregate;
+import org.apache.hugegraph.meta.GraphStatusEntry;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
+import org.apache.hugegraph.type.define.GraphStatus;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
@@ -245,6 +250,75 @@ public class GraphsAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, name);
         return ImmutableMap.of("name", g.name(), "backend", g.backend());
+    }
+
+    @GET
+    @Timed
+    @Path("{name}/status")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$owner=$name"})
+    public Object status(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
+                         @PathParam("name") String name) {
+        LOG.debug("Get status of graph '{}' in graph space '{}'",
+                  name, graphSpace);
+
+        /*
+         * A graph that is still loading is not bound to this server yet, so
+         * graph(manager, graphSpace, name) would answer 404 for exactly the
+         * case this API is meant to report
+         */
+        space(manager, graphSpace);
+
+        GraphStatusAggregate aggregate;
+        if (manager.isPDEnabled()) {
+            /*
+             * The status of a dropped graph is removed on every drop path,
+             * but a removal that couldn't be done leaves an entry behind, and
+             * a graph that no longer exists has to answer 404 either way. The
+             * config of a graph is written before its creation returns, so a
+             * graph that is still loading is found here
+             */
+            if (!exists(manager, graphSpace, name)) {
+                throw new NotFoundException(String.format(
+                        "Graph '%s' does not exist", name));
+            }
+            Map<String, GraphStatusEntry> status = manager.graphStatus(
+                    graphSpace, name);
+            Set<String> servers = manager.serviceServers(graphSpace);
+            aggregate = GraphStatusAggregate.of(status.values(), servers);
+        } else {
+            // Without PD nothing is reported, this server is the whole cluster
+            if (localGraph(manager, graphSpace, name) == null) {
+                throw new NotFoundException(String.format(
+                        "Graph '%s' does not exist", name));
+            }
+            GraphStatusEntry entry = new GraphStatusEntry(
+                    manager.serverId(), GraphStatus.READY, null,
+                    System.currentTimeMillis());
+            aggregate = GraphStatusAggregate.of(
+                    Collections.singletonList(entry), 1);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("graphspace", graphSpace);
+        result.put("graph", name);
+        result.putAll(aggregate.asMap());
+        return result;
+    }
+
+    private static boolean exists(GraphManager manager, String graphSpace,
+                                  String name) {
+        return manager.graphs(graphSpace).contains(name) ||
+               localGraph(manager, graphSpace, name) != null;
+    }
+
+    private static HugeGraph localGraph(GraphManager manager,
+                                        String graphSpace, String name) {
+        return manager.graph(String.join(GraphManager.DELIMITER, graphSpace,
+                                         name));
     }
 
     @POST
