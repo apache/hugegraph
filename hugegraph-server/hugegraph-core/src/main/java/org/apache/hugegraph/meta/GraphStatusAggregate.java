@@ -103,6 +103,14 @@ public final class GraphStatusAggregate {
                                           Collection<String> liveServers,
                                           long staleAfter, long now) {
         if (liveServers == null || liveServers.isEmpty()) {
+            /*
+             * The registered servers are the only thing that tells a server
+             * that is gone from one that is merely slow, so without them
+             * nothing can be dropped and the status stays below ready. The
+             * entries are still rendered: a graph of a cluster whose servers
+             * can't be listed is exactly when the caller wants to see who
+             * reported what
+             */
             return of(entries, UNKNOWN_EXPECTED);
         }
         Set<String> live = new HashSet<>(liveServers);

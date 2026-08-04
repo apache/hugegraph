@@ -1070,8 +1070,6 @@ public final class GraphManager {
             } catch (Throwable e) {
                 LOG.error("Graph '{}' can't be loaded: '{}'",
                           name, graphConfPath, e);
-                this.reportGraphStatus(DEFAULT_GRAPH_SPACE_SERVICE_NAME, name,
-                                       GraphStatus.FAILED, statusMessage(e));
             }
         }
     }
@@ -1912,13 +1910,14 @@ public final class GraphManager {
                  name, graphConfPath);
 
         /*
-         * A graph of the local config directory is opened and bound by the
-         * gremlin server itself, from its own settings, before the rest
-         * server is started, see HugeGremlinServer#prepare. It never travels
-         * through GRAPH_CREATE, so its readiness is reported here instead
+         * The status of a graph of the local config directory is deliberately
+         * not reported. Its name is taken from a file name and the config
+         * directory is read whether or not this server takes its graphs from
+         * it, so a local file named after a graph of the cluster would report
+         * over the graph of the cluster. A local graph is known to this
+         * server only, and the status API answers for it from the local
+         * instance rather than from the cluster metadata
          */
-        this.reportGraphStatus(DEFAULT_GRAPH_SPACE_SERVICE_NAME, name,
-                               GraphStatus.READY, null);
 
         if (this.requireAuthentication() &&
             !(graph instanceof HugeGraphAuthProxy)) {

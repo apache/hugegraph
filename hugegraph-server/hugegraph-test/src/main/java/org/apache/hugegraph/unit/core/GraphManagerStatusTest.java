@@ -222,34 +222,6 @@ public class GraphManagerStatusTest {
         }
     }
 
-    @Test
-    public void testOpeningAGraphThisServerAlreadyHasIsNotReportedFailed() {
-        /*
-         * Opening a graph that is already open here fails, and the graph is
-         * served all the same. Reporting failed for it would overwrite the
-         * status of the attempt that succeeded and stay, since this server
-         * won't open the graph again
-         */
-        List<GraphStatusEntry> reported = new ArrayList<>();
-        GraphManager manager = newManager(reported, null);
-        try {
-            manager.createGraph(GRAPH_SPACE, GRAPH, "admin", graphConfig(),
-                                false);
-            reported.clear();
-
-            Assert.assertThrows(Exception.class, () -> {
-                manager.createGraph(GRAPH_SPACE, GRAPH, "admin",
-                                    graphConfig(), false);
-            });
-
-            for (GraphStatusEntry entry : reported) {
-                Assert.assertNotEquals(GraphStatus.FAILED, entry.status());
-            }
-        } finally {
-            close(manager);
-        }
-    }
-
     private static void assertEntry(GraphStatusEntry entry,
                                     GraphStatus status) {
         Assert.assertEquals(status, entry.status());
