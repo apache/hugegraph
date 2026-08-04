@@ -189,6 +189,7 @@ public final class GraphManager {
     private final EventHub eventHub;
     private final String url;
     private final String serverId;
+    private final boolean serverIdDistinct;
     private final Set<String> serverUrlsToPd;
     private final Boolean serverDeployInK8s;
     private final HugeConfig config;
@@ -208,7 +209,11 @@ public final class GraphManager {
 
         this.config = conf;
         this.url = conf.get(ServerOptions.REST_SERVER_URL);
-        this.serverId = initServerId(conf);
+        String derivedServerId = initServerId(conf);
+        this.serverIdDistinct = derivedServerId != null;
+        this.serverId = this.serverIdDistinct ? derivedServerId :
+                        sanitizeServerId(
+                                conf.get(ServerOptions.REST_SERVER_URL));
         LOG.info("The id of this server is '{}'", this.serverId);
         this.serverUrlsToPd = new HashSet<>(Arrays.asList(
                 conf.get(ServerOptions.SERVER_URLS_TO_PD).split(",")));
@@ -1348,19 +1353,45 @@ public final class GraphManager {
             LOG.error("Graph '{}' of graph space '{}' can't be created",
                       name, graphSpace, e);
             /*
-             * Opening a graph that another attempt of this server registered
-             * first fails, and the graph is served all the same. Reporting
-             * failed for it would overwrite the status of the attempt that
-             * succeeded and stay, since this server won't open the graph
-             * again. An attempt that registered the graph itself and failed
-             * afterwards still has to leave a terminal status behind
+             * An attempt that registered the graph and failed afterwards
+             * leaves it half open: this server would answer for it while it
+             * reports it failed, and it would never open it again, so the
+             * graph would stay reported failed for good. Take it back out so
+             * that opening it can be tried again
              */
-            if (registered.get() ||
-                !this.graphs.containsKey(spaceGraphName(graphSpace, name))) {
+            if (registered.get()) {
+                this.unregisterFailedGraph(graphSpace, name);
+                this.reportGraphStatus(graphSpace, name, GraphStatus.FAILED,
+                                       statusMessage(e));
+            } else if (!this.graphs.containsKey(
+                    spaceGraphName(graphSpace, name))) {
                 this.reportGraphStatus(graphSpace, name, GraphStatus.FAILED,
                                        statusMessage(e));
             }
+            /*
+             * The graph is registered by an attempt that isn't this one, it
+             * is served and its status belongs to that attempt
+             */
             throw e;
+        }
+    }
+
+    /**
+     * Takes a graph this server registered and then failed to finish opening
+     * back out, so that it is neither served nor kept from being opened
+     * again. Best effort: a graph that can't be closed is still removed
+     */
+    private void unregisterFailedGraph(String graphSpace, String name) {
+        Graph graph = this.graphs.remove(spaceGraphName(graphSpace, name));
+        if (!(graph instanceof HugeGraph)) {
+            return;
+        }
+        try {
+            ((HugeGraph) graph).close();
+        } catch (Throwable e) {
+            LOG.warn("Failed to close graph '{}' of graph space '{}': {}",
+                     name, graphSpace, e.getMessage());
+            LOG.debug("Failed to close the graph that can't be created", e);
         }
     }
 
@@ -1496,19 +1527,20 @@ public final class GraphManager {
             return sanitizeServerId(port > 0 ? host + "_" + port : host);
         }
         /*
-         * Last resort. The url is the same for every replica of a container
-         * image, so the servers would share one id, report their graphs over
-         * each other and be counted as one. Say so: the status of a graph is
-         * only as good as the identity it's keyed by
+         * Nothing here tells this server apart from another one started from
+         * the same image: the rest server url is a bind address and is the
+         * same for all of them. The caller still needs an id to key the
+         * status by, it just can't be trusted to be unique
          */
-        String url = conf.get(ServerOptions.REST_SERVER_URL);
-        LOG.warn("Falling back to '{}' as the id of this server, it can't " +
-                 "tell this server apart from another one started with the " +
-                 "same '{}'. Set '{}' to a value that is unique in the " +
-                 "cluster to report the status of the graphs of this server",
-                 url, ServerOptions.REST_SERVER_URL.name(),
-                 ServerOptions.SERVER_ID.name());
-        return sanitizeServerId(url);
+        LOG.error("The id of this server can't be derived, the host name " +
+                  "can't be resolved and '{}' is not set. The status of the " +
+                  "graphs of this server is reported under an id that is " +
+                  "shared with every server started the same way, so this " +
+                  "server is left out of the readiness of its graphs. Set " +
+                  "'{}' to a value that is unique in the cluster",
+                  ServerOptions.SERVER_ID.name(),
+                  ServerOptions.SERVER_ID.name());
+        return null;
     }
 
     private static String localHostName() {
@@ -1654,9 +1686,15 @@ public final class GraphManager {
      * or an empty set when they can't be listed. They are the ids the servers
      * report their graph status with, so the reported status can be matched
      * against the servers that are actually part of the cluster.
+     * <p>
+     * An id that isn't known to be unique can't be matched against anything:
+     * the servers that share it are one id to the cluster and one of them
+     * reporting ready would answer for all of them. The servers are reported
+     * as unknown instead, which keeps the graphs of this graph space below
+     * ready rather than answering ready for a server that isn't.
      */
     public Set<String> serviceServers(String graphSpace) {
-        if (!this.isPDEnabled()) {
+        if (!this.isPDEnabled() || !this.serverIdDistinct) {
             return Collections.emptySet();
         }
         try {

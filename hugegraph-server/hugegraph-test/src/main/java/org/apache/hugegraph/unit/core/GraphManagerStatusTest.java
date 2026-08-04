@@ -222,6 +222,31 @@ public class GraphManagerStatusTest {
         }
     }
 
+    @Test
+    public void testAGraphThatCantBeCreatedIsNotLeftRegistered() {
+        /*
+         * A graph that failed after it was registered would be answered for
+         * while it reads failed, and this server would never open it again,
+         * so the failure would stay for good. It has to be taken back out so
+         * that opening it can be tried again
+         */
+        List<GraphStatusEntry> reported = new ArrayList<>();
+        GraphManager manager = newManager(
+                reported, new IllegalStateException("meta is unreachable"));
+        try {
+            Assert.assertThrows(IllegalStateException.class, () -> {
+                manager.createGraph(GRAPH_SPACE, GRAPH, "admin",
+                                    graphConfig(), false);
+            });
+
+            assertEntry(reported.get(reported.size() - 1),
+                        GraphStatus.FAILED);
+            Assert.assertNull(manager.graph(GRAPH_SPACE + "-" + GRAPH));
+        } finally {
+            close(manager);
+        }
+    }
+
     private static void assertEntry(GraphStatusEntry entry,
                                     GraphStatus status) {
         Assert.assertEquals(status, entry.status());

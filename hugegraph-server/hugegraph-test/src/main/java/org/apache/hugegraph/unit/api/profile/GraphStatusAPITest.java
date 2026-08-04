@@ -366,6 +366,7 @@ public class GraphStatusAPITest extends BaseUnitTest {
         Whitebox.setInternalState(manager, "serviceID", "hugegraph-service");
         Whitebox.setInternalState(manager, "url", SERVER_URL);
         Whitebox.setInternalState(manager, "serverId", SERVER_1);
+        Whitebox.setInternalState(manager, "serverIdDistinct", true);
         Whitebox.setInternalState(manager, "pdClient", pdClient);
 
         Map<String, GraphSpace> spaces = new ConcurrentHashMap<>();
