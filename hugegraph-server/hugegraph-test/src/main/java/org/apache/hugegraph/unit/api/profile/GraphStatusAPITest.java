@@ -312,6 +312,25 @@ public class GraphStatusAPITest extends BaseUnitTest {
         });
     }
 
+    @Test
+    public void testStatusIsNotFoundWhenTheMetadataCantBeRead() {
+        /*
+         * A graph config that can't be read is not a graph that was dropped,
+         * and the caller polls this API: answering not found would have it
+         * take a metadata failure for a final answer
+         */
+        GraphManager manager = pdManager(
+                reported(entry(SERVER_1, GraphStatus.READY, null)), 1, true);
+        MetaManager metaManager = Whitebox.getInternalState(manager,
+                                                            "metaManager");
+        Mockito.when(metaManager.getGraphConfig(GRAPHSPACE, GRAPH))
+               .thenThrow(new IllegalStateException("pd is unreachable"));
+
+        Map<String, Object> result = status(manager);
+
+        Assert.assertEquals(GRAPH, result.get(GRAPH_KEY));
+    }
+
     private static SecurityContext securityContext(boolean allowed) {
         SecurityContext sc = Mockito.mock(SecurityContext.class);
         Mockito.when(sc.isUserInRole(Mockito.anyString()))

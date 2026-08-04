@@ -107,6 +107,9 @@ public final class GraphStatusAggregate {
         }
         Set<String> live = new HashSet<>(liveServers);
         List<GraphStatusEntry> reported = new ArrayList<>();
+        Set<String> readyServers = new HashSet<>();
+        boolean failed = false;
+        boolean loading = false;
         if (entries != null) {
             for (GraphStatusEntry entry : entries) {
                 if (entry == null) {
@@ -114,17 +117,42 @@ public final class GraphStatusAggregate {
                 }
                 boolean registered = live.contains(entry.server());
                 boolean stale = now - entry.updateTime() > staleAfter;
-                if (registered || !stale) {
-                    reported.add(entry);
+                if (!registered && stale) {
+                    continue;
+                }
+                reported.add(entry);
+                GraphStatus entryStatus = entry.status();
+                if (entryStatus == GraphStatus.FAILED) {
+                    failed = true;
+                } else if (entryStatus == GraphStatus.READY) {
+                    readyServers.add(entry.server());
+                } else {
+                    // An unset status is not a guarantee, treat it as loading
+                    loading = true;
                 }
             }
         }
+        reported.sort(BY_SERVER);
+
         /*
-         * A server that reported but is no longer registered still has to be
-         * accounted for, otherwise the graph could look ready while it is not
+         * Which servers reported ready, not how many: the status left behind
+         * by a server that is gone must never stand in for a registered
+         * server that never reported, otherwise the graph reads ready while
+         * one of the servers of the cluster can't serve it
          */
-        int expected = Math.max(live.size(), reported.size());
-        return of(reported, expected);
+        GraphStatus status;
+        if (reported.isEmpty()) {
+            status = null;
+        } else if (failed) {
+            status = GraphStatus.FAILED;
+        } else if (loading || !readyServers.containsAll(live)) {
+            status = GraphStatus.LOADING;
+        } else {
+            status = GraphStatus.READY;
+        }
+        return new GraphStatusAggregate(status, readyServers.size(),
+                                        live.size(),
+                                        Collections.unmodifiableList(reported));
     }
 
     /**

@@ -1569,13 +1569,17 @@ public final class GraphManager {
     }
 
     /**
-     * Whether a graph is registered in the cluster metadata. Unlike listing
-     * the graphs of a graph space it reads a single key, it's on the path of
-     * an API clients poll
+     * Whether a graph is registered in the cluster metadata, or null when the
+     * metadata can't be read. Telling the two apart matters: a graph that
+     * can't be looked up is not a graph that doesn't exist, and the caller of
+     * an API clients poll would take the second for a final answer.
+     * <p>
+     * Unlike listing the graphs of a graph space this reads a single key, the
+     * caller is on a polled path.
      */
-    public boolean graphConfigExists(String graphSpace, String name) {
+    public Boolean graphConfigExists(String graphSpace, String name) {
         if (!this.isPDEnabled()) {
-            return false;
+            return Boolean.FALSE;
         }
         try {
             return this.metaManager.getGraphConfig(graphSpace, name) != null;
@@ -1583,7 +1587,7 @@ public final class GraphManager {
             LOG.warn("Failed to get the config of graph '{}-{}': {}",
                      graphSpace, name, e.getMessage());
             LOG.debug("Failed to get the config of graph", e);
-            return false;
+            return null;
         }
     }
 

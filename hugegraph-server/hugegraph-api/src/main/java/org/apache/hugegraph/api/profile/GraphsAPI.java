@@ -296,7 +296,7 @@ public class GraphsAPI extends API {
              * config of a graph is written before its creation returns, so a
              * graph that is still loading is found here
              */
-            if (!exists(manager, graphSpace, name)) {
+            if (missing(manager, graphSpace, name)) {
                 throw new NotFoundException(String.format(
                         "Graph '%s' does not exist", name));
             }
@@ -326,11 +326,19 @@ public class GraphsAPI extends API {
         return result;
     }
 
-    private static boolean exists(GraphManager manager, String graphSpace,
-                                  String name) {
+    /**
+     * Whether the graph is known to be gone. Only a metadata read that
+     * answered is taken as an answer: a read that failed leaves the graph
+     * reported as it was last seen rather than as dropped
+     */
+    private static boolean missing(GraphManager manager, String graphSpace,
+                                   String name) {
         // The local map first, it answers without asking the cluster metadata
-        return localGraph(manager, graphSpace, name) != null ||
-               manager.graphConfigExists(graphSpace, name);
+        if (localGraph(manager, graphSpace, name) != null) {
+            return false;
+        }
+        Boolean configured = manager.graphConfigExists(graphSpace, name);
+        return configured != null && !configured;
     }
 
     private static HugeGraph localGraph(GraphManager manager,

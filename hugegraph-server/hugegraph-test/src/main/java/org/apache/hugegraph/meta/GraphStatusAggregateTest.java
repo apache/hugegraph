@@ -362,8 +362,44 @@ public class GraphStatusAggregateTest {
                 STALE_AFTER, NOW);
 
         Assert.assertEquals(GraphStatus.LOADING, aggregate.status());
+        // The status of the server that is loading was kept, so it still
+        // holds the graph back
         Assert.assertEquals(2, aggregate.totalCount());
-        // The server that is loading still counts, so ready can't be reached
+        Assert.assertEquals(1, aggregate.expected());
+    }
+
+    @Test
+    public void testAServerThatIsGoneDoesNotStandInForOneThatIsRegistered() {
+        /*
+         * A server was replaced and its status is still recent enough to be
+         * kept, while the server that took its place has not reported yet.
+         * Counting the reports would make the two cancel out and answer
+         * ready, so which servers reported has to be looked at
+         */
+        List<GraphStatusEntry> entries = Arrays.asList(
+                new GraphStatusEntry("old-a", GraphStatus.READY, null, NOW),
+                new GraphStatusEntry("server-b", GraphStatus.READY, null,
+                                     NOW));
+        GraphStatusAggregate aggregate = GraphStatusAggregate.of(
+                entries, Arrays.asList("server-b", "server-c"),
+                STALE_AFTER, NOW);
+
+        Assert.assertEquals(GraphStatus.LOADING, aggregate.status());
+        Assert.assertEquals(2, aggregate.expected());
+    }
+
+    @Test
+    public void testReadyNeedsEveryRegisteredServer() {
+        List<GraphStatusEntry> entries = Arrays.asList(
+                new GraphStatusEntry("server-a", GraphStatus.READY, null, NOW),
+                new GraphStatusEntry("server-b", GraphStatus.READY, null,
+                                     NOW));
+        GraphStatusAggregate aggregate = GraphStatusAggregate.of(
+                entries, Arrays.asList("server-a", "server-b"),
+                STALE_AFTER, NOW);
+
+        Assert.assertEquals(GraphStatus.READY, aggregate.status());
+        Assert.assertEquals(2, aggregate.readyCount());
         Assert.assertEquals(2, aggregate.expected());
     }
 
