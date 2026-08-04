@@ -38,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -373,10 +374,42 @@ public final class GraphManager {
         this.loadGraphSpaces();
 
         this.kvStore = this.kvStoreInit();
+
+        /*
+         * Drop what this server reported before it restarted, while it is not
+         * registered yet. Its id is stable across a restart, so the status it
+         * left behind reads as the status of the server that is starting, and
+         * a graph it reported ready would be counted ready again before it
+         * has opened it
+         */
+        this.clearOwnGraphStatus();
+
         this.loadServices();
 
         this.loadGraphsFromMeta(this.graphConfigs());
         this.listenMetaChanges();
+    }
+
+    /**
+     * Removes the status this server reported for every graph it may serve.
+     * Best effort: a status that couldn't be removed makes a graph look ready
+     * before it is, which is worth a warning but not a failed startup
+     */
+    private void clearOwnGraphStatus() {
+        try {
+            for (String graphSpace : this.graphSpaces.keySet()) {
+                if (!servesGraphSpace(this.serviceGraphSpace, graphSpace)) {
+                    continue;
+                }
+                for (String graph : this.graphs(graphSpace)) {
+                    this.removeGraphStatus(graphSpace, graph);
+                }
+            }
+        } catch (Throwable e) {
+            LOG.warn("Failed to clear the graph status of this server: {}",
+                     e.getMessage());
+            LOG.debug("Failed to clear the graph status of this server", e);
+        }
     }
 
     public void initAdminUserIfNeeded(String password) {
@@ -1309,14 +1342,26 @@ public final class GraphManager {
          * indistinguishable from a server that is still working on the graph
          */
         this.reportGraphStatus(graphSpace, name, GraphStatus.LOADING, null);
+        AtomicBoolean registered = new AtomicBoolean();
         try {
             return this.createPdGraph(graphSpace, name, creator, configs,
-                                      init, grpcThread);
+                                      init, grpcThread, registered);
         } catch (Throwable e) {
             LOG.error("Graph '{}' of graph space '{}' can't be created",
                       name, graphSpace, e);
-            this.reportGraphStatus(graphSpace, name, GraphStatus.FAILED,
-                                   statusMessage(e));
+            /*
+             * Opening a graph that another attempt of this server registered
+             * first fails, and the graph is served all the same. Reporting
+             * failed for it would overwrite the status of the attempt that
+             * succeeded and stay, since this server won't open the graph
+             * again. An attempt that registered the graph itself and failed
+             * afterwards still has to leave a terminal status behind
+             */
+            if (registered.get() ||
+                !this.graphs.containsKey(spaceGraphName(graphSpace, name))) {
+                this.reportGraphStatus(graphSpace, name, GraphStatus.FAILED,
+                                       statusMessage(e));
+            }
             throw e;
         }
     }
@@ -1324,7 +1369,8 @@ public final class GraphManager {
     private HugeGraph createPdGraph(String graphSpace, String name,
                                     String creator,
                                     Map<String, Object> configs, boolean init,
-                                    boolean grpcThread) {
+                                    boolean grpcThread,
+                                    AtomicBoolean registered) {
         String nickname;
         if (configs.get("nickname") != null) {
             nickname = configs.get("nickname").toString();
@@ -1397,6 +1443,7 @@ public final class GraphManager {
             this.metaManager.notifyGraphAdd(graphSpace, name);
         }
         this.graphs.put(graphName, graph);
+        registered.set(true);
         if (!grpcThread) {
             this.metaManager.updateGraphSpaceConfig(graphSpace, gs);
         }
@@ -1450,7 +1497,20 @@ public final class GraphManager {
             int port = restServerPort(conf);
             return sanitizeServerId(port > 0 ? host + "_" + port : host);
         }
-        return sanitizeServerId(conf.get(ServerOptions.REST_SERVER_URL));
+        /*
+         * Last resort. The url is the same for every replica of a container
+         * image, so the servers would share one id, report their graphs over
+         * each other and be counted as one. Say so: the status of a graph is
+         * only as good as the identity it's keyed by
+         */
+        String url = conf.get(ServerOptions.REST_SERVER_URL);
+        LOG.warn("Falling back to '{}' as the id of this server, it can't " +
+                 "tell this server apart from another one started with the " +
+                 "same '{}'. Set '{}' to a value that is unique in the " +
+                 "cluster to report the status of the graphs of this server",
+                 url, ServerOptions.REST_SERVER_URL.name(),
+                 ServerOptions.SERVER_ID.name());
+        return sanitizeServerId(url);
     }
 
     private static String localHostName() {
