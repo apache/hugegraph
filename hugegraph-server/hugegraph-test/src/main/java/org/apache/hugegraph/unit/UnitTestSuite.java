@@ -23,13 +23,17 @@ import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
+import org.apache.hugegraph.meta.GraphStatusAggregateTest;
+import org.apache.hugegraph.meta.GraphStatusEntryTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
+import org.apache.hugegraph.meta.managers.GraphMetaManagerStatusTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
 import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
+import org.apache.hugegraph.unit.api.profile.GraphStatusAPITest;
 import org.apache.hugegraph.unit.api.space.GraphSpaceAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
 import org.apache.hugegraph.unit.cache.CacheManagerTest;
@@ -46,6 +50,7 @@ import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
+import org.apache.hugegraph.unit.core.GraphManagerStatusTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
 import org.apache.hugegraph.unit.core.QueryTest;
@@ -109,6 +114,9 @@ import org.junit.runners.Suite;
         /* api space */
         GraphSpaceAPITest.class,
 
+        /* api profile */
+        GraphStatusAPITest.class,
+
         /* cache */
         CacheTest.RamCacheTest.class,
         CacheTest.OffheapCacheTest.class,
@@ -116,6 +124,9 @@ import org.junit.runners.Suite;
         CachedSchemaTransactionTest.class,
         MetaManagerSchemaCacheClearEventTest.class,
         EtcdMetaDriverTest.class,
+        GraphMetaManagerStatusTest.class,
+        GraphStatusEntryTest.class,
+        GraphStatusAggregateTest.class,
         CachedGraphTransactionTest.class,
         CacheManagerTest.class,
         RamTableTest.class,
@@ -144,6 +155,7 @@ import org.junit.runners.Suite;
         RolePermissionTest.class,
         ExceptionTest.class,
         GraphManagerConfigTest.class,
+        GraphManagerStatusTest.class,
         BackendStoreInfoTest.class,
         TraversalUtilTest.class,
         TraversalUtilOptimizeTest.class,

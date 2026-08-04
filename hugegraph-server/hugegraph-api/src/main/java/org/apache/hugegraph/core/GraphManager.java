@@ -23,6 +23,8 @@ import static org.apache.hugegraph.space.GraphSpace.DEFAULT_GRAPH_SPACE_SERVICE_
 
 import java.io.IOException;
 import java.io.StringWriter;
+import java.net.InetAddress;
+import java.net.URI;
 import java.text.ParseException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -65,6 +68,7 @@ import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.config.TypedOption;
+import org.apache.hugegraph.event.Event;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NotFoundException;
@@ -80,6 +84,7 @@ import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.masterelection.RoleElectionOptions;
 import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
 import org.apache.hugegraph.masterelection.StandardRoleListener;
+import org.apache.hugegraph.meta.GraphStatusEntry;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
@@ -115,6 +120,7 @@ import org.apache.hugegraph.traversal.optimize.HugeScriptTraversal;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
+import org.apache.hugegraph.type.define.GraphStatus;
 import org.apache.hugegraph.type.define.NodeRole;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
@@ -150,6 +156,9 @@ public final class GraphManager {
     public static final int NICKNAME_MAX_LENGTH = 48;
     public static final String DELIMITER = "-";
     public static final String NAMESPACE_CREATE = "namespace_create";
+    private static final String UNKNOWN_SERVER_ID = "unknown-server";
+    private static final String BIND_FAILED_MESSAGE = "GremlinBindingFailure";
+    private static final int SERVER_ID_MAX_LENGTH = 128;
     private static final Logger LOG = Log.logger(GraphManager.class);
     private KvStore kvStore;
 
@@ -179,6 +188,8 @@ public final class GraphManager {
     private final HugeConfig conf;
     private final EventHub eventHub;
     private final String url;
+    private final String serverId;
+    private final boolean serverIdDistinct;
     private final Set<String> serverUrlsToPd;
     private final Boolean serverDeployInK8s;
     private final HugeConfig config;
@@ -198,6 +209,12 @@ public final class GraphManager {
 
         this.config = conf;
         this.url = conf.get(ServerOptions.REST_SERVER_URL);
+        String derivedServerId = initServerId(conf);
+        this.serverIdDistinct = derivedServerId != null;
+        this.serverId = this.serverIdDistinct ? derivedServerId :
+                        sanitizeServerId(
+                                conf.get(ServerOptions.REST_SERVER_URL));
+        LOG.info("The id of this server is '{}'", this.serverId);
         this.serverUrlsToPd = new HashSet<>(Arrays.asList(
                 conf.get(ServerOptions.SERVER_URLS_TO_PD).split(",")));
         this.serverDeployInK8s =
@@ -362,10 +379,42 @@ public final class GraphManager {
         this.loadGraphSpaces();
 
         this.kvStore = this.kvStoreInit();
+
+        /*
+         * Drop what this server reported before it restarted, while it is not
+         * registered yet. Its id is stable across a restart, so the status it
+         * left behind reads as the status of the server that is starting, and
+         * a graph it reported ready would be counted ready again before it
+         * has opened it
+         */
+        this.clearOwnGraphStatus();
+
         this.loadServices();
 
         this.loadGraphsFromMeta(this.graphConfigs());
         this.listenMetaChanges();
+    }
+
+    /**
+     * Removes the status this server reported for every graph it may serve.
+     * Best effort: a status that couldn't be removed makes a graph look ready
+     * before it is, which is worth a warning but not a failed startup
+     */
+    private void clearOwnGraphStatus() {
+        try {
+            for (String graphSpace : this.graphSpaces.keySet()) {
+                if (!servesGraphSpace(this.serviceGraphSpace, graphSpace)) {
+                    continue;
+                }
+                for (String graph : this.graphs(graphSpace)) {
+                    this.removeGraphStatus(graphSpace, graph);
+                }
+            }
+        } catch (Throwable e) {
+            LOG.warn("Failed to clear the graph status of this server: {}",
+                     e.getMessage());
+            LOG.debug("Failed to clear the graph status of this server", e);
+        }
     }
 
     public void initAdminUserIfNeeded(String password) {
@@ -864,6 +913,13 @@ public final class GraphManager {
             }
         }
 
+        /*
+         * The loop above walks the graphs this server has open, the graphs of
+         * the space this server never opened leave their status behind, so
+         * the whole subtree of the space is dropped
+         */
+        this.clearGraphSpaceStatus(name);
+
         // Clear all services
         for (String key : this.services.keySet()) {
             if (key.startsWith(name)) {
@@ -916,15 +972,20 @@ public final class GraphManager {
                             licenseValid = true;
                         }
                     })
-                    .setLabelMap(ImmutableMap.of(
-                            PdRegisterLabel.REGISTER_TYPE.name(),
-                            PdRegisterType.NODE_PORT.name(),
-                            PdRegisterLabel.GRAPHSPACE.name(), graphSpace,
-                            PdRegisterLabel.SERVICE_NAME.name(), service.name(),
-                            PdRegisterLabel.SERVICE_ID.name(), service.serviceId(),
-                            PdRegisterLabel.cores.name(),
-                            String.valueOf(Runtime.getRuntime().availableProcessors())
-                    )).setVersion(CoreVersion.VERSION.toString());
+                    .setLabelMap(ImmutableMap.<String, String>builder()
+                            .put(PdRegisterLabel.REGISTER_TYPE.name(),
+                                 PdRegisterType.NODE_PORT.name())
+                            .put(PdRegisterLabel.GRAPHSPACE.name(), graphSpace)
+                            .put(PdRegisterLabel.SERVICE_NAME.name(),
+                                 service.name())
+                            .put(PdRegisterLabel.SERVICE_ID.name(),
+                                 service.serviceId())
+                            .put(PdRegisterLabel.SERVER_ID.name(),
+                                 this.serverId())
+                            .put(PdRegisterLabel.cores.name(),
+                                 String.valueOf(Runtime.getRuntime()
+                                                       .availableProcessors()))
+                            .build()).setVersion(CoreVersion.VERSION.toString());
 
             String pdServiceId = register.registerService(config);
             service.pdServiceId(pdServiceId);
@@ -963,7 +1024,8 @@ public final class GraphManager {
                             PdRegisterLabel.REGISTER_TYPE.name(), PdRegisterType.NODE_PORT.name(),
                             PdRegisterLabel.GRAPHSPACE.name(), this.serviceGraphSpace,
                             PdRegisterLabel.SERVICE_NAME.name(), service.name(),
-                            PdRegisterLabel.SERVICE_ID.name(), service.serviceId()
+                            PdRegisterLabel.SERVICE_ID.name(), service.serviceId(),
+                            PdRegisterLabel.SERVER_ID.name(), this.serverId()
                     ));
 
             String ddsHost = this.metaManager.getDDSHost();
@@ -1276,6 +1338,68 @@ public final class GraphManager {
         }
         E.checkArgumentNotNull(name, "The graph name can't be null");
         checkGraphName(name);
+
+        /*
+         * From here on this server is opening the graph, so every way out has
+         * to leave a terminal status behind: an entry that stays LOADING is
+         * indistinguishable from a server that is still working on the graph
+         */
+        this.reportGraphStatus(graphSpace, name, GraphStatus.LOADING, null);
+        AtomicBoolean registered = new AtomicBoolean();
+        try {
+            return this.createPdGraph(graphSpace, name, creator, configs,
+                                      init, grpcThread, registered);
+        } catch (Throwable e) {
+            LOG.error("Graph '{}' of graph space '{}' can't be created",
+                      name, graphSpace, e);
+            /*
+             * An attempt that registered the graph and failed afterwards
+             * leaves it half open: this server would answer for it while it
+             * reports it failed, and it would never open it again, so the
+             * graph would stay reported failed for good. Take it back out so
+             * that opening it can be tried again
+             */
+            if (registered.get()) {
+                this.unregisterFailedGraph(graphSpace, name);
+                this.reportGraphStatus(graphSpace, name, GraphStatus.FAILED,
+                                       statusMessage(e));
+            } else if (!this.graphs.containsKey(
+                    spaceGraphName(graphSpace, name))) {
+                this.reportGraphStatus(graphSpace, name, GraphStatus.FAILED,
+                                       statusMessage(e));
+            }
+            /*
+             * The graph is registered by an attempt that isn't this one, it
+             * is served and its status belongs to that attempt
+             */
+            throw e;
+        }
+    }
+
+    /**
+     * Takes a graph this server registered and then failed to finish opening
+     * back out, so that it is neither served nor kept from being opened
+     * again. Best effort: a graph that can't be closed is still removed
+     */
+    private void unregisterFailedGraph(String graphSpace, String name) {
+        Graph graph = this.graphs.remove(spaceGraphName(graphSpace, name));
+        if (!(graph instanceof HugeGraph)) {
+            return;
+        }
+        try {
+            ((HugeGraph) graph).close();
+        } catch (Throwable e) {
+            LOG.warn("Failed to close graph '{}' of graph space '{}': {}",
+                     name, graphSpace, e.getMessage());
+            LOG.debug("Failed to close the graph that can't be created", e);
+        }
+    }
+
+    private HugeGraph createPdGraph(String graphSpace, String name,
+                                    String creator,
+                                    Map<String, Object> configs, boolean init,
+                                    boolean grpcThread,
+                                    AtomicBoolean registered) {
         String nickname;
         if (configs.get("nickname") != null) {
             nickname = configs.get("nickname").toString();
@@ -1348,26 +1472,284 @@ public final class GraphManager {
             this.metaManager.notifyGraphAdd(graphSpace, name);
         }
         this.graphs.put(graphName, graph);
+        registered.set(true);
         if (!grpcThread) {
             this.metaManager.updateGraphSpaceConfig(graphSpace, gs);
         }
 
-        // Let gremlin server and rest server context add graph
-        this.eventHub.notify(Events.GRAPH_CREATE, graph);
-
         if (init) {
             String schema = propConfig.getString(
                     CoreOptions.SCHEMA_INIT_TEMPLATE.name());
-            if (schema == null || schema.isEmpty()) {
-                return graph;
+            if (schema != null && !schema.isEmpty()) {
+                String schemas = this.schemaTemplate(graphSpace,
+                                                     schema).schema();
+                prepareSchema(graph, schemas);
             }
-            String schemas = this.schemaTemplate(graphSpace, schema).schema();
-            prepareSchema(graph, schemas);
         }
+
+        /*
+         * Let gremlin server and rest server context add graph. Notified last:
+         * the event is handled without waiting for it and its handler reports
+         * the graph ready, so anything that can still fail has to run before
+         * it, otherwise a failed creation could be reported ready
+         */
+        this.eventHub.notify(Events.GRAPH_CREATE, graph);
+
         if (grpcThread) {
             HugeGraphAuthProxy.resetContext();
         }
         return graph;
+    }
+
+    /**
+     * The id this server reports the status of its graphs with. It has to be
+     * stable across a restart of the same server and different from the id of
+     * every other server of the cluster.
+     */
+    public String serverId() {
+        return this.serverId;
+    }
+
+    private static String initServerId(HugeConfig conf) {
+        String configured = conf.get(ServerOptions.SERVER_ID);
+        if (StringUtils.isNotBlank(configured)) {
+            return sanitizeServerId(configured);
+        }
+        /*
+         * The rest server url is a bind address rather than an identity, it's
+         * the same for every replica of a container image. The host name is
+         * what tells containers and pods apart, the port is appended for the
+         * servers that share a host
+         */
+        String host = localHostName();
+        if (host != null) {
+            int port = restServerPort(conf);
+            return sanitizeServerId(port > 0 ? host + "_" + port : host);
+        }
+        /*
+         * Nothing here tells this server apart from another one started from
+         * the same image: the rest server url is a bind address and is the
+         * same for all of them. The caller still needs an id to key the
+         * status by, it just can't be trusted to be unique
+         */
+        LOG.error("The id of this server can't be derived, the host name " +
+                  "can't be resolved and '{}' is not set. The status of the " +
+                  "graphs of this server is reported under an id that is " +
+                  "shared with every server started the same way, so this " +
+                  "server is left out of the readiness of its graphs. Set " +
+                  "'{}' to a value that is unique in the cluster",
+                  ServerOptions.SERVER_ID.name(),
+                  ServerOptions.SERVER_ID.name());
+        return null;
+    }
+
+    private static String localHostName() {
+        try {
+            String host = InetAddress.getLocalHost().getHostName();
+            return StringUtils.isBlank(host) ? null : host;
+        } catch (Exception e) {
+            LOG.warn("Failed to resolve the local host name", e);
+            return null;
+        }
+    }
+
+    private static int restServerPort(HugeConfig conf) {
+        try {
+            return URI.create(conf.get(ServerOptions.REST_SERVER_URL))
+                      .getPort();
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private static String sanitizeServerId(String id) {
+        // The status meta key is joined by '/', keep the id to safe chars
+        String sanitized = StringUtils.trimToEmpty(id)
+                                      .replaceAll("[^A-Za-z0-9._-]", "_");
+        if (sanitized.length() > SERVER_ID_MAX_LENGTH) {
+            sanitized = sanitized.substring(0, SERVER_ID_MAX_LENGTH);
+        }
+        return sanitized.isEmpty() ? UNKNOWN_SERVER_ID : sanitized;
+    }
+
+    /**
+     * The status message is stored in the cluster metadata and served to
+     * every member of the graph space, while opening a graph is allowed to
+     * the owner of the graph space only. Exception messages of the backend
+     * carry data paths and connection strings, so only the type of the
+     * failure is published; the exception itself is left to the server log.
+     */
+    private static String statusMessage(Throwable e) {
+        return e.getClass().getSimpleName();
+    }
+
+    private void reportGraphStatus(String graphSpace, String name,
+                                   GraphStatus status, String message) {
+        if (!this.isPDEnabled()) {
+            return;
+        }
+        try {
+            GraphStatusEntry entry = new GraphStatusEntry(
+                    this.serverId(), status, message,
+                    System.currentTimeMillis());
+            this.metaManager.updateGraphStatus(graphSpace, name, entry);
+        } catch (Throwable e) {
+            // Reporting is best-effort, it must never break graph creation
+            LOG.warn("Failed to report status {} of graph '{}-{}'",
+                     status, graphSpace, name, e);
+        }
+    }
+
+    private void clearGraphStatus(String graphSpace, String name) {
+        if (!this.isPDEnabled()) {
+            return;
+        }
+        try {
+            this.metaManager.clearGraphStatus(graphSpace, name);
+        } catch (Throwable e) {
+            // Clearing is best-effort, it must never break dropping a graph
+            LOG.warn("Failed to clear status of graph '{}-{}'",
+                     graphSpace, name, e);
+        }
+    }
+
+    /**
+     * Remove the status this server reported for a graph, called where this
+     * server stops serving the graph but the cluster keeps it.
+     */
+    private void removeGraphStatus(String graphSpace, String name) {
+        if (!this.isPDEnabled()) {
+            return;
+        }
+        try {
+            this.metaManager.removeGraphStatus(graphSpace, name,
+                                               this.serverId());
+        } catch (Throwable e) {
+            LOG.warn("Failed to remove status of graph '{}-{}' reported by " +
+                     "server '{}'", graphSpace, name, this.serverId(), e);
+        }
+    }
+
+    private void clearGraphSpaceStatus(String graphSpace) {
+        if (!this.isPDEnabled()) {
+            return;
+        }
+        try {
+            this.metaManager.clearGraphSpaceStatus(graphSpace);
+        } catch (Throwable e) {
+            LOG.warn("Failed to clear the graph status of graph space '{}'",
+                     graphSpace, e);
+        }
+    }
+
+    public Map<String, GraphStatusEntry> graphStatus(String graphSpace,
+                                                     String graph) {
+        if (!this.isPDEnabled()) {
+            return Collections.emptyMap();
+        }
+        try {
+            return this.metaManager.getGraphStatus(graphSpace, graph);
+        } catch (Throwable e) {
+            // Clients poll the status, keep the stack trace out of the log
+            LOG.warn("Failed to get status of graph '{}-{}': {}",
+                     graphSpace, graph, e.getMessage());
+            LOG.debug("Failed to get status of graph", e);
+            return Collections.emptyMap();
+        }
+    }
+
+    /**
+     * Whether a graph is registered in the cluster metadata, or null when the
+     * metadata can't be read. Telling the two apart matters: a graph that
+     * can't be looked up is not a graph that doesn't exist, and the caller of
+     * an API clients poll would take the second for a final answer.
+     * <p>
+     * Unlike listing the graphs of a graph space this reads a single key, the
+     * caller is on a polled path.
+     */
+    public Boolean graphConfigExists(String graphSpace, String name) {
+        if (!this.isPDEnabled()) {
+            return Boolean.FALSE;
+        }
+        try {
+            return this.metaManager.getGraphConfig(graphSpace, name) != null;
+        } catch (Throwable e) {
+            LOG.warn("Failed to get the config of graph '{}-{}': {}",
+                     graphSpace, name, e.getMessage());
+            LOG.debug("Failed to get the config of graph", e);
+            return null;
+        }
+    }
+
+    /**
+     * The ids of the servers registered to serve the graphs of a graph space,
+     * or an empty set when they can't be listed. They are the ids the servers
+     * report their graph status with, so the reported status can be matched
+     * against the servers that are actually part of the cluster.
+     * <p>
+     * An id that isn't known to be unique can't be matched against anything:
+     * the servers that share it are one id to the cluster and one of them
+     * reporting ready would answer for all of them. The servers are reported
+     * as unknown instead, which keeps the graphs of this graph space below
+     * ready rather than answering ready for a server that isn't.
+     */
+    public Set<String> serviceServers(String graphSpace) {
+        if (!this.isPDEnabled() || !this.serverIdDistinct) {
+            return Collections.emptySet();
+        }
+        try {
+            return this.serviceServerIds(graphSpace);
+        } catch (Throwable e) {
+            // Clients poll the status, keep the stack trace out of the log
+            LOG.warn("Failed to list the servers of graph space '{}': {}",
+                     graphSpace, e.getMessage());
+            LOG.debug("Failed to list the servers of graph space", e);
+            return Collections.emptySet();
+        }
+    }
+
+    /**
+     * The ids of the servers of this service that serve the given graph
+     * space. A server registers one node per url it listens on, so the nodes
+     * are grouped by the id each server reports its graph status with.
+     */
+    private Set<String> serviceServerIds(String graphSpace) {
+        Query query = Query.newBuilder()
+                           .setAppName(this.cluster)
+                           .putLabels(PdRegisterLabel.REGISTER_TYPE.name(),
+                                      PdRegisterType.NODE_PORT.name())
+                           .putLabels(PdRegisterLabel.SERVICE_NAME.name(),
+                                      this.serviceID)
+                           .build();
+        NodeInfos nodeInfos = this.pdClient.getNodeInfos(query);
+        Set<String> servers = new HashSet<>();
+        for (NodeInfo nodeInfo : nodeInfos.getInfoList()) {
+            Map<String, String> labels = nodeInfo.getLabelsMap();
+            String registered = labels.get(PdRegisterLabel.GRAPHSPACE.name());
+            if (!servesGraphSpace(registered, graphSpace)) {
+                continue;
+            }
+            String server = labels.get(PdRegisterLabel.SERVER_ID.name());
+            /*
+             * A server of an older version registers no id, count it by
+             * address instead: that can only make the number larger, never
+             * let a graph look ready before every server reported
+             */
+            servers.add(StringUtils.isNotBlank(server) ? server :
+                        nodeInfo.getAddress());
+        }
+        return servers;
+    }
+
+    private static boolean servesGraphSpace(String registered,
+                                            String graphSpace) {
+        if (StringUtils.isBlank(registered)) {
+            // A server of unknown graph space is counted rather than skipped
+            return true;
+        }
+        // A server registered to DEFAULT serves the graphs of every space
+        return DEFAULT_GRAPH_SPACE_SERVICE_NAME.equals(registered) ||
+               registered.equals(graphSpace);
     }
 
     public Set<String> graphs() {
@@ -1565,6 +1947,16 @@ public final class GraphManager {
         LOG.info("Graph '{}' was successfully configured via '{}'",
                  name, graphConfPath);
 
+        /*
+         * The status of a graph of the local config directory is deliberately
+         * not reported. Its name is taken from a file name and the config
+         * directory is read whether or not this server takes its graphs from
+         * it, so a local file named after a graph of the cluster would report
+         * over the graph of the cluster. A local graph is known to this
+         * server only, and the status API answers for it from the local
+         * instance rather than from the cluster metadata
+         */
+
         if (this.requireAuthentication() &&
             !(graph instanceof HugeGraphAuthProxy)) {
             LOG.warn("You may need to support access control for '{}' with {}",
@@ -1757,11 +2149,47 @@ public final class GraphManager {
             this.graphs.remove(graph.spaceGraphName());
             return null;
         });
+        /*
+         * listenChanges is called both by the constructor and by init, and a
+         * listener is appended every time, so a graph would be reported ready
+         * twice. Register the listener only when it isn't registered yet
+         */
+        if (this.eventHub.containsListener(Events.GRAPH_BOUND)) {
+            return;
+        }
+        this.eventHub.listen(Events.GRAPH_BOUND, event -> {
+            return this.reportBindResult(event, GraphStatus.READY, null);
+        });
+        this.eventHub.listen(Events.GRAPH_BIND_FAILED, event -> {
+            return this.reportBindResult(event, GraphStatus.FAILED,
+                                         BIND_FAILED_MESSAGE);
+        });
+    }
+
+    private Object reportBindResult(Event event, GraphStatus status,
+                                    String message) {
+        LOG.debug("RestServer accepts event '{}'", event.name());
+        event.checkArgs(HugeGraph.class);
+        HugeGraph graph = (HugeGraph) event.args()[0];
+        /*
+         * Can't call graph.name() here, it verifies permission while the
+         * event thread carries no authentication context
+         */
+        String[] parts = graph.spaceGraphName().split(DELIMITER);
+        if (parts.length < 2) {
+            LOG.warn("The graph name format is incorrect: {}",
+                     graph.spaceGraphName());
+            return null;
+        }
+        this.reportGraphStatus(parts[0], parts[1], status, message);
+        return null;
     }
 
     private void unlistenChanges() {
         this.eventHub.unlisten(Events.GRAPH_CREATE);
         this.eventHub.unlisten(Events.GRAPH_DROP);
+        this.eventHub.unlisten(Events.GRAPH_BOUND);
+        this.eventHub.unlisten(Events.GRAPH_BIND_FAILED);
     }
 
     private void listenMetaChanges() {
@@ -2028,6 +2456,8 @@ public final class GraphManager {
                 throw new HugeException(
                         "Failed to remove graph config of '%s'", name, e);
             }
+            // The graph leaves the cluster, no server reports it any more
+            this.clearGraphStatus(graphSpace, name);
 
             /**
              * close task scheduler before clear data,
@@ -2049,6 +2479,12 @@ public final class GraphManager {
             } catch (Exception e) {
                 LOG.warn("Failed to close graph", e);
             }
+        } else {
+            /*
+             * The graph stays in the cluster and only this server stops
+             * serving it, so only the status of this server goes away
+             */
+            this.removeGraphStatus(graphSpace, name);
         }
         GraphSpace gs = this.graphSpace(graphSpace);
         if (!grpcThread) {
@@ -2333,6 +2769,13 @@ public final class GraphManager {
         GRAPHSPACE,
         SERVICE_NAME,
         SERVICE_ID,
+        /*
+         * The id of the server behind the node, one server registers one node
+         * per url it listens on. It's the id the server reports the status of
+         * its graphs with, so the nodes of a service can be counted in the
+         * same unit the reported status is counted in
+         */
+        SERVER_ID,
         cores
     }
 
@@ -2401,6 +2844,8 @@ public final class GraphManager {
                     this.metaManager.getGraphConfig(parts[0], parts[1]);
             if (config == null) {
                 LOG.error("The graph config not exist: {}", graphName);
+                this.reportGraphStatus(parts[0], parts[1], GraphStatus.FAILED,
+                                       "The graph config not exist");
                 continue;
             }
             Object objc = config.get("creator");
@@ -2423,7 +2868,13 @@ public final class GraphManager {
                 if (graph.tx().isOpen()) {
                     graph.tx().close();
                 }
-            } catch (HugeException e) {
+            } catch (Throwable e) {
+                /*
+                 * Not only HugeException: opening a graph also fails with an
+                 * IllegalArgumentException of a checked argument, and such a
+                 * failure has to be handled like any other one. The status of
+                 * the graph is reported by createGraph itself
+                 */
                 if (!this.startIgnoreSingleGraphError) {
                     throw e;
                 }

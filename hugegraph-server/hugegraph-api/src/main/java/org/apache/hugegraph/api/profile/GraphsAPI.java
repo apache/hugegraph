@@ -25,6 +25,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -39,9 +40,13 @@ import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
+import org.apache.hugegraph.exception.NotFoundException;
+import org.apache.hugegraph.meta.GraphStatusAggregate;
+import org.apache.hugegraph.meta.GraphStatusEntry;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
+import org.apache.hugegraph.type.define.GraphStatus;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
@@ -82,6 +87,12 @@ public class GraphsAPI extends API {
     private static final String GRAPH_ACTION = "action";
     private static final String UPDATE = "update";
     private static final String GRAPH_ACTION_RELOAD = "reload";
+    /**
+     * How long the status of a server that is no longer registered is kept,
+     * long enough to outlast a registration that lapsed while its server was
+     * merely slow
+     */
+    private static final long STATUS_STALE_AFTER = 10 * 60 * 1000L;
 
     private static Map<String, Object> convConfig(Map<String, Object> config) {
         Map<String, Object> result = new HashMap<>(config.size());
@@ -245,6 +256,95 @@ public class GraphsAPI extends API {
 
         HugeGraph g = graph(manager, graphSpace, name);
         return ImmutableMap.of("name", g.name(), "backend", g.backend());
+    }
+
+    @GET
+    @Timed
+    @Path("{name}/status")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    @RolesAllowed({"space_member", "$owner=$name"})
+    public Object status(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
+                         @PathParam("name") String name,
+                         @Context SecurityContext sc) {
+        LOG.debug("Get status of graph '{}' in graph space '{}'",
+                  name, graphSpace);
+
+        /*
+         * A graph that is still loading is not bound to this server yet, so
+         * graph(manager, graphSpace, name) would answer 404 for exactly the
+         * case this API is meant to report. It's also what verifies the
+         * permission on the graph itself for the other reads of this
+         * resource, so the role of the caller is checked here instead
+         */
+        space(manager, graphSpace);
+        String role = RequiredPerm.roleFor(graphSpace, name,
+                                           HugePermission.READ);
+        if (!sc.isUserInRole(role) && !isAdminManager(manager)) {
+            throw new ForbiddenException(String.format(
+                    "The user is not allowed to read graph '%s'", name));
+        }
+
+        GraphStatusAggregate aggregate;
+        if (manager.isPDEnabled()) {
+            /*
+             * The status of a dropped graph is removed on every drop path,
+             * but a removal that couldn't be done leaves an entry behind, and
+             * a graph that no longer exists has to answer 404 either way. The
+             * config of a graph is written before its creation returns, so a
+             * graph that is still loading is found here
+             */
+            if (missing(manager, graphSpace, name)) {
+                throw new NotFoundException(String.format(
+                        "Graph '%s' does not exist", name));
+            }
+            Map<String, GraphStatusEntry> status = manager.graphStatus(
+                    graphSpace, name);
+            Set<String> servers = manager.serviceServers(graphSpace);
+            aggregate = GraphStatusAggregate.of(status.values(), servers,
+                                                STATUS_STALE_AFTER,
+                                                System.currentTimeMillis());
+        } else {
+            // Without PD nothing is reported, this server is the whole cluster
+            if (localGraph(manager, graphSpace, name) == null) {
+                throw new NotFoundException(String.format(
+                        "Graph '%s' does not exist", name));
+            }
+            GraphStatusEntry entry = new GraphStatusEntry(
+                    manager.serverId(), GraphStatus.READY, null,
+                    System.currentTimeMillis());
+            aggregate = GraphStatusAggregate.of(
+                    Collections.singletonList(entry), 1);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("graphspace", graphSpace);
+        result.put("graph", name);
+        result.putAll(aggregate.asMap());
+        return result;
+    }
+
+    /**
+     * Whether the graph is known to be gone. Only a metadata read that
+     * answered is taken as an answer: a read that failed leaves the graph
+     * reported as it was last seen rather than as dropped
+     */
+    private static boolean missing(GraphManager manager, String graphSpace,
+                                   String name) {
+        // The local map first, it answers without asking the cluster metadata
+        if (localGraph(manager, graphSpace, name) != null) {
+            return false;
+        }
+        Boolean configured = manager.graphConfigExists(graphSpace, name);
+        return configured != null && !configured;
+    }
+
+    private static HugeGraph localGraph(GraphManager manager,
+                                        String graphSpace, String name) {
+        return manager.graph(String.join(GraphManager.DELIMITER, graphSpace,
+                                         name));
     }
 
     @POST
