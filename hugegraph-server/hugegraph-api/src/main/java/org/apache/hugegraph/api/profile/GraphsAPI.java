@@ -87,6 +87,12 @@ public class GraphsAPI extends API {
     private static final String GRAPH_ACTION = "action";
     private static final String UPDATE = "update";
     private static final String GRAPH_ACTION_RELOAD = "reload";
+    /**
+     * How long the status of a server that is no longer registered is kept,
+     * long enough to outlast a registration that lapsed while its server was
+     * merely slow
+     */
+    private static final long STATUS_STALE_AFTER = 10 * 60 * 1000L;
 
     private static Map<String, Object> convConfig(Map<String, Object> config) {
         Map<String, Object> result = new HashMap<>(config.size());
@@ -261,16 +267,25 @@ public class GraphsAPI extends API {
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
                          @Parameter(description = "The graph name")
-                         @PathParam("name") String name) {
+                         @PathParam("name") String name,
+                         @Context SecurityContext sc) {
         LOG.debug("Get status of graph '{}' in graph space '{}'",
                   name, graphSpace);
 
         /*
          * A graph that is still loading is not bound to this server yet, so
          * graph(manager, graphSpace, name) would answer 404 for exactly the
-         * case this API is meant to report
+         * case this API is meant to report. It's also what verifies the
+         * permission on the graph itself for the other reads of this
+         * resource, so the role of the caller is checked here instead
          */
         space(manager, graphSpace);
+        String role = RequiredPerm.roleFor(graphSpace, name,
+                                           HugePermission.READ);
+        if (!sc.isUserInRole(role) && !isAdminManager(manager)) {
+            throw new ForbiddenException(String.format(
+                    "The user is not allowed to read graph '%s'", name));
+        }
 
         GraphStatusAggregate aggregate;
         if (manager.isPDEnabled()) {
@@ -288,7 +303,9 @@ public class GraphsAPI extends API {
             Map<String, GraphStatusEntry> status = manager.graphStatus(
                     graphSpace, name);
             Set<String> servers = manager.serviceServers(graphSpace);
-            aggregate = GraphStatusAggregate.of(status.values(), servers);
+            aggregate = GraphStatusAggregate.of(status.values(), servers,
+                                                STATUS_STALE_AFTER,
+                                                System.currentTimeMillis());
         } else {
             // Without PD nothing is reported, this server is the whole cluster
             if (localGraph(manager, graphSpace, name) == null) {
@@ -311,8 +328,9 @@ public class GraphsAPI extends API {
 
     private static boolean exists(GraphManager manager, String graphSpace,
                                   String name) {
-        return manager.graphs(graphSpace).contains(name) ||
-               localGraph(manager, graphSpace, name) != null;
+        // The local map first, it answers without asking the cluster metadata
+        return localGraph(manager, graphSpace, name) != null ||
+               manager.graphConfigExists(graphSpace, name);
     }
 
     private static HugeGraph localGraph(GraphManager manager,

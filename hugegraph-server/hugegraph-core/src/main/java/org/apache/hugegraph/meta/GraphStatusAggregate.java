@@ -79,18 +79,29 @@ public final class GraphStatusAggregate {
      * Aggregates the reported status against the servers that are currently
      * registered in the cluster. A server keeps no state of its own, so the
      * status it reported outlives it: an entry left behind by a server that
-     * is gone is dropped here rather than counted, otherwise a stale FAILED
-     * would hold a healthy graph down forever and stale READY entries could
-     * make up a quorum the running servers never reached.
+     * is gone would otherwise hold a healthy graph down forever when it reads
+     * FAILED, or make up a quorum the running servers never reached when it
+     * reads READY.
+     * <p>
+     * A server missing from the registration isn't taken as gone right away:
+     * a registration is refreshed periodically and lapses for a while when a
+     * server is merely slow, and dropping the entry of a server that is in
+     * fact still loading would answer READY too early. Only an entry that is
+     * both unregistered and older than {@code staleAfter} is dropped, so the
+     * reading errs on the side of holding the graph back.
      *
      * @param entries     the status reported by each server, may be null
      * @param liveServers the ids of the servers registered for the graph
      *                    space, empty or null when they can't be listed, in
      *                    which case nothing is dropped and the aggregate
      *                    can't reach READY
+     * @param staleAfter  how long an unregistered server's status is kept, in
+     *                    milliseconds
+     * @param now         the current time, in milliseconds
      */
     public static GraphStatusAggregate of(Collection<GraphStatusEntry> entries,
-                                          Collection<String> liveServers) {
+                                          Collection<String> liveServers,
+                                          long staleAfter, long now) {
         if (liveServers == null || liveServers.isEmpty()) {
             return of(entries, UNKNOWN_EXPECTED);
         }
@@ -98,12 +109,22 @@ public final class GraphStatusAggregate {
         List<GraphStatusEntry> reported = new ArrayList<>();
         if (entries != null) {
             for (GraphStatusEntry entry : entries) {
-                if (entry != null && live.contains(entry.server())) {
+                if (entry == null) {
+                    continue;
+                }
+                boolean registered = live.contains(entry.server());
+                boolean stale = now - entry.updateTime() > staleAfter;
+                if (registered || !stale) {
                     reported.add(entry);
                 }
             }
         }
-        return of(reported, live.size());
+        /*
+         * A server that reported but is no longer registered still has to be
+         * accounted for, otherwise the graph could look ready while it is not
+         */
+        int expected = Math.max(live.size(), reported.size());
+        return of(reported, expected);
     }
 
     /**

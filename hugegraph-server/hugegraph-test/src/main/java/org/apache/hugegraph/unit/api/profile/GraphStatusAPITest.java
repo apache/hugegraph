@@ -43,6 +43,8 @@ import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.junit.Test;
 import org.mockito.Mockito;
 
+import jakarta.ws.rs.ForbiddenException;
+import jakarta.ws.rs.core.SecurityContext;
 import sun.misc.Unsafe;
 
 public class GraphStatusAPITest extends BaseUnitTest {
@@ -200,7 +202,8 @@ public class GraphStatusAPITest extends BaseUnitTest {
         GraphManager manager = pdManager(Collections.emptyMap(), 2, false);
 
         Assert.assertThrows(NotFoundException.class, () -> {
-            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH);
+            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH,
+                                   securityContext(true));
         }, e -> {
             Assert.assertContains("Graph 'hugegraph' does not exist",
                                   e.getMessage());
@@ -215,7 +218,8 @@ public class GraphStatusAPITest extends BaseUnitTest {
                 reported(entry(SERVER_1, GraphStatus.READY, null)), 1, false);
 
         Assert.assertThrows(NotFoundException.class, () -> {
-            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH);
+            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH,
+                                   securityContext(true));
         }, e -> {
             Assert.assertContains("Graph 'hugegraph' does not exist",
                                   e.getMessage());
@@ -230,7 +234,8 @@ public class GraphStatusAPITest extends BaseUnitTest {
                                   new ConcurrentHashMap<String, GraphSpace>());
 
         Assert.assertThrows(NotFoundException.class, () -> {
-            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH);
+            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH,
+                                   securityContext(true));
         }, e -> {
             Assert.assertContains("Graph space", e.getMessage());
         });
@@ -261,7 +266,8 @@ public class GraphStatusAPITest extends BaseUnitTest {
         GraphManager manager = standaloneManager(false);
 
         Assert.assertThrows(NotFoundException.class, () -> {
-            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH);
+            new GraphsAPI().status(manager, GRAPHSPACE, GRAPH,
+                                   securityContext(true));
         }, e -> {
             Assert.assertContains("Graph 'hugegraph' does not exist",
                                   e.getMessage());
@@ -270,7 +276,13 @@ public class GraphStatusAPITest extends BaseUnitTest {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> status(GraphManager manager) {
-        Object result = new GraphsAPI().status(manager, GRAPHSPACE, GRAPH);
+        return status(manager, securityContext(true));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> status(GraphManager manager,
+                                              SecurityContext sc) {
+        Object result = new GraphsAPI().status(manager, GRAPHSPACE, GRAPH, sc);
         Assert.assertInstanceOf(Map.class, result);
         return (Map<String, Object>) result;
     }
@@ -280,6 +292,31 @@ public class GraphStatusAPITest extends BaseUnitTest {
         Object servers = map.get(SERVERS_KEY);
         Assert.assertInstanceOf(List.class, servers);
         return (List<Map<String, Object>>) servers;
+    }
+
+    @Test
+    public void testStatusIsForbiddenWithoutReadOnTheGraph() {
+        /*
+         * A member of the graph space may hold a permission on another graph
+         * of the space only. The other reads of this resource verify the
+         * permission while opening the graph, this one can't
+         */
+        GraphManager manager = pdManager(
+                reported(entry(SERVER_1, GraphStatus.READY, null)), 1, true);
+
+        Assert.assertThrows(ForbiddenException.class, () -> {
+            status(manager, securityContext(false));
+        }, e -> {
+            Assert.assertContains("not allowed to read graph 'hugegraph'",
+                                  e.getMessage());
+        });
+    }
+
+    private static SecurityContext securityContext(boolean allowed) {
+        SecurityContext sc = Mockito.mock(SecurityContext.class);
+        Mockito.when(sc.isUserInRole(Mockito.anyString()))
+               .thenReturn(allowed);
+        return sc;
     }
 
     private static GraphStatusEntry entry(String server, GraphStatus status,
@@ -324,6 +361,8 @@ public class GraphStatusAPITest extends BaseUnitTest {
         Mockito.when(metaManager.getGraphStatus(GRAPHSPACE, GRAPH))
                .thenReturn(status);
         Mockito.when(metaManager.graphConfigs(GRAPHSPACE)).thenReturn(configs);
+        Mockito.when(metaManager.getGraphConfig(GRAPHSPACE, GRAPH))
+               .thenReturn(configExists ? Collections.emptyMap() : null);
         Whitebox.setInternalState(manager, "metaManager", metaManager);
 
         Whitebox.setInternalState(manager, "graphs",

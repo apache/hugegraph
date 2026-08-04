@@ -39,6 +39,10 @@ public class GraphStatusAggregateTest {
 
     private static final String STATUS_UNKNOWN = "UNKNOWN";
 
+    // The entries are stamped at 1L, so they are stale well before NOW
+    private static final long STALE_AFTER = 1000L;
+    private static final long NOW = 1_000_000L;
+
     @Test
     public void testEmptyEntriesRenderUnknownStatus() {
         GraphStatusAggregate aggregate =
@@ -283,7 +287,8 @@ public class GraphStatusAggregateTest {
                 entry("server-a", GraphStatus.READY),
                 entry("server-b", GraphStatus.FAILED));
         GraphStatusAggregate aggregate = GraphStatusAggregate.of(
-                entries, Collections.singletonList("server-a"));
+                entries, Collections.singletonList("server-a"),
+                STALE_AFTER, NOW);
 
         Assert.assertEquals(GraphStatus.READY, aggregate.status());
         Assert.assertEquals(1, aggregate.readyCount());
@@ -300,7 +305,8 @@ public class GraphStatusAggregateTest {
                 entry("old-b", GraphStatus.READY),
                 entry("server-a", GraphStatus.READY));
         GraphStatusAggregate aggregate = GraphStatusAggregate.of(
-                entries, Arrays.asList("server-a", "server-b"));
+                entries, Arrays.asList("server-a", "server-b"),
+                STALE_AFTER, NOW);
 
         Assert.assertEquals(GraphStatus.LOADING, aggregate.status());
         Assert.assertEquals(1, aggregate.readyCount());
@@ -313,7 +319,8 @@ public class GraphStatusAggregateTest {
         List<GraphStatusEntry> entries = Collections.singletonList(
                 entry("old-a", GraphStatus.FAILED));
         GraphStatusAggregate aggregate = GraphStatusAggregate.of(
-                entries, Collections.singletonList("server-a"));
+                entries, Collections.singletonList("server-a"),
+                STALE_AFTER, NOW);
 
         Assert.assertNull(aggregate.status());
         Assert.assertEquals(0, aggregate.totalCount());
@@ -330,12 +337,34 @@ public class GraphStatusAggregateTest {
 
         for (Collection<String> unknown : Arrays.asList(
                 (Collection<String>) null, Collections.<String>emptyList())) {
-            GraphStatusAggregate aggregate = GraphStatusAggregate.of(entries,
-                                                                     unknown);
+            GraphStatusAggregate aggregate = GraphStatusAggregate.of(
+                    entries, unknown, STALE_AFTER, NOW);
             Assert.assertEquals(GraphStatus.LOADING, aggregate.status());
             Assert.assertEquals(1, aggregate.totalCount());
             Assert.assertNull(aggregate.asMap().get(EXPECTED_COUNT_KEY));
         }
+    }
+
+    @Test
+    public void testRecentStatusOfAnUnregisteredServerIsKept() {
+        /*
+         * A registration is refreshed periodically and lapses for a while
+         * when a server is slow. Dropping the status of such a server would
+         * leave only the servers that are ready and answer ready while the
+         * missing one is still loading
+         */
+        List<GraphStatusEntry> entries = Arrays.asList(
+                new GraphStatusEntry("server-a", GraphStatus.READY, null, NOW),
+                new GraphStatusEntry("server-b", GraphStatus.LOADING, null,
+                                     NOW));
+        GraphStatusAggregate aggregate = GraphStatusAggregate.of(
+                entries, Collections.singletonList("server-a"),
+                STALE_AFTER, NOW);
+
+        Assert.assertEquals(GraphStatus.LOADING, aggregate.status());
+        Assert.assertEquals(2, aggregate.totalCount());
+        // The server that is loading still counts, so ready can't be reached
+        Assert.assertEquals(2, aggregate.expected());
     }
 
     @SuppressWarnings("unchecked")
