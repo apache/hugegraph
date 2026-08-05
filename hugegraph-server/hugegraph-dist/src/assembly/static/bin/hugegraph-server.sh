@@ -64,6 +64,10 @@ ensure_path_writable "$PLUGINS"
 MAX_MEM=$((32 * 1024))
 MIN_MEM=$((1 * 512))
 MIN_JAVA_VERSION=11
+# JDK 24 removed the Security Manager (JEP 486): "-Djava.security.manager=allow"
+# is a fatal VM initialization error there and System.setSecurityManager() always
+# throws, so HugeSecurityManager cannot be installed on newer runtimes.
+MAX_SECURITY_JAVA_VERSION=23
 
 # Add the slf4j-log4j12 binding
 CP=$(find -L $LIB -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
@@ -93,8 +97,18 @@ else
     JAVA="$JAVA_HOME/bin/java -server"
 fi
 
-JAVA_VERSION=$($JAVA -version 2>&1 | head -1 | cut -d'"' -f2 | sed 's/^1\.//' | cut -d'.' -f1)
-if [[ $? -ne 0 || $JAVA_VERSION -lt $MIN_JAVA_VERSION ]]; then
+# Pick the JVM banner line explicitly, anchored to its "java version"/"openjdk
+# version" prefix: whenever JAVA_TOOL_OPTIONS or _JAVA_OPTIONS is set the JVM
+# prints a preamble first ("Picked up JAVA_TOOL_OPTIONS: ..."), and an agent
+# loaded that way may print its own banner containing 'version "..."' (an APM
+# agent, for example), so matching any line with 'version "' can read the
+# agent version instead of the runtime version.
+JAVA_VERSION=$($JAVA -version 2>&1 |
+               awk -F'"' '/^(java|openjdk) version "/ {print $2; exit}' |
+               sed 's/^1\.//' | cut -d'.' -f1)
+# Drop any pre-release suffix, e.g. "24-ea" -> "24"
+JAVA_VERSION="${JAVA_VERSION%%[!0-9]*}"
+if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $MIN_JAVA_VERSION ]]; then
     echo "Make sure the JDK is installed and the version >= $MIN_JAVA_VERSION, current is $JAVA_VERSION" \
          >> "${OUTPUT}"
     exit 1
@@ -142,8 +156,58 @@ case "$GC_OPTION" in
 esac
 
 JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml"
+SECURITY_MANAGER_OPTION=""
 if [[ ${OPEN_SECURITY_CHECK} == "true" ]]; then
-    JVM_OPTIONS="${JVM_OPTIONS} -Djava.security.manager=org.apache.hugegraph.security.HugeSecurityManager"
+    if [[ ${JAVA_VERSION} -gt ${MAX_SECURITY_JAVA_VERSION} ]]; then
+        SECURITY_UNSUPPORTED_MSG=$(cat <<EOF
+The security check requires Java ${MIN_JAVA_VERSION}-${MAX_SECURITY_JAVA_VERSION}, current is ${JAVA_VERSION}.
+JDK 24+ removed the Security Manager (JEP 486), so HugeSecurityManager can no longer be installed.
+Run the server on Java ${MAX_SECURITY_JAVA_VERSION} or lower, or start it with the security check
+disabled: 'start-hugegraph.sh -s false'.
+EOF
+)
+        echo "${SECURITY_UNSUPPORTED_MSG}" >&2
+        echo "${SECURITY_UNSUPPORTED_MSG}" >> "${OUTPUT}"
+        exit 1
+    fi
+
+    SECURITY_PROPERTIES="${CONF}/java-security.properties"
+    if [[ ! -r ${SECURITY_PROPERTIES} ]]; then
+        # An operator may deliberately replace the bundled policy with their own
+        # -Djava.security.properties=<file>, which the JVM applies last and which
+        # makes a missing bundled file harmless. Track the last such option, since
+        # an empty value clears any earlier override. The override itself is not
+        # validated here: only the JVM's own properties parsing decides what it
+        # loads to, so the bootstrap stays the single validator and mirrors its
+        # rejection into the server log (see hugegraph.bootstrap.error.log below).
+        SECURITY_PROPERTIES_OVERRIDDEN="false"
+        for OPTION in ${JAVA_OPTIONS} ${_JAVA_OPTIONS:-}; do
+            case "${OPTION}" in
+                -Djava.security.properties=)
+                    SECURITY_PROPERTIES_OVERRIDDEN="false" ;;
+                -Djava.security.properties=?*)
+                    SECURITY_PROPERTIES_OVERRIDDEN="true" ;;
+            esac
+        done
+    fi
+    if [[ ! -r ${SECURITY_PROPERTIES} &&
+          ${SECURITY_PROPERTIES_OVERRIDDEN:-false} == "false" ]]; then
+        # The bootstrap validates the effective policy and refuses to start, but
+        # its stderr goes to the stdout log in daemon mode. Name the cause here
+        # so it also reaches the log start-hugegraph.sh points operators at.
+        cat >> "${OUTPUT}" <<EOF
+ERROR: Missing or unreadable '${SECURITY_PROPERTIES}'.
+An upgraded deployment that reuses an older conf/ directory must add this file,
+or supply its own -Djava.security.properties=<file> setting a finite positive
+networkaddress.cache.ttl.
+EOF
+    fi
+    JVM_OPTIONS="${JVM_OPTIONS} \
+                 -Djava.security.properties=${SECURITY_PROPERTIES}"
+    if [[ ${JAVA_VERSION} -ge 18 ]]; then
+        # Required to install HugeSecurityManager programmatically on JDK 18+.
+        SECURITY_MANAGER_OPTION="-Djava.security.manager=allow"
+    fi
 fi
 
 if [ "${OPEN_TELEMETRY}" == "true" ]; then
@@ -184,12 +248,24 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     export OTEL_RESOURCE_ATTRIBUTES=service.name=server
 fi
 
+if [[ "${STDOUT_MODE:-false}" != "true" ]]; then
+    # Daemon stderr only reaches hugegraph-server-stdout.log, so a bootstrap
+    # rejection of the effective DNS policy (a broken operator override
+    # included) would be invisible in the log start-hugegraph.sh points
+    # operators at. Let the bootstrap mirror its fatal errors there.
+    JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
+fi
+
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} -cp ${CLASSPATH}: \
-        org.apache.hugegraph.dist.HugeGraphServer ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
+    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
+        ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
 else
-    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} -cp ${CLASSPATH}: \
-        org.apache.hugegraph.dist.HugeGraphServer ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
+    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
+        ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
         >> ${LOGS}/hugegraph-server-stdout.log 2>&1
 fi

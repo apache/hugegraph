@@ -51,15 +51,30 @@ section() { echo ""; echo "── $1 ──"; }
 
 cleanup() {
     info "Cleaning up..."
+    "$STOP_SCRIPT" >/dev/null 2>&1 || true
     if [[ -s "$PID_FILE" ]]; then
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
     rm -rf "$STORE_ROOT/logs/"
     # kill anything holding Store ports (8520 REST, 8510 raft, 8500 gRPC)
-    lsof -ti :8520 | xargs kill -9 2>/dev/null || true
-    lsof -ti :8510 | xargs kill -9 2>/dev/null || true
-    lsof -ti :8500 | xargs kill -9 2>/dev/null || true
+    if [[ "$(uname)" == "Darwin" ]]; then
+        local port pids pid
+        for port in 8520 8510 8500; do
+            pids=$(lsof -ti ":$port" 2>/dev/null)
+            if [[ -n "$pids" ]]; then
+                for pid in $pids; do
+                    kill -9 "$pid" 2>/dev/null || true
+                done
+            fi
+        done
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -k 8520/tcp 2>/dev/null || true
+        fuser -k 8510/tcp 2>/dev/null || true
+        fuser -k 8500/tcp 2>/dev/null || true
+    else
+        echo "Warning: Neither lsof nor fuser available for Store port cleanup"
+    fi
     sleep 3
 }
 
@@ -110,7 +125,12 @@ if [[ ! -f "$START_SCRIPT" ]]; then
     exit 1
 fi
 
-for tool in lsof curl java; do
+if [[ "$(uname)" == "Darwin" ]]; then
+    _prereq_tools="lsof curl java"
+else
+    _prereq_tools="fuser curl java"
+fi
+for tool in $_prereq_tools; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "SKIP: required tool '$tool' not found — skipping test suite"
         exit 77

@@ -45,12 +45,14 @@ ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:Max
 WORKDIR /hugegraph-store/
 
 # 1. Install runtime dependencies
+# Note: lsof is gone because its only consumer was the dead check_port removed
+# from hg-store-dist bin/util.sh.  Store runs no port preflight, so unlike the
+# server images this needs no socket-table tool in its place.
 RUN apt-get -q update \
     && apt-get -q install -y --no-install-recommends --no-install-suggests \
        dumb-init \
        procps \
        curl \
-       lsof \
        vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

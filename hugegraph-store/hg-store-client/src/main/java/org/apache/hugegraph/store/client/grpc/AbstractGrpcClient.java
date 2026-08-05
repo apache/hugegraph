@@ -104,7 +104,7 @@ public abstract class AbstractGrpcClient {
                 if (pairs == null) {
                     HgPair<ManagedChannel, AbstractBlockingStub>[] value = new HgPair[concurrency];
                     IntStream.range(0, concurrency).forEach(i -> {
-                        ManagedChannel channel = channels[index];
+                        ManagedChannel channel = channels[i];
                         AbstractBlockingStub stub = getBlockingStub(channel);
                         value[i] = new HgPair<>(channel, stub);
                         // log.info("create channel for {}",target);
@@ -144,7 +144,7 @@ public abstract class AbstractGrpcClient {
                 if (pairs == null) {
                     HgPair<ManagedChannel, AbstractAsyncStub>[] value = new HgPair[concurrency];
                     IntStream.range(0, concurrency).parallel().forEach(i -> {
-                        ManagedChannel channel = channels[index];
+                        ManagedChannel channel = channels[i];
                         AbstractAsyncStub stub = getAsyncStub(channel);
                         // stub.withMaxInboundMessageSize(config.getGrpcMaxInboundMessageSize())
                         //    .withMaxOutboundMessageSize(config.getGrpcMaxOutboundMessageSize());
