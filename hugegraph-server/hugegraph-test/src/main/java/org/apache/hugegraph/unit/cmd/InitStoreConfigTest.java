@@ -37,8 +37,10 @@ import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -247,6 +249,53 @@ public class InitStoreConfigTest {
                            this.writeExistingMarker().toString());
         try {
             InitStore.main(new String[]{this.writeEnabledRestServerConf()});
+        } finally {
+            System.clearProperty(InitStore.INIT_COMPLETE_MARKER);
+        }
+    }
+
+    @Test
+    public void testNonRegularMarkerDoesNotSkipInitialization()
+                                                        throws IOException {
+        Path marker = this.workDir.resolve("docker/init_complete");
+        Files.createDirectories(marker);
+        this.assertInvalidMarker(marker);
+
+        Files.delete(marker);
+        Path target = this.workDir.resolve("marker-target");
+        Files.createFile(target);
+        try {
+            Files.createSymbolicLink(marker, target);
+        } catch (UnsupportedOperationException e) {
+            Assume.assumeTrue("Symbolic links are not supported", false);
+        }
+        this.assertInvalidMarker(marker);
+    }
+
+    @Test
+    public void testRecordInitCompleteRejectsNonRegularMarker()
+                                                        throws IOException {
+        Path marker = this.workDir.resolve("docker/init_complete");
+        Files.createDirectories(marker);
+        System.setProperty(InitStore.INIT_COMPLETE_MARKER,
+                           marker.toString());
+        try {
+            Assert.assertThrows(IllegalStateException.class, () -> {
+                Whitebox.invokeStatic(InitStore.class,
+                                       "recordInitComplete");
+            }, e -> Assert.assertContains("regular file", e.getMessage()));
+        } finally {
+            System.clearProperty(InitStore.INIT_COMPLETE_MARKER);
+        }
+    }
+
+    private void assertInvalidMarker(Path marker) throws IOException {
+        System.setProperty(InitStore.INIT_COMPLETE_MARKER,
+                           marker.toString());
+        try {
+            Assert.assertThrows(IllegalStateException.class, () -> {
+                InitStore.main(new String[]{this.writeEnabledRestServerConf()});
+            }, e -> Assert.assertContains("regular file", e.getMessage()));
         } finally {
             System.clearProperty(InitStore.INIT_COMPLETE_MARKER);
         }

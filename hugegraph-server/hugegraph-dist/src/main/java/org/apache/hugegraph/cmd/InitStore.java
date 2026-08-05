@@ -20,6 +20,7 @@ package org.apache.hugegraph.cmd;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -144,8 +145,15 @@ public class InitStore {
      */
     private static String presentInitCompleteMarker() {
         String marker = configuredInitCompleteMarker();
-        if (marker != null && Files.exists(Paths.get(marker))) {
+        if (marker == null) {
+            return null;
+        }
+        Path path = Paths.get(marker);
+        if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
             return marker;
+        }
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw invalidInitCompleteMarker(path);
         }
         return null;
     }
@@ -172,8 +180,17 @@ public class InitStore {
         } catch (FileAlreadyExistsException e) {
             // A concurrent container finishing its own successful init has
             // already recorded it, which is the same outcome
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                throw invalidInitCompleteMarker(path);
+            }
         }
         LOG.info("Recorded init-store completion at '{}'", path);
+    }
+
+    private static IllegalStateException invalidInitCompleteMarker(Path path) {
+        return new IllegalStateException(String.format(
+                "Init-store completion marker '%s' must be a regular file",
+                path));
     }
 
     /**

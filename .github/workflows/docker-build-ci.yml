@@ -26,6 +26,7 @@ on:
     paths:
       - '**/Dockerfile*'
       - '.dockerignore'
+      - 'hugegraph-server/hugegraph-dist/docker/**'
 
 jobs:
   docker-build:
@@ -50,3 +51,7 @@ jobs:
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
           echo "Healthcheck: $HC"
           [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
+
+      - name: Test server entrypoint property mapping
+        if: matrix.dockerfile == 'hugegraph-server/Dockerfile'
+        run: bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
