@@ -28,13 +28,15 @@ log() { echo "[hugegraph-server-entrypoint] $*"; }
 
 set_prop() {
     local key="$1" val="$2" file="$3"
-    local esc_key esc_val
+    local esc_key esc_val key_re
 
     esc_key=$(printf '%s' "$key" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g')
     esc_val=$(printf '%s' "$val" | sed -e 's/[&|\\~]/\\&/g')
+    key_re="^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+|[[:space:]]*$)"
 
-    if grep -qE "^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+)" "${file}"; then
-        sed -ri "s~^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+).*~${key}=${esc_val}~" "${file}"
+    if grep -qE "${key_re}" "${file}"; then
+        sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}"
+        sed -ri "0,/${key_re}/s~${key_re}.*~${key}=${esc_val}~" "${file}"
     else
         printf '%s=%s\n' "$key" "$val" >> "${file}"
     fi

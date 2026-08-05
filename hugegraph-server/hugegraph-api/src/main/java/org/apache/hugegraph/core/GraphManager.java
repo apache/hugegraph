@@ -355,7 +355,10 @@ public final class GraphManager {
 
         this.initMetaManager(conf);
         this.initK8sManagerIfNeeded(conf);
-        this.initAdminUserIfNeeded(conf.get(ServerOptions.ADMIN_PA));
+        if (shouldBootstrapAdmin(this.authenticator,
+                                 conf.get(ServerOptions.AUTH_REMOTE_URL))) {
+            this.initAdminUserIfNeeded(conf.get(ServerOptions.ADMIN_PA));
+        }
 
         this.createDefaultGraphSpaceIfNeeded(conf);
 
@@ -366,6 +369,12 @@ public final class GraphManager {
 
         this.loadGraphsFromMeta(this.graphConfigs());
         this.listenMetaChanges();
+    }
+
+    private static boolean shouldBootstrapAdmin(HugeAuthenticator authenticator,
+                                                String remoteUrl) {
+        return authenticator instanceof StandardAuthenticator &&
+               remoteUrl.isEmpty();
     }
 
     /**

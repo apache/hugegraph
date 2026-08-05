@@ -346,7 +346,7 @@ public class InitStoreConfigTest {
     @Test
     public void testDisabledInitStoreAllowsPdBackedHstoreAuthGraph()
                                                         throws Exception {
-        Path graphsDir = this.writeAuthGraphConfig("hstore");
+        Path graphsDir = this.writeAuthGraphConfig("HSTORE");
         String restConf = this.writeDisabledRestServerConfForGraphs(
                 graphsDir,
                 ServerOptions.AUTHENTICATOR.name() +
@@ -356,6 +356,16 @@ public class InitStoreConfigTest {
                 ServerOptions.ADMIN_PA.name() + "=secret");
 
         InitStore.main(new String[]{restConf});
+    }
+
+    @Test
+    public void testHstoreBackendComparisonIsCaseInsensitive() {
+        Assert.assertTrue(Whitebox.invokeStatic(
+                          InitStore.class, "isHstoreBackend", "hstore"));
+        Assert.assertTrue(Whitebox.invokeStatic(
+                          InitStore.class, "isHstoreBackend", "HSTORE"));
+        Assert.assertFalse(Whitebox.invokeStatic(
+                           InitStore.class, "isHstoreBackend", "memory"));
     }
 
     /**

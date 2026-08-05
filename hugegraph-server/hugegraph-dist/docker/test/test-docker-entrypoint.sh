@@ -38,6 +38,31 @@ assert_replaced() {
     [[ "$(grep -Ec '^init_store\.enabled=true$' "${file}")" -eq 1 ]]
 }
 
+assert_line_count() {
+    local expected="$1" pattern="$2" file="$3"
+    local actual
+
+    actual=$(grep -Ec "${pattern}" "${file}")
+    if [[ "${actual}" -ne "${expected}" ]]; then
+        echo "expected ${expected} matching lines, got ${actual}" >&2
+        return 1
+    fi
+}
+
 assert_replaced "="
 assert_replaced ": "
 assert_replaced " "
+
+duplicate_file="${test_dir}/config-duplicates"
+printf '%s\n' \
+    'init_store.enabled=false' \
+    'init_store.enabled: false' \
+    'init_store.enabled false' \
+    'init_store.enabled' \
+    'unrelated=true' > "${duplicate_file}"
+set_prop "init_store.enabled" "true" "${duplicate_file}"
+assert_line_count 1 \
+    '^[[:space:]]*init_store\.enabled([[:space:]]*[:=]|[[:space:]]+|[[:space:]]*$)' \
+    "${duplicate_file}"
+assert_line_count 1 '^init_store\.enabled=true$' "${duplicate_file}"
+grep -q '^unrelated=true$' "${duplicate_file}"

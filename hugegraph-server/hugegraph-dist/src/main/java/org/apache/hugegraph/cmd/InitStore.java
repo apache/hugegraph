@@ -26,7 +26,6 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
@@ -115,7 +114,7 @@ public class InitStore {
             for (Map.Entry<String, String> entry : graph2ConfigPaths.entrySet()) {
                 String configPath = entry.getValue();
                 HugeConfig config = new HugeConfig(configPath);
-                if (Objects.equals(config.get(CoreOptions.BACKEND), "hstore")) {
+                if (isHstoreBackend(config.get(CoreOptions.BACKEND))) {
                     // skip initializing hstore backend
                     continue;
                 }
@@ -218,7 +217,7 @@ public class InitStore {
                                              "' has no local configuration");
         }
         String backend = new HugeConfig(path).get(CoreOptions.BACKEND);
-        if (!"hstore".equals(backend)) {
+        if (!isHstoreBackend(backend)) {
             throw unreachableAdmin(restConf, "auth graph '" + name +
                                              "' uses backend '" + backend +
                                              "', not 'hstore'");
@@ -245,6 +244,10 @@ public class InitStore {
                 "authenticator but %s, so the admin created on the PD startup " +
                 "path would be unreachable. See docker/README.md.",
                 restConf, reason));
+    }
+
+    private static boolean isHstoreBackend(String backend) {
+        return "hstore".equalsIgnoreCase(backend);
     }
 
     /**

@@ -23,7 +23,9 @@ import java.util.Map;
 
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.auth.HugeAuthenticator;
 import org.apache.hugegraph.auth.HugeUser;
+import org.apache.hugegraph.auth.StandardAuthenticator;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.event.EventHub;
@@ -32,6 +34,7 @@ import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.managers.AuthMetaManager;
 import org.apache.hugegraph.meta.managers.SpaceMetaManager;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -131,6 +134,24 @@ public class GraphManagerAdminInitTest {
         Assert.assertThrows(HugeException.class, () -> {
             this.manager.initAdminUserIfNeeded("s3cret");
         }, e -> Assert.assertEquals(refused, e.getCause()));
+    }
+
+    @Test
+    public void testAdminBootstrapOnlyUsesLocalStandardAuthenticator() {
+        Class<?>[] types = {HugeAuthenticator.class, String.class};
+
+        Assert.assertFalse(Whitebox.invokeStatic(
+                GraphManager.class, types, "shouldBootstrapAdmin",
+                (Object) null, ""));
+        Assert.assertTrue(Whitebox.invokeStatic(
+                GraphManager.class, types, "shouldBootstrapAdmin",
+                new StandardAuthenticator(), ""));
+        Assert.assertFalse(Whitebox.invokeStatic(
+                GraphManager.class, types, "shouldBootstrapAdmin",
+                new StandardAuthenticator(), "pd:8520"));
+        Assert.assertFalse(Whitebox.invokeStatic(
+                GraphManager.class, types, "shouldBootstrapAdmin",
+                Mockito.mock(HugeAuthenticator.class), ""));
     }
 
     private static Object swapMetaManagerField(String field,
