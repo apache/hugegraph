@@ -83,6 +83,7 @@ message ScanStreamReq {
   bytes position = 12;
   uint32 closeFlag = 13;
   SelectParam selects = 14;
+  ScanOrderType orderType = 15;
 }
 
 message SelectParam {

@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.store.node.grpc;
 
+import static org.apache.hugegraph.store.node.util.HgStoreConst.SCAN_ALL_PARTITIONS_ID;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,6 +37,7 @@ import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 import org.apache.hugegraph.store.business.SelectIterator;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.grpc.stream.SelectParam;
@@ -71,7 +74,14 @@ class ScanUtil {
                 iter = wrapper.scanPrefix(graph, partition, table, prefix, scanType, query);
                 break;
             case RANGE:
-                iter = wrapper.scan(graph, partition, table, start, end, scanType, query);
+                if (partition == SCAN_ALL_PARTITIONS_ID &&
+                    request.getOrderType() == ScanOrderType.ORDER_BY_KEY) {
+                    iter = wrapper.scanOrdered(graph, table, start, end,
+                                               scanType, query);
+                } else {
+                    iter = wrapper.scan(graph, partition, table, start, end,
+                                        scanType, query);
+                }
                 break;
         }
         if (iter == null) {

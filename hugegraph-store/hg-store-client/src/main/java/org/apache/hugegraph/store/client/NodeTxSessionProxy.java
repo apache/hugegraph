@@ -41,7 +41,6 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.pd.common.PDException;
-import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgKvOrderedIterator;
@@ -57,6 +56,7 @@ import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.client.util.HgStoreClientUtil;
 import org.apache.hugegraph.store.grpc.common.Header;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq.Builder;
 import org.apache.hugegraph.store.query.StoreQueryParam;
@@ -76,6 +76,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @NotThreadSafe
 public class NodeTxSessionProxy implements HgStoreSession {
+
+    private static final int ORDERED_SCAN_PAGE_SIZE = 64;
 
     private final HgSessionConfig sessionConfig;
     private final HgStoreNodeManager nodeManager;
@@ -808,9 +810,9 @@ public class NodeTxSessionProxy implements HgStoreSession {
     private List<NodeTkv> toOrderedRangeNodeTkvList(String table,
                                                     HgOwnerKey startKey,
                                                     HgOwnerKey endKey) {
-        // One Store may host multiple partitions with independent key order
+        byte[] allOwner = HgStoreClientConst.ALL_PARTITION_OWNER;
         Collection<HgNodePartition> partitions =
-                this.doPartition(table, 0, PartitionUtils.MAX_VALUE);
+                this.doPartition(table, allOwner, allOwner);
         List<NodeTkv> nodeTkvs = new ArrayList<>(partitions.size());
         for (HgNodePartition partition : partitions) {
             nodeTkvs.add(new NodeTkv(partition, table, startKey, endKey));
@@ -833,6 +835,8 @@ public class NodeTxSessionProxy implements HgStoreSession {
                             .setLimit(scanLimit)
                             .setCode(nodeTkv.getKey().getKeyCode())
                             .setScanType(scanType)
+                            .setPageSize(ORDERED_SCAN_PAGE_SIZE)
+                            .setOrderType(ScanOrderType.ORDER_BY_KEY)
                             .setQuery(toByteString(query));
     }
 

@@ -31,12 +31,12 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
 import org.apache.hugegraph.store.HgStoreSession;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq.Builder;
 import org.junit.Assert;
 import org.junit.Test;
@@ -66,7 +66,7 @@ public class NodeTxSessionProxyTest {
     }
 
     @Test
-    public void testScanIteratorOrderedUsesPerPartitionBuildersLazily()
+    public void testScanIteratorOrderedUsesOneStreamPerStoreLazily()
             throws Exception {
         HgStoreNodeManager manager = HgStoreNodeManager.getInstance();
         HgStoreNodePartitioner oldPartitioner = manager.getNodePartitioner();
@@ -93,19 +93,16 @@ public class NodeTxSessionProxyTest {
 
             Assert.assertEquals(1, firstSession.builders.size());
             Assert.assertEquals(1, secondSession.builders.size());
-            Assert.assertEquals(0, partitioner.ownerRangeCalls);
-            Assert.assertEquals(1, partitioner.codeRangeCalls);
-            Assert.assertEquals(0, partitioner.startCode);
-            Assert.assertEquals(PartitionUtils.MAX_VALUE,
-                                partitioner.endCode);
+            Assert.assertEquals(1, partitioner.ownerRangeCalls);
+            Assert.assertEquals(0, partitioner.codeRangeCalls);
             Assert.assertEquals(0, firstSession.rangeScanCalls);
             Assert.assertEquals(0, secondSession.rangeScanCalls);
             Assert.assertEquals(0, firstIterator.nextCalls);
             Assert.assertEquals(0, secondIterator.nextCalls);
             assertOrderedRangeBuilder(firstSession.builders.get(0), 5L,
-                                      123, 10, keyBytes(7));
+                                      123, keyBytes(7));
             assertOrderedRangeBuilder(secondSession.builders.get(0), 5L,
-                                      123, 30, keyBytes(7));
+                                      123, keyBytes(7));
 
             Assert.assertEquals(1, key(iterator.next()));
             Assert.assertEquals(2, key(iterator.next()));
@@ -154,13 +151,16 @@ public class NodeTxSessionProxyTest {
     }
 
     private static void assertOrderedRangeBuilder(Builder builder, long limit,
-                                                  int scanType, int code,
+                                                  int scanType,
                                                   byte[] query) {
         Assert.assertEquals(ScanMethod.RANGE, builder.getMethod());
         Assert.assertEquals("table", builder.getTable());
         Assert.assertEquals(limit, builder.getLimit());
         Assert.assertEquals(scanType, builder.getScanType());
-        Assert.assertEquals(code, builder.getCode());
+        Assert.assertEquals(-1, builder.getCode());
+        Assert.assertEquals(64, builder.getPageSize());
+        Assert.assertEquals(ScanOrderType.ORDER_BY_KEY,
+                            builder.getOrderType());
         Assert.assertArrayEquals(keyBytes(1), builder.getStart().toByteArray());
         Assert.assertArrayEquals(keyBytes(5), builder.getEnd().toByteArray());
         Assert.assertArrayEquals(query, builder.getQuery().toByteArray());
@@ -273,7 +273,11 @@ public class NodeTxSessionProxyTest {
                              String graphName, byte[] startKey,
                              byte[] endKey) {
             this.ownerRangeCalls++;
-            return this.setPartitions(builder);
+            Set<HgNodePartition> stores = new LinkedHashSet<>();
+            stores.add(HgNodePartition.of(this.firstNodeId, -1));
+            stores.add(HgNodePartition.of(this.secondNodeId, -1));
+            builder.setPartitions(stores);
+            return 0;
         }
 
         @Override
@@ -289,6 +293,7 @@ public class NodeTxSessionProxyTest {
         private int setPartitions(HgNodePartitionerBuilder builder) {
             Set<HgNodePartition> partitions = new LinkedHashSet<>();
             partitions.add(HgNodePartition.of(this.firstNodeId, 10, 10, 20));
+            partitions.add(HgNodePartition.of(this.firstNodeId, 20, 20, 30));
             partitions.add(HgNodePartition.of(this.secondNodeId, 30, 30, 40));
             builder.setPartitions(partitions);
             return 0;

@@ -69,6 +69,9 @@ public interface BusinessHandler extends DBSessionBuilder {
     ScanIterator scan(String graph, int code, String table, byte[] start,
                       byte[] end, int scanType) throws HgStoreException;
 
+    ScanIterator scanOrdered(String graph, String table, byte[] start,
+                             byte[] end, int scanType) throws HgStoreException;
+
     /**
      * primary index scan
      */

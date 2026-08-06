@@ -21,6 +21,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
@@ -93,6 +97,43 @@ public class OrderedKvIteratorTest {
         Assert.assertTrue(second.closed);
     }
 
+    @Test
+    public void testMergePrimesSourcesConcurrently() {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch bothStarted = new CountDownLatch(2);
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        first.blockFirstHasNext(bothStarted);
+        second.blockFirstHasNext(bothStarted);
+        OrderedKvIterator iterator = new OrderedKvIterator(
+                Arrays.asList(first, second), 0L, executor);
+        try {
+            Assert.assertTrue(iterator.hasNext());
+            Assert.assertEquals(0L, bothStarted.getCount());
+        } finally {
+            iterator.close();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testMergeClosesAllSourcesWhenConcurrentInitializeFails() {
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        first.failOnHasNextAfter(0);
+        OrderedKvIterator iterator = new OrderedKvIterator(
+                Arrays.asList(first, second), 0L, executor);
+        try {
+            Assert.assertThrows(IllegalStateException.class,
+                                iterator::hasNext);
+            Assert.assertTrue(first.closed);
+            Assert.assertTrue(second.closed);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
     private static List<Integer> keys(HgKvIterator<HgKvEntry> iterator) {
         List<Integer> keys = new ArrayList<>();
         while (iterator.hasNext()) {
@@ -113,6 +154,8 @@ public class OrderedKvIteratorTest {
         private HgKvEntry current;
         private boolean closed;
         private int failOnHasNextAfter;
+        private CountDownLatch firstHasNextBarrier;
+        private boolean firstHasNextBlocked;
 
         private TestIterator(Integer... keys) {
             this.entries = new ArrayList<>(keys.length);
@@ -124,16 +167,37 @@ public class OrderedKvIteratorTest {
             this.current = null;
             this.closed = false;
             this.failOnHasNextAfter = -1;
+            this.firstHasNextBarrier = null;
+            this.firstHasNextBlocked = false;
         }
 
         private void failOnHasNextAfter(int nextCalls) {
             this.failOnHasNextAfter = nextCalls;
         }
 
+        private void blockFirstHasNext(CountDownLatch barrier) {
+            this.firstHasNextBarrier = barrier;
+        }
+
         @Override
         public boolean hasNext() {
             if (this.nextCalls == this.failOnHasNextAfter) {
                 throw new IllegalStateException("injected failure");
+            }
+            if (this.firstHasNextBarrier != null &&
+                !this.firstHasNextBlocked) {
+                this.firstHasNextBlocked = true;
+                this.firstHasNextBarrier.countDown();
+                try {
+                    if (!this.firstHasNextBarrier.await(5L,
+                                                        TimeUnit.SECONDS)) {
+                        throw new IllegalStateException(
+                                "Timed out waiting for concurrent source");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
             }
             return this.offset < this.entries.size();
         }

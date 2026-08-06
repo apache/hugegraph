@@ -17,21 +17,36 @@
 
 package org.apache.hugegraph.store.client;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.PriorityQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
+import org.apache.hugegraph.store.client.util.ExecutorPool;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 
 final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
+
+    private static final int INITIALIZE_THREADS = 8;
+    private static final ExecutorService INITIALIZER =
+            Executors.newFixedThreadPool(
+                    INITIALIZE_THREADS,
+                    ExecutorPool.newThreadFactory("ordered-scan-init"));
 
     private final List<? extends HgKvIterator<? extends HgKvEntry>> iterators;
     private final PriorityQueue<SourceEntry> queue;
     private final boolean[] sourceClosed;
     private final long limit;
+    private final ExecutorService initializer;
 
     private boolean initialized;
     private boolean closed;
@@ -41,6 +56,11 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
                       long limit) {
+        this(iterators, limit, INITIALIZER);
+    }
+
+    OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
+                      long limit, ExecutorService initializer) {
         this.iterators = iterators;
         this.queue = new PriorityQueue<>((left, right) -> {
             int result = Arrays.compareUnsigned(left.entry.key(),
@@ -53,6 +73,7 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         this.sourceClosed = new boolean[iterators.size()];
         this.limit = limit <= HgStoreClientConst.NO_LIMIT ? Long.MAX_VALUE :
                      limit;
+        this.initializer = Objects.requireNonNull(initializer);
         this.initialized = false;
         this.closed = false;
         this.count = 0L;
@@ -144,14 +165,43 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             return;
         }
         this.initialized = true;
+        List<Callable<SourceEntry>> tasks =
+                new ArrayList<>(this.iterators.size());
+        for (int i = 0; i < this.iterators.size(); i++) {
+            int source = i;
+            tasks.add(() -> this.firstEntry(source));
+        }
         try {
-            for (int i = 0; i < this.iterators.size(); i++) {
-                this.addNext(i);
+            List<Future<SourceEntry>> futures =
+                    this.initializer.invokeAll(tasks);
+            for (int i = 0; i < futures.size(); i++) {
+                SourceEntry entry = futures.get(i).get();
+                if (entry == null) {
+                    this.closeSource(i);
+                } else {
+                    this.queue.add(entry);
+                }
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw this.initializationFailure(
+                    new IllegalStateException(
+                            "Interrupted while initializing ordered scan", e));
+        } catch (ExecutionException e) {
+            throw this.initializationFailure(e.getCause());
         } catch (RuntimeException | Error e) {
             this.closeAfterFailure(e);
             throw e;
         }
+    }
+
+    private SourceEntry firstEntry(int source) {
+        HgKvIterator<? extends HgKvEntry> iterator =
+                this.iterators.get(source);
+        if (!iterator.hasNext()) {
+            return null;
+        }
+        return new SourceEntry(source, iterator.next());
     }
 
     private void addNext(int source) {
@@ -178,6 +228,17 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         } catch (RuntimeException | Error closeFailure) {
             failure.addSuppressed(closeFailure);
         }
+    }
+
+    private RuntimeException initializationFailure(Throwable failure) {
+        this.closeAfterFailure(failure);
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure instanceof RuntimeException) {
+            return (RuntimeException) failure;
+        }
+        return new IllegalStateException(failure);
     }
 
     private static final class SourceEntry {

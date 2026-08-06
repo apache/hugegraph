@@ -24,6 +24,7 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -60,7 +61,8 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
     private static final HgStoreClientConfig clientConfig = HgStoreClientConfig.of();
     private static final int nextTimeout = clientConfig.getNetKvScannerHaveNextTimeout();
     private final HgStoreNodeSession session;
-    private final HgStoreStreamStub stub;
+    private final Function<StreamObserver<KvPageRes>,
+                           StreamObserver<ScanStreamReq>> streamFactory;
     private final AtomicBoolean completed = new AtomicBoolean(false);
     private final SelectParam.Builder selectBuilder = SelectParam.newBuilder();
     private final BlockingQueue<ScanStreamReq> reqQueue = new LinkedBlockingQueue<>();
@@ -78,7 +80,7 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
                           int partition,
                           int scanType, byte[] query) {
         this.session = session;
-        this.stub = stub;
+        this.streamFactory = stub::scan;
         this.pageSize = clientConfig.getNetKvScannerPageSize();
         this.reqBuilder.setHeader(this.getHeader(this.session))
                        .setMethod(scanMethod)
@@ -97,9 +99,18 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
     public KvPageScanner(HgStoreNodeSession session, HgStoreStreamStub stub,
                          ScanStreamReq.Builder reqBuilder) {
+        this(session, reqBuilder, stub::scan);
+    }
+
+    KvPageScanner(HgStoreNodeSession session, ScanStreamReq.Builder reqBuilder,
+                  Function<StreamObserver<KvPageRes>,
+                           StreamObserver<ScanStreamReq>> streamFactory) {
         this.session = session;
-        this.stub = stub;
-        reqBuilder.setPageSize(pageSize);
+        this.streamFactory = streamFactory;
+        this.pageSize = reqBuilder.getPageSize() > 0 ?
+                        reqBuilder.getPageSize() :
+                        clientConfig.getNetKvScannerPageSize();
+        reqBuilder.setPageSize(this.pageSize);
         reqBuilder.setPosition(toBs(this.nodePosition));
         this.reqBuilder = reqBuilder;
         this.init();
@@ -149,7 +160,7 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
     private void init() {
         this.proxy = HgBufferProxy.of(() -> this.serverScan());
-        this.observer = this.stub.scan(new ServeObserverImpl());
+        this.observer = this.streamFactory.apply(new ServeObserverImpl());
 
     }
 
