@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.unit;
 
+import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
@@ -48,8 +49,10 @@ import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.GraphManagerAdminInitTest;
 import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
+import org.apache.hugegraph.unit.core.IdHolderTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
+import org.apache.hugegraph.unit.core.QueryResultsTest;
 import org.apache.hugegraph.unit.core.QueryTest;
 import org.apache.hugegraph.unit.core.RangeTest;
 import org.apache.hugegraph.unit.core.RolePermissionTest;
@@ -140,7 +143,9 @@ import org.junit.runners.Suite;
         BackendMutationTest.class,
         ConditionTest.class,
         ConditionQueryFlattenTest.class,
+        GraphIndexTransactionTest.class,
         QueryTest.class,
+        QueryResultsTest.class,
         RangeTest.class,
         SecurityManagerTest.class,
         RolePermissionTest.class,
@@ -150,6 +155,7 @@ import org.junit.runners.Suite;
         BackendStoreInfoTest.class,
         TraversalUtilTest.class,
         TraversalUtilOptimizeTest.class,
+        IdHolderTest.class,
         PageStateTest.class,
         SystemSchemaStoreTest.class,
         ServerInfoManagerTest.class,

@@ -159,6 +159,11 @@ public abstract class HstoreSessions extends BackendSessionPool {
                                                    byte[] query,
                                                    byte[] position);
 
+        public abstract BackendColumnIterator scanOrdered(
+                String table, byte[] ownerKeyFrom, byte[] ownerKeyTo,
+                byte[] keyFrom, byte[] keyTo, int scanType, byte[] query,
+                long limit);
+
         public abstract BackendColumnIterator scan(String table,
                                                    int codeFrom,
                                                    int codeTo,
