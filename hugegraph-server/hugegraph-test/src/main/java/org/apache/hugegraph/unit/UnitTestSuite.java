@@ -19,6 +19,9 @@ package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
+import org.apache.hugegraph.api.job.TaskResultExceptionsTest;
+import org.apache.hugegraph.api.job.TaskResultGrizzlyIntegrationTest;
+import org.apache.hugegraph.api.job.TaskResultStreamingOutputTest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
@@ -30,6 +33,7 @@ import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
 import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
+import org.apache.hugegraph.unit.api.job.TaskResultPageTokenCodecTest;
 import org.apache.hugegraph.unit.api.space.GraphSpaceAPITest;
 import org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest;
 import org.apache.hugegraph.unit.cache.CacheManagerTest;
@@ -59,6 +63,8 @@ import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
+import org.apache.hugegraph.unit.core.TaskResultSnapshotTest;
+import org.apache.hugegraph.unit.core.TaskResultStreamerTest;
 import org.apache.hugegraph.unit.core.TaskSchedulerServerInfoTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
 import org.apache.hugegraph.unit.id.EdgeIdTest;
@@ -103,6 +109,10 @@ import org.junit.runners.Suite;
 
         /* api gremlin */
         GremlinQueryAPITest.class,
+        TaskResultPageTokenCodecTest.class,
+        TaskResultExceptionsTest.class,
+        TaskResultGrizzlyIntegrationTest.class,
+        TaskResultStreamingOutputTest.class,
         WsAndHttpBasicAuthHandlerTest.class,
         GraphSpaceGroupAPITest.class,
         GraphSpaceAuthPayloadTest.class,
@@ -154,6 +164,8 @@ import org.junit.runners.Suite;
         PageStateTest.class,
         SystemSchemaStoreTest.class,
         ServerInfoManagerTest.class,
+        TaskResultSnapshotTest.class,
+        TaskResultStreamerTest.class,
         TaskSchedulerServerInfoTest.class,
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,

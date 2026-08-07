@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.task;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -94,6 +96,80 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
             Assert.assertGt(0, scheduler.resultReadCount());
         } finally {
             scheduler.forbidResultRead(false);
+            scheduler.deleteFromDBForTest(id);
+            scheduler.closeAndShutdown();
+        }
+    }
+
+    @Test
+    public void testSnapshotReadsPersistedResultWithoutLegacyDeserialization()
+            throws IOException {
+        Id id = IdGenerator.of(88903);
+        TestDistributedTaskScheduler scheduler = this.newScheduler();
+
+        try {
+            scheduler.init();
+
+            String largeResult = largeTaskResult();
+            HugeTask<Object> task = newTask(id, "snapshot-result-task",
+                                            TaskStatus.SUCCESS, largeResult);
+            scheduler.save(task);
+            scheduler.resetResultReadCount();
+            scheduler.forbidResultRead(true);
+
+            TaskResultSnapshot snapshot = scheduler.taskResultSnapshot(id);
+
+            Assert.assertEquals(id, snapshot.taskId());
+            Assert.assertEquals(TaskStatus.SUCCESS, snapshot.status());
+            Assert.assertTrue(snapshot.hasResult());
+            Assert.assertEquals(largeResult,
+                                new String(snapshot.openResultStream().readAllBytes(),
+                                           StandardCharsets.UTF_8));
+            Assert.assertEquals(0, scheduler.resultReadCount());
+        } finally {
+            scheduler.forbidResultRead(false);
+            scheduler.deleteFromDBForTest(id);
+            scheduler.closeAndShutdown();
+        }
+    }
+
+    @Test
+    public void testSnapshotReportsSuccessWithoutPersistedResult() {
+        Id id = IdGenerator.of(88904);
+        TestDistributedTaskScheduler scheduler = this.newScheduler();
+
+        try {
+            scheduler.init();
+            scheduler.save(newTask(id, "missing-result-task",
+                                   TaskStatus.SUCCESS, null));
+
+            TaskResultSnapshot snapshot = scheduler.taskResultSnapshot(id);
+
+            Assert.assertEquals(TaskStatus.SUCCESS, snapshot.status());
+            Assert.assertFalse(snapshot.hasResult());
+            Assert.assertFalse(scheduler.taskResultVertexExists(id));
+        } finally {
+            scheduler.deleteFromDBForTest(id);
+            scheduler.closeAndShutdown();
+        }
+    }
+
+    @Test
+    public void testSnapshotDoesNotExposeFailedResult() {
+        Id id = IdGenerator.of(88905);
+        TestDistributedTaskScheduler scheduler = this.newScheduler();
+
+        try {
+            scheduler.init();
+            scheduler.save(newTask(id, "failed-result-task",
+                                   TaskStatus.FAILED, "expected failure"));
+            Assert.assertTrue(scheduler.taskResultVertexExists(id));
+
+            TaskResultSnapshot snapshot = scheduler.taskResultSnapshot(id);
+
+            Assert.assertEquals(TaskStatus.FAILED, snapshot.status());
+            Assert.assertFalse(snapshot.hasResult());
+        } finally {
             scheduler.deleteFromDBForTest(id);
             scheduler.closeAndShutdown();
         }

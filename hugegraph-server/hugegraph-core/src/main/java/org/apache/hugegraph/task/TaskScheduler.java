@@ -53,6 +53,8 @@ public interface TaskScheduler {
         return this.task(id);
     }
 
+    TaskResultSnapshot taskResultSnapshot(Id id);
+
     <V> Iterator<HugeTask<V>> tasks(List<Id> ids);
 
     default <V> Iterator<HugeTask<V>> tasks(List<Id> ids,

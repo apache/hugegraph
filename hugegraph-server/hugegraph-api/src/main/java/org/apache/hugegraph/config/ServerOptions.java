@@ -24,7 +24,13 @@ import static org.apache.hugegraph.config.OptionChecker.positiveInt;
 import static org.apache.hugegraph.config.OptionChecker.rangeDouble;
 import static org.apache.hugegraph.config.OptionChecker.rangeInt;
 
+import java.security.SecureRandom;
+import java.util.Base64;
+
 public class ServerOptions extends OptionHolder {
+
+    private static final String TASK_RESULT_PAGE_TOKEN_TEMPORARY_SECRET =
+            temporaryTaskResultPageTokenSecret();
 
     public static final ConfigOption<String> REST_SERVER_URL =
             new ConfigOption<>(
@@ -75,6 +81,110 @@ public class ServerOptions extends OptionHolder {
                     "The task threads of rest server.",
                     rangeInt(1, Math.max(4, CoreOptions.CPUS * 2)),
                     Math.max(4, CoreOptions.CPUS / 2)
+            );
+
+    public static final ConfigOption<Integer> TASK_RESULT_PAGE_SIZE_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_page_size_max",
+                    "The maximum number of top-level JSON values in a " +
+                    "task result page.",
+                    positiveInt(),
+                    1000
+            );
+
+    public static final ConfigOption<Long> TASK_RESULT_PAGE_OFFSET_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_page_offset_max",
+                    "The maximum top-level JSON offset accepted from a " +
+                    "task result page token.",
+                    positiveInt(),
+                    100000L
+            );
+
+    public static final ConfigOption<Long> TASK_RESULT_SCAN_BYTES_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_scan_uncompressed_bytes_max",
+                    "The maximum uncompressed bytes scanned to locate a " +
+                    "task result page.",
+                    positiveInt(),
+                    256L * 1024L * 1024L
+            );
+
+    public static final ConfigOption<Integer> TASK_RESULT_SCAN_TIME_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_scan_time_max",
+                    "The maximum seconds spent validating a task result " +
+                    "page before committing the response.",
+                    positiveInt(),
+                    30
+            );
+
+    public static final ConfigOption<Integer> TASK_RESULT_STREAM_TIME_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_stream_time_max",
+                    "The maximum seconds spent streaming a task result " +
+                    "response.",
+                    positiveInt(),
+                    60
+            );
+
+    public static final ConfigOption<Integer> TASK_RESULT_ACTIVE_STREAMS_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_active_streams_max",
+                    "The maximum concurrent task result streams per server.",
+                    positiveInt(),
+                    Math.max(2, CoreOptions.CPUS / 2)
+            );
+
+    public static final ConfigOption<Integer> TASK_RESULT_PAGE_TOKEN_TTL =
+            new ConfigOption<>(
+                    "restserver.task_result_page_token_ttl",
+                    "The lifetime in seconds of a task result page token.",
+                    positiveInt(),
+                    15 * 60
+            );
+
+    public static final ConfigOption<Integer> TASK_RESULT_PAGE_TOKEN_LENGTH_MAX =
+            new ConfigOption<>(
+                    "restserver.task_result_page_token_length_max",
+                    "The maximum encoded length of a task result page token.",
+                    positiveInt(),
+                    4096
+            );
+
+    public static final ConfigOption<String> TASK_RESULT_PAGE_TOKEN_KEY_ID =
+            new ConfigOption<>(
+                    "restserver.task_result_page_token_key_id",
+                    "The current HMAC key id used for task result page tokens.",
+                    disallowEmpty(),
+                    "temporary"
+            );
+
+    public static final ConfigOption<String> TASK_RESULT_PAGE_TOKEN_SECRET =
+            new ConfigOption<>(
+                    "restserver.task_result_page_token_secret",
+                    "The Base64URL-encoded HMAC secret used for task result " +
+                    "page tokens. Configure the same value on every node.",
+                    disallowEmpty(),
+                    TASK_RESULT_PAGE_TOKEN_TEMPORARY_SECRET
+            );
+
+    public static final ConfigOption<String>
+            TASK_RESULT_PAGE_TOKEN_PREVIOUS_KEY_ID = new ConfigOption<>(
+                    "restserver.task_result_page_token_previous_key_id",
+                    "The previous task result page token key id accepted " +
+                    "during key rotation.",
+                    null,
+                    ""
+            );
+
+    public static final ConfigOption<String>
+            TASK_RESULT_PAGE_TOKEN_PREVIOUS_SECRET = new ConfigOption<>(
+                    "restserver.task_result_page_token_previous_secret",
+                    "The previous task result page token secret accepted " +
+                    "during key rotation.",
+                    null,
+                    ""
             );
 
     public static final ConfigOption<Integer> REQUEST_TIMEOUT =
@@ -681,6 +791,18 @@ public class ServerOptions extends OptionHolder {
                     ""
             );
     private static volatile ServerOptions instance;
+
+    private static String temporaryTaskResultPageTokenSecret() {
+        byte[] secret = new byte[32];
+        new SecureRandom().nextBytes(secret);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
+    }
+
+    public static boolean usingTemporaryTaskResultPageTokenSecret(
+            HugeConfig config) {
+        return TASK_RESULT_PAGE_TOKEN_TEMPORARY_SECRET.equals(
+                config.get(TASK_RESULT_PAGE_TOKEN_SECRET));
+    }
 
     private ServerOptions() {
         super();

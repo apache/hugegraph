@@ -37,6 +37,7 @@ import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 
@@ -131,6 +132,41 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
         }
 
         return task;
+    }
+
+    @Override
+    public TaskResultSnapshot taskResultSnapshot(Id id) {
+        E.checkArgumentNotNull(id, "Parameter task id can't be null");
+        TaskResultSnapshot snapshot = this.call(() -> {
+            Iterator<Vertex> taskVertices = this.tx().queryTaskInfos(id);
+            HugeVertex taskVertex = (HugeVertex) QueryResults.one(taskVertices);
+            if (taskVertex == null) {
+                return null;
+            }
+
+            HugeTask<?> task = HugeTask.fromVertex(taskVertex, false);
+            if (task.status() != TaskStatus.SUCCESS) {
+                return new TaskResultSnapshot(id, task.status(), null);
+            }
+
+            Iterator<Vertex> resultVertices = this.tx().queryTaskInfos(
+                    HugeTaskResult.genId(id));
+            HugeVertex resultVertex =
+                    (HugeVertex) QueryResults.one(resultVertices);
+            if (resultVertex == null) {
+                return new TaskResultSnapshot(id, task.status(), null);
+            }
+
+            Blob blob = resultVertex.getPropertyValue(
+                    resultVertex.graph()
+                                .propertyKey(HugeTaskResult.P.RESULT).id());
+            byte[] result = blob == null ? null : blob.bytes();
+            return new TaskResultSnapshot(id, task.status(), result);
+        });
+        if (snapshot == null) {
+            throw new NotFoundException("Can't find task with id '%s'", id);
+        }
+        return snapshot;
     }
 
     @Override

@@ -19,6 +19,7 @@ package org.apache.hugegraph.util;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.serializer.BytesBuffer;
@@ -56,6 +57,14 @@ public class LZ4Util {
 
     public static BytesBuffer decompress(byte[] bytes, int blockSize) {
         return decompress(bytes, blockSize, DEFAULT_BUFFER_RATIO);
+    }
+
+    public static InputStream decompressStream(byte[] bytes) {
+        E.checkNotNull(bytes, "compressed bytes");
+        LZ4Factory factory = LZ4Factory.fastestInstance();
+        LZ4FastDecompressor decompressor = factory.fastDecompressor();
+        ByteArrayInputStream input = new ByteArrayInputStream(bytes);
+        return new LZ4BlockInputStream(input, decompressor);
     }
 
     public static BytesBuffer decompress(byte[] bytes, int blockSize, float bufferRatio) {

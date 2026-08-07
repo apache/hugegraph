@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
+import org.apache.hugegraph.api.job.TaskResultPageTokenCodec;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.event.EventHub;
@@ -53,6 +54,13 @@ public class RestServer {
     public RestServer(HugeConfig conf, EventHub hub) {
         this.conf = conf;
         this.eventHub = hub;
+        TaskResultPageTokenCodec.fromConfig(conf);
+        if (ServerOptions.usingTemporaryTaskResultPageTokenSecret(conf)) {
+            LOG.warn("Use a temporary task result page token key; configure " +
+                     "'restserver.task_result_page_token_secret' " +
+                     "consistently across servers before using result " +
+                     "pagination in a multi-node deployment");
+        }
     }
 
     public void start() throws IOException {

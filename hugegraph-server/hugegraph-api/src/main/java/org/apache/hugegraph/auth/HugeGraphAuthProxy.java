@@ -78,6 +78,7 @@ import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.task.ServerInfoManager;
 import org.apache.hugegraph.task.TaskManager;
+import org.apache.hugegraph.task.TaskResultSnapshot;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.traversal.optimize.HugeScriptTraversal;
@@ -1335,6 +1336,13 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             return verifyTaskPermission(HugePermission.READ,
                                         this.taskScheduler.task(id,
                                                                 withResult));
+        }
+
+        @Override
+        public TaskResultSnapshot taskResultSnapshot(Id id) {
+            verifyTaskPermission(HugePermission.READ,
+                                 this.taskScheduler.task(id, false));
+            return this.taskScheduler.taskResultSnapshot(id);
         }
 
         @Override
