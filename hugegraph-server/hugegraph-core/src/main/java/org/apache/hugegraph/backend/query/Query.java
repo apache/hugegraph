@@ -251,13 +251,11 @@ public class Query implements Cloneable {
         if (fromIndex < 0L) {
             // Skipping offset is overhead, no need to skip
             fromIndex = 0L;
-        } else if (fromIndex > 0L) {
-            this.goOffset(fromIndex);
         }
-        if (fromIndex > Integer.MAX_VALUE) {
-            E.checkArgument(false,
-                            "Offset must be <= 0x7fffffff, but got '%s'",
-                            fromIndex);
+        // An index holder yields ids in batches, only count this batch's ids
+        fromIndex = Math.min(fromIndex, elems.size());
+        if (fromIndex > 0L) {
+            this.goOffset(fromIndex);
         }
 
         if (fromIndex >= elems.size()) {
