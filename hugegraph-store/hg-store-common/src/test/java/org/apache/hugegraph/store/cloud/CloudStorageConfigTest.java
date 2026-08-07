@@ -110,8 +110,9 @@ public class CloudStorageConfigTest {
          assertEquals(3, config.getUploadRetryMaxAttempts());
          assertEquals(1_000L, config.getUploadRetryInitialDelayMs());
          assertEquals(60_000L, config.getUploadRetryMaxDelayMs());
-         // Backpressure enabled by default.
-         assertEquals(64, config.getUploadBackpressureHighWatermark());
+         // Backpressure is opt-in (disabled by default): when > 0 it parks RocksDB's
+         // flush/compaction thread, which can stall writes during a sustained cloud outage.
+         assertEquals(0, config.getUploadBackpressureHighWatermark());
      }
 
      @Test

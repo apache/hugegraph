@@ -72,5 +72,14 @@
             <artifactId>fastjson</artifactId>
             <version>1.2.83</version>
         </dependency>
+        <!-- Test-only: mock RocksDB/session to exercise the read-miss-on-exception hydration
+             branch deterministically (a real embedded DB cannot reliably raise an IO error and
+             then recover). Version matches the project-wide mockito.version. -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>4.1.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

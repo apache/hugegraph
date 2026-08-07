@@ -393,19 +393,17 @@ public class BusinessHandlerImplTest {
      }
 
      @Test
-     public void testTruncateFiresTruncateCallbacksAroundKeyRangeDelete() throws Exception {
+     public void testTruncateClearsGraphRangeWithoutFiringWholePrefixTruncateCallbacks()
+             throws Exception {
          RocksDBSession session = mock(RocksDBSession.class);
          SessionOperator op = mock(SessionOperator.class);
          when(session.sessionOp()).thenReturn(op);
-         when(session.getGraphName()).thenReturn("g");
-         when(session.getDbPath()).thenReturn("/data/db/00001");
 
          BusinessHandlerImpl localHandler =
                  new SessionOverridingBusinessHandler(mockPartitionManager, session);
 
          // Replace the real InnerKeyCreator with a mock so getStartKey/getEndKey/delGraphId do not
-         // touch RocksDB or the graph-id metadata store; truncate() must still run to completion so
-         // the notifyTruncateBegin / notifyTruncate callbacks around the delete are both invoked.
+         // touch RocksDB or the graph-id metadata store.
          InnerKeyCreator mockKeyCreator = mock(InnerKeyCreator.class);
          Field keyCreatorField = BusinessHandlerImpl.class.getDeclaredField("keyCreator");
          keyCreatorField.setAccessible(true);
@@ -413,13 +411,16 @@ public class BusinessHandlerImplTest {
 
          localHandler.truncate("g", 1);
 
-         // The key-range delete runs between the begin/after truncate callbacks...
+         // Only this graph's key range is cleared...
          verify(op, times(1)).deleteRange(any(), any());
-         // ...the graph id is released...
+         // ...and its graph id is released.
          verify(mockKeyCreator, times(1)).delGraphId(1, "g");
-         // ...and the callback pair reads the db identity from the session.
-         verify(session, times(1)).getGraphName();
-         verify(session, times(1)).getDbPath();
+         // A partition's RocksDB instance is shared across graphs, so a per-graph clear must NOT
+         // read the db identity for — nor fire — the whole-prefix truncate callbacks, which would
+         // purge co-tenant graphs' objects from cloud. (A whole-instance RocksDBSession.truncate()
+         // remains the only path that fires them.)
+         verify(session, never()).getGraphName();
+         verify(session, never()).getDbPath();
          // The session opened by truncate() is closed by try-with-resources.
          verify(session, times(1)).close();
      }

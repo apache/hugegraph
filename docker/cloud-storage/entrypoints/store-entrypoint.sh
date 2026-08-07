@@ -80,12 +80,6 @@ export SPRING_APPLICATION_JSON="$(cat <<JSON
         "secret-key": "$(json_escape "${HG_CLOUD_STORAGE_SECRET_KEY}")"
       }
     }
-  },
-  "logging": {
-    "level": {
-      "org.apache.hugegraph.store.node.cloud": "DEBUG",
-      "org.apache.hugegraph.rocksdb.access": "DEBUG"
-    }
   }
 }
 JSON

@@ -105,9 +105,14 @@ public class CloudStorageConfig {
      * stop rather than pinning the write path on historical DLQ debt awaiting an explicit replay.
      * When {@code > 0} and the backlog exceeds this value, RocksDB's flush/compaction thread is
      * briefly slowed in {@code onTableFileCreated} so ingestion cannot outrun the cloud mirror,
-     * bounding the amount of local-only (at-risk) data. Default: {@code 64}. {@code 0} disables it.
+     * bounding the amount of local-only (at-risk) data.
+     *
+     * <p><b>Default: {@code 0} (disabled).</b> This is opt-in because the throttle parks RocksDB's
+     * own background flush/compaction thread (up to 30 s per event); under a sustained cloud outage
+     * that can turn into a memtable-flush stall / write-stop for the partition. Enable it only when
+     * bounding local-only data during a cloud outage is worth trading partition write availability.
      */
-    private int uploadBackpressureHighWatermark = 64;
+    private int uploadBackpressureHighWatermark = 0;
 
 
     /**

@@ -47,7 +47,6 @@ KEEP_UP="${KEEP_UP:-true}"
 SKIP_SMOKE_TESTS="${SKIP_SMOKE_TESTS:-false}"
 SCRIPT_START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 RECOVERY_STATUS="NOT_RUN"
-DELETE_CLEANUP_STATUS="NOT_RUN"
 RECREATE_STATUS="NOT_RUN"
 TOMBSTONE_STATUS="NOT_RUN"
 DELETE_CALLBACK_STATUS="NOT_RUN"
@@ -152,7 +151,6 @@ finalize_reports() {
      report_line "$FULL_TEST_REPORT" "infra_ready=${INFRA_READY}"
      report_line "$FULL_TEST_REPORT" "smoke_tests=${SMOKE_STATUS}"
      report_line "$FULL_TEST_REPORT" "recovery_test=${RECOVERY_STATUS}"
-     report_line "$FULL_TEST_REPORT" "db_deletion_cleanup_test=${DELETE_CLEANUP_STATUS}"
      report_line "$FULL_TEST_REPORT" "db_recreation_no_orphan_test=${RECREATE_STATUS}"
      report_line "$FULL_TEST_REPORT" "tombstone_sibling_key_test=${TOMBSTONE_STATUS}"
      report_line "$FULL_TEST_REPORT" "db_delete_callbacks_test=${DELETE_CALLBACK_STATUS}"
@@ -598,17 +596,6 @@ object_exists_exact() {
     ' 2>/dev/null || echo "no"
 }
 
-put_probe_object_in_prefix() {
-    local bucket="$1"
-    local prefix="$2"
-    local probe_key="${prefix%/}/marker-$(date +%s).txt"
-    docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
-        mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
-        printf "db-delete-probe\n" | mc pipe local/'"$bucket"'/'"$probe_key"' >/dev/null
-    '
-    log "  ✓ wrote cloud probe object: s3://${bucket}/${probe_key}"
-}
-
 find_graph_db_prefix() {
     local bucket="$1"
     local graph_name="$2"
@@ -833,65 +820,6 @@ run_recovery_test() {
      fi
  }
 
-run_db_deletion_cleanup_test() {
-     log "=== DB deletion + cloud storage prefix cleanup E2E ==="
-     local graph_name test_api count_before count_after probe_prefix db_cloud_prefix
-     graph_name="${GRAPH_API_BASE##*/}"
-     test_api="${GRAPH_API_BASE}"
-
-     log "using existing graph '${graph_name}' created/populated by recovery test"
-
-      db_cloud_prefix=$(find_graph_db_prefix "$S3_BUCKET_STORE0" "$graph_name" || true)
-      if [[ -z "$db_cloud_prefix" ]]; then
-          echo "ERROR: failed to detect cloud DB prefix for graph '${graph_name}' in bucket '${S3_BUCKET_STORE0}'" >&2
-          log "  sample objects in bucket for debugging:"
-          docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
-              mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
-              mc ls --recursive local/'"$S3_BUCKET_STORE0"' | head -20
-          ' || true
-          return 1
-      fi
-      probe_prefix="${db_cloud_prefix}"
-      log "detected graph DB cloud prefix: ${db_cloud_prefix}"
-
-      # Write a deterministic probe object so the delete-prefix test always has cloud data to prune.
-      log "writing probe object into cloud probe prefix '${probe_prefix}'..."
-      put_probe_object_in_prefix "$S3_BUCKET_STORE0" "${probe_prefix}"
-
-      count_before=$(count_objects_in_prefix "$S3_BUCKET_STORE0" "${probe_prefix}" || echo "0")
-      count_before="${count_before//[^0-9]/}"
-      if [[ -z "$count_before" || "$count_before" -eq 0 ]]; then
-          echo "ERROR: failed to create/observe probe object in cloud probe prefix '${probe_prefix}'" >&2
-          return 1
-      fi
-      log "  ✓ objects in probe prefix before delete: ${count_before}"
-
-      log "clearing graph data for '${graph_name}'..."
-      clear_graph_with_confirm "${test_api}" || {
-          echo "ERROR: failed to clear graph '${graph_name}'" >&2
-          return 1
-      }
-      sleep 5
-
-      log "verifying cloud probe prefix has been cleaned up..."
-      count_after=$(count_objects_in_prefix "$S3_BUCKET_STORE0" "${probe_prefix}" || echo "0")
-      log "  objects in probe prefix after deletion: ${count_after}"
-
-      if [[ "$count_after" == "0" || "$count_after" == "" ]]; then
-          log "✓ DB DELETION CLEANUP SUCCESS: cloud probe prefix pruned after DB deletion"
-      else
-          echo "ERROR: cloud probe prefix not cleaned up (objects remaining: ${count_after})" >&2
-          log "  listing remaining objects:"
-          docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
-              mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
-              mc ls --recursive local/'"$S3_BUCKET_STORE0"'/'"$probe_prefix"' | head -20
-          ' || true
-          return 1
-      fi
-
-     log "skip graph delete in single-graph deployment; clear() is the deletion-equivalent path under test"
- }
-
  # Verifies that when a DB is deleted the tombstone key is written as a sibling of the
  # data prefix (e.g. store-X/hugegraph/db_DELETED) and NOT inside it
  # (store-X/hugegraph/db/_DELETED). The sibling placement is critical: it ensures the
@@ -978,34 +906,92 @@ run_db_deletion_cleanup_test() {
      log "✓ TOMBSTONE SIBLING-KEY PASS: tombstone uses sibling path and was not found inside data prefix"
  }
 
+ # Verifies the DURABILITY of a genuine DB deletion against total local-state loss. A partition
+ # DB is genuinely deleted (raftDelete -> onDBDeleteBegin writes the tombstone, onDBDeleted purges
+ # the cloud prefix once the session refCount reaches 0). We then wipe every store's local RocksDB
+ # state and restart, forcing cloud pre-hydration to run for all partitions. The deleted
+ # partition's data must NOT resurrect from cloud: its purged prefix must not regain the pre-delete
+ # data objects (SSTs / probe). A fresh empty re-created partition (CURRENT/MANIFEST/OPTIONS only)
+ # is acceptable. Partitions are single-replica here (peerList has one peer), so a genuine delete
+ # is not healed from a peer — the only way old data could return is stale cloud re-hydration,
+ # which the tombstone/empty-prefix guard must prevent. This is the recovery-time counterpart of
+ # run_db_delete_callbacks_test (which verifies the purge itself).
  run_db_recreation_no_orphan_test() {
-     log "=== Post-clear no-orphan rehydration E2E ==="
-     local graph_name test_api
-     graph_name="${GRAPH_API_BASE##*/}"
-     test_api="${GRAPH_API_BASE%/graphs/*}/graphs/${graph_name}"
+     log "=== Post-delete no-orphan rehydration E2E ==="
+     local part_id part_port db_name db_bucket db_prefix prefix_match target first_target
+     local delete_resp purged="no" i count_now data_survivors
 
-     log "simulating local RocksDB loss after clear to verify no stale cloud rehydration..."
+     # 1) Find a partition that currently has a cloud DB prefix with data.
+     part_id=""; part_port=""; db_bucket=""; db_prefix=""; first_target=""
+     while IFS= read -r target; do
+         [[ -z "$target" ]] && continue
+         [[ -z "$first_target" ]] && first_target="$target"
+         part_port="${target%%|*}"; part_id="${target##*|}"
+         db_name=$(printf "%05d" "$part_id")
+         prefix_match=$(find_partition_db_prefix "$db_name" || true)
+         if [[ -n "$prefix_match" ]]; then
+             db_bucket="${prefix_match%%|*}"; db_prefix="${prefix_match##*|}"
+             break
+         fi
+         part_id=""
+     done < <(list_partition_targets)
+
+     if [[ -z "$part_id" || -z "$db_bucket" || -z "$db_prefix" ]]; then
+         echo "ERROR: no partition with a cloud DB prefix found for no-orphan test" >&2
+         return 1
+     fi
+     db_name=$(printf "%05d" "$part_id")
+     log "  target partition id=${part_id} (db=${db_name}), prefix=${db_bucket}/${db_prefix}"
+
+     # 2) Drop a probe object so cloud resurrection would be unmistakable.
+     docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
+         mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
+         printf "no-orphan-probe\n" | mc pipe local/'"$db_bucket"'/'"$db_prefix"'/no-orphan-probe.txt >/dev/null
+     ' || { echo "ERROR: failed to write probe object" >&2; return 1; }
+     log "  objects under prefix before delete: $(count_objects_in_prefix "$db_bucket" "$db_prefix")"
+
+     # 3) Genuinely delete the partition DB.
+     delete_resp=$(curl -s "http://127.0.0.1:${part_port}/test/raftDelete/${part_id}" 2>/dev/null || true)
+     if [[ "$delete_resp" != *"OK"* ]]; then
+         echo "ERROR: raftDelete did not return OK for partition ${part_id} on :${part_port}" >&2
+         return 1
+     fi
+     log "  raftDelete issued; waiting for cloud prefix purge (destroy watcher ticks ~60s)..."
+
+     # 4) Wait for the purge to empty the prefix.
+     for i in $(seq 1 60); do
+         count_now=$(count_objects_in_prefix "$db_bucket" "$db_prefix" || echo "0")
+         count_now="${count_now//[^0-9]/}"
+         [[ "${count_now:-0}" -eq 0 ]] && { purged="yes"; break; }
+         sleep 2
+     done
+     if [[ "$purged" != "yes" ]]; then
+         echo "ERROR: cloud prefix not purged after delete (still ${count_now} objects)" >&2
+         return 1
+     fi
+     log "  ✓ cloud prefix purged after delete"
+
+     # 5) Simulate total local RocksDB loss on every store, then restart.
+     log "  simulating total local RocksDB loss on all stores + restart..."
      for i in 0 1 2; do wipe_store_rocksdb_state "$i"; done
      wait_svc "store0" 240; wait_svc "store1" 240; wait_svc "store2" 240
      wait_http "${GRAPH_API_BASE}/graph/vertices" 240
+     sleep 5
 
-     log "verifying graph remains empty (no orphaned data rehydrated from cloud)..."
-     local vertex_count
-     vertex_count=$(curl -s --compressed "${test_api}/graph/vertices" 2>/dev/null \
-         | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))" \
-         2>/dev/null || echo "0")
+     # 6) The deleted partition's data must NOT resurrect: no pre-delete data object (SST/probe)
+     #    may reappear under the purged prefix. Fresh empty-DB metadata is acceptable.
+     data_survivors=$(list_object_keys_in_prefix "$db_bucket" "$db_prefix" \
+         | grep -Ec '\.sst$|probe' || true)
+     data_survivors="${data_survivors//[^0-9]/}"
 
-     log "  vertex count in recreated '${graph_name}': ${vertex_count}"
-
-     if [[ "$vertex_count" == "0" ]]; then
-         log "✓ RECREATION NO-ORPHAN SUCCESS: deleted graph marker prevents rehydration of old data"
+     if [[ "${data_survivors:-0}" -eq 0 ]]; then
+         log "✓ POST-DELETE NO-ORPHAN SUCCESS: deleted partition data did not resurrect after total local loss"
      else
-         echo "ERROR: orphaned data found in recreated graph (vertices: ${vertex_count})" >&2
-         log "  this suggests deletion markers were not properly written or preserved"
+         echo "ERROR: ${data_survivors} deleted data object(s) resurrected under '${db_prefix}' after restart" >&2
+         log "  listing surviving objects:"
+         list_object_keys_in_prefix "$db_bucket" "$db_prefix" | head -20 >&2
          return 1
      fi
-
-     log "leaving graph '${graph_name}' in place"
  }
 
 run_db_delete_callbacks_test() {
@@ -1429,22 +1415,12 @@ else
     exit 1
 fi
 
-if run_db_deletion_cleanup_test; then
-    DELETE_CLEANUP_STATUS="PASS"
-    record_phase "db-deletion-cleanup" "PASS" "cloud prefix cleaned after clear()"
-else
-    DELETE_CLEANUP_STATUS="FAIL"
-    record_phase "db-deletion-cleanup" "FAIL" "cloud prefix cleanup failed"
-    SMOKE_STATUS="FAILED"
-    exit 1
-fi
-
 if run_db_recreation_no_orphan_test; then
     RECREATE_STATUS="PASS"
-    record_phase "db-recreation-no-orphan" "PASS" "recreated graph remained empty"
+    record_phase "db-recreation-no-orphan" "PASS" "deleted partition data did not resurrect after total local loss"
 else
     RECREATE_STATUS="FAIL"
-    record_phase "db-recreation-no-orphan" "FAIL" "orphan data was rehydrated"
+    record_phase "db-recreation-no-orphan" "FAIL" "deleted partition data resurrected from cloud"
     SMOKE_STATUS="FAILED"
     exit 1
 fi

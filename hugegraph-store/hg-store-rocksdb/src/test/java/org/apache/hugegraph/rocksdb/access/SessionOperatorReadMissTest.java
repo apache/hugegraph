@@ -20,6 +20,12 @@ package org.apache.hugegraph.rocksdb.access;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.fail;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -32,8 +38,12 @@ import org.apache.commons.configuration2.MapConfiguration;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory.RocksdbChangedListener;
+import org.apache.hugegraph.rocksdb.access.RocksDBSession.CFHandleLock;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.rocksdb.ColumnFamilyHandle;
+import org.rocksdb.RocksDB;
+import org.rocksdb.RocksDBException;
 
 /**
  * {@link SessionOperatorImpl#get(String, byte[])} read-miss / cloud-hydration behaviour.
@@ -151,6 +161,126 @@ public class SessionOperatorReadMissTest {
 
             assertNull("retry read must return null when hydration produced no data", value);
         });
+    }
+
+    // =========================================================================
+    // Read-miss hydration on the EXCEPTION path
+    //
+    // A live SST referenced by the manifest that is physically missing surfaces as a
+    // RocksDBException (not a null), so hydration must be attempted on the exception too and the
+    // read retried; if nothing is restored, the original error must propagate as DBStoreException.
+    // A real embedded DB cannot deterministically raise-then-recover an IO error, so the DB and
+    // session are mocked here to drive the branch precisely.
+    // =========================================================================
+
+    @Test
+    public void firstGetThrows_thenHydrationSucceeds_retryReturnsRestoredValue() throws Exception {
+        RocksDB db = mock(RocksDB.class);
+        RocksDBSession session = mock(RocksDBSession.class);
+        ColumnFamilyHandle handle = mock(ColumnFamilyHandle.class);
+        CFHandleLock cfLock = mock(CFHandleLock.class);
+        when(cfLock.get()).thenReturn(handle);
+        when(session.getDB()).thenReturn(db);
+        when(session.getCFHandleLock(TABLE)).thenReturn(cfLock);
+        when(session.getGraphName()).thenReturn("db-mock");
+        // First read throws (missing live SST → IO error); after hydration the retry returns it.
+        when(db.get(any(ColumnFamilyHandle.class), any(byte[].class)))
+                .thenThrow(new RocksDBException("simulated missing SST"))
+                .thenReturn(bytes("hydrated"));
+
+        AtomicInteger hydrations = new AtomicInteger();
+        RocksdbChangedListener hydrator = new RocksdbChangedListener() {
+            @Override
+            public boolean onReadMiss(RocksDBSession s, String table, byte[] key) {
+                hydrations.incrementAndGet();
+                return true; // simulate a successful cloud restore of the missing SST
+            }
+        };
+        RocksDBFactory.getInstance().addRocksdbChangedListener(hydrator);
+        try {
+            SessionOperator op = new SessionOperatorImpl(session);
+            byte[] value = op.get(TABLE, bytes("cold"));
+
+            assertArrayEquals("retry after hydration must return the restored value",
+                              bytes("hydrated"), value);
+            assertEquals("hydration must be attempted exactly once", 1, hydrations.get());
+            verify(db, times(2)).get(any(ColumnFamilyHandle.class), any(byte[].class));
+        } finally {
+            RocksDBFactory.getInstance().removeRocksdbChangedListener(hydrator);
+        }
+    }
+
+    @Test
+    public void firstGetThrows_hydrationSucceeds_butRetryAlsoThrows_propagatesRetryError()
+            throws Exception {
+        RocksDB db = mock(RocksDB.class);
+        RocksDBSession session = mock(RocksDBSession.class);
+        ColumnFamilyHandle handle = mock(ColumnFamilyHandle.class);
+        CFHandleLock cfLock = mock(CFHandleLock.class);
+        when(cfLock.get()).thenReturn(handle);
+        when(session.getDB()).thenReturn(db);
+        when(session.getCFHandleLock(TABLE)).thenReturn(cfLock);
+        when(session.getGraphName()).thenReturn("db-mock");
+        // Both the initial read and the post-hydration retry throw (the restore did not repair it).
+        when(db.get(any(ColumnFamilyHandle.class), any(byte[].class)))
+                .thenThrow(new RocksDBException("initial missing SST"))
+                .thenThrow(new RocksDBException("still broken after restore"));
+
+        RocksdbChangedListener hydrator = new RocksdbChangedListener() {
+            @Override
+            public boolean onReadMiss(RocksDBSession s, String table, byte[] key) {
+                return true;
+            }
+        };
+        RocksDBFactory.getInstance().addRocksdbChangedListener(hydrator);
+        try {
+            SessionOperator op = new SessionOperatorImpl(session);
+            try {
+                op.get(TABLE, bytes("cold"));
+                fail("expected DBStoreException when the post-hydration retry also fails");
+            } catch (DBStoreException expected) {
+                // expected
+            }
+            verify(db, times(2)).get(any(ColumnFamilyHandle.class), any(byte[].class));
+        } finally {
+            RocksDBFactory.getInstance().removeRocksdbChangedListener(hydrator);
+        }
+    }
+
+    @Test
+    public void firstGetThrows_noHydration_propagatesAsDbStoreExceptionWithoutRetry()
+            throws Exception {
+        RocksDB db = mock(RocksDB.class);
+        RocksDBSession session = mock(RocksDBSession.class);
+        ColumnFamilyHandle handle = mock(ColumnFamilyHandle.class);
+        CFHandleLock cfLock = mock(CFHandleLock.class);
+        when(cfLock.get()).thenReturn(handle);
+        when(session.getDB()).thenReturn(db);
+        when(session.getCFHandleLock(TABLE)).thenReturn(cfLock);
+        when(session.getGraphName()).thenReturn("db-mock");
+        when(db.get(any(ColumnFamilyHandle.class), any(byte[].class)))
+                .thenThrow(new RocksDBException("simulated missing SST"));
+
+        RocksdbChangedListener noHydration = new RocksdbChangedListener() {
+            @Override
+            public boolean onReadMiss(RocksDBSession s, String table, byte[] key) {
+                return false; // nothing could be restored
+            }
+        };
+        RocksDBFactory.getInstance().addRocksdbChangedListener(noHydration);
+        try {
+            SessionOperator op = new SessionOperatorImpl(session);
+            try {
+                op.get(TABLE, bytes("cold"));
+                fail("expected DBStoreException to propagate when hydration restores nothing");
+            } catch (DBStoreException expected) {
+                // expected
+            }
+            // No retry read when hydration reported nothing: only the single failing get.
+            verify(db, times(1)).get(any(ColumnFamilyHandle.class), any(byte[].class));
+        } finally {
+            RocksDBFactory.getInstance().removeRocksdbChangedListener(noHydration);
+        }
     }
 
     // =========================================================================

@@ -63,54 +63,59 @@ After running `make test` or `./scripts/test-graph-queries-and-sst.sh`, check `.
 - **`cli-load.log`** — Data load job output from hg-store-cli
 - **`load-data.tsv`** — Generated test data file (200k entries)
 
-## Manual Verification Steps
+## Manual Verification (Core Flow)
 
-**Prerequisites:** Complete Step 1 first and wait for the infrastructure ready message.
+**Prerequisites:** Complete Core Step 1 first and wait for the infrastructure ready message.
 
-For hands-on validation with manual graph creation and queries, start the cluster using the automated script with `--keep-stack`, then follow interactive steps. **All commands use `$REPO_ROOT` to reference paths relative to the repository root.**
+For hands-on validation with manual graph creation and queries, start the cluster using the
+automated script with `--keep-stack`, then follow interactive steps.
 
-**Note:** These steps verify end-to-end SST upload by:
-1. Creating a graph schema
-2. Adding test vertices and edges
-3. Verifying data distribution across nodes
-4. Triggering an explicit RocksDB flush on each store node
-5. Confirming SST files are uploaded to MinIO buckets
+**Core goals in this flow:**
+1. Create schema and load enough data to generate SST files
+2. Flush stores to trigger cloud upload
+3. Verify SST + recovery metadata in MinIO UI
 
-### Step 0: Set Repository Root
-
-Before starting, set the `$REPO_ROOT` variable to point to the repository root. You can run this from anywhere:
-
-```bash
-export REPO_ROOT=$(git rev-parse --show-toplevel)
-```
-
-Verify the variable is set correctly:
-
-```bash
-echo $REPO_ROOT
-```
-
-### Step 1: Start Cluster with Infrastructure Only (No Auto-Load)
+### Step 1: Set Environment and Start Infrastructure (No Auto-Load)
 
 Use the automated test script to build images and start the stack. For manual-only flows,
 prefer `--infra-only` to skip scripted data creation and validation checks while keeping the stack up:
 
 ```bash
+export REPO_ROOT="$(git rev-parse --show-toplevel)"
+echo "$REPO_ROOT"
+
 $REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --keep-stack --infra-only
 ```
 
-After Step 1 starts the stack, resolve the Docker network name for `docker run --network` commands:
+#### Shared Helper: Resolve `HG_NET` Once Per Shell
+
+Run this once in your current shell after infrastructure is up. Re-run it if you open a new shell.
 
 ```bash
-export HG_NET="${HG_NET:-cloud-storage-net}"
-if docker network inspect "$HG_NET" >/dev/null 2>&1; then
+resolve_hg_net() {
+  local net
+  net=$(docker inspect cloud-storage-minio \
+    --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' \
+    2>/dev/null | head -n1 || true)
+
+  if [[ -z "$net" ]]; then
+    if docker network inspect cloud-storage-test_hg-net >/dev/null 2>&1; then
+      net="cloud-storage-test_hg-net"
+    elif docker network inspect cloud-storage-net >/dev/null 2>&1; then
+      net="cloud-storage-net"
+    fi
+  fi
+
+  [[ -n "$net" ]] || {
+    echo "No cloud-storage Docker network found. Ensure Core Step 1 completed successfully." >&2
+    return 1
+  }
+
+  export HG_NET="$net"
   echo "Using Docker network: $HG_NET"
-elif docker network inspect cloud-storage-test_hg-net >/dev/null 2>&1; then
-  export HG_NET="cloud-storage-test_hg-net"
-  echo "Using Docker network: $HG_NET"
-else
-  echo "No cloud-storage Docker network found. Ensure Step 1 completed successfully."
-fi
+}
+
+resolve_hg_net
 ```
 
 This will:
@@ -250,155 +255,166 @@ echo "✓ Inserted 150+ test vertices (sufficient for RocksDB compaction)"
 
 **Why 150+ vertices?** Smaller datasets may not trigger RocksDB compaction. 150+ vertices across 3 store nodes ensures enough write activity to generate SST files.
 
-### Step 5: Execute Graph Queries (Optional)
-
-Verify the data was stored:
+Optional quick sanity check before flush:
 
 ```bash
-echo "=== Vertex count ==="
-curl -s --compressed http://localhost:8080/graphs/hugegraph/graph/vertices | python3 -c "import sys,json; data=json.load(sys.stdin); print('Total vertices:', len(data.get('vertices',[])))"
-
-echo "=== Sample vertex ==="
-curl -s --compressed http://localhost:8080/graphs/hugegraph/graph/vertices | python3 -c "import sys,json; data=json.load(sys.stdin); vertices=data.get('vertices', []); print(json.dumps(vertices[0], indent=2) if vertices else 'No vertices')" | head -10
+curl -s --compressed http://localhost:8080/graphs/hugegraph/graph/vertices \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print('Total vertices:', len(d.get('vertices',[])))"
 ```
 
-**Note:** Querying 150+ vertices can return large result sets. To keep this step fast, the above commands just check the count and show a sample.
+### Step 5: Manual Flush + MinIO UI Verification
 
-### Step 6: Verify Data Distribution
+Use this step when you want a purely manual verification flow in the UI.
 
-Verify data has been distributed across store nodes:
+1. Open MinIO Console: `http://localhost:9001` (default credentials: `minioadmin` / `minioadmin`).
+2. Open buckets `hugegraph-store0`, `hugegraph-store1`, and `hugegraph-store2`.
+3. In each bucket, note the current SST/metadata state before flush:
+   - `*.sst` objects
+   - recovery metadata files (`CURRENT`, `MANIFEST-*`, `OPTIONS-*`)
+   - latest modified timestamps shown in the object list
+
+Trigger flush on all store nodes:
 
 ```bash
-echo "=== Partition Info (before flush) ==="
-for i in 0 1 2; do
-  port=$((8520 + i))
-  echo ""
-  echo "Store$i (port $port):"
-  curl -s http://127.0.0.1:$port/v1/partitions | python3 -c "import sys,json; data=json.load(sys.stdin); print(f'  Partitions: {len(data.get(\"partitions\",[])) if isinstance(data.get(\"partitions\"), list) else \"N/A\"}')" 2>/dev/null || echo "  (unable to retrieve)"
-done
-```
-
-**Expected:** Each store should show partition information, indicating data distribution across the cluster.
-
-### Step 7: Flush Data to S3
-```bash
+echo "=== Trigger flush on all stores ==="
 for p in 8520 8521 8522; do
-  curl -fsS "http://127.0.0.1:${p}/test/flush"
+  echo "Flushing store REST port ${p}..."
+  curl -fsS "http://127.0.0.1:${p}/test/flush" >/dev/null
 done
+echo "Flush requests sent"
 ```
 
-**What happens behind the scenes:**
-- Each store receives a `/test/flush` request
-- RocksDB flushes MemTable data to SST files on disk
-- SST creation events trigger the cloud upload listener
-- SST files are uploaded to MinIO asynchronously (parallel dispatch)
-- Metadata (`CURRENT`, `MANIFEST-*`, `OPTIONS-*`) is mirrored so cloud recovery stays consistent
-
-### Step 8: Final S3 Verification (After Flush)
-
-Verify that SST files have been successfully uploaded to MinIO buckets:
+Wait for asynchronous cloud upload, then refresh MinIO UI:
 
 ```bash
-echo "=== Checking MinIO buckets after flush ==="
+echo "Waiting for flush upload to reach MinIO..."
+sleep 20
+```
+
+Re-check the same three buckets in MinIO UI.
+
+**Success criteria:**
+- ✅ You can browse all three buckets in MinIO UI
+- ✅ `*.sst` objects exist in each bucket after flush
+- ✅ Recovery metadata files (`CURRENT`, `MANIFEST-*`, `OPTIONS-*`) are visible
+- ✅ At least one object timestamp advances after flush (new upload activity)
+
+If the UI does not update after ~20 seconds, wait another 20-40 seconds and refresh again.
+
+## Advanced Scenarios (Optional)
+
+### Advanced 1: Strict Script Assertions
+
+Run this if you want script-based strict assertions in addition to the manual UI checks in Core Step 5.
+The commands are wrapped in a guarded subshell so any `exit 1` fails only this block, not your
+terminal (even if `set -e` was enabled earlier in the shell).
+
+```bash
+
+if ! (
+# Requires the helper from Core Step 1.
+type resolve_hg_net >/dev/null 2>&1 || { echo "Run Core Step 1 helper first"; exit 1; }
+resolve_hg_net
+
+echo "=== Assert bucket object + SST counts ==="
 docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-              for b in hugegraph-store0 hugegraph-store1 hugegraph-store2; do \
-                echo ""; \
-                echo "### Bucket: $b"; \
-                total_count=$(mc ls --recursive local/$b | wc -l); \
-                sst_count=$(mc find local/$b --name "*.sst" | wc -l); \
-                printf "  Total objects: %d\n" "$total_count"; \
-                printf "  SST files:     %d\n" "$sst_count"; \
-                if (( sst_count > 0 )); then \
-                  echo "  Sample SST files (first 3):"; \
-                  mc find local/$b --name "*.sst" | head -3; \
-                fi; \
-              done'
-```
+  -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      else \
+        echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+        exit 1; \
+      fi; \
+      fail=0; \
+      for b in hugegraph-store0 hugegraph-store1 hugegraph-store2; do \
+        total_count=$(mc ls --recursive local/$b 2>/dev/null | wc -l); \
+        sst_count=$(mc find local/$b --name "*.sst" 2>/dev/null | wc -l); \
+        echo "### $b: total=$total_count sst=$sst_count"; \
+        if [ "$total_count" -eq 0 ] || [ "$sst_count" -eq 0 ]; then \
+          echo "  ERROR: expected total>0 and sst>0" >&2; \
+          fail=1; \
+        fi; \
+      done; \
+      exit "$fail"'
 
-**What successful upload looks like** (note the recovery metadata objects — `CURRENT`, `MANIFEST-*`,
-`OPTIONS-*` — mirrored alongside the SSTs so the SSTs are a usable database, not orphans):
-```
-### Bucket: hugegraph-store0
-  Total objects: 9
-  SST files:     6
-  Objects under a partition prefix (paths illustrative; the file names are what matter):
-    local/hugegraph-store0/<prefix>/<partition>/000009.sst
-    local/hugegraph-store0/<prefix>/<partition>/000012.sst
-    local/hugegraph-store0/<prefix>/<partition>/CURRENT
-    local/hugegraph-store0/<prefix>/<partition>/MANIFEST-000011
-    local/hugegraph-store0/<prefix>/<partition>/OPTIONS-000013
+echo "=== Assert metadata set (CURRENT / MANIFEST-* / OPTIONS-*) ==="
+docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      else \
+        echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+        exit 1; \
+      fi; \
+      fail=0; \
+      for b in hugegraph-store0 hugegraph-store1 hugegraph-store2; do \
+        current=$(mc find local/$b --name CURRENT 2>/dev/null | wc -l); \
+        manifest=$(mc find local/$b --name "MANIFEST-*" 2>/dev/null | wc -l); \
+        options=$(mc find local/$b --name "OPTIONS-*" 2>/dev/null | wc -l); \
+        sst=$(mc find local/$b --name "*.sst" 2>/dev/null | wc -l); \
+        echo "### $b: CURRENT=$current MANIFEST=$manifest OPTIONS=$options SST=$sst"; \
+        if [ "$current" -lt 1 ] || [ "$manifest" -lt 1 ] || [ "$options" -lt 1 ] || [ "$sst" -lt 1 ]; then \
+          echo "  ERROR: missing required recovery files" >&2; \
+          fail=1; \
+        fi; \
+      done; \
+      exit "$fail"'
 
-### Bucket: hugegraph-store1
-  Total objects: 10
-  SST files:     7
-  ...
-
-### Bucket: hugegraph-store2
-  Total objects: 9
-  SST files:     6
-  ...
+); then
+  echo "Advanced 1 assertions failed (see errors above)"
+fi
 ```
 
 **Success criteria:**
-- ✅ All three buckets show `Total objects: > 0`
-- ✅ All three buckets show `SST files: > 0`
-- ✅ Each partition prefix contains **exactly one** `CURRENT`, at least one `MANIFEST-*`, and at
-  least one `OPTIONS-*` (the consistent recovery metadata set)
-- ✅ SST counts are roughly balanced across buckets
-- ✅ No errors from mc command
-
-To assert the recovery metadata set explicitly:
-
-```bash
-docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-      for b in hugegraph-store0 hugegraph-store1 hugegraph-store2; do \
-        echo "### $b: CURRENT=$(mc find local/$b --name CURRENT | wc -l)" \
-             "MANIFEST=$(mc find local/$b --name "MANIFEST-*" | wc -l)" \
-             "OPTIONS=$(mc find local/$b --name "OPTIONS-*" | wc -l)" \
-             "SST=$(mc find local/$b --name "*.sst" | wc -l)"; \
-      done'
-```
+- ✅ Both assertion commands exit with status `0`
+- ✅ All buckets have `total > 0` and `sst > 0`
+- ✅ All buckets include `CURRENT`, `MANIFEST-*`, `OPTIONS-*`, and `*.sst`
 
 **If buckets are still empty after flush:**
 1. Check store logs for upload errors: `docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | grep -i "s3\|cloud\|error"`
 2. Verify cloud storage was initialized: `docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | grep -i "Cloud storage provider.*initialized\|S3CloudStorageProvider initialized"`
 3. Check that data was written: `docker exec cloud-storage-store0 sh -lc 'find /hugegraph-store/storage -name "*.sst" | wc -l'`
 
-### Step 8.5 (Optional): Verify Managed Delete/Clear Cleanup
+### Advanced 2: Clear Semantics & No-Orphan Re-hydration
 
-This step validates the delete path used by single-graph deployments: `graph.clear()` should clean the
-remote DB prefix so stale data is not rehydrated later.
+This step validates what `graph.clear()` guarantees for cloud storage. Clearing a graph runs a
+per-key-range delete (`deleteRange`) on the partition's RocksDB instance — it does **not** purge the
+whole remote DB prefix. That instance can be shared by multiple graphs, so a whole-prefix purge would
+destroy co-tenant graphs' cloud data; instead the cleared range converges in cloud through normal
+SST mirroring/compaction. The durable guarantee under test is therefore: **after `clear()` and a store
+restart, the graph does not re-hydrate stale data** (vertex count stays `0`).
 
-> **Warning:** This deletes graph data. Run it after Step 8, and re-run Steps 3-8 if you want to run
-> the recovery scenario in the next section.
+Because the prefix is intentionally not purged, the object count under the prefix is expected to remain
+non-zero after clear (live `CURRENT`/`MANIFEST-*`/`OPTIONS-*` and not-yet-compacted SSTs) — that is
+by design, not a leak. Whole-prefix purge is exercised only by real DB deletion (see Advanced 3).
+
+> **Warning:** This deletes graph data. Run it after Core Step 5 (and Advanced 1 if you use it),
+> then re-run Core Steps 3-5 if you want to repeat the flush/recovery setup.
+
+#### Manual Flow: Before Clear -> Clear -> After Clear -> Restart Check
+
+1. Resolve Docker network and detect one graph DB prefix in MinIO.
 
 ```bash
-run_step_8_5_clear_cleanup() {
 GRAPH_NAME=hugegraph
-BUCKETS=(hugegraph-store0 hugegraph-store1 hugegraph-store2)
+type resolve_hg_net >/dev/null 2>&1 || { echo "Run Core Step 1 helper first"; exit 1; }
+resolve_hg_net
+
 BUCKET=""
-
-# Resolve Docker network if HG_NET is not already set.
-if [[ -z "${HG_NET:-}" ]]; then
-  if docker network inspect cloud-storage-test_hg-net >/dev/null 2>&1; then
-    HG_NET="cloud-storage-test_hg-net"
-  elif docker network inspect cloud-storage-net >/dev/null 2>&1; then
-    HG_NET="cloud-storage-net"
-  else
-    HG_NET=$(docker inspect cloud-storage-minio --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' 2>/dev/null | head -n1)
-  fi
-fi
-
-echo "Using Docker network: ${HG_NET}"
-[[ -n "${HG_NET}" ]] || { echo "Failed to resolve HG_NET; ensure Step 1 stack is running"; return 1; }
-
-# Detect one cloud DB prefix for this graph across all buckets.
 DB_PREFIX=""
-for CANDIDATE_BUCKET in "${BUCKETS[@]}"; do
-  MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-    -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
+for CANDIDATE_BUCKET in hugegraph-store0 hugegraph-store1 hugegraph-store2; do
+  MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" \
+    minio/mc:RELEASE.2025-08-13T08-35-41Z \
+    -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+          :; \
+        elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+          :; \
+        else \
+          echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+          exit 1; \
+        fi; \
         mc find local/'"$CANDIDATE_BUCKET"' --name CURRENT 2>/dev/null' \
     | grep "/${GRAPH_NAME}/" | head -n1 || true)
   if [[ -n "$MATCH" ]]; then
@@ -410,43 +426,124 @@ for CANDIDATE_BUCKET in "${BUCKETS[@]}"; do
 done
 
 echo "Detected DB prefix: bucket=${BUCKET}, prefix=${DB_PREFIX}"
-[[ -n "$BUCKET" && -n "$DB_PREFIX" ]] || { echo "Failed to detect DB prefix for ${GRAPH_NAME} in any bucket"; return 1; }
+[[ -n "$BUCKET" && -n "$DB_PREFIX" ]] || {
+  echo "Failed to detect DB prefix for ${GRAPH_NAME}"
+  exit 1
+}
+```
 
-# Add a probe object under the DB prefix so cleanup is easy to validate.
-docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-      printf "delete-probe\n" | mc pipe local/'"$BUCKET"'/'"$DB_PREFIX"'/manual-delete-probe.txt >/dev/null'
+2. Observe objects before clear (CLI + optional MinIO UI check).
 
-echo "Objects before clear:" \
-  $(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-      -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-          mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
+```bash
+BEFORE_COUNT=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" \
+  minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      else \
+        echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+        exit 1; \
+      fi; \
+      mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
 
-# Managed delete-equivalent path for single-graph mode.
+echo "Objects before clear: ${BEFORE_COUNT}"
+
+docker run --rm --entrypoint /bin/sh --network "$HG_NET" \
+  minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      else \
+        echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+        exit 1; \
+      fi; \
+      mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | head -20'
+```
+
+Optional UI view: open `http://localhost:9001`, go to `${BUCKET}/${DB_PREFIX}`, and note object
+names / timestamps.
+
+3. Run clear action.
+
+```bash
 curl -s -X DELETE "http://localhost:8080/graphs/${GRAPH_NAME}/clear" \
-  --get --data-urlencode "confirm_message=I'm sure to delete all data" | head -c 200; echo
+  --get --data-urlencode "confirm_message=I'm sure to delete all data" | head -c 200
+echo
 sleep 5
+```
 
-echo "Objects after clear:" \
-  $(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-      -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-          mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
+4. Observe objects after clear (expected non-zero).
 
-# Optional no-orphan check: graph remains empty after store restart.
-docker restart cloud-storage-store0 cloud-storage-store1 cloud-storage-store2
-sleep 20
+```bash
+AFTER_COUNT=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" \
+  minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      else \
+        echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+        exit 1; \
+      fi; \
+      mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
+
+echo "Objects after clear (expected non-zero): ${AFTER_COUNT}"
+
+docker run --rm --entrypoint /bin/sh --network "$HG_NET" \
+  minio/mc:RELEASE.2025-08-13T08-35-41Z \
+  -c 'if mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      elif mc alias set local http://cloud-storage-minio:9000 minioadmin minioadmin >/dev/null 2>&1; then \
+        :; \
+      else \
+        echo "ERROR: cannot reach MinIO at minio:9000 or cloud-storage-minio:9000" >&2; \
+        exit 1; \
+      fi; \
+      mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | head -20'
+```
+
+5. Manual no-orphan re-hydration verification.
+
+```bash
+echo "Vertex count immediately after clear (expected 0):"
 curl -s --compressed "http://localhost:8080/graphs/${GRAPH_NAME}/graph/vertices" \
   | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))"
-}
 
-run_step_8_5_clear_cleanup
+docker restart cloud-storage-store0 cloud-storage-store1 cloud-storage-store2
+sleep 20
+
+echo "Vertex count after store restart (must remain 0):"
+curl -s --compressed "http://localhost:8080/graphs/${GRAPH_NAME}/graph/vertices" \
+  | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('vertices',[])))"
+```
+
+If the post-restart count is non-zero, stale data was re-hydrated (unexpected).
+
+#### Optional Automation
+
+Run the one-shot helper if you prefer scripted execution of the same checks:
+
+```bash
+bash "$REPO_ROOT/docker/cloud-storage/scripts/test-advanced-clear-semantics.sh"
+```
+
+Optional overrides:
+
+```bash
+GRAPH_NAME=hugegraph RESTART_WAIT_SECONDS=20 \
+  bash "$REPO_ROOT/docker/cloud-storage/scripts/test-advanced-clear-semantics.sh"
 ```
 
 **Success criteria:**
-- ✅ `Objects after clear` is `0` for the detected graph DB prefix
-- ✅ Optional restart check returns vertex count `0` (no orphaned rehydration)
+- ✅ `Objects before clear` is non-zero for the detected prefix
+- ✅ `Objects after clear` is typically still non-zero (shared prefix is not purged by design)
+- ✅ Vertex count immediately after clear is `0`
+- ✅ Restart check returns vertex count `0` — cleared data is not re-hydrated from cloud
+- ℹ️ Whole-prefix purge is validated by Advanced 3
 
-### Step 8.6 (Optional, Advanced): Verify DB Delete Callbacks (`onDBDeleteBegin` + `onDBDeleted`)
+### Advanced 3: DB Delete Callbacks (`onDBDeleteBegin` + `onDBDeleted`)
 
 This step validates the DB-destroy lifecycle callbacks (not truncate/clear):
 
@@ -458,259 +555,72 @@ engine, which triggers `destroyGraphDB(...)` internally.
 
 > **Important:** This is a **simulation of GraphDB deletion** via an internal test endpoint.
 > It is useful for callback behavior verification, but it is not the production graph-delete API path.
-> Use Step 8.5 to validate production managed delete/clear semantics.
+> Use Advanced 2 to validate production `clear()` semantics and no-orphan re-hydration.
 
 > **Warning:** This is destructive and intended only for callback verification. Run it near the
-> end of manual testing. After this step, restart from Step 1 for a fresh cluster state.
+> end of manual testing. After this step, restart from Core Step 1 for a fresh cluster state.
+
+Run this phase through the main end-to-end harness:
 
 ```bash
-run_step_8_6_delete_callbacks() {
-# Resolve Docker network used by the cloud-storage stack.
-if [[ -z "${HG_NET:-}" ]]; then
-  if docker network inspect cloud-storage-test_hg-net >/dev/null 2>&1; then
-    HG_NET="cloud-storage-test_hg-net"
-  elif docker network inspect cloud-storage-net >/dev/null 2>&1; then
-    HG_NET="cloud-storage-net"
-  else
-    HG_NET=$(docker inspect cloud-storage-minio --format '{{range $k, $v := .NetworkSettings.Networks}}{{println $k}}{{end}}' 2>/dev/null | head -n1)
-  fi
-fi
-
-echo "Using Docker network: ${HG_NET}"
-[[ -n "${HG_NET}" ]] || { echo "Failed to resolve HG_NET; ensure Step 1 stack is running"; return 1; }
-
-BUCKETS=(hugegraph-store0 hugegraph-store1 hugegraph-store2)
-
-# Pick one partition group id from any store endpoint.
-extract_partition_id() {
-  python3 -c 'import sys, json
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    raise SystemExit(0)
-
-def from_partitions(obj, out):
-    if isinstance(obj, dict):
-        parts = obj.get("partitions")
-        if isinstance(parts, list):
-            for item in parts:
-                if isinstance(item, dict) and "id" in item:
-                    value = str(item.get("id", "")).strip()
-                    if value.isdigit():
-                        out.append(value)
-        for value in obj.values():
-            from_partitions(value, out)
-    elif isinstance(obj, list):
-        for item in obj:
-            from_partitions(item, out)
-
-items = []
-from_partitions(data, items)
-seen = set()
-for value in items:
-    if value not in seen:
-        seen.add(value)
-        print(value)'
-}
-
-detect_scope_prefix() {
-  local TARGET_BUCKET="$1"
-  local SCOPE
-  SCOPE=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-    -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-        mc ls local/'"$TARGET_BUCKET"' 2>/dev/null | awk "NR==1 {print \$NF}" | sed "s#/$##"' \
-    2>/dev/null || true)
-  SCOPE="${SCOPE//$'\r'/}"
-  SCOPE="${SCOPE//$'\n'/}"
-  [[ -z "$SCOPE" ]] && SCOPE="hugegraph"
-  echo "$SCOPE"
-}
-
-PART_ID=""
-PART_PORT=""
-BUCKET=""
-DB_PREFIX=""
-FIRST_ID=""
-FIRST_PORT=""
-for PORT in 8520 8521 8522; do
-  IDS=$(curl -s "http://127.0.0.1:${PORT}/v1/partitions" 2>/dev/null | extract_partition_id || true)
-  while IFS= read -r ID; do
-    ID="${ID//[^0-9]/}"
-    [[ -z "$ID" ]] && continue
-    if [[ -z "$FIRST_ID" ]]; then
-      FIRST_ID="$ID"
-      FIRST_PORT="$PORT"
-    fi
-    DB_NAME=$(printf "%05d" "$ID")
-    for CANDIDATE_BUCKET in "${BUCKETS[@]}"; do
-      MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-        -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-            mc find local/'"$CANDIDATE_BUCKET"' --name CURRENT 2>/dev/null' \
-        | grep "/${DB_NAME}/CURRENT$" \
-        | head -n1 || true)
-      if [[ -z "$MATCH" ]]; then
-        MATCH=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-          -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-              mc find local/'"$CANDIDATE_BUCKET"' --name "*.sst" 2>/dev/null' \
-          | grep "/db/${DB_NAME}/" \
-          | head -n1 || true)
-      fi
-      if [[ -n "$MATCH" ]]; then
-        PART_ID="$ID"
-        PART_PORT="$PORT"
-        BUCKET="$CANDIDATE_BUCKET"
-        if [[ "$MATCH" == *"/CURRENT" ]]; then
-          DB_PREFIX="${MATCH#local/${CANDIDATE_BUCKET}/}"
-          DB_PREFIX="${DB_PREFIX%/CURRENT}"
-        else
-          REL="${MATCH#local/${CANDIDATE_BUCKET}/}"
-          DB_PREFIX="${REL%/*}"
-        fi
-        break 3
-      fi
-    done
-  done <<< "$IDS"
-done
-
-if [[ -z "$PART_ID" && -n "$FIRST_ID" ]]; then
-  PART_ID="$FIRST_ID"
-  PART_PORT="$FIRST_PORT"
-  DB_NAME=$(printf "%05d" "$PART_ID")
-  case "$PART_PORT" in
-    8520) BUCKET="hugegraph-store0"; STORE_NODE="store0" ;;
-    8521) BUCKET="hugegraph-store1"; STORE_NODE="store1" ;;
-    8522) BUCKET="hugegraph-store2"; STORE_NODE="store2" ;;
-    *) BUCKET="" ;;
-  esac
-  if [[ -n "$BUCKET" ]]; then
-    SCOPE_PREFIX=$(detect_scope_prefix "$BUCKET")
-    DB_PREFIX="${SCOPE_PREFIX}/store-${STORE_NODE}_8510/db/${DB_NAME}"
-    echo "WARNING: no existing cloud prefix found; using derived prefix ${DB_PREFIX}"
-  fi
-fi
-
-echo "Selected partition id: ${PART_ID} (from endpoint :${PART_PORT})"
-if [[ -z "$PART_ID" ]]; then
-  echo "No partition id with detectable cloud prefix found from store endpoints 8520/8521/8522"
-  for PORT in 8520 8521 8522; do
-    SAMPLE=$(curl -s "http://127.0.0.1:${PORT}/v1/partitions" 2>/dev/null | head -c 300 || true)
-    [[ -n "$SAMPLE" ]] && echo "Endpoint :${PORT} sample: ${SAMPLE}"
-  done
-  return 1
-fi
-
-echo "Detected DB prefix: bucket=${BUCKET}, prefix=${DB_PREFIX}"
-[[ -n "$BUCKET" && -n "$DB_PREFIX" ]] || { echo "Failed to detect cloud prefix for db ${DB_NAME} in any bucket"; return 1; }
-
-# Add a probe object so purge verification is deterministic.
-docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-      printf "db-delete-probe\n" | mc pipe local/'"$BUCKET"'/'"$DB_PREFIX"'/manual-db-delete-probe.txt >/dev/null'
-
-echo "Objects before db delete:" \
-  $(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-      -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-          mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
-
-# Trigger partition destroy path (calls destroyGraphDB internally).
-DELETE_RESP=$(curl -s "http://127.0.0.1:${PART_PORT}/test/raftDelete/${PART_ID}" 2>/dev/null || true)
-printf "%s\n" "$DELETE_RESP"
-[[ "$DELETE_RESP" == *"OK"* ]] || { echo "raftDelete did not return OK"; return 1; }
-
-# onDBDeleteBegin is immediate, onDBDeleted is asynchronous:
-# RocksDBFactory's destroy watcher runs every 60s, so a short sleep is flaky.
-# Poll store logs (all nodes) for both callback markers with timeout.
-CALLBACK_OK="no"
-POLL_START_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-for i in $(seq 1 24); do
-  LOGS=$(
-    docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store0 2>&1
-    docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store1 2>&1
-    docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store2 2>&1
-  )
-  if echo "$LOGS" | grep -q "Cloud DB tombstone written" \
-     && echo "$LOGS" | grep -q "Cloud DB purge completed"; then
-    CALLBACK_OK="yes"
-    break
-  fi
-  sleep 5
-done
-
-if [[ "$CALLBACK_OK" == "yes" ]]; then
-  echo "  ✓ callback log markers observed (tombstone written + purge completed)"
-else
-  echo "  WARNING: callback log markers not seen within timeout — may have fired before polling or partition had no active session"
-  echo "  checking recent logs for any evidence..."
-  docker logs --tail 200 cloud-storage-store0 2>&1 | grep -E "Cloud DB tombstone|Cloud DB purge" | tail -10 || true
-  docker logs --tail 200 cloud-storage-store1 2>&1 | grep -E "Cloud DB tombstone|Cloud DB purge" | tail -10 || true
-  docker logs --tail 200 cloud-storage-store2 2>&1 | grep -E "Cloud DB tombstone|Cloud DB purge" | tail -10 || true
-fi
-
-# Print recent callback evidence.
-(docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store0 2>&1
- docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store1 2>&1
- docker logs --since "$POLL_START_TS" --tail 500 cloud-storage-store2 2>&1) \
-  | grep -E "Cloud DB tombstone written|Cloud DB purge completed" | tail -20
-
-COUNT_AFTER=$(docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
-  -c 'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && \
-      mc ls --recursive local/'"$BUCKET"'/'"$DB_PREFIX"' 2>/dev/null | wc -l')
-COUNT_AFTER="${COUNT_AFTER//[^0-9]/}"
-printf "\nObjects after db delete: %s\n" "$COUNT_AFTER"
-if [[ "$COUNT_AFTER" == "0" || -z "$COUNT_AFTER" ]]; then
-  echo "✓ DB DELETE CALLBACKS SUCCESS: prefix purged (count=0)"
-else
-  echo "ERROR: partition cloud prefix not purged after callbacks (remaining=${COUNT_AFTER})"
-  return 1
-fi
-}
-
-run_step_8_6_delete_callbacks
+bash "$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh" --keep-stack
 ```
+
+What this phase does:
+1. picks a partition id and cloud DB prefix,
+2. writes a probe object,
+3. triggers `/test/raftDelete/{groupId}`,
+4. polls store logs for callback markers,
+5. verifies the prefix is fully purged.
 
 **Success criteria:**
 - ✅ Logs include `Cloud DB tombstone written` (from `onDBDeleteBegin`)
 - ✅ Logs include `Cloud DB purge completed` (from `onDBDeleted`, may appear up to ~60s later)
 - ✅ `Objects after db delete` is `0` for the detected DB prefix
 
-## Total-Loss Recovery from Cloud
+### Advanced 4: Local Disk-Loss Recovery (Automated)
 
-Steps 1–8 verify that SSTs **and** a consistent metadata set (`CURRENT` / `MANIFEST-*` /
-`OPTIONS-*`) reach the object store. Recovery validation is covered by the automated test:
+This scenario is covered by the main end-to-end harness (`recovery-test` phase):
 
 ```bash
-$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --keep-stack
+bash "$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh" --keep-stack
 ```
 
-This loads 150 vertices, flushes/compacts, asserts the consistent metadata set is in every bucket,
-wipes each store's RocksDB **state machine** (`db/` + `hgstore-metadata` — the cloud-mirrored
-tree) while **preserving `raft/`** so the node rejoins its Raft group cleanly, then restarts and
-confirms the recovered vertex count matches the pre-wipe baseline. It fails loudly if the
-consistent-restore guard trips (`Cloud restore inconsistent`) or the counts differ.
+What this phase does:
+1. checks baseline vertex count (> 0),
+2. triggers `/test/flush` on all stores,
+3. verifies every bucket contains recovery metadata (`CURRENT` / `MANIFEST-*` / `OPTIONS-*`) and SSTs,
+4. wipes each store's local state-machine data while preserving `raft/` and `snapshot/`,
+5. restarts stores and validates recovered vertex count matches baseline,
+6. checks logs for restore-consistency errors and stale `.hyd-tmp` leftovers.
 
-> **Full disk-loss variant (stronger test).** To simulate whole-volume loss (Raft included),
-> replace the wipe with:
-> ```bash
-> docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml rm -sf store0 store1 store2
-> for i in 0 1 2; do docker volume rm cloud-storage-test_hg-store${i}-data 2>/dev/null || true; done
-> docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml up -d store0 store1 store2
-> ```
-> Recovery then depends on Raft group re-formation in addition to cloud pre-hydration; run this
-> after the standard path above passes.
 
-### Step 9 (Optional): Destroy the Cluster
+**Success criteria:**
+- ✅ Baseline vertex count is non-zero before the wipe
+- ✅ Recovery metadata + SSTs exist in all three buckets before the wipe
+- ✅ Recovered vertex count after restart equals baseline
+- ✅ No `Cloud restore inconsistent` log errors or stale `.hyd-tmp` files
 
-When done with manual verification, stop and clean up:
+## Cleanup (Optional)
+
+When done with manual verification, stop and clean up. Use the **same project and compose file
+the harness created the stack with** — the committed `docker-compose.yml` declares
+`name: cloud-storage`, so a `down` against it targets a different project and leaves the
+`cloud-storage-test` stack running:
 
 ```bash
-docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml down
+export COMPOSE_PROJECT_NAME=cloud-storage-test
+CF="$REPO_ROOT/docker/cloud-storage/.generated/docker-compose.yml"
+docker compose -f "$CF" down
 ```
 
-To also remove data and logs directories:
+To also remove the store data volumes and the generated artifacts:
 
 ```bash
-docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml down
-rm -rf $REPO_ROOT/docker/cloud-storage/data/ $REPO_ROOT/docker/cloud-storage/logs/
+export COMPOSE_PROJECT_NAME=cloud-storage-test
+CF="$REPO_ROOT/docker/cloud-storage/.generated/docker-compose.yml"
+docker compose -f "$CF" down -v
+rm -rf $REPO_ROOT/docker/cloud-storage/.generated/
 ```
 
 To reset everything including built Docker images (for a fresh start):
@@ -765,16 +675,16 @@ curl -s http://localhost:8080/graphs/hugegraph/graph/vertices | python3 -c "impo
 docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs server | grep -i "error\|exception" | tail -20
 ```
 
-**Step 6: Partition info showing empty**
+**Optional partition check shows empty**
 ```bash
 # Data may still be in RocksDB memory, not yet in partitions
-# This is normal - proceed to Step 7 to flush
+# This is normal - proceed to Core Step 5 to flush
 
 # Or check if data was actually written
 docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | grep -i "vertex\|edge\|insert" | tail -10
 ```
 
-**Step 7: Flush endpoint fails or stores become unhealthy**
+**Core Step 5: Flush endpoint fails or stores become unhealthy**
 ```bash
 # Check individual store health
 for i in 0 1 2; do
@@ -787,7 +697,7 @@ done
 docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | tail -50 | grep -i "error\|exception"
 ```
 
-**Step 8: Buckets showing 0 files after flush**
+**Core Step 5 / Advanced 1: Buckets showing 0 files after flush**
 
 This is the most common issue. Debug step-by-step:
 
@@ -819,7 +729,8 @@ This is the most common issue. Debug step-by-step:
 
 5. **Manually check MinIO buckets:**
    ```bash
-   export HG_NET="cloud-storage-net"
+   type resolve_hg_net >/dev/null 2>&1 || { echo "Run Core Step 1 helper first"; exit 1; }
+   resolve_hg_net
    docker run --rm --entrypoint /bin/sh --network "$HG_NET" minio/mc:RELEASE.2025-08-13T08-35-41Z \
      -c 'mc alias set local http://minio:9000 minioadmin minioadmin && mc ls local/'
    ```
@@ -924,40 +835,44 @@ docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml down
 
 ## Summary of Manual Verification Workflow
 
-This manual verification process validates the complete SST upload pipeline:
+Use this sequence for the end-to-end manual flow:
 
-1. **Step 1:** Start the infrastructure (MinIO, PD, 3 Store nodes, HugeGraph Server)
-2. **Step 2:** Wait for all services to become healthy
-3. **Step 3:** Create graph schema (property keys, vertex labels, edge labels)
-4. **Step 4:** Load 150+ test vertices to trigger compaction
-5. **Step 5:** (Optional) Verify data was stored
-6. **Step 6:** Verify data distribution across store nodes
-7. **Step 7:** Trigger `/test/flush` on each store to flush SST files and upload to MinIO
-8. **Step 8:** Verify SST files are present in MinIO buckets
-9. **Step 8.5 (optional):** Verify managed delete/clear cleans graph cloud prefix (and optional no-orphan restart check)
-10. **Step 8.6 (optional, advanced):** Verify DB delete callbacks (`onDBDeleteBegin` + `onDBDeleted`) on one partition
-11. **Recovery (optional):** Run `test-graph-queries-and-sst.sh --keep-stack` (without `--infra-only`)
-    — the script wipes local RocksDB state, restarts, and confirms the recovered vertex count matches
-    the pre-wipe baseline (see [Total-Loss Recovery from Cloud](#total-loss-recovery-from-cloud))
-12. **Step 9:** Cleanup when done
+1. **Core Step 1:** Set environment and start infrastructure (`--keep-stack --infra-only`)
+2. **Core Step 2:** Wait for all services to become healthy
+3. **Core Step 3:** Create graph schema
+4. **Core Step 4:** Load 150+ vertices
+5. **Core Step 5:** Flush stores and verify SST + metadata in MinIO UI
+6. **Advanced 1 (optional):** Run strict script assertions
+7. **Advanced 2 (optional):** Verify `clear()` semantics and no-orphan re-hydration
+8. **Advanced 3 (optional):** Verify DB delete callbacks and remote prefix purge
+9. **Advanced 4 (optional):** Simulate local disk loss and validate cloud re-hydration
+10. **Cleanup (optional):** Tear down containers/volumes
 
-- **Note:** For manual Step 3+ workflows, run Step 1 with `--infra-only` so the script starts infrastructure but skips scripted data creation/validation that can mutate graph state.
+- **Note:** For manual Core Step 3+ workflows, always use Core Step 1 with `--infra-only` so
+  automation starts infrastructure but doesn't mutate graph state.
 
-**Success = Non-zero SST file counts in all three buckets after Step 8** (and, for recovery,
-`AFTER == BEFORE` vertex count after the total-loss recovery)
+For automated validation (including local state wipe + cloud re-hydration checks), run:
+
+```bash
+$REPO_ROOT/docker/cloud-storage/scripts/test-graph-queries-and-sst.sh --keep-stack
+```
+
+
+**Success = SST and recovery metadata appear in all three buckets after Core Step 5**
+(or after Advanced 1 strict checks).
 
 ## What Gets Verified
 
 ✅ Graph schema creation works  
 ✅ Vertex/edge insertion works  
-✅ Data distribution across 3 store nodes  
 ✅ RocksDB SST file generation via explicit flush/compaction  
 ✅ Cloud storage plugin uploads SST files to MinIO  
 ✅ Multiple buckets receive files consistently  
 ✅ A consistent `CURRENT` + `MANIFEST-*` + `OPTIONS-*` metadata set is mirrored alongside SSTs  
-✅ Managed delete/clear prunes the graph cloud prefix (optional step)  
+✅ `clear()` keeps graph data empty after restart (optional Advanced 2)  
+✅ `clear()` does not require whole-prefix purge in shared cloud DB layouts (optional Advanced 2)  
 ✅ DB delete callbacks write tombstone and purge remote DB prefix (optional advanced step)  
-✅ A store recovers all data from cloud after losing its local RocksDB state (pre-hydration)
+✅ A store recovers all data from cloud after losing its local RocksDB state (automated script)
 
 ## Notes
 

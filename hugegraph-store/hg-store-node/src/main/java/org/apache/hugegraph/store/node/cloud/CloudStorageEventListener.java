@@ -1935,12 +1935,19 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     /**
      * Removes the deleted SST file from the active cloud storage provider.
      *
-     * @param dbName   RocksDB instance name (partition id)
+     * @param dbNameOrPath RocksDB instance name (partition id) or DB directory path
      * @param cfName   column-family name
      * @param filePath absolute local path of the deleted SST file
      */
     @Override
-    public void onTableFileDeleted(String dbName, String cfName, String filePath) {
+    public void onTableFileDeleted(String dbNameOrPath, String cfName, String filePath) {
+        // RocksDB delivers the DB *directory path* here (from db.getName()), not the logical name —
+        // exactly as it does for onTableFileCreated. Resolve it the same way: without this, the
+        // delete guard's live-set lookup (RocksDBFactory.getLiveSstFiles), the metadata-sync
+        // capture (captureMetadataSnapshot), and the sync-tracker updates all key off a path that
+        // is absent from dbSessionMap, so every superseded-SST removal is silently skipped and the
+        // object leaks in cloud forever (with an endless deferred-delete retry loop).
+        String dbName = resolveDbName(dbNameOrPath, filePath);
         CloudStorageProvider provider = CloudStorageProviderFactory.getActiveProvider();
         if (provider == null) {
             return;
@@ -2573,9 +2580,11 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     /**
-     * Deletes remote {@code MANIFEST-*}/{@code OPTIONS-*} (and, always, {@code *.log}) objects for
-     * this DB that are not part of the just-published snapshot, bounding remote metadata growth.
-     * {@code CURRENT} and {@code *.sst} are never pruned here (SST lifecycle is the delete guard's).
+     * Deletes remote {@code MANIFEST-*}/{@code OPTIONS-*} objects for this DB that are not part of
+     * the just-published snapshot, bounding remote metadata growth. {@code CURRENT} and
+     * {@code *.sst} are never pruned here (SST lifecycle is the delete guard's). WAL {@code *.log}
+     * files are never mirrored to cloud (the snapshot only uploads CURRENT/MANIFEST/OPTIONS/SST),
+     * so there is nothing to prune for them.
      */
     private void pruneRemoteMetadata(CloudStorageProvider provider, String dbDir,
                                      MetadataSnapshot snapshot) {
@@ -2748,7 +2757,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
             // Tombstone check itself failed — cannot safely determine generation, and cloud cannot
             // validate the DB. Proceed from local state ONLY if it is self-consistent (valid
             // CURRENT→MANIFEST); orphan SSTs without a valid lineage must not silently boot.
-            if (hasConsistentLocalMetadata(root)) {
+            if (hasInconsistentLocalMetadata(root)) {
                 throw new IllegalStateException(
                         String.format("Cloud pre-hydration: tombstone check failed for db=%s and "
                                       + "local metadata is not self-consistent (no valid "
@@ -2992,7 +3001,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
             // A weaker "any SST present" check would let a stale/partial directory (orphan SSTs, no
             // valid CURRENT lineage) boot silently — risking a rollback/partial open. Require the
             // stronger predicate; otherwise fail startup loudly.
-            if (hasConsistentLocalMetadata(localRoot)) {
+            if (hasInconsistentLocalMetadata(localRoot)) {
                 throw new IllegalStateException(
                         String.format("Cloud pre-hydration list failed for prefix=%s and local "
                                       + "metadata is not self-consistent (no valid CURRENT→MANIFEST "
@@ -3006,13 +3015,18 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     }
 
     /**
-     * Returns {@code true} only if the local DB has SELF-CONSISTENT metadata: a {@code CURRENT}
-     * pointer that references a {@code MANIFEST-*} present locally. This is a stronger readiness
-     * predicate than a "local SST exists" check — orphan SSTs without a valid CURRENT→MANIFEST
-     * lineage (a partial/rolled-back directory) do NOT qualify. Used to decide whether it is safe
-     * to fall back to local state when cloud is unreachable and cannot validate the DB.
+     * Returns {@code true} when the local DB metadata is NOT self-consistent — i.e. there is no
+     * usable {@code CURRENT} → {@code MANIFEST-*} lineage: {@code CURRENT} is absent, empty, or
+     * unreadable, or it references a {@code MANIFEST-*} that is missing locally. Returns
+     * {@code false} only when {@code CURRENT} points at a {@code MANIFEST-*} that exists locally
+     * (a valid lineage).
+     *
+     * <p>This is a stronger predicate than a "local SST exists" check — orphan SSTs without a valid
+     * CURRENT→MANIFEST lineage (a partial/rolled-back directory) count as inconsistent. Callers use
+     * it to refuse opening a DB from local state when cloud is unreachable and cannot validate it:
+     * an inconsistent directory ({@code true}) must not silently boot as a partial/rolled-back DB.
      */
-    private static boolean hasConsistentLocalMetadata(Path root) {
+    private static boolean hasInconsistentLocalMetadata(Path root) {
         Path current = root.resolve("CURRENT");
         if (!Files.exists(current)) {
             return true;

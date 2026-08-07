@@ -99,7 +99,8 @@ public class AppConfigCloudStorageTest {
         assertTrue(cfg.isStartupHydrationEnabled());
         assertEquals(3000L, cfg.getReadMissGuardWindowMs());
         assertEquals(3, cfg.getUploadRetryMaxAttempts());
-        assertEquals(64, cfg.getUploadBackpressureHighWatermark());
+        // Backpressure is opt-in (disabled by default).
+        assertEquals(0, cfg.getUploadBackpressureHighWatermark());
         assertNotNull(cfg.getProviderProperties());
         assertTrue(cfg.getProviderProperties().isEmpty());
     }

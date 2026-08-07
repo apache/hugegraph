@@ -251,6 +251,42 @@ public class CloudStorageEventListenerTest {
     }
 
     @Test
+    public void onTableFileDeleted_resolvesPathFormDbName_beforeGuardAndSync() throws Exception {
+        // RocksDB delivers the DB *directory path* (db.getName()) to the delete callback, exactly
+        // as it does to the create callback. The listener must resolve it to the logical DB name
+        // before the delete guard / metadata sync run — otherwise those key off a path absent from
+        // dbSessionMap and every superseded-SST removal is silently skipped (object leaks in cloud).
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-resolve-del-db-name");
+        Path dbDir = tmpRoot.resolve("00001");
+        Files.createDirectories(dbDir);
+
+        AtomicReference<String> observedDbName = new AtomicReference<>();
+        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString())) {
+            @Override
+            boolean syncMetadataSnapshotInline(CloudStorageProvider provider, String dbName) {
+                observedDbName.set(dbName);
+                return true;
+            }
+        };
+
+        CloudStorageProviderFactory.reset();
+        // Seed the dir->logical mapping as happens when the DB opens.
+        l.onDBCreated("00001", dbDir.toString());
+
+        CapturingProvider provider = new CapturingProvider();
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+        try {
+            // Pass the path form, as RocksDB does in production.
+            l.onTableFileDeleted(dbDir.toString(), "default", dbDir.resolve("000001.sst").toString());
+            assertEquals("delete guard/metadata sync must key off the resolved logical name",
+                         "00001", observedDbName.get());
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
     public void onTableFileCreated_uploadFailure_doesNotThrow_andSubmitsToRetryQueue()
             throws Exception {
         // Exercises the *async provider upload-failure* path: the SST is staged successfully
@@ -899,6 +935,23 @@ public class CloudStorageEventListenerTest {
                 Thread.currentThread().interrupt();
                 throw new IOException("upload sleep interrupted", e);
             }
+        }
+    }
+
+    /**
+     * A provider whose tombstone existence check ({@link #fileExists}) always fails with an
+     * {@link IOException}, simulating a cloud that cannot confirm whether the previous generation
+     * was tombstoned. Exercises the {@code preHydrateDbFiles} catch-block that must fall back to
+     * inspecting local CURRENT→MANIFEST self-consistency.
+     */
+    static class TombstoneCheckFailingProvider extends CapturingProvider {
+
+        final AtomicInteger fileExistsCalls = new AtomicInteger();
+
+        @Override
+        public boolean fileExists(String remoteKey) throws IOException {
+            fileExistsCalls.incrementAndGet();
+            throw new IOException("simulated tombstone-check failure for " + remoteKey);
         }
     }
 
@@ -1828,6 +1881,77 @@ public class CloudStorageEventListenerTest {
                    provider.deletes.contains(tombstoneKey));
 
         deleteRecursively(tmpRoot.toFile());
+    }
+
+    /**
+     * When the tombstone existence check itself throws (cloud unreachable) AND the local metadata
+     * is not self-consistent (no valid CURRENT→MANIFEST lineage), the DB must NOT boot: generation
+     * state is unknowable, so silently opening from orphan local state could resurrect deleted
+     * data. {@code preHydrateDbFiles} must fail loudly with an {@link IllegalStateException}.
+     */
+    @Test
+    public void onDBOpening_tombstoneCheckFailsAndLocalMetadataInconsistent_blocksOpen()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-storage");
+        Path dbDir = tmpRoot.resolve("graph0");
+        Files.createDirectories(dbDir);
+        // Orphan SST with NO CURRENT — hasInconsistentLocalMetadata(root) returns true.
+        Files.write(dbDir.resolve("000001.sst"), "orphan".getBytes());
+
+        TombstoneCheckFailingProvider provider = new TombstoneCheckFailingProvider();
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+        CloudStorageEventListener l =
+                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+
+        try {
+            l.onDBOpening("graph0", dbDir.toString());
+            fail("Expected IllegalStateException when tombstone check fails and local metadata "
+                 + "is not self-consistent");
+        } catch (IllegalStateException e) {
+            assertTrue("Message must explain the DB open was blocked for safety, got: "
+                       + e.getMessage(),
+                       e.getMessage().contains("not self-consistent"));
+        } finally {
+            assertTrue("Tombstone check must have been attempted",
+                       provider.fileExistsCalls.get() > 0);
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    /**
+     * When the tombstone existence check throws (cloud unreachable) but the local metadata IS
+     * self-consistent (valid CURRENT→MANIFEST lineage present), it is safe to open from local
+     * state: {@code preHydrateDbFiles} must swallow the failure, log a warning, and proceed
+     * without throwing.
+     */
+    @Test
+    public void onDBOpening_tombstoneCheckFailsButLocalMetadataConsistent_proceeds()
+            throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-storage");
+        Path dbDir = tmpRoot.resolve("graph0");
+        Files.createDirectories(dbDir);
+        // Self-consistent local state: CURRENT points to an existing MANIFEST.
+        Files.write(dbDir.resolve("MANIFEST-000001"), "manifest".getBytes());
+        Files.write(dbDir.resolve("CURRENT"), "MANIFEST-000001".getBytes());
+
+        TombstoneCheckFailingProvider provider = new TombstoneCheckFailingProvider();
+        // No remote files: after the fall-through, listRemoteKeys is empty and hydration is a no-op.
+        CloudStorageProviderFactory.setActiveProviderForTest(provider);
+        CloudStorageEventListener l =
+                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+
+        try {
+            // Must NOT throw despite the tombstone-check IOException.
+            l.onDBOpening("graph0", dbDir.toString());
+            assertTrue("Tombstone check must have been attempted",
+                       provider.fileExistsCalls.get() > 0);
+            // Self-consistent local state must be left intact.
+            assertTrue("Local CURRENT must remain", Files.exists(dbDir.resolve("CURRENT")));
+            assertTrue("Local MANIFEST must remain",
+                       Files.exists(dbDir.resolve("MANIFEST-000001")));
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
     }
 
 }

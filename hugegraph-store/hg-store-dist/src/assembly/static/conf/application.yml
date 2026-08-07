@@ -78,7 +78,7 @@ logging:
 #     upload-retry-max-attempts: 3         # whole-file retries after first failure; default 3 (0 disables)
 #     upload-retry-initial-delay-ms: 1000  # delay before first retry (ms); default 1000
 #     upload-retry-max-delay-ms: 60000     # exponential-backoff ceiling (ms); default 60000
-#     upload-backpressure-high-watermark: 64  # slow ingestion while pending-upload backlog exceeds this; 0 disables
+#     upload-backpressure-high-watermark: 0   # opt-in: >0 parks RocksDB flush/compaction thread while backlog exceeds this; 0 (default) disables
 #     dlq-max-size: 100000                 # max DLQ entries before oldest are evicted; bounds memory/disk on outage
 #     metadata-sync-debounce-ms: 1000      # coalesce per-SST metadata sync; <= 0 publishes on every SST
 #     metadata-sync-max-unpublished: 32    # force a publish after N unmirrored SSTs (count-bounded RPO); <= 0 disables
@@ -110,8 +110,11 @@ cloud:
     upload-retry-max-attempts: 3
     upload-retry-initial-delay-ms: 1000
     upload-retry-max-delay-ms: 60000
-    # Backpressure high-watermark on the pending-upload backlog; 0 disables.
-    upload-backpressure-high-watermark: 64
+    # Backpressure high-watermark on the pending-upload backlog; 0 (default) disables it.
+    # Opt-in only: when > 0 the throttle parks RocksDB's flush/compaction thread (up to 30s per
+    # SST event), which under a sustained cloud outage can stall memtable flushes / stop writes for
+    # the partition. Set > 0 only if bounding local-only data during an outage is worth that trade.
+    upload-backpressure-high-watermark: 0
     # Max dead-letter-queue entries retained before the oldest are evicted; bounds memory/disk
     # during a prolonged provider outage (evicted files stay recoverable via delete guard/backfill).
     dlq-max-size: 100000

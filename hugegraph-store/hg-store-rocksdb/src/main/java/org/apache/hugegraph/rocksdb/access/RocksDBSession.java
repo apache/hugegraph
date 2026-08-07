@@ -79,6 +79,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     final AtomicInteger refCount;
     final AtomicBoolean shutdown;
     final String tempSuffix = "_temp_";
+    final String cloudMetaTempMarker = "_cloudmeta_";
     private final transient String graphName;
     private final HugeConfig hugeConfig;
     private final ReentrantReadWriteLock cfHandleLock;
@@ -357,23 +358,32 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
             dbs.ensureCapacity(files.length);
             // search all db path
             for (final File sFile : files) {
+                if (!sFile.isDirectory()) {
+                    continue;
+                }
                 final String name = sFile.getName();
                 if (!name.startsWith(prefix) && !name.equals(defaultName)) {
                     continue;
                 }
-                if (name.endsWith(tempSuffix)) {
+                // Ignore transient dirs created by snapshot/checkpoint capture.
+                if (name.endsWith(tempSuffix) || name.contains(cloudMetaTempMarker)) {
                     continue;
                 }
                 long v1 = -1L;
                 long v2 = -1L;
                 if (name.length() > defaultName.length()) {
                     String[] versions = name.substring(prefix.length()).split("_");
-                    if (versions.length == 1) {
+                    if (versions.length != 1 && versions.length != 2) {
+                        continue;
+                    }
+                    try {
                         v1 = Long.parseLong(versions[0]);
-                    } else if (versions.length == 2) {
-                        v1 = Long.parseLong(versions[0]);
-                        v2 = Long.parseLong(versions[1]);
-                    } else {
+                        if (versions.length == 2) {
+                            v2 = Long.parseLong(versions[1]);
+                        }
+                    } catch (NumberFormatException e) {
+                        log.debug("Skip invalid db-path candidate '{}': {}", name,
+                                  e.getMessage());
                         continue;
                     }
                 }

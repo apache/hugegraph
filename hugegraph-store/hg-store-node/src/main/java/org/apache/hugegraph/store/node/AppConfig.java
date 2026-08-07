@@ -670,8 +670,10 @@ public class AppConfig {
         private int uploadRetryMaxAttempts = 3;
         private long uploadRetryInitialDelayMs = 1_000L;
         private long uploadRetryMaxDelayMs = 60_000L;
-        // Backpressure high-watermark on the pending-upload backlog; 0 disables.
-        private int uploadBackpressureHighWatermark = 64;
+        // Backpressure high-watermark on the pending-upload backlog; 0 (default) disables it.
+        // Opt-in: when > 0 the throttle parks RocksDB's flush/compaction thread (up to 30s/event),
+        // which under a sustained cloud outage can stall memtable flushes / stop writes.
+        private int uploadBackpressureHighWatermark = 0;
         // Max DLQ entries before oldest are evicted (bounds memory/disk under a prolonged outage).
         private int dlqMaxSize = 100_000;
         // Debounce window (ms) for the per-SST metadata sync; <= 0 disables debouncing.

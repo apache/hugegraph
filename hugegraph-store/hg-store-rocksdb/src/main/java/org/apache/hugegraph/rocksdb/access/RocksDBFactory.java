@@ -261,7 +261,7 @@ public final class RocksDBFactory {
                          info.getFilePath(), info.getStatus().getCodeString());
                 return;
             }
-            log.debug("onTableFileDeleted: db={}, path={}",
+            log.info("onTableFileDeleted: db={}, path={}",
                       info.getDbName(), info.getFilePath());
             rocksdbChangedListeners.forEach(listener ->
                     listener.onTableFileDeleted(info.getDbName(), null, info.getFilePath())
@@ -416,13 +416,23 @@ public final class RocksDBFactory {
     public void destroyGraphDB(String dbName) {
         log.info("destroy {} 's  rocksdb.", dbName);
         RocksDBSession dbSession = dbSessionMap.get(dbName);
-        releaseGraphDB(dbName);
-        // Add delete mark
         if (dbSession != null) {
-            destroyGraphDBs.add(new DBSessionWatcher(dbSession));
+            // Fire onDBDeleteBegin BEFORE releasing the session or enqueuing the destroy watcher.
+            // A listener may throw here to HOLD the delete — e.g. the cloud listener cannot durably
+            // persist its anti-resurrection marker, so proceeding would risk a crash re-hydrating
+            // stale objects as live data. If we had already enqueued the watcher (which
+            // asynchronously deletes the local dir and purges cloud) the throw could not actually
+            // stop the delete. By notifying first and letting the exception propagate before
+            // release/enqueue, the DB is left intact and still in dbSessionMap, so the caller can
+            // retry the destroy once the underlying problem clears.
             rocksdbChangedListeners.forEach(listener -> {
                 listener.onDBDeleteBegin(dbSession.getGraphName(), dbSession.getDbPath());
             });
+        }
+        releaseGraphDB(dbName);
+        // Add delete mark only after the begin-notification succeeded for every listener.
+        if (dbSession != null) {
+            destroyGraphDBs.add(new DBSessionWatcher(dbSession));
         }
     }
 

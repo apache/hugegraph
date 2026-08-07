@@ -111,8 +111,11 @@
                         <exclude>**/*Benchmark.java</exclude>
                         <exclude>**/*E2ETest.java</exclude>
                     </excludes>
-                    <!-- When running explicitly, allow plenty of memory for generating 20 GB of files -->
-                    <argLine>-Xmx512m</argLine>
+                    <!-- When running explicitly, allow plenty of memory for generating 20 GB of files.
+                         @{argLine} preserves the JaCoCo agent injected by jacoco:prepare-agent (which
+                         sets the 'argLine' property); a bare literal here would drop the agent and this
+                         module would report zero coverage. -->
+                    <argLine>@{argLine} -Xmx512m</argLine>
                     <!-- Generous timeout for large data volumes (6 hours) -->
                     <forkedProcessTimeoutInSeconds>21600</forkedProcessTimeoutInSeconds>
                 </configuration>
