@@ -184,7 +184,13 @@ public class HstoreSessionsImpl extends HstoreSessions {
             hgStoreClient.getPdClient().delGraph(this.graphName);
         } catch (PDException ignored) {
 
+        } finally {
+            clearInitializedGraph(this.graphName);
         }
+    }
+
+    private static void clearInitializedGraph(String graphName) {
+        infoInitializedGraph.remove(graphName);
     }
 
     @Override

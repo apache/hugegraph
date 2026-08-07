@@ -19,7 +19,10 @@ package org.apache.hugegraph.backend.store.hstore;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -34,6 +37,32 @@ public class HstoreSessionsImplTest {
             String classFile = new String(stream.readAllBytes(), StandardCharsets.ISO_8859_1);
             Assert.assertFalse(classFile.contains(
                              "org/apache/hugegraph/testutil/Assert"));
+        }
+    }
+
+    @Test
+    public void testClearInitializedGraphStateRepeatedly() throws Exception {
+        Field initializedGraphField = HstoreSessionsImpl.class.getDeclaredField(
+                "infoInitializedGraph");
+        initializedGraphField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Set<String> initializedGraphs =
+                (Set<String>) initializedGraphField.get(null);
+
+        Method clearInitializedGraph =
+                HstoreSessionsImpl.class.getDeclaredMethod(
+                        "clearInitializedGraph", String.class);
+        clearInitializedGraph.setAccessible(true);
+
+        String graphName = "hugegraph/hstore-clear-test";
+        try {
+            for (int i = 0; i < 50; i++) {
+                Assert.assertTrue(initializedGraphs.add(graphName));
+                clearInitializedGraph.invoke(null, graphName);
+                Assert.assertFalse(initializedGraphs.contains(graphName));
+            }
+        } finally {
+            initializedGraphs.remove(graphName);
         }
     }
 }
