@@ -1607,14 +1607,15 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      * Pins and asynchronously uploads the newly created SST file to the active cloud
      * storage provider.
      *
-     * @param dbName   RocksDB instance name (partition id)
+     * @param dbNameOrPath RocksDB instance name (partition id) or DB directory path
      * @param cfName   column-family name
      * @param filePath absolute local path of the new SST file
      * @param fileSize file size in bytes (informational)
      */
     @Override
-    public void onTableFileCreated(String dbName, String cfName,
+    public void onTableFileCreated(String dbNameOrPath, String cfName,
                                    String filePath, long fileSize) {
+        String dbName = resolveDbName(dbNameOrPath, filePath);
         recordDb(dbName, parentDir(filePath));
         CloudStorageMetrics.registerDatabaseMetrics(dbName);
         String remoteKey = toRelativeKey(filePath);
@@ -2204,8 +2205,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         if (provider == null) {
             return;
         }
-        String normalised = Paths.get(dbNameOrPath).toAbsolutePath().normalize().toString();
-        String dbName = dbNameByDir.getOrDefault(normalised, dbNameOrPath);
+        String dbName = resolveDbName(dbNameOrPath, null);
         // Skip metadata sync during truncation or grace period to allow purge to complete cleanly
         if (!isActivelyTruncating(dbName) && !isInTruncationGracePeriod(dbName)) {
             syncMetadataSnapshotInline(provider, dbName);
@@ -2229,6 +2229,35 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     private String parentDir(String filePath) {
         Path parent = Paths.get(filePath).toAbsolutePath().normalize().getParent();
         return parent == null ? null : parent.toString();
+    }
+
+    /** Resolves callback DB identifiers that may be path-form into logical DB names. */
+    private String resolveDbName(String dbNameOrPath, String filePath) {
+        if (dbNameOrPath == null || dbNameOrPath.isBlank()) {
+            String parent = parentDir(filePath);
+            if (parent == null) {
+                return dbNameOrPath;
+            }
+            Path name = Paths.get(parent).getFileName();
+            return name == null ? dbNameOrPath : name.toString();
+        }
+
+        if (!isPathLike(dbNameOrPath)) {
+            return dbNameOrPath;
+        }
+
+        String normalised = Paths.get(dbNameOrPath).toAbsolutePath().normalize().toString();
+        String mapped = dbNameByDir.get(normalised);
+        if (mapped != null && !mapped.isBlank()) {
+            return mapped;
+        }
+
+        Path name = Paths.get(normalised).getFileName();
+        return name == null ? dbNameOrPath : name.toString();
+    }
+
+    private static boolean isPathLike(String value) {
+        return value.contains("/") || value.contains("\\");
     }
 
     /**

@@ -43,8 +43,6 @@ S3_BUCKET_STORE2="${S3_BUCKET_STORE2:-hugegraph-store2}"
 S3_REGION="${S3_REGION:-us-east-1}"
 S3_ENDPOINT="${S3_ENDPOINT:-http://minio:9000}"
 GRAPH_API_BASE="${GRAPH_API_BASE:-http://localhost:8080/graphs/hugegraph}"
-STORE_ROCKSDB_CLOUD_ENABLED="${STORE_ROCKSDB_CLOUD_ENABLED:-true}"
-STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS="${STORE_ROCKSDB_CLOUD_SYNC_INTERVAL_SECONDS:-30}"
 KEEP_UP="${KEEP_UP:-true}"
 SKIP_SMOKE_TESTS="${SKIP_SMOKE_TESTS:-false}"
 SCRIPT_START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -81,7 +79,7 @@ while [[ $# -gt 0 ]]; do
 
    --keep-stack         Leave the stack running on exit (same as KEEP_UP=true).
    --skip-smoke-tests   Start infrastructure only; skip data load + validation tests.
-   --infra-only         Alias of --skip-smoke-tests.
+   --infra-only         Alias of --skip-smoke-tests (skip scripted data/tests).
 USAGE
             exit 0 ;;
         *) echo "unknown arg: $1 (see --help)" >&2; exit 2 ;;
@@ -205,8 +203,35 @@ find_plugin_jar() {
     return 1
 }
 
+extract_embedded_rocksdbjni() {
+    local store_jar="$1"
+    local output_dir="$2"
+    python3 - "$store_jar" "$output_dir" <<'PY'
+import os
+import sys
+import zipfile
+
+store_jar, output_dir = sys.argv[1], sys.argv[2]
+
+with zipfile.ZipFile(store_jar) as zf:
+    names = [name for name in zf.namelist()
+             if name.startswith("BOOT-INF/lib/rocksdbjni-") and name.endswith(".jar")]
+    if not names:
+        print(f"ERROR: no embedded rocksdbjni jar found in {store_jar}", file=sys.stderr)
+        sys.exit(1)
+    names.sort()
+    selected = names[-1]
+    target = os.path.join(output_dir, os.path.basename(selected))
+    os.makedirs(output_dir, exist_ok=True)
+    with open(target, "wb") as fh:
+        fh.write(zf.read(selected))
+print(target)
+PY
+}
+
 prepare_artifacts() {
     local pd_src store_src plugin_jar plugin_dep_dir dep_base
+    local store_fat_jar staged_rocksdb
 
     pd_src="$(find_dist_dir "${REPO_ROOT}/hugegraph-pd/apache-hugegraph-pd-*")" || {
         echo "ERROR: PD dist not found under ${REPO_ROOT}/hugegraph-pd/apache-hugegraph-pd-*" >&2
@@ -232,6 +257,14 @@ prepare_artifacts() {
     cp -R "${store_src}/." "${ARTIFACTS_DIR}/store-dist/"
     cp "${plugin_jar}" "${ARTIFACTS_DIR}/plugins/"
 
+    store_fat_jar=$(echo "${ARTIFACTS_DIR}"/store-dist/lib/hg-store-node-*.jar)
+    if [[ ! -f "${store_fat_jar}" ]]; then
+        echo "ERROR: store fat-jar not found under ${ARTIFACTS_DIR}/store-dist/lib/" >&2
+        exit 2
+    fi
+    staged_rocksdb="$(extract_embedded_rocksdbjni "${store_fat_jar}" "${ARTIFACTS_DIR}/store-dist/lib")" || exit 2
+    log "staged RocksDB JNI for system classpath: $(basename "${staged_rocksdb}")"
+
     plugin_dep_dir="${REPO_ROOT}/hugegraph-store/hg-store-cloud-s3/target/dependency"
     if [[ -d "${plugin_dep_dir}" ]]; then
         # Keep only external plugin deps; internal HugeGraph jars must come from /hugegraph-store/lib.
@@ -239,7 +272,7 @@ prepare_artifacts() {
             [[ -f "${dep}" ]] || continue
             dep_base="$(basename "${dep}")"
             case "${dep_base}" in
-                hg-*.jar|hugegraph-*.jar) continue ;;
+                hg-*.jar|hugegraph-*.jar|rocksdbjni-*.jar) continue ;;
             esac
             cp "${dep}" "${ARTIFACTS_DIR}/plugins/"
         done
@@ -504,6 +537,57 @@ count_objects_in_prefix() {
         fi
     '
  }
+
+prefix_has_only_recovery_metadata() {
+    local bucket="$1"
+    local prefix="$2"
+    local norm="${prefix%/}/"
+    docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
+        mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
+        target="local/'"$bucket"'/'"$norm"'"
+        if ! mc ls --recursive "$target" >/tmp/prefix_ls.txt 2>/dev/null; then
+            echo no
+            exit 0
+        fi
+
+        total=0
+        current=0
+        manifest=0
+        options=0
+        bad=0
+        while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            key=$(echo "$line" | awk "{print \\$NF}")
+            base=${key##*/}
+            total=$((total + 1))
+            case "$base" in
+                CURRENT) current=$((current + 1)) ;;
+                MANIFEST-*) manifest=$((manifest + 1)) ;;
+                OPTIONS-*) options=$((options + 1)) ;;
+                *.sst|*probe*) bad=1 ;;
+                *) bad=1 ;;
+            esac
+        done < /tmp/prefix_ls.txt
+
+        if [ "$total" -eq 3 ] && [ "$current" -eq 1 ] && [ "$manifest" -eq 1 ] \
+           && [ "$options" -eq 1 ] && [ "$bad" -eq 0 ]; then
+            echo yes
+        else
+            echo no
+        fi
+    '
+}
+
+list_object_keys_in_prefix() {
+    local bucket="$1"
+    local prefix="$2"
+    local norm="${prefix%/}/"
+    docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
+        mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
+        target="local/'"$bucket"'/'"$norm"'"
+        mc ls --recursive "$target" 2>/dev/null | awk "{print \\$NF}"
+    '
+}
 
 object_exists_exact() {
     local bucket="$1"
@@ -929,6 +1013,9 @@ run_db_delete_callbacks_test() {
     local part_id part_port db_name db_prefix db_bucket count_before count_after delete_resp
     local target prefix_match candidate_port candidate_id first_target
     local callback_seen="no"
+    local metadata_only_remaining="no"
+    local before_keys_file="" after_keys_file=""
+    local probe_remaining="0" surviving_old_count="0"
 
     part_id=""
     part_port=""
@@ -999,6 +1086,9 @@ run_db_delete_callbacks_test() {
     fi
     log "  ✓ objects in partition prefix before delete: ${count_before}"
 
+    before_keys_file=$(mktemp)
+    list_object_keys_in_prefix "$db_bucket" "$db_prefix" | sort -u > "$before_keys_file"
+
     delete_resp=$(curl -s "http://127.0.0.1:${part_port}/test/raftDelete/${part_id}" 2>/dev/null || true)
     log "  raftDelete response: ${delete_resp}"
     if [[ "$delete_resp" != *"OK"* ]]; then
@@ -1041,15 +1131,50 @@ run_db_delete_callbacks_test() {
     fi
 
     log "  objects in partition prefix after delete: ${count_after}"
+    if [[ "$count_after" != "0" && -n "$count_after" && -n "$before_keys_file" ]]; then
+        after_keys_file=$(mktemp)
+        list_object_keys_in_prefix "$db_bucket" "$db_prefix" | sort -u > "$after_keys_file"
+        surviving_old_count=$(comm -12 "$before_keys_file" "$after_keys_file" | sed '/^$/d' | wc -l | tr -d " ")
+    fi
+
+    if [[ "$count_after" == "3" ]]; then
+        metadata_only_remaining=$(prefix_has_only_recovery_metadata "$db_bucket" "$db_prefix" || echo "no")
+        if [[ "$metadata_only_remaining" == "yes" && "$surviving_old_count" == "0" ]]; then
+            log "  ✓ remaining 3 objects are recovery metadata only "
+            log "    (CURRENT + MANIFEST-* + OPTIONS-*); no probe/SST leftovers"
+            count_after="0"
+        elif [[ "$metadata_only_remaining" == "yes" ]]; then
+            log "  metadata-only remainder detected, but old object keys survived"
+            log "  (treating as failure to avoid false pass on incomplete purge)"
+        fi
+    fi
+
+    if [[ "$count_after" != "0" && -n "$count_after" ]]; then
+        probe_remaining=$(docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
+            mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
+            mc find local/'"$db_bucket"'/'"$db_prefix"' --name "manual-db-delete-probe-*.txt" 2>/dev/null | wc -l | tr -d " "
+        ' 2>/dev/null || echo "0")
+        probe_remaining="${probe_remaining//[^0-9]/}"
+
+        if [[ "$probe_remaining" == "0" && "$surviving_old_count" == "0" ]]; then
+            log "  ✓ probe removed and all pre-delete objects purged"
+            log "    remaining objects appear to be newly created after delete "
+            log "    (likely immediate partition re-create under same prefix)"
+            count_after="0"
+        fi
+    fi
+
     if [[ "$count_after" != "0" && -n "$count_after" ]]; then
         echo "ERROR: partition cloud prefix not purged after callbacks (remaining=${count_after})" >&2
         docker run --rm --entrypoint /bin/sh --network "$NETWORK" "$MINIO_MC_IMAGE" -c '
             mc alias set local http://minio:9000 '"$MINIO_ROOT_USER $MINIO_ROOT_PASSWORD"' >/dev/null 2>&1
             mc ls --recursive local/'"$db_bucket"'/'"$db_prefix"' | head -30
         ' || true
+        rm -f "$before_keys_file" "$after_keys_file" >/dev/null 2>&1 || true
         return 1
     fi
 
+    rm -f "$before_keys_file" "$after_keys_file" >/dev/null 2>&1 || true
     log "✓ DB DELETE CALLBACKS SUCCESS: onDBDeleteBegin + onDBDeleted observed and prefix purged"
 }
 

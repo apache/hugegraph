@@ -34,6 +34,13 @@ json_escape() {
     printf "%s" "$s"
 }
 
+is_truthy() {
+    case "${1:-}" in
+        1|[Tt][Rr][Uu][Ee]|[Yy]|[Yy][Ee][Ss]|[Oo][Nn]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 require_env "HG_STORE_PD_ADDRESS"
 require_env "HG_STORE_GRPC_HOST"
 require_env "HG_STORE_RAFT_ADDRESS"
@@ -86,10 +93,40 @@ JSON
 
 STORE_JAR=$(echo /hugegraph-store/lib/hg-store-node-*.jar)
 
+if [[ ! -f "$STORE_JAR" ]]; then
+  echo "ERROR: store node jar not found under /hugegraph-store/lib/" >&2
+  exit 2
+fi
+
+# Avoid duplicate/conflicting RocksDB API jars in PropertiesLauncher loader.path.
+rm -f /hugegraph-store/plugins/rocksdbjni-*.jar >/dev/null 2>&1 || true
+
+# RocksDB native callback threads may resolve Java types via AppClassLoader; keep rocksdbjni
+# explicitly on the JVM system classpath to avoid NoClassDefFoundError for callback types.
+ROCKSDB_JAR=""
+if compgen -G "/hugegraph-store/lib/rocksdbjni-*.jar" > /dev/null; then
+  ROCKSDB_JAR=$(ls -1 /hugegraph-store/lib/rocksdbjni-*.jar | sort | tail -n 1)
+elif compgen -G "/hugegraph-store/plugins/rocksdbjni-*.jar" > /dev/null; then
+  ROCKSDB_JAR=$(ls -1 /hugegraph-store/plugins/rocksdbjni-*.jar | sort | tail -n 1)
+fi
+
+APP_CLASSPATH="$STORE_JAR"
+if [[ -n "$ROCKSDB_JAR" ]]; then
+  APP_CLASSPATH="$ROCKSDB_JAR:$APP_CLASSPATH"
+  echo "Using explicit rocksdbjni on system classpath: $ROCKSDB_JAR"
+else
+  if is_truthy "$HG_CLOUD_STORAGE_ENABLED"; then
+    echo "ERROR: no external rocksdbjni jar found while cloud storage is enabled" >&2
+    echo "ERROR: refusing to start to avoid callback NoClassDefFoundError at runtime" >&2
+    exit 2
+  fi
+  echo "WARNING: no external rocksdbjni jar found; continuing because cloud storage is disabled" >&2
+fi
+
 exec java ${JAVA_OPTS:-} \
   -Dlog4j.configurationFile=/hugegraph-store/conf/log4j2.xml \
   -Dspring.config.location=/hugegraph-store/conf/application.yml \
   -Dloader.path=/hugegraph-store/plugins \
-  -cp "$STORE_JAR" \
+  -cp "$APP_CLASSPATH" \
   org.springframework.boot.loader.PropertiesLauncher
 

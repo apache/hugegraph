@@ -73,7 +73,7 @@ For hands-on validation with manual graph creation and queries, start the cluste
 1. Creating a graph schema
 2. Adding test vertices and edges
 3. Verifying data distribution across nodes
-4. Restarting store nodes to flush SST files to RocksDB
+4. Triggering an explicit RocksDB flush on each store node
 5. Confirming SST files are uploaded to MinIO buckets
 
 ### Step 0: Set Repository Root
@@ -280,35 +280,19 @@ done
 
 **Expected:** Each store should show partition information, indicating data distribution across the cluster.
 
-### Step 7: Flush Data to S3 (Restart Store Nodes)
-
-To trigger SST file uploads to S3, restart the Store nodes. This forces RocksDB to:
-1. Flush in-memory data to disk as SST files
-2. Trigger the cloud storage event listener
-3. Upload SST files to MinIO buckets
-
+### Step 7: Flush Data to S3
 ```bash
-echo "Restarting store nodes to flush data to S3..."
-# Use container names so this works for both static compose and generated test compose
-docker restart cloud-storage-store0 cloud-storage-store1 cloud-storage-store2
-
-echo "Waiting for stores to restart and flush..."
-sleep 20
-
-echo "Verifying store health after restart..."
-for i in 0 1 2; do
-  port=$((8520 + i))
-  curl -fsS http://127.0.0.1:$port/v1/health >/dev/null 2>&1 && echo "✓ Store$i OK" || echo "✗ Store$i FAILED"
+for p in 8520 8521 8522; do
+  curl -fsS "http://127.0.0.1:${p}/test/flush"
 done
 ```
 
 **What happens behind the scenes:**
-- Docker restarts the store containers
-- RocksDB initializes and detects in-memory data
-- RocksDB writes all data as SST files to disk
-- Cloud storage listener detects flush events
-- SST files are uploaded to MinIO in parallel
-- Stores become healthy and rejoin cluster
+- Each store receives a `/test/flush` request
+- RocksDB flushes MemTable data to SST files on disk
+- SST creation events trigger the cloud upload listener
+- SST files are uploaded to MinIO asynchronously (parallel dispatch)
+- Metadata (`CURRENT`, `MANIFEST-*`, `OPTIONS-*`) is mirrored so cloud recovery stays consistent
 
 ### Step 8: Final S3 Verification (After Flush)
 
@@ -790,7 +774,7 @@ docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs server
 docker compose -f $REPO_ROOT/docker/cloud-storage/docker-compose.yml logs store0 | grep -i "vertex\|edge\|insert" | tail -10
 ```
 
-**Step 7: Stores not coming back healthy after restart**
+**Step 7: Flush endpoint fails or stores become unhealthy**
 ```bash
 # Check individual store health
 for i in 0 1 2; do
@@ -948,7 +932,7 @@ This manual verification process validates the complete SST upload pipeline:
 4. **Step 4:** Load 150+ test vertices to trigger compaction
 5. **Step 5:** (Optional) Verify data was stored
 6. **Step 6:** Verify data distribution across store nodes
-7. **Step 7:** Restart store nodes to flush SST files to disk and upload to MinIO
+7. **Step 7:** Trigger `/test/flush` on each store to flush SST files and upload to MinIO
 8. **Step 8:** Verify SST files are present in MinIO buckets
 9. **Step 8.5 (optional):** Verify managed delete/clear cleans graph cloud prefix (and optional no-orphan restart check)
 10. **Step 8.6 (optional, advanced):** Verify DB delete callbacks (`onDBDeleteBegin` + `onDBDeleted`) on one partition
@@ -967,7 +951,7 @@ This manual verification process validates the complete SST upload pipeline:
 ✅ Graph schema creation works  
 ✅ Vertex/edge insertion works  
 ✅ Data distribution across 3 store nodes  
-✅ RocksDB SST file generation on restart  
+✅ RocksDB SST file generation via explicit flush/compaction  
 ✅ Cloud storage plugin uploads SST files to MinIO  
 ✅ Multiple buckets receive files consistently  
 ✅ A consistent `CURRENT` + `MANIFEST-*` + `OPTIONS-*` metadata set is mirrored alongside SSTs  

@@ -40,6 +40,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 
@@ -208,6 +209,42 @@ public class CloudStorageEventListenerTest {
 
             assertEquals(1, provider.uploads.size());
             assertEquals("store-127.0.0.1_8501/0/000008.sst", provider.uploads.get(0)[1]);
+        } finally {
+            deleteRecursively(tmpRoot.toFile());
+        }
+    }
+
+    @Test
+    public void onTableFileCreated_resolvesPathFormDbName_beforeMetadataSync() throws Exception {
+        Path tmpRoot = Files.createTempDirectory("hgstore-test-resolve-db-name");
+        Path dbDir = tmpRoot.resolve("00001");
+        Files.createDirectories(dbDir);
+        Path sst = dbDir.resolve("000012.sst");
+        Files.write(sst, "sst".getBytes());
+
+        CountDownLatch metadataSyncCalled = new CountDownLatch(1);
+        AtomicReference<String> observedDbName = new AtomicReference<>();
+        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString())) {
+            @Override
+            void requestDebouncedMetadataSync(CloudStorageProvider provider, String dbName) {
+                observedDbName.set(dbName);
+                metadataSyncCalled.countDown();
+            }
+        };
+
+        try {
+            // Seed the dir->logical mapping as happens when the DB opens.
+            CloudStorageProviderFactory.reset();
+            l.onDBCreated("00001", dbDir.toString());
+
+            CapturingProvider provider = new CapturingProvider();
+            CloudStorageProviderFactory.setActiveProviderForTest(provider);
+
+            l.onTableFileCreated(dbDir.toString(), "default", sst.toString(), Files.size(sst));
+
+            assertTrue("Expected async metadata-sync trigger after upload",
+                       metadataSyncCalled.await(2, TimeUnit.SECONDS));
+            assertEquals("00001", observedDbName.get());
         } finally {
             deleteRecursively(tmpRoot.toFile());
         }
