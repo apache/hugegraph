@@ -34,6 +34,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.store.HgScanQuery;
 import org.apache.hugegraph.store.HgStoreSession;
 import org.apache.hugegraph.store.client.grpc.KvPageScannerTestSupport;
 import org.apache.hugegraph.store.grpc.common.Kv;
@@ -51,6 +52,24 @@ import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 
 public class NodeTxSessionProxyTest {
+
+    @Test
+    public void testBatchQueryRejectsOrderByKey() {
+        HgOwnerKey start = HgOwnerKey.of(keyBytes(9), keyBytes(1));
+        HgOwnerKey end = HgOwnerKey.of(keyBytes(9), keyBytes(5));
+        HgScanQuery.ScanBuilder builder = HgScanQuery.ScanBuilder.rangeOf(
+                "table", Collections.singletonList(start),
+                Collections.singletonList(end));
+
+        IllegalArgumentException error = Assert.assertThrows(
+                IllegalArgumentException.class,
+                () -> builder.setOrderType(ScanOrderType.ORDER_BY_KEY));
+        Assert.assertTrue(error.getMessage().contains("batch scan"));
+
+        HgScanQuery query = builder.setOrderType(ScanOrderType.ORDER_STRICT)
+                                   .build();
+        Assert.assertEquals(ScanOrderType.ORDER_STRICT, query.getOrderType());
+    }
 
     @Test
     public void testNodeTkvDoesNotMutateSharedOwnerKeys() {

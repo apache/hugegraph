@@ -28,7 +28,6 @@ import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutorCompletionService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import org.apache.hugegraph.store.HgKvEntry;
@@ -39,13 +38,17 @@ import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     private static final int INITIALIZE_THREADS = 8;
+    private static final long INITIALIZE_KEEP_ALIVE_SECONDS = 60L;
+    private static final ExecutorService INITIALIZER =
+            ExecutorPool.createExecutor("ordered-scan-init",
+                                        INITIALIZE_KEEP_ALIVE_SECONDS,
+                                        0, INITIALIZE_THREADS);
 
     private final List<? extends HgKvIterator<? extends HgKvEntry>> iterators;
     private final PriorityQueue<SourceEntry> queue;
     private final boolean[] sourceClosed;
     private final long limit;
     private final ExecutorService initializer;
-    private final boolean ownsInitializer;
 
     private boolean initialized;
     private boolean closed;
@@ -55,19 +58,12 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
                       long limit) {
-        this(iterators, limit, createInitializer(iterators), true);
+        this(iterators, limit, INITIALIZER);
     }
 
     OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
                       long limit, ExecutorService initializer) {
-        this(iterators, limit, initializer, false);
-    }
-
-    private OrderedKvIterator(
-            List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
-            long limit, ExecutorService initializer,
-            boolean ownsInitializer) {
-        this.iterators = iterators;
+        this.iterators = Objects.requireNonNull(iterators);
         this.queue = new PriorityQueue<>((left, right) -> {
             int result = Arrays.compareUnsigned(left.entry.key(),
                                                 right.entry.key());
@@ -80,7 +76,6 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         this.limit = limit <= HgStoreClientConst.NO_LIMIT ? Long.MAX_VALUE :
                      limit;
         this.initializer = Objects.requireNonNull(initializer);
-        this.ownsInitializer = ownsInitializer;
         this.initialized = false;
         this.closed = false;
         this.count = 0L;
@@ -159,7 +154,6 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             }
         }
         this.queue.clear();
-        this.shutdownInitializer();
         if (failure instanceof RuntimeException) {
             throw (RuntimeException) failure;
         }
@@ -208,8 +202,6 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             this.cancel(futures);
             this.closeAfterFailure(e);
             throw e;
-        } finally {
-            this.shutdownInitializer();
         }
     }
 
@@ -222,27 +214,11 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         return new SourceEntry(source, iterator.next());
     }
 
-    private static ExecutorService createInitializer(
-            List<? extends HgKvIterator<? extends HgKvEntry>> iterators) {
-        Objects.requireNonNull(iterators);
-        int threads = Math.max(1, Math.min(INITIALIZE_THREADS,
-                                           iterators.size()));
-        return Executors.newFixedThreadPool(
-                threads,
-                ExecutorPool.newThreadFactory("ordered-scan-init"));
-    }
-
     private void cancel(List<Future<SourceEntry>> futures) {
         for (Future<SourceEntry> future : futures) {
             if (!future.isDone()) {
                 future.cancel(true);
             }
-        }
-    }
-
-    private void shutdownInitializer() {
-        if (this.ownsInitializer) {
-            this.initializer.shutdownNow();
         }
     }
 

@@ -175,8 +175,9 @@ public class OrderedKvIteratorTest {
     }
 
     @Test
-    public void testSlowQueriesDoNotBlockIndependentQuery() throws Exception {
-        int concurrentQueries = 8;
+    public void testSlowQueriesUseBoundedWorkersAndDoNotBlockIndependentQuery()
+            throws Exception {
+        int concurrentQueries = 16;
         ExecutorService callers = Executors.newFixedThreadPool(
                 concurrentQueries + 1);
         CountDownLatch slowQueriesStarted = new CountDownLatch(
@@ -200,6 +201,10 @@ public class OrderedKvIteratorTest {
             }
             Assert.assertTrue(slowQueriesStarted.await(3L,
                                                        TimeUnit.SECONDS));
+            long workers = initializerThreads();
+            Assert.assertTrue("Expected at most 8 ordered scan initializer " +
+                              "threads, but found " + workers,
+                              workers <= 8L);
 
             Future<Boolean> fastResult = callers.submit(() -> {
                 OrderedKvIterator iterator = new OrderedKvIterator(
@@ -222,6 +227,14 @@ public class OrderedKvIteratorTest {
             }
             callers.shutdownNow();
         }
+    }
+
+    private static long initializerThreads() {
+        return Thread.getAllStackTraces().keySet().stream()
+                     .filter(Thread::isAlive)
+                     .filter(thread -> thread.getName().startsWith(
+                             "ordered-scan-init-"))
+                     .count();
     }
 
     private static List<Integer> keys(HgKvIterator<HgKvEntry> iterator) {

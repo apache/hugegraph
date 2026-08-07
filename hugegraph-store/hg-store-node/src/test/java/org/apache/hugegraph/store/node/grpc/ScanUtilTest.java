@@ -28,6 +28,7 @@ import org.apache.hugegraph.store.grpc.common.Header;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
 import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.KvPageRes;
+import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.node.AppConfig;
 import org.junit.Assert;
@@ -36,6 +37,22 @@ import org.junit.Test;
 import io.grpc.stub.StreamObserver;
 
 public class ScanUtilTest {
+
+    @Test
+    public void testBatchScanRejectsOrderByKey() {
+        ScanQueryRequest request = ScanQueryRequest.newBuilder()
+                                                   .setMethod(ScanMethod.RANGE)
+                                                   .setTable("table")
+                                                   .setOrderType(ScanOrderType.ORDER_BY_KEY)
+                                                   .build();
+
+        IllegalArgumentException error = Assert.assertThrows(
+                IllegalArgumentException.class,
+                () -> ScanQueryProducer.requestOf("graph",
+                                                  new String[]{"table"},
+                                                  request));
+        Assert.assertTrue(error.getMessage().contains("batch scan"));
+    }
 
     @Test
     public void testOrderedAllPartitionRangeUsesOrderedScan() {
