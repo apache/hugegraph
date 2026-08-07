@@ -100,6 +100,11 @@ message KvPageRes {
   bytes stream = 5;
 }
 
+enum ScanStreamVersion {
+  SCAN_STREAM_VERSION_UNKNOWN = 0;
+  SCAN_STREAM_VERSION_ORDERED_BY_KEY = 1;
+}
+
 enum KvStreamType {
   STREAM_TYPE_NONE = 0;
   STREAM_TYPE_KV = 1;

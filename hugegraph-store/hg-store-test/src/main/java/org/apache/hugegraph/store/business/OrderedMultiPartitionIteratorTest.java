@@ -34,6 +34,14 @@ import org.junit.Test;
 public class OrderedMultiPartitionIteratorTest {
 
     @Test
+    public void testOrderedScanIsBackwardCompatibleDefaultMethod()
+            throws Exception {
+        Assert.assertTrue(BusinessHandler.class.getMethod(
+                "scanOrdered", String.class, String.class, byte[].class,
+                byte[].class, int.class).isDefault());
+    }
+
+    @Test
     public void testMergeByUnsignedKeyAndTrackPartitionPosition() {
         Map<Integer, TestIterator> sources = new HashMap<>();
         sources.put(1, new TestIterator(1, 4));
@@ -76,6 +84,21 @@ public class OrderedMultiPartitionIteratorTest {
         }
 
         Assert.assertEquals(Arrays.asList(0x7f, 0x80), keys);
+    }
+
+    @Test
+    public void testCountConsumesAllRemainingEntries() {
+        Map<Integer, TestIterator> sources = new HashMap<>();
+        sources.put(1, new TestIterator(1, 4));
+        sources.put(2, new TestIterator(2, 3));
+        OrderedMultiPartitionIterator iterator =
+                OrderedMultiPartitionIterator.of(Arrays.asList(1, 2),
+                                                 sources::get);
+
+        Assert.assertEquals(4L, iterator.count());
+        Assert.assertFalse(iterator.hasNext());
+        Assert.assertTrue(sources.get(1).closed);
+        Assert.assertTrue(sources.get(2).closed);
     }
 
     @Test

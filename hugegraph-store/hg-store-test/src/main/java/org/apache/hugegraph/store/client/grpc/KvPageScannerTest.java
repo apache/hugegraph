@@ -25,6 +25,7 @@ import java.util.function.Function;
 import org.apache.hugegraph.store.client.HgStoreNodeSession;
 import org.apache.hugegraph.store.grpc.common.Kv;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.KvPageRes;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.junit.Assert;
@@ -64,6 +65,41 @@ public class KvPageScannerTest {
         Assert.assertEquals(3, scanner.next().getKey().byteAt(0) & 0xff);
         Assert.assertFalse(scanner.hasNext());
         Assert.assertEquals(2, requests.size());
+    }
+
+    @Test
+    public void testRejectsOrderedScanWithoutCapabilityAck() {
+        ScanStreamReq.Builder builder = ScanStreamReq.newBuilder()
+                                                     .setMethod(ScanMethod.RANGE)
+                                                     .setTable("table")
+                                                     .setPageSize(2)
+                                                     .setOrderType(
+                                                             ScanOrderType.ORDER_BY_KEY);
+        KvPageScanner scanner = new KvPageScanner(
+                session(), builder, response -> onePageObserver(response, 0));
+
+        try {
+            scanner.hasNext();
+            Assert.fail("Expected ordered scan capability failure");
+        } catch (RuntimeException e) {
+            Assert.assertTrue(e.getMessage().contains("ordered scan"));
+        }
+    }
+
+    @Test
+    public void testAcceptsOrderedScanWithCapabilityAck() {
+        ScanStreamReq.Builder builder = ScanStreamReq.newBuilder()
+                                                     .setMethod(ScanMethod.RANGE)
+                                                     .setTable("table")
+                                                     .setPageSize(2)
+                                                     .setOrderType(
+                                                             ScanOrderType.ORDER_BY_KEY);
+        KvPageScanner scanner = new KvPageScanner(
+                session(), builder, response -> onePageObserver(response, 1));
+
+        Assert.assertTrue(scanner.hasNext());
+        Assert.assertEquals(1, scanner.next().getKey().byteAt(0) & 0xff);
+        Assert.assertFalse(scanner.hasNext());
     }
 
     private static HgStoreNodeSession session() {
@@ -114,6 +150,27 @@ public class KvPageScannerTest {
         };
     }
 
+    private static StreamObserver<ScanStreamReq> onePageObserver(
+            StreamObserver<KvPageRes> response, int version) {
+        return new StreamObserver<ScanStreamReq>() {
+            @Override
+            public void onNext(ScanStreamReq request) {
+                if (request.getCloseFlag() == 0) {
+                    response.onNext(versionedPage(true, version, 1));
+                }
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                // The client cancels the incompatible ordered stream
+            }
+
+            @Override
+            public void onCompleted() {
+            }
+        };
+    }
+
     private static KvPageRes page(boolean over, int... keys) {
         KvPageRes.Builder page = KvPageRes.newBuilder().setOver(over);
         for (int key : keys) {
@@ -121,5 +178,10 @@ public class KvPageScannerTest {
             page.addData(Kv.newBuilder().setKey(bytes).setValue(bytes));
         }
         return page.build();
+    }
+
+    private static KvPageRes versionedPage(boolean over, int version,
+                                           int... keys) {
+        return page(over, keys).toBuilder().setVersion(version).build();
     }
 }

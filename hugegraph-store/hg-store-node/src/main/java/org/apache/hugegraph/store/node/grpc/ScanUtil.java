@@ -40,6 +40,7 @@ import org.apache.hugegraph.store.grpc.common.ScanMethod;
 import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamVersion;
 import org.apache.hugegraph.store.grpc.stream.SelectParam;
 
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +56,12 @@ class ScanUtil {
     private final static Map<String, byte[]> tableKeyMap = new HashMap<>();
 
     static ScanIterator getIterator(ScanStreamReq request, HgStoreWrapperEx wrapper) {
+        boolean ordered = isOrdered(request);
+        if (ordered && !request.getPosition().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Ordered scan doesn't support an opaque position; " +
+                    "continue with the physical key in start");
+        }
         String graph = request.getHeader().getGraph();
         String table = request.getTable();
         ScanMethod method = request.getMethod();
@@ -74,8 +81,7 @@ class ScanUtil {
                 iter = wrapper.scanPrefix(graph, partition, table, prefix, scanType, query);
                 break;
             case RANGE:
-                if (partition == SCAN_ALL_PARTITIONS_ID &&
-                    request.getOrderType() == ScanOrderType.ORDER_BY_KEY) {
+                if (ordered) {
                     iter = wrapper.scanOrdered(graph, table, start, end,
                                                scanType, query);
                 } else {
@@ -96,6 +102,20 @@ class ScanUtil {
         iter = new SelectIterator(iter, properties);
         iter.seek(request.getPosition().toByteArray());
         return iter;
+    }
+
+    static boolean isOrdered(ScanStreamReq request) {
+        return request.getMethod() == ScanMethod.RANGE &&
+               request.getCode() == SCAN_ALL_PARTITIONS_ID &&
+               request.getOrderType() == ScanOrderType.ORDER_BY_KEY;
+    }
+
+    static int responseVersion(ScanStreamReq request) {
+        if (isOrdered(request)) {
+            return ScanStreamVersion
+                   .SCAN_STREAM_VERSION_ORDERED_BY_KEY_VALUE;
+        }
+        return ScanStreamVersion.SCAN_STREAM_VERSION_UNKNOWN_VALUE;
     }
 
     static ScanIterator getIterator(ScanQuery sq, HgStoreWrapperEx wrapper) {

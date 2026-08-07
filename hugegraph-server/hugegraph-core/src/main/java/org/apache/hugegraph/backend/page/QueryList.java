@@ -89,7 +89,8 @@ public final class QueryList<R> {
             PageEntryIterator<R> iter = new PageEntryIterator<>(this, pageSize);
             /*
              * NOTE: PageEntryIterator query will change every fetch time.
-             * TODO: sort results by input ids in each page.
+             * QueryResults tracks this change and restores input-id order
+             * within each page without fetching later pages eagerly.
              */
             return iter.results();
         }

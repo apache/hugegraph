@@ -111,6 +111,16 @@ public final class OrderedMultiPartitionIterator implements ScanIterator {
     }
 
     @Override
+    public long count() {
+        long count = 0L;
+        while (this.hasNext()) {
+            this.next();
+            count++;
+        }
+        return count;
+    }
+
+    @Override
     public byte[] position() {
         if (this.currentPartitionId == null) {
             return EMPTY_BYTES;

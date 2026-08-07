@@ -35,11 +35,20 @@ import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
 import org.apache.hugegraph.store.HgStoreSession;
+import org.apache.hugegraph.store.client.grpc.KvPageScannerTestSupport;
+import org.apache.hugegraph.store.grpc.common.Kv;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
 import org.apache.hugegraph.store.grpc.common.ScanOrderType;
+import org.apache.hugegraph.store.grpc.stream.KvPageRes;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq.Builder;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamVersion;
 import org.junit.Assert;
 import org.junit.Test;
+
+import com.google.protobuf.ByteString;
+
+import io.grpc.stub.StreamObserver;
 
 public class NodeTxSessionProxyTest {
 
@@ -150,6 +159,141 @@ public class NodeTxSessionProxyTest {
         }
     }
 
+    @Test
+    public void testOrderedScanMergesPagedStoresWithLimitAndCursor()
+            throws Exception {
+        HgStoreNodeManager manager = HgStoreNodeManager.getInstance();
+        HgStoreNodePartitioner oldPartitioner = manager.getNodePartitioner();
+        long firstNodeId = System.nanoTime();
+        long secondNodeId = firstNodeId + 1L;
+        String graph = "graph-paged-" + firstNodeId;
+        PagedStream firstStream = new PagedStream(Arrays.asList(
+                range(0, 128, 2), Collections.singletonList(128)), -1);
+        PagedStream secondStream = new PagedStream(Arrays.asList(
+                range(1, 129, 2), Collections.singletonList(129)), -1);
+        addPagedNode(manager, graph, firstNodeId, firstStream);
+        addPagedNode(manager, graph, secondNodeId, secondStream);
+        manager.setNodePartitioner(new RecordingPartitioner(firstNodeId,
+                                                             secondNodeId));
+        try {
+            HgStoreSession proxy = new NodeTxSessionProxy(graph, manager);
+            HgKvIterator<HgKvEntry> iterator = proxy.scanIteratorOrdered(
+                    "table", HgOwnerKey.of(keyBytes(9), keyBytes(0)),
+                    HgOwnerKey.of(keyBytes(9), keyBytes(130)), 129L, 123,
+                    keyBytes(7));
+
+            List<Integer> actual = keys(iterator);
+            Assert.assertEquals(range(0, 129, 1), actual);
+            Assert.assertArrayEquals(keyBytes(128), iterator.position());
+            Assert.assertEquals(2, firstStream.dataRequests);
+            Assert.assertEquals(2, secondStream.dataRequests);
+            assertOrderedPageRequests(firstStream.requests, 129L);
+            assertOrderedPageRequests(secondStream.requests, 129L);
+        } finally {
+            restoreNodePartitioner(manager, oldPartitioner);
+        }
+    }
+
+    @Test
+    public void testOrderedScanHandlesEmptyStoreAndEarlyClose()
+            throws Exception {
+        HgStoreNodeManager manager = HgStoreNodeManager.getInstance();
+        HgStoreNodePartitioner oldPartitioner = manager.getNodePartitioner();
+        long firstNodeId = System.nanoTime();
+        long secondNodeId = firstNodeId + 1L;
+        String graph = "graph-empty-" + firstNodeId;
+        PagedStream emptyStream = new PagedStream(
+                Collections.singletonList(Collections.emptyList()), -1);
+        PagedStream activeStream = new PagedStream(Arrays.asList(
+                Arrays.asList(1, 2), Collections.singletonList(3)), -1);
+        addPagedNode(manager, graph, firstNodeId, emptyStream);
+        addPagedNode(manager, graph, secondNodeId, activeStream);
+        manager.setNodePartitioner(new RecordingPartitioner(firstNodeId,
+                                                             secondNodeId));
+        try {
+            HgStoreSession proxy = new NodeTxSessionProxy(graph, manager);
+            HgKvIterator<HgKvEntry> iterator = proxy.scanIteratorOrdered(
+                    "table", HgOwnerKey.of(keyBytes(9), keyBytes(0)),
+                    HgOwnerKey.of(keyBytes(9), keyBytes(4)), 0L, 123,
+                    keyBytes(7));
+
+            Assert.assertEquals(1, key(iterator.next()));
+            iterator.close();
+
+            Assert.assertEquals(1, emptyStream.dataRequests);
+            Assert.assertTrue(emptyStream.clientCompleted);
+            Assert.assertEquals(1, activeStream.dataRequests);
+            Assert.assertEquals(1, activeStream.closeRequests);
+        } finally {
+            restoreNodePartitioner(manager, oldPartitioner);
+        }
+    }
+
+    @Test
+    public void testOrderedScanClosesOtherStoreOnPagedFailure()
+            throws Exception {
+        HgStoreNodeManager manager = HgStoreNodeManager.getInstance();
+        HgStoreNodePartitioner oldPartitioner = manager.getNodePartitioner();
+        long firstNodeId = System.nanoTime();
+        long secondNodeId = firstNodeId + 1L;
+        String graph = "graph-page-failure-" + firstNodeId;
+        PagedStream failedStream = new PagedStream(
+                Collections.singletonList(Collections.singletonList(0)), 1);
+        PagedStream activeStream = new PagedStream(Arrays.asList(
+                Collections.singletonList(1),
+                Collections.singletonList(3)), -1);
+        addPagedNode(manager, graph, firstNodeId, failedStream);
+        addPagedNode(manager, graph, secondNodeId, activeStream);
+        manager.setNodePartitioner(new RecordingPartitioner(firstNodeId,
+                                                             secondNodeId));
+        try {
+            HgStoreSession proxy = new NodeTxSessionProxy(graph, manager);
+            HgKvIterator<HgKvEntry> iterator = proxy.scanIteratorOrdered(
+                    "table", HgOwnerKey.of(keyBytes(9), keyBytes(0)),
+                    HgOwnerKey.of(keyBytes(9), keyBytes(4)), 0L, 123,
+                    keyBytes(7));
+
+            Assert.assertThrows(RuntimeException.class, iterator::next);
+            Assert.assertTrue(failedStream.clientCompleted);
+            Assert.assertEquals(1, activeStream.closeRequests);
+        } finally {
+            restoreNodePartitioner(manager, oldPartitioner);
+        }
+    }
+
+    @Test
+    public void testOrderedScanRejectsMixedStoreVersionsAndClosesAll()
+            throws Exception {
+        HgStoreNodeManager manager = HgStoreNodeManager.getInstance();
+        HgStoreNodePartitioner oldPartitioner = manager.getNodePartitioner();
+        long firstNodeId = System.nanoTime();
+        long secondNodeId = firstNodeId + 1L;
+        String graph = "graph-mixed-version-" + firstNodeId;
+        PagedStream currentStream = new PagedStream(Arrays.asList(
+                Collections.singletonList(1),
+                Collections.singletonList(3)), -1);
+        PagedStream oldStream = new PagedStream(
+                Collections.singletonList(Collections.singletonList(2)),
+                -1, 0);
+        addPagedNode(manager, graph, firstNodeId, currentStream);
+        addPagedNode(manager, graph, secondNodeId, oldStream);
+        manager.setNodePartitioner(new RecordingPartitioner(firstNodeId,
+                                                             secondNodeId));
+        try {
+            HgStoreSession proxy = new NodeTxSessionProxy(graph, manager);
+            HgKvIterator<HgKvEntry> iterator = proxy.scanIteratorOrdered(
+                    "table", HgOwnerKey.of(keyBytes(9), keyBytes(0)),
+                    HgOwnerKey.of(keyBytes(9), keyBytes(4)), 0L, 123,
+                    keyBytes(7));
+
+            Assert.assertThrows(RuntimeException.class, iterator::hasNext);
+            Assert.assertTrue(oldStream.clientCompleted);
+            Assert.assertEquals(1, currentStream.closeRequests);
+        } finally {
+            restoreNodePartitioner(manager, oldPartitioner);
+        }
+    }
+
     private static void assertOrderedRangeBuilder(Builder builder, long limit,
                                                   int scanType,
                                                   byte[] query) {
@@ -166,6 +310,25 @@ public class NodeTxSessionProxyTest {
         Assert.assertArrayEquals(query, builder.getQuery().toByteArray());
     }
 
+    private static void assertOrderedPageRequests(
+            List<ScanStreamReq> requests, long limit) {
+        for (ScanStreamReq request : requests) {
+            Assert.assertEquals(ScanMethod.RANGE, request.getMethod());
+            Assert.assertEquals(ScanOrderType.ORDER_BY_KEY,
+                                request.getOrderType());
+            Assert.assertEquals(64, request.getPageSize());
+            Assert.assertEquals(limit, request.getLimit());
+        }
+    }
+
+    private static void addPagedNode(HgStoreNodeManager manager, String graph,
+                                     long nodeId, PagedStream stream) {
+        PagedRecordingSession handler = new PagedRecordingSession(
+                graph, nodeId, stream);
+        HgStoreNodeSession session = handler.proxy();
+        manager.addNode(graph, new RecordingStoreNode(nodeId, session));
+    }
+
     private static void restoreNodePartitioner(HgStoreNodeManager manager,
                                                HgStoreNodePartitioner old)
             throws Exception {
@@ -177,6 +340,22 @@ public class NodeTxSessionProxyTest {
 
     private static int key(HgKvEntry entry) {
         return entry.key()[0] & 0xff;
+    }
+
+    private static List<Integer> keys(HgKvIterator<HgKvEntry> iterator) {
+        List<Integer> keys = new ArrayList<>();
+        while (iterator.hasNext()) {
+            keys.add(key(iterator.next()));
+        }
+        return keys;
+    }
+
+    private static List<Integer> range(int start, int end, int step) {
+        List<Integer> keys = new ArrayList<>();
+        for (int key = start; key < end; key += step) {
+            keys.add(key);
+        }
+        return keys;
     }
 
     private static byte[] keyBytes(int key) {
@@ -393,6 +572,127 @@ public class NodeTxSessionProxyTest {
                 return "RecordingSession";
             }
             throw new UnsupportedOperationException(method.toString());
+        }
+    }
+
+    private static final class PagedRecordingSession
+            implements InvocationHandler {
+
+        private final String graph;
+        private final long nodeId;
+        private final PagedStream stream;
+
+        private PagedRecordingSession(String graph, long nodeId,
+                                      PagedStream stream) {
+            this.graph = graph;
+            this.nodeId = nodeId;
+            this.stream = stream;
+        }
+
+        private HgStoreNodeSession proxy() {
+            return (HgStoreNodeSession) Proxy.newProxyInstance(
+                    HgStoreNodeSession.class.getClassLoader(),
+                    new Class[]{HgStoreNodeSession.class}, this);
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) {
+            if ("scanIterator".equals(method.getName()) &&
+                args != null && args.length == 1 &&
+                args[0] instanceof Builder) {
+                return KvPageScannerTestSupport.iterator(
+                        (HgStoreNodeSession) proxy,
+                        ((Builder) args[0]).clone(), this.stream::open);
+            }
+            if ("getGraphName".equals(method.getName())) {
+                return this.graph;
+            }
+            if ("getStoreNode".equals(method.getName())) {
+                return new RecordingStoreNode(
+                        this.nodeId, (HgStoreSession) proxy);
+            }
+            if ("isTx".equals(method.getName())) {
+                return false;
+            }
+            if ("toString".equals(method.getName())) {
+                return "PagedRecordingSession";
+            }
+            throw new UnsupportedOperationException(method.toString());
+        }
+    }
+
+    private static final class PagedStream {
+
+        private static final int ORDERED_SCAN_VERSION =
+                ScanStreamVersion.SCAN_STREAM_VERSION_ORDERED_BY_KEY_VALUE;
+
+        private final List<List<Integer>> pages;
+        private final int failPage;
+        private final int responseVersion;
+        private final List<ScanStreamReq> requests;
+        private int page;
+        private int dataRequests;
+        private int closeRequests;
+        private boolean clientCompleted;
+
+        private PagedStream(List<List<Integer>> pages, int failPage) {
+            this(pages, failPage, ORDERED_SCAN_VERSION);
+        }
+
+        private PagedStream(List<List<Integer>> pages, int failPage,
+                            int responseVersion) {
+            this.pages = pages;
+            this.failPage = failPage;
+            this.responseVersion = responseVersion;
+            this.requests = new ArrayList<>();
+            this.page = 0;
+            this.dataRequests = 0;
+            this.closeRequests = 0;
+            this.clientCompleted = false;
+        }
+
+        private StreamObserver<ScanStreamReq> open(
+                StreamObserver<KvPageRes> response) {
+            return new StreamObserver<ScanStreamReq>() {
+                @Override
+                public void onNext(ScanStreamReq request) {
+                    if (request.getCloseFlag() != 0) {
+                        closeRequests++;
+                        response.onCompleted();
+                        return;
+                    }
+                    requests.add(request);
+                    dataRequests++;
+                    if (page == failPage) {
+                        response.onError(new IllegalStateException(
+                                "injected page failure"));
+                        return;
+                    }
+                    List<Integer> keys = pages.get(page++);
+                    KvPageRes.Builder result = KvPageRes.newBuilder()
+                                                       .setVersion(responseVersion)
+                                                       .setOver(page ==
+                                                                pages.size() &&
+                                                                failPage < 0);
+                    for (int key : keys) {
+                        ByteString bytes = ByteString.copyFrom(keyBytes(key));
+                        result.addData(Kv.newBuilder()
+                                         .setKey(bytes)
+                                         .setValue(bytes));
+                    }
+                    response.onNext(result.build());
+                }
+
+                @Override
+                public void onError(Throwable throwable) {
+                    clientCompleted = true;
+                }
+
+                @Override
+                public void onCompleted() {
+                    clientCompleted = true;
+                }
+            };
         }
     }
 }

@@ -24,8 +24,10 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
@@ -37,16 +39,13 @@ import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     private static final int INITIALIZE_THREADS = 8;
-    private static final ExecutorService INITIALIZER =
-            Executors.newFixedThreadPool(
-                    INITIALIZE_THREADS,
-                    ExecutorPool.newThreadFactory("ordered-scan-init"));
 
     private final List<? extends HgKvIterator<? extends HgKvEntry>> iterators;
     private final PriorityQueue<SourceEntry> queue;
     private final boolean[] sourceClosed;
     private final long limit;
     private final ExecutorService initializer;
+    private final boolean ownsInitializer;
 
     private boolean initialized;
     private boolean closed;
@@ -56,11 +55,18 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
 
     OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
                       long limit) {
-        this(iterators, limit, INITIALIZER);
+        this(iterators, limit, createInitializer(iterators), true);
     }
 
     OrderedKvIterator(List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
                       long limit, ExecutorService initializer) {
+        this(iterators, limit, initializer, false);
+    }
+
+    private OrderedKvIterator(
+            List<? extends HgKvIterator<? extends HgKvEntry>> iterators,
+            long limit, ExecutorService initializer,
+            boolean ownsInitializer) {
         this.iterators = iterators;
         this.queue = new PriorityQueue<>((left, right) -> {
             int result = Arrays.compareUnsigned(left.entry.key(),
@@ -74,6 +80,7 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         this.limit = limit <= HgStoreClientConst.NO_LIMIT ? Long.MAX_VALUE :
                      limit;
         this.initializer = Objects.requireNonNull(initializer);
+        this.ownsInitializer = ownsInitializer;
         this.initialized = false;
         this.closed = false;
         this.count = 0L;
@@ -152,6 +159,7 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             }
         }
         this.queue.clear();
+        this.shutdownInitializer();
         if (failure instanceof RuntimeException) {
             throw (RuntimeException) failure;
         }
@@ -171,27 +179,37 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             int source = i;
             tasks.add(() -> this.firstEntry(source));
         }
+        List<Future<SourceEntry>> futures =
+                new ArrayList<>(this.iterators.size());
         try {
-            List<Future<SourceEntry>> futures =
-                    this.initializer.invokeAll(tasks);
-            for (int i = 0; i < futures.size(); i++) {
-                SourceEntry entry = futures.get(i).get();
-                if (entry == null) {
-                    this.closeSource(i);
+            CompletionService<SourceEntry> completions =
+                    new ExecutorCompletionService<>(this.initializer);
+            for (Callable<SourceEntry> task : tasks) {
+                futures.add(completions.submit(task));
+            }
+            for (int i = 0; i < tasks.size(); i++) {
+                SourceEntry entry = completions.take().get();
+                if (entry.entry == null) {
+                    this.closeSource(entry.source);
                 } else {
                     this.queue.add(entry);
                 }
             }
         } catch (InterruptedException e) {
+            this.cancel(futures);
             Thread.currentThread().interrupt();
             throw this.initializationFailure(
                     new IllegalStateException(
                             "Interrupted while initializing ordered scan", e));
         } catch (ExecutionException e) {
+            this.cancel(futures);
             throw this.initializationFailure(e.getCause());
         } catch (RuntimeException | Error e) {
+            this.cancel(futures);
             this.closeAfterFailure(e);
             throw e;
+        } finally {
+            this.shutdownInitializer();
         }
     }
 
@@ -199,9 +217,33 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         HgKvIterator<? extends HgKvEntry> iterator =
                 this.iterators.get(source);
         if (!iterator.hasNext()) {
-            return null;
+            return new SourceEntry(source, null);
         }
         return new SourceEntry(source, iterator.next());
+    }
+
+    private static ExecutorService createInitializer(
+            List<? extends HgKvIterator<? extends HgKvEntry>> iterators) {
+        Objects.requireNonNull(iterators);
+        int threads = Math.max(1, Math.min(INITIALIZE_THREADS,
+                                           iterators.size()));
+        return Executors.newFixedThreadPool(
+                threads,
+                ExecutorPool.newThreadFactory("ordered-scan-init"));
+    }
+
+    private void cancel(List<Future<SourceEntry>> futures) {
+        for (Future<SourceEntry> future : futures) {
+            if (!future.isDone()) {
+                future.cancel(true);
+            }
+        }
+    }
+
+    private void shutdownInitializer() {
+        if (this.ownsInitializer) {
+            this.initializer.shutdownNow();
+        }
     }
 
     private void addNext(int source) {

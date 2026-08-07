@@ -19,12 +19,16 @@ package org.apache.hugegraph.store.client;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
@@ -134,6 +138,92 @@ public class OrderedKvIteratorTest {
         }
     }
 
+    @Test
+    public void testConcurrentInitializeFailsWithoutWaitingForSlowSource()
+            throws Exception {
+        ExecutorService initializer = Executors.newFixedThreadPool(2);
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        CountDownLatch slowStarted = new CountDownLatch(1);
+        CountDownLatch releaseSlow = new CountDownLatch(1);
+        TestIterator slow = new TestIterator(1);
+        TestIterator failed = new TestIterator(2);
+        slow.blockFirstHasNext(slowStarted, releaseSlow);
+        failed.failOnHasNextAfter(0);
+
+        Future<Boolean> result = caller.submit(() -> {
+            OrderedKvIterator iterator = new OrderedKvIterator(
+                    Arrays.asList(slow, failed), 0L, initializer);
+            return iterator.hasNext();
+        });
+        try {
+            Assert.assertTrue(slowStarted.await(3L, TimeUnit.SECONDS));
+            try {
+                result.get(3L, TimeUnit.SECONDS);
+                Assert.fail("Expected initialization failure");
+            } catch (ExecutionException e) {
+                Assert.assertTrue(e.getCause() instanceof
+                                  IllegalStateException);
+            }
+            Assert.assertTrue(slow.closed);
+            Assert.assertTrue(failed.closed);
+        } finally {
+            releaseSlow.countDown();
+            result.cancel(true);
+            caller.shutdownNow();
+            initializer.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testSlowQueriesDoNotBlockIndependentQuery() throws Exception {
+        int concurrentQueries = 8;
+        ExecutorService callers = Executors.newFixedThreadPool(
+                concurrentQueries + 1);
+        CountDownLatch slowQueriesStarted = new CountDownLatch(
+                concurrentQueries);
+        CountDownLatch releaseSlowQueries = new CountDownLatch(1);
+        List<Future<Boolean>> slowResults = new ArrayList<>();
+        try {
+            for (int i = 0; i < concurrentQueries; i++) {
+                TestIterator slow = new TestIterator(i);
+                slow.blockFirstHasNext(slowQueriesStarted,
+                                       releaseSlowQueries);
+                slowResults.add(callers.submit(() -> {
+                    OrderedKvIterator iterator = new OrderedKvIterator(
+                            Collections.singletonList(slow), 0L);
+                    try {
+                        return iterator.hasNext();
+                    } finally {
+                        iterator.close();
+                    }
+                }));
+            }
+            Assert.assertTrue(slowQueriesStarted.await(3L,
+                                                       TimeUnit.SECONDS));
+
+            Future<Boolean> fastResult = callers.submit(() -> {
+                OrderedKvIterator iterator = new OrderedKvIterator(
+                        Collections.singletonList(new TestIterator(100)),
+                        0L);
+                try {
+                    return iterator.hasNext();
+                } finally {
+                    iterator.close();
+                }
+            });
+            Assert.assertTrue(fastResult.get(3L, TimeUnit.SECONDS));
+        } catch (TimeoutException e) {
+            Assert.fail("An independent ordered scan was starved by slow " +
+                        "queries");
+        } finally {
+            releaseSlowQueries.countDown();
+            for (Future<Boolean> result : slowResults) {
+                result.cancel(true);
+            }
+            callers.shutdownNow();
+        }
+    }
+
     private static List<Integer> keys(HgKvIterator<HgKvEntry> iterator) {
         List<Integer> keys = new ArrayList<>();
         while (iterator.hasNext()) {
@@ -155,6 +245,8 @@ public class OrderedKvIteratorTest {
         private boolean closed;
         private int failOnHasNextAfter;
         private CountDownLatch firstHasNextBarrier;
+        private CountDownLatch firstHasNextStarted;
+        private CountDownLatch firstHasNextRelease;
         private boolean firstHasNextBlocked;
 
         private TestIterator(Integer... keys) {
@@ -168,6 +260,8 @@ public class OrderedKvIteratorTest {
             this.closed = false;
             this.failOnHasNextAfter = -1;
             this.firstHasNextBarrier = null;
+            this.firstHasNextStarted = null;
+            this.firstHasNextRelease = null;
             this.firstHasNextBlocked = false;
         }
 
@@ -177,6 +271,12 @@ public class OrderedKvIteratorTest {
 
         private void blockFirstHasNext(CountDownLatch barrier) {
             this.firstHasNextBarrier = barrier;
+        }
+
+        private void blockFirstHasNext(CountDownLatch started,
+                                       CountDownLatch release) {
+            this.firstHasNextStarted = started;
+            this.firstHasNextRelease = release;
         }
 
         @Override
@@ -193,6 +293,21 @@ public class OrderedKvIteratorTest {
                                                         TimeUnit.SECONDS)) {
                         throw new IllegalStateException(
                                 "Timed out waiting for concurrent source");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+            }
+            if (this.firstHasNextRelease != null &&
+                !this.firstHasNextBlocked) {
+                this.firstHasNextBlocked = true;
+                this.firstHasNextStarted.countDown();
+                try {
+                    if (!this.firstHasNextRelease.await(5L,
+                                                        TimeUnit.SECONDS)) {
+                        throw new IllegalStateException(
+                                "Timed out waiting for source release");
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
