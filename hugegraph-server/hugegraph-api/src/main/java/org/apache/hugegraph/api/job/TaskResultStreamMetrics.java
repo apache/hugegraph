@@ -234,7 +234,7 @@ final class TaskResultStreamMetrics {
 
     private static String reason(Throwable error) {
         if (error instanceof TaskResultException) {
-            return ((TaskResultException) error).reason();
+            return ((TaskResultException) error).metricReason();
         }
         if (error instanceof TaskResultStreamException) {
             TaskResultStreamException streamError =

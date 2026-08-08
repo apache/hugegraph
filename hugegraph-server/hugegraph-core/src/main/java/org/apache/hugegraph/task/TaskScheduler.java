@@ -53,7 +53,10 @@ public interface TaskScheduler {
         return this.task(id);
     }
 
-    TaskResultSnapshot taskResultSnapshot(Id id);
+    default TaskResultSnapshot taskResultSnapshot(Id id) {
+        throw new UnsupportedOperationException(
+                "The task scheduler doesn't support result streaming");
+    }
 
     <V> Iterator<HugeTask<V>> tasks(List<Id> ids);
 

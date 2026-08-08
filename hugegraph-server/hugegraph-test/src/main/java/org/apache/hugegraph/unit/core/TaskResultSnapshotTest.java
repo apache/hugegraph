@@ -20,11 +20,14 @@ package org.apache.hugegraph.unit.core;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Base64;
 
+import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.task.TaskResultSnapshot;
 import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.testutil.Assert;
@@ -32,6 +35,14 @@ import org.apache.hugegraph.util.StringEncoding;
 import org.junit.Test;
 
 public class TaskResultSnapshotTest {
+
+    @Test
+    public void testTaskResultSnapshotUsesDefaultSchedulerMethod()
+            throws Exception {
+        Method method = TaskScheduler.class.getMethod("taskResultSnapshot",
+                                                       Id.class);
+        Assert.assertTrue(method.isDefault());
+    }
 
     @Test
     public void testOpenResultStreamMoreThanOnce() throws Exception {

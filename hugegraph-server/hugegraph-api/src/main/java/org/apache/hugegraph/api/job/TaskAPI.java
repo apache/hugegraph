@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 import org.apache.groovy.util.Maps;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
+import org.apache.hugegraph.api.filter.CompressInterceptor.Compress;
 import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.backend.id.Id;
@@ -175,6 +176,7 @@ public class TaskAPI extends API {
 
     @GET
     @Timed
+    @Compress
     @Path("{id}/result")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public Response getResult(@Context GraphManager manager,
@@ -186,12 +188,12 @@ public class TaskAPI extends API {
                               @PathParam("graph") String graph,
                               @Parameter(description = "The task id")
                               @PathParam("id") long id,
-                              @Parameter(description = "The result page size")
-                              @QueryParam("page_size") Integer pageSize,
+                              @Parameter(description = "The result page limit")
+                              @QueryParam("limit") Integer limit,
                               @Parameter(description = "The result page token")
                               @QueryParam("page") String page) {
         TaskResultStreamMetrics.Mode mode =
-                pageSize != null || page != null ?
+                limit != null || page != null ?
                 TaskResultStreamMetrics.Mode.PAGE :
                 TaskResultStreamMetrics.Mode.COMPLETE;
         TaskResultStreamMetrics.RequestTrace trace =
@@ -199,7 +201,7 @@ public class TaskAPI extends API {
         try {
             return this.buildResultResponse(manager, config, request,
                                             graphSpace, graph, id,
-                                            pageSize, page, trace);
+                                            limit, page, trace);
         } catch (RuntimeException | Error e) {
             trace.preCommitFailure(e);
             throw e;
@@ -208,10 +210,11 @@ public class TaskAPI extends API {
 
     private Response buildResultResponse(
             GraphManager manager, HugeConfig config, Request request,
-            String graphSpace, String graph, long id, Integer pageSize,
+            String graphSpace, String graph, long id, Integer limit,
             String page, TaskResultStreamMetrics.RequestTrace trace) {
+        Integer pageSize = limit;
         E.checkArgument(pageSize == null || page == null,
-                        "The parameters 'page_size' and 'page' can't be " +
+                        "The parameters 'limit' and 'page' can't be " +
                         "specified together");
 
         boolean pagination = pageSize != null || page != null;
@@ -223,7 +226,7 @@ public class TaskAPI extends API {
             int maxPageSize = config.get(
                     ServerOptions.TASK_RESULT_PAGE_SIZE_MAX);
             E.checkArgument(pageSize > 0 && pageSize <= maxPageSize,
-                            "The page size must be between 1 and %s",
+                            "The limit must be between 1 and %s",
                             maxPageSize);
         } else if (page != null) {
             codec = tokenCodec(config);
@@ -242,7 +245,7 @@ public class TaskAPI extends API {
                 E.checkArgument(pageSize <= config.get(
                                         ServerOptions.
                                                 TASK_RESULT_PAGE_SIZE_MAX),
-                                "The page token page size exceeds the " +
+                                "The page token limit exceeds the " +
                                 "current limit");
             } catch (IllegalArgumentException e) {
                 throw new InvalidTaskResultPageTokenException(

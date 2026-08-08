@@ -57,15 +57,16 @@ public class TaskResultStreamerTest {
         AtomicReference<TaskResultPageCursor> cursor = new AtomicReference<>();
 
         TaskResultStreamer.streamPage(snapshot, rootType, 1L, 2, 1024L,
-                                      Long.MAX_VALUE, output, value -> {
-            cursor.set(value);
-            return "next-page";
-        });
+                                      Long.MAX_VALUE, output,
+                                      value -> {
+                                          cursor.set(value);
+                                          return "next-page";
+                                      });
 
         Assert.assertEquals(RootType.ARRAY, rootType);
         Assert.assertEquals("{\"root_type\":\"array\",\"items\":[" +
                             "{\"name\":\"marko\"},3]," +
-                            "\"next_page\":\"next-page\"}", utf8(output));
+                            "\"page\":\"next-page\"}", utf8(output));
         Assert.assertEquals(3L, cursor.get().nextOffset());
         Assert.assertEquals(2, cursor.get().pageSize());
         Assert.assertEquals(snapshot.fingerprint(),
@@ -82,7 +83,7 @@ public class TaskResultStreamerTest {
                                       cursor -> "unexpected");
 
         Assert.assertEquals("{\"root_type\":\"array\",\"items\":[4]," +
-                            "\"next_page\":null}", utf8(output));
+                            "\"page\":null}", utf8(output));
     }
 
     @Test
@@ -97,7 +98,7 @@ public class TaskResultStreamerTest {
                                       cursor -> "unexpected");
 
         Assert.assertEquals("{\"root_type\":\"array\",\"items\":[]," +
-                            "\"next_page\":null}", utf8(arrayOutput));
+                            "\"page\":null}", utf8(arrayOutput));
 
         TaskResultSnapshot object = snapshot("{}");
         ByteArrayOutputStream objectOutput = new ByteArrayOutputStream();
@@ -109,7 +110,7 @@ public class TaskResultStreamerTest {
                                       cursor -> "unexpected");
 
         Assert.assertEquals("{\"root_type\":\"object\",\"items\":[]," +
-                            "\"next_page\":null}", utf8(objectOutput));
+                            "\"page\":null}", utf8(objectOutput));
     }
 
     @Test
@@ -124,7 +125,7 @@ public class TaskResultStreamerTest {
         Assert.assertEquals("{\"root_type\":\"object\",\"items\":[" +
                             "{\"key\":\"b\",\"value\":{\"x\":2}}," +
                             "{\"key\":\"a\",\"value\":3}]," +
-                            "\"next_page\":null}", utf8(output));
+                            "\"page\":null}", utf8(output));
     }
 
     @Test

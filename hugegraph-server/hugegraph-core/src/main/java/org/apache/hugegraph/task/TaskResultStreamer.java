@@ -121,10 +121,10 @@ public final class TaskResultStreamer {
                 TaskResultPageCursor next = new TaskResultPageCursor(
                         rootType, nextOffset(offset, emitted), pageSize,
                         snapshot.fingerprint());
-                generator.writeStringField("next_page",
+                generator.writeStringField("page",
                                            tokenEncoder.apply(next));
             } else {
-                generator.writeNullField("next_page");
+                generator.writeNullField("page");
             }
             generator.writeEndObject();
             checkDeadline(deadlineNanos);

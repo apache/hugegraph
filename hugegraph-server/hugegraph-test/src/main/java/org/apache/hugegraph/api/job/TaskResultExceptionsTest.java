@@ -17,37 +17,71 @@
 
 package org.apache.hugegraph.api.job;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
+
+import org.apache.hugegraph.api.filter.CompressInterceptor.Compress;
 import org.apache.hugegraph.api.filter.ExceptionFilter;
+import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.testutil.Assert;
+import org.glassfish.grizzly.http.server.Request;
 import org.junit.Test;
+
+import jakarta.ws.rs.QueryParam;
 
 public class TaskResultExceptionsTest {
 
     @Test
-    public void testStableTaskResultErrorContract() {
-        assertException(new TaskResultNotReadyException("not ready"),
-                        409, "not_ready");
+    public void testGetResultUsesLimitQueryParameter() throws Exception {
+        Method method = getResultMethod();
+        QueryParam parameter = null;
+        for (Parameter item : method.getParameters()) {
+            if (item.getType() == Integer.class) {
+                parameter = item.getAnnotation(QueryParam.class);
+                break;
+            }
+        }
+
+        Assert.assertNotNull(parameter);
+        Assert.assertEquals("limit", parameter.value());
+    }
+
+    @Test
+    public void testGetResultUsesCompressInterceptor() throws Exception {
+        Assert.assertNotNull(getResultMethod().getAnnotation(Compress.class));
+    }
+
+    @Test
+    public void testTaskResultErrorsUseStandardEnvelope() {
+        assertException(new TaskResultNotReadyException("not ready"), 409);
         assertException(new TaskResultNotReadableException("not readable"),
-                        409, "not_readable");
+                        409);
         assertException(new TaskResultUnavailableException("unavailable"),
-                        409, "unavailable");
+                        409);
         assertException(new InvalidTaskResultPageTokenException(
                                 "invalid token",
                                 new IllegalArgumentException("invalid")),
-                        400, "invalid_page_token");
-        assertException(new TaskResultChangedException("changed"),
-                        409, "changed");
+                        400);
+        assertException(new TaskResultChangedException("changed"), 409);
         assertException(new TaskResultNotPageableException(
                                 "not pageable",
                                 new IllegalArgumentException("invalid")),
-                        400, "not_pageable");
+                        400);
     }
 
     private static void assertException(TaskResultException exception,
-                                        int status, String reason) {
+                                        int status) {
         Assert.assertEquals(status, exception.getResponse().getStatus());
-        Assert.assertEquals(reason, exception.reason());
         String envelope = ExceptionFilter.formatException(exception, false);
         Assert.assertContains(exception.getClass().getSimpleName(), envelope);
+        Assert.assertFalse(envelope.contains("\"reason\":"));
+    }
+
+    private static Method getResultMethod() throws Exception {
+        return TaskAPI.class.getMethod("getResult", GraphManager.class,
+                                       HugeConfig.class, Request.class,
+                                       String.class, String.class, long.class,
+                                       Integer.class, String.class);
     }
 }

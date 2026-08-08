@@ -123,17 +123,32 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testGetCompleteResultWithCompression() {
+        int taskId = this.gremlinJob("[1, 2, 3]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().target().path(resultPath(taskId))
+                                    .request()
+                                    .header("Accept-Encoding", "gzip")
+                                    .get();
+
+        Assert.assertEquals("gzip",
+                            response.getHeaderString("Content-Encoding"));
+        Assert.assertEquals("[1,2,3]", assertResponseStatus(200, response));
+    }
+
+    @Test
     public void testGetArrayResultByPage() {
         int taskId = this.gremlinJob("[1, 2, 3, 4]");
         waitTaskSuccess(taskId);
 
         Response response = client().get(resultPath(taskId),
-                                         ImmutableMap.of("page_size", 2));
+                                         ImmutableMap.of("limit", 2));
         Map<?, ?> first = JsonUtil.fromJson(
                 assertResponseStatus(200, response), Map.class);
         Assert.assertEquals("array", first.get("root_type"));
         Assert.assertEquals(List.of(1, 2), first.get("items"));
-        String nextPage = (String) first.get("next_page");
+        String nextPage = (String) first.get("page");
         Assert.assertNotNull(nextPage);
 
         response = client().get(resultPath(taskId),
@@ -142,7 +157,7 @@ public class TaskApiTest extends BaseApiTest {
                 assertResponseStatus(200, response), Map.class);
         Assert.assertEquals("array", second.get("root_type"));
         Assert.assertEquals(List.of(3, 4), second.get("items"));
-        Assert.assertNull(second.get("next_page"));
+        Assert.assertNull(second.get("page"));
     }
 
     @Test
@@ -151,14 +166,14 @@ public class TaskApiTest extends BaseApiTest {
         waitTaskSuccess(taskId);
 
         Response response = client().get(resultPath(taskId),
-                                         ImmutableMap.of("page_size", 1));
+                                         ImmutableMap.of("limit", 1));
         Map<?, ?> first = JsonUtil.fromJson(
                 assertResponseStatus(200, response), Map.class);
         List<?> items = (List<?>) first.get("items");
         Assert.assertEquals(1, items.size());
         Assert.assertEquals(ImmutableMap.of("key", "a", "value", 1),
                             items.get(0));
-        Assert.assertNotNull(first.get("next_page"));
+        Assert.assertNotNull(first.get("page"));
     }
 
     @Test
@@ -167,13 +182,13 @@ public class TaskApiTest extends BaseApiTest {
         waitTaskSuccess(taskId);
 
         Response response = client().get(resultPath(taskId),
-                                         ImmutableMap.of("page_size", 1));
+                                         ImmutableMap.of("limit", 1));
         String content = assertResponseStatus(400, response);
-        Assert.assertContains("TaskResultNotPageableException", content);
+        assertTaskResultError(content, "TaskResultNotPageableException");
 
         response = client().get(resultPath(taskId),
-                                ImmutableMap.of("page_size", 1,
-                                                "page", "invalid"));
+                                ImmutableMap.of("limit", 1,
+                                                 "page", "invalid"));
         assertResponseStatus(400, response);
     }
 
@@ -184,7 +199,7 @@ public class TaskApiTest extends BaseApiTest {
         Response response = client().get(resultPath(taskId));
 
         String content = assertResponseStatus(409, response);
-        Assert.assertContains("TaskResultNotReadyException", content);
+        assertTaskResultError(content, "TaskResultNotReadyException");
         waitTaskSuccess(taskId);
     }
 
@@ -196,7 +211,7 @@ public class TaskApiTest extends BaseApiTest {
 
         Response response = client().get(resultPath(taskId));
         String content = assertResponseStatus(409, response);
-        Assert.assertContains("TaskResultNotReadableException", content);
+        assertTaskResultError(content, "TaskResultNotReadableException");
 
         response = client().get(PATH, String.valueOf(taskId));
         content = assertResponseStatus(200, response);
@@ -211,10 +226,10 @@ public class TaskApiTest extends BaseApiTest {
         int taskId = this.gremlinJob("[1, 2, 3]");
         waitTaskSuccess(taskId);
         Response response = client().get(resultPath(taskId),
-                                         ImmutableMap.of("page_size", 1));
+                                         ImmutableMap.of("limit", 1));
         Map<?, ?> page = JsonUtil.fromJson(
                 assertResponseStatus(200, response), Map.class);
-        String token = (String) page.get("next_page");
+        String token = (String) page.get("page");
         int index = token.indexOf('.') + 2;
         char replacement = token.charAt(index) == 'A' ? 'B' : 'A';
         String tampered = token.substring(0, index) + replacement +
@@ -224,7 +239,7 @@ public class TaskApiTest extends BaseApiTest {
                                 ImmutableMap.of("page", tampered));
 
         String content = assertResponseStatus(400, response);
-        Assert.assertContains("InvalidTaskResultPageTokenException", content);
+        assertTaskResultError(content, "InvalidTaskResultPageTokenException");
     }
 
     @Test
@@ -299,6 +314,13 @@ public class TaskApiTest extends BaseApiTest {
 
     private static String resultPath(int taskId) {
         return PATH + taskId + "/result";
+    }
+
+    private static void assertTaskResultError(String content,
+                                              String exception) {
+        Map<?, ?> error = JsonUtil.fromJson(content, Map.class);
+        Assert.assertContains(exception, (String) error.get("exception"));
+        Assert.assertFalse(error.containsKey("reason"));
     }
 
     private void sleepAWhile() {
