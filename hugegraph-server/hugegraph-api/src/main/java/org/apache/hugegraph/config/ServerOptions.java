@@ -368,6 +368,17 @@ public class ServerOptions extends OptionHolder {
                     "./conf/graphs"
             );
 
+    public static final ConfigOption<Boolean> INIT_STORE_ENABLED =
+            new ConfigOption<>(
+                    "init_store.enabled",
+                    "Whether init-store initializes the local backend stores " +
+                    "and the built-in admin account. Set false in distributed " +
+                    "deployments (PD/HStore) where the storage side already " +
+                    "owns the metadata.",
+                    disallowEmpty(),
+                    true
+            );
+
     public static final ConfigOption<Boolean> SERVER_START_IGNORE_SINGLE_GRAPH_ERROR =
             new ConfigOption<>(
                     "server.start_ignore_single_graph_error",

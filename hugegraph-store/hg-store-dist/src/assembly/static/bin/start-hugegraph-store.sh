@@ -46,8 +46,8 @@ if [[ $arch == "aarch64" || $arch == "arm64" ]]; then
     lib_file="$TOP/bin/libjemalloc_aarch64.so"
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc_aarch64.so"
     expected_md5="2a631d2f81837f9d5864586761c5e380"
-    if download_and_verify $download_url $lib_file $expected_md5; then
-        export LD_PRELOAD=$lib_file
+    if download_and_verify "$download_url" "$lib_file" "$expected_md5"; then
+        export LD_PRELOAD="$lib_file"
     else
         echo "Failed to verify or download $lib_file, skip it"
     fi
@@ -55,8 +55,8 @@ elif [[ $arch == "x86_64" ]]; then
     lib_file="$TOP/bin/libjemalloc.so"
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc.so"
     expected_md5="fd61765eec3bfea961b646c269f298df"
-    if download_and_verify $download_url $lib_file $expected_md5; then
-        export LD_PRELOAD=$lib_file
+    if download_and_verify "$download_url" "$lib_file" "$expected_md5"; then
+        export LD_PRELOAD="$lib_file"
     else
         echo "Failed to verify or download $lib_file, skip it"
     fi
@@ -73,7 +73,8 @@ export FILE_LIMITN=1024
 #export FILE_LIMITN=1024000
 
 function check_evn_limit() {
-    local limit_check=$(ulimit -n)
+    local limit_check
+    limit_check=$(ulimit -n)
     if [[ ${limit_check} != "unlimited" && ${limit_check} -lt ${FILE_LIMITN} ]]; then
         echo -e "${BASH_SOURCE[0]##*/}:${LINENO}:\E[1;32m ulimit -n can open too few maximum file descriptors, need (${FILE_LIMITN})!! \E[0m"
         return 1
@@ -218,7 +219,7 @@ fi
 #  JAVA_OPTIONS="${JAVA_OPTIONS} -javaagent:${LIB}/jmx_prometheus_javaagent-0.16.1.jar=${JMX_EXPORT_PORT}:${CONF}/jmx_exporter.yml"
 #fi
 
-if [ $(ps -ef|grep -v grep| grep java|grep -cE ${CONF}) -ne 0 ]; then
+if [ "$(ps -ef | grep -v grep | grep java | grep -cE "${CONF}")" -ne 0 ]; then
    echo "HugeGraphStoreServer is already running..."
    exit 0
 fi

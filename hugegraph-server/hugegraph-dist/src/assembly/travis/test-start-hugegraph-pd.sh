@@ -30,6 +30,7 @@ set -uo pipefail
 PD_ROOT="${1:-$(pwd)}"
 BIN="$PD_ROOT/bin"
 START_SCRIPT="$BIN/start-hugegraph-pd.sh"
+STOP_SCRIPT="$BIN/stop-hugegraph-pd.sh"
 PID_FILE="$BIN/pid"
 PD_URL="http://localhost:8620"
 STARTUP_WAIT=60   # seconds to wait for PD HTTP to respond
@@ -67,14 +68,30 @@ section() {
 
 cleanup() {
     info "Cleaning up..."
+    "$STOP_SCRIPT" >/dev/null 2>&1 || true
     if [[ -s "$PID_FILE" ]]; then
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
     rm -rf "$PD_ROOT/logs/"
-    # kill anything still holding the PD port
-    lsof -ti :8620 | xargs kill -9 2>/dev/null || true
-    lsof -ti :8686 | xargs kill -9 2>/dev/null || true
+    # kill anything still holding the PD port: fuser on Linux, lsof on macOS,
+    # which ships no fuser.  Only the Linux path had to lose its lsof dependency.
+    if [[ "$(uname)" == "Darwin" ]]; then
+        local port pids pid
+        for port in 8620 8686; do
+            pids=$(lsof -ti ":$port" 2>/dev/null)
+            if [[ -n "$pids" ]]; then
+                for pid in $pids; do
+                    kill -9 "$pid" 2>/dev/null || true
+                done
+            fi
+        done
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -k 8620/tcp 2>/dev/null || true
+        fuser -k 8686/tcp 2>/dev/null || true
+    else
+        echo "Warning: Neither lsof nor fuser available for PD port cleanup"
+    fi
     sleep 3
 }
 
@@ -129,7 +146,12 @@ if [[ ! -f "$START_SCRIPT" ]]; then
     exit 1
 fi
 
-for tool in lsof curl java; do
+if [[ "$(uname)" == "Darwin" ]]; then
+    _prereq_tools="lsof curl java"
+else
+    _prereq_tools="fuser curl java"
+fi
+for tool in $_prereq_tools; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "SKIP: required tool '$tool' not found — skipping test suite"
         exit 77

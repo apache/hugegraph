@@ -355,7 +355,10 @@ public final class GraphManager {
 
         this.initMetaManager(conf);
         this.initK8sManagerIfNeeded(conf);
-        this.initAdminUserIfNeeded(conf.get(ServerOptions.ADMIN_PA));
+        if (shouldBootstrapAdmin(this.authenticator,
+                                 conf.get(ServerOptions.AUTH_REMOTE_URL))) {
+            this.initAdminUserIfNeeded(conf.get(ServerOptions.ADMIN_PA));
+        }
 
         this.createDefaultGraphSpaceIfNeeded(conf);
 
@@ -368,6 +371,19 @@ public final class GraphManager {
         this.listenMetaChanges();
     }
 
+    private static boolean shouldBootstrapAdmin(HugeAuthenticator authenticator,
+                                                String remoteUrl) {
+        return authenticator instanceof StandardAuthenticator &&
+               remoteUrl.isEmpty();
+    }
+
+    /**
+     * Creates the built-in admin account in PD metadata. With init-store
+     * disabled this is the only bootstrap that admin gets, and init-store's
+     * fail-closed check assumes it works, so only the already-exists case is
+     * benign; any other failure aborts startup instead of leaving the server
+     * without a usable administrator.
+     */
     public void initAdminUserIfNeeded(String password) {
         HugeUser user = new HugeUser("admin");
         user.nickname("超级管理员");
@@ -380,10 +396,29 @@ public final class GraphManager {
         user.create(new Date());
         user.avatar("/image.png");
         try {
-            this.metaManager.createUser(user);
+            try {
+                this.metaManager.createUser(user);
+            } catch (Exception e) {
+                // Judged by re-reading rather than by matching the message:
+                // benign only if the admin actually exists, from an earlier
+                // startup or from a concurrent server that won the race
+                HugeUser existing;
+                try {
+                    existing = this.metaManager.findUser(user.name());
+                } catch (Exception probe) {
+                    e.addSuppressed(probe);
+                    throw e;
+                }
+                if (existing == null) {
+                    throw e;
+                }
+                LOG.info("The built-in admin user already exists, " +
+                         "skip creating it");
+            }
             this.metaManager.initDefaultGraphSpace();
         } catch (Exception e) {
-            LOG.info(e.getMessage());
+            throw new HugeException("Failed to init the built-in admin " +
+                                    "user or the default graph space", e);
         }
     }
 

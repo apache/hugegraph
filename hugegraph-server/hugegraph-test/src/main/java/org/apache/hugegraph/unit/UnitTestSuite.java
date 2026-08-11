@@ -37,6 +37,7 @@ import org.apache.hugegraph.unit.cache.CacheTest;
 import org.apache.hugegraph.unit.cache.CachedGraphTransactionTest;
 import org.apache.hugegraph.unit.cache.CachedSchemaTransactionTest;
 import org.apache.hugegraph.unit.cache.RamTableTest;
+import org.apache.hugegraph.unit.cmd.InitStoreConfigTest;
 import org.apache.hugegraph.unit.core.AnalyzerTest;
 import org.apache.hugegraph.unit.core.BackendMutationTest;
 import org.apache.hugegraph.unit.core.BackendStoreInfoTest;
@@ -45,6 +46,7 @@ import org.apache.hugegraph.unit.core.ConditionTest;
 import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
+import org.apache.hugegraph.unit.core.GraphManagerAdminInitTest;
 import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
@@ -143,6 +145,7 @@ import org.junit.runners.Suite;
         SecurityManagerTest.class,
         RolePermissionTest.class,
         ExceptionTest.class,
+        GraphManagerAdminInitTest.class,
         GraphManagerConfigTest.class,
         BackendStoreInfoTest.class,
         TraversalUtilTest.class,
@@ -154,6 +157,9 @@ import org.junit.runners.Suite;
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
         SchemaElementTest.class,
+
+        /* cmd */
+        InitStoreConfigTest.class,
 
         /* serializer */
         BytesBufferTest.class,

@@ -110,7 +110,9 @@ jobs:
       - name: Check startup test prerequisites (PD)
         id: pd-preflight
         run: |
-          for tool in lsof curl java; do
+          # These jobs run on Linux, where the suites clean up ports with fuser.
+          # lsof is no longer required: check_port now uses ss/netstat.
+          for tool in fuser curl java; do
             if ! command -v "$tool" >/dev/null 2>&1; then
               echo "can_run=false" >> "$GITHUB_OUTPUT"
               echo "skip_reason=missing tool: $tool" >> "$GITHUB_OUTPUT"
@@ -190,7 +192,9 @@ jobs:
       - name: Check startup test prerequisites (Store)
         id: store-preflight
         run: |
-          for tool in lsof curl java; do
+          # These jobs run on Linux, where the suites clean up ports with fuser.
+          # lsof is no longer required: check_port now uses ss/netstat.
+          for tool in fuser curl java; do
             if ! command -v "$tool" >/dev/null 2>&1; then
               echo "can_run=false" >> "$GITHUB_OUTPUT"
               echo "skip_reason=missing tool: $tool" >> "$GITHUB_OUTPUT"

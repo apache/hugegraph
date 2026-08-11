@@ -46,12 +46,16 @@ ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:Max
 WORKDIR /hugegraph-server/
 
 # 1. Install runtime dependencies and configure server
+# Note: iproute2 provides `ss`, which the bin/util.sh port preflight needs.  The
+# jammy base image ships neither ss nor netstat, so without it the preflight is
+# permanently inconclusive and a duplicate start is no longer caught.  It
+# replaces lsof, which no shipped script calls any more.
 RUN apt-get -q update \
     && apt-get -q install -y --no-install-recommends --no-install-suggests \
        dumb-init \
        procps \
        curl \
-       lsof \
+       iproute2 \
        vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \

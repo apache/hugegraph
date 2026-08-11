@@ -81,8 +81,8 @@ services:
       start_period: 60s
 
   server:
-    image: hugegraph/server:${HUGEGRAPH_VERSION:-latest}
-    pull_policy: always
+    image: ${HUGEGRAPH_SERVER_IMAGE:-hugegraph/server:${HUGEGRAPH_VERSION:-latest}}
+    pull_policy: ${HUGEGRAPH_SERVER_PULL_POLICY:-always}
     container_name: hg-server
     hostname: server
     restart: unless-stopped
@@ -93,10 +93,38 @@ services:
     environment:
       HG_SERVER_BACKEND: hstore
       HG_SERVER_PD_PEERS: pd:8686
+      HG_SERVER_CLUSTER: hg
+      HG_SERVER_USE_PD: "true"
+      HG_SERVER_REST_URL: http://server:8080
+      HG_SERVER_MIN_FREE_MEMORY: "0"
+      HG_SERVER_INIT_STORE_ENABLED: "false"
+      HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
+      PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:?Set a non-default admin password}
     ports:
       - "8080:8080"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://server:8080/versions >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  hubble:
+    image: ${HUBBLE_IMAGE:-hugegraph/hubble:${HUGEGRAPH_VERSION:-latest}}
+    pull_policy: ${HUBBLE_PULL_POLICY:-always}
+    container_name: hg-hubble
+    hostname: hubble
+    restart: unless-stopped
+    networks: [hg-net]
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
+    volumes:
+      - ./hugegraph-hubble.properties:/hubble/conf/hugegraph-hubble.properties:ro
+    healthcheck:
+      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8088/about) && printf '%s' \"$$body\" | grep -q '\"status\":200' && printf '%s' \"$$body\" | grep -q '\"name\":\"hugegraph-hubble\"'"]
       interval: 10s
       timeout: 5s
       retries: 30

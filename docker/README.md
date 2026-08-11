@@ -4,14 +4,15 @@ This directory contains Docker Compose files for running HugeGraph:
 
 | File | Description |
 |------|-------------|
-| `docker-compose.yml` | Single-node cluster using pre-built images from Docker Hub |
-| `docker-compose.dev.yml` | Single-node cluster built from source (for developers) |
+| `docker-compose.yml` | PD, Store, Server, and Hubble using pre-built images |
+| `docker-compose.dev.yml` | PD, Store, and Server built from source, plus Hubble |
 | `docker-compose-3pd-3store-3server.yml` | 3-node distributed cluster (PD + Store + Server) |
 
 ## Prerequisites
 
 - **Docker Engine** 20.10+ (or Docker Desktop 4.x+)
 - **Docker Compose** v2 (included in Docker Desktop)
+- **OpenSSL CLI** (used to generate the initial administrator password)
 - **Memory**: Allocate at least **12 GB** to Docker Desktop (Settings → Resources → Memory). The 3-node cluster runs 9 JVM processes (3 PD + 3 Store + 3 Server) which are memory-intensive. Insufficient memory causes OOM kills that appear as silent Raft failures.
 
 > [!IMPORTANT]
@@ -20,47 +21,120 @@ This directory contains Docker Compose files for running HugeGraph:
 
 ## Single-Node Setup
 
-Two compose files are available for running a single-node cluster (1 PD + 1 Store + 1 Server):
+Two compose files run one PD, one Store, one Server, and one Hubble instance:
+
+Create a Compose environment file once so every lifecycle command can resolve
+the required administrator password:
+
+```bash
+(
+  set -eu
+  cd docker
+  if [ -e .env ]; then
+    echo "docker/.env already exists; reusing it"
+  else
+    command -v openssl >/dev/null 2>&1
+    admin_password="$(openssl rand -base64 12)"
+    if [ "${#admin_password}" -ne 16 ]; then
+      echo "Failed to generate a 16-character password" >&2
+      exit 1
+    fi
+    install -m 600 /dev/null .env
+    {
+      printf "HUGEGRAPH_ADMIN_PASSWORD='%s'\n" "${admin_password}"
+    } >> .env
+    unset admin_password
+  fi
+  chmod 600 .env
+  if ! env -u HUGEGRAPH_ADMIN_PASSWORD \
+       docker compose -f docker-compose.yml config --quiet ||
+     ! env -u HUGEGRAPH_ADMIN_PASSWORD \
+       docker compose -f docker-compose.dev.yml config --quiet; then
+    echo "docker/.env is incomplete; repair or move it, then retry" >&2
+    exit 1
+  fi
+)
+```
+
+Compose automatically reads `docker/.env` for `up`, `ps`, `stop`, and `down`.
+The generated password is a 16-character, Compose-safe random value. The file
+is excluded from Git and Docker build contexts; keep its permissions restricted
+and source production credentials from your secret manager instead of
+committing them.
 
 ### Option A: Quick Start (pre-built images)
 
 Uses pre-built images from Docker Hub. Best for **end users** who want to run HugeGraph quickly.
+Set `HUGEGRAPH_VERSION` to the same published release for PD, Store, Server,
+and Hubble. The authenticated PD/Hubble integration is not present in `1.7.x`;
+if no later compatible release is available, use Option B.
 
 ```bash
-cd docker
-HUGEGRAPH_VERSION=1.7.0 docker compose up -d
+(
+  cd docker
+  HUGEGRAPH_VERSION='<compatible-release-after-1.7.x>' \
+  docker compose up -d
+)
 ```
 
-- Images: `hugegraph/pd:1.7.0`, `hugegraph/store:1.7.0`, `hugegraph/server:1.7.0`
+- Images: matching `hugegraph/pd`, `hugegraph/store`, `hugegraph/server`, and
+  `hugegraph/hubble` tags from the selected compatible release
 - `pull_policy: always` — always pulls the specified image tag
 
-> **Note**: Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag is intended for testing or development only.
+> **Note**: Do not use `latest` to claim a reproducible deployment. Pin a
+> compatible release tag and keep it unchanged for later lifecycle commands.
 - PD healthcheck endpoint: `/v1/health`
-- Single PD, single Store (`HG_PD_INITIAL_STORE_LIST: store:8500`), single Server
+- Hubble is available at `http://localhost:8088`; sign in as `admin` with the
+  required `HUGEGRAPH_ADMIN_PASSWORD`
+- Hubble binds to host loopback by default. Set `HUBBLE_PUBLISH_HOST`
+  explicitly only behind an HTTPS reverse proxy and trusted network controls.
+- Hubble uses PD discovery and the Docker-network Server address
 - Server healthcheck endpoint: `/versions`
 
 ### Option B: Development Build (build from source)
 
 Builds images locally from source Dockerfiles. Best for **developers** who want to test local changes.
+Build the matching `hugegraph-toolchain` Hubble source as
+`local/hugegraph-hubble:dev` before starting this stack.
 
 ```bash
-cd docker
-docker compose -f docker-compose.dev.yml up -d
+(
+  cd docker
+  HUBBLE_IMAGE=local/hugegraph-hubble:dev \
+  HUBBLE_PULL_POLICY=never \
+  docker compose -f docker-compose.dev.yml up -d
+)
 ```
 
-To run Store with the JDK 17 image profile (useful for ARM64 JNI-heavy workloads):
-
-```bash
-cd docker
-HG_STORE_DOCKERFILE=hugegraph-store/Dockerfile-jdk17 \
-  docker compose -f docker-compose.dev.yml up -d --build
-```
-
-- Images: built from source via `build: context: ..` with Dockerfiles
-- No `pull_policy` — builds locally, doesn't pull
-- Entrypoint scripts are baked into the built image (no volume mounts)
+- PD, Store, and Server images are built from this repository
+- Hubble uses `HUBBLE_IMAGE` because its source is in `hugegraph-toolchain`
+- Server entrypoint scripts are baked into the built image; Hubble mounts the
+  Docker-local PD configuration
 - PD healthcheck endpoint: `/v1/health`
 - Otherwise identical env vars and structure to the quickstart file
+
+Use the same release tag for Option A lifecycle commands:
+
+```bash
+(
+  cd docker
+  export HUGEGRAPH_VERSION='<same-compatible-release>'
+  docker compose ps
+  docker compose stop
+  docker compose down
+)
+```
+
+Use the development Compose file for every Option B lifecycle command:
+
+```bash
+(
+  cd docker
+  docker compose -f docker-compose.dev.yml ps
+  docker compose -f docker-compose.dev.yml stop
+  docker compose -f docker-compose.dev.yml down
+)
+```
 
 ### Key Differences
 
@@ -68,11 +142,26 @@ HG_STORE_DOCKERFILE=hugegraph-store/Dockerfile-jdk17 \
 |---|---|---|
 | **Images** | Pull from Docker Hub | Build from source |
 | **Who it's for** | End users | Developers |
-| **pull_policy** | `always` | not set (build) |
+| **Server pull_policy** | `always` | `build` |
+| **Hubble pull_policy** | `always` | `never` in the workflow above (`missing` in the Compose file by default) |
 
 **Verify** (both options):
 ```bash
 curl http://localhost:8080/versions
+curl -fsS http://localhost:8088/about
+```
+
+To validate local images without Compose replacing them with remote `latest`:
+
+```bash
+(
+  cd docker
+  HUGEGRAPH_SERVER_IMAGE=local/hugegraph-server:test \
+  HUGEGRAPH_SERVER_PULL_POLICY=never \
+  HUBBLE_IMAGE=local/hugegraph-hubble:test \
+  HUBBLE_PULL_POLICY=never \
+  docker compose up -d --wait
+)
 ```
 
 ---
@@ -167,8 +256,100 @@ Configuration is injected via environment variables. The old `docker/configs/app
 |----------|----------|---------|-----------------------------|-------------|
 | `HG_SERVER_BACKEND` | Yes | — | `backend` in `hugegraph.properties` | Storage backend (e.g. `hstore`) |
 | `HG_SERVER_PD_PEERS` | Yes | — | `pd.peers` | PD cluster addresses (e.g. `pd0:8686,pd1:8686,pd2:8686`) |
+| `HG_SERVER_CLUSTER` | No | — | `cluster` in `rest-server.properties` | PD discovery application name; single-node Compose uses `hg` to match Hubble |
+| `HG_SERVER_USE_PD` | No | — | `usePD` in `rest-server.properties` | Enables Server PD registration and discovery |
+| `HG_SERVER_REST_URL` | No | — | `restserver.url` | Address registered with PD and used by clients |
+| `HG_SERVER_MIN_FREE_MEMORY` | No | — | `restserver.min_free_memory` | Minimum free-memory guard in MB; local Compose uses `0` |
+| `HG_SERVER_AUTH_TOKEN_SECRET` | No | generated in auth mode | `auth.token_secret` | Shared JWT secret for REST and embedded Gremlin authentication; explicit values must be at least 32 bytes |
 | `STORE_REST` | No | — | Used by `wait-partition.sh` | Store REST endpoint for partition verification (e.g. `store0:8520`) |
-| `PASSWORD` | No | — | Enables auth mode | Optional authentication password |
+| `PASSWORD` | No | — | Enables auth and sets `auth.admin_pa` | Initial administrator password; disabled init-store does not read it from stdin, but the entrypoint still applies it to the PD bootstrap path |
+| `HG_SERVER_INIT_STORE_ENABLED` | No | `true` | `init_store.enabled` in `rest-server.properties` | Set `false` in PD/HStore deployments so init-store skips local backend and admin initialization |
+
+> **The built-in authenticator with `HG_SERVER_INIT_STORE_ENABLED=false`
+> requires `usePD=true` and an HStore-backed `auth.graph_store`, unless
+> `auth.remote_url` delegates auth elsewhere.** With init-store skipped, the
+> server creates the built-in admin in PD metadata, and only an HStore auth
+> graph uses the PD-backed auth manager that can read that account. init-store
+> exits non-zero when the combination is unusable, rather than leaving a server
+> nobody can log in to. A custom `auth.authenticator` is exempt because it
+> manages its own identities.
+>
+> `docker/init_complete` is written by init-store itself, and only after it has
+> initialized. A skipped run therefore records nothing, whether it was disabled
+> by the variable or by the property in a mounted `rest-server.properties`, so a
+> later re-enable is still able to initialize. The marker only short-circuits
+> re-initialization: init-store runs on every container start, and a disabled
+> one performs the fail-closed check above first, so a marker left by an
+> earlier release or an earlier enabled run cannot bypass it.
+>
+> The entrypoint maps **`PASSWORD` to `auth.admin_pa`** before init-store runs.
+> A disabled init-store does not read the password from standard input, but the
+> PD startup path uses the explicit `auth.admin_pa` value when it first creates
+> the administrator. Changing it later does not rotate an existing password.
+
+The single-node Compose files also accept these deployment-level overrides:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HUGEGRAPH_SERVER_IMAGE` | `hugegraph/server:<version>` | Complete Server image reference |
+| `HUGEGRAPH_SERVER_PULL_POLICY` | `always` (`build` for dev) | Server pull policy |
+| `HUBBLE_IMAGE` | `hugegraph/hubble:<version>` | Complete Hubble image reference |
+| `HUBBLE_PULL_POLICY` | `always` (`missing` for dev) | Hubble pull policy |
+| `HUBBLE_PUBLISH_HOST` | `127.0.0.1` | Hubble host bind address; remote access requires an HTTPS reverse proxy |
+| `HUGEGRAPH_ADMIN_PASSWORD` | required (`docker/.env`) | Initial admin password; no public default is provided |
+| `HUGEGRAPH_AUTH_TOKEN_SECRET` | generated | JWT signing secret; explicit values must be at least 32 bytes |
+
+When authentication is enabled and no token secret is supplied, the Server
+entrypoint generates a random secret and writes it to both authentication
+configurations. The value is reused on container restart while the container
+filesystem is preserved. To preserve tokens across container recreation,
+generate a compatible secret once and add it to the mode-600 `docker/.env`:
+
+```bash
+(
+  set -euo pipefail
+  cd docker
+  secret_pattern='^[[:space:]]*(export[[:space:]]+)?HUGEGRAPH_AUTH_TOKEN_SECRET[[:space:]]*='
+  secret_count="$(grep -Ec "${secret_pattern}" .env || true)"
+  case "${secret_count}" in
+    0)
+      command -v openssl >/dev/null 2>&1
+      token_secret="$(openssl rand -hex 32)"
+      LC_ALL=C
+      if (( ${#token_secret} != 64 )); then
+        echo "Failed to generate a 64-character token secret" >&2
+        exit 1
+      fi
+      printf "HUGEGRAPH_AUTH_TOKEN_SECRET='%s'\n" \
+        "${token_secret}" >> .env
+      unset token_secret
+      echo "Generated HUGEGRAPH_AUTH_TOKEN_SECRET"
+      ;;
+    1)
+      token_secret="$(
+        sed -nE \
+          "s/${secret_pattern}'([^']*)'[[:space:]]*$/\\2/p" .env
+      )"
+      LC_ALL=C
+      if (( ${#token_secret} < 32 )); then
+        echo "Existing token secret must use the documented single-quoted" \
+             "format and contain at least 32 bytes; .env was not changed" >&2
+        exit 1
+      fi
+      unset token_secret
+      echo "HUGEGRAPH_AUTH_TOKEN_SECRET already exists; reusing it"
+      ;;
+    *)
+      echo "Duplicate HUGEGRAPH_AUTH_TOKEN_SECRET entries; repair .env" >&2
+      exit 1
+      ;;
+  esac
+  chmod 600 .env
+)
+```
+
+The entrypoint rejects shorter explicit values before changing either Server
+configuration file.
 
 **Deprecated aliases** (still work but log a warning):
 
@@ -182,7 +363,8 @@ Configuration is injected via environment variables. The old `docker/configs/app
 ## Port Reference
 
 The table below reflects the published host ports in `docker-compose-3pd-3store-3server.yml`.
-The single-node compose file (`docker-compose.yml`) only publishes the REST/API ports (`8620`, `8520`, `8080`) by default.
+The single-node Compose file publishes `8620`, `8520`, `8080`, and Hubble
+`8088`; Hubble defaults to host loopback.
 
 | Service | Container Port | Host Port | Protocol | Purpose |
 |---------|---------------|-----------|----------|---------|
@@ -215,6 +397,7 @@ The single-node compose file (`docker-compose.yml`) only publishes the REST/API 
 | PD | `GET /v1/health` | `200 OK` |
 | Store | `GET /v1/health` | `200 OK` |
 | Server | `GET /versions` | `200 OK` with version JSON |
+| Hubble | `GET /about` | `200` JSON with Hubble name and version |
 
 ---
 

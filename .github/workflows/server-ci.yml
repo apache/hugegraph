@@ -9,6 +9,19 @@ on:
   pull_request:
 
 jobs:
+  wait-storage-shell-test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run wait-storage.sh peer failover tests
+        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
+
   build-server:
     # TODO: we need test & replace it to ubuntu-24.04 or ubuntu-latest
     runs-on: ubuntu-22.04
@@ -70,23 +83,101 @@ jobs:
         run: |
           mvn clean compile -U -Dmaven.javadoc.skip=true -ntp
 
+      - name: Validate Docker integration
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh
+          check_compose() {
+            local file="$1"
+            local server_policy="$2"
+            local hubble_policy="$3"
+            local rendered
+            rendered="$(mktemp)"
+
+            if env -u HUGEGRAPH_ADMIN_PASSWORD \
+                 docker compose -f "$file" config -q >/dev/null 2>&1; then
+              echo "$file accepted an unset admin password" >&2
+              return 1
+            fi
+            if HUGEGRAPH_ADMIN_PASSWORD= \
+                 docker compose -f "$file" config -q >/dev/null 2>&1; then
+              echo "$file accepted an empty admin password" >&2
+              return 1
+            fi
+
+            HUGEGRAPH_ADMIN_PASSWORD=ci-test-password \
+              docker compose -f "$file" config --format json > "$rendered"
+            jq -e \
+              --arg server_policy "$server_policy" \
+              --arg hubble_policy "$hubble_policy" '
+                .services.server.pull_policy == $server_policy and
+                .services.hubble.pull_policy == $hubble_policy and
+                .services.server.environment.HG_SERVER_USE_PD == "true" and
+                .services.server.environment.HG_SERVER_CLUSTER == "hg" and
+                .services.server.environment.HG_SERVER_REST_URL ==
+                  "http://server:8080" and
+                .services.server.environment.HG_SERVER_INIT_STORE_ENABLED ==
+                  "false" and
+                .services.server.environment.PASSWORD ==
+                  "ci-test-password" and
+                (.services.server.environment.HG_SERVER_AUTH_TOKEN_SECRET !=
+                  null) and
+                .services.hubble.depends_on.server.condition ==
+                  "service_healthy" and
+                (.services.hubble.healthcheck.test[1] |
+                  contains("http://127.0.0.1:8088/about") and
+                  contains("\"status\":200") and
+                  contains("\"name\":\"hugegraph-hubble\"")) and
+                any(.services.hubble.ports[];
+                    .target == 8088 and .published == "8088" and
+                    .host_ip == "127.0.0.1")
+              ' "$rendered" >/dev/null
+            rm -f "$rendered"
+          }
+
+          check_compose docker/docker-compose.yml always always
+          check_compose docker/docker-compose.dev.yml build missing
+
+      - name: Run check_port unit tests
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          # Validates the ss/netstat port preflight that replaced lsof
+          $TRAVIS_DIR/test-check-port.sh \
+            hugegraph-server/hugegraph-dist/src/assembly/static \
+            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
+
+      - name: Run Java security properties tests
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          $TRAVIS_DIR/test-java-security-properties.sh $SERVER_DIR
+
       - name: Check startup test prerequisites
         id: server-preflight
         if: ${{ env.BACKEND == 'rocksdb' }}
         run: |
-          for tool in lsof crontab curl java; do
+          # Note: lsof removed from prerequisites; check_port now uses ss, falling back
+          # to netstat, and warns without blocking when neither can answer.
+          # This job always runs on Linux (ubuntu-22.04), which uses fuser for port cleanup.
+          for tool in crontab curl java; do
             if ! command -v "$tool" >/dev/null 2>&1; then
               echo "can_run=false" >> "$GITHUB_OUTPUT"
               echo "skip_reason=missing tool: $tool" >> "$GITHUB_OUTPUT"
               exit 0
             fi
           done
+          if ! command -v fuser >/dev/null 2>&1; then
+            echo "can_run=false" >> "$GITHUB_OUTPUT"
+            echo "skip_reason=missing tool: fuser (required for Linux port cleanup)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "can_run=true" >> "$GITHUB_OUTPUT"
 
       - name: Run start-hugegraph.sh foreground mode tests
         if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'true' }}
         run: |
-          mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
@@ -177,6 +268,13 @@ jobs:
       - name: Compile
         run: |
           mvn clean compile -pl hugegraph-server/hugegraph-test -am -U -Dmaven.javadoc.skip=true -ntp
+
+      - name: Run check_port unit tests
+        # Validates the ss/netstat port preflight that replaced lsof
+        run: |
+          $TRAVIS_DIR/test-check-port.sh \
+            hugegraph-server/hugegraph-dist/src/assembly/static \
+            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
 
       - name: Run RocksDB core test
         run: |
