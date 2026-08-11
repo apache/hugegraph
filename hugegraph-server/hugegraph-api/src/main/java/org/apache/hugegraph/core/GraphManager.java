@@ -34,10 +34,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -153,13 +150,6 @@ public final class GraphManager {
     public static final String DELIMITER = "-";
     public static final String NAMESPACE_CREATE = "namespace_create";
     private static final Logger LOG = Log.logger(GraphManager.class);
-    /*
-     * The graph create/drop listeners only do in-memory registrations (put the
-     * graph into the rest server context and into the gremlin server bindings),
-     * so they finish in microseconds on a healthy server. The bound is only a
-     * guard against a stuck or starved event worker.
-     */
-    private static final long EVENT_WAIT_TIMEOUT = 30L;
     private KvStore kvStore;
 
     private final String cluster;
@@ -1204,13 +1194,13 @@ public final class GraphManager {
             graph.create(this.graphsDir, this.globalNodeRoleInfo);
 
             // Let gremlin server and rest server add graph to context
-            this.notifyAndWaitEvent(Events.GRAPH_CREATE, graph);
+            this.notifyEvent(Events.GRAPH_CREATE, graph);
         } catch (Throwable e) {
             LOG.error("Failed to create graph '{}' due to: {}",
                       name, e.getMessage(), e);
             if (graph != null) {
                 // The create event may have added the graph to the context
-                this.graphs.remove(graph.spaceGraphName());
+                this.graphs.remove(graph.spaceGraphName(), graph);
                 this.dropGraphLocal(graph);
             }
             throw e;
@@ -1361,9 +1351,10 @@ public final class GraphManager {
          * graph behind in meta for the other servers to converge on
          */
         try {
-            this.notifyAndWaitEvent(Events.GRAPH_CREATE, graph);
+            this.notifyEvent(Events.GRAPH_CREATE, graph);
         } catch (Throwable e) {
-            this.graphs.remove(graphName);
+            this.notifyEventLenient(Events.GRAPH_DROP, graph);
+            this.graphs.remove(graphName, graph);
             try {
                 graph.close();
             } catch (Exception e1) {
@@ -1783,7 +1774,7 @@ public final class GraphManager {
             LOG.debug("RestServer accepts event '{}'", event.name());
             event.checkArgs(HugeGraph.class);
             HugeGraph graph = (HugeGraph) event.args()[0];
-            this.graphs.remove(graph.spaceGraphName());
+            this.graphs.remove(graph.spaceGraphName(), graph);
             return null;
         });
     }
@@ -1801,37 +1792,19 @@ public final class GraphManager {
     }
 
     /**
-     * Notify the listeners of `event` and wait for them to finish, failing if
-     * any listener did not complete successfully.
+     * Notify the listeners of `event` synchronously, failing if any listener
+     * did not complete successfully.
      * <p>
-     * EventHub swallows every throwable raised by a listener and resolves the
-     * future with the number of listeners that returned normally, so waiting
-     * alone doesn't prove that the graph was registered. Comparing the
-     * notified count with the registered listener count detects the swallowed
-     * failure and lets the caller fail instead of returning a graph that is
-     * missing from the rest/gremlin server context.
+     * EventHub swallows every throwable raised by a listener and returns the
+     * number of listeners that completed normally. Comparing it with the
+     * registered listener count detects the swallowed failure.
      */
-    private void notifyAndWaitEvent(String event, HugeGraph graph) {
+    private void notifyEvent(String event, HugeGraph graph) {
         String graphName = graph.spaceGraphName();
         // Listeners of ANY_EVENT are notified too, so they count as expected
         int expected = this.eventHub.listeners(event).size() +
                        this.eventHub.listeners(EventHub.ANY_EVENT).size();
-        int notified;
-        try {
-            Future<Integer> future = this.eventHub.notify(event, graph);
-            notified = future.get(EVENT_WAIT_TIMEOUT, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new HugeException("Interrupted while waiting for event " +
-                                    "'%s' of graph '%s'", e, event, graphName);
-        } catch (TimeoutException e) {
-            throw new HugeException("Timeout(%ss) while waiting for event " +
-                                    "'%s' of graph '%s'", e,
-                                    EVENT_WAIT_TIMEOUT, event, graphName);
-        } catch (ExecutionException e) {
-            throw new HugeException("Failed to wait for event '%s' of " +
-                                    "graph '%s'", e, event, graphName);
-        }
+        int notified = this.eventHub.notifySync(event, graph);
 
         if (notified < expected) {
             throw new HugeException("Only %s of %s listeners handled event " +
@@ -1841,21 +1814,14 @@ public final class GraphManager {
     }
 
     /**
-     * Same bounded wait as notifyAndWaitEvent(), but a failed listener is only
-     * logged. Used by the drop path: the graph data is already deleted when
-     * the event is sent, so failing the request can't undo anything, and the
-     * listener state may legitimately be absent already.
+     * Notify listeners synchronously, but keep listener failures non-fatal.
+     * Used by the drop and rollback paths, where cleanup must be best-effort.
      */
-    private void notifyAndWaitEventLenient(String event, HugeGraph graph) {
+    private void notifyEventLenient(String event, HugeGraph graph) {
         try {
-            Future<Integer> future = this.eventHub.notify(event, graph);
-            future.get(EVENT_WAIT_TIMEOUT, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.warn("Interrupted when waiting for event execution: {}",
-                     event, e);
+            this.eventHub.notifySync(event, graph);
         } catch (Throwable e) {
-            LOG.warn("Error when waiting for event execution: {}", event, e);
+            LOG.warn("Error when notifying event: {}", event, e);
         }
     }
 
@@ -2078,7 +2044,7 @@ public final class GraphManager {
         this.dropGraphLocal(graph);
 
         // Let gremlin server and rest server context remove graph
-        this.notifyAndWaitEventLenient(Events.GRAPH_DROP, graph);
+        this.notifyEventLenient(Events.GRAPH_DROP, graph);
     }
 
     public void dropGraph(String graphSpace, String name, boolean clear) {

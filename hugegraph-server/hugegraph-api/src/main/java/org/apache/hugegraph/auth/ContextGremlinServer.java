@@ -146,8 +146,12 @@ public class ContextGremlinServer extends GremlinServer {
         GremlinExecutor executor = this.getServerGremlinExecutor()
                                        .getGremlinExecutor();
         try {
-            manager.removeGraph(name);
-            manager.removeTraversalSource(G_PREFIX + name);
+            if (manager.getGraph(name) != null) {
+                manager.removeGraph(name);
+            }
+            if (manager.getTraversalSource(G_PREFIX + name) != null) {
+                manager.removeTraversalSource(G_PREFIX + name);
+            }
             Whitebox.invoke(executor, "globalBindings",
                             new Class<?>[]{Object.class},
                             "remove", name);

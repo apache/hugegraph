@@ -167,10 +167,29 @@ public class EventHub {
         return this.notify(event, null, args);
     }
 
+    /**
+     * Notify all registered listeners in the current thread.
+     */
+    public int notifySync(String event, @Nullable Object... args) {
+        ExtendableIterator<EventListener> all = this.eventListeners(event);
+        return this.notifyListeners(all, null, new Event(this, event, args));
+    }
+
     private Future<Integer> notify(String event,
                                    EventListener ignoredListener,
                                    @Nullable Object... args) {
-        @SuppressWarnings("resource")
+        ExtendableIterator<EventListener> all = this.eventListeners(event);
+        if (!all.hasNext()) {
+            return CompletableFuture.completedFuture(0);
+        }
+        Event ev = new Event(this, event, args);
+        return executor().submit(() -> {
+            return this.notifyListeners(all, ignoredListener, ev);
+        });
+    }
+
+    @SuppressWarnings("resource")
+    private ExtendableIterator<EventListener> eventListeners(String event) {
         ExtendableIterator<EventListener> all = new ExtendableIterator<>();
 
         List<EventListener> ls = this.listeners.get(event);
@@ -181,31 +200,30 @@ public class EventHub {
         if (lsAny != null && !lsAny.isEmpty()) {
             all.extend(lsAny.iterator());
         }
+        return all;
+    }
 
+    private int notifyListeners(ExtendableIterator<EventListener> all,
+                                EventListener ignoredListener, Event event) {
         if (!all.hasNext()) {
-            return CompletableFuture.completedFuture(0);
+            return 0;
         }
 
-        Event ev = new Event(this, event, args);
-
-        // The submit will catch params: `all`(Listeners) and `ev`(Event)
-        return executor().submit(() -> {
-            int count = 0;
-            // Notify all listeners, and ignore the results
-            while (all.hasNext()) {
-                EventListener listener = all.next();
-                if (listener == ignoredListener) {
-                    continue;
-                }
-                try {
-                    listener.event(ev);
-                    count++;
-                } catch (Throwable e) {
-                    LOG.warn("Failed to handle event: {}", ev, e);
-                }
+        int count = 0;
+        // Notify all listeners, and ignore the results
+        while (all.hasNext()) {
+            EventListener listener = all.next();
+            if (listener == ignoredListener) {
+                continue;
             }
-            return count;
-        });
+            try {
+                listener.event(event);
+                count++;
+            } catch (Throwable e) {
+                LOG.warn("Failed to handle event: {}", event, e);
+            }
+        }
+        return count;
     }
 
     public Object call(String event, @Nullable Object... args) {

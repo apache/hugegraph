@@ -389,6 +389,27 @@ public class EventHubTest extends BaseUnitTest {
     }
 
     @Test
+    public void testEventNotifySync() {
+        final String notify = "event-notify-sync";
+        AtomicInteger count = new AtomicInteger();
+
+        this.eventHub.listen(notify, event -> {
+            count.incrementAndGet();
+            return null;
+        });
+        this.eventHub.listen(notify, event -> {
+            throw new RuntimeException("fake exception");
+        });
+        this.eventHub.listen(EventHub.ANY_EVENT, event -> {
+            count.incrementAndGet();
+            return null;
+        });
+
+        Assert.assertEquals(2, this.eventHub.notifySync(notify));
+        Assert.assertEquals(2, count.get());
+    }
+
+    @Test
     public void testNotifyExcept() throws Exception {
         final String notify = "event-notify";
         AtomicInteger listenerACount = new AtomicInteger();
