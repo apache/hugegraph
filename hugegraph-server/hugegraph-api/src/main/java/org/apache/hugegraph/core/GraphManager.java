@@ -1199,9 +1199,13 @@ public final class GraphManager {
             LOG.error("Failed to create graph '{}' due to: {}",
                       name, e.getMessage(), e);
             if (graph != null) {
-                // The create event may have added the graph to the context
                 this.graphs.remove(graph.spaceGraphName(), graph);
-                this.dropGraphLocal(graph);
+                try {
+                    this.dropGraphLocal(graph);
+                } finally {
+                    // The create event may have partially registered the graph
+                    this.notifyEventLenient(Events.GRAPH_DROP, graph);
+                }
             }
             throw e;
         }
@@ -1210,14 +1214,16 @@ public final class GraphManager {
     }
 
     private void dropGraphLocal(HugeGraph graph) {
-        // Clear data and config files
-        graph.drop();
-
-        /*
-         * Will fill graph instance into HugeFactory.graphs after
-         * GraphFactory.open() succeed, remove it when the graph drops
-         */
-        HugeFactory.remove(graph);
+        try {
+            // Clear data and config files
+            graph.drop();
+        } finally {
+            /*
+             * Will fill graph instance into HugeFactory.graphs after
+             * GraphFactory.open() succeed, remove it when the graph drops
+             */
+            HugeFactory.remove(graph);
+        }
     }
 
     public HugeGraph createGraph(String graphSpace, String name, String creator,
