@@ -65,6 +65,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.config.TypedOption;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.event.EventHub.NotifyResult;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.exception.NotSupportException;
@@ -1801,21 +1802,18 @@ public final class GraphManager {
      * Notify the listeners of `event` synchronously, failing if any listener
      * did not complete successfully.
      * <p>
-     * EventHub swallows every throwable raised by a listener and returns the
-     * number of listeners that completed normally. Comparing it with the
-     * registered listener count detects the swallowed failure.
+     * EventHub swallows every throwable raised by a listener and reports the
+     * attempted and successful listeners from the same snapshot.
      */
     private void notifyEvent(String event, HugeGraph graph) {
         String graphName = graph.spaceGraphName();
-        // Listeners of ANY_EVENT are notified too, so they count as expected
-        int expected = this.eventHub.listeners(event).size() +
-                       this.eventHub.listeners(EventHub.ANY_EVENT).size();
-        int notified = this.eventHub.notifySync(event, graph);
+        NotifyResult result = this.eventHub.notifySync(event, graph);
 
-        if (notified < expected) {
+        if (!result.success()) {
             throw new HugeException("Only %s of %s listeners handled event " +
                                     "'%s' of graph '%s' successfully",
-                                    notified, expected, event, graphName);
+                                    result.succeeded(), result.attempted(),
+                                    event, graphName);
         }
     }
 

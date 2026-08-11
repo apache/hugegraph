@@ -39,6 +39,29 @@ import com.google.common.collect.ImmutableList;
 
 public class EventHub {
 
+    public static final class NotifyResult {
+
+        private final int attempted;
+        private final int succeeded;
+
+        private NotifyResult(int attempted, int succeeded) {
+            this.attempted = attempted;
+            this.succeeded = succeeded;
+        }
+
+        public int attempted() {
+            return this.attempted;
+        }
+
+        public int succeeded() {
+            return this.succeeded;
+        }
+
+        public boolean success() {
+            return this.attempted == this.succeeded;
+        }
+    }
+
     private static final Logger LOG = Log.logger(EventHub.class);
 
     public static final String EVENT_WORKER = "event-worker-%d";
@@ -170,7 +193,7 @@ public class EventHub {
     /**
      * Notify all registered listeners in the current thread.
      */
-    public int notifySync(String event, @Nullable Object... args) {
+    public NotifyResult notifySync(String event, @Nullable Object... args) {
         ExtendableIterator<EventListener> all = this.eventListeners(event);
         return this.notifyListeners(all, null, new Event(this, event, args));
     }
@@ -184,7 +207,7 @@ public class EventHub {
         }
         Event ev = new Event(this, event, args);
         return executor().submit(() -> {
-            return this.notifyListeners(all, ignoredListener, ev);
+            return this.notifyListeners(all, ignoredListener, ev).succeeded();
         });
     }
 
@@ -203,27 +226,30 @@ public class EventHub {
         return all;
     }
 
-    private int notifyListeners(ExtendableIterator<EventListener> all,
-                                EventListener ignoredListener, Event event) {
+    private NotifyResult notifyListeners(ExtendableIterator<EventListener> all,
+                                         EventListener ignoredListener,
+                                         Event event) {
         if (!all.hasNext()) {
-            return 0;
+            return new NotifyResult(0, 0);
         }
 
-        int count = 0;
+        int attempted = 0;
+        int succeeded = 0;
         // Notify all listeners, and ignore the results
         while (all.hasNext()) {
             EventListener listener = all.next();
             if (listener == ignoredListener) {
                 continue;
             }
+            attempted++;
             try {
                 listener.event(event);
-                count++;
+                succeeded++;
             } catch (Throwable e) {
                 LOG.warn("Failed to handle event: {}", event, e);
             }
         }
-        return count;
+        return new NotifyResult(attempted, succeeded);
     }
 
     public Object call(String event, @Nullable Object... args) {
