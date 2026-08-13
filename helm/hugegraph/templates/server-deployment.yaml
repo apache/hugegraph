@@ -26,15 +26,12 @@
 {{- $batchMaxWriteThreads = toString (get $restServer "batchMaxWriteThreads") }}
 {{- end }}
 {{- $customPort := ne (int .Values.server.port) 8080 }}
-{{- $hubble := get .Values "hubble" | default dict }}
-{{- $hubblePdMode := and (get $hubble "enabled" | default false) (ne (get $hubble "mode" | default "pd") "direct") }}
 {{/*
-PD meta mode (usePD) is required on two paths: the built-in authenticator
-creates the admin on the PD startup path, and PD-mode Hubble discovers the
-Server through the service URL the Server registers with PD. Both need the
-same four properties, so they share one condition.
+Distributed HStore requires every Server replica to share graph metadata
+through PD. The same registration properties let PD-mode Hubble discover the
+Server and let the built-in authenticator create the admin on the PD path.
 */}}
-{{- $pdMeta := or .Values.server.auth.enabled $hubblePdMode }}
+{{- $pdMeta := true }}
 {{- $wrapper := or $pdMeta $customPort (ne $minFreeMemory "") (ne $batchMaxWriteThreads "") }}
 apiVersion: apps/v1
 kind: Deployment

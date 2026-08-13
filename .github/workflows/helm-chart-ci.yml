@@ -83,6 +83,14 @@ jobs:
             | grep -qF 'value: "-Dpartition.default-shard-count=3"'
           helm template ci helm/hugegraph -f helm/hugegraph/values-single.yaml \
             | grep -qF 'value: "-Dpartition.default-shard-count=1"'
+          # The stock distributed install must put every Server replica on
+          # the shared PD graph catalog, even without auth or Hubble.
+          DEFAULT=$(helm template ci helm/hugegraph)
+          grep -qF "printf 'usePD=true\\n'" <<<"$DEFAULT"
+          grep -qF 'printf '\''pd.peers=%s\\n'\'' "${HG_SERVER_PD_PEERS}"' \
+            <<<"$DEFAULT"
+          grep -qF 'value: "ci-hugegraph-pd-0.ci-hugegraph-pd.default.svc:8686,ci-hugegraph-pd-1.ci-hugegraph-pd.default.svc:8686,ci-hugegraph-pd-2.ci-hugegraph-pd.default.svc:8686"' \
+            <<<"$DEFAULT"
 
       - name: reject invalid values
         run: |

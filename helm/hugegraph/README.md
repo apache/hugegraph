@@ -37,6 +37,12 @@ so operators do not have to:
   every replica would initialize the same backend concurrently. The chart
   creates no init Job and does not set `HG_SERVER_SKIP_INIT`. Standalone
   behavior is unchanged, because the option defaults to `true` when unset.
+- **Every Server uses PD for graph metadata.** The startup wrapper always writes
+  `usePD=true` and the chart-derived `pd.peers` into
+  `rest-server.properties`, so all Server replicas share the graph catalog
+  through PD. It also registers the Server client Service URL for Kubernetes
+  discovery. This is required for distributed HStore and does not make a local
+  RocksDB backend shared across replicas.
 - **Store waits for PD quorum** in an init container before starting, so Store
   never registers against an incomplete PD Raft group.
 - **The Server startup probe allows at least 450 seconds.** The image may spend
@@ -123,9 +129,10 @@ That rule covers values-sourced defaults only; the asymmetry is that
 template-derived settings **are** applied even under `--reuse-values`,
 because they are computed at render time from whatever values are in effect.
 Pod-level token mounting (disabled unconditionally) and the derived
-`-Dpartition.default-shard-count` in the PD `JAVA_OPTS` are the current
-cases. On an already-initialized cluster the seeded shard count is inert
-either way; see Partition Sharding.
+`-Dpartition.default-shard-count` in the PD `JAVA_OPTS`, plus the Server's
+enforced PD metadata mode, are the current cases. The PD metadata change rolls
+the Server Deployment. On an already-initialized cluster the seeded shard
+count is inert either way; see Partition Sharding.
 
 Upgrading an existing release to this chart version rolls the PD StatefulSet
 once: PD Pods now always carry a `JAVA_OPTS` environment variable with the
@@ -316,13 +323,12 @@ pointing at the Server client Service; there is no PD discovery and no
 operations view. Everything else in `hugegraph-hubble.properties` keeps the
 image default.
 
-Enabling `pd`-mode Hubble switches the Server into PD meta mode (`usePD`,
-`server.urls_to_pd`, `server.deploy_in_k8s`) so that PD can hand Hubble a
-resolvable Server address; auth-enabled installs already run in this mode.
-On an existing release this change rolls the Server Deployment once. The
-Store allow-list is computed from `store.replicas` at render time, so scale
-Store with `helm upgrade`, not `kubectl scale`, or the list goes stale until
-the next upgrade.
+The chart always runs the Server in PD meta mode (`usePD`, `pd.peers`,
+`server.urls_to_pd`, `server.deploy_in_k8s`). In `pd` mode, Hubble uses that
+registration so PD can hand it a resolvable Server address. The Store
+allow-list is computed from `store.replicas` at render time, so scale Store
+with `helm upgrade`, not `kubectl scale`, or the list goes stale until the next
+upgrade.
 
 Hubble is one replica by design: it keeps UI connection metadata, including
 any graph credentials entered in the UI, in an embedded per-instance H2
