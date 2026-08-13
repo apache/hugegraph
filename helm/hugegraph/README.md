@@ -601,22 +601,30 @@ kubectl exec <server-pod> -c server -- curl -s localhost:8080/graphs
 
 ### Queries Fail with "Could not rebind" Right After Creating a Graph
 
-Creating a graph returns before every Server replica has opened and bound it.
-The creating Server writes the graph to PD metadata and registers its own
-Gremlin binding; the other replicas converge independently through a PD watch
-plus a local graph open. Until they do, a Gremlin query routed through the
-load-balanced Service to a not-yet-converged replica fails with a 400 error
-such as `Could not rebind [g]`. This is upstream behavior, not a chart
-setting. Mitigations:
+**Update (2026-08-12):** [#3138](https://github.com/apache/hugegraph/pull/3138)
+merged on `master` and closes Phase 1 of
+[#3137](https://github.com/apache/hugegraph/issues/3137). The Server that
+handles `CreateGraph` now waits for its own Gremlin binding before returning
+HTTP 200, so create-then-query on the **same** Server (or sticky routing to
+that Pod) is reliable.
+
+Other Server replicas still converge independently through a PD metadata
+watch plus a local graph open. Until they finish, a Gremlin query routed
+through the load-balanced Service to a not-yet-converged replica can still
+fail with a 400 error such as `Could not rebind [g]`. This is upstream
+behavior, not a chart setting. Mitigations for multi-replica load-balanced
+deployments:
 
 - Retry with backoff in the client; the window normally closes in seconds.
 - Use sticky routing (or `kubectl port-forward` to one Pod) for
-  create-then-verify flows, so follow-up queries hit the creating replica.
+  create-then-verify flows.
 - Poll `/graphs` on each replica until the new graph appears everywhere
   before opening query traffic.
 
-The underlying fix, orchestrating graph creation through PD, is upstream
-work.
+Cluster-wide readiness and PD-owned graph creation remain tracked in
+[#3137](https://github.com/apache/hugegraph/issues/3137) (Phase 2:
+[#3139](https://github.com/apache/hugegraph/pull/3139); Phase 3: PD
+orchestration).
 
 ### Pods OOM Killed or Restarting
 
@@ -653,8 +661,11 @@ independently of the release name.
   re-replication after Store loss, leader balancing, and partition
   rebalancing run only when triggered (see Disaster Recovery); periodic
   balancing and shard-sync metrics are upstream feature work.
-- Newly created graphs are visible on all Server replicas only after a short
-  propagation window (see Troubleshooting: "Could not rebind").
+- After [#3138](https://github.com/apache/hugegraph/pull/3138), the creating
+  Server is consistent at HTTP 200; other replicas may still lag for a short
+  window on load-balanced installs (see Troubleshooting: "Could not rebind";
+  [#3137](https://github.com/apache/hugegraph/issues/3137) stays open for
+  cluster-wide and PD-owned creation).
 - The published images run as root, so `runAsNonRoot` and
   `readOnlyRootFilesystem` are not chart defaults. The container
   `securityContext` does default to `allowPrivilegeEscalation: false`,
