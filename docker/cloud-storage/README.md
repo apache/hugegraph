@@ -594,12 +594,26 @@ What this phase does:
 5. restarts stores and validates recovered vertex count matches baseline,
 6. checks logs for restore-consistency errors and stale `.hyd-tmp` leftovers.
 
-
 **Success criteria:**
 - ✅ Baseline vertex count is non-zero before the wipe
 - ✅ Recovery metadata + SSTs exist in all three buckets before the wipe
 - ✅ Recovered vertex count after restart equals baseline
 - ✅ No `Cloud restore inconsistent` log errors or stale `.hyd-tmp` files
+
+#### Full disk wipe (all files including `raft/` and `.cloud-store-scope`)
+
+The automated harness above preserves the Raft state directory. For a true **full-volume wipe** (simulating complete disk failure), the node also loses the `.cloud-store-scope` marker file, which normally caches the cloud key scope across restarts. On restart you will see:
+
+```
+WARN: Cloud key scope seeded from runtime network address: 'store-store0_8510'.
+This scope is only stable while the node's address does not change.
+For guaranteed recovery after an IP/hostname change or local disk loss,
+set a stable cloud.storage.node-id.
+```
+
+**This WARN is safe** in this Docker stack because `HG_CLOUD_STORAGE_NODE_ID=store0_8510` is already set in `docker-compose.yml`. The node-id env var and the runtime network address produce the identical sanitised scope string (`store0_8510`), so the node re-scopes correctly to its own remote objects and recovery completes fully.
+
+The WARN **does indicate a real risk** for deployments where `cloud.storage.node-id` is not set: if the node's hostname or IP changes after a disk wipe (new VM, rescheduled pod), the runtime-address fallback produces a different scope string, the node silently finds zero remote objects, and starts with empty data. **Always set `cloud.storage.node-id`** to a deployment-stable value in production (e.g. a StatefulSet pod ordinal or provisioned node UUID). See [pluggable-cloud-storage-architecture.md — Cloud key scope resolution](../../hugegraph-store/docs/pluggable-cloud-storage-architecture.md) for the full precedence rules.
 
 ## Cleanup (Optional)
 
@@ -646,6 +660,7 @@ docker rmi \
 - **Networking**: Containers run on `cloud-storage-net` (static compose) or `cloud-storage-test_hg-net` (default generated test stack)
 - **Storage**: Local bind mounts under `data/` and `logs/` for inspection
 - **Bucket layout**: each Store node writes SSTs to a dedicated bucket (`store0 -> hugegraph-store0`, `store1 -> hugegraph-store1`, `store2 -> hugegraph-store2`)
+Can- **Cloud key scope and `HG_CLOUD_STORAGE_NODE_ID`**: Each node scopes its remote objects under a key prefix derived from `cloud.storage.node-id` (env `HG_CLOUD_STORAGE_NODE_ID`). This value is already set per-node in `docker-compose.yml` (e.g. `store0_8510`). After a full disk wipe the local `.cloud-store-scope` marker file is lost; the node falls back to the runtime network address to re-seed the scope and logs a WARN. Recovery succeeds here because the node-id and the network address both resolve to the same string. **In production, always set `cloud.storage.node-id`** to a deployment-stable value so the scope survives both disk wipes and address changes. See the [architecture doc](../../hugegraph-store/docs/pluggable-cloud-storage-architecture.md) for details.
 
 ### Troubleshooting Manual Verification Steps
 

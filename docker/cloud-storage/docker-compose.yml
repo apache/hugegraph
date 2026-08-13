@@ -116,6 +116,7 @@ services:
       HG_STORE_RAFT_ADDRESS: store0:8510
       HG_CLOUD_STORAGE_ENDPOINT: http://minio:9000
       HG_CLOUD_STORAGE_BUCKET: hugegraph-store0
+      HG_CLOUD_STORAGE_NODE_ID: store0_8510
       JAVA_OPTS: ${HG_STORE_JAVA_OPTS:--Xms4g -Xmx4g -XX:+UseG1GC}
     ports:
       - "8500:8500"
@@ -152,6 +153,7 @@ services:
       HG_STORE_RAFT_ADDRESS: store1:8510
       HG_CLOUD_STORAGE_ENDPOINT: http://minio:9000
       HG_CLOUD_STORAGE_BUCKET: hugegraph-store1
+      HG_CLOUD_STORAGE_NODE_ID: store1_8510
       JAVA_OPTS: ${HG_STORE_JAVA_OPTS:--Xms4g -Xmx4g -XX:+UseG1GC}
     ports:
       - "8501:8500"
@@ -188,6 +190,7 @@ services:
       HG_STORE_RAFT_ADDRESS: store2:8510
       HG_CLOUD_STORAGE_ENDPOINT: http://minio:9000
       HG_CLOUD_STORAGE_BUCKET: hugegraph-store2
+      HG_CLOUD_STORAGE_NODE_ID: store2_8510
       JAVA_OPTS: ${HG_STORE_JAVA_OPTS:--Xms4g -Xmx4g -XX:+UseG1GC}
     ports:
       - "8502:8500"

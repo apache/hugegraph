@@ -56,6 +56,19 @@ require_env "HG_STORE_RAFT_ADDRESS"
 : "${HG_CLOUD_STORAGE_ACCESS_KEY:=minioadmin}"
 : "${HG_CLOUD_STORAGE_SECRET_KEY:=minioadmin}"
 : "${HG_CLOUD_STORAGE_PATH_PREFIX:=hugegraph}"
+# Stable per-node identity for the cloud key scope.  Set this to a deployment-stable
+# value (e.g. the container name) so hydration finds the correct remote objects after a
+# disk wipe — without it the scope falls back to the runtime Raft address, which may
+# produce a different sanitised string and silently find zero remote files.
+: "${HG_CLOUD_STORAGE_NODE_ID:=}"
+
+# Build the node-id fragment conditionally so a blank value is omitted from the JSON
+# rather than written as an empty string (which would override the default behaviour).
+if [[ -n "${HG_CLOUD_STORAGE_NODE_ID}" ]]; then
+    NODE_ID_JSON="\"node-id\": \"$(json_escape "${HG_CLOUD_STORAGE_NODE_ID}")\","
+else
+    NODE_ID_JSON=""
+fi
 
 export SPRING_APPLICATION_JSON="$(cat <<JSON
 {
@@ -72,6 +85,7 @@ export SPRING_APPLICATION_JSON="$(cat <<JSON
       "enabled": "$(json_escape "${HG_CLOUD_STORAGE_ENABLED}")",
       "provider": "$(json_escape "${HG_CLOUD_STORAGE_PROVIDER}")",
       "path-prefix": "$(json_escape "${HG_CLOUD_STORAGE_PATH_PREFIX}")",
+      ${NODE_ID_JSON}
       "s3": {
         "bucket": "$(json_escape "${HG_CLOUD_STORAGE_BUCKET}")",
         "region": "$(json_escape "${HG_CLOUD_STORAGE_REGION}")",
