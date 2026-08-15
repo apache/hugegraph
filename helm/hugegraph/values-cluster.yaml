@@ -86,11 +86,17 @@ server:
       memory: 2Gi
   hpa:
     enabled: false
+  # Auth is on by default (chart-managed admin Secret). Pin it here so a
+  # production overlay cannot accidentally drop authentication.
+  auth:
+    enabled: true
+    autoGenerateSecret: true
+    existingSecret: ""
 
-# The optional Hubble UI is not enabled here: this preset does not enable
-# server authentication, and current Hubble images cannot complete their
-# login against an auth-less cluster. Enable it together with server.auth,
-# starting from:
+# The optional Hubble UI is not enabled here: authentication is already on
+# by default, so turn Hubble on with --set hubble.enabled=true (or the
+# snippet below) when the browser UI is wanted. Current Hubble images still
+# refuse to render if server.auth is explicitly disabled.
 #
 # hubble:
 #   enabled: true

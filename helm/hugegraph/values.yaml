@@ -247,7 +247,9 @@ server:
   # HG_SERVER_SKIP_INIT and no init Job.
   initStoreEnabled: false
   auth:
-    enabled: false
+    # On by default: a chart-managed release-admin Secret supplies the password
+    # unless existingSecret is set. Set enabled=false only for trusted networks.
+    enabled: true
     autoGenerateSecret: true
     # Secret must contain key "password" (no newlines). Applied as
     # auth.admin_pa when the admin account is first created; changing the

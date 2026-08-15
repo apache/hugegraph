@@ -76,6 +76,28 @@ This deploys 3 PD + 3 Store + 3 Server, preserves the image's automatic JVM
 sizing, and sets no resource requests or limits. Set resources before
 production use.
 
+**Authentication is enabled by default.** The chart creates a kept Secret
+named `<release>-admin` (for example `hugegraph-admin`) with a random
+password unless `server.auth.existingSecret` points at a pre-created Secret.
+Read the password and exercise the API:
+
+```bash
+PASSWORD="$(kubectl get secret -n hugegraph hugegraph-admin \
+  -o jsonpath='{.data.password}' | base64 --decode)"
+kubectl port-forward -n hugegraph svc/hugegraph-server 8080:8080
+curl --user "admin:${PASSWORD}" http://127.0.0.1:8080/versions
+```
+
+**Hubble is not installed by default.** Enable the optional UI after install:
+
+```bash
+helm upgrade --install hugegraph ./helm/hugegraph --namespace hugegraph \
+  --set hubble.enabled=true
+```
+
+Auth is already on, so that single flag is enough. Login uses the same admin
+credential from the chart-managed (or BYO) Secret.
+
 The default anti-affinity for `pd`, `store`, and `server` is `preferred`
 (Server always was; Hubble has no anti-affinity knob because it is
 single-replica by design), so the chart schedules even on clusters with
@@ -105,9 +127,9 @@ helm test hugegraph --namespace hugegraph
 
 | File | Purpose |
 |---|---|
-| `values.yaml` | Default 3+3+3 topology with preferred anti-affinity, so it schedules on clusters of any node count |
-| `values-single.yaml` | Single-node 1+1+1 example |
-| `values-cluster.yaml` | Production 3+3+3 starting point with JVM/resources, PD/Store PDBs, and required anti-affinity for PD and Store; Hubble stays opt-in because the preset does not enable authentication |
+| `values.yaml` | Default 3+3+3 topology with preferred anti-affinity, authentication on, and Hubble off |
+| `values-single.yaml` | Single-node 1+1+1 example with authentication on |
+| `values-cluster.yaml` | Production 3+3+3 starting point with JVM/resources, PD/Store PDBs, and required anti-affinity for PD and Store; authentication on, Hubble still opt-in |
 
 `values-cluster.yaml` is a production starting point, not a capacity
 guarantee. Recalculate capacity for the graph size, traffic, failure budget,
@@ -287,7 +309,7 @@ default values.
 | `server.restServer.minFreeMemory` | Empty preserves the image default | `""` |
 | `server.restServer.batchMaxWriteThreads` | Empty preserves the image default | `""` |
 | `server.initStoreEnabled` | Must remain `false` for distributed HStore | `false` |
-| `server.auth.enabled` | Enable admin authentication | `false` |
+| `server.auth.enabled` | Enable admin authentication | `true` |
 | `server.auth.autoGenerateSecret` | Create and keep a random release-admin Secret when `existingSecret` is empty | `true` |
 | `server.auth.existingSecret` | Use a pre-created Secret instead; it must contain key `password` and takes priority | `""` |
 | `server.auth.tokenSecret.existingSecret` | BYO Secret for the JWT signing key (`auth.token_secret`); empty creates a kept release-auth-token Secret | `""` |
@@ -316,7 +338,11 @@ utilization-based HPA requires a strictly positive
 
 Set `hubble.enabled=true` to deploy [HugeGraph Hubble](https://hugegraph.apache.org/docs/quickstart/toolchain/hugegraph-hubble/),
 the web UI for graph management, schema browsing, Gremlin queries, and the
-cluster operations view. `hubble.mode` selects the wiring. In the default
+cluster operations view. A default install leaves Hubble off so API-only
+clusters stay lean; authentication is already on, so enabling the UI is a
+single flag (see Installing above). Login uses the admin credential from
+`server.auth.existingSecret` or the chart-managed `<release>-admin` Secret.
+`hubble.mode` selects the wiring. In the default
 `pd` mode the chart points `pd.peers` at the PD gRPC peers, `pd.server` at
 the PD client Service REST port, and the Store metrics allow-list at the
 Store REST endpoints, so the cluster view works without manual wiring; the
@@ -344,16 +370,13 @@ stored metadata), `size` and `storageClassName` apply at install time only,
 and a non-root `podSecurityContext` needs a matching `fsGroup` so H2 can
 write the volume.
 
-**Enable `server.auth` when using Hubble.** Current Hubble images gate the
-UI behind a login that authenticates against the cluster; with server
-authentication disabled the login cannot complete (the server rejects
-`/auth/login` with "Unconfigured authenticator"), so Hubble is only useful
-on an auth-enabled deployment, where the admin credential from
-`server.auth.existingSecret` or the chart-managed admin Secret logs in.
-The chart therefore refuses to render
-`hubble.enabled=true` without `server.auth` unless
-`hubble.allowWithoutServerAuth=true` explicitly overrides it for images
-whose login does not need cluster authentication.
+**Current Hubble images still require `server.auth`.** The UI login
+authenticates against the cluster; with authentication explicitly disabled
+the login cannot complete (the server rejects `/auth/login` with
+"Unconfigured authenticator"). The chart therefore refuses to render
+`hubble.enabled=true` when `server.auth.enabled=false` unless
+`hubble.allowWithoutServerAuth=true` overrides it for images whose login
+does not need cluster authentication.
 
 **Hubble serves plain HTTP.** Reach it with `kubectl port-forward` or behind
 an HTTPS-terminating Ingress; never expose the port directly to an untrusted
@@ -443,9 +466,11 @@ before anything reaches the cluster:
 ### Connecting to the Cluster
 
 ```bash
+PASSWORD="$(kubectl get secret -n hugegraph hugegraph-admin \
+  -o jsonpath='{.data.password}' | base64 --decode)"
 kubectl port-forward -n hugegraph svc/hugegraph-server 8080:8080
-curl http://127.0.0.1:8080/versions
-curl http://127.0.0.1:8080/graphs
+curl --user "admin:${PASSWORD}" http://127.0.0.1:8080/versions
+curl --user "admin:${PASSWORD}" http://127.0.0.1:8080/graphs
 ```
 
 ### Cluster Health
@@ -684,13 +709,13 @@ independently of the release name.
   valid for a root image; `podSecurityContext` and `securityContext` are fully
   configurable per component.
 - `values-cluster.yaml` is a starting point, not a capacity guarantee.
-- The auth Secret sets the admin password only at first creation via
-  `auth.admin_pa`; the chart cannot rotate an existing cluster's admin
-  password.
-- With authentication enabled, every Server replica must share one JWT
-  signing key. The chart injects `HG_SERVER_AUTH_TOKEN_SECRET` from
-  `server.auth.tokenSecret` (chart-managed by default) so Hubble login
-  stays stable behind a multi-replica Service.
+- Authentication is on by default. The auth Secret sets the admin password
+  only at first creation via `auth.admin_pa`; the chart cannot rotate an
+  existing cluster's admin password.
+- Every Server replica must share one JWT signing key. The chart injects
+  `HG_SERVER_AUTH_TOKEN_SECRET` from `server.auth.tokenSecret`
+  (chart-managed by default) so Hubble login stays stable behind a
+  multi-replica Service.
 - Hubble is single-replica, serves plain HTTP, requires `server.auth` to be
   enabled for its login to complete, and keeps UI connection metadata,
   including any graph credentials entered in the UI, in an embedded H2

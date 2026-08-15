@@ -38,3 +38,7 @@ server:
   replicas: 1
   hpa:
     enabled: false
+  auth:
+    enabled: true
+    autoGenerateSecret: true
+    existingSecret: ""
