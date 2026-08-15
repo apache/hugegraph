@@ -137,7 +137,7 @@ public abstract class AbstractClient implements Closeable {
         Exception ex = null;
         for (int i = 0; i < proxy.getHostCount(); i++) {
             String host = proxy.nextHost();
-            close();
+            closeConnections();
 
             channel = ManagedChannelBuilder.forTarget(host).usePlaintext().build();
             PDBlockingStub blockingStub =
@@ -149,7 +149,7 @@ public abstract class AbstractClient implements Closeable {
                 Metapb.Member leader = members.getLeader();
                 leaderHost = leader.getGrpcUrl();
                 if (!host.equals(leaderHost)) {
-                    close();
+                    closeConnections();
                     channel = ManagedChannelBuilder.forTarget(leaderHost).usePlaintext().build();
                 }
                 proxy.setBlockingStub(setBlockingParams(createBlockingStub(), config));
@@ -268,13 +268,16 @@ public abstract class AbstractClient implements Closeable {
 
     @Override
     public void close() {
+        closeConnections();
+    }
+
+    private void closeConnections() {
         closeChannel(channel);
         if (stubs != null) {
             for (AbstractBlockingStub stub : stubs.values()) {
                 closeChannel((ManagedChannel) stub.getChannel());
             }
         }
-
     }
 
     private void closeChannel(ManagedChannel channel) {
