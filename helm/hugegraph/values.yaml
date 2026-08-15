@@ -248,9 +248,11 @@ server:
   initStoreEnabled: false
   auth:
     enabled: false
+    autoGenerateSecret: true
     # Secret must contain key "password" (no newlines). Applied as
     # auth.admin_pa when the admin account is first created; changing the
-    # Secret later does not rotate an existing cluster's password.
+    # Secret later does not rotate an existing cluster's password. When empty,
+    # the chart creates a kept release-admin Secret.
     existingSecret: ""
     # JWT signing key for auth.token_secret / HG_SERVER_AUTH_TOKEN_SECRET.
     # Must be identical on every Server replica or Hubble login fails behind

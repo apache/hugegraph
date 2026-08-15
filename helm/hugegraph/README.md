@@ -288,7 +288,8 @@ default values.
 | `server.restServer.batchMaxWriteThreads` | Empty preserves the image default | `""` |
 | `server.initStoreEnabled` | Must remain `false` for distributed HStore | `false` |
 | `server.auth.enabled` | Enable admin authentication | `false` |
-| `server.auth.existingSecret` | Required when auth is enabled; must contain key `password` | `""` |
+| `server.auth.autoGenerateSecret` | Create and keep a random release-admin Secret when `existingSecret` is empty | `true` |
+| `server.auth.existingSecret` | Use a pre-created Secret instead; it must contain key `password` and takes priority | `""` |
 | `server.auth.tokenSecret.existingSecret` | BYO Secret for the JWT signing key (`auth.token_secret`); empty creates a kept release-auth-token Secret | `""` |
 | `server.auth.tokenSecret.key` | Key inside the JWT signing Secret | `token_secret` |
 | `server.ingress.enabled` | Create an Ingress for the Server Service | `false` |
@@ -348,7 +349,8 @@ UI behind a login that authenticates against the cluster; with server
 authentication disabled the login cannot complete (the server rejects
 `/auth/login` with "Unconfigured authenticator"), so Hubble is only useful
 on an auth-enabled deployment, where the admin credential from
-`server.auth.existingSecret` logs in. The chart therefore refuses to render
+`server.auth.existingSecret` or the chart-managed admin Secret logs in.
+The chart therefore refuses to render
 `hubble.enabled=true` without `server.auth` unless
 `hubble.allowWithoutServerAuth=true` explicitly overrides it for images
 whose login does not need cluster authentication.
@@ -397,9 +399,10 @@ before anything reaches the cluster:
 
 - Unknown keys and wrong types are rejected.
 - `server.initStoreEnabled` must remain `false` for a distributed deployment.
-- With authentication enabled, `server.auth.existingSecret` must name a Secret
-  containing a `password` key. With authentication disabled it must be empty,
-  so a configured but inactive Secret reference cannot be overlooked. A missing
+- With authentication enabled, either `server.auth.existingSecret` must name a
+  Secret containing a `password` key, or `server.auth.autoGenerateSecret` must
+  be true. With authentication disabled `existingSecret` must be empty, so a
+  configured but inactive Secret reference cannot be overlooked. A missing
   Secret fails when Kubernetes configures the container; an empty `password`
   fails in the Server startup wrapper.
 - `server.hpa.minReplicas` must not exceed `maxReplicas`, and enabling

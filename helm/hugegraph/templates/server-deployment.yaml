@@ -267,14 +267,12 @@ spec:
             {{- end }}
             {{- with .Values.server.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
             {{- with include "hugegraph.javaOptsEnv" .Values.server.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
-            {{- if and .Values.server.auth.enabled .Values.server.auth.existingSecret }}
+            {{- if .Values.server.auth.enabled }}
             - name: PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.server.auth.existingSecret | quote }}
+                  name: {{ include "hugegraph.server.authSecretName" . | quote }}
                   key: password
-            {{- end }}
-            {{- if .Values.server.auth.enabled }}
             - name: HG_SERVER_AUTH_TOKEN_SECRET
               valueFrom:
                 secretKeyRef:

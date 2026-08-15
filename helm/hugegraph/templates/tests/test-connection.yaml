@@ -53,7 +53,7 @@ spec:
         - name: PASSWORD
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.server.auth.existingSecret | quote }}
+              name: {{ include "hugegraph.server.authSecretName" . | quote }}
               key: password
       {{- end }}
       command:

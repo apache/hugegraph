@@ -554,6 +554,9 @@
             "enabled": {
               "type": "boolean"
             },
+            "autoGenerateSecret": {
+              "type": "boolean"
+            },
             "existingSecret": {
               "type": "string"
             },
@@ -585,11 +588,25 @@
                 }
               },
               "then": {
-                "properties": {
-                  "existingSecret": {
-                    "minLength": 1
+                "anyOf": [
+                  {
+                    "properties": {
+                      "existingSecret": {
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  {
+                    "properties": {
+                      "autoGenerateSecret": {
+                        "const": true
+                      },
+                      "existingSecret": {
+                        "const": ""
+                      }
+                    }
                   }
-                }
+                ]
               }
             },
             {

@@ -82,6 +82,35 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-test-connection" (include "hugegraph.fullname" . | trunc 47 | trimSuffix "-") }}
 {{- end }}
 
+{{/*
+Resolve the Server authentication Secret. A user-provided Secret always wins;
+otherwise use a stable chart-managed name so the generated Secret can survive
+uninstall and be reused by a later install of the same release.
+*/}}
+{{- define "hugegraph.server.authSecretName" -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- $existingSecret := get $auth "existingSecret" | default "" -}}
+{{- if $existingSecret -}}
+{{- $existingSecret -}}
+{{- else -}}
+{{- printf "%s-admin" (.Release.Name | trunc 55 | trimSuffix "-") -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Return the generated Secret's already-encoded password when it exists. The
+lookup keeps upgrades from rotating the administrator credential; a first
+install gets a random password. This helper is only used for chart-managed
+Secrets, never for an external existingSecret.
+*/}}
+{{- define "hugegraph.server.authSecretPassword" -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (include "hugegraph.server.authSecretName" .) -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") "password") -}}
+{{- get (get $secret "data") "password" -}}
+{{- else -}}
+{{- randAlphaNum 32 | b64enc -}}
+{{- end -}}
+{{- end }}
 
 {{/*
 Resolve the JWT signing Secret. User-provided tokenSecret.existingSecret wins;
@@ -487,6 +516,10 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- if and (get $hubbleIngress "enabled" | default false) (empty (get $hubbleIngress "tls")) (not (get $hubbleIngress "allowPlainHttp" | default false)) -}}
 {{- fail "hubble.ingress.enabled without tls publishes the plain-HTTP, unauthenticated Hubble UI; configure hubble.ingress.tls, or set hubble.ingress.allowPlainHttp=true to accept that on a trusted network" -}}
 {{- end -}}
+{{- end -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- if and (get $auth "enabled" | default false) (not (get $auth "existingSecret" | default "")) (not (get $auth "autoGenerateSecret" | default false)) -}}
+{{- fail "server.auth requires existingSecret when autoGenerateSecret=false" -}}
 {{- end -}}
 {{- end }}
 

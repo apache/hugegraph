@@ -112,7 +112,7 @@ jobs:
             --set server.resources.requests.cpu=100m \
             --set server.pdb.enabled=true \
             --set server.pdb.minAvailable=2
-          must_fail --set server.auth.enabled=true
+          must_fail --set server.auth.enabled=true --set server.auth.autoGenerateSecret=false
           must_fail --set hubble.enabled=true
           A=(--set hubble.enabled=true --set hubble.allowWithoutServerAuth=true)
           must_fail "${A[@]}" --set hubble.port=0
