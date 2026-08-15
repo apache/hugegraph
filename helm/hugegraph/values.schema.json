@@ -556,6 +556,23 @@
             },
             "existingSecret": {
               "type": "string"
+            },
+            "tokenSecret": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "existingSecret",
+                "key"
+              ],
+              "properties": {
+                "existingSecret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           },
           "allOf": [

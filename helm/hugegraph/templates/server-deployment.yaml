@@ -274,6 +274,13 @@ spec:
                   name: {{ .Values.server.auth.existingSecret | quote }}
                   key: password
             {{- end }}
+            {{- if .Values.server.auth.enabled }}
+            - name: HG_SERVER_AUTH_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.server.authTokenSecretName" . | quote }}
+                  key: {{ include "hugegraph.server.authTokenSecretKey" . | quote }}
+            {{- end }}
           startupProbe:
             httpGet:
               path: /versions

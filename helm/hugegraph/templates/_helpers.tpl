@@ -82,6 +82,44 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-test-connection" (include "hugegraph.fullname" . | trunc 47 | trimSuffix "-") }}
 {{- end }}
 
+
+{{/*
+Resolve the JWT signing Secret. User-provided tokenSecret.existingSecret wins;
+otherwise use a stable chart-managed name so every Server replica shares one key.
+*/}}
+{{- define "hugegraph.server.authTokenSecretName" -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- $token := get $auth "tokenSecret" | default dict -}}
+{{- $existing := get $token "existingSecret" | default "" -}}
+{{- if $existing -}}
+{{- $existing -}}
+{{- else -}}
+{{- printf "%s-auth-token" (.Release.Name | trunc 51 | trimSuffix "-") -}}
+{{- end -}}
+{{- end }}
+
+{{- define "hugegraph.server.authTokenSecretKey" -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- $token := get $auth "tokenSecret" | default dict -}}
+{{- get $token "key" | default "token_secret" -}}
+{{- end }}
+
+{{/*
+Return the already-encoded JWT signing secret when present; otherwise generate
+32 random bytes (base64). Lookup keeps multi-replica Server pods and upgrades
+on the same signing key.
+*/}}
+{{- define "hugegraph.server.authTokenSecretValue" -}}
+{{- $name := include "hugegraph.server.authTokenSecretName" . -}}
+{{- $key := include "hugegraph.server.authTokenSecretKey" . -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
+{{- else -}}
+{{- randAlphaNum 32 | b64enc -}}
+{{- end -}}
+{{- end }}
+
 {{/*
 PD Raft peers list: pod-0.svc.ns.svc:8610,...
 Uses short headless DNS (cluster.local optional) resolvable inside the namespace.
@@ -422,7 +460,7 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- $reservedEnv := dict
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
       "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
-      "server" (list "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "JAVA_OPTS" "JAVA_OPTIONS")
+      "server" (list "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
       "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}

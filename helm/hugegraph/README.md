@@ -289,6 +289,8 @@ default values.
 | `server.initStoreEnabled` | Must remain `false` for distributed HStore | `false` |
 | `server.auth.enabled` | Enable admin authentication | `false` |
 | `server.auth.existingSecret` | Required when auth is enabled; must contain key `password` | `""` |
+| `server.auth.tokenSecret.existingSecret` | BYO Secret for the JWT signing key (`auth.token_secret`); empty creates a kept release-auth-token Secret | `""` |
+| `server.auth.tokenSecret.key` | Key inside the JWT signing Secret | `token_secret` |
 | `server.ingress.enabled` | Create an Ingress for the Server Service | `false` |
 | `server.ingress.className` | IngressClass name | `""` |
 | `server.ingress.annotations` | Ingress annotations (cert-manager, nginx, ALB) | `{}` |
@@ -682,6 +684,10 @@ independently of the release name.
 - The auth Secret sets the admin password only at first creation via
   `auth.admin_pa`; the chart cannot rotate an existing cluster's admin
   password.
+- With authentication enabled, every Server replica must share one JWT
+  signing key. The chart injects `HG_SERVER_AUTH_TOKEN_SECRET` from
+  `server.auth.tokenSecret` (chart-managed by default) so Hubble login
+  stays stable behind a multi-replica Service.
 - Hubble is single-replica, serves plain HTTP, requires `server.auth` to be
   enabled for its login to complete, and keeps UI connection metadata,
   including any graph credentials entered in the UI, in an embedded H2
