@@ -78,7 +78,7 @@ production use.
 
 **Authentication is enabled by default.** The chart creates a kept Secret
 named `<release>-admin` (for example `hugegraph-admin`) with a random
-password unless `server.auth.existingSecret` points at a pre-created Secret.
+password unless `server.auth.admin.existingSecret` points at a pre-created Secret.
 Read the password and exercise the API:
 
 ```bash
@@ -310,10 +310,14 @@ default values.
 | `server.restServer.batchMaxWriteThreads` | Empty preserves the image default | `""` |
 | `server.initStoreEnabled` | Must remain `false` for distributed HStore | `false` |
 | `server.auth.enabled` | Enable admin authentication | `true` |
-| `server.auth.autoGenerateSecret` | Create and keep a random release-admin Secret when `existingSecret` is empty | `true` |
-| `server.auth.existingSecret` | Use a pre-created Secret instead; it must contain key `password` and takes priority | `""` |
-| `server.auth.tokenSecret.existingSecret` | BYO Secret for the JWT signing key (`auth.token_secret`); empty creates a kept release-auth-token Secret | `""` |
-| `server.auth.tokenSecret.key` | Key inside the JWT signing Secret | `token_secret` |
+| `server.auth.admin.password` | Optional inline admin password; prefer a Secret in shared clusters | `""` |
+| `server.auth.admin.existingSecret` | Pre-created Secret name (key defaults to `password`); takes priority | `""` |
+| `server.auth.admin.key` | Key inside the admin password Secret | `password` |
+| `server.auth.admin.autoGenerate` | Create and keep a random release-admin Secret when password and existingSecret are empty | `true` |
+| `server.auth.token.value` | Optional inline JWT signing key; prefer a Secret in shared clusters | `""` |
+| `server.auth.token.existingSecret` | Pre-created Secret for the JWT signing key (`auth.token_secret`) | `""` |
+| `server.auth.token.key` | Key inside the JWT signing Secret | `token_secret` |
+| `server.auth.token.autoGenerate` | Create and keep a random release-auth-token Secret when value and existingSecret are empty | `true` |
 | `server.ingress.enabled` | Create an Ingress for the Server Service | `false` |
 | `server.ingress.className` | IngressClass name | `""` |
 | `server.ingress.annotations` | Ingress annotations (cert-manager, nginx, ALB) | `{}` |
@@ -341,7 +345,7 @@ the web UI for graph management, schema browsing, Gremlin queries, and the
 cluster operations view. A default install leaves Hubble off so API-only
 clusters stay lean; authentication is already on, so enabling the UI is a
 single flag (see Installing above). Login uses the admin credential from
-`server.auth.existingSecret` or the chart-managed `<release>-admin` Secret.
+`server.auth.admin.existingSecret` or the chart-managed `<release>-admin` Secret.
 `hubble.mode` selects the wiring. In the default
 `pd` mode the chart points `pd.peers` at the PD gRPC peers, `pd.server` at
 the PD client Service REST port, and the Store metrics allow-list at the
@@ -422,12 +426,15 @@ before anything reaches the cluster:
 
 - Unknown keys and wrong types are rejected.
 - `server.initStoreEnabled` must remain `false` for a distributed deployment.
-- With authentication enabled, either `server.auth.existingSecret` must name a
-  Secret containing a `password` key, or `server.auth.autoGenerateSecret` must
-  be true. With authentication disabled `existingSecret` must be empty, so a
-  configured but inactive Secret reference cannot be overlooked. A missing
-  Secret fails when Kubernetes configures the container; an empty `password`
-  fails in the Server startup wrapper.
+- With authentication enabled, either `server.auth.admin.existingSecret` must
+  name a Secret containing the configured key (default `password`), or
+  `server.auth.admin.password` must be set, or `server.auth.admin.autoGenerate`
+  must be true. The same shape applies to `server.auth.token` (`existingSecret`
+  / `value` / `autoGenerate`). With authentication disabled,
+  `admin.existingSecret`, `admin.password`, `token.existingSecret`, and
+  `token.value` must be empty, so a configured but inactive Secret reference
+  cannot be overlooked. A missing Secret fails when Kubernetes configures the
+  container; an empty `password` fails in the Server startup wrapper.
 - `server.hpa.minReplicas` must not exceed `maxReplicas`, and enabling
   utilization-based HPA requires a strictly positive
   `server.resources.requests.cpu`.
@@ -713,7 +720,7 @@ independently of the release name.
   only at first creation via `auth.admin_pa`; the chart cannot rotate an
   existing cluster's admin password.
 - Every Server replica must share one JWT signing key. The chart injects
-  `HG_SERVER_AUTH_TOKEN_SECRET` from `server.auth.tokenSecret`
+  `HG_SERVER_AUTH_TOKEN_SECRET` from `server.auth.token`
   (chart-managed by default) so Hubble login stays stable behind a
   multi-replica Service.
 - Hubble is single-replica, serves plain HTTP, requires `server.auth` to be

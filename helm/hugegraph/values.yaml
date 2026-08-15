@@ -248,21 +248,30 @@ server:
   initStoreEnabled: false
   auth:
     # On by default: a chart-managed release-admin Secret supplies the password
-    # unless existingSecret is set. Set enabled=false only for trusted networks.
+    # unless admin.existingSecret or admin.password is set. Set enabled=false
+    # only for trusted networks.
     enabled: true
-    autoGenerateSecret: true
-    # Secret must contain key "password" (no newlines). Applied as
-    # auth.admin_pa when the admin account is first created; changing the
-    # Secret later does not rotate an existing cluster's password. When empty,
-    # the chart creates a kept release-admin Secret.
-    existingSecret: ""
+    # Admin password: inline value vs Kubernetes Secret name are separate keys.
+    # Priority: existingSecret > password > autoGenerate.
+    admin:
+      # Optional plaintext password (prefer existingSecret in shared clusters).
+      password: ""
+      # Pre-created Secret name. Must contain key below; chart does not manage it.
+      existingSecret: ""
+      key: password
+      # When existingSecret and password are empty, create a kept release-admin Secret.
+      autoGenerate: true
     # JWT signing key for auth.token_secret / HG_SERVER_AUTH_TOKEN_SECRET.
     # Must be identical on every Server replica or Hubble login fails behind
-    # the Service. Empty existingSecret: chart creates a kept Secret (lookup
-    # keeps the value across upgrades). BYO with existingSecret + key.
-    tokenSecret:
+    # the Service. Priority: existingSecret > value > autoGenerate.
+    token:
+      # Optional plaintext signing key (prefer existingSecret in shared clusters).
+      value: ""
+      # Pre-created Secret name. Chart does not manage it.
       existingSecret: ""
       key: token_secret
+      # When existingSecret and value are empty, create a kept release-auth-token Secret.
+      autoGenerate: true
   service:
     type: ClusterIP
     annotations: {}

@@ -90,8 +90,10 @@ server:
   # production overlay cannot accidentally drop authentication.
   auth:
     enabled: true
-    autoGenerateSecret: true
-    existingSecret: ""
+    admin:
+      autoGenerate: true
+    token:
+      autoGenerate: true
 
 # The optional Hubble UI is not enabled here: authentication is already on
 # by default, so turn Hubble on with --set hubble.enabled=true (or the

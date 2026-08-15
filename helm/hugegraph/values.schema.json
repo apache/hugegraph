@@ -548,32 +548,60 @@
           "additionalProperties": false,
           "required": [
             "enabled",
-            "existingSecret"
+            "admin",
+            "token"
           ],
           "properties": {
             "enabled": {
               "type": "boolean"
             },
-            "autoGenerateSecret": {
-              "type": "boolean"
-            },
-            "existingSecret": {
-              "type": "string"
-            },
-            "tokenSecret": {
+            "admin": {
               "type": "object",
               "additionalProperties": false,
               "required": [
+                "password",
                 "existingSecret",
-                "key"
+                "key",
+                "autoGenerate"
               ],
               "properties": {
+                "password": {
+                  "type": "string"
+                },
                 "existingSecret": {
                   "type": "string"
                 },
                 "key": {
                   "type": "string",
                   "minLength": 1
+                },
+                "autoGenerate": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "token": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "existingSecret",
+                "key",
+                "autoGenerate"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "existingSecret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "autoGenerate": {
+                  "type": "boolean"
                 }
               }
             }
@@ -588,25 +616,70 @@
                 }
               },
               "then": {
-                "anyOf": [
-                  {
-                    "properties": {
-                      "existingSecret": {
-                        "minLength": 1
-                      }
-                    }
-                  },
-                  {
-                    "properties": {
-                      "autoGenerateSecret": {
-                        "const": true
+                "properties": {
+                  "admin": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "existingSecret": {
+                            "minLength": 1
+                          }
+                        }
                       },
-                      "existingSecret": {
-                        "const": ""
+                      {
+                        "properties": {
+                          "password": {
+                            "minLength": 1
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "autoGenerate": {
+                            "const": true
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
                       }
-                    }
+                    ]
+                  },
+                  "token": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "existingSecret": {
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "value": {
+                            "minLength": 1
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "autoGenerate": {
+                            "const": true
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      }
+                    ]
                   }
-                ]
+                }
               }
             },
             {
@@ -619,8 +692,25 @@
               },
               "then": {
                 "properties": {
-                  "existingSecret": {
-                    "const": ""
+                  "admin": {
+                    "properties": {
+                      "existingSecret": {
+                        "const": ""
+                      },
+                      "password": {
+                        "const": ""
+                      }
+                    }
+                  },
+                  "token": {
+                    "properties": {
+                      "existingSecret": {
+                        "const": ""
+                      },
+                      "value": {
+                        "const": ""
+                      }
+                    }
                   }
                 }
               }

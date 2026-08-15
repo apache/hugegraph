@@ -40,5 +40,7 @@ server:
     enabled: false
   auth:
     enabled: true
-    autoGenerateSecret: true
-    existingSecret: ""
+    admin:
+      autoGenerate: true
+    token:
+      autoGenerate: true

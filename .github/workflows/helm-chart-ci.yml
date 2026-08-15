@@ -61,7 +61,7 @@ jobs:
           helm template ci helm/hugegraph \
             --set hubble.enabled=true \
             --set server.auth.enabled=true \
-            --set server.auth.existingSecret=ci-auth > /dev/null
+            --set server.auth.admin.existingSecret=ci-auth > /dev/null
           helm template ci helm/hugegraph \
             --set hubble.enabled=true \
             --set hubble.allowWithoutServerAuth=true \
@@ -116,7 +116,7 @@ jobs:
             --set server.resources.requests.cpu=100m \
             --set server.pdb.enabled=true \
             --set server.pdb.minAvailable=2
-          must_fail --set server.auth.enabled=true --set server.auth.autoGenerateSecret=false
+          must_fail --set server.auth.enabled=true --set server.auth.admin.autoGenerate=false --set server.auth.token.autoGenerate=false
           # Auth defaults to on, so Hubble alone is valid; refuse Hubble only
           # when authentication is explicitly disabled.
           must_fail --set hubble.enabled=true --set server.auth.enabled=false
@@ -180,7 +180,7 @@ jobs:
           helm template ci helm/hugegraph \
             --set hubble.enabled=true \
             --set server.auth.enabled=true \
-            --set server.auth.existingSecret=ci-auth \
+            --set server.auth.admin.existingSecret=ci-auth \
             | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
           helm template ci helm/hugegraph \
             --set pd.partition.defaultShardCount=3 \

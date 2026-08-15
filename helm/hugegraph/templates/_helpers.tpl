@@ -89,7 +89,8 @@ uninstall and be reused by a later install of the same release.
 */}}
 {{- define "hugegraph.server.authSecretName" -}}
 {{- $auth := get .Values.server "auth" | default dict -}}
-{{- $existingSecret := get $auth "existingSecret" | default "" -}}
+{{- $admin := get $auth "admin" | default dict -}}
+{{- $existingSecret := get $admin "existingSecret" | default "" -}}
 {{- if $existingSecret -}}
 {{- $existingSecret -}}
 {{- else -}}
@@ -97,28 +98,41 @@ uninstall and be reused by a later install of the same release.
 {{- end -}}
 {{- end }}
 
+{{- define "hugegraph.server.authSecretKey" -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- $admin := get $auth "admin" | default dict -}}
+{{- get $admin "key" | default "password" -}}
+{{- end }}
+
 {{/*
-Return the generated Secret's already-encoded password when it exists. The
-lookup keeps upgrades from rotating the administrator credential; a first
-install gets a random password. This helper is only used for chart-managed
-Secrets, never for an external existingSecret.
+Return the chart-managed admin password (base64). Inline admin.password wins
+on first write; otherwise lookup keeps upgrades from rotating a generated
+credential. Never used for an external existingSecret.
 */}}
 {{- define "hugegraph.server.authSecretPassword" -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- $admin := get $auth "admin" | default dict -}}
+{{- $password := get $admin "password" | default "" -}}
+{{- if $password -}}
+{{- $password | b64enc -}}
+{{- else -}}
+{{- $key := include "hugegraph.server.authSecretKey" . -}}
 {{- $secret := lookup "v1" "Secret" .Release.Namespace (include "hugegraph.server.authSecretName" .) -}}
-{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") "password") -}}
-{{- get (get $secret "data") "password" -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
 {{- else -}}
 {{- randAlphaNum 32 | b64enc -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-Resolve the JWT signing Secret. User-provided tokenSecret.existingSecret wins;
+Resolve the JWT signing Secret. User-provided token.existingSecret wins;
 otherwise use a stable chart-managed name so every Server replica shares one key.
 */}}
 {{- define "hugegraph.server.authTokenSecretName" -}}
 {{- $auth := get .Values.server "auth" | default dict -}}
-{{- $token := get $auth "tokenSecret" | default dict -}}
+{{- $token := get $auth "token" | default dict -}}
 {{- $existing := get $token "existingSecret" | default "" -}}
 {{- if $existing -}}
 {{- $existing -}}
@@ -129,16 +143,22 @@ otherwise use a stable chart-managed name so every Server replica shares one key
 
 {{- define "hugegraph.server.authTokenSecretKey" -}}
 {{- $auth := get .Values.server "auth" | default dict -}}
-{{- $token := get $auth "tokenSecret" | default dict -}}
+{{- $token := get $auth "token" | default dict -}}
 {{- get $token "key" | default "token_secret" -}}
 {{- end }}
 
 {{/*
-Return the already-encoded JWT signing secret when present; otherwise generate
-32 random bytes (base64). Lookup keeps multi-replica Server pods and upgrades
-on the same signing key.
+Return the chart-managed JWT signing secret (base64). Inline token.value wins
+on first write; otherwise lookup keeps multi-replica pods and upgrades on the
+same signing key.
 */}}
 {{- define "hugegraph.server.authTokenSecretValue" -}}
+{{- $auth := get .Values.server "auth" | default dict -}}
+{{- $token := get $auth "token" | default dict -}}
+{{- $value := get $token "value" | default "" -}}
+{{- if $value -}}
+{{- $value | b64enc -}}
+{{- else -}}
 {{- $name := include "hugegraph.server.authTokenSecretName" . -}}
 {{- $key := include "hugegraph.server.authTokenSecretKey" . -}}
 {{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
@@ -146,6 +166,7 @@ on the same signing key.
 {{- get (get $secret "data") $key -}}
 {{- else -}}
 {{- randAlphaNum 32 | b64enc -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 
@@ -518,8 +539,15 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- end -}}
 {{- end -}}
 {{- $auth := get .Values.server "auth" | default dict -}}
-{{- if and (get $auth "enabled" | default false) (not (get $auth "existingSecret" | default "")) (not (get $auth "autoGenerateSecret" | default false)) -}}
-{{- fail "server.auth requires existingSecret when autoGenerateSecret=false" -}}
+{{- $admin := get $auth "admin" | default dict -}}
+{{- $token := get $auth "token" | default dict -}}
+{{- if get $auth "enabled" | default false -}}
+{{- if and (not (get $admin "existingSecret" | default "")) (not (get $admin "password" | default "")) (not (get $admin "autoGenerate" | default false)) -}}
+{{- fail "server.auth.admin requires existingSecret, password, or autoGenerate=true when auth is enabled" -}}
+{{- end -}}
+{{- if and (not (get $token "existingSecret" | default "")) (not (get $token "value" | default "")) (not (get $token "autoGenerate" | default false)) -}}
+{{- fail "server.auth.token requires existingSecret, value, or autoGenerate=true when auth is enabled" -}}
+{{- end -}}
 {{- end -}}
 {{- end }}
 

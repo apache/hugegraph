@@ -98,7 +98,16 @@ server:
   initStoreEnabled: false
   auth:
     enabled: false
-    existingSecret: ""
+    admin:
+      password: ""
+      existingSecret: ""
+      key: password
+      autoGenerate: true
+    token:
+      value: ""
+      existingSecret: ""
+      key: token_secret
+      autoGenerate: true
   ingress:
     enabled: false
     className: ""
