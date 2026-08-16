@@ -321,6 +321,7 @@ default values.
 | `server.ingress.enabled` | Create an Ingress for the Server Service | `false` |
 | `server.ingress.className` | IngressClass name | `""` |
 | `server.ingress.annotations` | Ingress annotations (cert-manager, nginx, ALB) | `{}` |
+| `server.advertiseUrl` | Absolute Server URL registered with PD (`server.urls_to_pd`). Empty uses the in-cluster Service URL | `""` |
 | `server.service.type` | Server Service type | `ClusterIP` |
 | `server.service.annotations` | Server Service annotations | `{}` |
 | `server.ingress.hosts` | Ingress hosts and paths | see `values.yaml` |
@@ -338,7 +339,107 @@ Helm upgrade does not overwrite the autoscaler's live replica count. Enabling
 utilization-based HPA requires a strictly positive
 `server.resources.requests.cpu`.
 
+
+### Reaching Hubble (pick one path)
+
+Most people should stop at **1**. Use **2** only if Hubble must run outside
+the cluster. Use **3** only if that outside Hubble must discover Server through
+PD. Store Operations metrics from outside the cluster are out of scope here.
+
+#### 1. In-cluster Hubble (recommended)
+
+Set `hubble.enabled=true` (off by default so API-only clusters stay lean). The
+chart wires PD/Server for you.
+
+Open the UI with one port-forward:
+
+```bash
+kubectl -n <namespace> port-forward svc/<release>-hugegraph-hubble 8088:8088
+```
+
+Then open `http://127.0.0.1:8088`. For a shared environment, expose Hubble with
+`hubble.service.type` NodePort/LoadBalancer or `hubble.ingress` instead of
+port-forward. Log in with the chart admin password from the NOTES / admin
+Secret.
+
+This is the average-user path: no Docker, no advertise URL, no PD peer list.
+
+#### 2. Outside Hubble, direct Server URL (simple external)
+
+Use this when Hubble runs on a host or VM outside the cluster, and you only
+need graph / schema / data / Gremlin (not PD discovery).
+
+1. Leave in-chart Hubble off (`hubble.enabled=false`).
+2. Expose Server (`server.service.type` NodePort/LoadBalancer, or Ingress).
+3. Run a standalone Hubble image with `pd.enabled=false` and
+   `server.direct_url` set to that reachable Server URL (match Server auth).
+4. Open the standalone Hubble port in a browser (or SSH tunnel to it).
+
+Example property fragment for the standalone process:
+
+```properties
+pd.enabled=false
+server.direct_url=http://<reachable-server-host>:<port>
+```
+
+Mount the file at `/hubble/conf/hugegraph-hubble.properties` inside the
+official image (workdir is `/hubble`). One Server URL is enough; you do not
+need to expose PD.
+
+#### 3. Outside Hubble, PD discovery (advanced)
+
+Use this when an outside Hubble must ask PD for the Server address.
+
+In-cluster names such as `*.svc` are not reachable from outside. The chart
+helps with two knobs: advertise a reachable Server URL to PD, and expose the
+PD client Service.
+
+Keep **`server.auth.enabled=true`**. With `hubble.enabled=false`, auth-on is
+what enables PD meta mode so the chart actually writes `server.urls_to_pd`
+(and therefore honors `server.advertiseUrl`). Auth-off plus `advertiseUrl`
+fails at render time.
+
+1. Leave in-chart Hubble off and keep `server.auth.enabled=true`.
+2. Expose Server and set `server.advertiseUrl` to the absolute `http(s)://`
+   URL outside Hubble will use after discovery. The chart registers it via
+   `server.urls_to_pd` instead of the in-cluster Service URL.
+3. Expose PD (`pd.service.type` NodePort/LoadBalancer) so Hubble can dial PD
+   REST and gRPC.
+4. Run standalone Hubble with `pd.enabled=true` and `pd.peers` / `pd.server`
+   pointed at those external PD addresses. Mount config at
+   `/hubble/conf/hugegraph-hubble.properties`.
+
+Example property fragment:
+
+```properties
+pd.enabled=true
+pd.peers=<reachable-pd-host>:<grpc-port>
+pd.server=<reachable-pd-host>:<rest-port>
+```
+
+Trade-off: when `server.advertiseUrl` is set, PD returns that same URL to
+every discovery client, including an in-cluster Hubble. Leave it empty for the
+default in-cluster path.
+
+Local quick test (cluster and Hubble on the same machine): port-forward Server
+`8080` and PD client `8620`/`8686`, set
+`server.advertiseUrl=http://127.0.0.1:8080`, run standalone Hubble with
+`--network host` and the PD properties above, then open Hubble on `8088`
+(or SSH `-L 8088:127.0.0.1:8088` from a laptop).
+
+| Parameter | Description | Default |
+|---|---|---|
+| `server.advertiseUrl` | Absolute Server URL registered with PD for discovery clients. Empty uses the in-cluster Server Service URL | `""` |
+| `pd.service.type` | PD client Service type (`ClusterIP`, `NodePort`, `LoadBalancer`) | `ClusterIP` |
+| `pd.service.annotations` | Annotations on the PD client Service | `{}` |
+| `pd.service.restNodePort` | Optional fixed NodePort for PD REST; requires NodePort/LoadBalancer | unset |
+| `pd.service.grpcNodePort` | Optional fixed NodePort for PD gRPC; requires NodePort/LoadBalancer | unset |
+
 ### Hubble (optional UI)
+
+How to open Hubble (in-cluster vs outside) is under
+[Reaching Hubble](#reaching-hubble-pick-one-path) above. This section covers
+chart wiring and parameters.
 
 Set `hubble.enabled=true` to deploy [HugeGraph Hubble](https://hugegraph.apache.org/docs/quickstart/toolchain/hugegraph-hubble/),
 the web UI for graph management, schema browsing, Gremlin queries, and the

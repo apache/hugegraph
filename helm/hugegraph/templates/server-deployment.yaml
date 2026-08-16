@@ -209,8 +209,10 @@ spec:
               if [[ "${FOUND_PD_PEERS}" == false ]]; then
                 printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
               fi
-              # PD hands this URL to discovery clients such as Hubble. The
-              # k8s branch is taken only when server.deploy_in_k8s is true;
+              # PD hands this URL to discovery clients such as Hubble.
+              # HG_SERVER_URLS_TO_PD uses server.advertiseUrl when set,
+              # otherwise the in-cluster Server Service URL. The k8s
+              # branch is taken only when server.deploy_in_k8s is true;
               # otherwise the announcement falls back to restserver.url,
               # whose 0.0.0.0 is never resolvable from another Pod.
               if [[ "${FOUND_URLS_TO_PD}" == false ]]; then
@@ -263,7 +265,7 @@ spec:
               value: {{ .Values.server.initStoreEnabled | quote }}
             {{- if $pdMeta }}
             - name: HG_SERVER_URLS_TO_PD
-              value: {{ include "hugegraph.server.clientUrl" . | quote }}
+              value: {{ include "hugegraph.server.urlsToPd" . | quote }}
             {{- end }}
             {{- with .Values.server.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
             {{- with include "hugegraph.javaOptsEnv" .Values.server.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}

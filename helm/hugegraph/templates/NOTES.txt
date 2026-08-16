@@ -71,6 +71,20 @@ Hubble Pod is replaced. Graph data is unaffected.
 
 Authentication is disabled. Do not expose this release to untrusted networks.
 {{- end }}
+{{- $advertiseUrl := trim (default "" .Values.server.advertiseUrl) }}
+{{- if $advertiseUrl }}
+
+Outside PD discovery: Server registers this URL with PD:
+
+  {{ $advertiseUrl }}
+
+Keep server.auth.enabled=true so this registration stays active. Expose the
+PD client Service (pd.service.type=NodePort or LoadBalancer) and point a
+standalone Hubble at that PD endpoint with pd.enabled=true. Graph UI works
+via PD discovery; Store Operations metrics are unchanged and still use
+in-cluster Store URLs unless configured separately.
+{{- end }}
+
 {{- if and (gt (int .Values.pd.replicas) 1) (ne (get .Values.pd "antiAffinity" | default "") "required") (empty (get .Values.pd "affinity")) }}
 
 pd.antiAffinity is not "required", so the scheduler may co-locate PD quorum

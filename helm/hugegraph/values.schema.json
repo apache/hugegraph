@@ -341,6 +341,39 @@
               "type": "boolean"
             }
           }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ]
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "restNodePort": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 30000,
+              "maximum": 32767
+            },
+            "grpcNodePort": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 30000,
+              "maximum": 32767
+            }
+          }
         }
       }
     },
@@ -818,6 +851,10 @@
         },
         "service": {
           "$ref": "#/definitions/service"
+        },
+        "advertiseUrl": {
+          "type": "string",
+          "description": "URL registered with PD via server.urls_to_pd. Empty uses the in-cluster Server Service URL. Set to an externally reachable URL for outside Hubble PD discovery."
         }
       }
     },

@@ -97,6 +97,15 @@ pd:
     annotations: {}
     # This chart makes no Kubernetes API calls, so no token is mounted.
     automountServiceAccountToken: false
+  # Client Service for PD REST/gRPC. Defaults to ClusterIP for in-cluster
+  # consumers (Server, Store, in-chart Hubble). Set type to NodePort or
+  # LoadBalancer when an outside Hubble must reach PD for discovery.
+  service:
+    type: ClusterIP
+    annotations: {}
+    # Optional fixed NodePorts; require service.type NodePort or LoadBalancer.
+    restNodePort:
+    grpcNodePort:
   pdb:
     enabled: true
     minAvailable: 2
@@ -272,6 +281,15 @@ server:
       key: token_secret
       # When existingSecret and value are empty, create a kept release-auth-token Secret.
       autoGenerate: true
+  # URL announced to PD via server.urls_to_pd for discovery clients such as
+  # Hubble. Empty keeps the in-cluster Server Service URL
+  # (http://<release>-server.<ns>.svc:<port>). Set this to a URL reachable
+  # from outside the cluster (NodePort, LoadBalancer, or Ingress) when an
+  # external Hubble uses PD mode; PD will hand that address back to Hubble.
+  # Trade-off: in-cluster discovery clients then receive the same URL, so it
+  # must also be reachable from inside the cluster (or keep Hubble in-cluster
+  # and leave this empty).
+  advertiseUrl: ""
   service:
     type: ClusterIP
     annotations: {}

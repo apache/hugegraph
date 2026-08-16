@@ -250,6 +250,20 @@ instead of the in-pod 0.0.0.0 default.
 {{- end }}
 
 {{/*
+URL registered with PD (server.urls_to_pd / HG_SERVER_URLS_TO_PD).
+server.advertiseUrl wins when set so outside PD-mode Hubble receives a
+reachable address; otherwise the in-cluster Server Service URL is used.
+*/}}
+{{- define "hugegraph.server.urlsToPd" -}}
+{{- $advertise := trim (default "" .Values.server.advertiseUrl) -}}
+{{- if $advertise -}}
+{{- $advertise -}}
+{{- else -}}
+{{- include "hugegraph.server.clientUrl" . -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 PD REST endpoint reached through the client Service, for Hubble's pd.server.
 */}}
 {{- define "hugegraph.pd.restClientEndpoint" -}}
@@ -487,6 +501,21 @@ keys for releases stored before the values existed.
 {{- $svc := get .Values.server "service" | default dict -}}
 {{- if and (get $svc "nodePort") (not (has (get $svc "type" | default "ClusterIP") (list "NodePort" "LoadBalancer"))) -}}
 {{- fail "server.service.nodePort requires server.service.type to be NodePort or LoadBalancer" -}}
+{{- end -}}
+{{- $advertiseUrl := trim (default "" .Values.server.advertiseUrl) -}}
+{{- if and $advertiseUrl (not (or (hasPrefix "http://" $advertiseUrl) (hasPrefix "https://" $advertiseUrl))) -}}
+{{- fail "server.advertiseUrl must be an absolute http:// or https:// URL when set" -}}
+{{- end -}}
+{{- $hubbleForAdvertise := get .Values "hubble" | default dict -}}
+{{- $hubblePdModeForAdvertise := and (get $hubbleForAdvertise "enabled" | default false) (ne (get $hubbleForAdvertise "mode" | default "pd") "direct") -}}
+{{- $pdMetaForAdvertise := or .Values.server.auth.enabled $hubblePdModeForAdvertise -}}
+{{- if and $advertiseUrl (not $pdMetaForAdvertise) -}}
+{{- fail "server.advertiseUrl requires server.auth.enabled=true (or in-chart hubble.enabled with hubble.mode=pd), because only then does the chart register server.urls_to_pd with PD" -}}
+{{- end -}}
+{{- $pdSvc := get .Values.pd "service" | default dict -}}
+{{- $pdSvcType := get $pdSvc "type" | default "ClusterIP" -}}
+{{- if and (or (get $pdSvc "restNodePort") (get $pdSvc "grpcNodePort")) (not (has $pdSvcType (list "NodePort" "LoadBalancer"))) -}}
+{{- fail "pd.service.restNodePort and pd.service.grpcNodePort require pd.service.type to be NodePort or LoadBalancer" -}}
 {{- end -}}
 {{- $serverPdb := get .Values.server "pdb" | default dict -}}
 {{- $serverReplicaFloor := include "hugegraph.server.replicaFloor" . | int -}}

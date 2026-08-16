@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+{{- $svc := get .Values.pd "service" | default dict }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -22,8 +23,12 @@ metadata:
   labels:
     {{- include "hugegraph.labels" . | nindent 4 }}
     app.kubernetes.io/component: pd
+  {{- with (get $svc "annotations") }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  type: ClusterIP
+  type: {{ get $svc "type" | default "ClusterIP" }}
   selector:
     {{- include "hugegraph.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: pd
@@ -31,6 +36,12 @@ spec:
     - name: rest
       port: {{ .Values.pd.ports.rest }}
       targetPort: rest
+      {{- with (get $svc "restNodePort") }}
+      nodePort: {{ . }}
+      {{- end }}
     - name: grpc
       port: {{ .Values.pd.ports.grpc }}
       targetPort: grpc
+      {{- with (get $svc "grpcNodePort") }}
+      nodePort: {{ . }}
+      {{- end }}
