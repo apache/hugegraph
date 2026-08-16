@@ -121,6 +121,7 @@ public final class ApiVersion {
      * [0.69] Issue-1748: Support Cypher query RESTful API
      * [0.70] PR-2242: Add edge-existence RESTful API
      * [0.71] PR-2286: Support Arthas API & Metric API prometheus format
+     * [0.72] Support GraphSpace default-role management APIs
      */
 
     /**
