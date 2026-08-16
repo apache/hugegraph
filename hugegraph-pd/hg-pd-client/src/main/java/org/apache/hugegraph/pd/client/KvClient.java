@@ -51,6 +51,7 @@ import org.apache.hugegraph.pd.grpc.kv.WatchRequest;
 import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchType;
 
+import io.grpc.Status;
 import io.grpc.stub.AbstractBlockingStub;
 import io.grpc.stub.AbstractStub;
 import io.grpc.stub.StreamObserver;
@@ -60,9 +61,22 @@ import lombok.extern.slf4j.Slf4j;
 public class KvClient<T extends WatchResponse> extends AbstractClient implements Closeable {
 
     private static final long RECONNECT_DELAY_MS = 1000L;
+    private static final Set<Status.Code> NON_RETRYABLE_WATCH_ERRORS =
+            Set.of(Status.Code.CANCELLED,
+                   Status.Code.INVALID_ARGUMENT,
+                   Status.Code.NOT_FOUND,
+                   Status.Code.ALREADY_EXISTS,
+                   Status.Code.PERMISSION_DENIED,
+                   Status.Code.FAILED_PRECONDITION,
+                   Status.Code.OUT_OF_RANGE,
+                   Status.Code.UNIMPLEMENTED,
+                   Status.Code.DATA_LOSS,
+                   Status.Code.UNAUTHENTICATED);
 
-    private final AtomicLong clientId = new AtomicLong(0);
-    private final Semaphore semaphore = new Semaphore(1);
+    private final AtomicLong lockClientId = new AtomicLong(0);
+    private final AtomicLong watchClientId = new AtomicLong(0);
+    private final Semaphore lockSemaphore = new Semaphore(1);
+    private final Semaphore watchSemaphore = new Semaphore(1);
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Set<WatchSubscription> subscriptions = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService reconnectExecutor;
@@ -142,7 +156,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
 
     private void onEvent(WatchResponse value, Consumer<T> consumer) {
         log.info("receive message for {},event Count:{}", value, value.getEventsCount());
-        clientId.compareAndSet(0L, value.getClientId());
+        watchClientId.compareAndSet(0L, value.getClientId());
         if (value.getEventsCount() != 0) {
             try {
                 consumer.accept((T) value);
@@ -164,11 +178,11 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                 }
                 switch (value.getState()) {
                     case Starting:
-                        boolean b = clientId.compareAndSet(0, value.getClientId());
+                        boolean b = watchClientId.compareAndSet(0, value.getClientId());
                         if (b) {
                             log.info("set watch client id to :{}", value.getClientId());
                         }
-                        release();
+                        release(watchSemaphore);
                         break;
                     case Started:
                         onEvent(value, subscription.consumer);
@@ -186,7 +200,11 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
 
             @Override
             public void onError(Throwable t) {
-                requestReconnect(subscription, this);
+                if (isRetryableWatchError(t)) {
+                    requestReconnect(subscription, this);
+                } else {
+                    stopWatch(subscription, this, t);
+                }
             }
 
             @Override
@@ -231,15 +249,15 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             return false;
         }
 
-        acquire();
+        acquire(watchClientId, watchSemaphore);
         if (closed.get()) {
             subscription.observer.compareAndSet(observer, null);
-            release();
+            release(watchSemaphore);
             return false;
         }
 
         WatchRequest request = WatchRequest.newBuilder()
-                                           .setClientId(clientId.get())
+                                           .setClientId(watchClientId.get())
                                            .setKey(subscription.key)
                                            .build();
         try {
@@ -250,7 +268,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             }
             return true;
         } catch (Exception e) {
-            release();
+            release(watchSemaphore);
             if (e instanceof PDException) {
                 throw (PDException) e;
             }
@@ -264,9 +282,26 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             !subscription.observer.compareAndSet(sourceObserver, null)) {
             return;
         }
-        clientId.set(0L);
-        release();
+        watchClientId.set(0L);
+        release(watchSemaphore);
         scheduleReconnect(subscription);
+    }
+
+    private static boolean isRetryableWatchError(Throwable throwable) {
+        Status.Code code = Status.fromThrowable(throwable).getCode();
+        return !NON_RETRYABLE_WATCH_ERRORS.contains(code);
+    }
+
+    private void stopWatch(WatchSubscription subscription,
+                           StreamObserver<WatchResponse> sourceObserver,
+                           Throwable throwable) {
+        if (!subscription.observer.compareAndSet(sourceObserver, null)) {
+            return;
+        }
+        release(watchSemaphore);
+        subscriptions.remove(subscription);
+        log.error("Watch for key {} stopped after a non-retryable error: {}",
+                  subscription.key, Status.fromThrowable(throwable), throwable);
     }
 
     private void scheduleReconnect(WatchSubscription subscription) {
@@ -302,7 +337,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         }
     }
 
-    private void acquire() {
+    private void acquire(AtomicLong clientId, Semaphore semaphore) {
         if (clientId.get() == 0L) {
             try {
                 semaphore.acquire();
@@ -316,7 +351,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         }
     }
 
-    private void release() {
+    private void release(Semaphore semaphore) {
         try {
             if (semaphore.availablePermits() == 0) {
                 semaphore.release();
@@ -355,65 +390,68 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
     }
 
     public LockResponse lock(String key, long ttl) throws PDException {
-        acquire();
+        acquire(lockClientId, lockSemaphore);
         LockResponse response;
         try {
             LockRequest k =
-                    LockRequest.newBuilder().setKey(key).setClientId(clientId.get()).setTtl(ttl)
+                    LockRequest.newBuilder().setKey(key).setClientId(lockClientId.get()).setTtl(ttl)
                                .build();
             response = blockingUnaryCall(KvServiceGrpc.getLockMethod(), k);
             handleErrors(response.getHeader());
-            clientId.compareAndSet(0, response.getClientId());
+            lockClientId.compareAndSet(0, response.getClientId());
         } catch (Exception e) {
             throw e;
         } finally {
-            release();
+            release(lockSemaphore);
         }
         return response;
     }
 
     public LockResponse lockWithoutReentrant(String key, long ttl) throws PDException {
-        acquire();
+        acquire(lockClientId, lockSemaphore);
         LockResponse response;
         try {
             LockRequest k =
-                    LockRequest.newBuilder().setKey(key).setClientId(clientId.get()).setTtl(ttl)
+                    LockRequest.newBuilder().setKey(key).setClientId(lockClientId.get()).setTtl(ttl)
                                .build();
             response = blockingUnaryCall(KvServiceGrpc.getLockWithoutReentrantMethod(), k);
             handleErrors(response.getHeader());
-            clientId.compareAndSet(0, response.getClientId());
+            lockClientId.compareAndSet(0, response.getClientId());
         } catch (Exception e) {
             throw e;
         } finally {
-            release();
+            release(lockSemaphore);
         }
         return response;
     }
 
     public LockResponse isLocked(String key) throws PDException {
-        LockRequest k = LockRequest.newBuilder().setKey(key).setClientId(clientId.get()).build();
+        LockRequest k =
+                LockRequest.newBuilder().setKey(key).setClientId(lockClientId.get()).build();
         LockResponse response = blockingUnaryCall(KvServiceGrpc.getIsLockedMethod(), k);
         handleErrors(response.getHeader());
         return response;
     }
 
     public LockResponse unlock(String key) throws PDException {
-        assert clientId.get() != 0;
-        LockRequest k = LockRequest.newBuilder().setKey(key).setClientId(clientId.get()).build();
+        assert lockClientId.get() != 0;
+        LockRequest k =
+                LockRequest.newBuilder().setKey(key).setClientId(lockClientId.get()).build();
         LockResponse response = blockingUnaryCall(KvServiceGrpc.getUnlockMethod(), k);
         handleErrors(response.getHeader());
-        clientId.compareAndSet(0L, response.getClientId());
-        assert clientId.get() == response.getClientId();
+        lockClientId.compareAndSet(0L, response.getClientId());
+        assert lockClientId.get() == response.getClientId();
         return response;
     }
 
     public LockResponse keepAlive(String key) throws PDException {
-        assert clientId.get() != 0;
-        LockRequest k = LockRequest.newBuilder().setKey(key).setClientId(clientId.get()).build();
+        assert lockClientId.get() != 0;
+        LockRequest k =
+                LockRequest.newBuilder().setKey(key).setClientId(lockClientId.get()).build();
         LockResponse response = blockingUnaryCall(KvServiceGrpc.getKeepAliveMethod(), k);
         handleErrors(response.getHeader());
-        clientId.compareAndSet(0L, response.getClientId());
-        assert clientId.get() == response.getClientId();
+        lockClientId.compareAndSet(0L, response.getClientId());
+        assert lockClientId.get() == response.getClientId();
         return response;
     }
 
@@ -423,7 +461,8 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             return;
         }
         reconnectExecutor.shutdownNow();
-        release();
+        release(lockSemaphore);
+        release(watchSemaphore);
         for (WatchSubscription subscription : subscriptions) {
             try {
                 StreamObserver<WatchResponse> observer =

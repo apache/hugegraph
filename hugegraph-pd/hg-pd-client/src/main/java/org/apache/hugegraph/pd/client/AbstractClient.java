@@ -261,8 +261,11 @@ public abstract class AbstractClient implements Closeable {
                         proxy.setStub(null);
                     }
                     streamingCall(method, request, responseObserver, ++retry);
+                    return;
                 }
             }
+            throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                  "RPC streaming call failed", e);
         }
     }
 

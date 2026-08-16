@@ -18,10 +18,12 @@
 package org.apache.hugegraph.pd.client;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import java.lang.reflect.Field;
@@ -43,6 +45,8 @@ import org.apache.hugegraph.pd.grpc.PDGrpc;
 import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.grpc.kv.KResponse;
 import org.apache.hugegraph.pd.grpc.kv.KvServiceGrpc;
+import org.apache.hugegraph.pd.grpc.kv.LockRequest;
+import org.apache.hugegraph.pd.grpc.kv.LockResponse;
 import org.apache.hugegraph.pd.grpc.kv.ScanPrefixResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchEvent;
 import org.apache.hugegraph.pd.grpc.kv.WatchKv;
@@ -54,9 +58,15 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import io.grpc.CallOptions;
+import io.grpc.Channel;
+import io.grpc.ClientCall;
+import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.AbstractBlockingStub;
 import io.grpc.stub.AbstractStub;
 import io.grpc.stub.StreamObserver;
@@ -136,6 +146,44 @@ public class KvClientTest extends BaseClientTest {
         }
     }
 
+    @Test(timeout = 2000L)
+    public void testStreamingFailurePropagatesToListenCaller() {
+        ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
+        StatusRuntimeException failure =
+                Status.UNAVAILABLE.withDescription("stream failed").asRuntimeException();
+        PDConfig config = PDConfig.of("first:8686,second:8686").setAuthority(user, pwd);
+        try (SequentialStreamingKvClient testClient =
+                     new SequentialStreamingKvClient(config, reconnectExecutor,
+                                                     new FailingChannel(failure),
+                                                     new FailingChannel(failure),
+                                                     new FailingChannel(failure),
+                                                     new FailingChannel(failure))) {
+            assertThatThrownBy(() -> testClient.listen("key", response -> { }))
+                    .isInstanceOf(PDException.class)
+                    .hasCause(failure);
+            assertThatThrownBy(() -> testClient.listen("key", response -> { }))
+                    .isInstanceOf(PDException.class)
+                    .hasCause(failure);
+        }
+    }
+
+    @Test(timeout = 2000L)
+    public void testStreamingFailureRetriesNextPeer() throws Exception {
+        ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
+        StatusRuntimeException failure =
+                Status.UNAVAILABLE.withDescription("first peer failed").asRuntimeException();
+        AtomicBoolean secondPeerCalled = new AtomicBoolean(false);
+        PDConfig config = PDConfig.of("first:8686,second:8686").setAuthority(user, pwd);
+        try (SequentialStreamingKvClient testClient =
+                     new SequentialStreamingKvClient(config, reconnectExecutor,
+                                                     new FailingChannel(failure),
+                                                     new SuccessfulChannel(secondPeerCalled))) {
+            testClient.listen("key", response -> { });
+
+            assertThat(secondPeerCalled).isTrue();
+        }
+    }
+
     @Test
     public void testReconnectRetriesAfterFirstFailure() throws Exception {
         try (WatchTestContext context = newWatchTestContext()) {
@@ -152,6 +200,7 @@ public class KvClientTest extends BaseClientTest {
 
             assertThat(context.client.calls).hasSize(3);
             assertThat(context.reconnectTasks).isEmpty();
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L, 1000L);
             assertThat(context.client.call(2).methodName)
                     .isEqualTo(KvServiceGrpc.getWatchMethod().getFullMethodName());
             assertThat(context.client.call(2).request.getKey()).isEqualTo("key");
@@ -185,6 +234,73 @@ public class KvClientTest extends BaseClientTest {
 
             assertThat(context.client.calls).hasSize(4);
             assertThat(context.reconnectTasks).isEmpty();
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L, 1000L, 1000L);
+        }
+    }
+
+    @Test
+    public void testWatchReconnectPreservesLockClientId() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.respondWithLockClientId(42L);
+            context.client.lock("lock", 1000L);
+            context.client.listen("key", response -> { });
+
+            assertThat(context.client.call(0).request.getClientId()).isZero();
+            StreamObserver<WatchResponse> observer = context.client.call(0).observer;
+            observer.onNext(WatchResponse.newBuilder()
+                                                 .setState(WatchState.Starting)
+                                                 .setClientId(7L)
+                                                 .build());
+            observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+
+            context.client.keepAlive("lock");
+            assertThat(context.client.lockCall(0).methodName)
+                    .isEqualTo(KvServiceGrpc.getLockMethod().getFullMethodName());
+            assertThat(context.client.lockCall(0).request.getClientId()).isZero();
+            assertThat(context.client.lockCall(1).methodName)
+                    .isEqualTo(KvServiceGrpc.getKeepAliveMethod().getFullMethodName());
+            assertThat(context.client.lockCall(1).request.getClientId()).isEqualTo(42L);
+        }
+    }
+
+    @Test
+    public void testPermanentErrorStopsReconnect() throws Exception {
+        for (Status status : List.of(Status.CANCELLED,
+                                     Status.INVALID_ARGUMENT,
+                                     Status.NOT_FOUND,
+                                     Status.ALREADY_EXISTS,
+                                     Status.PERMISSION_DENIED,
+                                     Status.FAILED_PRECONDITION,
+                                     Status.OUT_OF_RANGE,
+                                     Status.UNIMPLEMENTED,
+                                     Status.DATA_LOSS,
+                                     Status.UNAUTHENTICATED)) {
+            try (WatchTestContext context = newWatchTestContext()) {
+                context.client.listen("key", response -> { });
+                StreamObserver<WatchResponse> observer = context.client.call(0).observer;
+
+                observer.onError(status.withDescription("permanent watch error")
+                                       .asRuntimeException());
+                observer.onCompleted();
+
+                assertThat(context.reconnectTasks).isEmpty();
+                assertThat(context.client.calls).hasSize(1);
+            }
+        }
+    }
+
+    @Test
+    public void testRetryableErrorSchedulesReconnect() throws Exception {
+        for (Status status : List.of(Status.UNAVAILABLE, Status.UNKNOWN)) {
+            try (WatchTestContext context = newWatchTestContext()) {
+                context.client.listen("key", response -> { });
+
+                context.client.call(0).observer.onError(status.asRuntimeException());
+
+                assertThat(context.reconnectTasks).hasSize(1);
+                assertThat(context.reconnectDelaysMs).containsExactly(1000L);
+            }
         }
     }
 
@@ -202,7 +318,7 @@ public class KvClientTest extends BaseClientTest {
                     WatchResponse.newBuilder().setState(WatchState.Leader_Changed).build());
 
             assertThat(context.reconnectTasks).hasSize(1);
-            assertThat(context.reconnectDelaysMs.get(0)).isGreaterThan(0L);
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L);
             context.runNextReconnect();
             assertThat(context.client.calls).hasSize(2);
             assertThat(context.client.call(1).request.getClientId()).isZero();
@@ -217,6 +333,7 @@ public class KvClientTest extends BaseClientTest {
             context.client.call(0).observer.onCompleted();
 
             assertThat(context.reconnectTasks).hasSize(1);
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L);
             context.runNextReconnect();
             assertThat(context.client.calls).hasSize(2);
         }
@@ -232,21 +349,77 @@ public class KvClientTest extends BaseClientTest {
             observer.onCompleted();
 
             assertThat(context.reconnectTasks).hasSize(1);
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L);
+        }
+    }
+
+    @Test
+    public void testSubscriptionsReconnectIndependently() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            Consumer<WatchResponse> firstConsumer = mock(Consumer.class);
+            Consumer<WatchResponse> secondConsumer = mock(Consumer.class);
+            context.client.listen("first", firstConsumer);
+            context.client.call(0).observer.onNext(startingResponse(11L));
+            context.client.listenPrefix("second", secondConsumer);
+
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.client.call(1).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+
+            assertThat(context.reconnectTasks).hasSize(2);
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L, 1000L);
+
+            context.runNextReconnect();
+            assertThat(context.client.call(2).methodName)
+                    .isEqualTo(KvServiceGrpc.getWatchMethod().getFullMethodName());
+            assertThat(context.client.call(2).request.getKey()).isEqualTo("first");
+            context.client.call(2).observer.onNext(startingResponse(12L));
+            WatchResponse firstEvent = eventResponse(12L);
+            context.client.call(2).observer.onNext(firstEvent);
+
+            context.runNextReconnect();
+            assertThat(context.client.call(3).methodName)
+                    .isEqualTo(KvServiceGrpc.getWatchPrefixMethod().getFullMethodName());
+            assertThat(context.client.call(3).request.getKey()).isEqualTo("second");
+            context.client.call(3).observer.onNext(startingResponse(12L));
+            WatchResponse secondEvent = eventResponse(13L);
+            context.client.call(3).observer.onNext(secondEvent);
+
+            verify(firstConsumer).accept(firstEvent);
+            verify(secondConsumer).accept(secondEvent);
+            verify(firstConsumer, never()).accept(secondEvent);
+            verify(secondConsumer, never()).accept(firstEvent);
         }
     }
 
     @Test
     public void testStaleObserverDoesNotScheduleReconnect() throws Exception {
         try (WatchTestContext context = newWatchTestContext()) {
-            context.client.listen("key", response -> { });
+            Consumer<WatchResponse> consumer = mock(Consumer.class);
+            context.client.listen("key", consumer);
             StreamObserver<WatchResponse> staleObserver = context.client.call(0).observer;
             staleObserver.onError(new RuntimeException("disconnected"));
             context.runNextReconnect();
 
             staleObserver.onCompleted();
+            WatchEvent event = WatchEvent.newBuilder().setType(WatchType.Put).build();
+            WatchResponse response = WatchResponse.newBuilder()
+                                                  .setState(WatchState.Started)
+                                                  .setClientId(8L)
+                                                  .addEvents(event)
+                                                  .build();
+            staleObserver.onNext(response);
 
             assertThat(context.client.calls).hasSize(2);
             assertThat(context.reconnectTasks).isEmpty();
+            verify(consumer, never()).accept(any());
+
+            StreamObserver<WatchResponse> currentObserver = context.client.call(1).observer;
+            currentObserver.onNext(WatchResponse.newBuilder()
+                                                .setState(WatchState.Starting)
+                                                .setClientId(8L)
+                                                .build());
+            currentObserver.onNext(response);
+            verify(consumer).accept(response);
         }
     }
 
@@ -334,6 +507,21 @@ public class KvClientTest extends BaseClientTest {
         return ((AtomicBoolean) field.get(client)).get();
     }
 
+    private static WatchResponse startingResponse(long clientId) {
+        return WatchResponse.newBuilder()
+                            .setState(WatchState.Starting)
+                            .setClientId(clientId)
+                            .build();
+    }
+
+    private static WatchResponse eventResponse(long clientId) {
+        return WatchResponse.newBuilder()
+                            .setState(WatchState.Started)
+                            .setClientId(clientId)
+                            .addEvents(WatchEvent.newBuilder().setType(WatchType.Put).build())
+                            .build();
+    }
+
     private WatchTestContext newWatchTestContext() {
         ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
         Deque<Runnable> reconnectTasks = new ArrayDeque<>();
@@ -358,6 +546,125 @@ public class KvClientTest extends BaseClientTest {
 
         void initializeTransport() throws PDException {
             getStub();
+        }
+    }
+
+    private static class SequentialStreamingKvClient extends KvClient<WatchResponse> {
+
+        private final Deque<Channel> channels = new ArrayDeque<>();
+
+        SequentialStreamingKvClient(PDConfig pdConfig,
+                                    ScheduledExecutorService reconnectExecutor,
+                                    Channel... channels) {
+            super(pdConfig, reconnectExecutor);
+            for (Channel channel : channels) {
+                this.channels.addLast(channel);
+            }
+        }
+
+        @Override
+        protected AbstractStub getStub() {
+            return KvServiceGrpc.newStub(this.channels.removeFirst());
+        }
+    }
+
+    private static class FailingChannel extends Channel {
+
+        private final StatusRuntimeException failure;
+
+        FailingChannel(StatusRuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public String authority() {
+            return "test";
+        }
+
+        @Override
+        public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
+                MethodDescriptor<ReqT, RespT> method, CallOptions callOptions) {
+            return new FailingClientCall<>(this.failure);
+        }
+    }
+
+    private static class FailingClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
+
+        private final StatusRuntimeException failure;
+
+        FailingClientCall(StatusRuntimeException failure) {
+            this.failure = failure;
+        }
+
+        @Override
+        public void start(Listener<RespT> responseListener, Metadata headers) {
+            throw this.failure;
+        }
+
+        @Override
+        public void request(int numMessages) {
+        }
+
+        @Override
+        public void cancel(String message, Throwable cause) {
+        }
+
+        @Override
+        public void halfClose() {
+        }
+
+        @Override
+        public void sendMessage(ReqT message) {
+        }
+    }
+
+    private static class SuccessfulChannel extends Channel {
+
+        private final AtomicBoolean called;
+
+        SuccessfulChannel(AtomicBoolean called) {
+            this.called = called;
+        }
+
+        @Override
+        public String authority() {
+            return "test";
+        }
+
+        @Override
+        public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
+                MethodDescriptor<ReqT, RespT> method, CallOptions callOptions) {
+            return new SuccessfulClientCall<>(this.called);
+        }
+    }
+
+    private static class SuccessfulClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
+
+        private final AtomicBoolean called;
+
+        SuccessfulClientCall(AtomicBoolean called) {
+            this.called = called;
+        }
+
+        @Override
+        public void start(Listener<RespT> responseListener, Metadata headers) {
+            this.called.set(true);
+        }
+
+        @Override
+        public void request(int numMessages) {
+        }
+
+        @Override
+        public void cancel(String message, Throwable cause) {
+        }
+
+        @Override
+        public void halfClose() {
+        }
+
+        @Override
+        public void sendMessage(ReqT message) {
         }
     }
 
@@ -396,7 +703,9 @@ public class KvClientTest extends BaseClientTest {
     private static class TestKvClient extends KvClient<WatchResponse> {
 
         private final List<WatchCall> calls = new ArrayList<>();
+        private final List<LockCall> lockCalls = new ArrayList<>();
         private int remainingFailures;
+        private long lockClientId;
 
         TestKvClient(PDConfig pdConfig, ScheduledExecutorService reconnectExecutor) {
             super(pdConfig, reconnectExecutor);
@@ -408,6 +717,26 @@ public class KvClientTest extends BaseClientTest {
 
         WatchCall call(int index) {
             return this.calls.get(index);
+        }
+
+        void respondWithLockClientId(long clientId) {
+            this.lockClientId = clientId;
+        }
+
+        LockCall lockCall(int index) {
+            return this.lockCalls.get(index);
+        }
+
+        @Override
+        protected <ReqT, RespT> RespT blockingUnaryCall(
+                MethodDescriptor<ReqT, RespT> method, ReqT request) {
+            LockRequest lockRequest = (LockRequest) request;
+            this.lockCalls.add(new LockCall(method.getFullMethodName(), lockRequest));
+            return (RespT) LockResponse.newBuilder()
+                                       .setHeader(AbstractClient.okHeader)
+                                       .setClientId(this.lockClientId)
+                                       .setSucceed(true)
+                                       .build();
         }
 
         @Override
@@ -437,6 +766,17 @@ public class KvClientTest extends BaseClientTest {
             this.methodName = methodName;
             this.request = request;
             this.observer = observer;
+        }
+    }
+
+    private static class LockCall {
+
+        private final String methodName;
+        private final LockRequest request;
+
+        LockCall(String methodName, LockRequest request) {
+            this.methodName = methodName;
+            this.request = request;
         }
     }
 }
