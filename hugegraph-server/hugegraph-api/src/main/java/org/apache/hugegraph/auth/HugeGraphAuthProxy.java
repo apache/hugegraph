@@ -172,6 +172,21 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         REQUEST_GRAPH_SPACE.remove();
     }
 
+    private void prepareAuditLimiter(UserWithRole user) {
+        if (user == null || user.role() == null ||
+            HugeAuthenticator.ROLE_NONE.equals(user.role())) {
+            return;
+        }
+        Id userKey = auditLimiterKey(user.username());
+        this.auditLimiters.getOrFetch(userKey, id -> {
+            return RateLimiter.create(this.auditLogMaxRate);
+        });
+    }
+
+    private static Id auditLimiterKey(String username) {
+        return IdGenerator.of(username);
+    }
+
     /**
      * Get the graph space from current request URL path
      */
@@ -1571,7 +1586,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                             "Can't delete user '%s'", user.name());
             E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(currentUsername()),
                             "only admin can delete user", user.name());
-            HugeGraphAuthProxy.this.auditLimiters.invalidate(user.id());
+            HugeGraphAuthProxy.this.auditLimiters.invalidate(
+                    auditLimiterKey(user.name()));
             this.invalidRoleCache();
             return this.authManager.deleteUser(id);
         }
@@ -2015,9 +2031,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
             try {
                 Id userKey = IdGenerator.of(username + password);
-                return HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(userKey, id -> {
-                    return this.authManager.validateUser(username, password);
-                });
+                UserWithRole user =
+                        HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(
+                                userKey, id -> this.authManager.validateUser(
+                                        username, password));
+                HugeGraphAuthProxy.this.prepareAuditLimiter(user);
+                return user;
             } catch (Exception e) {
                 LOG.error("Failed to validate user {} with error: ",
                           username, e);
@@ -2034,9 +2053,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
             try {
                 Id userKey = IdGenerator.of(token);
-                return HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(userKey, id -> {
-                    return this.authManager.validateUser(token);
-                });
+                UserWithRole user =
+                        HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(
+                                userKey,
+                                id -> this.authManager.validateUser(token));
+                HugeGraphAuthProxy.this.prepareAuditLimiter(user);
+                return user;
             } catch (Exception e) {
                 LOG.error("Failed to validate token with error: ", e);
                 throw e;

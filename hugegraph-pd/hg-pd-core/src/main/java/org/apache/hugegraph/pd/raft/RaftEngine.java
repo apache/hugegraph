@@ -127,28 +127,14 @@ public class RaftEngine {
 
         final PeerId serverId = JRaftUtils.getPeerId(config.getAddress());
 
-        try {
-            rpcServer = createRaftRpcServer(config.getAddress(), initConf.getPeers());
-            // construct raft group and start raft
-            this.raftGroupService =
-                    new RaftGroupService(groupId, serverId, nodeOptions,
-                                         rpcServer, true);
-            this.raftNode = raftGroupService.start(false);
-            if (this.raftNode == null) {
-                this.shutDown();
-                return false;
-            }
-            log.info("RaftEngine start successfully: id = {}, peers list = {}",
-                     groupId, nodeOptions.getInitialConf().getPeers());
-            return true;
-        } catch (RuntimeException | Error e) {
-            try {
-                this.shutDown();
-            } catch (RuntimeException | Error cleanupFailure) {
-                e.addSuppressed(cleanupFailure);
-            }
-            throw e;
-        }
+        rpcServer = createRaftRpcServer(config.getAddress(), initConf.getPeers());
+        // construct raft group and start raft
+        this.raftGroupService =
+                new RaftGroupService(groupId, serverId, nodeOptions, rpcServer, true);
+        this.raftNode = raftGroupService.start(false);
+        log.info("RaftEngine start successfully: id = {}, peers list = {}", groupId,
+                 nodeOptions.getInitialConf().getPeers());
+        return this.raftNode != null;
     }
 
     /**
@@ -157,32 +143,13 @@ public class RaftEngine {
     private RpcServer createRaftRpcServer(String raftAddr, List<PeerId> peers) {
         Endpoint endpoint = JRaftUtils.getEndPoint(raftAddr);
         RpcServer rpcServer = RaftRpcServerFactory.createRaftRpcServer(endpoint);
-        try {
-            IpAuthHandler ipAuthHandler = IpAuthHandler.getInstance(
-                    peers.stream()
-                         .map(PeerId::getIp)
-                         .collect(Collectors.toSet()));
-            configureRaftServerIpWhitelist(ipAuthHandler, rpcServer);
-            RaftRpcProcessor.registerProcessor(rpcServer, this);
-            if (!rpcServer.init(null)) {
-                throw new IllegalStateException(
-                        "Failed to initialize Raft RPC server");
-            }
-            return rpcServer;
-        } catch (RuntimeException | Error e) {
-            try {
-                rpcServer.shutdown();
-            } catch (RuntimeException | Error cleanupFailure) {
-                e.addSuppressed(cleanupFailure);
-            } finally {
-                IpAuthHandler.shutdownInstance();
-            }
-            throw e;
-        }
+        configureRaftServerIpWhitelist(peers, rpcServer);
+        RaftRpcProcessor.registerProcessor(rpcServer, this);
+        rpcServer.init(null);
+        return rpcServer;
     }
 
-    private static void configureRaftServerIpWhitelist(
-            IpAuthHandler ipAuthHandler, RpcServer rpcServer) {
+    private static void configureRaftServerIpWhitelist(List<PeerId> peers, RpcServer rpcServer) {
         if (rpcServer instanceof BoltRpcServer) {
             ((BoltRpcServer) rpcServer).getServer().option(
                     BoltServerOption.EXTENDED_NETTY_CHANNEL_HANDLER,
@@ -190,7 +157,11 @@ public class RaftEngine {
                         @Override
                         public List<ChannelHandler> frontChannelHandlers() {
                             return Collections.singletonList(
-                                    ipAuthHandler
+                                    IpAuthHandler.getInstance(
+                                            peers.stream()
+                                                 .map(PeerId::getIp)
+                                                 .collect(Collectors.toSet())
+                                    )
                             );
                         }
 
@@ -204,38 +175,24 @@ public class RaftEngine {
     }
 
     public void shutDown() {
-        InterruptedException interrupted = null;
-        try {
-            if (this.raftGroupService != null) {
-                this.raftGroupService.shutdown();
-                try {
-                    this.raftGroupService.join();
-                } catch (InterruptedException e) {
-                    interrupted = e;
-                }
-            }
-        } finally {
-            this.raftGroupService = null;
+        if (this.raftGroupService != null) {
+            this.raftGroupService.shutdown();
             try {
-                if (this.rpcServer != null) {
-                    this.rpcServer.shutdown();
-                }
-            } finally {
-                this.rpcServer = null;
-                try {
-                    if (this.raftNode != null) {
-                        this.raftNode.shutdown();
-                    }
-                } finally {
-                    this.raftNode = null;
-                    IpAuthHandler.shutdownInstance();
-                }
+                this.raftGroupService.join();
+            } catch (final InterruptedException e) {
+                this.raftNode = null;
+                ThrowUtil.throwException(e);
             }
+            this.raftGroupService = null;
         }
-        if (interrupted != null) {
-            Thread.currentThread().interrupt();
-            ThrowUtil.throwException(interrupted);
+        if (this.rpcServer != null) {
+            this.rpcServer.shutdown();
+            this.rpcServer = null;
         }
+        if (this.raftNode != null) {
+            this.raftNode.shutdown();
+        }
+        this.raftNode = null;
     }
 
     public boolean isLeader() {
@@ -395,43 +352,32 @@ public class RaftEngine {
 
     public Status changePeerList(String peerList) {
         AtomicReference<Status> result = new AtomicReference<>();
+        Configuration newPeers = new Configuration();
         try {
-            IpAuthHandler.validatePeerListShape(peerList);
             String[] peers = peerList.split(",", -1);
             if ((peers.length & 1) != 1) {
                 throw new PDException(-1, "the number of peer list must be odd.");
             }
-            Configuration newPeers = PeerUtil.parsePeerList(peerList);
-            Set<String> newIps = newPeers.getPeers()
-                                            .stream()
-                                            .map(PeerId::getIp)
-                                            .collect(Collectors.toSet());
-            IpAuthHandler.validateAllowedEntries(newIps);
-            IpAuthHandler.requireActiveInstance();
+            newPeers.parse(peerList);
             CountDownLatch latch = new CountDownLatch(1);
             this.raftNode.changePeers(newPeers, status -> {
-                Status callbackStatus = status;
-                try {
-                    if (status != null && status.isOk()) {
-                        IpAuthHandler.refreshInstance(newIps);
+                result.compareAndSet(null, status);
+                if (status != null && status.isOk()) {
+                    IpAuthHandler handler = IpAuthHandler.getInstance();
+                    if (handler != null) {
+                        Set<String> newIps = newPeers.getPeers()
+                                                     .stream()
+                                                     .map(PeerId::getIp)
+                                                     .collect(Collectors.toSet());
+                        handler.refresh(newIps);
                         log.info("IpAuthHandler refreshed after peer list change to: {}",
                                  peerList);
-                    } else if (status == null) {
-                        callbackStatus = new Status(
-                                RaftError.EINTERNAL,
-                                "changePeers returned no status");
+                    } else {
+                        log.warn("IpAuthHandler not initialized, skipping refresh for "
+                                 + "peer list: {}", peerList);
                     }
-                } catch (RuntimeException e) {
-                    callbackStatus = new Status(
-                            RaftError.EINTERNAL,
-                            "Raft peers changed but allowlist refresh failed: %s",
-                            e.getMessage());
-                    log.error("Failed to refresh IpAuthHandler after peer list change to {}",
-                              peerList, e);
-                } finally {
-                    result.compareAndSet(null, callbackStatus);
-                    latch.countDown();
                 }
+                latch.countDown();
             });
             boolean completed = latch.await(3L * config.getRpcTimeout(), TimeUnit.MILLISECONDS);
             if (!completed && result.get() == null) {
