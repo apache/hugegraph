@@ -48,6 +48,7 @@ import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.junit.After;
 import org.junit.Test;
@@ -389,6 +390,33 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                 __.V().sideEffect(__.addE("knows")).asAdmin();
         Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
                             traversalPermissions(parent));
+    }
+
+    @Test
+    public void testTraversalStrategyListKeepsAuthProxy() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthManager authManager = Mockito.mock(AuthManager.class);
+        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+
+        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE))
+               .thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY))
+               .thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
+               .thenReturn(1000D);
+
+        GraphTraversalSource traversal =
+                new HugeGraphAuthProxy(graph).traversal();
+        Assert.assertFalse(traversal.getStrategies().toList().isEmpty());
+        traversal.getStrategies().toList().forEach(strategy -> {
+            Assert.assertEquals("TraversalStrategyProxy",
+                                strategy.getClass().getSimpleName());
+        });
     }
 
     @SuppressWarnings("unchecked")

@@ -2336,7 +2336,9 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public List<TraversalStrategy<?>> toList() {
-            return this.strategies.toList();
+            List<TraversalStrategy<?>> proxies = new ArrayList<>();
+            this.iterator().forEachRemaining(proxies::add);
+            return proxies;
         }
 
         @Override
