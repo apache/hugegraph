@@ -31,6 +31,7 @@ import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.HugeUser;
+import org.apache.hugegraph.auth.ResourceObject;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.cache.Cache;
@@ -593,6 +594,52 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                 role, write));
         Assert.assertFalse(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
                 role, delete));
+    }
+
+    @Test
+    public void testSpaceManagerCanManageUserGrantInOwnSpace() {
+        RolePermission managerRole = RolePermission.fromJson(
+                "{\"roles\":{\"space-a\":{\"*\":{" +
+                "\"SPACE\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        RolePermission memberGrant = RolePermission.fromJson(
+                "{\"roles\":{\"space-a\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}," +
+                "\"WRITE\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        RolePermission otherSpaceGrant = RolePermission.fromJson(
+                "{\"roles\":{\"space-b\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}," +
+                "\"WRITE\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        RolePermission multiSpaceGrant = RolePermission.fromJson(
+                "{\"roles\":{" +
+                "\"space-a\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}}}," +
+                "\"space-b\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}}}" +
+                "}}");
+        HugeUser member = new HugeUser("member");
+        ResourceObject<?> ownSpace =
+                ResourceObject.of("space-a", "hugegraph", member);
+        ResourceObject<?> otherSpace =
+                ResourceObject.of("space-b", "hugegraph", member);
+        ResourceObject<?> admin =
+                ResourceObject.of("space-a", "hugegraph",
+                                  new HugeUser(HugeAuthenticator.USER_ADMIN));
+
+        Assert.assertTrue(HugeAuthenticator.RolePerm.match(
+                managerRole, memberGrant, ownSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, memberGrant, otherSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, otherSpaceGrant, ownSpace));
+        Assert.assertTrue(HugeAuthenticator.RolePerm.match(
+                managerRole, multiSpaceGrant, ownSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, memberGrant, admin));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, RolePermission.admin(), ownSpace));
     }
 
     @SuppressWarnings("unchecked")

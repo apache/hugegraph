@@ -363,8 +363,15 @@ public interface HugeAuthenticator extends Authenticator {
                 }
             }
 
-            RolePermission rolePerm = RolePermission.fromJson(role);
-            return rolePerm.contains(grant);
+            RolePermission grantedRole = RolePermission.fromJson(grant);
+            RolePerm rolePerm = RolePerm.fromJson(role);
+            if (resourceObject != null &&
+                !RolePermission.isAdmin(grantedRole) &&
+                grantedRole.roles().containsKey(resourceObject.graphSpace()) &&
+                rolePerm.matchSpace(resourceObject.graphSpace(), "space")) {
+                return true;
+            }
+            return RolePermission.fromJson(role).contains(grantedRole);
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})
