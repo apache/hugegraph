@@ -19,13 +19,16 @@ package org.apache.hugegraph.unit.auth;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAuthenticator;
 import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
+import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.id.IdGenerator;
@@ -44,6 +47,8 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
+import org.apache.tinkerpop.gremlin.process.traversal.Bytecode;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal.Symbols;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -364,6 +369,41 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
             context.updateLoggers();
             appender.stop();
         }
+    }
+
+    @Test
+    public void testTraversalPermissions() throws Exception {
+        Bytecode read = new Bytecode();
+        read.addStep(Symbols.V);
+        Assert.assertTrue(traversalPermissions(read).isEmpty());
+
+        Bytecode write = new Bytecode();
+        write.addStep(Symbols.addV, "person");
+        write.addStep(Symbols.property, "name", "marko");
+        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
+                            traversalPermissions(write));
+
+        Bytecode delete = new Bytecode();
+        delete.addStep(Symbols.V);
+        delete.addStep(Symbols.drop);
+        Assert.assertEquals(Collections.singleton(HugePermission.DELETE),
+                            traversalPermissions(delete));
+
+        Bytecode nested = new Bytecode();
+        nested.addStep(Symbols.addE, "knows");
+        Bytecode parent = new Bytecode();
+        parent.addStep(Symbols.sideEffect, nested);
+        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
+                            traversalPermissions(parent));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<HugePermission> traversalPermissions(Bytecode bytecode)
+            throws Exception {
+        Method method = HugeGraphAuthProxy.class.getDeclaredMethod(
+                "traversalPermissions", Bytecode.class);
+        method.setAccessible(true);
+        return (Set<HugePermission>) method.invoke(null, bytecode);
     }
 
     private static class TestAppender extends AbstractAppender {

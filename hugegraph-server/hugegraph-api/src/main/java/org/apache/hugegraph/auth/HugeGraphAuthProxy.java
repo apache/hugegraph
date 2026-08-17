@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -95,6 +96,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.Script;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal.Symbols;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.translator.GroovyTranslator;
 import org.apache.tinkerpop.gremlin.structure.Edge;
@@ -2414,6 +2416,11 @@ public final class HugeGraphAuthProxy implements HugeGraph {
              */
             String caller = Thread.currentThread().getName();
             if (!caller.contains(TraversalStrategiesProxy.REST_WORKER)) {
+                for (HugePermission permission :
+                     traversalPermissions(traversal.getBytecode())) {
+                    verifyNamePermission(permission, ResourceType.GREMLIN,
+                                         script);
+                }
                 verifyNamePermission(HugePermission.EXECUTE,
                                      ResourceType.GREMLIN, script);
             }
@@ -2459,6 +2466,33 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         @Override
         public String toString() {
             return this.origin.toString();
+        }
+    }
+
+    private static Set<HugePermission> traversalPermissions(Bytecode bytecode) {
+        Set<HugePermission> permissions = EnumSet.noneOf(HugePermission.class);
+        collectTraversalPermissions(bytecode, permissions);
+        return permissions;
+    }
+
+    private static void collectTraversalPermissions(
+                        Bytecode bytecode,
+                        Set<HugePermission> permissions) {
+        for (Instruction instruction : bytecode.getStepInstructions()) {
+            String operator = instruction.getOperator();
+            if (Symbols.addV.equals(operator) ||
+                Symbols.addE.equals(operator) ||
+                Symbols.property.equals(operator)) {
+                permissions.add(HugePermission.WRITE);
+            } else if (Symbols.drop.equals(operator)) {
+                permissions.add(HugePermission.DELETE);
+            }
+            for (Object argument : instruction.getArguments()) {
+                if (argument instanceof Bytecode) {
+                    collectTraversalPermissions((Bytecode) argument,
+                                                permissions);
+                }
+            }
         }
     }
 }
