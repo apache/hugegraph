@@ -47,8 +47,8 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
-import org.apache.tinkerpop.gremlin.process.traversal.Bytecode;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal.Symbols;
+import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -373,37 +373,31 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
     @Test
     public void testTraversalPermissions() throws Exception {
-        Bytecode read = new Bytecode();
-        read.addStep(Symbols.V);
+        Traversal.Admin<?, ?> read = __.V().asAdmin();
         Assert.assertTrue(traversalPermissions(read).isEmpty());
 
-        Bytecode write = new Bytecode();
-        write.addStep(Symbols.addV, "person");
-        write.addStep(Symbols.property, "name", "marko");
+        Traversal.Admin<?, ?> write =
+                __.addV("person").property("name", "marko").asAdmin();
         Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
                             traversalPermissions(write));
 
-        Bytecode delete = new Bytecode();
-        delete.addStep(Symbols.V);
-        delete.addStep(Symbols.drop);
+        Traversal.Admin<?, ?> delete = __.V().drop().asAdmin();
         Assert.assertEquals(Collections.singleton(HugePermission.DELETE),
                             traversalPermissions(delete));
 
-        Bytecode nested = new Bytecode();
-        nested.addStep(Symbols.addE, "knows");
-        Bytecode parent = new Bytecode();
-        parent.addStep(Symbols.sideEffect, nested);
+        Traversal.Admin<?, ?> parent =
+                __.V().sideEffect(__.addE("knows")).asAdmin();
         Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
                             traversalPermissions(parent));
     }
 
     @SuppressWarnings("unchecked")
-    private static Set<HugePermission> traversalPermissions(Bytecode bytecode)
-            throws Exception {
+    private static Set<HugePermission> traversalPermissions(
+            Traversal.Admin<?, ?> traversal) throws Exception {
         Method method = HugeGraphAuthProxy.class.getDeclaredMethod(
-                "traversalPermissions", Bytecode.class);
+                "traversalPermissions", Traversal.Admin.class);
         method.setAccessible(true);
-        return (Set<HugePermission>) method.invoke(null, bytecode);
+        return (Set<HugePermission>) method.invoke(null, traversal);
     }
 
     private static class TestAppender extends AbstractAppender {

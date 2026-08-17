@@ -93,11 +93,18 @@ import org.apache.tinkerpop.gremlin.process.computer.GraphComputer;
 import org.apache.tinkerpop.gremlin.process.traversal.Bytecode;
 import org.apache.tinkerpop.gremlin.process.traversal.Bytecode.Instruction;
 import org.apache.tinkerpop.gremlin.process.traversal.Script;
+import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal.Symbols;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
+import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.DropStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeStartStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStartStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.translator.GroovyTranslator;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Element;
@@ -2417,7 +2424,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             String caller = Thread.currentThread().getName();
             if (!caller.contains(TraversalStrategiesProxy.REST_WORKER)) {
                 for (HugePermission permission :
-                     traversalPermissions(traversal.getBytecode())) {
+                     traversalPermissions(traversal)) {
                     verifyNamePermission(permission, ResourceType.GREMLIN,
                                          script);
                 }
@@ -2469,28 +2476,33 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
     }
 
-    private static Set<HugePermission> traversalPermissions(Bytecode bytecode) {
+    private static Set<HugePermission> traversalPermissions(
+                                       Traversal.Admin<?, ?> traversal) {
         Set<HugePermission> permissions = EnumSet.noneOf(HugePermission.class);
-        collectTraversalPermissions(bytecode, permissions);
+        collectTraversalPermissions(traversal, permissions);
         return permissions;
     }
 
     private static void collectTraversalPermissions(
-                        Bytecode bytecode,
+                        Traversal.Admin<?, ?> traversal,
                         Set<HugePermission> permissions) {
-        for (Instruction instruction : bytecode.getStepInstructions()) {
-            String operator = instruction.getOperator();
-            if (Symbols.addV.equals(operator) ||
-                Symbols.addE.equals(operator) ||
-                Symbols.property.equals(operator)) {
+        for (Step<?, ?> step : traversal.getSteps()) {
+            if (step instanceof AddVertexStartStep ||
+                step instanceof AddVertexStep ||
+                step instanceof AddEdgeStartStep ||
+                step instanceof AddEdgeStep ||
+                step instanceof AddPropertyStep) {
                 permissions.add(HugePermission.WRITE);
-            } else if (Symbols.drop.equals(operator)) {
+            } else if (step instanceof DropStep) {
                 permissions.add(HugePermission.DELETE);
             }
-            for (Object argument : instruction.getArguments()) {
-                if (argument instanceof Bytecode) {
-                    collectTraversalPermissions((Bytecode) argument,
-                                                permissions);
+            if (step instanceof TraversalParent) {
+                TraversalParent parent = (TraversalParent) step;
+                for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+                    collectTraversalPermissions(child, permissions);
+                }
+                for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
+                    collectTraversalPermissions(child, permissions);
                 }
             }
         }
