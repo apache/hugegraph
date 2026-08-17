@@ -146,10 +146,8 @@ public class GraphSpaceAPI extends API {
             throw new ForbiddenException("Forbidden to set role " + role.toString());
         }
 
-        boolean hasGraph = role.equals(HugeDefaultRole.OBSERVER);
-
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = role.equals(HugeDefaultRole.OBSERVER) &&
+                           StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, name, graph);
         }
@@ -164,6 +162,12 @@ public class GraphSpaceAPI extends API {
             result.put("graph", graph);
         } else {
             authManager.createSpaceDefaultRole(name, user, role);
+            if (role.equals(HugeDefaultRole.OBSERVER)) {
+                for (String currentGraph : manager.graphs(name)) {
+                    authManager.deleteDefaultRole(
+                            name, user, role, currentGraph);
+                }
+            }
         }
 
         return manager.serializer().writeMap(result);
@@ -203,9 +207,8 @@ public class GraphSpaceAPI extends API {
             defaultRole.equals(HugeDefaultRole.SPACE)) {
             throw new ForbiddenException("Forbidden to check role " + role);
         }
-        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) &&
+                           StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, name, graph);
         }
@@ -217,6 +220,15 @@ public class GraphSpaceAPI extends API {
         } else {
             result = authManager.isDefaultRole(name, user,
                                                defaultRole);
+            if (!result && defaultRole.equals(HugeDefaultRole.OBSERVER)) {
+                for (String currentGraph : manager.graphs(name)) {
+                    if (authManager.isDefaultRole(
+                            name, currentGraph, user, defaultRole)) {
+                        result = true;
+                        break;
+                    }
+                }
+            }
         }
         return manager.serializer().writeMap(ImmutableMap.of("check", result));
     }
@@ -259,9 +271,8 @@ public class GraphSpaceAPI extends API {
             E.checkArgument(false, "Invalid role value '%s'", role);
             defaultRole = null; // unreachable, satisfies compiler
         }
-        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) &&
+                           StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, name, graph);
         }
@@ -269,6 +280,12 @@ public class GraphSpaceAPI extends API {
             authManager.deleteDefaultRole(name, user, defaultRole, graph);
         } else {
             authManager.deleteDefaultRole(name, user, defaultRole);
+            if (defaultRole.equals(HugeDefaultRole.OBSERVER)) {
+                for (String currentGraph : manager.graphs(name)) {
+                    authManager.deleteDefaultRole(
+                            name, user, defaultRole, currentGraph);
+                }
+            }
         }
     }
 
