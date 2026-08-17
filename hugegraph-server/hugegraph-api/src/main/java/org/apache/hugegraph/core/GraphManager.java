@@ -1314,9 +1314,6 @@ public final class GraphManager {
             throw new ExistedException("graph", key);
         }
         boolean grpcThread = Thread.currentThread().getName().contains("grpc");
-        if (grpcThread) {
-            HugeGraphAuthProxy.setAdmin();
-        }
         E.checkArgumentNotNull(name, "The graph name can't be null");
         checkGraphName(name);
         String nickname;
@@ -1425,9 +1422,6 @@ public final class GraphManager {
             }
             String schemas = this.schemaTemplate(graphSpace, schema).schema();
             prepareSchema(graph, schemas);
-        }
-        if (grpcThread) {
-            HugeGraphAuthProxy.resetContext();
         }
         return graph;
     }
@@ -2434,19 +2428,14 @@ public final class GraphManager {
 
         @Override
         public void accept(T t) {
-            boolean grpcThread = false;
             try {
-                grpcThread = Thread.currentThread().getName().contains("grpc");
-                if (grpcThread) {
-                    HugeGraphAuthProxy.setAdmin();
+                if (Thread.currentThread().getName().contains("grpc")) {
+                    HugeGraphAuthProxy.runAsAdmin(() -> this.consumer.accept(t));
+                } else {
+                    this.consumer.accept(t);
                 }
-                consumer.accept(t);
             } catch (Throwable e) {
                 LOG.error("Listener exception occurred.", e);
-            } finally {
-                if (grpcThread) {
-                    HugeGraphAuthProxy.resetContext();
-                }
             }
         }
     }
@@ -2498,11 +2487,6 @@ public final class GraphManager {
                 // TODO: add alias graph
                 graph = this.createGraph(parts[0], parts[1], creator, config, false);
                 LOG.info("Add graph space:{} graph:{}", parts[0], parts[1]);
-                // TODO: use a more secure method to determine administrator privileges
-                boolean grpcThread = Thread.currentThread().getName().contains("grpc");
-                if (grpcThread) {
-                    HugeGraphAuthProxy.setAdmin();
-                }
                 graph.started(true);
                 if (graph.tx().isOpen()) {
                     graph.tx().close();

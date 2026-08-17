@@ -163,11 +163,13 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     }
 
     public static void resetContext() {
+        AuthContext.resetContext();
         CONTEXTS.remove();
         REQUEST_GRAPH_SPACE.remove();
     }
 
     public static void resetSpaceContext() {
+        AuthContext.resetContext();
         CONTEXTS.remove();
         REQUEST_GRAPH_SPACE.remove();
     }
@@ -202,13 +204,27 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         REQUEST_GRAPH_SPACE.set(graphSpace);
     }
 
-    public static Context setAdmin() {
-        Context old = getContext();
-        AuthContext.useAdmin();
-        return old;
+    public static void runAsAdmin(Runnable runnable) {
+        String old = AuthContext.getContext();
+        try {
+            AuthContext.setContext(User.ADMIN.toJson());
+            runnable.run();
+        } finally {
+            if (old == null) {
+                AuthContext.resetContext();
+            } else {
+                AuthContext.setContext(old);
+            }
+        }
     }
 
     public static Context getContext() {
+        String internalContext = AuthContext.getContext();
+        User internalUser = User.fromJson(internalContext);
+        if (internalUser != null) {
+            return new Context(internalUser);
+        }
+
         // Return task context first
         String taskContext = TaskManager.getContext();
 

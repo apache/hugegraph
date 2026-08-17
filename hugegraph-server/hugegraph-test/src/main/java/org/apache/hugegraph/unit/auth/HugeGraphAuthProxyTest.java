@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.AuthManager;
@@ -119,6 +120,76 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
         String username = HugeGraphAuthProxy.username();
         Assert.assertEquals("admin", username);
+    }
+
+    @Test
+    public void testRunAsAdminRestoresContext() {
+        HugeAuthenticator.User user = new HugeAuthenticator.User(
+                "test_user",
+                RolePermission.admin()
+        );
+        setContext(new HugeGraphAuthProxy.Context(user));
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Assert.assertEquals(HugeAuthenticator.USER_ADMIN,
+                                HugeGraphAuthProxy.username());
+        });
+
+        Assert.assertEquals("test_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminOverridesTaskContext() {
+        HugeAuthenticator.User taskUser = new HugeAuthenticator.User(
+                "task_user",
+                RolePermission.admin()
+        );
+        TaskManager.setContext(taskUser.toJson());
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Assert.assertEquals(HugeAuthenticator.USER_ADMIN,
+                                HugeGraphAuthProxy.username());
+        });
+
+        Assert.assertEquals("task_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminRestoresContextAfterException() {
+        HugeAuthenticator.User taskUser = new HugeAuthenticator.User(
+                "task_user",
+                RolePermission.admin()
+        );
+        TaskManager.setContext(taskUser.toJson());
+
+        Assert.assertThrows(RuntimeException.class, () -> {
+            HugeGraphAuthProxy.runAsAdmin(() -> {
+                throw new RuntimeException("expected");
+            });
+        });
+
+        Assert.assertEquals("task_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminDoesNotPropagateToChildThread()
+            throws InterruptedException {
+        AtomicReference<String> username = new AtomicReference<>();
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Thread child = new Thread(() -> {
+                username.set(HugeGraphAuthProxy.username());
+            });
+            child.start();
+            try {
+                child.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        });
+
+        Assert.assertEquals("anonymous", username.get());
     }
 
     @Test
