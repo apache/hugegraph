@@ -1586,7 +1586,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             String username = currentUsername();
             HugeUser user = this.authManager.getUser(updatedUser.id());
             if (!user.name().equals(username)) {
-                E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(username),
+                E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(username) ||
+                                this.authManager.isAdminManager(username),
                                 "Only the user themselves or the admin can change this user",
                                 user.name());
                 this.updateCreator(updatedUser);
@@ -1600,7 +1601,9 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             HugeUser user = this.authManager.getUser(id);
             E.checkArgument(!HugeAuthenticator.USER_ADMIN.equals(user.name()),
                             "Can't delete user '%s'", user.name());
-            E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(currentUsername()),
+            String username = currentUsername();
+            E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(username) ||
+                            this.authManager.isAdminManager(username),
                             "only admin can delete user", user.name());
             HugeGraphAuthProxy.this.auditLimiters.invalidate(
                     auditLimiterKey(user.name()));

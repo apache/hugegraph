@@ -422,6 +422,8 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                            storedUserId, "cache_user",
                            RolePermission.all("hugegraph")));
         Mockito.when(authManager.getUser(storedUserId)).thenReturn(storedUser);
+        Mockito.when(authManager.isAdminManager("custom_admin"))
+               .thenReturn(true);
 
         HugeGraphAuthProxy proxy = new HugeGraphAuthProxy(graph);
         AuthManager proxyAuthManager = proxy.authManager();
@@ -435,10 +437,18 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                 new HugeAuthenticator.User(
                         HugeAuthenticator.USER_ADMIN,
                         RolePermission.admin())));
+        proxyAuthManager.updateUser(storedUser);
+
+        setContext(new HugeGraphAuthProxy.Context(
+                new HugeAuthenticator.User(
+                        "custom_admin",
+                        RolePermission.admin())));
+        proxyAuthManager.updateUser(storedUser);
         proxyAuthManager.deleteUser(storedUserId);
 
         Assert.assertFalse(auditLimiters.containsKey(
                 IdGenerator.of("cache_user")));
+        Mockito.verify(authManager, Mockito.times(2)).updateUser(storedUser);
         Mockito.verify(authManager).deleteUser(storedUserId);
     }
 
