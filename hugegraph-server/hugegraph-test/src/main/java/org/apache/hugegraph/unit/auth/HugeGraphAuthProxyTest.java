@@ -419,6 +419,37 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         });
     }
 
+    @Test
+    public void testSpaceMemberDoesNotGrantMutationPermissions() {
+        RolePermission role = RolePermission.fromJson(
+                "{\"roles\":{\"DEFAULT\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}," +
+                "\"SPACE_MEMBER\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        HugeAuthenticator.RequiredPerm read =
+                new HugeAuthenticator.RequiredPerm()
+                        .graphSpace("DEFAULT")
+                        .owner("hugegraph")
+                        .action("read");
+        HugeAuthenticator.RequiredPerm write =
+                new HugeAuthenticator.RequiredPerm()
+                        .graphSpace("DEFAULT")
+                        .owner("hugegraph")
+                        .action("write");
+        HugeAuthenticator.RequiredPerm delete =
+                new HugeAuthenticator.RequiredPerm()
+                        .graphSpace("DEFAULT")
+                        .owner("hugegraph")
+                        .action("delete");
+
+        Assert.assertTrue(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
+                role, read));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
+                role, write));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
+                role, delete));
+    }
+
     @SuppressWarnings("unchecked")
     private static Set<HugePermission> traversalPermissions(
             Traversal.Admin<?, ?> traversal) throws Exception {

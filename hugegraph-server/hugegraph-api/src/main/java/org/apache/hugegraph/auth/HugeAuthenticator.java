@@ -290,6 +290,10 @@ public interface HugeAuthenticator extends Authenticator {
             }
             for (Map.Entry<HugePermission, Object> e : perms.entrySet()) {
                 HugePermission permission = e.getKey();
+                if (permission == HugePermission.SPACE ||
+                    permission == HugePermission.SPACE_MEMBER) {
+                    continue;
+                }
                 // Maybe required = ANY
                 if (action.match(permission) ||
                     action.equals(HugePermission.EXECUTE)) {
