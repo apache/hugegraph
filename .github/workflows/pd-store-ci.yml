@@ -33,6 +33,9 @@ jobs:
         with:
           fetch-depth: 5
 
+      - name: Run JaCoCo report validator tests
+        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-jacoco-report.sh
+
       - name: Use staged maven repo settings
         run: |
           cp $HOME/.m2/settings.xml /tmp/settings.xml || true
@@ -65,7 +68,7 @@ jobs:
       USE_STAGE: 'false' # Whether to include the stage repository.
       # TODO: remove outdated env
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
-      REPORT_DIR: target/site/jacoco
+      REPORT_FILE: hugegraph-pd/hg-pd-test/target/site/jacoco/jacoco.xml
 
     steps:
       - name: Install JDK 11
@@ -92,20 +95,22 @@ jobs:
           cp $HOME/.m2/settings.xml /tmp/settings.xml
           mv -vf .github/configs/settings.xml $HOME/.m2/settings.xml
 
-      - name: Run common test
-        run: |
-          mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-common-test
-
-      - name: Run core test
-        run: |
-          mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-core-test
-
-      # The above tests do not require starting a PD instance.
-
       - name: Package
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+
+      # These tests do not require starting a PD instance. Run them after the
+      # clean package so their JaCoCo data survives until the final report.
+      - name: Run common test
+        run: |
+          mvn test -pl hugegraph-pd/hg-pd-test -am \
+            -P pd-common-test -Djacoco.sessionId=pd-common-test
+
+      - name: Run core test
+        run: |
+          mvn test -pl hugegraph-pd/hg-pd-test -am \
+            -P pd-core-test -Djacoco.sessionId=pd-core-test
 
       - name: Check startup test prerequisites (PD)
         id: pd-preflight
@@ -139,16 +144,32 @@ jobs:
 
       - name: Run client test
         run: |
-          mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-client-test
+          mvn test -pl hugegraph-pd/hg-pd-test -am \
+            -P pd-client-test -Djacoco.sessionId=pd-client-test
 
       - name: Run rest test
         run: |
-          mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-rest-test
+          mvn test -pl hugegraph-pd/hg-pd-test -am \
+            -P pd-rest-test -Djacoco.sessionId=pd-rest-test
+
+      - name: Generate aggregate coverage report
+        run: |
+          mvn verify -pl hugegraph-pd/hg-pd-test -am -P jacoco -DskipTests -ntp
+
+      - name: Validate aggregate coverage report
+        run: |
+          $TRAVIS_DIR/check-jacoco-report.sh \
+            --require-session pd-common-test \
+            --require-session pd-core-test \
+            --require-session pd-client-test \
+            --require-session pd-rest-test \
+            "$REPORT_FILE" \
+            hg-pd-grpc hg-pd-common hg-pd-client hg-pd-core hg-pd-service hg-pd-dist
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0
         with:
-          file: ${{ env.REPORT_DIR }}/*.xml
+          files: ${{ env.REPORT_FILE }}
 
   store:
     needs: struct
@@ -157,7 +178,7 @@ jobs:
       USE_STAGE: 'false' # Whether to include the stage repository.
       # TODO: remove outdated env
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
-      REPORT_DIR: target/site/jacoco
+      REPORT_FILE: hugegraph-store/hg-store-test/target/site/jacoco/jacoco.xml
 
     steps:
       - name: Install JDK 11
@@ -228,32 +249,55 @@ jobs:
 
       - name: Run common test
         run: |
-          mvn test -pl hugegraph-store/hg-store-test -am -P store-common-test
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-common-test -Djacoco.sessionId=store-common-test
 
       - name: Run client test
         run: |
-          mvn test -pl hugegraph-store/hg-store-test -am -P store-client-test
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-client-test -Djacoco.sessionId=store-client-test
 
       - name: Run core test
         run: |
-          mvn test -pl hugegraph-store/hg-store-test -am -P store-core-test
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-core-test -Djacoco.sessionId=store-core-test
 
       - name: Run rocksdb test
         run: |
-          mvn test -pl hugegraph-store/hg-store-test -am -P store-rocksdb-test
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test
 
       - name: Run server test
         run: |
-          mvn test -pl hugegraph-store/hg-store-test -am -P store-server-test
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-server-test -Djacoco.sessionId=store-server-test
 
       - name: Run raft-core test
         run: |
-          mvn test -pl hugegraph-store/hg-store-test -am -P store-raftcore-test
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-raftcore-test -Djacoco.sessionId=store-raftcore-test
+
+      - name: Generate aggregate coverage report
+        run: |
+          mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco -DskipTests -ntp
+
+      - name: Validate aggregate coverage report
+        run: |
+          $TRAVIS_DIR/check-jacoco-report.sh \
+            --require-session store-common-test \
+            --require-session store-client-test \
+            --require-session store-core-test \
+            --require-session store-rocksdb-test \
+            --require-session store-server-test \
+            --require-session store-raftcore-test \
+            "$REPORT_FILE" \
+            hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb \
+            hg-store-core hg-store-node
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0
         with:
-          file: ${{ env.REPORT_DIR }}/*.xml
+          files: ${{ env.REPORT_FILE }}
 
   hstore:
     needs: struct
