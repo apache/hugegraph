@@ -27,8 +27,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
@@ -99,6 +101,7 @@ import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.entity.PeerId;
+import com.alipay.sofa.jraft.error.RaftError;
 
 import io.grpc.ManagedChannel;
 import io.grpc.stub.StreamObserver;
@@ -1683,7 +1686,20 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
             return;
         }
 
-        var list = PeerUtil.parseConfig(request.getConfig());
+        List<KVPair<String, PeerId>> list;
+        try {
+            IpAuthHandler.validatePeerListShape(request.getConfig());
+            list = PeerUtil.parseConfig(request.getConfig());
+        } catch (IllegalArgumentException e) {
+            Pdpb.UpdatePdRaftResponse response =
+                    Pdpb.UpdatePdRaftResponse.newBuilder()
+                                             .setHeader(newErrorHeader(
+                                                     6668, e.getMessage()))
+                                             .build();
+            observer.onNext(response);
+            observer.onCompleted();
+            return;
+        }
 
         log.info("update raft request: {}, list: {}", request.getConfig(), list);
 
@@ -1732,28 +1748,93 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
                 }
             }
 
+            Set<String> newIps = new HashSet<>();
+            config.getPeers().forEach(peer -> newIps.add(peer.getIp()));
+            config.getLearners().forEach(peer -> newIps.add(peer.getIp()));
+            try {
+                IpAuthHandler.validateAllowedEntries(newIps);
+                IpAuthHandler.requireActiveInstance();
+            } catch (IllegalArgumentException e) {
+                response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                    .setHeader(newErrorHeader(
+                                                            6668,
+                                                            e.getMessage()))
+                                                    .build();
+                break;
+            } catch (IllegalStateException e) {
+                response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                    .setHeader(newErrorHeader(
+                                                            6670,
+                                                            e.getMessage()))
+                                                    .build();
+                break;
+            }
+
             log.info("pd raft update with new config: {}", config);
 
-            node.changePeers(config, status -> {
-                if (status.isOk()) {
-                    log.info("updatePdRaft, change peers success");
-                    // Refresh IpAuthHandler so newly added peers are not blocked
-                    IpAuthHandler handler = IpAuthHandler.getInstance();
-                    if (handler != null) {
-                        Set<String> newIps = new HashSet<>();
-                        config.getPeers().forEach(p -> newIps.add(p.getIp()));
-                        config.getLearners().forEach(p -> newIps.add(p.getIp()));
-                        handler.refresh(newIps);
-                        log.info("IpAuthHandler refreshed after updatePdRaft peer change");
-                    } else {
-                        log.warn("IpAuthHandler not initialized, skipping refresh");
+            CountDownLatch changeLatch = new CountDownLatch(1);
+            AtomicReference<Status> changeStatus = new AtomicReference<>();
+            try {
+                node.changePeers(config, status -> {
+                    Status callbackStatus = status;
+                    try {
+                        if (status != null && status.isOk()) {
+                            log.info("updatePdRaft, change peers success");
+                            IpAuthHandler.refreshInstance(newIps);
+                            log.info("IpAuthHandler refreshed after updatePdRaft peer change");
+                        } else if (status != null) {
+                            log.error("changePeers status: {}, msg:{}, code: {}, raft error:{}",
+                                      status, status.getErrorMsg(), status.getCode(),
+                                      status.getRaftError());
+                        } else {
+                            callbackStatus = new Status(
+                                    RaftError.EINTERNAL,
+                                    "changePeers returned no status");
+                        }
+                    } catch (RuntimeException e) {
+                        callbackStatus = new Status(
+                                RaftError.EINTERNAL,
+                                "Raft peers changed but allowlist refresh failed: %s",
+                                e.getMessage());
+                        log.error("Raft peers changed but IpAuthHandler refresh failed",
+                                  e);
+                    } finally {
+                        changeStatus.set(callbackStatus);
+                        changeLatch.countDown();
                     }
-                } else {
-                    log.error("changePeers status: {}, msg:{}, code: {}, raft error:{}",
-                              status, status.getErrorMsg(), status.getCode(),
-                              status.getRaftError());
+                });
+                long timeout = 3L * pdConfig.getRaft().getRpcTimeout();
+                if (!changeLatch.await(timeout, TimeUnit.MILLISECONDS)) {
+                    response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                        .setHeader(newErrorHeader(
+                                                                6669,
+                                                                "changePeers timed out"))
+                                                        .build();
+                } else if (changeStatus.get() == null ||
+                           !changeStatus.get().isOk()) {
+                    String message = changeStatus.get() == null ?
+                                     "changePeers returned no status" :
+                                     changeStatus.get().getErrorMsg();
+                    response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                        .setHeader(newErrorHeader(
+                                                                6670, message))
+                                                        .build();
                 }
-            });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                    .setHeader(newErrorHeader(
+                                                            6670,
+                                                            "changePeers interrupted"))
+                                                    .build();
+            } catch (RuntimeException e) {
+                log.error("changePeers failed before callback", e);
+                response = Pdpb.UpdatePdRaftResponse.newBuilder()
+                                                    .setHeader(newErrorHeader(
+                                                            6670,
+                                                            e.getMessage()))
+                                                    .build();
+            }
         } while (false);
 
         observer.onNext(response);

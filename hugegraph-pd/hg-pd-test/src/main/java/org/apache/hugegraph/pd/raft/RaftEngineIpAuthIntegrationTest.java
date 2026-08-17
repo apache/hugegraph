@@ -19,6 +19,7 @@ package org.apache.hugegraph.pd.raft;
 
 import java.util.Collections;
 
+import org.apache.hugegraph.pd.config.PDConfig;
 import org.apache.hugegraph.pd.raft.auth.IpAuthHandler;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.After;
@@ -35,25 +36,35 @@ import com.alipay.sofa.jraft.error.RaftError;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 public class RaftEngineIpAuthIntegrationTest {
 
     private Node originalRaftNode;
+    private PDConfig.Raft originalConfig;
 
     @Before
     public void setUp() {
         // Save original raftNode so we can restore it after the test
         originalRaftNode = RaftEngine.getInstance().getRaftNode();
+        originalConfig = Whitebox.getInternalState(RaftEngine.getInstance(),
+                                                   "config");
+        PDConfig pdConfig = new PDConfig();
+        PDConfig.Raft config = pdConfig.new Raft();
+        config.setRpcTimeout(100);
+        Whitebox.setInternalState(RaftEngine.getInstance(), "config", config);
         // Reset IpAuthHandler singleton for a clean state
-        Whitebox.setInternalState(IpAuthHandler.class, "instance", null);
+        IpAuthHandler.shutdownInstance();
     }
 
     @After
     public void tearDown() {
         // Restore original raftNode
         Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", originalRaftNode);
+        Whitebox.setInternalState(RaftEngine.getInstance(), "config", originalConfig);
         // Reset IpAuthHandler singleton
-        Whitebox.setInternalState(IpAuthHandler.class, "instance", null);
+        IpAuthHandler.shutdownInstance();
     }
 
     @Test
@@ -80,9 +91,11 @@ public class RaftEngineIpAuthIntegrationTest {
         Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", mockNode);
 
         // Call changePeerList with new peer — must be odd count
-        RaftEngine.getInstance().changePeerList("127.0.0.1:8610");
+        Status status = RaftEngine.getInstance().changePeerList(
+                "127.0.0.1:8610");
 
         // Verify IpAuthHandler was refreshed with the new peer IP
+        Assert.assertTrue(status.isOk());
         Assert.assertTrue(invokeIsIpAllowed(handler, "127.0.0.1"));
         // Old IP should no longer be allowed
         Assert.assertFalse(invokeIsIpAllowed(handler, "10.0.0.1"));
@@ -109,11 +122,71 @@ public class RaftEngineIpAuthIntegrationTest {
 
         Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", mockNode);
 
-        RaftEngine.getInstance().changePeerList("127.0.0.1:8610");
+        Status status = RaftEngine.getInstance().changePeerList(
+                "127.0.0.1:8610");
 
         // Handler should NOT be refreshed — old IP still allowed
+        Assert.assertFalse(status.isOk());
         Assert.assertTrue(invokeIsIpAllowed(handler, "10.0.0.1"));
         Assert.assertFalse(invokeIsIpAllowed(handler, "127.0.0.1"));
+    }
+
+    @Test
+    public void testChangePeerListRejectsNullCallbackStatus() {
+        IpAuthHandler.getInstance(Collections.singleton("10.0.0.1"));
+        Node mockNode = mock(Node.class);
+        doAnswer(invocation -> {
+            Closure closure = invocation.getArgument(1);
+            closure.run(null);
+            return null;
+        }).when(mockNode).changePeers(any(Configuration.class),
+                                     any(Closure.class));
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode",
+                                  mockNode);
+
+        Status status = RaftEngine.getInstance().changePeerList(
+                "127.0.0.1:8610");
+
+        Assert.assertNotNull(status);
+        Assert.assertFalse(status.isOk());
+        Assert.assertTrue(status.getErrorMsg()
+                                .contains("returned no status"));
+    }
+
+    @Test
+    public void testChangePeerListRejectsOversizedAllowlistBeforeRaft() {
+        Node mockNode = mock(Node.class);
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", mockNode);
+        StringBuilder peers = new StringBuilder();
+        for (int i = 0; i < 129; i++) {
+            if (i > 0) {
+                peers.append(',');
+            }
+            peers.append("pd-").append(i).append(":8610");
+        }
+
+        Status status = RaftEngine.getInstance().changePeerList(
+                peers.toString());
+
+        Assert.assertNotNull(status);
+        Assert.assertFalse(status.isOk());
+        verify(mockNode, never()).changePeers(
+                any(Configuration.class), any(Closure.class));
+    }
+
+    @Test
+    public void testChangePeerListRejectsMalformedPeerBeforeRaft() {
+        Node mockNode = mock(Node.class);
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", mockNode);
+
+        Status status = RaftEngine.getInstance().changePeerList(
+                "127.0.0.1:8610,bad,127.0.0.2:8610");
+
+        Assert.assertNotNull(status);
+        Assert.assertFalse(status.isOk());
+        Assert.assertTrue(status.getErrorMsg().contains("Invalid Raft peer"));
+        verify(mockNode, never()).changePeers(
+                any(Configuration.class), any(Closure.class));
     }
 
     private boolean invokeIsIpAllowed(IpAuthHandler handler, String ip) {

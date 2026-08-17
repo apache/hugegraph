@@ -17,15 +17,17 @@
 
 package org.apache.hugegraph.pd.raft;
 
-import com.alipay.sofa.jraft.JRaftUtils;
-import com.alipay.sofa.jraft.entity.PeerId;
-import org.apache.hugegraph.pd.common.KVPair;
-
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
 
+import org.apache.hugegraph.pd.common.KVPair;
+
+import com.alipay.sofa.jraft.conf.Configuration;
+import com.alipay.sofa.jraft.entity.PeerId;
+
 public class PeerUtil {
+
     public static boolean isPeerEquals(PeerId p1, PeerId p2) {
         if (p1 == null && p2 == null) {
             return true;
@@ -40,19 +42,42 @@ public class PeerUtil {
         List<KVPair<String, PeerId>> result = new LinkedList<>();
 
         if (conf != null && conf.length() > 0) {
-            for (var s : conf.split(",")) {
+            for (var s : conf.split(",", -1)) {
+                String role;
+                String peer;
                 if (s.endsWith("/leader")) {
-                    result.add(new KVPair<>("leader", JRaftUtils.getPeerId(s.substring(0, s.length() - 7))));
+                    role = "leader";
+                    peer = s.substring(0, s.length() - 7);
                 } else if (s.endsWith("/learner")) {
-                    result.add(new KVPair<>("learner", JRaftUtils.getPeerId(s.substring(0, s.length() - 8))));
+                    role = "learner";
+                    peer = s.substring(0, s.length() - 8);
                 } else if (s.endsWith("/follower")) {
-                    result.add(new KVPair<>("follower", JRaftUtils.getPeerId(s.substring(0, s.length() - 9))));
+                    role = "follower";
+                    peer = s.substring(0, s.length() - 9);
                 } else {
-                    result.add(new KVPair<>("follower", JRaftUtils.getPeerId(s)));
+                    role = "follower";
+                    peer = s;
                 }
+                result.add(new KVPair<>(role, parsePeer(peer)));
             }
         }
 
         return result;
+    }
+
+    public static Configuration parsePeerList(String peerList) {
+        Configuration configuration = new Configuration();
+        for (String peer : peerList.split(",", -1)) {
+            configuration.addPeer(parsePeer(peer));
+        }
+        return configuration;
+    }
+
+    private static PeerId parsePeer(String value) {
+        PeerId peer = new PeerId();
+        if (value.isEmpty() || !peer.parse(value)) {
+            throw new IllegalArgumentException("Invalid Raft peer: " + value);
+        }
+        return peer;
     }
 }
