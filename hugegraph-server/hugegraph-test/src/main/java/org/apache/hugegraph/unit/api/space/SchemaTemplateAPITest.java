@@ -19,6 +19,8 @@
 
 package org.apache.hugegraph.unit.api.space;
 
+import java.util.function.Supplier;
+
 import org.apache.hugegraph.api.space.SchemaTemplateAPI;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.testutil.Assert;
@@ -33,7 +35,11 @@ public class SchemaTemplateAPITest {
 
     @Test
     public void testCreatorCanManageTemplate() {
-        Assert.assertTrue(canManage(authManager(false, false), CREATOR));
+        Supplier<AuthManager> authManager =
+                Mockito.mock(Supplier.class);
+
+        Assert.assertTrue(canManage(authManager, CREATOR));
+        Mockito.verifyZeroInteractions(authManager);
     }
 
     @Test
@@ -43,7 +49,8 @@ public class SchemaTemplateAPITest {
 
     @Test
     public void testSpaceManagerCanManageAnotherUsersTemplate() {
-        Assert.assertTrue(canManage(authManager(false, true), "space-admin"));
+        Assert.assertTrue(canManage(authManager(false, true),
+                                    "space-admin"));
     }
 
     @Test
@@ -51,22 +58,24 @@ public class SchemaTemplateAPITest {
         Assert.assertFalse(canManage(authManager(false, false), "member"));
     }
 
-    private static AuthManager authManager(boolean admin,
-                                           boolean spaceManager) {
+    private static Supplier<AuthManager> authManager(boolean admin,
+                                                     boolean spaceManager) {
         AuthManager auth = Mockito.mock(AuthManager.class);
         Mockito.when(auth.isAdminManager(Mockito.anyString()))
                .thenReturn(admin);
         Mockito.when(auth.isSpaceManager(GRAPHSPACE, "space-admin"))
                .thenReturn(spaceManager);
-        return auth;
+        return () -> auth;
     }
 
-    private static boolean canManage(AuthManager auth, String username) {
+    private static boolean canManage(
+            Supplier<AuthManager> authManager,
+            String username) {
         return Whitebox.invokeStatic(
                 SchemaTemplateAPI.class,
-                new Class<?>[]{AuthManager.class, String.class,
+                new Class<?>[]{Supplier.class, String.class,
                                String.class, String.class},
                 "canManage",
-                auth, GRAPHSPACE, CREATOR, username);
+                authManager, GRAPHSPACE, CREATOR, username);
     }
 }
