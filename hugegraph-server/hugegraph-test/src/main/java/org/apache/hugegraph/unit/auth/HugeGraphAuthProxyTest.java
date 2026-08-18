@@ -587,10 +587,8 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     @Test
     public void testMergeRecursesChildTraversals() throws Exception {
         Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep
-                merge = new org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep(
-                        traversal);
-        merge.addChild(__.V().drop().asAdmin());
+        AbstractStep<Object, Object> merge = mergeStep(traversal, true);
+        addMergeChild(merge, __.V().drop().asAdmin());
         traversal.addStep(merge);
 
         Set<HugePermission> permissions = traversalPermissions(traversal);
@@ -717,23 +715,10 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                                                      boolean vertex)
                                                      throws Exception {
         Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        AbstractStep<Object, Object> merge;
-        if (vertex) {
-            org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep
-                    step = new org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep(
-                            traversal);
-            merge = step;
-            if (onMatch) {
-                step.addChild(__.constant(Collections.emptyMap()).asAdmin());
-            }
-        } else {
-            org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeStep
-                    step = new org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeStep(
-                            traversal);
-            merge = step;
-            if (onMatch) {
-                step.addChild(__.constant(Collections.emptyMap()).asAdmin());
-            }
+        AbstractStep<Object, Object> merge = mergeStep(traversal, vertex);
+        if (onMatch) {
+            addMergeChild(merge,
+                          __.constant(Collections.emptyMap()).asAdmin());
         }
         traversal.addStep(merge);
         Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
@@ -766,6 +751,24 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                                              .getStrategies().toList().get(0);
         Assert.assertThrows(ForbiddenException.class,
                             () -> strategy.apply(traversal));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static AbstractStep<Object, Object> mergeStep(
+            Traversal.Admin<?, ?> traversal, boolean vertex) throws Exception {
+        String type = "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
+                      (vertex ? "MergeVertexStep" : "MergeEdgeStep");
+        Class<?> mergeClass = Class.forName(type);
+        return (AbstractStep<Object, Object>)
+               mergeClass.getConstructor(Traversal.Admin.class)
+                         .newInstance(traversal);
+    }
+
+    private static void addMergeChild(AbstractStep<Object, Object> merge,
+                                      Traversal.Admin<?, ?> child)
+                                      throws Exception {
+        merge.getClass().getMethod("addChild", Traversal.Admin.class)
+             .invoke(merge, child);
     }
 
     private static class TestTraversalParent

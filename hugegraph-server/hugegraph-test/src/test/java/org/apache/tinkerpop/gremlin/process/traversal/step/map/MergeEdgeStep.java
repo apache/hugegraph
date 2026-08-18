@@ -20,11 +20,16 @@ package org.apache.tinkerpop.gremlin.process.traversal.step.map;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 
 /*
- * Test-only compatibility fixture for TinkerPop 3.7 MergeEdgeStep.
+ * Test-output-only compatibility fixture for TinkerPop 3.7 MergeEdgeStep.
  */
 public class MergeEdgeStep extends TestMergeStep {
 
     public MergeEdgeStep(Traversal.Admin<?, ?> traversal) {
         super(traversal);
+    }
+
+    @Override
+    public void addChild(Traversal.Admin<?, ?> child) {
+        super.addChild(child);
     }
 }

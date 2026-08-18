@@ -135,6 +135,11 @@
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
                             </testClassesDirectory>
+                            <additionalClasspathElements>
+                                <additionalClasspathElement>
+                                    ${project.build.testOutputDirectory}
+                                </additionalClasspathElement>
+                            </additionalClasspathElements>
                             <includes>
                                 <include>**/UnitTestSuite.java</include>
                             </includes>
