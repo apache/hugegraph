@@ -56,6 +56,7 @@ import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
+import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
@@ -64,6 +65,8 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
+
+import jakarta.ws.rs.ForbiddenException;
 
 public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
@@ -553,13 +556,23 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     }
 
     @Test
-    public void testTinkerPopMergeStepsRequireWrite() {
-        Assert.assertTrue(isMergeStepClassName(
-                "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
-                "MergeVertexStep"));
-        Assert.assertTrue(isMergeStepClassName(
-                "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
-                "MergeEdgeStep"));
+    public void testExecuteOnlyCannotCreateVertexWithMerge() throws Exception {
+        assertExecuteOnlyCannotMerge(false, true);
+    }
+
+    @Test
+    public void testExecuteOnlyCannotMatchVertexWithMerge() throws Exception {
+        assertExecuteOnlyCannotMerge(true, true);
+    }
+
+    @Test
+    public void testExecuteOnlyCannotCreateEdgeWithMerge() throws Exception {
+        assertExecuteOnlyCannotMerge(false, false);
+    }
+
+    @Test
+    public void testExecuteOnlyCannotMatchEdgeWithMerge() throws Exception {
+        assertExecuteOnlyCannotMerge(true, false);
     }
 
     @Test
@@ -574,13 +587,16 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     @Test
     public void testMergeRecursesChildTraversals() throws Exception {
         Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        TestTraversalParent merge = new TestTraversalParent(traversal);
+        org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep
+                merge = new org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep(
+                        traversal);
         merge.addChild(__.V().drop().asAdmin());
         traversal.addStep(merge);
 
         Set<HugePermission> permissions = traversalPermissions(traversal);
-        Assert.assertEquals(Collections.singleton(HugePermission.DELETE),
-                            permissions);
+        Assert.assertEquals(2, permissions.size());
+        Assert.assertTrue(permissions.contains(HugePermission.WRITE));
+        Assert.assertTrue(permissions.contains(HugePermission.DELETE));
     }
 
     @Test
@@ -696,9 +712,60 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         return (Set<HugePermission>) method.invoke(null, traversal);
     }
 
-    private static boolean isMergeStepClassName(String name) {
-        return Whitebox.invokeStatic(HugeGraphAuthProxy.class,
-                                     "isMergeStepClassName", name);
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void assertExecuteOnlyCannotMerge(boolean onMatch,
+                                                     boolean vertex)
+                                                     throws Exception {
+        Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
+        AbstractStep<Object, Object> merge;
+        if (vertex) {
+            org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep
+                    step = new org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep(
+                            traversal);
+            merge = step;
+            if (onMatch) {
+                step.addChild(__.constant(Collections.emptyMap()).asAdmin());
+            }
+        } else {
+            org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeStep
+                    step = new org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeStep(
+                            traversal);
+            merge = step;
+            if (onMatch) {
+                step.addChild(__.constant(Collections.emptyMap()).asAdmin());
+            }
+        }
+        traversal.addStep(merge);
+        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
+                            traversalPermissions(traversal));
+
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthManager authManager = Mockito.mock(AuthManager.class);
+        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+        Mockito.when(graph.name()).thenReturn("hugegraph");
+        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.spaceGraphName()).thenReturn("DEFAULT-hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE)).thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY)).thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE)).thenReturn(1000D);
+
+        RolePermission executeOnly = RolePermission.fromJson(
+                "{\"roles\":{\"DEFAULT\":{\"hugegraph\":{" +
+                "\"EXECUTE\":{\"GREMLIN\":[{" +
+                "\"type\":\"GREMLIN\",\"label\":\"*\"," +
+                "\"properties\":null}]}}}}}");
+        setContext(new HugeGraphAuthProxy.Context(
+                new HugeAuthenticator.User("execute-only", executeOnly)));
+
+        TraversalStrategy strategy =
+                new HugeGraphAuthProxy(graph).traversal()
+                                             .getStrategies().toList().get(0);
+        Assert.assertThrows(ForbiddenException.class,
+                            () -> strategy.apply(traversal));
     }
 
     private static class TestTraversalParent
