@@ -32,7 +32,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.util.AbstractStep;
  */
 public class MergeVertexStep extends TestMergeStep {
 
-    public MergeVertexStep(Traversal.Admin<?, ?> traversal) {
+    public MergeVertexStep(Traversal.Admin<?, ?> traversal, boolean isStart) {
         super(traversal);
     }
 

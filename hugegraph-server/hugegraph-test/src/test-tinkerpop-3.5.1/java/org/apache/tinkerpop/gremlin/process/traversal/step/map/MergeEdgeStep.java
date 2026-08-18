@@ -24,7 +24,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
  */
 public class MergeEdgeStep extends TestMergeStep {
 
-    public MergeEdgeStep(Traversal.Admin<?, ?> traversal) {
+    public MergeEdgeStep(Traversal.Admin<?, ?> traversal, boolean isStart) {
         super(traversal);
     }
 

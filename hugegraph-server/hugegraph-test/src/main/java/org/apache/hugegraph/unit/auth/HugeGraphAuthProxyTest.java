@@ -759,16 +759,34 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         String type = "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
                       (vertex ? "MergeVertexStep" : "MergeEdgeStep");
         Class<?> mergeClass = Class.forName(type);
-        return (AbstractStep<Object, Object>)
-               mergeClass.getConstructor(Traversal.Admin.class)
-                         .newInstance(traversal);
+        try {
+            return (AbstractStep<Object, Object>)
+                   mergeClass.getConstructor(Traversal.Admin.class,
+                                             boolean.class)
+                             .newInstance(traversal, true);
+        } catch (NoSuchMethodException ignored) {
+            return (AbstractStep<Object, Object>)
+                   mergeClass.getConstructor(Traversal.Admin.class)
+                             .newInstance(traversal);
+        }
     }
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     private static void addMergeChild(AbstractStep<Object, Object> merge,
                                       Traversal.Admin<?, ?> child)
                                       throws Exception {
-        merge.getClass().getMethod("addChild", Traversal.Admin.class)
-             .invoke(merge, child);
+        try {
+            Class<? extends Enum> mergeToken =
+                    (Class<? extends Enum>) Class.forName(
+                            "org.apache.tinkerpop.gremlin.process.traversal.Merge");
+            Enum<?> onMatch = Enum.valueOf(mergeToken, "onMatch");
+            merge.getClass().getMethod("addChildOption", mergeToken,
+                                       Traversal.Admin.class)
+                 .invoke(merge, onMatch, child);
+        } catch (ClassNotFoundException ignored) {
+            merge.getClass().getMethod("addChild", Traversal.Admin.class)
+                 .invoke(merge, child);
+        }
     }
 
     private static class TestTraversalParent
