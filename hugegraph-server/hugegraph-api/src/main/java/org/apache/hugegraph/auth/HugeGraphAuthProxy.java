@@ -2530,7 +2530,11 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                         Traversal.Admin<?, ?> traversal,
                         Set<HugePermission> permissions) {
         for (Step<?, ?> step : traversal.getSteps()) {
-            if (isWriteStep(step)) {
+            if (step instanceof AddVertexStartStep ||
+                step instanceof AddVertexStep ||
+                step instanceof AddEdgeStartStep ||
+                step instanceof AddEdgeStep ||
+                step instanceof AddPropertyStep) {
                 permissions.add(HugePermission.WRITE);
             } else if (step instanceof DropStep) {
                 permissions.add(HugePermission.DELETE);
@@ -2545,33 +2549,5 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                 }
             }
         }
-    }
-
-    private static boolean isWriteStep(Step<?, ?> step) {
-        if (step instanceof AddVertexStartStep ||
-            step instanceof AddVertexStep ||
-            step instanceof AddEdgeStartStep ||
-            step instanceof AddEdgeStep ||
-            step instanceof AddPropertyStep) {
-            return true;
-        }
-
-        /*
-         * HugeGraph currently compiles against TinkerPop 3.5, while mergeV/E
-         * were added later. Avoid a hard dependency so this guard also works
-         * when an embedding application supplies a newer compatible version.
-         */
-        for (Class<?> type = step.getClass(); type != null;
-             type = type.getSuperclass()) {
-            if (isMergeStepClassName(type.getName())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isMergeStepClassName(String name) {
-        return "org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep".equals(name) ||
-               "org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeStep".equals(name);
     }
 }

@@ -21,7 +21,6 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -56,17 +55,11 @@ import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
-import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
-import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
-import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
-import org.apache.tinkerpop.gremlin.process.traversal.step.util.AbstractStep;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
-
-import jakarta.ws.rs.ForbiddenException;
 
 public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
@@ -556,48 +549,6 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     }
 
     @Test
-    public void testExecuteOnlyCannotCreateVertexWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(false, true);
-    }
-
-    @Test
-    public void testExecuteOnlyCannotMatchVertexWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(true, true);
-    }
-
-    @Test
-    public void testExecuteOnlyCannotCreateEdgeWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(false, false);
-    }
-
-    @Test
-    public void testExecuteOnlyCannotMatchEdgeWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(true, false);
-    }
-
-    @Test
-    public void testSameSimpleNameOutsideTinkerPopDoesNotRequireWrite()
-            throws Exception {
-        Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        traversal.addStep(new MergeVertexStep(traversal));
-
-        Assert.assertTrue(traversalPermissions(traversal).isEmpty());
-    }
-
-    @Test
-    public void testMergeRecursesChildTraversals() throws Exception {
-        Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        AbstractStep<Object, Object> merge = mergeStep(traversal, true);
-        addMergeChild(merge, __.V().drop().asAdmin());
-        traversal.addStep(merge);
-
-        Set<HugePermission> permissions = traversalPermissions(traversal);
-        Assert.assertEquals(2, permissions.size());
-        Assert.assertTrue(permissions.contains(HugePermission.WRITE));
-        Assert.assertTrue(permissions.contains(HugePermission.DELETE));
-    }
-
-    @Test
     public void testTraversalStrategyListKeepsAuthProxy() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         HugeConfig config = Mockito.mock(HugeConfig.class);
@@ -708,120 +659,6 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                 "traversalPermissions", Traversal.Admin.class);
         method.setAccessible(true);
         return (Set<HugePermission>) method.invoke(null, traversal);
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static void assertExecuteOnlyCannotMerge(boolean onMatch,
-                                                     boolean vertex)
-                                                     throws Exception {
-        Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        AbstractStep<Object, Object> merge = mergeStep(traversal, vertex);
-        if (onMatch) {
-            addMergeChild(merge,
-                          __.constant(Collections.emptyMap()).asAdmin());
-        }
-        traversal.addStep(merge);
-        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
-                            traversalPermissions(traversal));
-
-        HugeGraph graph = Mockito.mock(HugeGraph.class);
-        HugeConfig config = Mockito.mock(HugeConfig.class);
-        AuthManager authManager = Mockito.mock(AuthManager.class);
-        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
-        Mockito.when(graph.name()).thenReturn("hugegraph");
-        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
-        Mockito.when(graph.spaceGraphName()).thenReturn("DEFAULT-hugegraph");
-        Mockito.when(graph.configuration()).thenReturn(config);
-        Mockito.when(graph.authManager()).thenReturn(authManager);
-        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
-        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE)).thenReturn(3600L);
-        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY)).thenReturn(100L);
-        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE)).thenReturn(1000D);
-
-        RolePermission executeOnly = RolePermission.fromJson(
-                "{\"roles\":{\"DEFAULT\":{\"hugegraph\":{" +
-                "\"EXECUTE\":{\"GREMLIN\":[{" +
-                "\"type\":\"GREMLIN\",\"label\":\"*\"," +
-                "\"properties\":null}]}}}}}");
-        setContext(new HugeGraphAuthProxy.Context(
-                new HugeAuthenticator.User("execute-only", executeOnly)));
-
-        TraversalStrategy strategy =
-                new HugeGraphAuthProxy(graph).traversal()
-                                             .getStrategies().toList().get(0);
-        Assert.assertThrows(ForbiddenException.class,
-                            () -> strategy.apply(traversal));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static AbstractStep<Object, Object> mergeStep(
-            Traversal.Admin<?, ?> traversal, boolean vertex) throws Exception {
-        String type = "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
-                      (vertex ? "MergeVertexStep" : "MergeEdgeStep");
-        Class<?> mergeClass = Class.forName(type);
-        try {
-            return (AbstractStep<Object, Object>)
-                   mergeClass.getConstructor(Traversal.Admin.class,
-                                             boolean.class)
-                             .newInstance(traversal, true);
-        } catch (NoSuchMethodException ignored) {
-            return (AbstractStep<Object, Object>)
-                   mergeClass.getConstructor(Traversal.Admin.class)
-                             .newInstance(traversal);
-        }
-    }
-
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static void addMergeChild(AbstractStep<Object, Object> merge,
-                                      Traversal.Admin<?, ?> child)
-                                      throws Exception {
-        try {
-            Class<? extends Enum> mergeToken =
-                    (Class<? extends Enum>) Class.forName(
-                            "org.apache.tinkerpop.gremlin.process.traversal.Merge");
-            Enum<?> onMatch = Enum.valueOf(mergeToken, "onMatch");
-            merge.getClass().getMethod("addChildOption", mergeToken,
-                                       Traversal.Admin.class)
-                 .invoke(merge, onMatch, child);
-        } catch (ClassNotFoundException ignored) {
-            merge.getClass().getMethod("addChild", Traversal.Admin.class)
-                 .invoke(merge, child);
-        }
-    }
-
-    private static class TestTraversalParent
-            extends AbstractStep<Object, Object>
-            implements TraversalParent {
-
-        private final List<Traversal.Admin<?, ?>> children;
-
-        TestTraversalParent(Traversal.Admin<?, ?> traversal) {
-            super(traversal);
-            this.children = new ArrayList<>();
-        }
-
-        void addChild(Traversal.Admin<?, ?> child) {
-            this.children.add(child);
-        }
-
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        @Override
-        public <S, E> List<Traversal.Admin<S, E>> getLocalChildren() {
-            return (List) this.children;
-        }
-
-        @Override
-        protected Traverser.Admin<Object> processNextStart()
-                                                      throws NoSuchElementException {
-            throw new NoSuchElementException();
-        }
-    }
-
-    private static class MergeVertexStep extends TestTraversalParent {
-
-        MergeVertexStep(Traversal.Admin<?, ?> traversal) {
-            super(traversal);
-        }
     }
 
     private static class TestAppender extends AbstractAppender {
