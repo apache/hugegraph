@@ -157,8 +157,14 @@ check_module("hugegraph-store", "hg-store-test")
 store_test = ET.parse(ROOT / "hugegraph-store/hg-store-test/pom.xml").getroot()
 dependencies = store_test.find(NS + "dependencies")
 assert dependencies is not None
+assert not any(child_text(dep, "artifactId") == "hg-store-rocksdb"
+               for dep in dependencies.findall(NS + "dependency"))
+store_jacoco = next(profile for profile in store_test.findall(
+    ".//" + NS + "profile") if child_text(profile, "id") == "jacoco")
+profile_dependencies = store_jacoco.find(NS + "dependencies")
+assert profile_dependencies is not None
 assert any(child_text(dep, "artifactId") == "hg-store-rocksdb"
-           for dep in dependencies.findall(NS + "dependency"))
+           for dep in profile_dependencies.findall(NS + "dependency"))
 
 workflow = (ROOT / ".github/workflows/pd-store-ci.yml").read_text()
 pd_job = workflow.split("\n  pd:\n", 1)[1].split("\n  store:\n", 1)[0]
@@ -172,6 +178,7 @@ def assert_order(job, commands):
 
 assert_order(pd_job, [
     "mvn clean package",
+    "mvn editorconfig:check -pl hugegraph-pd/hg-pd-test -am -ntp",
     "-P pd-common-test -Djacoco.sessionId=pd-common-test",
     "-P pd-core-test -Djacoco.sessionId=pd-core-test",
     "-P pd-client-test -Djacoco.sessionId=pd-client-test",
@@ -184,9 +191,12 @@ assert pd_job.count("mvn clean") == 1
 assert "hugegraph-pd/hg-pd-test/target/site/jacoco/jacoco.xml" in pd_job
 assert "files: ${{ env.REPORT_FILE }}" in pd_job
 assert "\n          directory:" not in pd_job
+assert "mvn verify -pl hugegraph-pd/hg-pd-test -am -P jacoco \\ " \
+       "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(pd_job.split())
 
 assert_order(store_job, [
     "mvn clean package",
+    "mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp",
     "-P store-common-test -Djacoco.sessionId=store-common-test",
     "-P store-client-test -Djacoco.sessionId=store-client-test",
     "-P store-core-test -Djacoco.sessionId=store-core-test",
@@ -202,6 +212,8 @@ assert store_job.count("mvn clean") == 1
 assert "hugegraph-store/hg-store-test/target/site/jacoco/jacoco.xml" in store_job
 assert "files: ${{ env.REPORT_FILE }}" in store_job
 assert "\n          directory:" not in store_job
+assert "mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \\ " \
+       "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(store_job.split())
 
 print("PASS: JaCoCo aggregation configuration contract")
 PY

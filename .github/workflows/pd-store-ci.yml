@@ -100,6 +100,10 @@ jobs:
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
 
+      - name: Check source formatting
+        run: |
+          mvn editorconfig:check -pl hugegraph-pd/hg-pd-test -am -ntp
+
       # These tests do not require starting a PD instance. Run them after the
       # clean package so their JaCoCo data survives until the final report.
       - name: Run common test
@@ -154,7 +158,8 @@ jobs:
 
       - name: Generate aggregate coverage report
         run: |
-          mvn verify -pl hugegraph-pd/hg-pd-test -am -P jacoco -DskipTests -ntp
+          mvn verify -pl hugegraph-pd/hg-pd-test -am -P jacoco \
+            -DskipTests -Deditorconfig.skip=true -ntp
 
       - name: Validate aggregate coverage report
         run: |
@@ -209,6 +214,10 @@ jobs:
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+
+      - name: Check source formatting
+        run: |
+          mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp
 
       - name: Check startup test prerequisites (Store)
         id: store-preflight
@@ -279,7 +288,8 @@ jobs:
 
       - name: Generate aggregate coverage report
         run: |
-          mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco -DskipTests -ntp
+          mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \
+            -DskipTests -Deditorconfig.skip=true -ntp
 
       - name: Validate aggregate coverage report
         run: |
