@@ -56,7 +56,6 @@ import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
-import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
@@ -65,8 +64,6 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
-
-import jakarta.ws.rs.ForbiddenException;
 
 public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
@@ -556,36 +553,34 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     }
 
     @Test
-    public void testExecuteOnlyCannotCreateVertexWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(false, true);
+    public void testTinkerPopMergeStepsRequireWrite() {
+        Assert.assertTrue(isMergeStepClassName(
+                "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
+                "MergeVertexStep"));
+        Assert.assertTrue(isMergeStepClassName(
+                "org.apache.tinkerpop.gremlin.process.traversal.step.map." +
+                "MergeEdgeStep"));
     }
 
     @Test
-    public void testExecuteOnlyCannotMatchVertexWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(true, true);
-    }
+    public void testSameSimpleNameOutsideTinkerPopDoesNotRequireWrite()
+            throws Exception {
+        Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
+        traversal.addStep(new MergeVertexStep(traversal));
 
-    @Test
-    public void testExecuteOnlyCannotCreateEdgeWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(false, false);
-    }
-
-    @Test
-    public void testExecuteOnlyCannotMatchEdgeWithMerge() throws Exception {
-        assertExecuteOnlyCannotMerge(true, false);
+        Assert.assertTrue(traversalPermissions(traversal).isEmpty());
     }
 
     @Test
     public void testMergeRecursesChildTraversals() throws Exception {
         Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        MergeVertexStep merge = new MergeVertexStep(traversal, true);
+        TestTraversalParent merge = new TestTraversalParent(traversal);
         merge.addChild(__.V().drop().asAdmin());
         traversal.addStep(merge);
 
         Set<HugePermission> permissions = traversalPermissions(traversal);
-        Assert.assertEquals(2, permissions.size());
-        Assert.assertTrue(permissions.contains(HugePermission.WRITE));
-        Assert.assertTrue(permissions.contains(HugePermission.DELETE));
+        Assert.assertEquals(Collections.singleton(HugePermission.DELETE),
+                            permissions);
     }
 
     @Test
@@ -701,60 +696,20 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         return (Set<HugePermission>) method.invoke(null, traversal);
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private static void assertExecuteOnlyCannotMerge(boolean onMatch,
-                                                     boolean vertex)
-                                                     throws Exception {
-        Traversal.Admin<Object, Object> traversal = __.identity().asAdmin();
-        AbstractStep<Object, Object> merge = vertex ?
-                                             new MergeVertexStep(traversal, onMatch) :
-                                             new MergeEdgeStep(traversal, onMatch);
-        traversal.addStep(merge);
-        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
-                            traversalPermissions(traversal));
-
-        HugeGraph graph = Mockito.mock(HugeGraph.class);
-        HugeConfig config = Mockito.mock(HugeConfig.class);
-        AuthManager authManager = Mockito.mock(AuthManager.class);
-        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
-        Mockito.when(graph.name()).thenReturn("hugegraph");
-        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
-        Mockito.when(graph.spaceGraphName()).thenReturn("DEFAULT-hugegraph");
-        Mockito.when(graph.configuration()).thenReturn(config);
-        Mockito.when(graph.authManager()).thenReturn(authManager);
-        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
-        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE)).thenReturn(3600L);
-        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY)).thenReturn(100L);
-        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE)).thenReturn(1000D);
-
-        RolePermission executeOnly = RolePermission.fromJson(
-                "{\"roles\":{\"DEFAULT\":{\"hugegraph\":{" +
-                "\"EXECUTE\":{\"GREMLIN\":[{" +
-                "\"type\":\"GREMLIN\",\"label\":\"*\"," +
-                "\"properties\":null}]}}}}}");
-        setContext(new HugeGraphAuthProxy.Context(
-                new HugeAuthenticator.User("execute-only", executeOnly)));
-
-        TraversalStrategy strategy =
-                new HugeGraphAuthProxy(graph).traversal()
-                                             .getStrategies().toList().get(0);
-        Assert.assertThrows(ForbiddenException.class,
-                            () -> strategy.apply(traversal));
+    private static boolean isMergeStepClassName(String name) {
+        return Whitebox.invokeStatic(HugeGraphAuthProxy.class,
+                                     "isMergeStepClassName", name);
     }
 
-    private abstract static class TestMergeStep
+    private static class TestTraversalParent
             extends AbstractStep<Object, Object>
             implements TraversalParent {
 
         private final List<Traversal.Admin<?, ?>> children;
 
-        TestMergeStep(Traversal.Admin<?, ?> traversal, boolean onMatch) {
+        TestTraversalParent(Traversal.Admin<?, ?> traversal) {
             super(traversal);
             this.children = new ArrayList<>();
-            this.children.add(__.constant(Collections.emptyMap()).asAdmin());
-            if (onMatch) {
-                this.children.add(__.constant(Collections.emptyMap()).asAdmin());
-            }
         }
 
         void addChild(Traversal.Admin<?, ?> child) {
@@ -774,17 +729,10 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         }
     }
 
-    private static class MergeVertexStep extends TestMergeStep {
+    private static class MergeVertexStep extends TestTraversalParent {
 
-        MergeVertexStep(Traversal.Admin<?, ?> traversal, boolean onMatch) {
-            super(traversal, onMatch);
-        }
-    }
-
-    private static class MergeEdgeStep extends TestMergeStep {
-
-        MergeEdgeStep(Traversal.Admin<?, ?> traversal, boolean onMatch) {
-            super(traversal, onMatch);
+        MergeVertexStep(Traversal.Admin<?, ?> traversal) {
+            super(traversal);
         }
     }
 

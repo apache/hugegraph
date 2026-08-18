@@ -2563,12 +2563,15 @@ public final class HugeGraphAuthProxy implements HugeGraph {
          */
         for (Class<?> type = step.getClass(); type != null;
              type = type.getSuperclass()) {
-            String name = type.getSimpleName();
-            if ("MergeVertexStep".equals(name) ||
-                "MergeEdgeStep".equals(name)) {
+            if (isMergeStepClassName(type.getName())) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static boolean isMergeStepClassName(String name) {
+        return "org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeVertexStep".equals(name) ||
+               "org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeStep".equals(name);
     }
 }
