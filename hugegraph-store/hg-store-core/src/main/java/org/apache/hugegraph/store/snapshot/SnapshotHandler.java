@@ -96,7 +96,9 @@ public class SnapshotHandler {
             Integer groupId = partitionEngine.getGroupId();
             AtomicInteger state = businessHandler.getState(groupId);
             if (state != null && state.get() == BusinessHandler.doing) {
-                return;
+                throw new HgStoreException(
+                        String.format("Partition %d is busy (compaction in progress), " +
+                                      "snapshot save skipped", groupId));
             }
             // rocks db snapshot
             final String graphSnapshotDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
@@ -172,8 +174,14 @@ public class SnapshotHandler {
 
         // No need to load locally saved snapshots
         if (shouldNotLoad(reader)) {
-            log.info("skip to load snapshot because of should_not_load flag");
-            return;
+            final String dataDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
+            if (new File(dataDir).exists()) {
+                log.info("skip to load snapshot because of should_not_load flag");
+                return;
+            }
+            log.warn("Raft {} should_not_load flag present but data dir {} is missing — " +
+                     "snapshot is corrupt, proceeding to load path",
+                     partitionEngine.getGroupId(), dataDir);
         }
 
         // Use snapshot directly
