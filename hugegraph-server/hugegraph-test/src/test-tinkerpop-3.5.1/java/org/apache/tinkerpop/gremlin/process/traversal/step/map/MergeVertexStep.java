@@ -27,8 +27,8 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.AbstractStep;
 
 /*
- * Test-output-only compatibility fixture for TinkerPop 3.7 merge steps.
- * HugeGraph currently compiles against 3.5, where these classes do not exist.
+ * Test-output-only compatibility fixture for TinkerPop 3.5.1, where the
+ * TinkerPop 3.7 merge classes do not exist.
  */
 public class MergeVertexStep extends TestMergeStep {
 
