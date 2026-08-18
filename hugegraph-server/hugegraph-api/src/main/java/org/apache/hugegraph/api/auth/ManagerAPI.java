@@ -287,23 +287,19 @@ public class ManagerAPI extends API {
             defaultRole = null; // unreachable, satisfies compiler
         }
         validGraphSpace(manager, graphSpace);
-        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) &&
-                           StringUtils.isNotEmpty(graph);
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) && StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, graphSpace, graph);
         }
 
         boolean result;
         if (hasGraph) {
-            result = authManager.isDefaultRole(graphSpace, graph, user,
-                                               defaultRole);
+            result = authManager.isDefaultRole(graphSpace, graph, user, defaultRole);
         } else {
-            result = authManager.isDefaultRole(graphSpace, user,
-                                               defaultRole);
+            result = authManager.isDefaultRole(graphSpace, user, defaultRole);
             if (!result && defaultRole.equals(HugeDefaultRole.OBSERVER)) {
                 for (String currentGraph : manager.graphs(graphSpace)) {
-                    if (authManager.isDefaultRole(
-                            graphSpace, currentGraph, user, defaultRole)) {
+                    if (authManager.isDefaultRole(graphSpace, currentGraph, user, defaultRole)) {
                         result = true;
                         break;
                     }

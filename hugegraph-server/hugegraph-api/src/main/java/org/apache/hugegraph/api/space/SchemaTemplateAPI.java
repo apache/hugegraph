@@ -135,8 +135,7 @@ public class SchemaTemplateAPI extends API {
                         "Schema template '%s' does not exist", name);
 
         String username = HugeGraphAuthProxy.username();
-        if (canManage(manager.authManager(), graphSpace, st.creator(),
-                      username)) {
+        if (canManage(manager.authManager(), graphSpace, st.creator(), username)) {
             manager.dropSchemaTemplate(graphSpace, name);
         } else {
             throw new ForbiddenException("No permission to delete schema template");
@@ -165,8 +164,7 @@ public class SchemaTemplateAPI extends API {
         }
 
         String username = HugeGraphAuthProxy.username();
-        if (canManage(manager.authManager(), graphSpace, old.creator(),
-                      username)) {
+        if (canManage(manager.authManager(), graphSpace, old.creator(), username)) {
             SchemaTemplate template = jsonSchemaTemplate.build(old);
             template.creator(old.creator());
             template.create(old.create());
@@ -179,8 +177,7 @@ public class SchemaTemplateAPI extends API {
 
     }
 
-    private static boolean canManage(AuthManager authManager,
-                                     String graphSpace, String creator,
+    private static boolean canManage(AuthManager authManager, String graphSpace, String creator,
                                      String username) {
         return Objects.equals(creator, username) ||
                authManager.isAdminManager(username) ||
