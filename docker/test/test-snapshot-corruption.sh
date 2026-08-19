@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
@@ -27,8 +26,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
-COMPOSE_FILE="$SCRIPT_DIR/../../docker-compose-3pd-3store-3server.yml"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+COMPOSE_FILE="$SCRIPT_DIR/../docker-compose-3pd-3store-3server.yml"
 HUGEGRAPH_VERSION="${HUGEGRAPH_VERSION:-1.7.0}"
 VOLUME_PREFIX="hugegraph-3x3"
 STORE_LOG="hugegraph-store.log"
@@ -40,27 +39,26 @@ log()  { echo -e "${GREEN}[repro]${NC} $*"; }
 warn() { echo -e "${YELLOW}[repro]${NC} $*"; }
 fail() { echo -e "${RED}[repro] FAIL${NC} $*" >&2; exit 1; }
 
-# In --fixed mode use the locally-built patched image.
-# Build it from source if it doesn't exist yet so the caller only needs --fixed.
-PATCHED_IMAGE="hugegraph/store:patched"
-DOCKERFILE="$SCRIPT_DIR/../../Dockerfile.store-patched"
-PATCHED_JAR="$SCRIPT_DIR/../../hg-store-node-${HUGEGRAPH_VERSION}.jar"
 JAR_SOURCE="$REPO_ROOT/hugegraph-store/hg-store-node/target/hg-store-node-${HUGEGRAPH_VERSION}.jar"
 
 if $FIXED_MODE; then
-    STORE_IMAGE="${STORE_IMAGE:-$PATCHED_IMAGE}"
-    if [[ "$STORE_IMAGE" == "$PATCHED_IMAGE" ]] && \
-       ! docker image inspect "$PATCHED_IMAGE" >/dev/null 2>&1; then
+    STORE_IMAGE="${STORE_IMAGE:-hugegraph/store:patched}"
+    if [[ "$STORE_IMAGE" == "hugegraph/store:patched" ]] && \
+       ! docker image inspect "hugegraph/store:patched" >/dev/null 2>&1; then
         log "Patched image not found — building from source..."
         if [[ ! -f "$JAR_SOURCE" ]]; then
             log "  Compiling hugegraph-store (this takes a minute)..."
             mvn package -pl hugegraph-store/hg-store-node -am -DskipTests -q \
                 -f "$REPO_ROOT/pom.xml"
         fi
-        cp "$JAR_SOURCE" "$PATCHED_JAR"
-        docker build -f "$DOCKERFILE" -t "$PATCHED_IMAGE" \
-            "$(dirname "$DOCKERFILE")" >/dev/null
-        log "  Built $PATCHED_IMAGE."
+        BUILD_CTX="$(mktemp -d)"
+        cp "$JAR_SOURCE" "$BUILD_CTX/hg-store-node-${HUGEGRAPH_VERSION}.jar"
+        cat > "$BUILD_CTX/Dockerfile" <<EOF
+FROM hugegraph/store:${HUGEGRAPH_VERSION}
+COPY hg-store-node-${HUGEGRAPH_VERSION}.jar /hugegraph-store/lib/hg-store-node-${HUGEGRAPH_VERSION}.jar
+EOF
+        docker build -t "hugegraph/store:patched" "$BUILD_CTX" >/dev/null
+        log "  Built hugegraph/store:patched."
     fi
 else
     STORE_IMAGE="${STORE_IMAGE:-hugegraph/store:${HUGEGRAPH_VERSION}}"
@@ -72,8 +70,7 @@ log "Compose File: $COMPOSE_FILE"
 # If a non-default store image is requested, write a temporary compose override that
 # replaces the store image — without modifying the committed compose file.
 OVERRIDE_FILE=""
-DEFAULT_IMAGE="hugegraph/store:${HUGEGRAPH_VERSION}"
-if [ "$STORE_IMAGE" != "$DEFAULT_IMAGE" ]; then
+if [ "$STORE_IMAGE" != "hugegraph/store:${HUGEGRAPH_VERSION}" ]; then
     OVERRIDE_FILE="$(mktemp /tmp/snapshot-test-override-XXXXXX.yml)"
     cat > "$OVERRIDE_FILE" <<EOF
 services:
@@ -89,8 +86,8 @@ fi
 # Build the compose -f arguments (base file always first; override appended when set)
 COMPOSE_ARGS="-f $COMPOSE_FILE"
 [ -n "$OVERRIDE_FILE" ] && COMPOSE_ARGS="$COMPOSE_ARGS -f $OVERRIDE_FILE"
-# Clean up the temp file on exit
-trap '[ -n "$OVERRIDE_FILE" ] && rm -f "$OVERRIDE_FILE"' EXIT
+# Clean up temp files on exit (BUILD_CTX trap already set in --fixed mode above)
+trap '[ -n "$OVERRIDE_FILE" ] && rm -f "$OVERRIDE_FILE"; [ -n "${BUILD_CTX:-}" ] && rm -rf "$BUILD_CTX"' EXIT
 
 wait_http() {
     local url=$1 label=$2 tries=${3:-60}

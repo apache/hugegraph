@@ -174,8 +174,8 @@ public class SnapshotHandler {
 
         // No need to load locally saved snapshots
         if (shouldNotLoad(reader)) {
-            final String dataDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
-            if (new File(dataDir).exists()) {
+            final File dataDir = new File(snapshotDir + File.separator + SNAPSHOT_DATA_PATH);
+            if (dataDir.isDirectory()) {
                 log.info("skip to load snapshot because of should_not_load flag");
                 return;
             }
