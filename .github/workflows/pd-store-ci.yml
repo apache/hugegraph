@@ -69,6 +69,7 @@ jobs:
       # TODO: remove outdated env
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_FILE: hugegraph-pd/hg-pd-test/target/site/jacoco/jacoco.xml
+      TEST_REPORT_DIR: hugegraph-pd/hg-pd-test/target/surefire-reports
 
     steps:
       - name: Install JDK 11
@@ -164,6 +165,14 @@ jobs:
       - name: Validate aggregate coverage report
         run: |
           $TRAVIS_DIR/check-jacoco-report.sh \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.pd.common.CommonSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.pd.core.PDCoreSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.pd.client.PDClientSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.pd.rest.PDRestSuiteTest.xml" \
             --require-session pd-common-test \
             --require-session pd-core-test \
             --require-session pd-client-test \
@@ -184,6 +193,7 @@ jobs:
       # TODO: remove outdated env
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_FILE: hugegraph-store/hg-store-test/target/site/jacoco/jacoco.xml
+      TEST_REPORT_DIR: hugegraph-store/hg-store-test/target/surefire-reports
 
     steps:
       - name: Install JDK 11
@@ -266,20 +276,10 @@ jobs:
           mvn test -pl hugegraph-store/hg-store-test -am \
             -P store-client-test -Djacoco.sessionId=store-client-test
 
-      - name: Run core test
-        run: |
-          mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-core-test -Djacoco.sessionId=store-core-test
-
       - name: Run rocksdb test
         run: |
           mvn test -pl hugegraph-store/hg-store-test -am \
             -P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test
-
-      - name: Run server test
-        run: |
-          mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-server-test -Djacoco.sessionId=store-server-test
 
       - name: Run raft-core test
         run: |
@@ -294,11 +294,17 @@ jobs:
       - name: Validate aggregate coverage report
         run: |
           $TRAVIS_DIR/check-jacoco-report.sh \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.client.ClientSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml" \
             --require-session store-common-test \
             --require-session store-client-test \
-            --require-session store-core-test \
             --require-session store-rocksdb-test \
-            --require-session store-server-test \
             --require-session store-raftcore-test \
             "$REPORT_FILE" \
             hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb \

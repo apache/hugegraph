@@ -38,6 +38,15 @@ run_case() {
     CASE_RC=$?
 }
 
+run_report_case() {
+    run_case --require-test-report "${TMP_DIR}/tests.xml" "$@"
+}
+
+run_case_with_timeout() {
+    CASE_OUTPUT=$(timeout 2 "${VALIDATOR}" "$@" 2>&1)
+    CASE_RC=$?
+}
+
 assert_success() {
     [[ "${CASE_RC}" -eq 0 ]] || fail "$1 returned ${CASE_RC}"
 }
@@ -54,14 +63,37 @@ if [[ ! -x "${VALIDATOR}" ]]; then
     fail "validator not found or not executable at ${VALIDATOR}"
 fi
 
+cat > "${TMP_DIR}/tests.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="SuiteTest" tests="2" failures="0" errors="0" skipped="0"/>
+EOF
+
+cat > "${TMP_DIR}/zero-tests.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="EmptySuiteTest" tests="0" failures="0" errors="0" skipped="0"/>
+EOF
+
 echo "JaCoCo report validator tests"
 
-run_case --require-session suite-a "${TMP_DIR}/missing.xml" hg-pd-client
+run_case_with_timeout --require-session
+[[ "${CASE_RC}" -ne 124 ]] || fail "missing session value timed out"
+assert_failure "missing session value"
+assert_output "--require-session requires a non-empty value"
+
+run_case --require-session ""
+assert_failure "empty session value"
+assert_output "--require-session requires a non-empty value"
+
+run_case --require-test-report
+assert_failure "missing test report value"
+assert_output "--require-test-report requires a non-empty value"
+
+run_report_case --require-session suite-a "${TMP_DIR}/missing.xml" hg-pd-client
 assert_failure "missing report"
 assert_output "not found or empty"
 
 touch "${TMP_DIR}/empty.xml"
-run_case --require-session suite-a "${TMP_DIR}/empty.xml" hg-pd-client
+run_report_case --require-session suite-a "${TMP_DIR}/empty.xml" hg-pd-client
 assert_failure "empty report"
 assert_output "not found or empty"
 
@@ -76,29 +108,52 @@ cat > "${TMP_DIR}/valid.xml" <<'EOF'
 </report>
 EOF
 
-run_case --require-session suite-a --require-session suite-b \
-         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+run_report_case --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
 assert_success "complete report"
 assert_output "contains all expected modules"
 
-run_case --require-session suite-a --require-session suite-c \
+run_case --require-session suite-a --require-session suite-b \
          "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_failure "report without required test reports"
+assert_output "at least one --require-test-report is required"
+
+run_case --require-test-report "${TMP_DIR}/missing-tests.xml" \
+         --require-session suite-a --require-session suite-b \
+         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_failure "missing required test report"
+assert_output "Surefire report not found or empty"
+
+run_case --require-test-report "${TMP_DIR}/zero-tests.xml" \
+         --require-session suite-a --require-session suite-b \
+         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_failure "required test report without tests"
+assert_output "Surefire report has no tests"
+
+run_report_case --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/valid.xml"
+assert_failure "report without expected modules"
+assert_output "at least one expected module is required"
+
+run_report_case --require-session suite-a --require-session suite-c \
+                "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
 assert_failure "report missing a required session"
 assert_output "missing JaCoCo session 'suite-c'"
 
 sed 's/covered="3"/covered="0"/' "${TMP_DIR}/valid.xml" > "${TMP_DIR}/uncovered.xml"
-run_case --require-session suite-a --require-session suite-b \
-         "${TMP_DIR}/uncovered.xml" hg-pd-client hg-pd-core
+run_report_case --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/uncovered.xml" hg-pd-client hg-pd-core
 assert_failure "report without covered instructions"
 assert_output "has no covered instructions"
 
-run_case --require-session suite-a --require-session suite-b \
-         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-service
+run_report_case --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-service
 assert_failure "report missing an expected module"
 assert_output "missing JaCoCo group 'hg-pd-service'"
 
 python3 - "${REPO_ROOT}" <<'PY' || fail "aggregation configuration contract failed"
 from pathlib import Path
+import re
 import sys
 import xml.etree.ElementTree as ET
 
@@ -176,6 +231,25 @@ def assert_order(job, commands):
     assert positions == sorted(positions)
 
 
+def validation_command(job):
+    return job.split("$TRAVIS_DIR/check-jacoco-report.sh", 1)[1].split(
+        "- name: Upload coverage", 1)[0]
+
+
+def required_test_reports(job):
+    return set(re.findall(r"TEST-[A-Za-z0-9_.]+SuiteTest[.]xml",
+                          validation_command(job)))
+
+
+def required_modules(job):
+    command = validation_command(job).split('"$REPORT_FILE"', 1)[1]
+    return set(re.findall(r"\bhg-(?:pd|store)-[a-z0-9-]+\b", command))
+
+
+def selected_profiles(job, prefix):
+    return set(re.findall(r"-P (" + prefix + r"-[a-z0-9-]+-test)\b", job))
+
+
 assert_order(pd_job, [
     "mvn clean package",
     "mvn editorconfig:check -pl hugegraph-pd/hg-pd-test -am -ntp",
@@ -193,19 +267,29 @@ assert "files: ${{ env.REPORT_FILE }}" in pd_job
 assert "\n          directory:" not in pd_job
 assert "mvn verify -pl hugegraph-pd/hg-pd-test -am -P jacoco \\ " \
        "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(pd_job.split())
+assert selected_profiles(pd_job, "pd") == {
+    "pd-common-test", "pd-core-test", "pd-client-test", "pd-rest-test",
+}
+assert required_test_reports(pd_job) == {
+    "TEST-org.apache.hugegraph.pd.common.CommonSuiteTest.xml",
+    "TEST-org.apache.hugegraph.pd.core.PDCoreSuiteTest.xml",
+    "TEST-org.apache.hugegraph.pd.client.PDClientSuiteTest.xml",
+    "TEST-org.apache.hugegraph.pd.rest.PDRestSuiteTest.xml",
+}
+assert required_modules(pd_job) == {
+    "hg-pd-grpc", "hg-pd-common", "hg-pd-client", "hg-pd-core",
+    "hg-pd-service", "hg-pd-dist",
+}
 
 assert_order(store_job, [
     "mvn clean package",
     "mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp",
     "-P store-common-test -Djacoco.sessionId=store-common-test",
     "-P store-client-test -Djacoco.sessionId=store-client-test",
-    "-P store-core-test -Djacoco.sessionId=store-core-test",
     "-P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test",
-    "-P store-server-test -Djacoco.sessionId=store-server-test",
     "-P store-raftcore-test -Djacoco.sessionId=store-raftcore-test",
     "mvn verify", "--require-session store-common-test",
-    "--require-session store-client-test", "--require-session store-core-test",
-    "--require-session store-rocksdb-test", "--require-session store-server-test",
+    "--require-session store-client-test", "--require-session store-rocksdb-test",
     "--require-session store-raftcore-test", "codecov/codecov-action",
 ])
 assert store_job.count("mvn clean") == 1
@@ -214,6 +298,20 @@ assert "files: ${{ env.REPORT_FILE }}" in store_job
 assert "\n          directory:" not in store_job
 assert "mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \\ " \
        "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(store_job.split())
+assert selected_profiles(store_job, "store") == {
+    "store-common-test", "store-client-test", "store-rocksdb-test",
+    "store-raftcore-test",
+}
+assert required_test_reports(store_job) == {
+    "TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.client.ClientSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml",
+}
+assert required_modules(store_job) == {
+    "hg-store-grpc", "hg-store-common", "hg-store-client",
+    "hg-store-rocksdb", "hg-store-core", "hg-store-node",
+}
 
 print("PASS: JaCoCo aggregation configuration contract")
 PY

@@ -19,9 +19,33 @@
 set -uo pipefail
 
 REQUIRED_SESSIONS=()
-while [[ "${1:-}" == "--require-session" ]]; do
-    REQUIRED_SESSIONS+=("${2:-}")
-    shift 2 || true
+REQUIRED_TEST_REPORTS=()
+while (( $# > 0 )); do
+    case "${1}" in
+        --require-session)
+            if (( $# < 2 )) || [[ -z "${2:-}" || "${2}" == --* ]]; then
+                echo "ERROR: --require-session requires a non-empty value" >&2
+                exit 1
+            fi
+            REQUIRED_SESSIONS+=("${2}")
+            shift 2
+            ;;
+        --require-test-report)
+            if (( $# < 2 )) || [[ -z "${2:-}" || "${2}" == --* ]]; then
+                echo "ERROR: --require-test-report requires a non-empty value" >&2
+                exit 1
+            fi
+            REQUIRED_TEST_REPORTS+=("${2}")
+            shift 2
+            ;;
+        --*)
+            echo "ERROR: unknown option: ${1}" >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
 done
 
 if (( ${#REQUIRED_SESSIONS[@]} == 0 )); then
@@ -29,13 +53,48 @@ if (( ${#REQUIRED_SESSIONS[@]} == 0 )); then
     exit 1
 fi
 
+if (( ${#REQUIRED_TEST_REPORTS[@]} == 0 )); then
+    echo "ERROR: at least one --require-test-report is required" >&2
+    exit 1
+fi
+
 REPORT_FILE="${1:-}"
-shift || true
+if (( $# > 0 )); then
+    shift
+fi
 
 if [[ -z "${REPORT_FILE}" || ! -s "${REPORT_FILE}" ]]; then
     echo "ERROR: JaCoCo report not found or empty: ${REPORT_FILE:-<unset>}" >&2
     exit 1
 fi
+
+if (( $# == 0 )); then
+    echo "ERROR: at least one expected module is required" >&2
+    exit 1
+fi
+
+for test_report in "${REQUIRED_TEST_REPORTS[@]}"; do
+    if [[ ! -s "${test_report}" ]]; then
+        echo "ERROR: Surefire report not found or empty: ${test_report}" >&2
+        exit 1
+    fi
+
+    if ! test_count=$(python3 - "${test_report}" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+root = ET.parse(sys.argv[1]).getroot()
+print(int(root.attrib.get("tests", "0")))
+PY
+    ); then
+        echo "ERROR: unable to parse Surefire report: ${test_report}" >&2
+        exit 1
+    fi
+    if (( test_count <= 0 )); then
+        echo "ERROR: Surefire report has no tests: ${test_report}" >&2
+        exit 1
+    fi
+done
 
 if ! grep -Eq '<counter type="INSTRUCTION" missed="[0-9]+" covered="[1-9][0-9]*"' \
      "${REPORT_FILE}"; then
