@@ -16,12 +16,21 @@
 # limitations under the License.
 
 
-# test-snapshot-corruption.sh — deterministic reproducer for the HStore snapshot corruption bug
+# test-snapshot-corruption.sh — load-path reproducer for the HStore snapshot corruption bug
+#
+# This script covers the LOAD side of the fix (SnapshotHandler.onSnapshotLoad):
+#   default mode  — simulates Sub-case A outcome (missing data/ dir) to verify the load error
+#   --fixed mode  — simulates Sub-case B (should_not_load present, data/ missing) to verify Fix 2
+#
+# The SAVE side of the fix (SnapshotHandler.onSnapshotSave throwing when compaction state==doing)
+# cannot be reproduced deterministically here: /test/compact submits a background job and returns
+# immediately, so the race window is too narrow to hit reliably from a shell script.
+# Save-side coverage lives in the unit test: HgSnapshotHandlerTest.
 #
 # Requires: Docker Desktop >= 20.10, >= 12 GB allocated to Docker, Docker Compose v2
 # Run from the repo root:
-#   bash docker/hbase/test/test-snapshot-corruption.sh            # confirm bug is present (buggy image)
-#   bash docker/hbase/test/test-snapshot-corruption.sh --fixed    # confirm bug is absent (fixed image)
+#   bash docker/hbase/test/test-snapshot-corruption.sh            # confirm load-path bug is present (buggy image)
+#   bash docker/hbase/test/test-snapshot-corruption.sh --fixed    # confirm load-path fix is active (fixed image)
 
 set -euo pipefail
 
@@ -165,11 +174,13 @@ log "All stores stopped."
 # ── Step 4: Corrupt one partition snapshot on store0 ─────────────────────────
 # Two sub-cases of the bug:
 #
-#  Sub-case A (race: state==doing at snapshot-save time) — tested in default mode:
-#    onSnapshotSave returns early → neither data/ nor should_not_load written.
-#    Snapshot dir has only __raft_snapshot_meta.
+#  Sub-case A (race: state==doing at snapshot-save time) — load-path simulated in default mode:
+#    The actual race cannot be triggered deterministically from a shell script (see header).
+#    We instead simulate the outcome: manually remove data/ and should_not_load, leaving only
+#    __raft_snapshot_meta, which is what the race would produce.
 #    On load: goes straight to loadSnapshot(missingDir) → "not exists" → stuck.
-#    Fix 1 (throw instead of return) prevents this snapshot from ever being committed.
+#    Fix 1 (throw instead of return in onSnapshotSave) prevents this snapshot from ever being
+#    committed; this script validates only the resulting load-path error, not the throw itself.
 #
 #  Sub-case B (JVM killed after should_not_load but before data/ completes) — tested in --fixed mode:
 #    Snapshot dir has __raft_snapshot_meta + should_not_load, but no data/.
