@@ -73,6 +73,11 @@ cat > "${TMP_DIR}/zero-tests.xml" <<'EOF'
 <testsuite name="EmptySuiteTest" tests="0" failures="0" errors="0" skipped="0"/>
 EOF
 
+cat > "${TMP_DIR}/not-surefire.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<report tests="0"/>
+EOF
+
 echo "JaCoCo report validator tests"
 
 run_case_with_timeout --require-session
@@ -87,6 +92,14 @@ assert_output "--require-session requires a non-empty value"
 run_case --require-test-report
 assert_failure "missing test report value"
 assert_output "--require-test-report requires a non-empty value"
+
+run_case --require-suite-report
+assert_failure "missing suite report value"
+assert_output "--require-suite-report requires a non-empty value"
+
+run_case --require-suite-report ""
+assert_failure "empty suite report value"
+assert_output "--require-suite-report requires a non-empty value"
 
 run_report_case --require-session suite-a "${TMP_DIR}/missing.xml" hg-pd-client
 assert_failure "missing report"
@@ -129,6 +142,26 @@ run_case --require-test-report "${TMP_DIR}/zero-tests.xml" \
          "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
 assert_failure "required test report without tests"
 assert_output "Surefire report has no tests"
+
+run_case --require-suite-report "${TMP_DIR}/zero-tests.xml" \
+         --require-test-report "${TMP_DIR}/tests.xml" \
+         --require-session suite-a --require-session suite-b \
+         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_success "required zero-test suite report"
+
+run_case --require-suite-report "${TMP_DIR}/missing-suite.xml" \
+         --require-test-report "${TMP_DIR}/tests.xml" \
+         --require-session suite-a --require-session suite-b \
+         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_failure "missing required suite report"
+assert_output "Surefire report not found or empty"
+
+run_case --require-suite-report "${TMP_DIR}/not-surefire.xml" \
+         --require-test-report "${TMP_DIR}/tests.xml" \
+         --require-session suite-a --require-session suite-b \
+         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_failure "required suite report with invalid root"
+assert_output "unable to parse Surefire report"
 
 run_report_case --require-session suite-a --require-session suite-b \
                 "${TMP_DIR}/valid.xml"
@@ -221,6 +254,15 @@ assert profile_dependencies is not None
 assert any(child_text(dep, "artifactId") == "hg-store-rocksdb"
            for dep in profile_dependencies.findall(NS + "dependency"))
 
+core_suite = (ROOT / "hugegraph-store/hg-store-test/src/main/java/org/apache/"
+              "hugegraph/store/core/CoreSuiteTest.java").read_text()
+core_suite_code = "\n".join(
+    line for line in core_suite.splitlines()
+    if not line.lstrip().startswith("//")
+)
+assert "@RunWith(Suite.class)" in core_suite_code
+assert re.search(r"@Suite[.]SuiteClasses[(][{]\s*[}][)]", core_suite_code)
+
 workflow = (ROOT / ".github/workflows/pd-store-ci.yml").read_text()
 pd_job = workflow.split("\n  pd:\n", 1)[1].split("\n  store:\n", 1)[0]
 store_job = workflow.split("\n  store:\n", 1)[1].split("\n  hstore:\n", 1)[0]
@@ -236,9 +278,12 @@ def validation_command(job):
         "- name: Upload coverage", 1)[0]
 
 
-def required_test_reports(job):
-    return set(re.findall(r"TEST-[A-Za-z0-9_.]+SuiteTest[.]xml",
-                          validation_command(job)))
+def reports_for_option(job, option):
+    pattern = re.escape(option) + (
+        r'\s+\\?\s*"\$TEST_REPORT_DIR/'
+        r'(TEST-[A-Za-z0-9_.]+SuiteTest[.]xml)"'
+    )
+    return set(re.findall(pattern, validation_command(job)))
 
 
 def required_modules(job):
@@ -270,12 +315,13 @@ assert "mvn verify -pl hugegraph-pd/hg-pd-test -am -P jacoco \\ " \
 assert selected_profiles(pd_job, "pd") == {
     "pd-common-test", "pd-core-test", "pd-client-test", "pd-rest-test",
 }
-assert required_test_reports(pd_job) == {
+assert reports_for_option(pd_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.pd.common.CommonSuiteTest.xml",
     "TEST-org.apache.hugegraph.pd.core.PDCoreSuiteTest.xml",
     "TEST-org.apache.hugegraph.pd.client.PDClientSuiteTest.xml",
     "TEST-org.apache.hugegraph.pd.rest.PDRestSuiteTest.xml",
 }
+assert not reports_for_option(pd_job, "--require-suite-report")
 assert required_modules(pd_job) == {
     "hg-pd-grpc", "hg-pd-common", "hg-pd-client", "hg-pd-core",
     "hg-pd-service", "hg-pd-dist",
@@ -286,10 +332,13 @@ assert_order(store_job, [
     "mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp",
     "-P store-common-test -Djacoco.sessionId=store-common-test",
     "-P store-client-test -Djacoco.sessionId=store-client-test",
+    "-P store-core-test -Djacoco.sessionId=store-core-test",
     "-P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test",
+    "-P store-server-test -Djacoco.sessionId=store-server-test",
     "-P store-raftcore-test -Djacoco.sessionId=store-raftcore-test",
     "mvn verify", "--require-session store-common-test",
-    "--require-session store-client-test", "--require-session store-rocksdb-test",
+    "--require-session store-client-test", "--require-session store-core-test",
+    "--require-session store-rocksdb-test", "--require-session store-server-test",
     "--require-session store-raftcore-test", "codecov/codecov-action",
 ])
 assert store_job.count("mvn clean") == 1
@@ -299,14 +348,18 @@ assert "\n          directory:" not in store_job
 assert "mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \\ " \
        "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(store_job.split())
 assert selected_profiles(store_job, "store") == {
-    "store-common-test", "store-client-test", "store-rocksdb-test",
-    "store-raftcore-test",
+    "store-common-test", "store-client-test", "store-core-test",
+    "store-rocksdb-test", "store-server-test", "store-raftcore-test",
 }
-assert required_test_reports(store_job) == {
+assert reports_for_option(store_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.client.ClientSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml",
+}
+assert reports_for_option(store_job, "--require-suite-report") == {
+    "TEST-org.apache.hugegraph.store.core.CoreSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml",
 }
 assert required_modules(store_job) == {
     "hg-store-grpc", "hg-store-common", "hg-store-client",

@@ -20,6 +20,7 @@ set -uo pipefail
 
 REQUIRED_SESSIONS=()
 REQUIRED_TEST_REPORTS=()
+REQUIRED_SUITE_REPORTS=()
 while (( $# > 0 )); do
     case "${1}" in
         --require-session)
@@ -36,6 +37,14 @@ while (( $# > 0 )); do
                 exit 1
             fi
             REQUIRED_TEST_REPORTS+=("${2}")
+            shift 2
+            ;;
+        --require-suite-report)
+            if (( $# < 2 )) || [[ -z "${2:-}" || "${2}" == --* ]]; then
+                echo "ERROR: --require-suite-report requires a non-empty value" >&2
+                exit 1
+            fi
+            REQUIRED_SUITE_REPORTS+=("${2}")
             shift 2
             ;;
         --*)
@@ -73,27 +82,44 @@ if (( $# == 0 )); then
     exit 1
 fi
 
-for test_report in "${REQUIRED_TEST_REPORTS[@]}"; do
+validate_test_report() {
+    local test_report="${1}"
+    local require_tests="${2}"
+
     if [[ ! -s "${test_report}" ]]; then
         echo "ERROR: Surefire report not found or empty: ${test_report}" >&2
-        exit 1
+        return 1
     fi
 
+    local test_count
     if ! test_count=$(python3 - "${test_report}" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
 root = ET.parse(sys.argv[1]).getroot()
-print(int(root.attrib.get("tests", "0")))
+if root.tag.rsplit("}", 1)[-1] != "testsuite" or "tests" not in root.attrib:
+    raise ValueError("not a Surefire testsuite report")
+test_count = int(root.attrib["tests"])
+if test_count < 0:
+    raise ValueError("negative Surefire test count")
+print(test_count)
 PY
     ); then
         echo "ERROR: unable to parse Surefire report: ${test_report}" >&2
-        exit 1
+        return 1
     fi
-    if (( test_count <= 0 )); then
+    if [[ "${require_tests}" == "true" ]] && (( test_count <= 0 )); then
         echo "ERROR: Surefire report has no tests: ${test_report}" >&2
-        exit 1
+        return 1
     fi
+}
+
+for suite_report in "${REQUIRED_SUITE_REPORTS[@]}"; do
+    validate_test_report "${suite_report}" false || exit 1
+done
+
+for test_report in "${REQUIRED_TEST_REPORTS[@]}"; do
+    validate_test_report "${test_report}" true || exit 1
 done
 
 if ! grep -Eq '<counter type="INSTRUCTION" missed="[0-9]+" covered="[1-9][0-9]*"' \
