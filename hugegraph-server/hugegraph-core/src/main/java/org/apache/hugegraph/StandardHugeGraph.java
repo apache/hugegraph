@@ -519,6 +519,9 @@ public class StandardHugeGraph implements HugeGraph {
 
         LockUtil.lock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         try {
+            if (this.isHstore()) {
+                ((CachedSchemaTransactionV2) this.schemaTransaction()).clear();
+            }
             this.storeProvider.clear();
         } finally {
             LockUtil.unlock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
