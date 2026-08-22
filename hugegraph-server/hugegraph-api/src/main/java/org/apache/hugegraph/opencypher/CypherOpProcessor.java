@@ -19,7 +19,7 @@ package org.apache.hugegraph.opencypher;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Optional.empty;
-import static org.apache.tinkerpop.gremlin.driver.message.ResponseStatusCode.SERVER_ERROR;
+import static org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode.SERVER_ERROR;
 import static org.opencypher.gremlin.translation.StatementOption.EXPLAIN;
 import static org.slf4j.LoggerFactory.getLogger;
 
@@ -33,10 +33,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.tinkerpop.gremlin.driver.Tokens;
-import org.apache.tinkerpop.gremlin.driver.message.RequestMessage;
-import org.apache.tinkerpop.gremlin.driver.message.ResponseMessage;
-import org.apache.tinkerpop.gremlin.driver.message.ResponseStatusCode;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.DefaultGraphTraversal;
@@ -49,7 +45,11 @@ import org.apache.tinkerpop.gremlin.server.OpProcessor;
 import org.apache.tinkerpop.gremlin.server.op.AbstractEvalOpProcessor;
 import org.apache.tinkerpop.gremlin.server.op.OpProcessorException;
 import org.apache.tinkerpop.gremlin.structure.Graph;
+import org.apache.tinkerpop.gremlin.util.Tokens;
 import org.apache.tinkerpop.gremlin.util.function.ThrowingConsumer;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode;
 import org.opencypher.gremlin.translation.CypherAst;
 import org.opencypher.gremlin.translation.groovy.GroovyPredicate;
 import org.opencypher.gremlin.translation.ir.TranslationWriter;
@@ -66,7 +66,7 @@ import scala.collection.Seq;
 /**
  * Description of the modifications:
  * <p>
- * 1) Changed the method signature to adopt the gremlin-server 3.5.1.
+ * 1) Changed the method signature to adopt the gremlin-server Context API.
  * <pre>
  * public Optional<ThrowingConsumer<Context>> selectOther(RequestMessage requestMessage)
  * -->

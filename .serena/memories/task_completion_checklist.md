@@ -20,7 +20,7 @@ mvn clean compile -Dmaven.javadoc.skip=true  # Compile warnings
 4. Run `./install-dist/scripts/dependency/regenerate_known_dependencies.sh`
 
 ## 4. CI Awareness
-- `server-ci.yml`: memory/rocksdb/hbase × Java 11
+- `server-ci.yml`: memory/rocksdb/hbase × Java 17
 - `rerun-ci.yml`: auto-retries flaky failures
 - `licence-checker.yml`: header validation
 - Raft tests: only `test*`/`raft*` branches

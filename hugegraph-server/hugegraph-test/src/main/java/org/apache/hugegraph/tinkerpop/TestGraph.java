@@ -55,6 +55,8 @@ public class TestGraph implements Graph {
 
     public static final Set<String> TRUNCATE_BACKENDS = ImmutableSet.of("rocksdb");
 
+    private static final String HSTORE_BACKEND = "hstore";
+
     private static volatile int id = 666;
 
     private HugeGraph graph;
@@ -95,24 +97,53 @@ public class TestGraph implements Graph {
 
     @Watched
     protected void clearAll(String testClass) {
-        List<PropertyKey> pks = this.graph.schema().getPropertyKeys();
-        if (pks.isEmpty()) {
-            // No need to clear if there is no PKs(that's no schema and data)
+        if (!this.hasSchema() &&
+            !testClass.endsWith("VariableAsMapTest")) {
+            // No need to clear if there is no schema, data, or variables
             return;
         }
 
-        if (TRUNCATE_BACKENDS.contains(this.graph.backend())) {
+        String backend = this.graph.backend();
+        if (HSTORE_BACKEND.equals(backend)) {
+            // HStore keeps schema in PD, outside the truncated data store
+            this.truncateBackend();
+            this.clearSchemaAndVariables(testClass);
+        } else if (TRUNCATE_BACKENDS.contains(backend)) {
             // Delete all data by truncating tables
             this.truncateBackend();
         } else {
-            // Clear schema (also include data)
-            this.clearSchema();
+            this.clearSchemaAndVariables(testClass);
+        }
+    }
 
-            // Clear variables if needed (would not clear when clearing schema)
-            if (testClass.endsWith("VariableAsMapTest")) {
-                this.clearVariables();
-                this.tx().commit();
-            }
+    @Watched
+    protected void clearForLoad() {
+        if (HSTORE_BACKEND.equals(this.graph.backend())) {
+            // An auxiliary graph can be loaded while its source remains open.
+            // Truncating it makes the source invisible to HStore scans.
+            // Only the bootstrap schema needs to be removed at this point.
+            this.clearSchema();
+        } else {
+            this.clearAll("");
+        }
+    }
+
+    private boolean hasSchema() {
+        SchemaManager schema = this.graph.schema();
+        return !schema.getPropertyKeys().isEmpty() ||
+               !schema.getVertexLabels().isEmpty() ||
+               !schema.getEdgeLabels().isEmpty() ||
+               !schema.getIndexLabels().isEmpty();
+    }
+
+    private void clearSchemaAndVariables(String testClass) {
+        // Clear schema (also include data)
+        this.clearSchema();
+
+        // Clear variables if needed (would not clear when clearing schema)
+        if (testClass.endsWith("VariableAsMapTest")) {
+            this.clearVariables();
+            this.tx().commit();
         }
     }
 
@@ -430,6 +461,7 @@ public class TestGraph implements Graph {
         SchemaManager schema = this.graph.schema();
 
         schema.propertyKey("weight").asDouble().ifNotExist().create();
+        schema.propertyKey("a").asInt().ifNotExist().create();
         schema.propertyKey("name").ifNotExist().create();
         schema.propertyKey("lang").ifNotExist().create();
         schema.propertyKey("age").asInt().ifNotExist().create();
@@ -499,12 +531,12 @@ public class TestGraph implements Graph {
         }
 
         schema.edgeLabel("knows").link("person", "person")
-              .properties("weight", "year")
-              .nullableKeys("weight", "year")
+              .properties("weight", "year", "a")
+              .nullableKeys("weight", "year", "a")
               .ifNotExist().create();
         schema.edgeLabel("created").link("person", "software")
-              .properties("weight")
-              .nullableKeys("weight")
+              .properties("weight", "a")
+              .nullableKeys("weight", "a")
               .ifNotExist().create();
         schema.edgeLabel("codeveloper").link("person", "person")
               .properties("year")
@@ -591,9 +623,15 @@ public class TestGraph implements Graph {
 
     @Watched
     public void initBasicSchema(IdStrategy idStrategy, String defaultVL) {
+        this.initBasicSchema(idStrategy, defaultVL, defaultVL);
+    }
+
+    @Watched
+    public void initBasicSchema(IdStrategy idStrategy, String defaultVL,
+                                String selfVL) {
         this.initBasicPropertyKey();
         this.initBasicVertexLabelV(idStrategy, defaultVL);
-        this.initBasicVertexLabelAndEdgeLabelExceptV(defaultVL);
+        this.initBasicVertexLabelAndEdgeLabelExceptV(defaultVL, selfVL);
     }
 
     @Watched
@@ -603,7 +641,9 @@ public class TestGraph implements Graph {
         schema.propertyKey("__id").ifNotExist().create();
         schema.propertyKey("oid").asInt().ifNotExist().create();
         schema.propertyKey("communityIndex").asInt().ifNotExist().create();
-        schema.propertyKey("test").ifNotExist().create();
+        if (!this.graph.existsPropertyKey("test")) {
+            schema.propertyKey("test").ifNotExist().create();
+        }
         schema.propertyKey("testing").ifNotExist().create();
         schema.propertyKey("data").ifNotExist().create();
         schema.propertyKey("name").ifNotExist().create();
@@ -748,7 +788,8 @@ public class TestGraph implements Graph {
     }
 
     @Watched
-    private void initBasicVertexLabelAndEdgeLabelExceptV(String defaultVL) {
+    private void initBasicVertexLabelAndEdgeLabelExceptV(String defaultVL,
+                                                         String selfVL) {
         SchemaManager schema = this.graph.schema();
 
         if (!"person".equals(defaultVL)) {
@@ -770,13 +811,15 @@ public class TestGraph implements Graph {
               .nullableKeys("test")
               .ifNotExist().create();
 
-        schema.edgeLabel("self").link(defaultVL, defaultVL)
+        schema.edgeLabel("self").link(selfVL, selfVL)
               .properties("__id", "test", "name", "some", "acl", "weight",
                           "here", "to-change", "dropped", "not-dropped", "new",
                           "to-drop", "short", "long")
               .nullableKeys("__id", "test", "name", "some", "acl", "weight",
                             "here", "to-change", "dropped", "not-dropped",
                             "new", "to-drop", "short", "long")
+              .ifNotExist().create();
+        schema.edgeLabel("self-but-different").link(selfVL, selfVL)
               .ifNotExist().create();
         schema.edgeLabel("aTOa").link(defaultVL, defaultVL)
               .properties("gremlin.partitionGraphStrategy.partition")

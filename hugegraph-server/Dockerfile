@@ -18,7 +18,7 @@
 
 # Dockerfile for HugeGraph Server
 # 1st stage: build source code
-FROM --platform=$BUILDPLATFORM maven:3.9.0-eclipse-temurin-11 AS build
+FROM --platform=$BUILDPLATFORM maven:3.9.16-eclipse-temurin-17 AS build
 
 WORKDIR /pkg
 
@@ -32,14 +32,13 @@ RUN --mount=type=cache,target=/root/.m2 \
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
-FROM eclipse-temurin:11-jre-jammy
+FROM eclipse-temurin:17-jre-jammy
 
 COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default
-# Note: --add-exports is required for Java 11+ to access jdk.internal.reflect for auth proxy
-ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED" \
+ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm" \
     HUGEGRAPH_HOME="hugegraph-server" \
     STDOUT_MODE="true"
 

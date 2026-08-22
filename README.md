@@ -66,7 +66,7 @@ HugeGraph supports both **standalone** and **distributed** deployments:
                         │             HugeGraph Server (:8080)                │
                         │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
                         │  │ REST API │  │ Gremlin  │  │   Cypher Engine  │   │
-                        │  │(Jersey 3)│  │ (TP 3.5) │  │   (OpenCypher)   │   │
+                        │  │(Jersey 3)│  │ (TP 3.8) │  │   (OpenCypher)   │   │
                         │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
                         │       └─────────────┼─────────────────┘             │
                         │            ┌────────▼────────┐                      │
@@ -125,7 +125,7 @@ flowchart TB
 
     subgraph Server["HugeGraph Server :8080"]
         API[REST API<br/>Jersey 3]
-        GS[Gremlin Server<br/>TinkerPop 3.5]
+        GS[Gremlin Server<br/>TinkerPop 3.8]
         CS[Cypher Engine<br/>OpenCypher]
         CORE[Graph Engine<br/>hugegraph-core]
 
@@ -176,8 +176,12 @@ curl -X POST http://localhost:8080/gremlin \
 
 ### Prerequisites
 
-- **Java 11+** (required)
-- **Maven 3.5+** (for building from source)
+- **Java 17** (required and currently the only supported Java release)
+- **Maven 3.6.3+** (for building from source)
+
+The launch scripts reject Java versions older than 17. That minimum-version
+check does not qualify later Java releases; use Java 17 unless another release
+is explicitly listed as supported.
 
 ### Option 1: Docker (Fastest)
 
@@ -281,7 +285,7 @@ curl http://localhost:8080/versions
 #   "versions": {
 #     "version": "v1",
 #     "core": "1.7.0",
-#     "gremlin": "3.5.1",
+#     "gremlin": "3.8.1",
 #     "api": "1.7.0"
 #   }
 # }
@@ -327,7 +331,7 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
    - Review the [Architecture Diagram](#architecture) above
 
 2. **Set Up Your Environment**
-   - Install Java 11+ and Maven 3.5+
+   - Install Java 17 and Maven 3.6.3+
    - Follow [BUILDING.md](BUILDING.md) for build instructions
    - Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 

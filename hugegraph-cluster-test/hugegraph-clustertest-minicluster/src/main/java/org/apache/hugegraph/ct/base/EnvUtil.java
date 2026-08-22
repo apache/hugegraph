@@ -18,7 +18,9 @@
 package org.apache.hugegraph.ct.base;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -30,6 +32,7 @@ import org.slf4j.Logger;
 public class EnvUtil {
 
     private static final Logger LOG = HGTestLogger.UTIL_LOG;
+    private static final int PORT_CONNECT_TIMEOUT_MILLIS = 500;
     private static final Set<Integer> ports = new HashSet<>();
 
     public static int getAvailablePort() {
@@ -45,6 +48,16 @@ public class EnvUtil {
         } catch (IOException e) {
             LOG.error("Failed to get available ports", e);
             return -1;
+        }
+    }
+
+    public static boolean isPortOpen(String host, int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port),
+                           PORT_CONNECT_TIMEOUT_MILLIS);
+            return true;
+        } catch (IOException ignored) {
+            return false;
         }
     }
 

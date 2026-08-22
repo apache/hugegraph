@@ -7,7 +7,7 @@ This file provides guidance to an AI coding tool when working with code in this 
 HugeGraph Store is a distributed storage backend for Apache HugeGraph, using RocksDB as the underlying storage engine with Raft consensus protocol for distributed coordination. It is designed for production-scale deployments requiring high availability and horizontal scalability.
 
 **Technology Stack**:
-- Java 11+
+- Java 17 (currently supported release)
 - RocksDB: Embedded key-value storage engine
 - Raft (JRaft): Distributed consensus protocol
 - gRPC: Inter-node communication

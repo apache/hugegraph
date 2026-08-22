@@ -384,7 +384,7 @@ graph.name=hugegraph
 **On all nodes**:
 
 ```bash
-# Check Java version (11+ required)
+# Check Java version (Java 17 is the only currently supported release)
 java -version
 
 # Check Maven (for building from source)

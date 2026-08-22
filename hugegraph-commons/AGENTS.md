@@ -7,8 +7,8 @@ This file provides guidance to an AI coding tool when working with code in this 
 hugegraph-commons is a shared utility module for Apache HugeGraph and its peripheral components. It provides core infrastructure components (locks, config, events, iterators, REST client, RPC framework) to simplify development across the HugeGraph ecosystem.
 
 **Technology Stack**:
-- Java 8+ (compiler source/target: 1.8)
-- Apache Maven 3.5+
+- Java 17 (currently supported release; compiler release: 17)
+- Apache Maven 3.6.3+
 - Apache Commons Configuration2 for config management
 - OkHttp 4.10.0 for REST client (hugegraph-common)
 - Sofa-RPC 5.7.6 for RPC framework (hugegraph-rpc)
@@ -71,10 +71,10 @@ This is a Maven multi-module project with 2 main modules:
 
 ### Prerequisites
 ```bash
-# Verify Java version (8+ required)
+# Verify Java version (Java 17 required)
 java -version
 
-# Verify Maven version (3.5+ required)
+# Verify Maven version (3.6.3+ required)
 mvn -version
 ```
 
@@ -108,10 +108,12 @@ mvn test -pl hugegraph-common -DskipCommonsTests=false
 mvn test -pl hugegraph-rpc -am -DskipCommonsTests=false
 
 # Run single test class
-mvn test -pl hugegraph-common -Dtest=HugeConfigTest -DskipCommonsTests=false
+mvn test -pl hugegraph-common -Dtest=HugeConfigTest -DskipCommonsTests=false \
+  -Dsurefire.failIfNoSpecifiedTests=true
 
 # Run test suite (includes all unit tests)
-mvn test -pl hugegraph-common -Dtest=UnitTestSuite -DskipCommonsTests=false
+mvn test -pl hugegraph-common -Dtest=UnitTestSuite -DskipCommonsTests=false \
+  -Dsurefire.failIfNoSpecifiedTests=true
 ```
 
 ### Code Quality
@@ -231,13 +233,16 @@ When adding third-party dependencies:
 
 ```bash
 # Single test class
-mvn test -pl hugegraph-common -Dtest=HugeConfigTest -DskipCommonsTests=false
+mvn test -pl hugegraph-common -Dtest=HugeConfigTest -DskipCommonsTests=false \
+  -Dsurefire.failIfNoSpecifiedTests=true
 
 # Single test method
-mvn test -pl hugegraph-common -Dtest=HugeConfigTest#testGetOption -DskipCommonsTests=false
+mvn test -pl hugegraph-common -Dtest=HugeConfigTest#testGetOption \
+  -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
 # Pattern matching
-mvn test -pl hugegraph-common -Dtest=*ConfigTest -DskipCommonsTests=false
+mvn test -pl hugegraph-common -Dtest=*ConfigTest -DskipCommonsTests=false \
+  -Dsurefire.failIfNoSpecifiedTests=true
 ```
 
 ### Debugging Tips

@@ -82,30 +82,54 @@ scriptEngines: {
   }
 }
 serializers:
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphBinaryMessageSerializerV1,
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphBinaryMessageSerializerV1,
+     config: {
+       serializeResultToString: false,
+       builder: org.apache.hugegraph.io.HugeGraphTypeSerializerRegistryBuilder,
+       ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
+     }
+  }
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV1,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV1d0,
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV2,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV2d0,
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV3,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV3d0,
+  # Keep untyped GraphSON before typed GraphSON so application/json stays
+  # mapped to the untyped V1 serializer while explicit typed MIME requests work.
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV1,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV2,
+     config: {
+       serializeResultToString: false,
+       ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
+     }
+  }
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV3,
+     config: {
+       serializeResultToString: false,
+       ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
+     }
+  }
+# Typed GraphSON remains fallback scope for File/Id/simple typed values.
+# Full HugeGraph internal object typed GraphSON for schema/Vertex/Edge/Path
+# remains follow-up scope; keep untyped serializers for normal remote objects.
 metrics: {
   consoleReporter: {enabled: false, interval: 180000},
   csvReporter: {enabled: false, interval: 180000, fileName: ./metrics/gremlin-server-metrics.csv},

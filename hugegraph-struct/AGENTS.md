@@ -168,7 +168,7 @@ Query classes provide backend-agnostic query building:
 
 - **hg-pd-client** (${project.version}): PD client for metadata coordination
 - **hugegraph-common** (${project.version}): Shared utilities
-- **Apache TinkerPop 3.5.1**: Graph computing framework
+- **Apache TinkerPop 3.8.1**: Graph computing framework
 - **Guava 25.1-jre**: Google utilities
 - **Eclipse Collections 10.4.0**: High-performance collections
 - **fastutil 8.1.0**: Fast primitive collections

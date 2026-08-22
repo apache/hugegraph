@@ -17,7 +17,10 @@
 
 package org.apache.hugegraph.api.cypher;
 
+import java.lang.reflect.Array;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -29,20 +32,23 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.commons.configuration2.Configuration;
+import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.driver.Client;
 import org.apache.tinkerpop.gremlin.driver.Cluster;
 import org.apache.tinkerpop.gremlin.driver.Result;
 import org.apache.tinkerpop.gremlin.driver.ResultSet;
-import org.apache.tinkerpop.gremlin.driver.Tokens;
-import org.apache.tinkerpop.gremlin.driver.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.process.traversal.Path;
+import org.apache.tinkerpop.gremlin.util.Tokens;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
 import org.slf4j.Logger;
 
 @ThreadSafe
 public final class CypherClient {
 
     private static final Logger LOG = Log.logger(CypherClient.class);
+    private static final int NORMALIZE_MAX_DEPTH = 32;
     private final Supplier<Configuration> configurationSupplier;
     private String userName;
     private String password;
@@ -105,10 +111,100 @@ public final class CypherClient {
 
         while (iter.hasNext()) {
             Result data = iter.next();
-            list.add(data.getObject());
+            list.add(normalize(data.getObject()));
         }
 
         return list;
+    }
+
+    static Object normalize(Object value) {
+        return normalize(value, 0, new IdentityHashMap<>());
+    }
+
+    private static Object normalize(Object value, int depth,
+                                    IdentityHashMap<Object, Boolean> seen) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Id) {
+            return ((Id) value).asObject();
+        }
+        boolean composite = value instanceof Map || value instanceof Path ||
+                            value instanceof Iterable ||
+                            value.getClass().isArray();
+        if (!composite) {
+            return value;
+        }
+        if (depth >= NORMALIZE_MAX_DEPTH) {
+            throw new IllegalArgumentException(
+                      "Exceeded max normalization depth 32");
+        }
+        if (value instanceof Map) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            Map<Object, Object> normalized = new LinkedHashMap<>();
+            try {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    normalized.put(normalize(entry.getKey(), depth + 1, seen),
+                                   normalize(entry.getValue(), depth + 1, seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value instanceof Path) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            try {
+                Path path = (Path) value;
+                normalized.put("labels",
+                               normalize(path.labels(), depth + 1, seen));
+                normalized.put("objects",
+                               normalize(path.objects(), depth + 1, seen));
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value instanceof Iterable) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            List<Object> normalized = new LinkedList<>();
+            try {
+                for (Object item : (Iterable<?>) value) {
+                    normalized.add(normalize(item, depth + 1, seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value.getClass().isArray()) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            List<Object> normalized = new LinkedList<>();
+            try {
+                int length = Array.getLength(value);
+                for (int i = 0; i < length; i++) {
+                    normalized.add(normalize(Array.get(value, i), depth + 1,
+                                             seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        return value;
     }
 
     /**

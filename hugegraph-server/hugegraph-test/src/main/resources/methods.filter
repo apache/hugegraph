@@ -16,40 +16,37 @@
 # limitations under the License.
 #
 ####################    structure suite    ####################
+## Filter reason categories:
+## HG-LEGACY: Existing HugeGraph feature boundary before this upgrade
+## TP37-SEMANTICS: New or renamed TinkerPop 3.7 suite expectation
+## TEST-INFRA: Test harness/storage lifecycle issue, not a feature regression
+## FOLLOW-UP: Keep tracked for later behavior or infrastructure cleanup
 
-## automatic ID for edges
+## HG-LEGACY: automatic ID for edges
 org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdgeTest.shouldNotEvaluateToEqualDifferentId: Not support automatic/custom id for edge
 org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdgeTest.shouldNotEvaluateToEqualDifferentId: Not support automatic/custom id for edge
 org.apache.tinkerpop.gremlin.structure.EdgeTest.BasicEdgeTest.shouldValidateIdEquality: Not support automatic/custom id for edge
 org.apache.tinkerpop.gremlin.structure.EdgeTest.BasicEdgeTest.shouldValidateEquality: Not support automatic/custom id for edge
 
-## property ID
+## HG-LEGACY: property ID
 org.apache.tinkerpop.gremlin.structure.util.detached.DetachedPropertyTest.shouldNotBeEqualPropertiesAsThereIsDifferentKey: Not support property id
 
-## id should be String type
+## HG-LEGACY: id should be String type
 org.apache.tinkerpop.gremlin.structure.GraphTest.shouldAddVertexWithUserSuppliedStringId: expect vertex.id is String type
 
-## same id for element
+## HG-LEGACY: same id for element
 org.apache.tinkerpop.gremlin.structure.GraphTest.shouldHaveExceptionConsistencyWhenAssigningSameIdOnVertex: Assigning the same ID to an Element is accepted(override), but tinkerpop expect throw an exception
 
-## uniform list
-org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertexOnAdd[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
-org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnEdgeOnAdd[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
-org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertex[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
-org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnEdge[supportsUniformListValues([100, 200, 300])]: Not support uniform of Integer because define uniform as String list
-org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertexOnAdd[supportsUniformListValues([try1, try2])]: Uniform list can't be accessed by vertex.property() which is supposed right by tinkerpop
-org.apache.tinkerpop.gremlin.structure.PropertyTest.PropertyFeatureSupportTest.shouldSetValueOnVertex[supportsUniformListValues([try1, try2])]: Uniform list can't be accessed by vertex.property() which is supposed right by tinkerpop
-
-# expect multi properties after setting single property multi times
+## HG-LEGACY: expect multi properties after setting single property multi times
 org.apache.tinkerpop.gremlin.structure.GraphTest.shouldOverwriteEarlierKeyValuesWithLaterKeyValuesOnAddVertexIfMultiProperty: Expect multi properties after setting single property multi times
 org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyRemoval.shouldRemoveMultiProperties: Expect multi properties after setting single property multi times
 org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyRemoval.shouldRemoveMultiPropertiesWhenVerticesAreRemoved: Expect multi properties after setting single property multi times
 org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyAddition.shouldAllowIdenticalValuedMultiProperties: Expect multi properties after setting single property multi times
 
-# not support nested property
+## HG-LEGACY: not support nested property
 org.apache.tinkerpop.gremlin.structure.VertexPropertyTest.VertexPropertyRemoval.shouldAllowIteratingAndRemovingVertexPropertyProperties: Not support nested property
 
-## failed tests with wrong edge number, reason: replicated edges treated as one
+## HG-LEGACY: failed tests with wrong edge number, reason: replicated edges treated as one
 org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.ProcessorTest.shouldProcessEdges: Replicated edges treated as one
 org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(NormalDistribution{stdDeviation=2.0, mean=0.0},NormalDistribution{stdDeviation=2.0, mean=0.0})]: Replicated edges treated as one
 org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(NormalDistribution{stdDeviation=2.0, mean=0.0},NormalDistribution{stdDeviation=2.0, mean=0.0})]: Replicated edges treated as one
@@ -64,27 +61,56 @@ org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.Diffe
 org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateSameGraph[test(PowerLawDistribution{gamma=2.3, multiplier=0.0},PowerLawDistribution{gamma=2.8, multiplier=0.0})]: Replicated edges treated as one
 org.apache.tinkerpop.gremlin.algorithm.generator.DistributionGeneratorTest.DifferentDistributionsTest.shouldGenerateDifferentGraph[test(PowerLawDistribution{gamma=2.3, multiplier=0.0},PowerLawDistribution{gamma=2.8, multiplier=0.0})]: Replicated edges treated as one
 
-## user supplied numeric id
+## HG-LEGACY: user supplied numeric id
 org.apache.tinkerpop.gremlin.structure.FeatureSupportTest.VertexFunctionalityTest.shouldSupportUserSuppliedIdsOfTypeNumericLong: Not open the feature 'support user supplied id of numeric long' although numeric long id is allowed
 org.apache.tinkerpop.gremlin.structure.FeatureSupportTest.VertexFunctionalityTest.shouldSupportUserSuppliedIdsOfTypeNumericInt: Not open the feature 'support user supplied id of numeric long' although numeric long id is allowed
 
-## user supplied uuid id
+## HG-LEGACY/FOLLOW-UP: user supplied uuid id feature flag remains closed
 org.apache.tinkerpop.gremlin.structure.FeatureSupportTest.VertexFunctionalityTest.shouldSupportUserSuppliedIdsOfTypeUuid: Not open the feature 'support user supplied id of uuid' although uuid id is allowed
 
-## edge id format validate firstly and throw NotFoundException if invalid
+## HG-LEGACY/FOLLOW-UP: edge id format validation throws NotFoundException first
 org.apache.tinkerpop.gremlin.structure.GraphTest.shouldHaveExceptionConsistencyWhenFindEdgeByIdThatIsNonExistentViaIterator: Invalid format of edge id will introduce throwing NotFoundException before try to query in backend store
 
-## not bugs
+## HG-LEGACY/TEST-INFRA/FOLLOW-UP: existing non-bug behavior and long-running transaction case
 org.apache.tinkerpop.gremlin.structure.GraphTest.shouldRemoveVertices: Random UUID as edge label
 org.apache.tinkerpop.gremlin.structure.GraphTest.shouldRemoveEdges: Random UUID as edge label
 org.apache.tinkerpop.gremlin.structure.TransactionTest.shouldExecuteWithCompetingThreads: Hang the tests because property 'test' have both String and long value
 
-## vertex properties doesn't have nested structures with HugeVertexSerializer
+## TEST-INFRA/FOLLOW-UP: gryo-v3 migration tests reopen source graph path before RocksDB releases lock
+org.apache.tinkerpop.gremlin.structure.io.IoGraphTest.shouldMigrateModernGraph[gryo-v3]: RocksDB lock not released between source and target graph in gryo-v3 migration test
+org.apache.tinkerpop.gremlin.structure.io.IoGraphTest.shouldMigrateClassicGraph[gryo-v3]: RocksDB lock not released between source and target graph in gryo-v3 migration test
+
+## TP37-SEMANTICS/FOLLOW-UP: TinkerPop 3.7 transaction lifecycle checks spawned thread transactions
+org.apache.tinkerpop.gremlin.structure.TransactionTest.shouldExecuteCompetingThreadsOnMultipleDbInstances: HugeGraph uses ThreadLocal transactions, spawned thread tx not auto-closed on graph close
+org.apache.tinkerpop.gremlin.structure.TransactionTest.shouldAllowReferenceOfEdgeIdOutsideOfOriginalThreadManual: HugeGraph uses ThreadLocal transactions, spawned thread tx not auto-closed on graph close
+org.apache.tinkerpop.gremlin.structure.TransactionTest.shouldSupportTransactionIsolationCommitCheck: HugeGraph uses ThreadLocal transactions, spawned thread tx not auto-closed on graph close
+org.apache.tinkerpop.gremlin.structure.TransactionTest.shouldAllowReferenceOfVertexIdOutsideOfOriginalThreadManual: HugeGraph uses ThreadLocal transactions, spawned thread tx not auto-closed on graph close
+
+## HG-LEGACY/TP37-SEMANTICS/FOLLOW-UP: TransactionMultiThreadedTest assumes spawned transaction isolation and cleanup
+org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest.shouldCommit: Memory backend exposes uncommitted vertices across ThreadLocal transactions and spawned tx stays open
+org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest.shouldDeleteVertexOnCommit: Spawned read transaction is not auto-closed after thread exit
+org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest.shouldDeleteRelatedEdgesOnVertexDelete: Spawned verification transaction is not auto-closed after thread exit
+org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest.shouldRollbackAddedVertex: Memory backend exposes uncommitted vertices and spawned tx stays open
+org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest.shouldCommitEdge: Spawned read transactions are not auto-closed after thread exit
+org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest.shouldRollbackAddedEdge: Spawned read transactions are not auto-closed after thread exit
+
+## HG-MODEL/FOLLOW-UP: scenarios supply custom vertex ids while the standard test graph uses AUTOMATIC id strategy
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_mergeEXlabel_knows_out_marko_in_vadasX: Can't customize vertex id when id strategy is 'AUTOMATIC' for vertex label 'person'
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_mergeEXlabel_knows_out_marko_in_vadasX_optionXonCreate_created_YX_optionXonMatch_created_NX_exists: Can't customize vertex id when id strategy is 'AUTOMATIC' for vertex label 'person'
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_mergeEXlabel_knows_out_marko_in_vadasX_optionXonCreate_created_YX_optionXonMatch_created_NX_exists_updated: Can't customize vertex id when id strategy is 'AUTOMATIC' for vertex label 'person'
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_injectXlabel_knows_out_marko_in_vadasX_mergeE: Can't customize vertex id when id strategy is 'AUTOMATIC' for vertex label 'person'
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_mergeE_with_outV_inV_options: Can't customize vertex id when id strategy is 'AUTOMATIC' for vertex label 'person'
+
+## HG-MODEL/FOLLOW-UP: HugeGraph multi-edge labels require a non-null sort key on every parallel edge
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_mergeEXlabel_knows_out_marko_in_vadas_weight_05X_exists: Scenario requires two same-label parallel edges while one edge has no sort-key value
+org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest.Traversals.g_V_hasXperson_name_marko_X_mergeEXlabel_knowsX_optionXonCreate_created_YX_optionXonMatch_created_NX_exists_updated: Scenario requires two same-label parallel edges while one edge has no sort-key value
+
+## HG-LEGACY/FOLLOW-UP: vertex properties don't have nested structures with HugeVertexSerializer
 org.apache.tinkerpop.gremlin.structure.SerializationTest.GraphSONTest.shouldSerializeVertex: Vertex properties doesn't have nested structures with HugeVertexSerializer
 org.apache.tinkerpop.gremlin.structure.SerializationTest.GraphSONTest.shouldSerializePath: Vertex properties doesn't have nested structures with HugeVertexSerializer
 org.apache.tinkerpop.gremlin.structure.SerializationTest.GraphSONTest.shouldSerializeTree: Vertex properties doesn't have nested structures with HugeVertexSerializer
 
-## update property but no commit, lead there are changes in indexTx, can't do index query
+## HG-LEGACY: update property but no commit leaves changes in indexTx
 org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdgeTest.shouldConstructDetachedEdge: Can't do index query when there are changes in transaction
 org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdgeTest.shouldConstructDetachedEdgeAsReference: Can't do index query when there are changes in transaction
 org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdgeTest.shouldConstructReferenceEdge: Can't do index query when there are changes in transaction
@@ -94,9 +120,11 @@ org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdgeTest.shouldCo
 # unsupported automatic edge id, therefore number of edge is wrong
 org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.EventStrategyProcessTest.shouldTriggerAddEdge: Unsupported automatic edge id, therefore number of edge is wrong
 org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.EventStrategyProcessTest.shouldTriggerAddEdgeByPath: Unsupported automatic edge id, therefore number of edge is wrong
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.EventStrategyProcessTest.shouldTriggerAddVertexWithPropertyThenPropertyAdded: Unsupported vertex property changed event tracking for addV().property()
 # shouldWriteToMultiplePartitions
 org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.PartitionStrategyProcessTest.shouldWriteToMultiplePartitions: It's not allowed to query by index when there are uncommitted records
 org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.PartitionStrategyProcessTest.shouldWriteVerticesToMultiplePartitions: It's not allowed to query by index when there are uncommitted records
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.PartitionStrategyProcessTest.shouldPartitionWithAbstractLambdaChildTraversal: Unsupported partition test schema label
 
 # assert error, long time, reason: replicated edges treated as one
 org.apache.tinkerpop.gremlin.process.traversal.step.map.CountTest.Traversals.g_V_both_both_count: Replicated edges treated as one
@@ -117,21 +145,16 @@ org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexTest.Traversals
 org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexTest.Traversals.g_addVXanimalX_propertyXname_mateoX_propertyXname_gateoX_propertyXname_cateoX_propertyXage_5X: Expect multi properties after setting single property multi times
 org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexTest.Traversals.g_V_addVXanimalX_propertyXname_valuesXnameXX_propertyXname_an_animalX_propertyXvaluesXnameX_labelX: Expect multi properties after setting single property multi times
 
-# unsupported predicate
+## HG-LEGACY/TP37-SEMANTICS/FOLLOW-UP: unsupported has predicates and empty-id semantics
 org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasIdXwithoutXemptyXX_count: Unsupported query 'NOT IN []'
 org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasIdXemptyX_count: Unsupported query 'hasId(EmptyList)'
 
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_containingXarkXX: Unsupported predicate 'containing(ark)'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_endingWithXasXX: Unsupported predicate 'endingWith(as)'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_startingWithXmarXX: Unsupported predicate 'startingWith(mar)'
 org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXage_withoutX27X_count: Unsupported relation 'NEQ'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXperson_name_containingXoX_andXltXmXXX: Unsupported predicate 'containing(o)'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_not_startingWithXmarXX: Unsupported predicate 'notStartingWith(mar)'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_not_containingXarkXX: Unsupported predicate 'notContaining(ark)'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_not_endingWithXasXX: Unsupported predicate 'notEndingWith(as)'
 org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXage_withoutX27_29X_count: Unsupported relation 'NEQ'
-org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXname_gtXmX_andXcontainingXoXXX: Unsupported predicate 'containing(o)'
 org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasTest.Traversals.g_V_hasXp_neqXvXX: Don't accept query based on properties [p] that are not indexed in any label, may not match not-equal condition
+
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.ElementIdStrategyProcessTest.shouldSetIdOnAddEWithNamePropertyKeySpecifiedAndNameSuppliedAsProperty: Unsupported ElementIdStrategy edge id/property index query
+org.apache.tinkerpop.gremlin.process.traversal.strategy.decoration.ElementIdStrategyProcessTest.shouldGenerateDefaultIdOnGraphAddVWithGeneratedCustomId: Unsupported ElementIdStrategy generated custom id schema
 
 # Unsupport edge label 'created': 'software' -> 'person', has existed an edgelabel (created: person -> software) in this case
 org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeTest.Traversals.g_V_hasXname_markoX_asXaX_outEXcreatedX_asXbX_inV_addEXselectXbX_labelX_toXaX: Unsupport edge from inV to outV

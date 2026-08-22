@@ -26,8 +26,16 @@ on:
     paths:
       - '**/Dockerfile*'
       - '.dockerignore'
+      - '.github/workflows/docker-build-ci.yml'
       - 'hugegraph-server/hugegraph-dist/docker/**'
-      - 'hugegraph-server/hugegraph-dist/src/assembly/static/bin/util.sh'
+      - 'hugegraph-server/hugegraph-dist/src/assembly/static/bin/**'
+      - 'hugegraph-server/hugegraph-dist/src/assembly/static/conf/**'
+      - 'pom.xml'
+      - 'hugegraph-server/**'
+      - 'hugegraph-pd/**'
+      - 'hugegraph-store/**'
+      - 'hugegraph-commons/**'
+      - 'hugegraph-struct/**'
 
 jobs:
   docker-build:
@@ -53,6 +61,15 @@ jobs:
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
           echo "Healthcheck: $HC"
           [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
+
+      - name: Verify Java 17 runtime in ${{ matrix.dockerfile }}
+        run: |
+          JAVA_VERSION=$(docker run --rm --entrypoint java "$IMAGE_ID" -version 2>&1)
+          echo "$JAVA_VERSION"
+          grep -Eq 'version "17\.' <<< "$JAVA_VERSION" || {
+            echo "ERROR: expected a Java 17 runtime in ${{ matrix.dockerfile }}"
+            exit 1
+          }
 
       - name: Test server entrypoint property mapping
         if: matrix.dockerfile == 'hugegraph-server/Dockerfile'

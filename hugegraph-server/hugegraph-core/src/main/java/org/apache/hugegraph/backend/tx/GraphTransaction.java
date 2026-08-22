@@ -551,24 +551,26 @@ public class GraphTransaction extends IndexableTransaction {
         boolean hasUpdate = this.hasUpdate();
         Aggregate aggregate = query.aggregateNotNull();
 
-        // TODO: we can concat index-query results and tx uncommitted records.
         if (hasUpdate) {
-            E.checkArgument(!isConditionQuery,
-                            "It's not allowed to query by index when " +
-                            "there are uncommitted records.");
+            E.checkArgument(aggregate.func() == AggregateFunc.COUNT,
+                            "The %s operator with uncommitted records " +
+                            "is not supported",
+                            aggregate.func().string());
+            Query queryWithoutAggregate = query.copy();
+            queryWithoutAggregate.aggregate(null);
+            Iterator<?> results = queryWithoutAggregate.resultType().isVertex() ?
+                                  this.queryVertices(queryWithoutAggregate) :
+                                  this.queryEdges(queryWithoutAggregate);
+            return countAndClose(results);
         }
 
         QueryList<Number> queries = this.optimizeQueries(query, q -> {
             boolean isIndexQuery = q instanceof IdQuery;
             assert isIndexQuery || isConditionQuery || q == query;
-            // Need to fall back if there are uncommitted records
-            boolean fallback = hasUpdate;
+            boolean fallback = false;
             Number result;
 
-            if (fallback) {
-                // Here just ignore it, and do fall back later
-                result = null;
-            } else if (!isIndexQuery || !isConditionQuery) {
+            if (!isIndexQuery || !isConditionQuery) {
                 // It's a sysprop-query, let parent tx do it
                 assert !fallback;
                 result = super.queryNumber(q);
@@ -606,6 +608,19 @@ public class GraphTransaction extends IndexableTransaction {
                                        QueryResults.empty() :
                                        queries.fetch(this.pageSize);
         return aggregate.reduce(results.iterator());
+    }
+
+    private static long countAndClose(Iterator<?> results) {
+        try {
+            long count = 0L;
+            while (results.hasNext()) {
+                results.next();
+                count++;
+            }
+            return count;
+        } finally {
+            CloseableIterator.closeIterator(results);
+        }
     }
 
     @Watched(prefix = "graph")
@@ -834,7 +849,7 @@ public class GraphTransaction extends IndexableTransaction {
     public Iterator<Vertex> queryVertices(Query query) {
         if (this.hasUpdate()) {
             E.checkArgument(query.noLimitAndOffset(),
-                            "It's not allowed to query with offser/limit " +
+                            "It's not allowed to query with offset/limit " +
                             "when there are uncommitted records.");
             // TODO: also add check: no SCAN, no OLAP
             E.checkArgument(!query.paging(),
@@ -1000,7 +1015,7 @@ public class GraphTransaction extends IndexableTransaction {
     public Iterator<Edge> queryEdges(Query query) {
         if (this.hasUpdate()) {
             E.checkArgument(query.noLimitAndOffset(),
-                            "It's not allowed to query with offser/limit " +
+                            "It's not allowed to query with offset/limit " +
                             "when there are uncommitted records.");
             // TODO: also add check: no SCAN, no OLAP
             E.checkArgument(!query.paging(),

@@ -30,11 +30,9 @@
     </parent>
 
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <guava.version>25.1-jre</guava.version>
-        <tinkerpop.version>3.5.1</tinkerpop.version>
+        <tinkerpop.version>3.8.1</tinkerpop.version>
     </properties>
 
     <dependencies>
@@ -52,8 +50,15 @@
 
         <dependency>
             <groupId>org.apache.tinkerpop</groupId>
+            <artifactId>gremlin-core</artifactId>
+            <version>${tinkerpop.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.tinkerpop</groupId>
             <artifactId>gremlin-test</artifactId>
             <version>${tinkerpop.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -86,7 +91,7 @@
         <dependency>
             <groupId>org.apache.tinkerpop</groupId>
             <artifactId>gremlin-shaded</artifactId>
-            <version>3.5.1</version>
+            <version>${tinkerpop.version}</version>
         </dependency>
         <dependency>
             <groupId>org.mindrot</groupId>

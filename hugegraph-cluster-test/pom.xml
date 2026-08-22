@@ -39,8 +39,6 @@
     </modules>
 
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <final.name>apache-${release.name}-ct-${project.version}</final.name>
     </properties>
@@ -96,7 +94,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>simple-cluster-test</id>
@@ -120,7 +117,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>multi-cluster-test</id>

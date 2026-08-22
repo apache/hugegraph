@@ -186,7 +186,7 @@ public class HugeFeatures implements Graph.Features {
 
         @Override
         public boolean supportsUniformListValues() {
-            return true;
+            return false;
         }
 
         @Override
@@ -225,7 +225,7 @@ public class HugeFeatures implements Graph.Features {
 
         @Override
         public boolean supportsUniformListValues() {
-            return true;
+            return false;
         }
 
     }

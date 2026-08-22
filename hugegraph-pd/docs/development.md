@@ -18,10 +18,10 @@ This document provides comprehensive guidance for developing, testing, and contr
 
 Ensure you have the following tools installed:
 
-| Tool | Minimum Version | Recommended | Purpose |
+| Tool | Version Requirement | Recommended | Purpose |
 |------|----------------|-------------|---------|
-| **JDK** | 11 | 11 or 17 | Java runtime and compilation |
-| **Maven** | 3.5.0 | 3.8+ | Build tool and dependency management |
+| **JDK** | 17 (only supported release) | 17 LTS | Java runtime and compilation |
+| **Maven** | 3.6.3+ | 3.8+ | Build tool and dependency management |
 | **Git** | 2.0+ | Latest | Version control |
 | **IDE** | N/A | IntelliJ IDEA | Development environment |
 
@@ -30,11 +30,11 @@ Ensure you have the following tools installed:
 ```bash
 # Check Java version
 java -version
-# Expected: openjdk version "11.0.x" or later
+# Expected: openjdk version "17.0.x"
 
 # Check Maven version
 mvn -version
-# Expected: Apache Maven 3.5.0 or later
+# Expected: Apache Maven 3.6.3 or later
 
 # Check Git version
 git --version
@@ -77,8 +77,8 @@ Required for Lombok support:
 #### Configure JDK
 
 1. **File → Project Structure → Project**
-2. **Project SDK**: Select JDK 11 or 17
-3. **Project language level**: 11
+2. **Project SDK**: Select JDK 17
+3. **Project language level**: 17
 4. **Apply** and **OK**
 
 ## Building from Source
@@ -196,10 +196,10 @@ mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-rest-test
 
 ```bash
 # Run specific test class
-mvn -pl hugegraph-pd/hg-pd-test test -Dtest=PartitionServiceTest -DfailIfNoTests=false
+mvn -pl hugegraph-pd/hg-pd-test test -Dtest=PartitionServiceTest
 
 # Run specific test method
-mvn -pl hugegraph-pd/hg-pd-test test -Dtest=PartitionServiceTest#testSplitPartition -DfailIfNoTests=false
+mvn -pl hugegraph-pd/hg-pd-test test -Dtest=PartitionServiceTest#testSplitPartition
 ```
 
 #### Test from IDE
@@ -382,7 +382,7 @@ if (store == null) {
    - **Main class**: `org.apache.hugegraph.pd.HgPdApplication` (in `hg-pd-service`)
    - **Program arguments**: `--spring.config.location=file:./conf/application.yml`
    - **Working directory**: `hugegraph-pd/hg-pd-dist/target/hugegraph-pd-<version>/`
-   - **JRE**: 11 or 17
+   - **JRE**: 17
 
 2. Set breakpoints in code
 

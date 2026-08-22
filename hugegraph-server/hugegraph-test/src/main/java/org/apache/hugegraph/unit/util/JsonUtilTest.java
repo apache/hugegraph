@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import org.apache.commons.lang3.tuple.Pair;
@@ -51,6 +52,9 @@ import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.collection.CollectionFactory;
+import org.apache.tinkerpop.gremlin.process.traversal.Path;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.MutablePath;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.Tree;
 import org.apache.tinkerpop.shaded.jackson.core.type.TypeReference;
 import org.eclipse.collections.api.map.primitive.MutableIntObjectMap;
 import org.junit.Test;
@@ -306,6 +310,31 @@ public class JsonUtilTest extends BaseUnitTest {
                             "\"properties\":{\"date\":" +
                             "\"2019-03-12 00:00:00.000\"," +
                             "\"weight\":0.8}}", json);
+    }
+
+    @Test
+    public void testSerializePath() {
+        Path path = MutablePath.make()
+                               .extend("marko", Set.of("a"))
+                               .extend(29, Set.of("b"));
+
+        String json = JsonUtil.toJson(path);
+
+        Assert.assertEquals("{\"labels\":[[\"a\"],[\"b\"]]," +
+                            "\"objects\":[\"marko\",29]}", json);
+    }
+
+    @Test
+    public void testSerializeTree() {
+        Tree<String> child = new Tree<>();
+        child.put("lop", new Tree<>());
+        Tree<String> tree = new Tree<>();
+        tree.put("marko", child);
+
+        String json = JsonUtil.toJson(tree);
+
+        Assert.assertEquals("[{\"key\":\"marko\",\"value\":[{" +
+                            "\"key\":\"lop\",\"value\":[]}]}]", json);
     }
 
     @Test

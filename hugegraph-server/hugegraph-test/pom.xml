@@ -67,11 +67,11 @@
             <version>${tinkerpop.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.tinkerpop</groupId>
-            <artifactId>gremlin-groovy-test</artifactId>
-            <version>3.2.11</version>
+            <groupId>com.google.inject</groupId>
+            <artifactId>guice</artifactId>
+            <version>4.2.3</version>
+            <scope>provided</scope>
         </dependency>
-
         <dependency>
             <groupId>org.glassfish.jersey.test-framework.providers</groupId>
             <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
@@ -114,11 +114,18 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.20</version>
+                <configuration>
+                    <argLine>
+                        @{argLine}
+                        @${project.basedir}/../hugegraph-dist/src/assembly/static/bin/jvm-module.options
+                        @${project.basedir}/conf/jvm-test-module.options
+                    </argLine>
+                </configuration>
                 <executions>
                     <execution>
                         <id>core-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -131,6 +138,7 @@
                     <execution>
                         <id>unit-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -143,6 +151,7 @@
                     <execution>
                         <id>api-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <!-- FIXME: HStore core guards and capability failures are tracked in
                                  https://github.com/apache/hugegraph/issues/3090.
                                  Keep backend scoped to API tests until the issue is resolved. -->
@@ -161,6 +170,7 @@
                     <execution>
                         <id>tinkerpop-structure-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -173,14 +183,22 @@
                     <execution>
                         <id>tinkerpop-process-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <!-- TinkerPop process ReadTest.Traversals.class need write/read disk -->
-                            <argLine>-Dbuild.dir=${project.build.directory}</argLine>
+                            <argLine>
+                                @{argLine}
+                                @${project.basedir}/../hugegraph-dist/src/assembly/static/bin/jvm-module.options
+                                @${project.basedir}/conf/jvm-test-module.options
+                                -Dbuild.dir=${project.build.directory}
+                            </argLine>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
                             </testClassesDirectory>
                             <includes>
                                 <include>**/ProcessStandardTest.java</include>
+                                <include>**/HugeGraphFeatureTest.java</include>
+                                <include>**/HugeGraphProviderLifecycleTest.java</include>
                             </includes>
                         </configuration>
                     </execution>
@@ -210,7 +228,6 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.8</version>
                 <configuration>
                     <excludes>
                         <exclude>org/apache/hugegraph/traversal/algorithm/*.class</exclude>

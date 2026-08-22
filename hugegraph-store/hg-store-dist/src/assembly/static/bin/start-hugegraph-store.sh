@@ -122,7 +122,7 @@ ensure_path_writable "$PLUGINS"
 # The maximum and minimum heap memory that service can use (for production env set it 36GB)
 MAX_MEM=$((2 * 1024))
 MIN_MEM=$((1 * 512))
-EXPECT_JDK_VERSION=11
+EXPECT_JDK_VERSION=17
 
 # Change to $BIN's parent
 cd ${TOP} || exit
@@ -135,8 +135,11 @@ else
 fi
 
 # check jdk version
-JAVA_VERSION=$($JAVA -version 2>&1 | awk 'NR==1{gsub(/"/,""); print $3}'  | awk -F'_' '{print $1}')
-if [[ $? -ne 0 || $JAVA_VERSION < $EXPECT_JDK_VERSION ]]; then
+JAVA_VERSION=$($JAVA -version 2>&1 |
+               awk -F'"' '/^(java|openjdk) version "/ {print $2; exit}' |
+               sed 's/^1\.//' | cut -d'.' -f1)
+JAVA_VERSION="${JAVA_VERSION%%[!0-9]*}"
+if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $EXPECT_JDK_VERSION ]]; then
     echo "Please make sure that the JDK is installed and the version >= $EXPECT_JDK_VERSION"  >> ${OUTPUT}
     exit 1
 fi
@@ -164,7 +167,7 @@ case "$GC_OPTION" in
                       -XX:InitiatingHeapOccupancyPercent=50 -XX:G1RSetUpdatingPauseTimePercent=5"
         ;;
     zgc|ZGC)
-        echo "Using ZGC as the default garbage collector (Only support Java 11+)"
+        echo "Using ZGC as the default garbage collector (requires Java 17 or later)"
         JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseZGC -XX:+UnlockExperimentalVMOptions \
                                       -XX:ConcGCThreads=2 -XX:ParallelGCThreads=6 \
                                       -XX:ZCollectionInterval=120 -XX:ZAllocationSpikeTolerance=5 \

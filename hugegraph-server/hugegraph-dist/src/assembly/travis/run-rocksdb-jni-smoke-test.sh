@@ -25,7 +25,9 @@ fi
 TRAVIS_DIR=$(cd "$(dirname "$0")" && pwd)
 SERVER_DIR=$(cd "$1" && pwd)
 EXPECTED_ARCH=${EXPECTED_ARCH:-}
-EXPECTED_JAVA_MAJOR=${EXPECTED_JAVA_MAJOR:-11}
+EXPECTED_JAVA_MAJOR=${EXPECTED_JAVA_MAJOR:-17}
+EXPECTED_RISCV64_JAVA_VERSION=${EXPECTED_RISCV64_JAVA_VERSION:-}
+EXPECTED_RISCV64_JAVA_VENDOR=${EXPECTED_RISCV64_JAVA_VENDOR:-}
 ACTUAL_ARCH=$(uname -m)
 
 if [[ -n "${JAVA_HOME:-}" ]]; then
@@ -88,8 +90,8 @@ fi
 configure_riscv64_libatomic
 
 if [[ "$ACTUAL_ARCH" == "riscv64" ]]; then
-    EXPECTED_RISCV64_JAVA_VERSION=${EXPECTED_RISCV64_JAVA_VERSION:-11.0.31.28}
-    if [[ "$JAVA_VERSION" != "$EXPECTED_RISCV64_JAVA_VERSION" ]]; then
+    if [[ -n "$EXPECTED_RISCV64_JAVA_VERSION" && \
+          "$JAVA_VERSION" != "$EXPECTED_RISCV64_JAVA_VERSION" ]]; then
         echo "Expected RISC-V Java $EXPECTED_RISCV64_JAVA_VERSION, got $JAVA_VERSION" >&2
         exit 1
     fi
@@ -97,8 +99,10 @@ if [[ "$ACTUAL_ARCH" == "riscv64" ]]; then
         echo "Expected RISC-V Server VM, got $JAVA_VM_NAME" >&2
         exit 1
     fi
-    if [[ "$JAVA_VM_VENDOR" != "Alibaba" ]]; then
-        echo "Expected RISC-V Java vendor Alibaba, got $JAVA_VM_VENDOR" >&2
+    if [[ -n "$EXPECTED_RISCV64_JAVA_VENDOR" && \
+          "$JAVA_VM_VENDOR" != "$EXPECTED_RISCV64_JAVA_VENDOR" ]]; then
+        echo "Expected RISC-V Java vendor $EXPECTED_RISCV64_JAVA_VENDOR," \
+             "got $JAVA_VM_VENDOR" >&2
         exit 1
     fi
     if [[ "$JAVA_VM_INFO" != *"mixed mode"* ]]; then

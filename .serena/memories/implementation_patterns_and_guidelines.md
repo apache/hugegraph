@@ -23,7 +23,7 @@
 - After `.proto` changes: `mvn clean compile` → `target/generated-sources/protobuf/`
 
 ## Query Languages
-- **Gremlin**: Native TinkerPop 3.5.1
+- **Gremlin**: Native TinkerPop 3.8.1
 - **OpenCypher**: `hugegraph-api/opencypher/`
 - TinkerPop exceptions are passed through in Gremlin responses
 
@@ -35,7 +35,7 @@
 - **Profiles**: `unit-test`, `core-test`, `api-test`, `tinkerpop-structure-test`, `tinkerpop-process-test`
 - **Backends in CI**: memory, rocksdb, hbase (matrix)
 - **Single test class**: `mvn test -pl hugegraph-server/hugegraph-test -am -P core-test,memory -Dtest=ClassName`
-- TinkerPop tests: only on `release-*`/`test-*` branches
+- TinkerPop tests: `release-*`/`test-*` and upgrade branches selected in `server-ci.yml`
 - Raft tests: only on `test*`/`raft*` branches
 
 ## Docker
@@ -44,6 +44,6 @@
 - Container logs: stdout-based
 
 ## CI Pipelines
-- `server-ci.yml`: compile + unit/core/API tests (memory/rocksdb/hbase × Java 11)
+- `server-ci.yml`: compile + unit/core/API tests (memory/rocksdb/hbase × Java 17)
 - `rerun-ci.yml`: auto-rerun flaky failures (max 2 reruns, 180s delay)
 - `auto-pr-review.yml`: auto-comment on new PRs

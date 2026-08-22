@@ -3271,6 +3271,24 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByNullKeyAndLabel() {
+        HugeGraph graph = graph();
+        init10Vertices();
+
+        Assert.assertFalse(graph.traversal().V()
+                                .has((String) null, "test-null-key")
+                                .hasNext());
+        Assert.assertFalse(graph.traversal().V()
+                                .hasLabel((String) null)
+                                .hasNext());
+
+        List<Vertex> vertices = graph.traversal().V()
+                                     .hasLabel(null, "book")
+                                     .toList();
+        Assert.assertEquals(5, vertices.size());
+    }
+
+    @Test
     public void testQueryByLabelWithLimit() {
         HugeGraph graph = graph();
         this.init10VerticesAndCommit();
@@ -3992,6 +4010,35 @@ public class VertexCoreTest extends BaseCoreTest {
             Assert.assertContains("Invalid data type of query value",
                                   e.getMessage());
         });
+    }
+
+    @Test
+    public void testQueryByNegatedNullPredicate() {
+        HugeGraph graph = graph();
+
+        graph.addVertex(T.label, "person", "name", "marko",
+                        "city", "Beijing", "age", 29);
+        graph.addVertex(T.label, "person", "name", "vadas",
+                        "city", "Beijing", "age", 27);
+        graph.addVertex(T.label, "person", "name", "lop",
+                        "city", "Shanghai");
+        this.commitTx();
+
+        List<Object> negatedNull = graph.traversal().V()
+                                        .hasLabel("person")
+                                        .has("age", P.not(P.eq(null)))
+                                        .values("name")
+                                        .toList();
+        List<Object> notEqualNull = graph.traversal().V()
+                                         .hasLabel("person")
+                                         .has("age", P.neq(null))
+                                         .values("name")
+                                         .toList();
+
+        Set<Object> expected = ImmutableSet.of("marko", "vadas");
+        Assert.assertEquals(expected, ImmutableSet.copyOf(negatedNull));
+        Assert.assertEquals(expected, ImmutableSet.copyOf(notEqualNull));
+        Assert.assertEquals(notEqualNull.size(), negatedNull.size());
     }
 
     @Test
@@ -4857,14 +4904,10 @@ public class VertexCoreTest extends BaseCoreTest {
                  .and(P.lt(29).or(P.eq(35)).or(P.gt(45)))
         ).values("name").toList();
 
-        // There is duplicate results with OR condition
-        Assert.assertEquals(5, vertices.size());
-
         Set<String> names = ImmutableSet.of("Hebe", "James",
                                             "Tom Cat", "Lisa");
-        for (Object name : vertices) {
-            Assert.assertTrue(names.contains(name));
-        }
+        Assert.assertEquals(names.size(), vertices.size());
+        Assert.assertEquals(names, ImmutableSet.copyOf(vertices));
     }
 
     @Test

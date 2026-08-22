@@ -31,7 +31,7 @@ TOP="$(cd $BIN/../ && pwd)"
 . $BIN/util.sh
 
 if [ "$JAVA_HOME" == "" ]; then
-    echo "Must set JAVA_HOME environment variable and installed jdk >= 1.8"
+    echo "Must set JAVA_HOME environment variable and install JDK >= 17"
     exit 1
 fi
 

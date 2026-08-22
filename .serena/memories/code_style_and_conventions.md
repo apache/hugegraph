@@ -24,5 +24,5 @@
 - Validate: `mvn apache-rat:check -ntp` + `mvn editorconfig:check`
 
 ## Build
-- Java 11 target, `-Xlint:unchecked`, Lombok 1.18.30 (provided/optional)
+- Java 17 release target, `-Xlint:unchecked`, Lombok 1.18.30 (provided/optional)
 - Swagger: `io.swagger.core.v3:swagger-jaxrs2-jakarta` for REST API docs

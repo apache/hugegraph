@@ -15,10 +15,10 @@ jobs:
       USE_STAGE: 'false' # Whether to include the stage repository.
 
     steps:
-      - name: Install JDK 11
+      - name: Install JDK 17
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
@@ -45,8 +45,27 @@ jobs:
 
       - name: Run simple cluster test
         run: |
-          mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test -am -P simple-cluster-test
+          timeout 45m mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test \
+            -am -P simple-cluster-test
 
       - name: Run multi cluster test
         run: |
-          mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test -am -P multi-cluster-test
+          timeout 45m mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test \
+            -am -P multi-cluster-test
+
+      - name: Show cluster diagnostics on failure
+        if: failure()
+        run: |
+          echo "[ci] java processes:"
+          ps -ef | grep -E "HugeGraph|hg-|java" | grep -v grep || true
+          echo "[ci] listening tcp ports:"
+          (ss -ltnp || netstat -ltnp || true) 2>&1
+          find hugegraph-cluster-test -path '*/logs/*' -type f | sort | while read -r log; do
+            echo "--- tail -n 200 $log ---"
+            tail -n 200 "$log" || true
+          done
+          find . -path '*/surefire-reports/*' -type f \
+            \( -name '*.txt' -o -name '*.xml' \) | sort | while read -r report; do
+            echo "--- tail -n 120 $report ---"
+            tail -n 120 "$report" || true
+          done

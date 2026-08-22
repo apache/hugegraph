@@ -30,6 +30,7 @@ TOP="$(cd "${BIN}"/../ && pwd)"
 CONF="$TOP/conf"
 LIB="$TOP/lib"
 PLUGINS="$TOP/plugins"
+JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
 
 . "${BIN}"/util.sh
 
@@ -38,15 +39,16 @@ ensure_path_writable "${PLUGINS}"
 
 if [[ -n "$JAVA_HOME" ]]; then
     JAVA="$JAVA_HOME"/bin/java
-    EXT="$JAVA_HOME/jre/lib/ext:$LIB:$PLUGINS"
 else
     JAVA=java
-    EXT="$LIB:$PLUGINS"
 fi
 
 cd "${TOP}" || exit
 
-DEFAULT_JAVA_OPTIONS="--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED"
+if [[ ! -r ${JVM_MODULE_OPTIONS} ]]; then
+    echo "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}" >&2
+    exit 1
+fi
 
 echo "Initializing HugeGraph Store..."
 
@@ -54,7 +56,7 @@ echo "Initializing HugeGraph Store..."
 CP=$(find -L "${LIB}" -name 'hugegraph*.jar' | sort | tr '\n' ':')
 CP="$CP":$(find -L "${LIB}" -name '*.jar' \! -name 'hugegraph*' | sort | tr '\n' ':')
 CP="$CP":$(find -L "${PLUGINS}" -name '*.jar' | sort | tr '\n' ':')
-$JAVA -cp $CP ${DEFAULT_JAVA_OPTIONS} \
+"${JAVA}" @"${JVM_MODULE_OPTIONS}" -cp "$CP" \
 org.apache.hugegraph.cmd.InitStore "${CONF}"/rest-server.properties
 INIT_STORE_STATUS=$?
 if [[ ${INIT_STORE_STATUS} -ne 0 ]]; then

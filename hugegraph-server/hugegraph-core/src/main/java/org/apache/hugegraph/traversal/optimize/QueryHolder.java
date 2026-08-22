@@ -25,7 +25,8 @@ import org.apache.hugegraph.iterator.Metadatable;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 
-public interface QueryHolder extends HasContainerHolder, Metadatable {
+public interface QueryHolder<S, E>
+        extends HasContainerHolder<S, E>, Metadatable {
 
     String SYSPROP_PAGE = "~page";
 

@@ -19,12 +19,14 @@ package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
+import org.apache.hugegraph.api.cypher.CypherClientTest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
+import org.apache.hugegraph.tinkerpop.HugeGraphTestInfrastructureTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
@@ -38,8 +40,10 @@ import org.apache.hugegraph.unit.cache.CachedGraphTransactionTest;
 import org.apache.hugegraph.unit.cache.CachedSchemaTransactionTest;
 import org.apache.hugegraph.unit.cache.RamTableTest;
 import org.apache.hugegraph.unit.cmd.InitStoreConfigTest;
+import org.apache.hugegraph.unit.config.GremlinConfigCompatibilityTest;
 import org.apache.hugegraph.unit.core.AnalyzerTest;
 import org.apache.hugegraph.unit.core.BackendMutationTest;
+import org.apache.hugegraph.unit.core.BackendProviderFactoryTest;
 import org.apache.hugegraph.unit.core.BackendStoreInfoTest;
 import org.apache.hugegraph.unit.core.ConditionQueryFlattenTest;
 import org.apache.hugegraph.unit.core.ConditionTest;
@@ -48,6 +52,8 @@ import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.GraphManagerAdminInitTest;
 import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
+import org.apache.hugegraph.unit.core.GroovyScriptEngineCompatibilityTest;
+import org.apache.hugegraph.unit.core.HugeFeaturesTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
 import org.apache.hugegraph.unit.core.QueryTest;
@@ -73,6 +79,7 @@ import org.apache.hugegraph.unit.serializer.BinaryBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.BinaryScatterSerializerTest;
 import org.apache.hugegraph.unit.serializer.BinarySerializerTest;
 import org.apache.hugegraph.unit.serializer.BytesBufferTest;
+import org.apache.hugegraph.unit.serializer.HugeGraphSONModuleTest;
 import org.apache.hugegraph.unit.serializer.SerializerFactoryTest;
 import org.apache.hugegraph.unit.serializer.StoreSerializerTest;
 import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
@@ -102,6 +109,7 @@ import org.junit.runners.Suite;
 
         /* api gremlin */
         GremlinQueryAPITest.class,
+        CypherClientTest.class,
         WsAndHttpBasicAuthHandlerTest.class,
         GraphSpaceGroupAPITest.class,
         GraphSpaceAuthPayloadTest.class,
@@ -138,7 +146,10 @@ import org.junit.runners.Suite;
         RowLockTest.class,
         AnalyzerTest.class,
         BackendMutationTest.class,
+        BackendProviderFactoryTest.class,
         ConditionTest.class,
+        GroovyScriptEngineCompatibilityTest.class,
+        HugeFeaturesTest.class,
         ConditionQueryFlattenTest.class,
         QueryTest.class,
         RangeTest.class,
@@ -157,6 +168,7 @@ import org.junit.runners.Suite;
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
         SchemaElementTest.class,
+        HugeGraphTestInfrastructureTest.class,
 
         /* cmd */
         InitStoreConfigTest.class,
@@ -169,9 +181,12 @@ import org.junit.runners.Suite;
         BinaryBackendEntryTest.class,
         BinarySerializerTest.class,
         BinaryScatterSerializerTest.class,
+        HugeGraphSONModuleTest.class,
         StoreSerializerTest.class,
         TextSerializerTest.class,
 
+        /* config */
+        GremlinConfigCompatibilityTest.class,
         /* rocksdb */
         RocksDBSessionsTest.class,
         RocksDBSessionTest.class,

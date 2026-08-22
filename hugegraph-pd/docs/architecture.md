@@ -54,7 +54,7 @@ HugeGraph PD (Placement Driver) is the control plane for HugeGraph distributed d
 - **Storage**: RocksDB for persistent metadata
 - **Communication**: gRPC with Protocol Buffers
 - **Framework**: Spring Boot for REST APIs and dependency injection
-- **Language**: Java 11+
+- **Language**: Java 17 (currently supported release)
 
 ## Module Architecture
 

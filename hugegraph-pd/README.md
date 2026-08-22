@@ -36,8 +36,8 @@ For detailed architecture and design, see [Architecture Documentation](docs/arch
 
 ### Prerequisites
 
-- **Java**: 11 or higher
-- **Maven**: 3.5 or higher
+- **Java**: 17 (currently the only supported release)
+- **Maven**: 3.6.3 or higher
 - **Disk Space**: At least 1GB for PD data directory
 
 ### Build

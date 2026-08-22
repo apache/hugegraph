@@ -17,6 +17,14 @@
 
 package org.apache.hugegraph.unit.serializer;
 
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
 import org.apache.hugegraph.backend.serializer.BinaryScatterSerializer;
@@ -58,9 +66,14 @@ public class SerializerFactoryTest extends BaseUnitTest {
         Assert.assertEquals(FakeSerializer.class,
                             SerializerFactory.serializer(config, "fake").getClass());
 
+        // Identical registration is idempotent
+        SerializerFactory.register("fake", FakeSerializer.class.getName());
+        Assert.assertEquals(FakeSerializer.class,
+                            SerializerFactory.serializer(config, "fake").getClass());
+
         Assert.assertThrows(BackendException.class, () -> {
-            // exist
-            SerializerFactory.register("fake", FakeSerializer.class.getName());
+            // conflict
+            SerializerFactory.register("fake", TextSerializer.class.getName());
         }, e -> {
             Assert.assertContains("Exists serializer:", e.getMessage());
         });
@@ -79,6 +92,63 @@ public class SerializerFactoryTest extends BaseUnitTest {
             Assert.assertContains("Class is not a subclass of class",
                                   e.getMessage());
         });
+    }
+
+    @Test
+    public void testRegisterConcurrently() throws Exception {
+        String name = "concurrent-serializer-" + System.nanoTime();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Class<?>>> registrations = List.of(
+                    executor.submit(() -> {
+                        ready.countDown();
+                        start.await();
+                        SerializerFactory.register(
+                                name, FakeSerializer.class.getName());
+                        return FakeSerializer.class;
+                    }),
+                    executor.submit(() -> {
+                        ready.countDown();
+                        start.await();
+                        SerializerFactory.register(
+                                name, TextSerializer.class.getName());
+                        return TextSerializer.class;
+                    }));
+
+            Assert.assertTrue(ready.await(5L, TimeUnit.SECONDS));
+            start.countDown();
+
+            int successes = 0;
+            int conflicts = 0;
+            Class<?> registered = null;
+            for (Future<Class<?>> registration : registrations) {
+                try {
+                    registered = registration.get(5L, TimeUnit.SECONDS);
+                    successes++;
+                } catch (ExecutionException e) {
+                    Assert.assertInstanceOf(BackendException.class,
+                                            e.getCause());
+                    Assert.assertContains("Exists serializer:",
+                                          e.getCause().getMessage());
+                    conflicts++;
+                }
+            }
+
+            Assert.assertEquals(1, successes);
+            Assert.assertEquals(1, conflicts);
+            Assert.assertNotNull(registered);
+
+            SerializerFactory.register(name, registered.getName());
+            HugeConfig config = FakeObjects.newConfig();
+            Assert.assertEquals(
+                    registered,
+                    SerializerFactory.serializer(config, name).getClass());
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+        }
     }
 
     public static class FakeSerializer extends BinarySerializer {

@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - master
-      - /^release-.*$/
-      - /^test-.*$/
+      - 'release-*'
+      - 'test-*'
   pull_request:
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        JAVA_VERSION: ['11']
+        JAVA_VERSION: ['17']
 
     steps:
       - name: Install JDK ${{ matrix.JAVA_VERSION }}
@@ -51,11 +51,13 @@ jobs:
 
       - name: Run common test
         run: |
-          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite -DskipCommonsTests=false
+          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite \
+            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
       - name: Run rpc test
         run: |
-          mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite -DskipCommonsTests=false
+          mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite \
+            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0

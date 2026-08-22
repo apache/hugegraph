@@ -6,7 +6,8 @@ README.md covers human-facing deployment/ecosystem context; only consult it on d
 ## Stack & Modules
 
 Apache HugeGraph — Apache TinkerPop 3 compliant graph database.
-Java 11+, Maven 3.5+. Version managed via `${revision}` (currently `1.8.0`).
+Java 17 (currently supported release), Maven 3.6.3+. Version managed via
+`${revision}` (currently `1.7.0`).
 
 ```
 Client (Gremlin / Cypher / REST)

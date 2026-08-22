@@ -422,8 +422,6 @@ public class AssertTest extends BaseUnitTest {
 
         Assert.assertThrows(NullPointerException.class, () -> {
             Assert.assertContains(null, "null");
-        }, e -> {
-            Assert.assertNull(e.getMessage());
         });
     }
 

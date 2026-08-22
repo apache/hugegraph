@@ -106,16 +106,14 @@ public class FixGraphIdController {
     @PostMapping(value = "/update_graph_id/{partition_id}", produces = "application/json")
     public String updateGraphId(@PathVariable(value = "partition_id") int pid,
                                 @RequestBody Map<String, Long> idMap) throws IOException {
+        GraphIdManager.checkGraphIds(idMap, pid);
+
         var handler = (BusinessHandlerImpl) nodeService.getStoreEngine().getBusinessHandler();
         try (var manager = new GraphIdManager(handler, pid)) {
-            idMap.forEach((graphName, graphId) -> {
-                log.info("update graph id of {} to {}, partition, {}", graphName, graphId, pid);
-                var graphIdKey = MetadataKeyHelper.getGraphIDKey(graphName);
-                var slotKey = manager.genCIDSlotKey(GRAPH_ID_PREFIX, graphId);
-                var value = Int64Value.of(graphId);
-                manager.put(graphIdKey, value);
-                manager.put(slotKey, value);
-            });
+            idMap.forEach((graphName, graphId) ->
+                                  log.info("update graph id of {} to {}, partition, {}",
+                                           graphName, graphId, pid));
+            manager.updateGraphIds(idMap);
             manager.flush();
         }
         handler.getKeyCreator().clearCache(pid);

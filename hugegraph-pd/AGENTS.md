@@ -11,8 +11,8 @@ HugeGraph PD (Placement Driver) is a meta server for distributed HugeGraph deplo
 - Metadata coordination using Raft consensus
 
 **Technology Stack**:
-- Java 11+ (required)
-- Apache Maven 3.5+
+- Java 17 (currently supported release; required)
+- Apache Maven 3.6.3+
 - gRPC + Protocol Buffers for RPC communication
 - JRaft (Ant Design's Raft implementation) for consensus
 - RocksDB for metadata persistence
@@ -320,7 +320,7 @@ docker build -f hugegraph-pd/Dockerfile -t hugegraph-pd:latest .
 
 The Dockerfile uses multi-stage build:
 1. Stage 1: Build with Maven
-2. Stage 2: Runtime with OpenJDK 11
+2. Stage 2: Runtime with Eclipse Temurin 17 JRE
 
 ### Running in Docker
 

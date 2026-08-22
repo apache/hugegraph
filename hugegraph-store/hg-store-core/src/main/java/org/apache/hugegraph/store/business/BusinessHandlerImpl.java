@@ -1577,7 +1577,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
         public TxBuilder put(int code, String table, byte[] key, byte[] value) throws
                                                                                HgStoreException {
             try {
-                byte[] targetKey = keyCreator.getKey(this.partId, graph, code, key);
+                byte[] targetKey = keyCreator.getKeyOrCreate(this.partId, graph, code, key);
                 this.op.put(table, targetKey, value);
             } catch (DBStoreException e) {
                 throw new HgStoreException(HgStoreException.EC_RKDB_DOPUT_FAIL, e.toString());
@@ -1642,7 +1642,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
                                                                                  HgStoreException {
 
             try {
-                byte[] targetKey = keyCreator.getKey(this.partId, graph, code, key);
+                byte[] targetKey = keyCreator.getKeyOrCreate(this.partId, graph, code, key);
                 op.merge(table, targetKey, value);
             } catch (DBStoreException e) {
                 throw new HgStoreException(HgStoreException.EC_RKDB_DOMERGE_FAIL, e.toString());

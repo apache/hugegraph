@@ -29,6 +29,8 @@ public interface BaseEnv {
     /* clear the cluster env and all config*/
     void stopCluster();
 
+    void dumpClusterStatus();
+
     ClusterConfig getConf();
 
     void init();

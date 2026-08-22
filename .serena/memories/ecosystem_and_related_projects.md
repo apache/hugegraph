@@ -17,7 +17,7 @@ Sources → hugegraph-loader → hugegraph-server → Hubble / Computer / AI
 
 ## Integrations
 - Big Data: Flink, Spark, HDFS
-- Queries: Gremlin (TinkerPop 3.5.1), OpenCypher, REST API + Swagger UI
+- Queries: Gremlin (TinkerPop 3.8.1), OpenCypher, REST API + Swagger UI
 - Storage: RocksDB (default), HStore (distributed)
 
-## Version: Server 1.7.0, TinkerPop 3.5.1, Java 11+
+## Version: Server 1.7.0, TinkerPop 3.8.1, Java 17

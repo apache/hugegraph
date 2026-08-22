@@ -29,7 +29,7 @@
 - Dist: `hugegraph-store/hg-store-dist/src/assembly/static/`
 
 ## CI Workflows (.github/workflows/)
-- `server-ci.yml` — Server tests (matrix: memory/rocksdb/hbase × Java 11)
+- `server-ci.yml` — Server tests (matrix: memory/rocksdb/hbase × Java 17)
 - `pd-store-ci.yml` — PD, Store & HStore tests
 - `commons-ci.yml` — Commons tests
 - `cluster-test-ci.yml` — Cluster integration

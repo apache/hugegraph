@@ -10,7 +10,8 @@ HugeGraph Server is the graph engine layer of Apache HugeGraph, consisting of:
 - **Backend Interface**: Abstraction layer for pluggable storage backends
 - **Storage Backend Implementations**: RocksDB (default), HStore (distributed), HBase (deprecated; planned for removal in 2.0), and Memory (test-only)
 
-Technology: Java 11+, Maven 3.5+, Apache TinkerPop 3.5.1, Jersey 3.0 (REST), gRPC (distributed communication)
+Technology: Java 17 (currently supported release), Maven 3.6.3+,
+Apache TinkerPop 3.8.1, Jersey 3.0 (REST), gRPC (distributed communication)
 
 ## Build Commands
 

@@ -22,6 +22,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Test;
 
@@ -81,9 +82,11 @@ public class DateUtilTest extends BaseUnitTest {
     @Test
     public void testParseCornerDateValue() throws InterruptedException {
         final CountDownLatch latch = new CountDownLatch(1);
+        final Date expected = DateUtil.parse("0", "yyyy");
         int threadCount = 10;
         List<Thread> threads = new ArrayList<>(threadCount);
         AtomicInteger errorCount = new AtomicInteger(0);
+        AtomicReference<Throwable> firstError = new AtomicReference<>();
         for (int t = 0; t < threadCount; t++) {
             Thread thread = new Thread(() -> {
                 try {
@@ -92,9 +95,9 @@ public class DateUtilTest extends BaseUnitTest {
                     throw new RuntimeException(e);
                 }
                 try {
-                    Assert.assertEquals(new Date(-62167248343000L),
-                                        DateUtil.parse("0", "yyyy"));
-                } catch (Exception e) {
+                    Assert.assertEquals(expected, DateUtil.parse("0", "yyyy"));
+                } catch (Throwable e) {
+                    firstError.compareAndSet(null, e);
                     errorCount.incrementAndGet();
                 }
             });
@@ -109,6 +112,15 @@ public class DateUtilTest extends BaseUnitTest {
             thread.join();
         }
 
+        Throwable error = firstError.get();
+        if (error != null) {
+            AssertionError assertion = new AssertionError(String.format(
+                                      "Expected concurrent parses to match " +
+                                      "baseline result, but got %s failures",
+                                      errorCount.get()));
+            assertion.initCause(error);
+            throw assertion;
+        }
         Assert.assertEquals(0, errorCount.get());
     }
 

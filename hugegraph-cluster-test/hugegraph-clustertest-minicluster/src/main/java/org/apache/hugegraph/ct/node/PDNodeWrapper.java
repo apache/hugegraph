@@ -24,7 +24,7 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.PD_JAR_PREFIX;
 import static org.apache.hugegraph.ct.base.ClusterConstant.PD_LIB_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.PD_TEMPLATE_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.getFileInDir;
-import static org.apache.hugegraph.ct.base.ClusterConstant.isJava11OrHigher;
+import static org.apache.hugegraph.ct.base.ClusterConstant.isJava17OrHigher;
 
 import java.io.File;
 import java.io.IOException;
@@ -62,8 +62,8 @@ public class PDNodeWrapper extends AbstractNodeWrapper {
             File stdoutFile = new File(getLogPath());
             List<String> startCmd = new ArrayList<>();
             startCmd.add(JAVA_CMD);
-            if (!isJava11OrHigher()) {
-                LOG.error("Please make sure that the JDK is installed and the version >= 11");
+            if (!isJava17OrHigher()) {
+                LOG.error("Please make sure that the JDK is installed and the version >= 17");
                 return;
             }
 

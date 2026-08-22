@@ -15,10 +15,10 @@ jobs:
     env:
       USE_STAGE: 'false'
     steps:
-      - name: Install JDK 11
+      - name: Install JDK 17
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
@@ -68,10 +68,10 @@ jobs:
       REPORT_DIR: target/site/jacoco
 
     steps:
-      - name: Install JDK 11
+      - name: Install JDK 17
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
@@ -99,6 +99,31 @@ jobs:
       - name: Run core test
         run: |
           mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-core-test
+
+      - name: Verify Surefire single-class routing
+        run: |
+          SUREFIRE_DIR=hugegraph-pd/hg-pd-test/target/surefire-reports
+          REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.pd.core.PDConfigTest.xml"
+          rm -f "$REPORT"
+          mvn test -pl hugegraph-pd/hg-pd-test -am \
+            -P pd-core-test -Dtest=PDConfigTest -ntp
+          test -s "$REPORT" || {
+            echo "::error::PD single-class test produced no report"
+            exit 1
+          }
+          NEGATIVE_LOG=$(mktemp)
+          trap 'rm -f "$NEGATIVE_LOG"' EXIT
+          if mvn test -pl hugegraph-pd/hg-pd-test -am \
+            -P pd-core-test -Dtest=NoSuchJava17ContractTest -ntp \
+            >"$NEGATIVE_LOG" 2>&1; then
+            cat "$NEGATIVE_LOG"
+            echo "::error::Surefire accepted a missing PD test class"
+            exit 1
+          fi
+          cat "$NEGATIVE_LOG"
+          grep -Fq 'No tests matching pattern "NoSuchJava17ContractTest"' \
+            "$NEGATIVE_LOG"
+          grep -Fq '(pd-core-test) @ hg-pd-test' "$NEGATIVE_LOG"
 
       # The above tests do not require starting a PD instance.
 
@@ -145,6 +170,23 @@ jobs:
         run: |
           mvn test -pl hugegraph-pd/hg-pd-test -am -P pd-rest-test
 
+      - name: Show PD diagnostics on failure
+        if: failure()
+        run: |
+          VERSION=$(grep -E '^VersionInBash=' \
+            hugegraph-commons/hugegraph-common/src/main/resources/version.properties | cut -d'=' -f2-)
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]] || {
+            echo "Invalid VersionInBash: $VERSION"
+            exit 1
+          }
+          PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION
+          bash $TRAVIS_DIR/ci-service-utils.sh dump "$PD_DIR" HugeGraphPD || true
+          find . -path '*/surefire-reports/*' -type f \
+            \( -name '*.txt' -o -name '*.xml' \) | sort | while read -r report; do
+            echo "--- tail -n 120 $report ---"
+            tail -n 120 "$report" || true
+          done
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0
         with:
@@ -160,10 +202,10 @@ jobs:
       REPORT_DIR: target/site/jacoco
 
     steps:
-      - name: Install JDK 11
+      - name: Install JDK 17
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
@@ -188,6 +230,31 @@ jobs:
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+
+      - name: Verify Surefire single-class routing
+        run: |
+          SUREFIRE_DIR=hugegraph-store/hg-store-test/target/surefire-reports
+          REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.store.raftcore.ZeroByteStringHelperTest.xml"
+          rm -f "$REPORT"
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-raftcore-test -Dtest=ZeroByteStringHelperTest -ntp
+          test -s "$REPORT" || {
+            echo "::error::Store single-class test produced no report"
+            exit 1
+          }
+          NEGATIVE_LOG=$(mktemp)
+          trap 'rm -f "$NEGATIVE_LOG"' EXIT
+          if mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-raftcore-test -Dtest=NoSuchJava17ContractTest -ntp \
+            >"$NEGATIVE_LOG" 2>&1; then
+            cat "$NEGATIVE_LOG"
+            echo "::error::Surefire accepted a missing Store test class"
+            exit 1
+          fi
+          cat "$NEGATIVE_LOG"
+          grep -Fq 'No tests matching pattern "NoSuchJava17ContractTest"' \
+            "$NEGATIVE_LOG"
+          grep -Fq '(store-raftcore-test) @ hg-store-test' "$NEGATIVE_LOG"
 
       - name: Check startup test prerequisites (Store)
         id: store-preflight
@@ -250,6 +317,25 @@ jobs:
         run: |
           mvn test -pl hugegraph-store/hg-store-test -am -P store-raftcore-test
 
+      - name: Show Store diagnostics on failure
+        if: failure()
+        run: |
+          VERSION=$(grep -E '^VersionInBash=' \
+            hugegraph-commons/hugegraph-common/src/main/resources/version.properties | cut -d'=' -f2-)
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]] || {
+            echo "Invalid VersionInBash: $VERSION"
+            exit 1
+          }
+          PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION
+          STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION
+          bash $TRAVIS_DIR/ci-service-utils.sh dump "$PD_DIR" HugeGraphPD || true
+          bash $TRAVIS_DIR/ci-service-utils.sh dump "$STORE_DIR" HugeGraphStore || true
+          find . -path '*/surefire-reports/*' -type f \
+            \( -name '*.txt' -o -name '*.xml' \) | sort | while read -r report; do
+            echo "--- tail -n 120 $report ---"
+            tail -n 120 "$report" || true
+          done
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0
         with:
@@ -263,13 +349,25 @@ jobs:
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
       BACKEND: hstore
-      RELEASE_BRANCH: ${{ startsWith(github.ref_name, 'release-') || startsWith(github.ref_name, 'test-') || startsWith(github.base_ref, 'release-') }}
+      RUN_TINKERPOP_TESTS: >-
+        ${{
+          startsWith(github.ref_name, 'release-') ||
+          startsWith(github.ref_name, 'test-') ||
+          startsWith(github.head_ref, 'release-') ||
+          startsWith(github.head_ref, 'test-') ||
+          startsWith(github.base_ref, 'release-') ||
+          startsWith(github.base_ref, 'test-') ||
+          github.base_ref == 'task/tinkerpop-3.7-upgrade' ||
+          github.head_ref == 'task/tinkerpop-3.7-upgrade' ||
+          github.base_ref == 'task/gsoc-phase2-java17' ||
+          github.head_ref == 'task/gsoc-phase2-java17'
+        }}
 
     steps:
-      - name: Install JDK 11
+      - name: Install JDK 17
         uses: actions/setup-java@v3
         with:
-          java-version: '11'
+          java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
@@ -297,6 +395,39 @@ jobs:
 
       - name: Prepare env and service
         run: |
+          VERSION=$(grep -E '^VersionInBash=' \
+            hugegraph-commons/hugegraph-common/src/main/resources/version.properties | cut -d'=' -f2-)
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]] || {
+            echo "Invalid VersionInBash: $VERSION"
+            exit 1
+          }
+          STORE_CONFIG=hugegraph-store/apache-hugegraph-store-$VERSION/conf/application-pd.yml
+          [[ -f "$STORE_CONFIG" ]] || {
+            echo "Store config not found: $STORE_CONFIG"
+            exit 1
+          }
+          [[ $(grep -Ec '^[[:space:]]*min_write_buffer_number_to_merge:' \
+                       "$STORE_CONFIG") -eq 1 ]] || {
+            echo "Unable to locate RocksDB config insertion point: $STORE_CONFIG"
+            exit 1
+          }
+          # Bound file-handle caching for this CI topology without changing
+          # the released Store default for deployments with different limits.
+          sed -i \
+            -e '/^[[:space:]]*max_open_files:/d' \
+            -e '/^[[:space:]]*min_write_buffer_number_to_merge:/a\  max_open_files: 4096' \
+            "$STORE_CONFIG"
+          grep -n 'max_open_files' "$STORE_CONFIG"
+
+          SOFT_OPEN_FILES=$(ulimit -Sn)
+          echo "[ci] open-file limit before HStore startup:" \
+               "soft=$SOFT_OPEN_FILES, hard=$(ulimit -Hn)"
+          if [[ "$SOFT_OPEN_FILES" != "unlimited" ]] &&
+             (( SOFT_OPEN_FILES < 65535 )); then
+            ulimit -Sn 65535
+          fi
+          echo "[ci] open-file limit for HStore:" \
+               "soft=$(ulimit -Sn), hard=$(ulimit -Hn)"
           $TRAVIS_DIR/install-backend.sh $BACKEND
 
       - name: Run unit test
@@ -304,6 +435,9 @@ jobs:
           $TRAVIS_DIR/run-unit-test.sh $BACKEND
 
       - name: Run core test
+        # Bound stuck HStore scans so the diagnostic steps below can run
+        # before the GitHub-hosted job reaches its global execution limit.
+        timeout-minutes: 45
         run: |
           $TRAVIS_DIR/run-core-test.sh $BACKEND
 
@@ -316,10 +450,167 @@ jobs:
         run: |
           $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR
 
-      - name: Run TinkerPop test
-        if: ${{ env.RELEASE_BRANCH == 'true' }}
+      # Include HStore in the upgrade compatibility gate. The dedicated HStore
+      # service setup above makes its structure/process suites exercise the
+      # distributed backend rather than only the memory and RocksDB paths.
+      - name: Run TinkerPop structure test
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
+        # The HStore suite needs close to one hour before global cleanup, so
+        # keep enough headroom to finish cleanup and emit Surefire results.
+        timeout-minutes: 120
         run: |
-          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND tinkerpop
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND structure
+
+      - name: Run TinkerPop process standard test
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
+        timeout-minutes: 120
+        run: |
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-standard
+
+      - name: Run TinkerPop process feature test
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
+        timeout-minutes: 120
+        run: |
+          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-feature
+
+      - name: Collect HStore diagnostics on failure or timeout
+        if: ${{ failure() || cancelled() }}
+        timeout-minutes: 10
+        run: |
+          set +e
+          DIAGNOSTICS_DIR=hstore-diagnostics
+          mkdir -p "$DIAGNOSTICS_DIR/threads" \
+                   "$DIAGNOSTICS_DIR/surefire" \
+                   "$DIAGNOSTICS_DIR/services"
+          exec > >(tee -a "$DIAGNOSTICS_DIR/summary.log") 2>&1
+
+          VERSION=$(grep -E '^VersionInBash=' \
+            hugegraph-commons/hugegraph-common/src/main/resources/version.properties | cut -d'=' -f2-)
+          [[ "$VERSION" =~ ^[0-9A-Za-z._-]+$ ]] || {
+            echo "Invalid VersionInBash: $VERSION"
+            exit 0
+          }
+          PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION
+          STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION
+
+          echo "::group::HugeGraphStore file descriptors"
+          STORE_PID_FILE="$STORE_DIR/bin/pid"
+          if [[ -f "$STORE_PID_FILE" ]]; then
+            STORE_PID=$(tr -d '[:space:]' < "$STORE_PID_FILE")
+            if [[ "$STORE_PID" =~ ^[0-9]+$ ]] &&
+               [[ -r "/proc/$STORE_PID/limits" ]] &&
+               [[ -d "/proc/$STORE_PID/fd" ]]; then
+              cat "/proc/$STORE_PID/limits" |
+                tee "$DIAGNOSTICS_DIR/services/store-process-limits.txt" || true
+
+              FD_TARGETS="$DIAGNOSTICS_DIR/services/store-fd-targets.txt"
+              find "/proc/$STORE_PID/fd" -mindepth 1 -maxdepth 1 -type l \
+                -printf '%l\n' >"$FD_TARGETS" \
+                2>"$DIAGNOSTICS_DIR/services/store-fd-errors.txt" || true
+              ls -l "/proc/$STORE_PID/fd" \
+                >"$DIAGNOSTICS_DIR/services/store-fds.txt" 2>&1 || true
+
+              STORE_FD_COUNT=$(wc -l < "$FD_TARGETS" | tr -d '[:space:]')
+              echo "[ci] Store PID $STORE_PID open fd count: $STORE_FD_COUNT" |
+                tee "$DIAGNOSTICS_DIR/services/store-fd-count.txt" || true
+
+              awk '
+                /\.sst/ { types["rocksdb-sst"]++; next }
+                /^socket:/ { types["socket"]++; next }
+                /^pipe:/ { types["pipe"]++; next }
+                /^anon_inode:/ { types["anon-inode"]++; next }
+                /\/storage\// { types["rocksdb-other"]++; next }
+                { types["other"]++ }
+                END {
+                  for (type in types) {
+                    print types[type], type
+                  }
+                }
+              ' "$FD_TARGETS" | sort -nr |
+                tee "$DIAGNOSTICS_DIR/services/store-fd-types.txt" || true
+
+              sort "$FD_TARGETS" | uniq -c | sort -nr \
+                >"$DIAGNOSTICS_DIR/services/store-fd-target-counts.txt" || true
+              echo "[ci] Store top fd targets:"
+              head -n 50 \
+                "$DIAGNOSTICS_DIR/services/store-fd-target-counts.txt" || true
+            else
+              echo "[ci] Store PID is unavailable for fd diagnostics: $STORE_PID"
+            fi
+          else
+            echo "[ci] Store pid file not found: $STORE_PID_FILE"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Runner process snapshot"
+          ps -eo pid,ppid,stat,etime,%cpu,%mem,args --sort=pid |
+            tee "$DIAGNOSTICS_DIR/processes.txt" || true
+          (ss -ltnp || netstat -ltnp || true) 2>&1 |
+            tee "$DIAGNOSTICS_DIR/listening-ports.txt" || true
+          echo "::endgroup::"
+
+          echo "::group::Java thread dumps"
+          if command -v jcmd >/dev/null 2>&1; then
+            jcmd -l | tee "$DIAGNOSTICS_DIR/jcmd-list.txt" || true
+            while read -r pid _; do
+              [[ "$pid" =~ ^[0-9]+$ ]] || continue
+              kill -0 "$pid" >/dev/null 2>&1 || continue
+              thread_dump="$DIAGNOSTICS_DIR/threads/java-$pid.txt"
+              timeout 30s jcmd "$pid" Thread.print -l >"$thread_dump" 2>&1
+              if [[ $? -ne 0 ]] && command -v jstack >/dev/null 2>&1; then
+                timeout 30s jstack -l "$pid" >"$thread_dump" 2>&1 || true
+              fi
+              echo "[ci] captured Java thread dump: $thread_dump"
+            done < "$DIAGNOSTICS_DIR/jcmd-list.txt"
+          else
+            echo "[ci] jcmd is unavailable"
+          fi
+          echo "::endgroup::"
+
+          bash $TRAVIS_DIR/ci-service-utils.sh dump "$PD_DIR" HugeGraphPD || true
+          bash $TRAVIS_DIR/ci-service-utils.sh dump "$STORE_DIR" HugeGraphStore || true
+          bash $TRAVIS_DIR/ci-service-utils.sh dump \
+            "$SERVER_DIR" HugeGraphServer || true
+
+          for service in \
+            "pd:$PD_DIR/logs" \
+            "store:$STORE_DIR/logs" \
+            "server:$SERVER_DIR/logs"; do
+            service_name="${service%%:*}"
+            log_dir="${service#*:}"
+            if [[ -d "$log_dir" ]]; then
+              mkdir -p "$DIAGNOSTICS_DIR/services/$service_name"
+              cp -a "$log_dir/." \
+                "$DIAGNOSTICS_DIR/services/$service_name/" || true
+            fi
+          done
+
+          echo "::group::Surefire reports"
+          while read -r report; do
+            destination="$DIAGNOSTICS_DIR/surefire/${report#./}"
+            mkdir -p "$(dirname "$destination")"
+            cp "$report" "$destination" || true
+            echo "--- tail -n 200 $report ---"
+            tail -n 200 "$report" || true
+          done < <(
+            find . -path "./$DIAGNOSTICS_DIR" -prune -o \
+              -path '*/surefire-reports/*' -type f \
+              \( -name '*.txt' -o -name '*.xml' -o \
+                 -name '*.dump' -o -name '*.dumpstream' \) \
+              -print | sort
+          )
+          echo "::endgroup::"
+          exit 0
+
+      - name: Upload HStore diagnostics
+        if: ${{ failure() || cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hstore-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: hstore-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0

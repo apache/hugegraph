@@ -17,7 +17,7 @@
 hosts: [localhost]
 port: 8182
 serializer: {
-  className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV1d0,
+  className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV1,
   config: {
     serializeResultToString: false,
     # The duplication of HugeGraphIoRegistry is meant to fix a bug in the
@@ -28,3 +28,9 @@ serializer: {
     ]
   }
 }
+# Typed GraphSON fallback for clients that require @type/@value for
+# File/Id/simple typed values:
+# use org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV1 in
+# place of GraphSONUntypedMessageSerializerV1, and keep HugeGraphIoRegistry.
+# Full HugeGraph internal object typed GraphSON for schema/Vertex/Edge/Path
+# remains follow-up scope; keep untyped serializers for normal remote objects.

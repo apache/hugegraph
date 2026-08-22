@@ -30,6 +30,7 @@ import org.apache.tinkerpop.gremlin.structure.GraphConstructionTest;
 import org.apache.tinkerpop.gremlin.structure.GraphTest;
 import org.apache.tinkerpop.gremlin.structure.PropertyTest;
 import org.apache.tinkerpop.gremlin.structure.SerializationTest;
+import org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest;
 import org.apache.tinkerpop.gremlin.structure.TransactionTest;
 import org.apache.tinkerpop.gremlin.structure.VariablesTest;
 import org.apache.tinkerpop.gremlin.structure.VertexPropertyTest;
@@ -64,7 +65,8 @@ public class StructureBasicSuite extends AbstractGremlinSuite {
     /**
      * This list of tests in the suite that will be executed.
      * Gremlin developers should add to this list
-     * as needed to enforce tests upon implementations.
+     * as needed to enforce tests upon implementations. This list is synchronized
+     * with TinkerPop 3.8.1's official StructureStandardSuite.
      */
     private static final Class<?>[] ALL_TESTS = new Class<?>[]{
             CommunityGeneratorTest.class,
@@ -94,6 +96,7 @@ public class StructureBasicSuite extends AbstractGremlinSuite {
             SerializationTest.class,
             StarGraphTest.class,
             TransactionTest.class,
+            TransactionMultiThreadedTest.class,
             VertexTest.class
     };
 
