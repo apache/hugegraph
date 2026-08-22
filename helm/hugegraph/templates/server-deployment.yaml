@@ -54,9 +54,14 @@ spec:
         {{- include "hugegraph.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
         {{- with .Values.server.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
-      {{- with .Values.server.podAnnotations }}
+      {{- if or .Values.server.auth.enabled .Values.server.podAnnotations }}
       annotations:
-        {{- toYaml . | nindent 8 }}
+        {{- if .Values.server.auth.enabled }}
+        # Rolls Server pods when the resolved auth Secrets change, so rotating
+        # an existingSecret takes effect without a manual restart.
+        checksum/auth: {{ include "hugegraph.server.authChecksum" . | quote }}
+        {{- end }}
+        {{- with .Values.server.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
       {{- end }}
     spec:
       automountServiceAccountToken: {{ get (get .Values.server "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}

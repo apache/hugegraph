@@ -76,6 +76,10 @@ This deploys 3 PD + 3 Store + 3 Server, preserves the image's automatic JVM
 sizing, and sets no resource requests or limits. Set resources before
 production use.
 
+The command examples in this document assume the release is named
+`hugegraph`. With a different release name, substitute the release-prefixed
+resource names (`kubectl get svc,secret -n <namespace>` lists them).
+
 **Authentication is enabled by default.** The chart creates a kept Secret
 named `<release>-admin` (for example `hugegraph-admin`) with a random
 password unless `server.auth.admin.existingSecret` points at a pre-created Secret.
@@ -111,7 +115,7 @@ A fresh install seeds PD with a partition shard count of 3 when
 default of 1. The seed applies at first bootstrap only; see Partition
 Sharding below.
 
-This first chart is version `0.1.0`. While the contribution is a draft, its
+This chart is at an early 0.1.x version. While the contribution is a draft, its
 component image tags and `appVersion` track `latest` with pull policy `Always`.
 Before stable publication, pin all three component tags and `appVersion` to the
 next HugeGraph release and switch the component pull policies to
@@ -140,6 +144,21 @@ node topology, and storage class before production use.
 ```bash
 helm upgrade hugegraph ./helm/hugegraph --namespace hugegraph --reuse-values
 ```
+
+Upgrading to 0.1.1 from an earlier revision rolls two workloads once:
+
+- **PD** restarts one pod at a time because the Pod template gains the
+  `wait-for-pd-dns` init container. On current images a restarted PD returns
+  with a new Pod IP that peers holding older allowlists may reject (see
+  Limitations). If PDs log `Blocked connection` after the roll, delete all PD
+  pods at once — the DNS gate makes the parallel cold start deterministic.
+  For a maintenance-window upgrade, set `pd.updateStrategy.type=OnDelete`
+  and restart the pods yourself.
+- **Server** rolls because the Pod template gains the `checksum/auth`
+  annotation, and once more on the first upgrade after a fresh install, when
+  the checksum first observes the install-created Secrets. Template-only
+  pipelines (`helm template`, GitOps renderers) never see live Secrets, so
+  there the annotation is a constant and Secret rotation does not roll pods.
 
 Every optional field stays optional, so a release created by an earlier
 revision continues to render under `--reuse-values`. Note that `--reuse-values`
@@ -737,10 +756,12 @@ kubectl -n <provisioner-namespace> get pods
 ### Server Ready but Queries Fail
 
 The Server readiness probe uses `/versions`, which can report ready before the
-graph is fully able to serve index-backed queries. Confirm the graph is live:
+graph is fully able to serve index-backed queries. Confirm the graph is live
+(the server image does not ship `curl`, so probe through a port-forward):
 
 ```bash
-kubectl exec <server-pod> -c server -- curl -s localhost:8080/graphs
+kubectl port-forward -n hugegraph svc/hugegraph-server 8080:8080
+curl -s --user "admin:${PASSWORD}" http://127.0.0.1:8080/graphs
 ```
 
 ### Queries Fail with "Could not rebind" Right After Creating a Graph
@@ -800,6 +821,17 @@ independently of the release name.
 
 ## Limitations
 
+- PD builds its raft RPC allowlist by resolving peer hostnames once at
+  startup. The chart gates PD start on all peer DNS names resolving
+  (`wait-for-pd-dns`), which makes first boot deterministic, but a PD Pod
+  rescheduled to a new IP later can still be rejected by peers until they
+  restart and re-resolve; a dynamic refresh is upstream image work.
+- The PD management REST endpoints (`/v1/members`, `/v1/stores`) reject
+  requests on current images (`invalid service name`), and unauthenticated
+  GETs return HTTP 200 with an `Unauthorized` JSON body. Until that is
+  resolved upstream, the operator-triggered Disaster Recovery flow below may
+  be unavailable; rely on `helm test`, Pod readiness, and Server APIs for
+  health checks.
 - No TLS, backups, Operator, multi-cluster support, automatic leader transfer,
   or a complete monitoring stack. Store recovery is manual on current builds:
   re-replication after Store loss, leader balancing, and partition

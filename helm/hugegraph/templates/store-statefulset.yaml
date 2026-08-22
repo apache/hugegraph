@@ -26,6 +26,14 @@ spec:
   serviceName: {{ include "hugegraph.store.name" . }}
   replicas: {{ .Values.store.replicas }}
   podManagementPolicy: Parallel
+  {{- with .Values.store.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.store.persistentVolumeClaimRetentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "hugegraph.selectorLabels" . | nindent 6 }}

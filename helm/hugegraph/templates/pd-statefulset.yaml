@@ -26,6 +26,14 @@ spec:
   serviceName: {{ include "hugegraph.pd.name" . }}
   replicas: {{ .Values.pd.replicas }}
   podManagementPolicy: Parallel
+  {{- with .Values.pd.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.pd.persistentVolumeClaimRetentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "hugegraph.selectorLabels" . | nindent 6 }}
@@ -74,6 +82,59 @@ spec:
         {{- toYaml .Values.pd.affinity | nindent 8 }}
       {{- else }}
       {{- with include "hugegraph.antiAffinity" (dict "mode" .Values.pd.antiAffinity "component" "pd" "labels" (include "hugegraph.selectorLabels" . | fromYaml)) }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- end }}
+      {{- if .Values.pd.waitEnabled }}
+      initContainers:
+        # Gate PD start on all peer DNS names resolving. PD builds its raft RPC
+        # allowlist by resolving peer hostnames once at boot; with a Parallel
+        # podManagementPolicy a PD can start before its peers' A records are
+        # published and freeze a partial allowlist that blocks the leader. The
+        # PD headless Service sets publishNotReadyAddresses: true, so peer
+        # records appear as soon as pods get IPs (before readiness), keeping
+        # this gate free of a circular wait.
+        - name: wait-for-pd-dns
+          image: {{ .Values.pd.waitImage | quote }}
+          {{- with .Values.pd.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              PEERS=$(echo "{{ include "hugegraph.pd.peerHostsList" . }}" | tr ',' ' ')
+              TIMEOUT={{ .Values.pd.waitTimeoutSeconds | default 300 }}
+              DEADLINE=$(( $(date +%s) + TIMEOUT ))
+              # busybox nslookup ignores resolv.conf search domains, so the
+              # short <pod>.<svc>.<ns>.svc names NXDOMAIN even when published.
+              # Derive the cluster domain and retry against the FQDN.
+              CLUSTER_DOMAIN=$(awk '/^search/ {for(i=2;i<=NF;i++) if ($i ~ /^svc\./) {sub(/^svc\./,"",$i); print $i; exit}}' /etc/resolv.conf 2>/dev/null || true)
+              resolves() {
+                nslookup "$1" >/dev/null 2>&1 && return 0
+                if [ -n "${CLUSTER_DOMAIN}" ]; then
+                  nslookup "$1.${CLUSTER_DOMAIN}" >/dev/null 2>&1 && return 0
+                fi
+                nslookup "$1.cluster.local" >/dev/null 2>&1
+              }
+              echo "Waiting for all PD peer DNS to resolve: ${PEERS}"
+              for host in ${PEERS}; do
+                until resolves "${host}"; do
+                  if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
+                    echo "Timed out after ${TIMEOUT}s waiting for PD peer DNS: ${host}" >&2
+                    echo "Check PD Pods: kubectl get pods -l app.kubernetes.io/component=pd" >&2
+                    exit 1
+                  fi
+                  echo "Waiting for DNS: ${host}"
+                  sleep 3
+                done
+                echo "Resolved: ${host}"
+              done
+              echo "All PD peer DNS resolved."
+          {{- with .Values.pd.waitResources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       {{- end }}
       containers:
         - name: pd

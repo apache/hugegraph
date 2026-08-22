@@ -87,6 +87,55 @@
         }
       }
     },
+    "updateStrategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "RollingUpdate",
+            "OnDelete"
+          ]
+        },
+        "rollingUpdate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "partition": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "persistentVolumeClaimRetentionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "whenDeleted": {
+          "type": "string",
+          "enum": [
+            "Retain",
+            "Delete"
+          ]
+        },
+        "whenScaled": {
+          "type": "string",
+          "enum": [
+            "Retain",
+            "Delete"
+          ]
+        }
+      }
+    },
     "resourceList": {
       "type": "object",
       "additionalProperties": {
@@ -238,6 +287,7 @@
         "resources",
         "antiAffinity",
         "pdb",
+        "waitImage",
         "probes"
       ],
       "properties": {
@@ -251,6 +301,26 @@
         },
         "javaOpts": {
           "type": "string"
+        },
+        "waitEnabled": {
+          "type": "boolean"
+        },
+        "waitImage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "waitResources": {
+          "$ref": "#/definitions/resources"
+        },
+        "waitTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "updateStrategy": {
+          "$ref": "#/definitions/updateStrategy"
+        },
+        "persistentVolumeClaimRetentionPolicy": {
+          "$ref": "#/definitions/persistentVolumeClaimRetentionPolicy"
         },
         "partition": {
           "type": "object",
@@ -447,6 +517,12 @@
         "waitTimeoutSeconds": {
           "type": "integer",
           "minimum": 1
+        },
+        "updateStrategy": {
+          "$ref": "#/definitions/updateStrategy"
+        },
+        "persistentVolumeClaimRetentionPolicy": {
+          "$ref": "#/definitions/persistentVolumeClaimRetentionPolicy"
         },
         "nodeSelector": {
           "type": "object"

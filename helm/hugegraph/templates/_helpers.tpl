@@ -217,6 +217,34 @@ PD REST endpoints for Server storage-readiness checks.
 {{- end }}
 
 {{/*
+PD peer hostnames without port, for the PD-start DNS gate init container:
+pod-0.<svc>.<ns>.svc,pod-1.<svc>.<ns>.svc,...
+Derived from hugegraph.pd.raftPeersList so it tracks pd.replicas.
+*/}}
+{{- define "hugegraph.pd.peerHostsList" -}}
+{{- regexReplaceAll ":[0-9]+" (include "hugegraph.pd.raftPeersList" .) "" -}}
+{{- end }}
+
+{{/*
+Checksum for the Server pod template so rotating the referenced auth Secrets
+rolls Server pods. Hashes Secret names, keys, and metadata.resourceVersion -
+never Secret data - so the annotation carries no credential-derived material.
+Lookup-based and therefore best-effort: plain `helm template` (and
+template-only GitOps renderers) see no live Secrets and emit a constant; the
+first upgrade after a fresh install rolls Server once as the checksum picks
+up the Secrets created by that install; out-of-band rotation of an
+existingSecret applies on the next `helm upgrade`.
+*/}}
+{{- define "hugegraph.server.authChecksum" -}}
+{{- $parts := list (include "hugegraph.server.authSecretName" .) (include "hugegraph.server.authSecretKey" .) (include "hugegraph.server.authTokenSecretName" .) (include "hugegraph.server.authTokenSecretKey" .) -}}
+{{- $admin := lookup "v1" "Secret" .Release.Namespace (include "hugegraph.server.authSecretName" .) -}}
+{{- if $admin -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $admin) -}}{{- end -}}
+{{- $token := lookup "v1" "Secret" .Release.Namespace (include "hugegraph.server.authTokenSecretName" .) -}}
+{{- if $token -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $token) -}}{{- end -}}
+{{- join "|" $parts | sha256sum -}}
+{{- end }}
+
+{{/*
 Initial store list for PD bootstrap: store-0.svc.ns.svc:8500,...
 */}}
 {{- define "hugegraph.store.initialStoreList" -}}
