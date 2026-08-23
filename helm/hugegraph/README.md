@@ -145,20 +145,21 @@ node topology, and storage class before production use.
 helm upgrade hugegraph ./helm/hugegraph --namespace hugegraph --reuse-values
 ```
 
-Upgrading to 0.1.1 from an earlier revision rolls two workloads once:
+Any upgrade that changes a Pod template rolls that workload once. Two cases
+are worth knowing about in advance:
 
-- **PD** restarts one pod at a time because the Pod template gains the
-  `wait-for-pd-dns` init container. On current images a restarted PD returns
-  with a new Pod IP that peers holding older allowlists may reject (see
-  Limitations). If PDs log `Blocked connection` after the roll, delete all PD
-  pods at once — the DNS gate makes the parallel cold start deterministic.
-  For a maintenance-window upgrade, set `pd.updateStrategy.type=OnDelete`
-  and restart the pods yourself.
-- **Server** rolls because the Pod template gains the `checksum/auth`
-  annotation, and once more on the first upgrade after a fresh install, when
-  the checksum first observes the install-created Secrets. Template-only
-  pipelines (`helm template`, GitOps renderers) never see live Secrets, so
-  there the annotation is a constant and Secret rotation does not roll pods.
+- **PD** restarts one pod at a time whenever its Pod template changes. On
+  current images a restarted PD returns with a new Pod IP that peers holding
+  older allowlists may reject (see Limitations). If PDs log
+  `Blocked connection` after a roll, delete all PD pods at once — the
+  `wait-for-pd-dns` gate makes the parallel cold start deterministic. For a
+  maintenance-window upgrade, set `pd.updateStrategy.type=OnDelete` and
+  restart the pods yourself.
+- **Server** rolls once on the first `helm upgrade` after a fresh install,
+  when the `checksum/auth` annotation first observes the install-created
+  Secrets. Template-only pipelines (`helm template`, GitOps renderers) never
+  see live Secrets, so there the annotation is a constant and Secret rotation
+  does not roll pods.
 
 Every optional field stays optional, so a release created by an earlier
 revision continues to render under `--reuse-values`. Note that `--reuse-values`
