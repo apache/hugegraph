@@ -287,7 +287,6 @@
         "resources",
         "antiAffinity",
         "pdb",
-        "waitImage",
         "probes"
       ],
       "properties": {

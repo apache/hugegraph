@@ -83,7 +83,7 @@ spec:
       {{- else }}
       {{- with include "hugegraph.antiAffinity" (dict "mode" .Values.pd.antiAffinity "component" "pd" "labels" (include "hugegraph.selectorLabels" . | fromYaml)) }}{{ . | trim | nindent 6 }}{{- end }}
       {{- end }}
-      {{- if .Values.pd.waitEnabled }}
+      {{- if ne .Values.pd.waitEnabled false }}
       initContainers:
         # Gate PD start on all peer DNS names resolving. PD builds its raft RPC
         # allowlist by resolving peer hostnames once at boot; with a Parallel
@@ -93,7 +93,7 @@ spec:
         # records appear as soon as pods get IPs (before readiness), keeping
         # this gate free of a circular wait.
         - name: wait-for-pd-dns
-          image: {{ .Values.pd.waitImage | quote }}
+          image: {{ .Values.pd.waitImage | default "curlimages/curl:8.5.0" | quote }}
           {{- with .Values.pd.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}

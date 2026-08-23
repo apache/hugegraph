@@ -115,6 +115,8 @@ pd:
   waitEnabled: true
   # The gate needs an nslookup whose exit code reflects NXDOMAIN; busybox
   # older than 1.30 exits 0 on failure and would make the gate a no-op.
+  # Optional in the schema and defaulted in the template so releases created
+  # before this field existed keep rendering under --reuse-values.
   waitImage: curlimages/curl:8.5.0
   # Bound the peer-DNS wait so a cluster whose PD DNS never publishes fails
   # visibly instead of sitting in Init:0/1 forever.
