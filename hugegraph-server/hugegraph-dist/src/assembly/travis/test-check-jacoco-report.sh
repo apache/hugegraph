@@ -93,6 +93,14 @@ run_case --require-test-report
 assert_failure "missing test report value"
 assert_output "--require-test-report requires a non-empty value"
 
+run_case --require-covered-group
+assert_failure "missing covered group value"
+assert_output "--require-covered-group requires a non-empty value"
+
+run_case --require-covered-group ""
+assert_failure "empty covered group value"
+assert_output "--require-covered-group requires a non-empty value"
+
 run_case --require-suite-report
 assert_failure "removed suite report option"
 assert_output "unknown option: --require-suite-report"
@@ -149,6 +157,21 @@ cat > "${TMP_DIR}/truncated.xml" <<'EOF'
   <counter type="INSTRUCTION" missed="7" covered="3"/>
 EOF
 
+cat > "${TMP_DIR}/partial-group-coverage.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<report name="partial-group-coverage">
+  <sessioninfo id="suite-a" start="1" dump="2"/>
+  <sessioninfo id="suite-b" start="3" dump="4"/>
+  <group name="hg-pd-core">
+    <counter type="INSTRUCTION" missed="10" covered="0"/>
+  </group>
+  <group name="hg-pd-service">
+    <counter type="INSTRUCTION" missed="2" covered="5"/>
+  </group>
+  <counter type="INSTRUCTION" missed="12" covered="5"/>
+</report>
+EOF
+
 run_report_case --require-session suite-a --require-session suite-b \
                 "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
 assert_success "complete report"
@@ -167,6 +190,25 @@ run_report_case --require-session suite-a --require-session suite-b \
                 "${TMP_DIR}/comment-only.xml" hg-pd-client hg-pd-core
 assert_failure "report with evidence only in XML comments"
 assert_output "has no covered instructions"
+
+run_report_case --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/partial-group-coverage.xml" \
+                hg-pd-core hg-pd-service
+assert_success "presence-only groups with partial coverage"
+
+run_report_case --require-covered-group hg-pd-service \
+                --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/partial-group-coverage.xml" \
+                hg-pd-core hg-pd-service
+assert_success "required group with covered instructions"
+
+run_report_case --require-covered-group hg-pd-core \
+                --require-covered-group hg-pd-service \
+                --require-session suite-a --require-session suite-b \
+                "${TMP_DIR}/partial-group-coverage.xml" \
+                hg-pd-core hg-pd-service
+assert_failure "required group without covered instructions"
+assert_output "JaCoCo group 'hg-pd-core' has no covered instructions"
 
 run_case --require-session suite-a --require-session suite-b \
          "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
@@ -305,6 +347,11 @@ def reports_for_option(job, option):
     return set(re.findall(pattern, validation_command(job)))
 
 
+def values_for_option(job, option):
+    pattern = re.escape(option) + r"\s+([A-Za-z0-9_-]+)"
+    return set(re.findall(pattern, validation_command(job)))
+
+
 def required_modules(job):
     command = validation_command(job).split('"$REPORT_FILE"', 1)[1]
     return set(re.findall(r"\bhg-(?:pd|store)-[a-z0-9-]+\b", command))
@@ -341,6 +388,9 @@ assert reports_for_option(pd_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.pd.rest.PDRestSuiteTest.xml",
 }
 assert not reports_for_option(pd_job, "--require-suite-report")
+assert values_for_option(pd_job, "--require-covered-group") == {
+    "hg-pd-common", "hg-pd-client", "hg-pd-core",
+}
 assert required_modules(pd_job) == {
     "hg-pd-grpc", "hg-pd-common", "hg-pd-client", "hg-pd-core",
     "hg-pd-service", "hg-pd-dist",
@@ -374,6 +424,9 @@ assert reports_for_option(store_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml",
 }
 assert not reports_for_option(store_job, "--require-suite-report")
+assert values_for_option(store_job, "--require-covered-group") == {
+    "hg-store-common", "hg-store-client", "hg-store-rocksdb",
+}
 assert required_modules(store_job) == {
     "hg-store-grpc", "hg-store-common", "hg-store-client",
     "hg-store-rocksdb",

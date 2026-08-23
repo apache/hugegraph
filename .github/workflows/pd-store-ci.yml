@@ -173,6 +173,9 @@ jobs:
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.pd.client.PDClientSuiteTest.xml" \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.pd.rest.PDRestSuiteTest.xml" \
+            --require-covered-group hg-pd-common \
+            --require-covered-group hg-pd-client \
+            --require-covered-group hg-pd-core \
             --require-session pd-common-test \
             --require-session pd-core-test \
             --require-session pd-client-test \
@@ -302,6 +305,9 @@ jobs:
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml" \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml" \
+            --require-covered-group hg-store-common \
+            --require-covered-group hg-store-client \
+            --require-covered-group hg-store-rocksdb \
             --require-session store-common-test \
             --require-session store-client-test \
             --require-session store-rocksdb-test \

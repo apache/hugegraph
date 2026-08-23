@@ -20,6 +20,7 @@ set -uo pipefail
 
 REQUIRED_SESSIONS=()
 REQUIRED_TEST_REPORTS=()
+REQUIRED_COVERED_GROUPS=()
 while (( $# > 0 )); do
     case "${1}" in
         --require-session)
@@ -36,6 +37,14 @@ while (( $# > 0 )); do
                 exit 1
             fi
             REQUIRED_TEST_REPORTS+=("${2}")
+            shift 2
+            ;;
+        --require-covered-group)
+            if (( $# < 2 )) || [[ -z "${2:-}" || "${2}" == --* ]]; then
+                echo "ERROR: --require-covered-group requires a non-empty value" >&2
+                exit 1
+            fi
+            REQUIRED_COVERED_GROUPS+=("${2}")
             shift 2
             ;;
         --*)
@@ -108,14 +117,18 @@ for test_report in "${REQUIRED_TEST_REPORTS[@]}"; do
     validate_test_report "${test_report}" || exit 1
 done
 
-python3 - "${REPORT_FILE}" "${REQUIRED_SESSIONS[@]}" -- "$@" <<'PY' || exit 1
+python3 - "${REPORT_FILE}" "${REQUIRED_SESSIONS[@]}" -- \
+    ${REQUIRED_COVERED_GROUPS[@]+"${REQUIRED_COVERED_GROUPS[@]}"} \
+    -- "$@" <<'PY' || exit 1
 import sys
 import xml.etree.ElementTree as ET
 
 report_file = sys.argv[1]
-separator = sys.argv.index("--", 2)
-required_sessions = sys.argv[2:separator]
-required_modules = sys.argv[separator + 1:]
+session_separator = sys.argv.index("--", 2)
+group_separator = sys.argv.index("--", session_separator + 1)
+required_sessions = sys.argv[2:session_separator]
+required_covered_groups = sys.argv[session_separator + 1:group_separator]
+required_modules = sys.argv[group_separator + 1:]
 
 
 def fail(message):
@@ -157,13 +170,31 @@ for session in required_sessions:
     if session not in session_ids:
         fail(f"missing JaCoCo session '{session}' in {report_file}")
 
-group_names = {
-    element.attrib.get("name") for element in children
+groups_by_name = {
+    element.attrib.get("name"): element for element in children
     if local_name(element.tag) == "group"
 }
 for module in required_modules:
-    if module not in group_names:
+    if module not in groups_by_name:
         fail(f"missing JaCoCo group '{module}' in {report_file}")
+
+for group_name in required_covered_groups:
+    group = groups_by_name.get(group_name)
+    if group is None:
+        fail(f"missing JaCoCo group '{group_name}' in {report_file}")
+    counters = [
+        element for element in list(group)
+        if local_name(element.tag) == "counter" and
+        element.attrib.get("type") == "INSTRUCTION"
+    ]
+    try:
+        has_coverage = any(int(counter.attrib.get("covered", "0")) > 0
+                           for counter in counters)
+    except ValueError as error:
+        fail(f"unable to parse JaCoCo report: {report_file}: {error}")
+    if not has_coverage:
+        fail(f"JaCoCo group '{group_name}' has no covered instructions: "
+             f"{report_file}")
 PY
 
 echo "JaCoCo report ${REPORT_FILE} contains all expected modules"
