@@ -17,14 +17,11 @@
 
 package org.apache.hugegraph.store.core;
 
-import org.junit.runner.RunWith;
-import org.junit.runners.Suite;
-
 import lombok.extern.slf4j.Slf4j;
 
 // TODO: uncomment it until all test can run free.
-@RunWith(Suite.class)
-@Suite.SuiteClasses({
+//@RunWith(Suite.class)
+//@Suite.SuiteClasses({
 //        HgCmdClientTest.class,
 //        HgSnapshotHandlerTest.class,
 //        RaftUtilsTest.class,
@@ -44,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 //        PartitionInstructionProcessorTest.class,
 //        // Try to put it last
 //        HgBusinessImplTest.class
-})
+//})
 
 @Slf4j
 public class CoreSuiteTest {

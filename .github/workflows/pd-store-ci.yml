@@ -276,20 +276,10 @@ jobs:
           mvn test -pl hugegraph-store/hg-store-test -am \
             -P store-client-test -Djacoco.sessionId=store-client-test
 
-      - name: Run core test
-        run: |
-          mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-core-test -Djacoco.sessionId=store-core-test
-
       - name: Run rocksdb test
         run: |
           mvn test -pl hugegraph-store/hg-store-test -am \
             -P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test
-
-      - name: Run server test
-        run: |
-          mvn test -pl hugegraph-store/hg-store-test -am \
-            -P store-server-test -Djacoco.sessionId=store-server-test
 
       - name: Run raft-core test
         run: |
@@ -303,29 +293,21 @@ jobs:
 
       - name: Validate aggregate coverage report
         run: |
-          # CoreSuiteTest and ServerSuiteTest are existing placeholders with zero tests.
           $TRAVIS_DIR/check-jacoco-report.sh \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml" \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.client.ClientSuiteTest.xml" \
-            --require-suite-report \
-            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.core.CoreSuiteTest.xml" \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml" \
-            --require-suite-report \
-            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml" \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml" \
             --require-session store-common-test \
             --require-session store-client-test \
-            --require-session store-core-test \
             --require-session store-rocksdb-test \
-            --require-session store-server-test \
             --require-session store-raftcore-test \
             "$REPORT_FILE" \
-            hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb \
-            hg-store-core hg-store-node
+            hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3.0.0

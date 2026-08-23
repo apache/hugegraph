@@ -20,7 +20,6 @@ set -uo pipefail
 
 REQUIRED_SESSIONS=()
 REQUIRED_TEST_REPORTS=()
-REQUIRED_SUITE_REPORTS=()
 while (( $# > 0 )); do
     case "${1}" in
         --require-session)
@@ -37,14 +36,6 @@ while (( $# > 0 )); do
                 exit 1
             fi
             REQUIRED_TEST_REPORTS+=("${2}")
-            shift 2
-            ;;
-        --require-suite-report)
-            if (( $# < 2 )) || [[ -z "${2:-}" || "${2}" == --* ]]; then
-                echo "ERROR: --require-suite-report requires a non-empty value" >&2
-                exit 1
-            fi
-            REQUIRED_SUITE_REPORTS+=("${2}")
             shift 2
             ;;
         --*)
@@ -84,7 +75,6 @@ fi
 
 validate_test_report() {
     local test_report="${1}"
-    local require_tests="${2}"
 
     if [[ ! -s "${test_report}" ]]; then
         echo "ERROR: Surefire report not found or empty: ${test_report}" >&2
@@ -108,38 +98,72 @@ PY
         echo "ERROR: unable to parse Surefire report: ${test_report}" >&2
         return 1
     fi
-    if [[ "${require_tests}" == "true" ]] && (( test_count <= 0 )); then
+    if (( test_count <= 0 )); then
         echo "ERROR: Surefire report has no tests: ${test_report}" >&2
         return 1
     fi
 }
 
-for suite_report in "${REQUIRED_SUITE_REPORTS[@]}"; do
-    validate_test_report "${suite_report}" false || exit 1
-done
-
 for test_report in "${REQUIRED_TEST_REPORTS[@]}"; do
-    validate_test_report "${test_report}" true || exit 1
+    validate_test_report "${test_report}" || exit 1
 done
 
-if ! grep -Eq '<counter type="INSTRUCTION" missed="[0-9]+" covered="[1-9][0-9]*"' \
-     "${REPORT_FILE}"; then
-    echo "ERROR: JaCoCo report has no covered instructions: ${REPORT_FILE}" >&2
-    exit 1
-fi
+python3 - "${REPORT_FILE}" "${REQUIRED_SESSIONS[@]}" -- "$@" <<'PY' || exit 1
+import sys
+import xml.etree.ElementTree as ET
 
-for session in "${REQUIRED_SESSIONS[@]}"; do
-    if ! grep -Fq "<sessioninfo id=\"${session}\" " "${REPORT_FILE}"; then
-        echo "ERROR: missing JaCoCo session '${session}' in ${REPORT_FILE}" >&2
-        exit 1
-    fi
-done
+report_file = sys.argv[1]
+separator = sys.argv.index("--", 2)
+required_sessions = sys.argv[2:separator]
+required_modules = sys.argv[separator + 1:]
 
-for module in "$@"; do
-    if ! grep -Fq "<group name=\"${module}\"" "${REPORT_FILE}"; then
-        echo "ERROR: missing JaCoCo group '${module}' in ${REPORT_FILE}" >&2
-        exit 1
-    fi
-done
+
+def fail(message):
+    print(f"ERROR: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+try:
+    root = ET.parse(report_file).getroot()
+except (OSError, ET.ParseError) as error:
+    fail(f"unable to parse JaCoCo report: {report_file}: {error}")
+
+if local_name(root.tag) != "report":
+    fail(f"unable to parse JaCoCo report: {report_file}: expected report root")
+
+children = list(root)
+instruction_counters = [
+    element for element in children
+    if local_name(element.tag) == "counter" and
+    element.attrib.get("type") == "INSTRUCTION"
+]
+try:
+    has_coverage = any(int(counter.attrib.get("covered", "0")) > 0
+                       for counter in instruction_counters)
+except ValueError as error:
+    fail(f"unable to parse JaCoCo report: {report_file}: {error}")
+if not has_coverage:
+    fail(f"JaCoCo report has no covered instructions: {report_file}")
+
+session_ids = {
+    element.attrib.get("id") for element in children
+    if local_name(element.tag) == "sessioninfo"
+}
+for session in required_sessions:
+    if session not in session_ids:
+        fail(f"missing JaCoCo session '{session}' in {report_file}")
+
+group_names = {
+    element.attrib.get("name") for element in children
+    if local_name(element.tag) == "group"
+}
+for module in required_modules:
+    if module not in group_names:
+        fail(f"missing JaCoCo group '{module}' in {report_file}")
+PY
 
 echo "JaCoCo report ${REPORT_FILE} contains all expected modules"
