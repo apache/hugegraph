@@ -49,9 +49,7 @@ def indentation(line):
     return len(line) - len(line.lstrip())
 
 
-for workflow_path in workflow_paths:
-    relative_path = str(workflow_path.relative_to(repo_root))
-    lines = workflow_path.read_text(encoding="utf-8").splitlines()
+def find_uploads(lines):
     uploads = []
 
     for line_number, line in enumerate(lines, start=1):
@@ -68,7 +66,81 @@ for workflow_path in workflow_paths:
             if candidate.strip() and indentation(candidate) <= step_indent:
                 break
             block.append(candidate)
-        uploads.append((line_number, match.group("version"), block))
+        uploads.append(
+            (line_number, match.group("version"), block, uses_indent)
+        )
+
+    return uploads
+
+
+def read_inputs(block, uses_indent):
+    inputs = {}
+    in_with_block = False
+    for candidate in block:
+        candidate_indent = indentation(candidate)
+        if candidate_indent == uses_indent and candidate.strip() == "with:":
+            in_with_block = True
+            continue
+        if (in_with_block and candidate.strip() and
+                candidate_indent <= uses_indent):
+            break
+        if not in_with_block or candidate_indent != uses_indent + 2:
+            continue
+        candidate_match = re.match(
+            r"^\s*(?P<key>[a-zA-Z_]+):\s*(?P<value>.*?)\s*$",
+            candidate,
+        )
+        if candidate_match is not None:
+            inputs[candidate_match.group("key")] = candidate_match.group("value")
+    return inputs
+
+
+def parse_uploads(lines):
+    return [
+        (line_number, version, read_inputs(block, uses_indent))
+        for line_number, version, block, uses_indent in find_uploads(lines)
+    ]
+
+
+def check_mixed_upload_indentation():
+    lines = [
+        "jobs:",
+        "  first:",
+        "    steps:",
+        "      - uses: codecov/codecov-action@v5",
+        "        with:",
+        "          token: ${{ secrets.CODECOV_TOKEN }}",
+        "          files: first.xml",
+        "  second:",
+        "      steps:",
+        "        - uses: codecov/codecov-action@v5",
+        "          with:",
+        "            token: ${{ secrets.CODECOV_TOKEN }}",
+        "            files: second.xml",
+    ]
+    expected_inputs = [
+        {
+            "token": "${{ secrets.CODECOV_TOKEN }}",
+            "files": "first.xml",
+        },
+        {
+            "token": "${{ secrets.CODECOV_TOKEN }}",
+            "files": "second.xml",
+        },
+    ]
+    actual_inputs = [inputs for _, _, inputs in parse_uploads(lines)]
+    if actual_inputs != expected_inputs:
+        return ["Codecov uploads with mixed indentation were parsed incorrectly"]
+    return []
+
+
+errors.extend(check_mixed_upload_indentation())
+
+
+for workflow_path in workflow_paths:
+    relative_path = str(workflow_path.relative_to(repo_root))
+    lines = workflow_path.read_text(encoding="utf-8").splitlines()
+    uploads = parse_uploads(lines)
 
     expected_count = expected_uploads.get(relative_path)
     if expected_count is not None and len(uploads) != expected_count:
@@ -79,32 +151,13 @@ for workflow_path in workflow_paths:
     if expected_count is not None:
         checked_expected_workflows.add(relative_path)
 
-    for line_number, version, block in uploads:
+    for line_number, version, inputs in uploads:
         version_match = version_pattern.match(version)
         if version_match is None or int(version_match.group("major")) < 5:
             errors.append(
                 f"{relative_path}:{line_number}: Codecov action {version} "
                 "uses the legacy uploader"
             )
-
-        inputs = {}
-        in_with_block = False
-        for candidate in block:
-            candidate_indent = indentation(candidate)
-            if candidate_indent == uses_indent and candidate.strip() == "with:":
-                in_with_block = True
-                continue
-            if (in_with_block and candidate.strip() and
-                    candidate_indent <= uses_indent):
-                break
-            if not in_with_block or candidate_indent != uses_indent + 2:
-                continue
-            candidate_match = re.match(
-                r"^\s*(?P<key>[a-zA-Z_]+):\s*(?P<value>.*?)\s*$",
-                candidate,
-            )
-            if candidate_match is not None:
-                inputs[candidate_match.group("key")] = candidate_match.group("value")
 
         if not inputs.get("files"):
             errors.append(
