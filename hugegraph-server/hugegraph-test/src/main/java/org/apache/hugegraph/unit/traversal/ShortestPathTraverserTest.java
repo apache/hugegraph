@@ -22,6 +22,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.HugeGraph;
@@ -31,7 +33,9 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.traversal.algorithm.HugeTraverser;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.Path;
+import org.apache.hugegraph.traversal.algorithm.HugeTraverser.PathSet;
 import org.apache.hugegraph.traversal.algorithm.ShortestPathTraverser;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.type.define.Directions;
@@ -88,6 +92,204 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
         Assert.assertTrue(targetEdges.closed());
     }
 
+    @Test
+    public void testCloseEdgesWhenSkipDegreeReached() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        Id other = IdGenerator.of(3L);
+        TrackingIterator sourceEdges = edges(edgeTo(target), edgeTo(other));
+        TestTraverser traverser = new TestTraverser(sourceEdges);
+
+        Path path = shortestPath(traverser, source, target, 1, 2L);
+
+        Assert.assertTrue(path.vertices().isEmpty());
+        Assert.assertTrue(sourceEdges.closed());
+    }
+
+    @Test
+    public void testCloseEdgesWhenTargetIsSuperNode() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        Id other = IdGenerator.of(3L);
+        TrackingIterator sourceEdges = edges(edgeTo(target));
+        TrackingIterator targetEdges = edges(edgeTo(source), edgeTo(other));
+        TestTraverser traverser = new TestTraverser(sourceEdges, targetEdges);
+
+        Path path = shortestPath(traverser, source, target, 1, 2L);
+
+        Assert.assertTrue(path.vertices().isEmpty());
+        Assert.assertTrue(sourceEdges.closed());
+        Assert.assertTrue(targetEdges.closed());
+    }
+
+    @Test
+    public void testCloseEdgesThroughLabelAndLimitWrappers() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        TrackingIterator backendEdges = edges(edgeTo(target));
+        TestTraverser traverser = new TestTraverser(backendEdges);
+
+        Path path = traverser.shortestPath(
+                    source, target, Directions.OUT,
+                    Collections.singletonList("link"), 1, 1L, 0L, 100L);
+
+        Assert.assertEquals(Arrays.asList(source, target), path.vertices());
+        Assert.assertTrue(backendEdges.closed());
+    }
+
+    @Test
+    public void testCloseAllEdgesThroughWrappersWhenCloseFails() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        RuntimeException closeFailure = new IllegalStateException("close");
+        TrackingIterator first = new TrackingIterator(
+                                 Arrays.<Edge>asList(edgeTo(target)).iterator(),
+                                 null,
+                                 closeFailure);
+        TrackingIterator second = edges();
+        TestTraverser traverser = new TestTraverser(first, second);
+
+        Throwable actual = Assert.assertThrows(
+                           RuntimeException.class,
+                           () -> traverser.shortestPath(
+                                 source, target, Directions.OUT,
+                                 Arrays.asList("first", "second"),
+                                 1, 1L, 0L, 100L));
+
+        Assert.assertSame(closeFailure, actual.getCause());
+        Assert.assertTrue(first.closed());
+        Assert.assertTrue(second.closed());
+    }
+
+    @Test
+    public void testCloseEdgesForAllShortestPaths() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        TrackingIterator sourceEdges = edges(edgeTo(target));
+        TestTraverser traverser = new TestTraverser(sourceEdges);
+
+        PathSet paths = traverser.allShortestPaths(
+                        source, target, Directions.OUT,
+                        Collections.emptyList(), 1, 1L, 0L, 100L);
+
+        Assert.assertEquals(1, paths.size());
+        Assert.assertEquals(Arrays.asList(source, target),
+                            paths.iterator().next().vertices());
+        Assert.assertTrue(sourceEdges.closed());
+    }
+
+    @Test
+    public void testCloseAllOpenedEdgesWhenMapLabelQueryFails() {
+        Id source = IdGenerator.of(1L);
+        RuntimeException closeFailure = new IllegalStateException("close");
+        RuntimeException queryFailure = new IllegalArgumentException("query");
+        TrackingIterator first = throwingCloseEdges(closeFailure);
+        TrackingIterator second = edges();
+        TestTraverser traverser = new TestTraverser(first, second,
+                                                    queryFailure);
+        Map<Id, String> labels = new LinkedHashMap<>();
+        labels.put(IdGenerator.of(11L), "first");
+        labels.put(IdGenerator.of(12L), "second");
+        labels.put(IdGenerator.of(13L), "third");
+
+        Throwable actual = Assert.assertThrows(
+                           IllegalArgumentException.class,
+                           () -> traverser.queryEdges(
+                                 source, labels, HugeTraverser.NO_LIMIT));
+
+        Assert.assertSame(queryFailure, actual);
+        Assert.assertTrue(first.closed());
+        Assert.assertTrue(second.closed());
+        assertSuppressedCloseFailure(actual, closeFailure);
+    }
+
+    @Test
+    public void testCloseOpenedEdgesWhenListLabelQueryFails() {
+        Id source = IdGenerator.of(1L);
+        RuntimeException queryFailure = new IllegalArgumentException("query");
+        TrackingIterator first = edges();
+        TestTraverser traverser = new TestTraverser(first, queryFailure);
+        List<Id> labels = Arrays.asList(IdGenerator.of(11L),
+                                       IdGenerator.of(12L));
+
+        Throwable actual = Assert.assertThrows(
+                           IllegalArgumentException.class,
+                           () -> traverser.queryEdges(
+                                 source, labels, HugeTraverser.NO_LIMIT));
+
+        Assert.assertSame(queryFailure, actual);
+        Assert.assertTrue(first.closed());
+    }
+
+    @Test
+    public void testPreserveTraversalFailureWhenClosingEdgesFails() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        RuntimeException traversalFailure =
+                new IllegalArgumentException("hasNext");
+        RuntimeException closeFailure = new IllegalStateException("close");
+        TrackingIterator sourceEdges = throwingEdges(traversalFailure,
+                                                     closeFailure);
+        TestTraverser traverser = new TestTraverser(sourceEdges);
+
+        Throwable actual = Assert.assertThrows(
+                           IllegalArgumentException.class,
+                           () -> shortestPath(traverser, source, target,
+                                              1, 0L));
+
+        Assert.assertSame(traversalFailure, actual);
+        Assert.assertTrue(sourceEdges.closed());
+        assertSuppressedCloseFailure(actual, closeFailure);
+    }
+
+    @Test
+    public void testPreserveBackwardFailureWhenClosingEdgesFails() {
+        Id source = IdGenerator.of(1L);
+        Id middle = IdGenerator.of(2L);
+        Id target = IdGenerator.of(3L);
+        RuntimeException traversalFailure =
+                new IllegalArgumentException("hasNext");
+        RuntimeException closeFailure = new IllegalStateException("close");
+        TrackingIterator forwardEdges = edges(edgeTo(middle));
+        TrackingIterator backwardEdges = throwingEdges(traversalFailure,
+                                                        closeFailure);
+        TestTraverser traverser = new TestTraverser(forwardEdges,
+                                                    backwardEdges);
+
+        Throwable actual = Assert.assertThrows(
+                           IllegalArgumentException.class,
+                           () -> shortestPath(traverser, source, target,
+                                              2, 0L));
+
+        Assert.assertSame(traversalFailure, actual);
+        Assert.assertTrue(forwardEdges.closed());
+        Assert.assertTrue(backwardEdges.closed());
+        assertSuppressedCloseFailure(actual, closeFailure);
+    }
+
+    @Test
+    public void testPreserveSuperNodeFailureWhenClosingEdgesFails() {
+        Id source = IdGenerator.of(1L);
+        Id target = IdGenerator.of(2L);
+        RuntimeException traversalFailure =
+                new IllegalArgumentException("hasNext");
+        RuntimeException closeFailure = new IllegalStateException("close");
+        TrackingIterator sourceEdges = edges(edgeTo(target));
+        TrackingIterator targetEdges = throwingEdges(traversalFailure,
+                                                      closeFailure);
+        TestTraverser traverser = new TestTraverser(sourceEdges, targetEdges);
+
+        Throwable actual = Assert.assertThrows(
+                           IllegalArgumentException.class,
+                           () -> shortestPath(traverser, source, target,
+                                              1, 2L));
+
+        Assert.assertSame(traversalFailure, actual);
+        Assert.assertTrue(sourceEdges.closed());
+        Assert.assertTrue(targetEdges.closed());
+        assertSuppressedCloseFailure(actual, closeFailure);
+    }
+
     private static Path shortestPath(TestTraverser traverser, Id source,
                                      Id target, int depth, long skipDegree) {
         return traverser.shortestPath(source, target, Directions.OUT,
@@ -107,6 +309,25 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
         return new TrackingIterator(Arrays.asList(edges).iterator());
     }
 
+    private static TrackingIterator throwingCloseEdges(
+                                    RuntimeException closeFailure) {
+        return new TrackingIterator(Collections.emptyIterator(), null,
+                                    closeFailure);
+    }
+
+    private static TrackingIterator throwingEdges(
+                                    RuntimeException traversalFailure,
+                                    RuntimeException closeFailure) {
+        return new TrackingIterator(Collections.emptyIterator(),
+                                    traversalFailure, closeFailure);
+    }
+
+    private static void assertSuppressedCloseFailure(
+                        Throwable failure, RuntimeException closeFailure) {
+        Assert.assertEquals(1, failure.getSuppressed().length);
+        Assert.assertSame(closeFailure, failure.getSuppressed()[0].getCause());
+    }
+
     private static HugeGraph mockGraph() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         Mockito.when(graph.option(CoreOptions.OLTP_COLLECTION_TYPE))
@@ -116,10 +337,9 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
 
     private static class TestTraverser extends ShortestPathTraverser {
 
-        private final Deque<Iterator<Edge>> edges;
+        private final Deque<Object> edges;
 
-        @SafeVarargs
-        public TestTraverser(Iterator<Edge>... edges) {
+        public TestTraverser(Object... edges) {
             super(mockGraph());
             this.edges = new ArrayDeque<>(Arrays.asList(edges));
         }
@@ -130,10 +350,33 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
         }
 
         @Override
+        protected Id getEdgeLabelIdOrNull(Object label) {
+            return label == null ? null : IdGenerator.of(label.toString());
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
         protected Iterator<Edge> edgesOfVertex(Id source, Directions dir,
-                                               Map<Id, String> labels,
+                                               Id label,
                                                long limit) {
-            return this.edges.removeFirst();
+            Object result = this.edges.removeFirst();
+            if (result instanceof RuntimeException) {
+                throw (RuntimeException) result;
+            }
+            if (result instanceof Error) {
+                throw (Error) result;
+            }
+            return (Iterator<Edge>) result;
+        }
+
+        public Iterator<Edge> queryEdges(Id source, Map<Id, String> labels,
+                                         long limit) {
+            return super.edgesOfVertex(source, Directions.OUT, labels, limit);
+        }
+
+        public Iterator<Edge> queryEdges(Id source, List<Id> labels,
+                                         long limit) {
+            return super.edgesOfVertex(source, Directions.OUT, labels, limit);
         }
     }
 
@@ -141,15 +384,28 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
                                                      AutoCloseable {
 
         private final Iterator<Edge> edges;
+        private final RuntimeException traversalFailure;
+        private final RuntimeException closeFailure;
         private boolean closed;
 
         public TrackingIterator(Iterator<Edge> edges) {
+            this(edges, null, null);
+        }
+
+        public TrackingIterator(Iterator<Edge> edges,
+                                RuntimeException traversalFailure,
+                                RuntimeException closeFailure) {
             this.edges = edges;
+            this.traversalFailure = traversalFailure;
+            this.closeFailure = closeFailure;
             this.closed = false;
         }
 
         @Override
         public boolean hasNext() {
+            if (this.traversalFailure != null) {
+                throw this.traversalFailure;
+            }
             return this.edges.hasNext();
         }
 
@@ -161,6 +417,9 @@ public class ShortestPathTraverserTest extends BaseUnitTest {
         @Override
         public void close() {
             this.closed = true;
+            if (this.closeFailure != null) {
+                throw this.closeFailure;
+            }
         }
 
         public boolean closed() {

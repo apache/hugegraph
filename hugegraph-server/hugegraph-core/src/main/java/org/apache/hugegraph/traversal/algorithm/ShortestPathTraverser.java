@@ -31,7 +31,6 @@ import org.apache.hugegraph.traversal.algorithm.steps.EdgeStep;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Edge;
-import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 import org.apache.tinkerpop.gremlin.util.iterator.IteratorUtils;
 
 import com.google.common.collect.ImmutableList;
@@ -187,6 +186,7 @@ public class ShortestPathTraverser extends HugeTraverser {
 
                 Iterator<Edge> sourceEdges = edgesOfVertex(
                         source, this.direction, this.labels, degree);
+                Throwable failure = null;
                 try {
                     Iterator<Edge> edges = skipSuperNodeIfNeeded(
                             sourceEdges, this.degree, this.skipDegree);
@@ -212,8 +212,11 @@ public class ShortestPathTraverser extends HugeTraverser {
                             return paths;
                         }
                     }
+                } catch (RuntimeException | Error e) {
+                    failure = e;
+                    throw e;
                 } finally {
-                    CloseableIterator.closeIterator(sourceEdges);
+                    closeIterator(sourceEdges, failure);
                 }
             }
 
@@ -237,6 +240,7 @@ public class ShortestPathTraverser extends HugeTraverser {
 
                 Iterator<Edge> sourceEdges = edgesOfVertex(
                         source, opposite, this.labels, degree);
+                Throwable failure = null;
                 try {
                     Iterator<Edge> edges = skipSuperNodeIfNeeded(
                             sourceEdges, this.degree, this.skipDegree);
@@ -261,8 +265,11 @@ public class ShortestPathTraverser extends HugeTraverser {
                             return results;
                         }
                     }
+                } catch (RuntimeException | Error e) {
+                    failure = e;
+                    throw e;
                 } finally {
-                    CloseableIterator.closeIterator(sourceEdges);
+                    closeIterator(sourceEdges, failure);
                 }
             }
 
@@ -278,10 +285,14 @@ public class ShortestPathTraverser extends HugeTraverser {
             }
             Iterator<Edge> edges = edgesOfVertex(vertex, direction,
                                                  this.labels, this.skipDegree);
+            Throwable failure = null;
             try {
                 return IteratorUtils.count(edges) >= this.skipDegree;
+            } catch (RuntimeException | Error e) {
+                failure = e;
+                throw e;
             } finally {
-                CloseableIterator.closeIterator(edges);
+                closeIterator(edges, failure);
             }
         }
 
