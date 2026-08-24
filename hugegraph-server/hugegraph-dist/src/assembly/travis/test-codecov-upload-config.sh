@@ -25,30 +25,29 @@ python3 - "${REPO_ROOT}" <<'PY'
 import pathlib
 import re
 import sys
+from collections import Counter
 
 repo_root = pathlib.Path(sys.argv[1])
-expected_uploads = {
-    ".github/workflows/commons-ci.yml": 1,
-    ".github/workflows/pd-store-ci.yml": 3,
-    ".github/workflows/server-ci.yml": 1,
-}
 expected_files = {
-    ".github/workflows/commons-ci.yml": [
-        "hugegraph-commons/target/jacoco.xml",
-    ],
-    ".github/workflows/pd-store-ci.yml": [
-        "${{ env.REPORT_FILE }}",
-        "${{ env.REPORT_FILE }}",
-        "${{ env.REPORT_DIR }}/*.xml",
-    ],
-    ".github/workflows/server-ci.yml": [
-        "${{ env.REPORT_DIR }}/*.xml",
-    ],
+    ".github/workflows/commons-ci.yml": {
+        "build-commons": "hugegraph-commons/target/jacoco.xml",
+    },
+    ".github/workflows/pd-store-ci.yml": {
+        "pd": "${{ env.REPORT_FILE }}",
+        "store": "${{ env.REPORT_FILE }}",
+        "hstore": "${{ env.REPORT_DIR }}/*.xml",
+    },
+    ".github/workflows/server-ci.yml": {
+        "build-server": "${{ env.REPORT_DIR }}/*.xml",
+    },
 }
 action_pattern = re.compile(
     r"^(?P<indent>\s*)(?P<dash>-\s+)?uses:\s*"
-    r"codecov/codecov-action@(?P<version>\S+)\s*$"
+    r"(?:(?P<quote>['\"])codecov/codecov-action@"
+    r"(?P<quoted>[^'\"\s]+)(?P=quote)\s*(?:#.*)?|"
+    r"codecov/codecov-action@(?P<plain>\S+?)(?:\s+#.*)?\s*)$"
 )
+job_pattern = re.compile(r"^  (?P<job>[a-zA-Z0-9_-]+):\s*(?:#.*)?$")
 version_pattern = re.compile(r"^v(?P<major>\d+)(?:[.-].*)?$")
 errors = []
 workflow_dir = repo_root / ".github/workflows"
@@ -64,8 +63,12 @@ def indentation(line):
 
 def find_uploads(lines):
     uploads = []
+    current_job = None
 
     for line_number, line in enumerate(lines, start=1):
+        job_match = job_pattern.match(line)
+        if job_match is not None:
+            current_job = job_match.group("job")
         match = action_pattern.match(line)
         if match is None:
             continue
@@ -80,7 +83,8 @@ def find_uploads(lines):
                 break
             block.append(candidate)
         uploads.append(
-            (line_number, match.group("version"), block, uses_indent)
+            (line_number, current_job,
+             match.group("quoted") or match.group("plain"), block, uses_indent)
         )
 
     return uploads
@@ -110,9 +114,16 @@ def read_inputs(block, uses_indent):
 
 def parse_uploads(lines):
     return [
-        (line_number, version, read_inputs(block, uses_indent))
-        for line_number, version, block, uses_indent in find_uploads(lines)
+        (line_number, job, version, read_inputs(block, uses_indent))
+        for line_number, job, version, block, uses_indent in find_uploads(lines)
     ]
+
+
+def files_match(uploads, expected):
+    actual = Counter(
+        (job, inputs.get("files")) for _, job, _, inputs in uploads
+    )
+    return actual == Counter(expected.items())
 
 
 def check_mixed_upload_indentation():
@@ -141,7 +152,7 @@ def check_mixed_upload_indentation():
             "files": "second.xml",
         },
     ]
-    actual_inputs = [inputs for _, _, inputs in parse_uploads(lines)]
+    actual_inputs = [inputs for _, _, _, inputs in parse_uploads(lines)]
     if actual_inputs != expected_inputs:
         return ["Codecov uploads with mixed indentation were parsed incorrectly"]
     return []
@@ -155,22 +166,17 @@ for workflow_path in workflow_paths:
     lines = workflow_path.read_text(encoding="utf-8").splitlines()
     uploads = parse_uploads(lines)
 
-    expected_count = expected_uploads.get(relative_path)
-    if expected_count is not None and len(uploads) != expected_count:
-        errors.append(
-            f"{relative_path}: expected {expected_count} Codecov uploads, "
-            f"found {len(uploads)}"
-        )
-    if expected_count is not None:
-        checked_expected_workflows.add(relative_path)
     expected_workflow_files = expected_files.get(relative_path)
     if uploads and expected_workflow_files is None:
         errors.append(
             f"{relative_path}: unexpected Codecov upload workflow"
         )
-        expected_workflow_files = []
+    elif expected_workflow_files is not None:
+        checked_expected_workflows.add(relative_path)
+        if not files_match(uploads, expected_workflow_files):
+            errors.append(f"{relative_path}: unexpected Codecov files inputs")
 
-    for upload_index, (line_number, version, inputs) in enumerate(uploads):
+    for line_number, _, version, inputs in uploads:
         version_match = version_pattern.match(version)
         if version_match is None or int(version_match.group("major")) < 5:
             errors.append(
@@ -178,17 +184,6 @@ for workflow_path in workflow_paths:
                 "uses the legacy uploader"
             )
 
-        if upload_index >= len(expected_workflow_files):
-            errors.append(
-                f"{relative_path}:{line_number}: unexpected Codecov upload"
-            )
-            continue
-        expected_file = expected_workflow_files[upload_index]
-        if inputs.get("files") != expected_file:
-            errors.append(
-                f"{relative_path}:{line_number}: expected files input "
-                f"{expected_file!r}, found {inputs.get('files')!r}"
-            )
         if inputs.get("token") != "${{ secrets.CODECOV_TOKEN }}":
             errors.append(
                 f"{relative_path}:{line_number}: Codecov upload must pass "
@@ -205,7 +200,7 @@ for workflow_path in workflow_paths:
                 "fail_ci_if_error: false"
             )
 
-for relative_path in expected_uploads.keys() - checked_expected_workflows:
+for relative_path in expected_files.keys() - checked_expected_workflows:
     errors.append(f"{relative_path}: expected workflow file is missing")
 
 if errors:
