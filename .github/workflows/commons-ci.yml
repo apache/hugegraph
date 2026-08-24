@@ -58,6 +58,9 @@ jobs:
           mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite -DskipCommonsTests=false
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.0.0
+        uses: codecov/codecov-action@v5
         with:
-          file: target/jacoco.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: hugegraph-commons/target/jacoco.xml
+          disable_search: true
+          fail_ci_if_error: false

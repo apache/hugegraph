@@ -36,6 +36,9 @@ jobs:
       - name: Run JaCoCo report validator tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-jacoco-report.sh
 
+      - name: Run Codecov upload configuration tests
+        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-codecov-upload-config.sh
+
       - name: Use staged maven repo settings
         run: |
           cp $HOME/.m2/settings.xml /tmp/settings.xml || true
@@ -184,9 +187,12 @@ jobs:
             hg-pd-grpc hg-pd-common hg-pd-client hg-pd-core hg-pd-service hg-pd-dist
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.0.0
+        uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_FILE }}
+          disable_search: true
+          fail_ci_if_error: false
 
   store:
     needs: struct
@@ -316,9 +322,12 @@ jobs:
             hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.0.0
+        uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_FILE }}
+          disable_search: true
+          fail_ci_if_error: false
 
   hstore:
     needs: struct
@@ -387,6 +396,9 @@ jobs:
           $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND tinkerpop
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3.0.0
+        uses: codecov/codecov-action@v5
         with:
-          file: ${{ env.REPORT_DIR }}/*.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ env.REPORT_DIR }}/*.xml
+          disable_search: true
+          fail_ci_if_error: false
