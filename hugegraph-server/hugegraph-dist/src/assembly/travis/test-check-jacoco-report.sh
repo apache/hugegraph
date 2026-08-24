@@ -43,7 +43,41 @@ run_report_case() {
 }
 
 run_case_with_timeout() {
-    CASE_OUTPUT=$(timeout 2 "${VALIDATOR}" "$@" 2>&1)
+    CASE_OUTPUT=$(python3 - "${VALIDATOR}" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+process = subprocess.Popen(
+    sys.argv[1:],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    universal_newlines=True,
+    start_new_session=True,
+)
+try:
+    output, _ = process.communicate(timeout=2)
+except subprocess.TimeoutExpired:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        output, _ = process.communicate(timeout=1)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        output, _ = process.communicate()
+    sys.stdout.write(output)
+    sys.exit(124)
+
+sys.stdout.write(output)
+sys.exit(process.returncode)
+PY
+    )
     CASE_RC=$?
 }
 
@@ -73,17 +107,61 @@ cat > "${TMP_DIR}/zero-tests.xml" <<'EOF'
 <testsuite name="EmptySuiteTest" tests="0" failures="0" errors="0" skipped="0"/>
 EOF
 
+cat > "${TMP_DIR}/all-skipped.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="AllSkippedSuiteTest" tests="2" failures="0" errors="0" skipped="2"/>
+EOF
+
 cat > "${TMP_DIR}/not-surefire.xml" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <report tests="0"/>
 EOF
 
+cat > "${TMP_DIR}/hanging-validator.sh" <<'EOF'
+#!/bin/bash
+sleep 30 >/dev/null 2>&1 &
+child_pid=$!
+printf '%s\n' "${child_pid}" > "${1}"
+wait "${child_pid}"
+EOF
+chmod +x "${TMP_DIR}/hanging-validator.sh"
+
 echo "JaCoCo report validator tests"
 
+# Simulate stock macOS, where GNU timeout is not installed by default.
+timeout() {
+    return 127
+}
 run_case_with_timeout --require-session
+unset -f timeout
 [[ "${CASE_RC}" -ne 124 ]] || fail "missing session value timed out"
 assert_failure "missing session value"
 assert_output "--require-session requires a non-empty value"
+
+REAL_VALIDATOR="${VALIDATOR}"
+VALIDATOR="${TMP_DIR}/hanging-validator.sh"
+run_case_with_timeout "${TMP_DIR}/hanging-child.pid"
+VALIDATOR="${REAL_VALIDATOR}"
+[[ "${CASE_RC}" -eq 124 ]] || fail "hanging validator returned ${CASE_RC}"
+child_pid=$(cat "${TMP_DIR}/hanging-child.pid")
+if ! python3 - "${child_pid}" <<'PY'
+import os
+import sys
+import time
+
+pid = int(sys.argv[1])
+for _ in range(20):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        sys.exit(0)
+    time.sleep(0.05)
+sys.exit(1)
+PY
+then
+    kill "${child_pid}" 2>/dev/null || true
+    fail "timed-out validator left child process ${child_pid} running"
+fi
 
 run_case --require-session ""
 assert_failure "empty session value"
@@ -226,6 +304,12 @@ run_case --require-test-report "${TMP_DIR}/zero-tests.xml" \
          "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
 assert_failure "required test report without tests"
 assert_output "Surefire report has no tests"
+
+run_case --require-test-report "${TMP_DIR}/all-skipped.xml" \
+         --require-session suite-a --require-session suite-b \
+         "${TMP_DIR}/valid.xml" hg-pd-client hg-pd-core
+assert_failure "required all-skipped test report"
+assert_output "Surefire report has no executed tests"
 
 run_case --require-test-report "${TMP_DIR}/not-surefire.xml" \
          --require-session suite-a --require-session suite-b \

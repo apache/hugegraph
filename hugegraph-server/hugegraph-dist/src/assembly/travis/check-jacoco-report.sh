@@ -90,8 +90,8 @@ validate_test_report() {
         return 1
     fi
 
-    local test_count
-    if ! test_count=$(python3 - "${test_report}" <<'PY'
+    local test_counts
+    if ! test_counts=$(python3 - "${test_report}" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -99,16 +99,26 @@ root = ET.parse(sys.argv[1]).getroot()
 if root.tag.rsplit("}", 1)[-1] != "testsuite" or "tests" not in root.attrib:
     raise ValueError("not a Surefire testsuite report")
 test_count = int(root.attrib["tests"])
+skipped_count = int(root.attrib.get("skipped", "0"))
 if test_count < 0:
     raise ValueError("negative Surefire test count")
-print(test_count)
+if skipped_count < 0 or skipped_count > test_count:
+    raise ValueError("invalid Surefire skipped count")
+print(test_count, test_count - skipped_count)
 PY
     ); then
         echo "ERROR: unable to parse Surefire report: ${test_report}" >&2
         return 1
     fi
+    local test_count
+    local executed_count
+    read -r test_count executed_count <<< "${test_counts}"
     if (( test_count <= 0 )); then
         echo "ERROR: Surefire report has no tests: ${test_report}" >&2
+        return 1
+    fi
+    if (( executed_count <= 0 )); then
+        echo "ERROR: Surefire report has no executed tests: ${test_report}" >&2
         return 1
     fi
 }
