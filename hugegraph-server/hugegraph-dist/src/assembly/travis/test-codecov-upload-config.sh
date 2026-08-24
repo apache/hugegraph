@@ -32,6 +32,19 @@ expected_uploads = {
     ".github/workflows/pd-store-ci.yml": 3,
     ".github/workflows/server-ci.yml": 1,
 }
+expected_files = {
+    ".github/workflows/commons-ci.yml": [
+        "hugegraph-commons/target/jacoco.xml",
+    ],
+    ".github/workflows/pd-store-ci.yml": [
+        "${{ env.REPORT_FILE }}",
+        "${{ env.REPORT_FILE }}",
+        "${{ env.REPORT_DIR }}/*.xml",
+    ],
+    ".github/workflows/server-ci.yml": [
+        "${{ env.REPORT_DIR }}/*.xml",
+    ],
+}
 action_pattern = re.compile(
     r"^(?P<indent>\s*)(?P<dash>-\s+)?uses:\s*"
     r"codecov/codecov-action@(?P<version>\S+)\s*$"
@@ -150,8 +163,14 @@ for workflow_path in workflow_paths:
         )
     if expected_count is not None:
         checked_expected_workflows.add(relative_path)
+    expected_workflow_files = expected_files.get(relative_path)
+    if uploads and expected_workflow_files is None:
+        errors.append(
+            f"{relative_path}: unexpected Codecov upload workflow"
+        )
+        expected_workflow_files = []
 
-    for line_number, version, inputs in uploads:
+    for upload_index, (line_number, version, inputs) in enumerate(uploads):
         version_match = version_pattern.match(version)
         if version_match is None or int(version_match.group("major")) < 5:
             errors.append(
@@ -159,15 +178,31 @@ for workflow_path in workflow_paths:
                 "uses the legacy uploader"
             )
 
-        if not inputs.get("files"):
+        if upload_index >= len(expected_workflow_files):
             errors.append(
-                f"{relative_path}:{line_number}: Codecov upload must use "
-                "the files input"
+                f"{relative_path}:{line_number}: unexpected Codecov upload"
+            )
+            continue
+        expected_file = expected_workflow_files[upload_index]
+        if inputs.get("files") != expected_file:
+            errors.append(
+                f"{relative_path}:{line_number}: expected files input "
+                f"{expected_file!r}, found {inputs.get('files')!r}"
             )
         if inputs.get("token") != "${{ secrets.CODECOV_TOKEN }}":
             errors.append(
                 f"{relative_path}:{line_number}: Codecov upload must pass "
                 "secrets.CODECOV_TOKEN for trusted runs"
+            )
+        if inputs.get("disable_search") != "true":
+            errors.append(
+                f"{relative_path}:{line_number}: Codecov upload must set "
+                "disable_search: true"
+            )
+        if inputs.get("fail_ci_if_error") != "false":
+            errors.append(
+                f"{relative_path}:{line_number}: Codecov upload must keep "
+                "fail_ci_if_error: false"
             )
 
 for relative_path in expected_uploads.keys() - checked_expected_workflows:
