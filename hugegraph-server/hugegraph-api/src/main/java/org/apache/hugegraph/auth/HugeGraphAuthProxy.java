@@ -1240,8 +1240,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         // Log user action, limit rate for each user
-        Id usrId = context.user().userId();
-        RateLimiter auditLimiter = this.auditLimiters.getOrFetch(usrId, id -> {
+        Id userKey = auditLimiterKey(username);
+        RateLimiter auditLimiter = this.auditLimiters.getOrFetch(userKey, id -> {
             return RateLimiter.create(this.auditLogMaxRate);
         });
 

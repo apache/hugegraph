@@ -399,7 +399,7 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     }
 
     @Test
-    public void testDeleteUserInvalidatesUsernameAuditLimiter() {
+    public void testAuditLimiterUsesUsernameAndDeleteInvalidatesIt() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         HugeConfig config = Mockito.mock(HugeConfig.class);
         AuthManager authManager = Mockito.mock(AuthManager.class);
@@ -408,6 +408,8 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         HugeUser storedUser = new HugeUser(storedUserId, "cache_user");
 
         Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.name()).thenReturn("hugegraph");
         Mockito.when(graph.configuration()).thenReturn(config);
         Mockito.when(graph.authManager()).thenReturn(authManager);
         Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
@@ -430,8 +432,21 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         proxyAuthManager.validateUser("cache_user", "pass");
         Cache<Id, RateLimiter> auditLimiters =
                 Whitebox.getInternalState(proxy, "auditLimiters");
+        Id usernameKey = IdGenerator.of("cache_user");
+        Assert.assertNotEquals(usernameKey, storedUserId);
         Assert.assertTrue(auditLimiters.containsKey(
-                IdGenerator.of("cache_user")));
+                usernameKey));
+
+        HugeAuthenticator.User cacheUser = new HugeAuthenticator.User(
+                "cache_user", RolePermission.all("hugegraph"));
+        Whitebox.setInternalState(cacheUser, "userId", storedUserId);
+        Assert.assertEquals(storedUserId, cacheUser.userId());
+        setContext(new HugeGraphAuthProxy.Context(cacheUser));
+        proxy.name();
+
+        Assert.assertEquals(1L, auditLimiters.size());
+        Assert.assertTrue(auditLimiters.containsKey(usernameKey));
+        Assert.assertFalse(auditLimiters.containsKey(storedUserId));
 
         setContext(new HugeGraphAuthProxy.Context(
                 new HugeAuthenticator.User(
@@ -446,8 +461,9 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         proxyAuthManager.updateUser(storedUser);
         proxyAuthManager.deleteUser(storedUserId);
 
-        Assert.assertFalse(auditLimiters.containsKey(
-                IdGenerator.of("cache_user")));
+        Assert.assertEquals(0L, auditLimiters.size());
+        Assert.assertFalse(auditLimiters.containsKey(usernameKey));
+        Assert.assertFalse(auditLimiters.containsKey(storedUserId));
         Mockito.verify(authManager, Mockito.times(2)).updateUser(storedUser);
         Mockito.verify(authManager).deleteUser(storedUserId);
     }
