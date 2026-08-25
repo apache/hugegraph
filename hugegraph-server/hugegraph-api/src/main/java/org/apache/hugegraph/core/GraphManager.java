@@ -34,7 +34,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -66,6 +65,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.config.TypedOption;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.event.EventHub.NotifyResult;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.exception.NotSupportException;
@@ -1228,30 +1228,38 @@ public final class GraphManager {
 
             // Init graph and start it
             graph.create(this.graphsDir, this.globalNodeRoleInfo);
+
+            // Let gremlin server and rest server add graph to context
+            this.notifyEvent(Events.GRAPH_CREATE, graph);
         } catch (Throwable e) {
             LOG.error("Failed to create graph '{}' due to: {}",
                       name, e.getMessage(), e);
             if (graph != null) {
-                this.dropGraphLocal(graph);
+                this.graphs.remove(graph.spaceGraphName(), graph);
+                try {
+                    this.dropGraphLocal(graph);
+                } finally {
+                    // The create event may have partially registered the graph
+                    this.notifyEventLenient(Events.GRAPH_DROP, graph);
+                }
             }
             throw e;
         }
-
-        // Let gremlin server and rest server add graph to context
-        this.notifyAndWaitEvent(Events.GRAPH_CREATE, graph);
 
         return graph;
     }
 
     private void dropGraphLocal(HugeGraph graph) {
-        // Clear data and config files
-        graph.drop();
-
-        /*
-         * Will fill graph instance into HugeFactory.graphs after
-         * GraphFactory.open() succeed, remove it when the graph drops
-         */
-        HugeFactory.remove(graph);
+        try {
+            // Clear data and config files
+            graph.drop();
+        } finally {
+            /*
+             * Will fill graph instance into HugeFactory.graphs after
+             * GraphFactory.open() succeed, remove it when the graph drops
+             */
+            HugeFactory.remove(graph);
+        }
     }
 
     public HugeGraph createGraph(String graphSpace, String name, String creator,
@@ -1377,18 +1385,37 @@ public final class GraphManager {
         graph.updateTime(timeStamp);
 
         String graphName = spaceGraphName(graphSpace, name);
+        this.graphs.put(graphName, graph);
+
+        /*
+         * Let gremlin server and rest server context add graph before the
+         * graph is published, so that a failed local binding can't leave the
+         * graph behind in meta for the other servers to converge on
+         */
+        try {
+            this.notifyEvent(Events.GRAPH_CREATE, graph);
+        } catch (Throwable e) {
+            this.notifyEventLenient(Events.GRAPH_DROP, graph);
+            this.graphs.remove(graphName, graph);
+            try {
+                graph.close();
+            } catch (Exception e1) {
+                if (graph instanceof StandardHugeGraph) {
+                    ((StandardHugeGraph) graph).clearSchedulerAndLock();
+                }
+            }
+            HugeFactory.remove(graph);
+            throw e;
+        }
+
         if (init) {
             this.creatingGraphs.add(graphName);
             this.metaManager.addGraphConfig(graphSpace, name, configs);
             this.metaManager.notifyGraphAdd(graphSpace, name);
         }
-        this.graphs.put(graphName, graph);
         if (!grpcThread) {
             this.metaManager.updateGraphSpaceConfig(graphSpace, gs);
         }
-
-        // Let gremlin server and rest server context add graph
-        this.eventHub.notify(Events.GRAPH_CREATE, graph);
 
         if (init) {
             String schema = propConfig.getString(
@@ -1789,7 +1816,7 @@ public final class GraphManager {
             LOG.debug("RestServer accepts event '{}'", event.name());
             event.checkArgs(HugeGraph.class);
             HugeGraph graph = (HugeGraph) event.args()[0];
-            this.graphs.remove(graph.spaceGraphName());
+            this.graphs.remove(graph.spaceGraphName(), graph);
             return null;
         });
     }
@@ -1806,12 +1833,34 @@ public final class GraphManager {
         this.metaManager.listenGraphClear(ConsumerWrapper.wrap(this::graphClearHandler));
     }
 
-    private void notifyAndWaitEvent(String event, HugeGraph graph) {
-        Future<?> future = this.eventHub.notify(event, graph);
+    /**
+     * Notify the listeners of `event` synchronously, failing if any listener
+     * did not complete successfully.
+     * <p>
+     * EventHub swallows every throwable raised by a listener and reports the
+     * attempted and successful listeners from the same snapshot.
+     */
+    private void notifyEvent(String event, HugeGraph graph) {
+        String graphName = graph.spaceGraphName();
+        NotifyResult result = this.eventHub.notifySync(event, graph);
+
+        if (!result.success()) {
+            throw new HugeException("Only %s of %s listeners handled event " +
+                                    "'%s' of graph '%s' successfully",
+                                    result.succeeded(), result.attempted(),
+                                    event, graphName);
+        }
+    }
+
+    /**
+     * Notify listeners synchronously, but keep listener failures non-fatal.
+     * Used by the drop and rollback paths, where cleanup must be best-effort.
+     */
+    private void notifyEventLenient(String event, HugeGraph graph) {
         try {
-            future.get();
+            this.eventHub.notifySync(event, graph);
         } catch (Throwable e) {
-            LOG.warn("Error when waiting for event execution: {}", event, e);
+            LOG.warn("Error when notifying event: {}", event, e);
         }
     }
 
@@ -2034,7 +2083,7 @@ public final class GraphManager {
         this.dropGraphLocal(graph);
 
         // Let gremlin server and rest server context remove graph
-        this.notifyAndWaitEvent(Events.GRAPH_DROP, graph);
+        this.notifyEventLenient(Events.GRAPH_DROP, graph);
     }
 
     public void dropGraph(String graphSpace, String name, boolean clear) {

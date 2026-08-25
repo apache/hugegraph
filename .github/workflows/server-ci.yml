@@ -216,11 +216,12 @@ jobs:
           $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND tinkerpop
 
       - name: Upload coverage to Codecov
-        # TODO: update to v5 later
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ${{ env.REPORT_DIR }}/*.xml
+          files: ${{ env.REPORT_DIR }}/*.xml
+          disable_search: true
+          fail_ci_if_error: false
 
   build-server-macos-rocksdb:
     runs-on: ${{ matrix.os }}

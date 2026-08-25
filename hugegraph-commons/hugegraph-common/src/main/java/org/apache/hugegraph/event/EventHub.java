@@ -39,6 +39,29 @@ import com.google.common.collect.ImmutableList;
 
 public class EventHub {
 
+    public static final class NotifyResult {
+
+        private final int attempted;
+        private final int succeeded;
+
+        private NotifyResult(int attempted, int succeeded) {
+            this.attempted = attempted;
+            this.succeeded = succeeded;
+        }
+
+        public int attempted() {
+            return this.attempted;
+        }
+
+        public int succeeded() {
+            return this.succeeded;
+        }
+
+        public boolean success() {
+            return this.attempted == this.succeeded;
+        }
+    }
+
     private static final Logger LOG = Log.logger(EventHub.class);
 
     public static final String EVENT_WORKER = "event-worker-%d";
@@ -167,10 +190,29 @@ public class EventHub {
         return this.notify(event, null, args);
     }
 
+    /**
+     * Notify all registered listeners in the current thread.
+     */
+    public NotifyResult notifySync(String event, @Nullable Object... args) {
+        ExtendableIterator<EventListener> all = this.eventListeners(event);
+        return this.notifyListeners(all, null, new Event(this, event, args));
+    }
+
     private Future<Integer> notify(String event,
                                    EventListener ignoredListener,
                                    @Nullable Object... args) {
-        @SuppressWarnings("resource")
+        ExtendableIterator<EventListener> all = this.eventListeners(event);
+        if (!all.hasNext()) {
+            return CompletableFuture.completedFuture(0);
+        }
+        Event ev = new Event(this, event, args);
+        return executor().submit(() -> {
+            return this.notifyListeners(all, ignoredListener, ev).succeeded();
+        });
+    }
+
+    @SuppressWarnings("resource")
+    private ExtendableIterator<EventListener> eventListeners(String event) {
         ExtendableIterator<EventListener> all = new ExtendableIterator<>();
 
         List<EventListener> ls = this.listeners.get(event);
@@ -181,31 +223,33 @@ public class EventHub {
         if (lsAny != null && !lsAny.isEmpty()) {
             all.extend(lsAny.iterator());
         }
+        return all;
+    }
 
+    private NotifyResult notifyListeners(ExtendableIterator<EventListener> all,
+                                         EventListener ignoredListener,
+                                         Event event) {
         if (!all.hasNext()) {
-            return CompletableFuture.completedFuture(0);
+            return new NotifyResult(0, 0);
         }
 
-        Event ev = new Event(this, event, args);
-
-        // The submit will catch params: `all`(Listeners) and `ev`(Event)
-        return executor().submit(() -> {
-            int count = 0;
-            // Notify all listeners, and ignore the results
-            while (all.hasNext()) {
-                EventListener listener = all.next();
-                if (listener == ignoredListener) {
-                    continue;
-                }
-                try {
-                    listener.event(ev);
-                    count++;
-                } catch (Throwable e) {
-                    LOG.warn("Failed to handle event: {}", ev, e);
-                }
+        int attempted = 0;
+        int succeeded = 0;
+        // Notify all listeners, and ignore the results
+        while (all.hasNext()) {
+            EventListener listener = all.next();
+            if (listener == ignoredListener) {
+                continue;
             }
-            return count;
-        });
+            attempted++;
+            try {
+                listener.event(event);
+                succeeded++;
+            } catch (Throwable e) {
+                LOG.warn("Failed to handle event: {}", event, e);
+            }
+        }
+        return new NotifyResult(attempted, succeeded);
     }
 
     public Object call(String event, @Nullable Object... args) {

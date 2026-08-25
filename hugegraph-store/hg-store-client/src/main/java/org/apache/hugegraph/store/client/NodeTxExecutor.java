@@ -263,8 +263,14 @@ final class NodeTxExecutor {
         }
     }
 
-    public HgStoreSession openNodeSession(HgStoreNode node) {
+    public synchronized HgStoreSession openNodeSession(HgStoreNode node) {
         HgStoreSession res = this.sessions.get(node.getNodeId());
+        if (res instanceof HgStoreNodeSession &&
+            ((HgStoreNodeSession) res).getStoreNode() != node) {
+            // A retry can receive the same node ID backed by a new Store process.
+            this.sessions.remove(node.getNodeId());
+            res = null;
+        }
         if (res == null) {
             this.sessions.put(node.getNodeId(), (res = node.openSession(this.graphName)));
         }

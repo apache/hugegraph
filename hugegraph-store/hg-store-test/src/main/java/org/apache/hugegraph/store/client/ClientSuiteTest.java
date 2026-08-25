@@ -27,7 +27,8 @@ import org.junit.runners.Suite;
  */
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
-        AbstractGrpcClientTest.class
+        AbstractGrpcClientTest.class,
+        NodeTxExecutorTest.class
 })
 public class ClientSuiteTest {
 }
