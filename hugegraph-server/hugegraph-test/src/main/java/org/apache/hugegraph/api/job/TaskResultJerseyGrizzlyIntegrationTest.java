@@ -51,6 +51,7 @@ import com.codahale.metrics.Meter;
 
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HEAD;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
@@ -75,6 +76,22 @@ public class TaskResultJerseyGrizzlyIntegrationTest {
             Assert.assertEquals(RESULT, decompress(response.body));
             Assert.assertEquals(0, scenario.permitsDuringWrite.get());
             Assert.assertEquals(1, scenario.limiter.availablePermits());
+        }
+    }
+
+    @Test
+    public void testJerseyHeadReturnsHeadersWithoutEntity() throws Exception {
+        Scenario scenario = Scenario.complete();
+
+        try (ServerHarness server = new ServerHarness(scenario, 5)) {
+            HttpResponse response = server.head();
+
+            Assert.assertEquals(200, response.status);
+            Assert.assertEquals(CompressInterceptor.GZIP,
+                                response.contentEncoding);
+            Assert.assertEquals(0, response.body.length);
+            Assert.assertEquals(0, scenario.limiter.availablePermits());
+            Assert.assertEquals(1L, scenario.writerStarted.getCount());
         }
     }
 
@@ -229,6 +246,18 @@ public class TaskResultJerseyGrizzlyIntegrationTest {
             return Response.ok(output, MediaType.APPLICATION_JSON_TYPE)
                            .build();
         }
+
+        @HEAD
+        @Compress
+        @Produces(MediaType.APPLICATION_JSON)
+        public Response head() {
+            return Response.ok()
+                           .type(MediaType.APPLICATION_JSON_TYPE)
+                           .header("Cache-Control", "no-store")
+                           .header("Content-Encoding",
+                                   CompressInterceptor.GZIP)
+                           .build();
+        }
     }
 
     private static final class Scenario {
@@ -341,9 +370,18 @@ public class TaskResultJerseyGrizzlyIntegrationTest {
         }
 
         private HttpResponse request() throws IOException {
+            return this.request("GET");
+        }
+
+        private HttpResponse head() throws IOException {
+            return this.request("HEAD");
+        }
+
+        private HttpResponse request(String method) throws IOException {
             HttpURLConnection connection = (HttpURLConnection)
                     URI.create("http://127.0.0.1:" + this.port + "/stream")
                        .toURL().openConnection();
+            connection.setRequestMethod(method);
             connection.setRequestProperty("Accept-Encoding",
                                           CompressInterceptor.GZIP);
             connection.setConnectTimeout(2000);
