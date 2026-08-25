@@ -41,6 +41,7 @@ import org.apache.hugegraph.job.JobBuilder;
 import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.task.StandardTaskScheduler;
 import org.apache.hugegraph.task.TaskCallable;
+import org.apache.hugegraph.task.TaskResultMetadata;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.testutil.Assert;
@@ -471,6 +472,11 @@ public class TaskCoreTest extends BaseCoreTest {
         scheduler.schedule(task);
 
         scheduler.waitUntilTaskCompleted(id, 10);
+
+        TaskResultMetadata metadata = scheduler.taskResultMetadata(id);
+        Assert.assertEquals(id, metadata.taskId());
+        Assert.assertEquals(TaskStatus.SUCCESS, metadata.status());
+        Assert.assertTrue(metadata.hasResult());
 
         HugeTask<?> taskWithResult = scheduler.task(id, true);
         Assert.assertEquals("\"metadata-result\"", taskWithResult.result());

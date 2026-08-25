@@ -170,6 +170,40 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
     }
 
     @Override
+    public TaskResultMetadata taskResultMetadata(Id id) {
+        E.checkArgumentNotNull(id, "Parameter task id can't be null");
+        TaskResultMetadata metadata = this.call(() -> {
+            Iterator<Vertex> taskVertices = this.tx().queryTaskInfos(id);
+            HugeVertex taskVertex =
+                    (HugeVertex) QueryResults.one(taskVertices);
+            if (taskVertex == null) {
+                return null;
+            }
+
+            HugeTask<?> task = HugeTask.fromVertex(taskVertex, false);
+            if (task.status() != TaskStatus.SUCCESS) {
+                return new TaskResultMetadata(id, task.status(), false);
+            }
+
+            Iterator<Vertex> resultVertices = this.tx().queryTaskInfos(
+                    HugeTaskResult.genId(id));
+            HugeVertex resultVertex =
+                    (HugeVertex) QueryResults.one(resultVertices);
+            if (resultVertex == null) {
+                return new TaskResultMetadata(id, task.status(), false);
+            }
+            boolean hasResult = resultVertex.hasProperty(
+                    resultVertex.graph()
+                                .propertyKey(HugeTaskResult.P.RESULT).id());
+            return new TaskResultMetadata(id, task.status(), hasResult);
+        });
+        if (metadata == null) {
+            throw new NotFoundException("Can't find task with id '%s'", id);
+        }
+        return metadata;
+    }
+
+    @Override
     public <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
         return this.tasks(ids, false);
     }

@@ -74,6 +74,9 @@ public final class TaskResultStreamer {
                 cursor.moveNext();
                 inspected++;
             }
+            if (!cursor.hasCurrentItem()) {
+                cursor.requireEndOfInput();
+            }
             return cursor.rootType;
         } catch (IOException e) {
             throw invalidJson(e);
@@ -124,6 +127,7 @@ public final class TaskResultStreamer {
                 generator.writeStringField("page",
                                            tokenEncoder.apply(next));
             } else {
+                cursor.requireEndOfInput();
                 generator.writeNullField("page");
             }
             generator.writeEndObject();
@@ -194,7 +198,8 @@ public final class TaskResultStreamer {
     }
 
     private static void checkDeadline(long deadlineNanos) {
-        if (System.nanoTime() > deadlineNanos) {
+        if (Thread.currentThread().isInterrupted() ||
+            System.nanoTime() > deadlineNanos) {
             throw new TaskResultStreamException(
                     Reason.TIMEOUT, "Reading the task result timed out");
         }
@@ -258,6 +263,28 @@ public final class TaskResultStreamer {
 
         private void moveNext() throws IOException {
             this.current = this.parser.nextToken();
+            this.checkLimits();
+        }
+
+        private void requireEndOfInput() {
+            JsonToken end = this.rootType == RootType.ARRAY ?
+                            JsonToken.END_ARRAY : JsonToken.END_OBJECT;
+            if (this.current != end) {
+                throw new TaskResultStreamException(
+                        Reason.INVALID_JSON,
+                        "The persisted task result ended before its " +
+                        "top-level container was closed");
+            }
+            try {
+                if (this.parser.nextToken() != null) {
+                    throw new TaskResultStreamException(
+                            Reason.INVALID_JSON,
+                            "The persisted task result contains content " +
+                            "after its top-level container");
+                }
+            } catch (IOException e) {
+                throw invalidJson(e);
+            }
             this.checkLimits();
         }
 

@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 import org.apache.groovy.util.Maps;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
+import org.apache.hugegraph.api.filter.CompressInterceptor;
 import org.apache.hugegraph.api.filter.CompressInterceptor.Compress;
 import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
@@ -44,6 +45,7 @@ import org.apache.hugegraph.api.job.TaskResultPageTokenCodec.Token;
 import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.task.TaskResultPageCursor;
 import org.apache.hugegraph.task.TaskResultPageCursor.RootType;
+import org.apache.hugegraph.task.TaskResultMetadata;
 import org.apache.hugegraph.task.TaskResultSnapshot;
 import org.apache.hugegraph.task.TaskResultStreamException;
 import org.apache.hugegraph.task.TaskResultStreamException.Reason;
@@ -65,6 +67,7 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.HEAD;
 import jakarta.ws.rs.NotSupportedException;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
@@ -198,20 +201,49 @@ public class TaskAPI extends API {
                 TaskResultStreamMetrics.Mode.COMPLETE;
         TaskResultStreamMetrics.RequestTrace trace =
                 TaskResultStreamMetrics.request(graphSpace, graph, id, mode);
+        long requestDeadlineNanos = deadline(config.get(
+                ServerOptions.REQUEST_TIMEOUT));
         try {
             return this.buildResultResponse(manager, config, request,
                                             graphSpace, graph, id,
-                                            limit, page, trace);
+                                            limit, page, trace,
+                                            requestDeadlineNanos);
         } catch (RuntimeException | Error e) {
             trace.preCommitFailure(e);
             throw e;
         }
     }
 
+    @HEAD
+    @Timed
+    @Compress
+    @Path("{id}/result")
+    @Produces(APPLICATION_JSON_WITH_CHARSET)
+    public Response headResult(
+            @Context GraphManager manager,
+            @Parameter(description = "The graphspace name")
+            @PathParam("graphspace") String graphSpace,
+            @Parameter(description = "The graph name")
+            @PathParam("graph") String graph,
+            @Parameter(description = "The task id")
+            @PathParam("id") long id) {
+        TaskScheduler scheduler = graph(manager, graphSpace, graph)
+                .taskScheduler();
+        TaskResultMetadata metadata = scheduler.taskResultMetadata(
+                IdGenerator.of(id));
+        ensureReadable(metadata);
+        return Response.ok()
+                       .type(APPLICATION_JSON_WITH_CHARSET)
+                       .header("Cache-Control", "no-store")
+                       .header("Content-Encoding", CompressInterceptor.GZIP)
+                       .build();
+    }
+
     private Response buildResultResponse(
             GraphManager manager, HugeConfig config, Request request,
             String graphSpace, String graph, long id, Integer limit,
-            String page, TaskResultStreamMetrics.RequestTrace trace) {
+            String page, TaskResultStreamMetrics.RequestTrace trace,
+            long requestDeadlineNanos) {
         Integer pageSize = limit;
         E.checkArgument(pageSize == null || page == null,
                         "The parameters 'limit' and 'page' can't be " +
@@ -258,6 +290,7 @@ public class TaskAPI extends API {
             checkPageRange(offset, pageSize, config.get(
                     ServerOptions.TASK_RESULT_PAGE_OFFSET_MAX));
         }
+        checkRequestDeadline(requestDeadlineNanos);
 
         Semaphore limiter = this.resultStreamLimiter(config.get(
                 ServerOptions.TASK_RESULT_ACTIVE_STREAMS_MAX));
@@ -274,6 +307,7 @@ public class TaskAPI extends API {
             TaskScheduler scheduler = hugeGraph.taskScheduler();
             TaskResultSnapshot snapshot = scheduler.taskResultSnapshot(
                     IdGenerator.of(id));
+            checkRequestDeadline(requestDeadlineNanos);
             ensureReadable(snapshot);
             Connection<?> connection = connection(request);
             BooleanSupplier responseCommitted = responseCommitted(request);
@@ -282,7 +316,7 @@ public class TaskAPI extends API {
             if (!pagination) {
                 output = streamComplete(snapshot, limiter, config,
                                         connection, responseCommitted,
-                                        trace);
+                                        trace, requestDeadlineNanos);
             } else {
                 if (token != null &&
                     !token.fingerprint().equals(snapshot.fingerprint())) {
@@ -291,7 +325,8 @@ public class TaskAPI extends API {
                             "was issued");
                 }
                 RootType rootType = preflight(snapshot, offset, pageSize,
-                                               expectedRoot, config);
+                                               expectedRoot, config,
+                                               requestDeadlineNanos);
 
                 if (codec == null) {
                     codec = tokenCodec(config);
@@ -312,7 +347,8 @@ public class TaskAPI extends API {
                                     responseCommitted, trace, rootType,
                                     resultOffset,
                                     resultPageSize, pageCodec, graphSpace,
-                                    graph, id, issuedAt, expiresAt);
+                                    graph, id, issuedAt, expiresAt,
+                                    requestDeadlineNanos);
             }
 
             Response response = Response.ok(output,
@@ -399,19 +435,29 @@ public class TaskAPI extends API {
     }
 
     private static void ensureReadable(TaskResultSnapshot snapshot) {
-        TaskStatus status = snapshot.status();
+        ensureReadable(snapshot.taskId(), snapshot.status(),
+                       snapshot.hasResult());
+    }
+
+    private static void ensureReadable(TaskResultMetadata metadata) {
+        ensureReadable(metadata.taskId(), metadata.status(),
+                       metadata.hasResult());
+    }
+
+    private static void ensureReadable(Id taskId, TaskStatus status,
+                                       boolean hasResult) {
         if (status != TaskStatus.SUCCESS) {
             String message;
             if (status == TaskStatus.FAILED ||
                 status == TaskStatus.CANCELLED) {
                 message = String.format(
                         "Task '%s' has status '%s'; read its error from the " +
-                        "task details endpoint", snapshot.taskId(),
+                        "task details endpoint", taskId,
                         status.string());
             } else {
                 message = String.format(
                         "Task '%s' result is not ready in status '%s'",
-                        snapshot.taskId(), status.string());
+                        taskId, status.string());
             }
             if (status == TaskStatus.FAILED ||
                 status == TaskStatus.CANCELLED) {
@@ -419,22 +465,25 @@ public class TaskAPI extends API {
             }
             throw new TaskResultNotReadyException(message);
         }
-        if (!snapshot.hasResult()) {
+        if (!hasResult) {
             throw new TaskResultUnavailableException(String.format(
-                    "Task '%s' has no persisted result", snapshot.taskId()));
+                    "Task '%s' has no persisted result", taskId));
         }
     }
 
     private static RootType preflight(TaskResultSnapshot snapshot,
                                       long offset, int pageSize,
                                       RootType expectedRoot,
-                                      HugeConfig config) {
+                                      HugeConfig config,
+                                      long requestDeadlineNanos) {
         try {
             RootType rootType = TaskResultStreamer.preflight(
                     snapshot, offset, pageSize,
                     config.get(ServerOptions.TASK_RESULT_SCAN_BYTES_MAX),
-                    deadline(config.get(
-                            ServerOptions.TASK_RESULT_SCAN_TIME_MAX)));
+                    Math.min(requestDeadlineNanos,
+                             deadline(config.get(
+                                     ServerOptions.
+                                             TASK_RESULT_SCAN_TIME_MAX))));
             if (expectedRoot != null && expectedRoot != rootType) {
                 throw new TaskResultChangedException(
                         String.format("The task result root changed from " +
@@ -443,10 +492,12 @@ public class TaskAPI extends API {
             }
             return rootType;
         } catch (TaskResultStreamException e) {
-            if (e.reason() == Reason.SCAN_LIMIT_EXCEEDED ||
-                e.reason() == Reason.TIMEOUT) {
+            if (e.reason() == Reason.SCAN_LIMIT_EXCEEDED) {
                 throwStatus(Response.Status.REQUEST_ENTITY_TOO_LARGE
                                     .getStatusCode(), e.getMessage());
+            }
+            if (e.reason() == Reason.TIMEOUT) {
+                throw new TaskResultTimeoutException(e.getMessage(), e);
             }
             if (e.reason() == Reason.INVALID_JSON) {
                 throwStatus(Response.Status.CONFLICT.getStatusCode(),
@@ -465,11 +516,13 @@ public class TaskAPI extends API {
                                                    Connection<?> connection,
                                                    BooleanSupplier
                                                    responseCommitted,
-                                                   TaskResultStreamMetrics.RequestTrace trace) {
+                                                   TaskResultStreamMetrics.RequestTrace trace,
+                                                   long requestDeadlineNanos) {
         int timeout = config.get(
                 ServerOptions.TASK_RESULT_STREAM_TIME_MAX);
         return new TaskResultStreamingOutput(
-                connection, responseCommitted, timeout, limiter, trace,
+                connection, responseCommitted, timeout,
+                requestDeadlineNanos, limiter, trace,
                 snapshot.compressedSize(),
                 (output, deadlineNanos) -> TaskResultStreamer.stream(
                         snapshot, output, deadlineNanos));
@@ -482,11 +535,13 @@ public class TaskAPI extends API {
             TaskResultStreamMetrics.RequestTrace trace, RootType rootType,
             long offset, int pageSize,
             TaskResultPageTokenCodec codec, String graphSpace, String graph,
-            long taskId, long issuedAt, long expiresAt) {
+            long taskId, long issuedAt, long expiresAt,
+            long requestDeadlineNanos) {
         int timeout = config.get(
                 ServerOptions.TASK_RESULT_STREAM_TIME_MAX);
         return new TaskResultStreamingOutput(
-                connection, responseCommitted, timeout, limiter, trace,
+                connection, responseCommitted, timeout,
+                requestDeadlineNanos, limiter, trace,
                 snapshot.compressedSize(), (output, deadlineNanos) ->
                 TaskResultStreamer.streamPage(
                         snapshot, rootType, offset, pageSize,
@@ -559,12 +614,24 @@ public class TaskAPI extends API {
     }
 
     private static long deadline(int seconds) {
+        if (seconds < 0) {
+            return Long.MAX_VALUE;
+        }
         long now = System.nanoTime();
         long duration = TimeUnit.SECONDS.toNanos(seconds);
         if (Long.MAX_VALUE - now < duration) {
             return Long.MAX_VALUE;
         }
         return now + duration;
+    }
+
+    private static void checkRequestDeadline(long deadlineNanos) {
+        if (Thread.currentThread().isInterrupted() ||
+            (deadlineNanos != Long.MAX_VALUE &&
+             System.nanoTime() - deadlineNanos >= 0L)) {
+            throw new TaskResultTimeoutException(
+                    "Reading the task result timed out");
+        }
     }
 
     private static long nowSeconds() {

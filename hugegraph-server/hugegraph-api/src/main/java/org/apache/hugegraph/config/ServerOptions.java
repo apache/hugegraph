@@ -114,18 +114,20 @@ public class ServerOptions extends OptionHolder {
             new ConfigOption<>(
                     "restserver.task_result_scan_time_max",
                     "The maximum seconds spent validating a task result " +
-                    "page before committing the response.",
+                    "page before committing the response. The effective " +
+                    "deadline is also capped by restserver.request_timeout.",
                     positiveInt(),
-                    30
+                    15
             );
 
     public static final ConfigOption<Integer> TASK_RESULT_STREAM_TIME_MAX =
             new ConfigOption<>(
                     "restserver.task_result_stream_time_max",
                     "The maximum seconds spent streaming a task result " +
-                    "response.",
+                    "response. The effective deadline is also capped by " +
+                    "the remaining restserver.request_timeout budget.",
                     positiveInt(),
-                    60
+                    30
             );
 
     public static final ConfigOption<Integer> TASK_RESULT_ACTIVE_STREAMS_MAX =

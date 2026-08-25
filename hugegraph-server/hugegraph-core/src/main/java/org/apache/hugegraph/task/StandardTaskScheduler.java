@@ -397,6 +397,38 @@ public class StandardTaskScheduler implements TaskScheduler {
     }
 
     @Override
+    public TaskResultMetadata taskResultMetadata(Id id) {
+        E.checkArgumentNotNull(id, "Parameter task id can't be null");
+        HugeTask<?> task = this.tasks.get(id);
+        if (task != null && task.status() != TaskStatus.SUCCESS) {
+            return new TaskResultMetadata(id, task.status(), false);
+        }
+
+        TaskResultMetadata metadata = this.call(() -> {
+            Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
+            HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
+            if (vertex == null) {
+                return task == null ? null :
+                       new TaskResultMetadata(id, task.status(), false);
+            }
+
+            TaskStatus status = task == null ?
+                                HugeTask.fromVertex(vertex, false).status() :
+                                task.status();
+            if (status != TaskStatus.SUCCESS) {
+                return new TaskResultMetadata(id, status, false);
+            }
+            boolean hasResult = vertex.hasProperty(
+                    vertex.graph().propertyKey(P.RESULT).id());
+            return new TaskResultMetadata(id, status, hasResult);
+        });
+        if (metadata == null) {
+            throw new NotFoundException("Can't find task with id '%s'", id);
+        }
+        return metadata;
+    }
+
+    @Override
     public <V> Iterator<HugeTask<V>> tasks(List<Id> ids) {
         return this.tasks(ids, true);
     }

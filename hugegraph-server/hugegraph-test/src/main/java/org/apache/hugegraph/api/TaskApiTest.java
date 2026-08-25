@@ -138,6 +138,24 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testHeadResultUsesMetadataOnlyResponse() {
+        int taskId = this.gremlinJob("[1, 2, 3]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().target().path(resultPath(taskId))
+                                    .request()
+                                    .header("Accept-Encoding", "gzip")
+                                    .head();
+
+        Assert.assertEquals(200, response.getStatus());
+        Assert.assertEquals("no-store",
+                            response.getHeaderString("Cache-Control"));
+        Assert.assertEquals("gzip",
+                            response.getHeaderString("Content-Encoding"));
+        Assert.assertFalse(response.hasEntity());
+    }
+
+    @Test
     public void testGetArrayResultByPage() {
         int taskId = this.gremlinJob("[1, 2, 3, 4]");
         waitTaskSuccess(taskId);

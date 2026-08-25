@@ -134,6 +134,31 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
     }
 
     @Test
+    public void testResultMetadataDoesNotDeserializePersistedResult() {
+        Id id = IdGenerator.of(88906);
+        TestDistributedTaskScheduler scheduler = this.newScheduler();
+
+        try {
+            scheduler.init();
+            scheduler.save(newTask(id, "metadata-result-task",
+                                   TaskStatus.SUCCESS, largeTaskResult()));
+            scheduler.resetResultReadCount();
+            scheduler.forbidResultRead(true);
+
+            TaskResultMetadata metadata = scheduler.taskResultMetadata(id);
+
+            Assert.assertEquals(id, metadata.taskId());
+            Assert.assertEquals(TaskStatus.SUCCESS, metadata.status());
+            Assert.assertTrue(metadata.hasResult());
+            Assert.assertEquals(0, scheduler.resultReadCount());
+        } finally {
+            scheduler.forbidResultRead(false);
+            scheduler.deleteFromDBForTest(id);
+            scheduler.closeAndShutdown();
+        }
+    }
+
+    @Test
     public void testSnapshotReportsSuccessWithoutPersistedResult() {
         Id id = IdGenerator.of(88904);
         TestDistributedTaskScheduler scheduler = this.newScheduler();

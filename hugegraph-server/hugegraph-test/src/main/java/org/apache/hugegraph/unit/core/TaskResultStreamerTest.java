@@ -87,6 +87,57 @@ public class TaskResultStreamerTest {
     }
 
     @Test
+    public void testRejectTrailingRootAfterFinalArrayPage() {
+        TaskResultStreamException exception = Assert.assertThrows(
+                TaskResultStreamException.class,
+                () -> TaskResultStreamer.preflight(
+                        snapshot("[1] [2]"), 0L, 2, 1024L,
+                        Long.MAX_VALUE));
+
+        Assert.assertEquals(Reason.INVALID_JSON, exception.reason());
+    }
+
+    @Test
+    public void testRejectTrailingGarbageAfterFinalObjectPage() {
+        TaskResultStreamException exception = Assert.assertThrows(
+                TaskResultStreamException.class,
+                () -> TaskResultStreamer.preflight(
+                        snapshot("{\"a\":1}garbage"), 0L, 1, 1024L,
+                        Long.MAX_VALUE));
+
+        Assert.assertEquals(Reason.INVALID_JSON, exception.reason());
+    }
+
+    @Test
+    public void testRejectTrailingRootWhileStreamingFinalPage() {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        TaskResultStreamException exception = Assert.assertThrows(
+                TaskResultStreamException.class,
+                () -> TaskResultStreamer.streamPage(
+                        snapshot("[1][2]"), RootType.ARRAY, 0L, 2,
+                        1024L, Long.MAX_VALUE, output,
+                        cursor -> "unexpected"));
+
+        Assert.assertEquals(Reason.INVALID_JSON, exception.reason());
+    }
+
+    @Test
+    public void testAllowWhitespaceAfterFinalPage() throws Exception {
+        TaskResultSnapshot snapshot = snapshot("[1]\r\n\t ");
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        RootType rootType = TaskResultStreamer.preflight(
+                snapshot, 0L, 2, 1024L, Long.MAX_VALUE);
+        TaskResultStreamer.streamPage(snapshot, rootType, 0L, 2,
+                                      1024L, Long.MAX_VALUE, output,
+                                      cursor -> "unexpected");
+
+        Assert.assertEquals("{\"root_type\":\"array\",\"items\":[1]," +
+                            "\"page\":null}", utf8(output));
+    }
+
+    @Test
     public void testStreamEmptyArrayAndObjectPages() throws Exception {
         TaskResultSnapshot array = snapshot("[]");
         ByteArrayOutputStream arrayOutput = new ByteArrayOutputStream();
@@ -211,6 +262,23 @@ public class TaskResultStreamerTest {
                                                    1024L, 0L));
 
         Assert.assertEquals(Reason.TIMEOUT, exception.reason());
+    }
+
+    @Test
+    public void testRejectInterruptedScanAsTimeout() {
+        Thread.currentThread().interrupt();
+        try {
+            TaskResultStreamException exception = Assert.assertThrows(
+                    TaskResultStreamException.class,
+                    () -> TaskResultStreamer.preflight(
+                            snapshot("[1]"), 0L, 1024L,
+                            Long.MAX_VALUE));
+
+            Assert.assertEquals(Reason.TIMEOUT, exception.reason());
+            Assert.assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

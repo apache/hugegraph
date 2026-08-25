@@ -17,12 +17,16 @@
 
 package org.apache.hugegraph.api.job;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 import org.apache.hugegraph.metrics.MetricsUtil;
 import org.apache.hugegraph.task.TaskResultStreamException;
@@ -71,6 +75,91 @@ public class TaskResultStreamingOutputTest {
                             histogram("written-bytes").getCount());
         Mockito.verify(connection).setWriteTimeout(
                 5000L, TimeUnit.MILLISECONDS);
+    }
+
+    @Test
+    public void testFinishGzipBeforeRecordingSuccess() throws Exception {
+        Semaphore limiter = new Semaphore(0);
+        ByteArrayOutputStream target = new ByteArrayOutputStream();
+        GZIPOutputStream gzip = new GZIPOutputStream(target);
+        TaskResultStreamingOutput streaming = new TaskResultStreamingOutput(
+                null, committed(true), 1, limiter, trace(), 17,
+                (output, deadline) ->
+                        output.write("ok".getBytes(StandardCharsets.UTF_8)));
+
+        streaming.write(gzip);
+
+        byte[] content;
+        try (GZIPInputStream input = new GZIPInputStream(
+                new ByteArrayInputStream(target.toByteArray()))) {
+            content = input.readAllBytes();
+        }
+        Assert.assertEquals("ok", new String(content,
+                                              StandardCharsets.UTF_8));
+        Assert.assertEquals(1, limiter.availablePermits());
+    }
+
+    @Test
+    public void testGzipTrailerFailureIsNotRecordedAsSuccess()
+            throws Exception {
+        Semaphore limiter = new Semaphore(0);
+        Connection<?> connection = connection(5000L);
+        TaskResultStreamMetrics.RequestTrace trace = trace();
+        long success = meter("success").getCount();
+        long postCommit = meter("postcommit-failed").getCount();
+        GZIPOutputStream gzip = new GZIPOutputStream(
+                new TrailerFailingOutputStream());
+        TaskResultStreamingOutput streaming = new TaskResultStreamingOutput(
+                connection, committed(true), 1, limiter, trace, 17,
+                (output, deadline) -> output.write(1));
+
+        Assert.assertThrows(IOException.class,
+                            () -> streaming.write(gzip));
+
+        Assert.assertEquals(success, meter("success").getCount());
+        Assert.assertEquals(postCommit + 1L,
+                            meter("postcommit-failed").getCount());
+        Assert.assertEquals(1, limiter.availablePermits());
+        Mockito.verify(connection).terminateSilently();
+    }
+
+    @Test
+    public void testInterruptedStreamIsClassifiedAsTimeout() {
+        Semaphore limiter = new Semaphore(0);
+        long timeout = meter("timeout").getCount();
+        TaskResultStreamingOutput streaming = new TaskResultStreamingOutput(
+                null, committed(true), 1, limiter, trace(), 17,
+                (output, deadline) -> Thread.currentThread().interrupt());
+
+        try {
+            TaskResultStreamException exception = Assert.assertThrows(
+                    TaskResultStreamException.class,
+                    () -> streaming.write(new ByteArrayOutputStream()));
+
+            Assert.assertEquals(Reason.TIMEOUT, exception.reason());
+            Assert.assertEquals(timeout + 1L, meter("timeout").getCount());
+            Assert.assertEquals(1, limiter.availablePermits());
+            Assert.assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    public void testRequestDeadlineCapsStreamDeadline() {
+        Semaphore limiter = new Semaphore(0);
+        AtomicBoolean writerCalled = new AtomicBoolean(false);
+        TaskResultStreamingOutput streaming = new TaskResultStreamingOutput(
+                null, committed(false), 60, 0L, limiter, trace(), 17,
+                (output, deadline) -> writerCalled.set(true));
+
+        TaskResultStreamException exception = Assert.assertThrows(
+                TaskResultStreamException.class,
+                () -> streaming.write(new ByteArrayOutputStream()));
+
+        Assert.assertEquals(Reason.TIMEOUT, exception.reason());
+        Assert.assertFalse(writerCalled.get());
+        Assert.assertEquals(1, limiter.availablePermits());
     }
 
     @Test
@@ -125,6 +214,7 @@ public class TaskResultStreamingOutputTest {
                             meter("postcommit-failed").getCount());
         Mockito.verify(connection).setWriteTimeout(
                 5000L, TimeUnit.MILLISECONDS);
+        Mockito.verify(connection).terminateSilently();
     }
 
     @Test
@@ -176,6 +266,7 @@ public class TaskResultStreamingOutputTest {
                             meter("postcommit-failed").getCount());
         Mockito.verify(connection).setWriteTimeout(
                 5000L, TimeUnit.MILLISECONDS);
+        Mockito.verify(connection, Mockito.never()).terminateSilently();
     }
 
     @Test
@@ -279,6 +370,32 @@ public class TaskResultStreamingOutputTest {
                         "Write timeout exceeded when trying to flush the data");
             }
         };
+    }
+
+    private static final class TrailerFailingOutputStream
+            extends OutputStream {
+
+        private int written;
+
+        private TrailerFailingOutputStream() {
+            this.written = 0;
+        }
+
+        @Override
+        public void write(int value) throws IOException {
+            if (this.written >= 10) {
+                throw new IOException("failed to write gzip trailer");
+            }
+            this.written++;
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length)
+                          throws IOException {
+            for (int i = 0; i < length; i++) {
+                this.write(bytes[offset + i]);
+            }
+        }
     }
 
     private static Counter counter(String name) {

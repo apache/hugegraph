@@ -21,6 +21,7 @@ import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.api.job.TaskResultExceptionsTest;
 import org.apache.hugegraph.api.job.TaskResultGrizzlyIntegrationTest;
+import org.apache.hugegraph.api.job.TaskResultJerseyGrizzlyIntegrationTest;
 import org.apache.hugegraph.api.job.TaskResultStreamingOutputTest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
@@ -112,6 +113,7 @@ import org.junit.runners.Suite;
         TaskResultPageTokenCodecTest.class,
         TaskResultExceptionsTest.class,
         TaskResultGrizzlyIntegrationTest.class,
+        TaskResultJerseyGrizzlyIntegrationTest.class,
         TaskResultStreamingOutputTest.class,
         WsAndHttpBasicAuthHandlerTest.class,
         GraphSpaceGroupAPITest.class,

@@ -141,4 +141,15 @@ public class ServerOptionsTest {
         Assert.assertEquals(1.0D,
                             config.get(ServerOptions.JVM_MEMORY_MONITOR_THRESHOLD));
     }
+
+    @Test
+    public void testTaskResultTimeoutDefaultsAreCappedByRequestBudget() {
+        HugeConfig config = new HugeConfig(new PropertiesConfiguration());
+
+        Assert.assertEquals(15, config.get(
+                ServerOptions.TASK_RESULT_SCAN_TIME_MAX));
+        Assert.assertEquals(30, config.get(
+                ServerOptions.TASK_RESULT_STREAM_TIME_MAX));
+        Assert.assertEquals(30, config.get(ServerOptions.REQUEST_TIMEOUT));
+    }
 }

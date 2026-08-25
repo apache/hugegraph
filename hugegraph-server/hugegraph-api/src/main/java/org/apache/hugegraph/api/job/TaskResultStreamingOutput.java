@@ -24,6 +24,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
+import java.util.zip.GZIPOutputStream;
 
 import org.apache.hugegraph.task.TaskResultStreamException;
 import org.apache.hugegraph.task.TaskResultStreamException.Reason;
@@ -44,6 +45,7 @@ final class TaskResultStreamingOutput implements StreamingOutput {
     private final Connection<?> connection;
     private final BooleanSupplier responseCommitted;
     private final int timeoutSeconds;
+    private final long requestDeadlineNanos;
     private final Semaphore limiter;
     private final TaskResultStreamMetrics.RequestTrace requestTrace;
     private final int compressedBytes;
@@ -52,6 +54,16 @@ final class TaskResultStreamingOutput implements StreamingOutput {
     TaskResultStreamingOutput(
             Connection<?> connection, BooleanSupplier responseCommitted,
             int timeoutSeconds, Semaphore limiter,
+            TaskResultStreamMetrics.RequestTrace requestTrace,
+            int compressedBytes, Writer writer) {
+        this(connection, responseCommitted, timeoutSeconds, Long.MAX_VALUE,
+             limiter, requestTrace, compressedBytes, writer);
+    }
+
+    TaskResultStreamingOutput(
+            Connection<?> connection, BooleanSupplier responseCommitted,
+            int timeoutSeconds, long requestDeadlineNanos,
+            Semaphore limiter,
             TaskResultStreamMetrics.RequestTrace requestTrace,
             int compressedBytes, Writer writer) {
         E.checkArgument(timeoutSeconds > 0,
@@ -64,6 +76,7 @@ final class TaskResultStreamingOutput implements StreamingOutput {
         this.connection = connection;
         this.responseCommitted = responseCommitted;
         this.timeoutSeconds = timeoutSeconds;
+        this.requestDeadlineNanos = requestDeadlineNanos;
         this.limiter = limiter;
         this.requestTrace = requestTrace;
         this.compressedBytes = compressedBytes;
@@ -72,49 +85,64 @@ final class TaskResultStreamingOutput implements StreamingOutput {
 
     @Override
     public void write(OutputStream output) throws IOException {
-        long deadlineNanos = deadline(this.timeoutSeconds);
+        long deadlineNanos = Math.min(deadline(this.timeoutSeconds),
+                                      this.requestDeadlineNanos);
         TaskResultStreamMetrics.StreamTrace streamTrace =
                 this.requestTrace.stream(this.compressedBytes);
         ClientOutputStream clientOutput =
                 new ClientOutputStream(output, deadlineNanos);
         WriteTimeoutScope timeout = WriteTimeoutScope.NONE;
         try {
+            checkDeadline(deadlineNanos);
             timeout = WriteTimeoutScope.open(this.connection,
                                              this.timeoutSeconds);
             clientOutput.timeout(timeout);
             this.writer.write(clientOutput, deadlineNanos);
             checkDeadline(deadlineNanos);
+            clientOutput.finish();
             streamTrace.success(clientOutput.count());
         } catch (ClientWriteException e) {
+            TaskResultStreamMetrics.Stage stage =
+                    this.stage(clientOutput.count());
             TaskResultStreamMetrics.Outcome outcome =
                     deadlineReached(deadlineNanos) ||
                     isTransportTimeout(e) ?
                     TaskResultStreamMetrics.Outcome.TIMEOUT :
                     TaskResultStreamMetrics.Outcome.DISCONNECTED;
-            streamTrace.failure(this.stage(clientOutput.count()), outcome,
-                                e, clientOutput.count(),
-                                this.compressedBytes);
+            streamTrace.failure(stage, outcome,
+                                 e, clientOutput.count(),
+                                 this.compressedBytes);
+            this.abortConnection(stage);
             throw e;
         } catch (TaskResultStreamException e) {
+            TaskResultStreamMetrics.Stage stage =
+                    this.stage(clientOutput.count());
             TaskResultStreamMetrics.Outcome outcome =
                     e.reason() == Reason.TIMEOUT ?
                     TaskResultStreamMetrics.Outcome.TIMEOUT :
                     TaskResultStreamMetrics.Outcome.FAILURE;
-            streamTrace.failure(this.stage(clientOutput.count()), outcome,
-                                e, clientOutput.count(),
-                                this.compressedBytes);
+            streamTrace.failure(stage, outcome,
+                                 e, clientOutput.count(),
+                                 this.compressedBytes);
+            this.abortConnection(stage);
             throw e;
         } catch (IOException e) {
+            TaskResultStreamMetrics.Stage stage =
+                    this.stage(clientOutput.count());
             streamTrace.failure(
-                    this.stage(clientOutput.count()),
+                    stage,
                     TaskResultStreamMetrics.Outcome.FAILURE, e,
                     clientOutput.count(), this.compressedBytes);
+            this.abortConnection(stage);
             throw e;
         } catch (RuntimeException | Error e) {
+            TaskResultStreamMetrics.Stage stage =
+                    this.stage(clientOutput.count());
             streamTrace.failure(
-                    this.stage(clientOutput.count()),
+                    stage,
                     TaskResultStreamMetrics.Outcome.FAILURE, e,
                     clientOutput.count(), this.compressedBytes);
+            this.abortConnection(stage);
             throw e;
         } finally {
             try {
@@ -135,7 +163,8 @@ final class TaskResultStreamingOutput implements StreamingOutput {
     }
 
     private static void checkDeadline(long deadlineNanos) {
-        if (deadlineReached(deadlineNanos)) {
+        if (Thread.currentThread().isInterrupted() ||
+            deadlineReached(deadlineNanos)) {
             throw new TaskResultStreamException(
                     Reason.TIMEOUT, "Streaming the task result timed out");
         }
@@ -171,6 +200,19 @@ final class TaskResultStreamingOutput implements StreamingOutput {
         return writtenBytes > 0L ?
                TaskResultStreamMetrics.Stage.POST_COMMIT :
                TaskResultStreamMetrics.Stage.PRE_COMMIT;
+    }
+
+    private void abortConnection(TaskResultStreamMetrics.Stage stage) {
+        if (stage != TaskResultStreamMetrics.Stage.POST_COMMIT ||
+            this.connection == null) {
+            return;
+        }
+        try {
+            this.connection.terminateSilently();
+        } catch (RuntimeException e) {
+            LOG.warn("Failed to terminate the task result connection after " +
+                     "a post-commit streaming failure", e);
+        }
     }
 
     @FunctionalInterface
@@ -281,6 +323,19 @@ final class TaskResultStreamingOutput implements StreamingOutput {
 
         private long count() {
             return this.count;
+        }
+
+        private void finish() throws IOException {
+            this.timeout.beforeWrite(this.deadlineNanos);
+            try {
+                if (this.output instanceof GZIPOutputStream) {
+                    ((GZIPOutputStream) this.output).finish();
+                }
+                this.output.flush();
+            } catch (IOException e) {
+                throw new ClientWriteException(e);
+            }
+            checkDeadline(this.deadlineNanos);
         }
 
         @Override
