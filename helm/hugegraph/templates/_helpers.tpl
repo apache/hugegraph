@@ -534,12 +534,6 @@ keys for releases stored before the values existed.
 {{- if and $advertiseUrl (not (or (hasPrefix "http://" $advertiseUrl) (hasPrefix "https://" $advertiseUrl))) -}}
 {{- fail "server.advertiseUrl must be an absolute http:// or https:// URL when set" -}}
 {{- end -}}
-{{- $hubbleForAdvertise := get .Values "hubble" | default dict -}}
-{{- $hubblePdModeForAdvertise := and (get $hubbleForAdvertise "enabled" | default false) (ne (get $hubbleForAdvertise "mode" | default "pd") "direct") -}}
-{{- $pdMetaForAdvertise := or .Values.server.auth.enabled $hubblePdModeForAdvertise -}}
-{{- if and $advertiseUrl (not $pdMetaForAdvertise) -}}
-{{- fail "server.advertiseUrl requires server.auth.enabled=true (or in-chart hubble.enabled with hubble.mode=pd), because only then does the chart register server.urls_to_pd with PD" -}}
-{{- end -}}
 {{- $pdSvc := get .Values.pd "service" | default dict -}}
 {{- $pdSvcType := get $pdSvc "type" | default "ClusterIP" -}}
 {{- if and (or (get $pdSvc "restNodePort") (get $pdSvc "grpcNodePort")) (not (has $pdSvcType (list "NodePort" "LoadBalancer"))) -}}

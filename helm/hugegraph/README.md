@@ -414,12 +414,10 @@ In-cluster names such as `*.svc` are not reachable from outside. The chart
 helps with two knobs: advertise a reachable Server URL to PD, and expose the
 PD client Service.
 
-Keep **`server.auth.enabled=true`**. With `hubble.enabled=false`, auth-on is
-what enables PD meta mode so the chart actually writes `server.urls_to_pd`
-(and therefore honors `server.advertiseUrl`). Auth-off plus `advertiseUrl`
-fails at render time.
+The chart always registers `server.urls_to_pd` with PD, so `server.advertiseUrl`
+is honored whenever it is set.
 
-1. Leave in-chart Hubble off and keep `server.auth.enabled=true`.
+1. Leave in-chart Hubble off if the bundled UI is not wanted.
 2. Expose Server and set `server.advertiseUrl` to the absolute `http(s)://`
    URL outside Hubble will use after discovery. The chart registers it via
    `server.urls_to_pd` instead of the in-cluster Service URL.
