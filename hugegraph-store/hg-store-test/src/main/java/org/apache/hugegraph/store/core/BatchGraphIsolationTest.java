@@ -234,6 +234,7 @@ public class BatchGraphIsolationTest {
         Assert.assertArrayEquals(value2, read(graph2));
 
         handler.truncate(graph2, PARTITION_ID);
+        Assert.assertNull(read(graph2));
         Assert.assertArrayEquals(value1, read(graph1));
     }
 
