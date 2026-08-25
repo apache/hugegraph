@@ -74,6 +74,7 @@ public class HstoreSessionsImpl extends HstoreSessions {
     private static volatile Boolean initializedNode = Boolean.FALSE;
     private static volatile PDClient defaultPdClient;
     private static volatile HgStoreClient hgStoreClient;
+    private final GraphStoreClient graphStoreClient;
     private final HugeConfig config;
     private final HstoreSession session;
     private final Map<String, Integer> tables;
@@ -81,11 +82,23 @@ public class HstoreSessionsImpl extends HstoreSessions {
     private final String graphName;
 
     public HstoreSessionsImpl(HugeConfig config, String database, String store) {
+        this(config, database, store, null);
+    }
+
+    HstoreSessionsImpl(HugeConfig config, String database, String store,
+                       GraphStoreClient graphStoreClient) {
         super(config, database, store);
         this.config = config;
         this.graphName = database + "/" + store;
-        this.initStoreNode(config);
-        this.session = new HstoreSession(this.config, graphName);
+        if (graphStoreClient == null) {
+            this.initStoreNode(config);
+            this.graphStoreClient = new GraphStoreClient();
+        } else {
+            this.graphStoreClient = graphStoreClient;
+        }
+        this.session = new HstoreSession(
+                this.config, this.graphName,
+                this.graphStoreClient.openSession(this.graphName));
         this.tables = new ConcurrentHashMap<>();
         this.refCount = new AtomicInteger(1);
     }
@@ -130,10 +143,11 @@ public class HstoreSessionsImpl extends HstoreSessions {
                     E.checkArgument(partitionCount > -1,
                                     "The value of hstore.partition_count " +
                                     "cannot be less than 0.");
-                    defaultPdClient.setGraph(Metapb.Graph.newBuilder()
-                                                         .setGraphName(this.graphName)
-                                                         .setPartitionCount(partitionCount)
-                                                         .build());
+                    this.graphStoreClient.setGraph(
+                            Metapb.Graph.newBuilder()
+                                         .setGraphName(this.graphName)
+                                         .setPartitionCount(partitionCount)
+                                         .build());
                     infoInitializedGraph.add(this.graphName);
                 }
             }
@@ -181,10 +195,16 @@ public class HstoreSessionsImpl extends HstoreSessions {
     public void clear() {
         this.session.deleteGraph();
         try {
-            hgStoreClient.getPdClient().delGraph(this.graphName);
+            this.graphStoreClient.delGraph(this.graphName);
         } catch (PDException ignored) {
 
+        } finally {
+            clearInitializedGraph(this.graphName);
         }
+    }
+
+    private static void clearInitializedGraph(String graphName) {
+        infoInitializedGraph.remove(graphName);
     }
 
     @Override
@@ -194,7 +214,8 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
     @Override
     protected final Session newSession() {
-        return new HstoreSession(this.config(), this.graphName);
+        return new HstoreSession(this.config(), this.graphName,
+                                 this.graphStoreClient.openSession(this.graphName));
     }
 
     @Override
@@ -214,6 +235,21 @@ public class HstoreSessionsImpl extends HstoreSessions {
     }
 
     private void checkValid() {
+    }
+
+    static class GraphStoreClient {
+
+        HgStoreSession openSession(String graphName) {
+            return hgStoreClient.openSession(graphName);
+        }
+
+        void setGraph(Metapb.Graph graph) throws PDException {
+            defaultPdClient.setGraph(graph);
+        }
+
+        void delGraph(String graphName) throws PDException {
+            hgStoreClient.getPdClient().delGraph(graphName);
+        }
     }
 
     private static class ColumnIterator<T extends HgKvIterator> implements
@@ -418,10 +454,11 @@ public class HstoreSessionsImpl extends HstoreSessions {
         private final HgStoreSession graph;
         int changedSize = 0;
 
-        public HstoreSession(HugeConfig conf, String graphName) {
+        public HstoreSession(HugeConfig conf, String graphName,
+                             HgStoreSession graph) {
             setGraphName(graphName);
             setConf(conf);
-            this.graph = hgStoreClient.openSession(graphName);
+            this.graph = graph;
         }
 
         @Override
