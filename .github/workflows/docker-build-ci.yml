@@ -25,11 +25,71 @@ on:
   pull_request:
     paths:
       - '**/Dockerfile*'
+      - 'docker-bake.hcl'
       - '.dockerignore'
       - 'hugegraph-server/hugegraph-dist/docker/**'
       - 'hugegraph-server/hugegraph-dist/src/assembly/static/bin/util.sh'
 
 jobs:
+  docker-bake-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify shared Maven stages stay identical
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          extract_build_stage() {
+            awk '
+              /^FROM .* AS build$/ {
+                in_build = 1
+              }
+              in_build && seen && /^FROM / {
+                exit
+              }
+              in_build {
+                print
+                seen = 1
+              }
+            ' "$1"
+          }
+
+          reference="hugegraph-pd/Dockerfile"
+          for dockerfile in \
+            hugegraph-store/Dockerfile \
+            hugegraph-server/Dockerfile \
+            hugegraph-server/Dockerfile-hstore; do
+            diff -u \
+              <(extract_build_stage "$reference") \
+              <(extract_build_stage "$dockerfile")
+          done
+
+      - name: Validate shared image build graph
+        run: |
+          set -euo pipefail
+
+          docker buildx bake --print > /tmp/hugegraph-bake.json
+          jq -e '
+            .group.default.targets == [
+              "build-cache",
+              "pd",
+              "server-hstore",
+              "server-standalone",
+              "store"
+            ] and
+            ([.target[] | .platforms] |
+              all(. == ["linux/amd64", "linux/arm64"])) and
+            .target["build-cache"].target == "build" and
+            .target["build-cache"].output[0].type == "cacheonly" and
+            ([.target | to_entries[] |
+              select(.key != "build-cache") |
+              .value.output[0].type] |
+              all(. == "docker"))
+          ' /tmp/hugegraph-bake.json
+
   docker-build:
     runs-on: ubuntu-24.04
     strategy:

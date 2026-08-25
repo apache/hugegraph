@@ -97,6 +97,10 @@ Builds images locally from source Dockerfiles. Best for **developers** who want 
 Build the matching `hugegraph-toolchain` Hubble source as
 `local/hugegraph-hubble:dev` before starting this stack.
 
+The publishing pipeline uses the repository-root `docker-bake.hcl` to compile
+the Java reactor once and build the PD, Store, HStore Server, and standalone
+Server runtime images from that shared result.
+
 ```bash
 (
   cd docker
