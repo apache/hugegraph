@@ -217,15 +217,6 @@ PD REST endpoints for Server storage-readiness checks.
 {{- end }}
 
 {{/*
-PD peer hostnames without port, for the PD-start DNS gate init container:
-pod-0.<svc>.<ns>.svc,pod-1.<svc>.<ns>.svc,...
-Derived from hugegraph.pd.raftPeersList so it tracks pd.replicas.
-*/}}
-{{- define "hugegraph.pd.peerHostsList" -}}
-{{- regexReplaceAll ":[0-9]+" (include "hugegraph.pd.raftPeersList" .) "" -}}
-{{- end }}
-
-{{/*
 Checksum for the Server pod template so rotating the referenced auth Secrets
 rolls Server pods. Hashes Secret names, keys, and metadata.resourceVersion -
 never Secret data - so the annotation carries no credential-derived material.
@@ -386,6 +377,13 @@ count of 2 to 1 (two shards cannot elect a leader) and its config API
 accepts only odd values. store-max-shard-count is rendered only when set,
 keeping the image default. All lookups tolerate absent keys so releases
 stored before these values existed keep rendering under --reuse-values.
+
+raft.ip-whitelist.enabled is always rendered, default false: PD resolves its
+raft peer allowlist once at boot, which under Kubernetes blocks peers whose
+pod IPs were unpublished at that moment or change later, so the switch is
+off in-cluster per the upstream design and k8s auth owns that layer. Images
+without the property ignore the flag. Set pd.raftIpWhitelistEnabled=true to
+restore the image default.
 */}}
 {{- define "hugegraph.pd.effectiveJavaOpts" -}}
 {{- $pd := .Values.pd -}}
@@ -400,6 +398,8 @@ stored before these values existed keep rendering under --reuse-values.
 {{- if ne $maxShard "" -}}
 {{- $flags = append $flags (printf "-Dpartition.store-max-shard-count=%s" $maxShard) -}}
 {{- end -}}
+{{- $ipWhitelist := ternary "true" "false" (eq (get $pd "raftIpWhitelistEnabled" | toString) "true") -}}
+{{- $flags = append $flags (printf "-Draft.ip-whitelist.enabled=%s" $ipWhitelist) -}}
 {{- $userOpts := trim (get $pd "javaOpts" | default "") -}}
 {{- if ne $userOpts "" -}}
 {{- $flags = append $flags $userOpts -}}

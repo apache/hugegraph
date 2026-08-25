@@ -301,19 +301,8 @@
         "javaOpts": {
           "type": "string"
         },
-        "waitEnabled": {
+        "raftIpWhitelistEnabled": {
           "type": "boolean"
-        },
-        "waitImage": {
-          "type": "string",
-          "minLength": 1
-        },
-        "waitResources": {
-          "$ref": "#/definitions/resources"
-        },
-        "waitTimeoutSeconds": {
-          "type": "integer",
-          "minimum": 1
         },
         "updateStrategy": {
           "$ref": "#/definitions/updateStrategy"

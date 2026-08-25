@@ -148,13 +148,15 @@ helm upgrade hugegraph ./helm/hugegraph --namespace hugegraph --reuse-values
 Any upgrade that changes a Pod template rolls that workload once. Two cases
 are worth knowing about in advance:
 
-- **PD** restarts one pod at a time whenever its Pod template changes. On
-  current images a restarted PD returns with a new Pod IP that peers holding
-  older allowlists may reject (see Limitations). If PDs log
-  `Blocked connection` after a roll, delete all PD pods at once — the
-  `wait-for-pd-dns` gate makes the parallel cold start deterministic. For a
-  maintenance-window upgrade, set `pd.updateStrategy.type=OnDelete` and
-  restart the pods yourself.
+- **PD** restarts one pod at a time whenever its Pod template changes, which
+  includes adopting the `-Draft.ip-whitelist.enabled=false` setting described
+  under Limitations. With a PD image that carries the upstream whitelist
+  switch this roll is uneventful. On an older image the whitelist stays
+  active, and a restarted PD returning on a new Pod IP may be rejected by
+  peers holding stale allowlists; if PDs log `Blocked connection` after a
+  roll, delete all PD pods at once so they cold-start together and
+  re-resolve. For a maintenance-window upgrade, set
+  `pd.updateStrategy.type=OnDelete` and restart the pods yourself.
 - **Server** rolls once on the first `helm upgrade` after a fresh install,
   when the `checksum/auth` annotation first observes the install-created
   Secrets. Template-only pipelines (`helm template`, GitOps renderers) never
@@ -222,6 +224,7 @@ default values.
 | `pd.image.tag` | PD image tag. Tracks the development image until the next release is pinned | `latest` |
 | `pd.image.pullPolicy` | PD image pull policy | `Always` |
 | `pd.javaOpts` | Extra JVM flags, rendered after the chart-derived `-D` properties below so an explicit duplicate here wins. The image's automatic heap sizing is preserved unless heap flags are set | `""` |
+| `pd.raftIpWhitelistEnabled` | Enable PD's raft peer IP whitelist. Off in-cluster because PD resolves peers once at boot; requires a PD image carrying the upstream switch | `false` |
 | `pd.partition.defaultShardCount` | Shard replicas per partition, seeded into PD's persisted config at first bootstrap only; inert on an initialized cluster (see Partition Sharding). Empty derives 3 when `store.replicas` is at least 3, else 1. An explicit value must be odd and must not exceed `store.replicas` | `""` |
 | `pd.partition.storeMaxShardCount` | Maximum shards per Store, seeded at first bootstrap only. Also fixes the initial partition count, `store.replicas x storeMaxShardCount / shardCount` (see Partition Sharding). Empty preserves the image default of `12` | `""` |
 | `pd.ports.grpc` | PD gRPC port | `8686` |
@@ -820,11 +823,17 @@ independently of the release name.
 
 ## Limitations
 
-- PD builds its raft RPC allowlist by resolving peer hostnames once at
-  startup. The chart gates PD start on all peer DNS names resolving
-  (`wait-for-pd-dns`), which makes first boot deterministic, but a PD Pod
-  rescheduled to a new IP later can still be rejected by peers until they
-  restart and re-resolve; a dynamic refresh is upstream image work.
+- PD's raft IP whitelist resolves peer hostnames to IPs once at startup,
+  which under Kubernetes can block peers whose pod IPs were unpublished at
+  that moment or change later. The chart therefore disables the whitelist
+  in-cluster via the upstream `raft.ip-whitelist.enabled` switch, leaving
+  peer authentication to Kubernetes-level controls. Setting
+  `pd.raftIpWhitelistEnabled=true` restores the image default along with
+  its one-shot resolution semantics — bring-up races and pod-IP-change
+  rejections included — at the operator's own risk. PD images that predate
+  the switch ignore the flag and keep the whitelist active, so they remain
+  exposed to those failure modes; use images built from a source tree that
+  includes the switch.
 - The PD management REST endpoints (`/v1/members`, `/v1/stores`) reject
   requests on current images (`invalid service name`), and unauthenticated
   GETs return HTTP 200 with an `Unauthorized` JSON body. Until that is

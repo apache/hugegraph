@@ -77,12 +77,13 @@ jobs:
             --set pd.partition.storeMaxShardCount=12 > /dev/null
           helm template ci helm/hugegraph \
             --set-string pd.partition.defaultShardCount=3 > /dev/null
-          # The derived shard count must land in the PD JAVA_OPTS verbatim:
-          # 3 on the default topology, 1 on the single-node preset
+          # The derived shard count and the raft whitelist switch must land in
+          # the PD JAVA_OPTS verbatim: shard count 3 on the default topology,
+          # 1 on the single-node preset, whitelist disabled in both.
           helm template ci helm/hugegraph \
-            | grep -qF 'value: "-Dpartition.default-shard-count=3"'
+            | grep -qF 'value: "-Dpartition.default-shard-count=3 -Draft.ip-whitelist.enabled=false"'
           helm template ci helm/hugegraph -f helm/hugegraph/values-single.yaml \
-            | grep -qF 'value: "-Dpartition.default-shard-count=1"'
+            | grep -qF 'value: "-Dpartition.default-shard-count=1 -Draft.ip-whitelist.enabled=false"'
           # The stock distributed install must put every Server replica on
           # the shared PD graph catalog, even without Hubble. Auth is on by
           # default, so the chart-managed admin Secret must render too.
