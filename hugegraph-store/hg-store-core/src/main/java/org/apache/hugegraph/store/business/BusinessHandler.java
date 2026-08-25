@@ -152,6 +152,7 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     default void doBatch(String graph, int partId, List<BatchEntry> entryList) {
         BusinessHandler.TxBuilder builder = txBuilder(graph, partId);
+        BusinessHandler.Tx transaction = builder.build();
         try {
             for (BatchEntry b : entryList) {
                 Key start = b.getStartKey();
@@ -185,12 +186,16 @@ public interface BusinessHandler extends DBSessionBuilder {
                     }
                 }
             }
-            builder.build().commit();
+            transaction.commit();
         } catch (Throwable e) {
             String msg =
                     String.format("graph data %s-%s do batch insert with error:", graph, partId);
             log.error(msg, e);
-            builder.build().rollback();
+            try {
+                transaction.rollback();
+            } catch (Throwable rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         }
     }

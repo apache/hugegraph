@@ -38,6 +38,9 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -121,6 +124,8 @@ public class BusinessHandlerImpl implements BusinessHandler {
 
     private static final Map<String, HugeGraphSupplier> GRAPH_SUPPLIER_CACHE =
             new ConcurrentHashMap<>();
+    private static final int GRAPH_LOCK_STRIPES = 1024;
+    private static final ReadWriteLock[] GRAPH_LOCKS = createGraphLocks();
     private static final int batchSize = 10000;
     private static Long indexDataSize = 50 * 1024L;
     private static final RocksDBFactory factory = RocksDBFactory.getInstance();
@@ -170,6 +175,20 @@ public class BusinessHandlerImpl implements BusinessHandler {
 
             }
         });
+    }
+
+    private static ReadWriteLock[] createGraphLocks() {
+        ReadWriteLock[] locks = new ReadWriteLock[GRAPH_LOCK_STRIPES];
+        for (int i = 0; i < locks.length; i++) {
+            locks[i] = new ReentrantReadWriteLock(true);
+        }
+        return locks;
+    }
+
+    private static ReadWriteLock graphLock(String graph, int partId) {
+        int hash = 31 * partId + graph.hashCode();
+        hash ^= hash >>> 16;
+        return GRAPH_LOCKS[hash & (GRAPH_LOCK_STRIPES - 1)];
     }
 
     public static HugeConfig initRocksdb(Map<String, Object> rocksdbConfig,
@@ -1014,11 +1033,17 @@ public class BusinessHandlerImpl implements BusinessHandler {
     public void truncate(String graphName, int partId) throws HgStoreException {
         // Each partition corresponds to a rocksdb instance, so the rocksdb instance name is
         // rocksdb + partId
-        try (RocksDBSession dbSession = getSession(graphName, partId)) {
-            dbSession.sessionOp().deleteRange(keyCreator.getStartKey(partId, graphName),
-                                              keyCreator.getEndKey(partId, graphName));
-            // Release map ID
-            keyCreator.delGraphId(partId, graphName);
+        Lock lifecycleLock = graphLock(graphName, partId).writeLock();
+        lifecycleLock.lock();
+        try {
+            try (RocksDBSession dbSession = getSession(graphName, partId)) {
+                dbSession.sessionOp().deleteRange(keyCreator.getStartKey(partId, graphName),
+                                                  keyCreator.getEndKey(partId, graphName));
+                // Release map ID
+                keyCreator.delGraphId(partId, graphName);
+            }
+        } finally {
+            lifecycleLock.unlock();
         }
     }
 
@@ -1287,7 +1312,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
 
     @Override
     public TxBuilder txBuilder(String graph, int partId) throws HgStoreException {
-        return new TxBuilderImpl(graph, partId, getSession(graph, partId));
+        return new TxBuilderImpl(graph, partId);
     }
 
     @Override
@@ -1564,13 +1589,35 @@ public class BusinessHandlerImpl implements BusinessHandler {
         private final int partId;
         private final RocksDBSession dbSession;
         private final SessionOperator op;
+        private final Lock lifecycleLock;
+        private boolean completed;
 
-        private TxBuilderImpl(String graph, int partId, RocksDBSession dbSession) {
+        private TxBuilderImpl(String graph, int partId) {
             this.graph = graph;
             this.partId = partId;
-            this.dbSession = dbSession;
-            this.op = this.dbSession.sessionOp();
-            this.op.prepare();
+            this.lifecycleLock = graphLock(graph, partId).readLock();
+            this.lifecycleLock.lock();
+
+            RocksDBSession session = null;
+            SessionOperator operator = null;
+            try {
+                session = getSession(graph, partId);
+                operator = session.sessionOp();
+                operator.prepare();
+            } catch (RuntimeException | Error e) {
+                try {
+                    if (session != null) {
+                        session.close();
+                    }
+                } catch (Throwable closeError) {
+                    e.addSuppressed(closeError);
+                } finally {
+                    this.lifecycleLock.unlock();
+                }
+                throw e;
+            }
+            this.dbSession = session;
+            this.op = operator;
         }
 
         @Override
@@ -1655,20 +1702,36 @@ public class BusinessHandlerImpl implements BusinessHandler {
             return new Tx() {
                 @Override
                 public void commit() throws HgStoreException {
+                    if (completed) {
+                        return;
+                    }
                     op.commit();  // After an exception occurs in commit, rollback must be
                     // called, otherwise it will cause the lock not to be released.
-                    dbSession.close();
+                    completed = true;
+                    release();
                 }
 
                 @Override
                 public void rollback() throws HgStoreException {
+                    if (completed) {
+                        return;
+                    }
                     try {
                         op.rollback();
                     } finally {
-                        dbSession.close();
+                        completed = true;
+                        release();
                     }
                 }
             };
+        }
+
+        private void release() {
+            try {
+                this.dbSession.close();
+            } finally {
+                this.lifecycleLock.unlock();
+            }
         }
     }
 
