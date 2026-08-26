@@ -22,15 +22,19 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
@@ -233,6 +237,96 @@ public class OrderedKvIteratorTest {
     }
 
     @Test
+    public void testInitializeDrainsCompletedFailureBeforeRefillingWindow() {
+        int workers = 8;
+        ExecutorService initializer = new DirectExecutorService();
+        List<TestIterator> sources = new ArrayList<>();
+        sources.add(new TestIterator(0));
+        TestIterator failed = new TestIterator(1);
+        failed.failOnHasNextAfter(0);
+        sources.add(failed);
+        for (int i = 2; i < workers; i++) {
+            sources.add(new TestIterator(i));
+        }
+        CountDownLatch ninthStarted = new CountDownLatch(1);
+        TestIterator ninth = new TestIterator(workers);
+        ninth.blockFirstHasNext(ninthStarted, new CountDownLatch(0));
+        sources.add(ninth);
+
+        OrderedKvIterator iterator = new OrderedKvIterator(
+                sources, 0L, initializer);
+        try {
+            Assert.assertThrows(IllegalStateException.class,
+                                iterator::hasNext);
+            Assert.assertEquals(1L, ninthStarted.getCount());
+            for (TestIterator source : sources) {
+                Assert.assertTrue(source.closed);
+            }
+        } finally {
+            initializer.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testSingleSourceInitializationDoesNotUseExecutor() {
+        DirectExecutorService initializer = new DirectExecutorService();
+        OrderedKvIterator iterator = new OrderedKvIterator(
+                Collections.singletonList(new TestIterator(1)), 0L,
+                initializer);
+        try {
+            Assert.assertTrue(iterator.hasNext());
+            Assert.assertEquals(0, initializer.executions());
+            Assert.assertEquals(1, iterator.next().key()[0] & 0xff);
+            Assert.assertFalse(iterator.hasNext());
+        } finally {
+            iterator.close();
+            initializer.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testSingleSourceInitializationPreservesInterrupt()
+            throws Exception {
+        ExecutorService initializer = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        TestIterator source = new TestIterator(1);
+        source.blockFirstHasNextWithoutRestoringInterrupt(started, release);
+        OrderedKvIterator iterator = new OrderedKvIterator(
+                Collections.singletonList(source), 0L, initializer);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicBoolean interrupted = new AtomicBoolean();
+        Thread caller = new Thread(() -> {
+            try {
+                iterator.hasNext();
+            } catch (Throwable e) {
+                failure.set(e);
+            } finally {
+                interrupted.set(Thread.currentThread().isInterrupted());
+            }
+        });
+        caller.start();
+        try {
+            Assert.assertTrue(started.await(3L, TimeUnit.SECONDS));
+            caller.interrupt();
+            caller.join(3_000L);
+
+            Assert.assertFalse(caller.isAlive());
+            Assert.assertTrue(failure.get() instanceof IllegalStateException);
+            Assert.assertEquals("Interrupted while initializing ordered scan",
+                                failure.get().getMessage());
+            Assert.assertTrue(interrupted.get());
+            Assert.assertTrue(source.closed);
+        } finally {
+            release.countDown();
+            caller.interrupt();
+            caller.join(3_000L);
+            iterator.close();
+            initializer.shutdownNow();
+        }
+    }
+
+    @Test
     public void testInitializeDrainsInFlightTaskBeforeRetryingRejectedSource()
             throws Exception {
         ExecutorService initializer = new ThreadPoolExecutor(
@@ -354,6 +448,52 @@ public class OrderedKvIteratorTest {
         }
     }
 
+    private static final class DirectExecutorService
+            extends AbstractExecutorService {
+
+        private boolean shutdown;
+        private int executions;
+
+        private int executions() {
+            return this.executions;
+        }
+
+        @Override
+        public void shutdown() {
+            this.shutdown = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            this.shutdown = true;
+            return Collections.emptyList();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return this.shutdown;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return this.shutdown;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) {
+            return this.shutdown;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            if (this.shutdown) {
+                throw new RejectedExecutionException();
+            }
+            this.executions++;
+            command.run();
+        }
+    }
+
     private static List<Integer> keys(HgKvIterator<HgKvEntry> iterator) {
         List<Integer> keys = new ArrayList<>();
         while (iterator.hasNext()) {
@@ -379,6 +519,7 @@ public class OrderedKvIteratorTest {
         private CountDownLatch firstHasNextRelease;
         private boolean firstHasNextBlocked;
         private boolean failAfterFirstHasNextRelease;
+        private boolean restoreInterrupt;
 
         private TestIterator(Integer... keys) {
             this.entries = new ArrayList<>(keys.length);
@@ -395,6 +536,7 @@ public class OrderedKvIteratorTest {
             this.firstHasNextRelease = null;
             this.firstHasNextBlocked = false;
             this.failAfterFirstHasNextRelease = false;
+            this.restoreInterrupt = true;
         }
 
         private void failOnHasNextAfter(int nextCalls) {
@@ -417,6 +559,12 @@ public class OrderedKvIteratorTest {
             this.failAfterFirstHasNextRelease = true;
         }
 
+        private void blockFirstHasNextWithoutRestoringInterrupt(
+                CountDownLatch started, CountDownLatch release) {
+            this.blockFirstHasNext(started, release);
+            this.restoreInterrupt = false;
+        }
+
         @Override
         public boolean hasNext() {
             if (this.nextCalls == this.failOnHasNextAfter) {
@@ -433,7 +581,9 @@ public class OrderedKvIteratorTest {
                                 "Timed out waiting for concurrent source");
                     }
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    if (this.restoreInterrupt) {
+                        Thread.currentThread().interrupt();
+                    }
                     throw new IllegalStateException(e);
                 }
             }
@@ -448,7 +598,9 @@ public class OrderedKvIteratorTest {
                                 "Timed out waiting for source release");
                     }
                 } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    if (this.restoreInterrupt) {
+                        Thread.currentThread().interrupt();
+                    }
                     throw new IllegalStateException(e);
                 }
                 if (this.failAfterFirstHasNextRelease) {

@@ -172,6 +172,22 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         List<Future<SourceEntry>> futures =
                 new ArrayList<>(this.iterators.size());
         try {
+            if (this.iterators.size() == 1) {
+                try {
+                    this.addFirst(this.firstEntry(0));
+                } catch (RuntimeException e) {
+                    InterruptedException interruption =
+                            interruption(e);
+                    if (interruption == null) {
+                        throw e;
+                    }
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(
+                            "Interrupted while initializing ordered scan",
+                            interruption);
+                }
+                return;
+            }
             CompletionService<SourceEntry> completions =
                     new ExecutorCompletionService<>(this.initializer);
             int nextSource = 0;
@@ -196,8 +212,12 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
                     }
                 }
                 if (inFlight > 0) {
-                    this.addFirst(completions.take().get());
-                    inFlight--;
+                    Future<SourceEntry> completion = completions.take();
+                    do {
+                        this.addFirst(completion.get());
+                        inFlight--;
+                        completion = completions.poll();
+                    } while (completion != null);
                 }
             }
         } catch (InterruptedException e) {
@@ -214,6 +234,17 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             this.closeAfterFailure(e);
             throw e;
         }
+    }
+
+    private static InterruptedException interruption(Throwable failure) {
+        Throwable cause = failure;
+        while (cause != null) {
+            if (cause instanceof InterruptedException) {
+                return (InterruptedException) cause;
+            }
+            cause = cause.getCause();
+        }
+        return null;
     }
 
     private void addFirst(SourceEntry entry) {
