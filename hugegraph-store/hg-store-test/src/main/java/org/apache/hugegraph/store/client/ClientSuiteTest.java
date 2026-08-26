@@ -18,6 +18,7 @@
 package org.apache.hugegraph.store.client;
 
 import org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest;
+import org.apache.hugegraph.store.client.grpc.KvPageScannerTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -28,7 +29,10 @@ import org.junit.runners.Suite;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
         AbstractGrpcClientTest.class,
-        NodeTxExecutorTest.class
+        NodeTxExecutorTest.class,
+        KvPageScannerTest.class,
+        NodeTxSessionProxyTest.class,
+        OrderedKvIteratorTest.class
 })
 public class ClientSuiteTest {
 }

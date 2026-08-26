@@ -363,6 +363,29 @@ public class BusinessHandlerImpl implements BusinessHandler {
         return MultiPartitionIterator.of(ids, function);
     }
 
+    @Override
+    public ScanIterator scanOrdered(String graph, String table, byte[] start,
+                                    byte[] end, int scanType) throws HgStoreException {
+        List<Integer> ids = this.getLeaderPartitionIds(graph);
+        Function<Integer, ScanIterator> function = id -> {
+            byte[] endKey;
+            int type;
+            if (ArrayUtils.isEmpty(end)) {
+                endKey = keyCreator.getEndKey(id, graph);
+                type = ScanIterator.Trait.SCAN_LT_END;
+            } else {
+                endKey = keyCreator.getEndKey(id, graph, end);
+                type = scanType;
+            }
+            try (RocksDBSession dbSession = getSession(graph, table, id)) {
+                return new InnerKeyFilter(dbSession.sessionOp().scan(
+                        table, keyCreator.getStartKey(id, graph, start),
+                        endKey, type));
+            }
+        };
+        return OrderedMultiPartitionIterator.of(ids, function);
+    }
+
     /**
      * Merge ID scans into a single list, and invoke the scan function for others
      *

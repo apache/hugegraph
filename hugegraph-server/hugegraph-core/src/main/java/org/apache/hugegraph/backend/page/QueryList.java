@@ -89,7 +89,8 @@ public final class QueryList<R> {
             PageEntryIterator<R> iter = new PageEntryIterator<>(this, pageSize);
             /*
              * NOTE: PageEntryIterator query will change every fetch time.
-             * TODO: sort results by input ids in each page.
+             * QueryResults tracks this change and restores input-id order
+             * within each page without fetching later pages eagerly.
              */
             return iter.results();
         }
@@ -258,7 +259,7 @@ public final class QueryList<R> {
                     return null;
                 }
 
-                return this.queryByIndexIds(ids);
+                return this.queryByIndexIds(ids, holder.keepOrder());
             });
         }
 
@@ -275,7 +276,8 @@ public final class QueryList<R> {
                 return PageResults.emptyIterator();
             }
 
-            QueryResults<R> results = this.queryByIndexIds(pageIds.ids());
+            QueryResults<R> results = this.queryByIndexIds(pageIds.ids(),
+                                                           holder.keepOrder());
 
             return new PageResults<>(results, pageIds.pageState());
         }
@@ -309,10 +311,6 @@ public final class QueryList<R> {
                 }
                 query = query.originQuery();
             }
-        }
-
-        private QueryResults<R> queryByIndexIds(Set<Id> ids) {
-            return this.queryByIndexIds(ids, false);
         }
 
         private QueryResults<R> queryByIndexIds(Set<Id> ids, boolean inOrder) {

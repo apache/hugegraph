@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.backend.query;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
@@ -32,6 +33,7 @@ import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.iterator.FlatMapperIterator;
 import org.apache.hugegraph.iterator.ListIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
+import org.apache.hugegraph.iterator.WrappedIterator;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.type.Idfiable;
 import org.apache.hugegraph.util.E;
@@ -47,6 +49,8 @@ public class QueryResults<R> {
 
     private final Iterator<R> results;
     private final List<Query> queries;
+    private List<Query> currentQueries;
+    private long queryVersion;
 
     public QueryResults(Iterator<R> results, Query query) {
         this(results);
@@ -56,6 +60,8 @@ public class QueryResults<R> {
     private QueryResults(Iterator<R> results) {
         this.results = results;
         this.queries = InsertionOrderUtil.newList();
+        this.currentQueries = Collections.emptyList();
+        this.queryVersion = 0L;
     }
 
     public void setQuery(Query query) {
@@ -67,14 +73,17 @@ public class QueryResults<R> {
 
     private void addQuery(Query query) {
         E.checkNotNull(query, "query");
-        this.queries.add(query);
+        this.addQueries(Collections.singletonList(query));
     }
 
     private void addQueries(List<Query> queries) {
         assert !queries.isEmpty();
         for (Query query : queries) {
-            this.addQuery(query);
+            E.checkNotNull(query, "query");
+            this.queries.add(query);
         }
+        this.currentQueries = new ArrayList<>(queries);
+        this.queryVersion++;
     }
 
     public Iterator<R> iterator() {
@@ -101,52 +110,17 @@ public class QueryResults<R> {
             // None result found
             return origin;
         }
-        Collection<Id> ids;
-        if (!this.mustSortByInputIds() || this.paging() ||
-            (ids = this.queryIds()).size() <= 1) {
-            /*
-             * Return the original iterator if it's paging query or if the
-             * query input is less than one id, or don't have to do sort.
-             * NOTE: queryIds() only return the first batch of index query
-             */
+        if (!mustSortByInputIds(this.currentQueries)) {
             return origin;
         }
-
-        // Fill map with all elements
-        Map<Id, T> map = InsertionOrderUtil.newMap();
-        QueryResults.fillMap(origin, map);
-
-        if (map.size() > ids.size()) {
-            /*
-             * This means current query is part of QueryResults. For example,
-             * g.V().has('country', 'china').has('city', within('HK', 'BJ'))
-             * will be converted to
-             * g.V().has('country', 'china').has('city', 'HK') or
-             * g.V().has('country', 'china').has('city', 'BJ'),
-             * and ids is just first index subquery's id, not all.
-             */
-            ids = map.keySet();
-        }
-
-        return new MapperIterator<>(ids.iterator(), map::get);
+        return new InputOrderIterator<>(this, origin);
     }
 
-    private boolean mustSortByInputIds() {
-        assert !this.queries.isEmpty() : this;
-        for (Query query : this.queries) {
+    private static boolean mustSortByInputIds(List<Query> queries) {
+        assert !queries.isEmpty() : queries;
+        for (Query query : queries) {
             if (query instanceof IdQuery &&
                 ((IdQuery) query).mustSortByInput()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean paging() {
-        assert !this.queries.isEmpty();
-        for (Query query : this.queries) {
-            Query origin = query.originQuery();
-            if (query.paging() || origin != null && origin.paging()) {
                 return true;
             }
         }
@@ -164,14 +138,14 @@ public class QueryResults<R> {
         return false;
     }
 
-    private Collection<Id> queryIds() {
-        assert !this.queries.isEmpty();
-        if (this.queries.size() == 1) {
-            return this.queries.get(0).ids();
+    private static Collection<Id> queryIds(List<Query> queries) {
+        assert !queries.isEmpty();
+        if (queries.size() == 1) {
+            return queries.get(0).ids();
         }
 
         Set<Id> ids = InsertionOrderUtil.newSet();
-        for (Query query : this.queries) {
+        for (Query query : queries) {
             ids.addAll(query.ids());
         }
         return ids;
@@ -223,14 +197,17 @@ public class QueryResults<R> {
             if (results == null || !results.iterator().hasNext()) {
                 return null;
             }
-            /*
-             * NOTE: should call results.iterator().hasNext() before
-             * results.queries() to collect sub-query with index query
-             */
-            qr[0].addQueries(results.queries());
-            return results.iterator();
+            return new QueryTrackingIterator<>(qr[0], results);
         }));
         return qr[0];
+    }
+
+    private long queryVersion() {
+        return this.queryVersion;
+    }
+
+    private List<Query> currentQueries() {
+        return new ArrayList<>(this.currentQueries);
     }
 
     @Watched
@@ -324,6 +301,121 @@ public class QueryResults<R> {
         @Override
         public void close() throws Exception {
             // pass
+        }
+    }
+
+    private static class QueryTrackingIterator<R>
+            extends WrappedIterator<R> {
+
+        private final QueryResults<R> parent;
+        private final QueryResults<R> child;
+        private long childQueryVersion;
+
+        public QueryTrackingIterator(QueryResults<R> parent,
+                                     QueryResults<R> child) {
+            this.parent = parent;
+            this.child = child;
+            this.childQueryVersion = -1L;
+        }
+
+        @Override
+        protected Iterator<R> originIterator() {
+            return this.child.iterator();
+        }
+
+        @Override
+        protected boolean fetch() {
+            Iterator<R> origin = this.child.iterator();
+            if (!origin.hasNext()) {
+                return false;
+            }
+            R result = origin.next();
+            long queryVersion = this.child.queryVersion();
+            if (this.childQueryVersion != queryVersion) {
+                this.parent.addQueries(this.child.currentQueries());
+                this.childQueryVersion = queryVersion;
+            }
+            assert this.current == none();
+            this.current = result;
+            return true;
+        }
+    }
+
+    private static class InputOrderIterator<T extends Idfiable>
+            extends WrappedIterator<T> {
+
+        private final QueryResults<?> queryResults;
+        private final Iterator<T> origin;
+        private Iterator<T> currentBatch;
+
+        public InputOrderIterator(QueryResults<?> queryResults,
+                                  Iterator<T> origin) {
+            this.queryResults = queryResults;
+            this.origin = origin;
+            this.currentBatch = Collections.emptyIterator();
+        }
+
+        @Override
+        protected Iterator<T> originIterator() {
+            return this.origin;
+        }
+
+        @Override
+        protected boolean fetch() {
+            while (true) {
+                if (this.currentBatch.hasNext()) {
+                    assert this.current == none();
+                    this.current = this.currentBatch.next();
+                    return true;
+                }
+                if (!this.origin.hasNext()) {
+                    return false;
+                }
+                this.currentBatch = this.fetchBatch();
+            }
+        }
+
+        private Iterator<T> fetchBatch() {
+            long queryVersion = this.queryResults.queryVersion();
+            List<Query> queries = this.queryResults.currentQueries();
+            List<T> results = InsertionOrderUtil.newList();
+            do {
+                results.add(this.origin.next());
+                Query.checkForceCapacity(results.size());
+            } while (this.origin.hasNext() &&
+                     queryVersion == this.queryResults.queryVersion());
+
+            if (!mustSortByInputIds(queries)) {
+                return results.iterator();
+            }
+            Collection<Id> ids = queryIds(queries);
+            if (ids.size() <= 1) {
+                return results.iterator();
+            }
+
+            Map<Id, T> byId = InsertionOrderUtil.newMap();
+            for (T result : results) {
+                assert result.id() != null;
+                byId.put(result.id(), result);
+            }
+            if (byId.size() > ids.size()) {
+                /*
+                 * The current query only describes part of this segment.
+                 * Preserve backend order because it can't fully define the
+                 * order of every returned result.
+                 */
+                return results.iterator();
+            }
+
+            List<T> ordered = new ArrayList<>(results.size());
+            for (Id id : ids) {
+                T result = byId.remove(id);
+                if (result != null) {
+                    ordered.add(result);
+                }
+            }
+            ordered.addAll(byId.values());
+            return ordered.iterator();
         }
     }
 }

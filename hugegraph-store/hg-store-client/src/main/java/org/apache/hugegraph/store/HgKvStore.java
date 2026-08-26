@@ -95,6 +95,19 @@ public interface HgKvStore {
     HgKvIterator<HgKvEntry> scanIterator(String table, HgOwnerKey startKey, HgOwnerKey endKey,
                                          long limit, int scanType, byte[] query);
 
+    /**
+     * Scan a range in global key order across all partitions.
+     *
+     * Low-level node sessions don't provide cross-partition ordering. The
+     * multi-node session proxy overrides this capability.
+     */
+    default HgKvIterator<HgKvEntry> scanIteratorOrdered(
+            String table, HgOwnerKey startKey, HgOwnerKey endKey, long limit,
+            int scanType, byte[] query) {
+        throw new UnsupportedOperationException(
+                "Global ordered scan is not supported");
+    }
+
     HgKvIterator<HgKvEntry> scanIterator(String table, int codeFrom, int codeTo, int scanType,
                                          byte[] query);
 

@@ -24,6 +24,7 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -40,8 +41,10 @@ import org.apache.hugegraph.store.client.util.MetricX;
 import org.apache.hugegraph.store.grpc.common.Header;
 import org.apache.hugegraph.store.grpc.common.Kv;
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.HgStoreStreamGrpc.HgStoreStreamStub;
 import org.apache.hugegraph.store.grpc.stream.KvPageRes;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamVersion;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.grpc.stream.SelectParam;
 
@@ -60,7 +63,9 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
     private static final HgStoreClientConfig clientConfig = HgStoreClientConfig.of();
     private static final int nextTimeout = clientConfig.getNetKvScannerHaveNextTimeout();
     private final HgStoreNodeSession session;
-    private final HgStoreStreamStub stub;
+    private final Function<StreamObserver<KvPageRes>,
+                           StreamObserver<ScanStreamReq>> streamFactory;
+    private final boolean orderedScan;
     private final AtomicBoolean completed = new AtomicBoolean(false);
     private final SelectParam.Builder selectBuilder = SelectParam.newBuilder();
     private final BlockingQueue<ScanStreamReq> reqQueue = new LinkedBlockingQueue<>();
@@ -78,7 +83,8 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
                           int partition,
                           int scanType, byte[] query) {
         this.session = session;
-        this.stub = stub;
+        this.streamFactory = stub::scan;
+        this.orderedScan = false;
         this.pageSize = clientConfig.getNetKvScannerPageSize();
         this.reqBuilder.setHeader(this.getHeader(this.session))
                        .setMethod(scanMethod)
@@ -97,9 +103,20 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
     public KvPageScanner(HgStoreNodeSession session, HgStoreStreamStub stub,
                          ScanStreamReq.Builder reqBuilder) {
+        this(session, reqBuilder, stub::scan);
+    }
+
+    KvPageScanner(HgStoreNodeSession session, ScanStreamReq.Builder reqBuilder,
+                  Function<StreamObserver<KvPageRes>,
+                           StreamObserver<ScanStreamReq>> streamFactory) {
         this.session = session;
-        this.stub = stub;
-        reqBuilder.setPageSize(pageSize);
+        this.streamFactory = streamFactory;
+        this.orderedScan = reqBuilder.getOrderType() ==
+                           ScanOrderType.ORDER_BY_KEY;
+        this.pageSize = reqBuilder.getPageSize() > 0 ?
+                        reqBuilder.getPageSize() :
+                        clientConfig.getNetKvScannerPageSize();
+        reqBuilder.setPageSize(this.pageSize);
         reqBuilder.setPosition(toBs(this.nodePosition));
         this.reqBuilder = reqBuilder;
         this.init();
@@ -149,7 +166,7 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
     private void init() {
         this.proxy = HgBufferProxy.of(() -> this.serverScan());
-        this.observer = this.stub.scan(new ServeObserverImpl());
+        this.observer = this.streamFactory.apply(new ServeObserverImpl());
 
     }
 
@@ -276,6 +293,14 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
 
         @Override
         public void onNext(KvPageRes value) {
+            if (orderedScan && value.getVersion() <
+                               ScanStreamVersion
+                                       .SCAN_STREAM_VERSION_ORDERED_BY_KEY_VALUE) {
+                this.onError(new IllegalStateException(
+                        "Store node doesn't support ordered scan; " +
+                        "upgrade every Store node before using ORDER_BY_KEY"));
+                return;
+            }
             if (value.getOver()) {
                 completed.set(true);
                 observer.onCompleted();
@@ -294,8 +319,8 @@ class KvPageScanner implements KvCloseableIterator<Kv>, HgPageSize, HgSeekAble {
             } catch (Exception e) {
                 log.warn("failed to invoke requestObserver.onCompleted(), reason:", e.getMessage());
             }
-            proxy.close();
             proxy.setError(t);
+            proxy.close();
             log.error("failed to complete scan of session: " + session, t);
         }
 

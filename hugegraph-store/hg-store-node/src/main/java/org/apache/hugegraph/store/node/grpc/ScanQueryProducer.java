@@ -25,6 +25,7 @@ import java.util.NoSuchElementException;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.ScanCondition;
 import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
 import org.apache.hugegraph.store.node.util.HgAssert;
@@ -58,6 +59,8 @@ class ScanQueryProducer implements Iterable<ScanQuery> {
         HgAssert.isArgumentValid(graph, "graph");
         HgAssert.isArgumentNotNull(tables, "tables");
         HgAssert.isArgumentNotNull(request, "ScanQueryRequest");
+        HgAssert.isFalse(request.getOrderType() == ScanOrderType.ORDER_BY_KEY,
+                         "ORDER_BY_KEY is not supported by batch scan");
 
         ScanQueryProducer res = new ScanQueryProducer();
         res.graph = graph;

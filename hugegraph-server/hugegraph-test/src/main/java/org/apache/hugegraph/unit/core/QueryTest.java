@@ -96,6 +96,22 @@ public class QueryTest {
     }
 
     @Test
+    public void testSkipOffsetAcrossBatches() {
+        Query query = new Query(HugeType.VERTEX);
+        query.offset(6L);
+        query.limit(2L);
+
+        Assert.assertTrue(query.skipOffsetIfNeeded(
+                ImmutableSet.of(0, 1, 2, 3)).isEmpty());
+        Assert.assertEquals(4L, query.actualOffset());
+
+        Assert.assertEquals(ImmutableSet.of(6, 7),
+                            query.skipOffsetIfNeeded(
+                                    ImmutableSet.of(4, 5, 6, 7)));
+        Assert.assertEquals(6L, query.actualOffset());
+    }
+
+    @Test
     public void testToString() {
         Query query = new Query(HugeType.VERTEX);
         Assert.assertEquals("`Query * from VERTEX`", query.toString());

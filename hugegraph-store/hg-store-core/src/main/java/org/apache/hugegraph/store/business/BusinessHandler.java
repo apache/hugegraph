@@ -69,6 +69,13 @@ public interface BusinessHandler extends DBSessionBuilder {
     ScanIterator scan(String graph, int code, String table, byte[] start,
                       byte[] end, int scanType) throws HgStoreException;
 
+    default ScanIterator scanOrdered(String graph, String table, byte[] start,
+                                     byte[] end, int scanType)
+                                     throws HgStoreException {
+        throw new UnsupportedOperationException(
+                "Ordered scan is not supported");
+    }
+
     /**
      * primary index scan
      */

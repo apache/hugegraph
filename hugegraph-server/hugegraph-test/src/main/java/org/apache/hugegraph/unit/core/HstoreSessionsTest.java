@@ -15,20 +15,25 @@
  * limitations under the License.
  */
 
-package org.apache.hugegraph.store.service;
+package org.apache.hugegraph.unit.core;
 
-import org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest;
-import org.junit.runner.RunWith;
-import org.junit.runners.Suite;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
-import lombok.extern.slf4j.Slf4j;
+import org.apache.hugegraph.backend.store.hstore.HstoreSessions;
+import org.junit.Assert;
+import org.junit.Test;
 
-@RunWith(Suite.class)
-@Suite.SuiteClasses({
-        OrderedMultiPartitionIteratorTest.class
-})
+public class HstoreSessionsTest {
 
-@Slf4j
+    @Test
+    public void testOrderedScanDoesNotAddAbstractSubclassRequirement()
+            throws Exception {
+        Method method = HstoreSessions.Session.class.getDeclaredMethod(
+                "scanOrdered", String.class, byte[].class, byte[].class,
+                byte[].class, byte[].class, int.class, byte[].class,
+                long.class);
 
-public class ServerSuiteTest {
+        Assert.assertFalse(Modifier.isAbstract(method.getModifiers()));
+    }
 }
