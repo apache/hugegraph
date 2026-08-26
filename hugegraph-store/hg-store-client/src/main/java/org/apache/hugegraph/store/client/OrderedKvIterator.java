@@ -23,12 +23,13 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.PriorityQueue;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
@@ -42,7 +43,8 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
     private static final ExecutorService INITIALIZER =
             ExecutorPool.createExecutor("ordered-scan-init",
                                         INITIALIZE_KEEP_ALIVE_SECONDS,
-                                        0, INITIALIZE_THREADS);
+                                        0, INITIALIZE_THREADS,
+                                        new ThreadPoolExecutor.AbortPolicy());
 
     private final List<? extends HgKvIterator<? extends HgKvEntry>> iterators;
     private final PriorityQueue<SourceEntry> queue;
@@ -167,26 +169,35 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             return;
         }
         this.initialized = true;
-        List<Callable<SourceEntry>> tasks =
-                new ArrayList<>(this.iterators.size());
-        for (int i = 0; i < this.iterators.size(); i++) {
-            int source = i;
-            tasks.add(() -> this.firstEntry(source));
-        }
         List<Future<SourceEntry>> futures =
                 new ArrayList<>(this.iterators.size());
         try {
             CompletionService<SourceEntry> completions =
                     new ExecutorCompletionService<>(this.initializer);
-            for (Callable<SourceEntry> task : tasks) {
-                futures.add(completions.submit(task));
-            }
-            for (int i = 0; i < tasks.size(); i++) {
-                SourceEntry entry = completions.take().get();
-                if (entry.entry == null) {
-                    this.closeSource(entry.source);
-                } else {
-                    this.queue.add(entry);
+            int nextSource = 0;
+            int inFlight = 0;
+            while (nextSource < this.iterators.size() || inFlight > 0) {
+                while (nextSource < this.iterators.size() &&
+                       inFlight < INITIALIZE_THREADS) {
+                    int source = nextSource;
+                    try {
+                        futures.add(completions.submit(
+                                () -> this.firstEntry(source)));
+                        nextSource++;
+                        inFlight++;
+                    } catch (RejectedExecutionException e) {
+                        if (this.initializer.isShutdown()) {
+                            throw e;
+                        }
+                        if (inFlight > 0) {
+                            break;
+                        }
+                        this.addFirst(this.firstEntry(nextSource++));
+                    }
+                }
+                if (inFlight > 0) {
+                    this.addFirst(completions.take().get());
+                    inFlight--;
                 }
             }
         } catch (InterruptedException e) {
@@ -202,6 +213,14 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
             this.cancel(futures);
             this.closeAfterFailure(e);
             throw e;
+        }
+    }
+
+    private void addFirst(SourceEntry entry) {
+        if (entry.entry == null) {
+            this.closeSource(entry.source);
+        } else {
+            this.queue.add(entry);
         }
     }
 
