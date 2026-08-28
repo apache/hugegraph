@@ -39,7 +39,7 @@ public class SchemaTemplateAPITest {
                 Mockito.mock(Supplier.class);
 
         Assert.assertTrue(canManage(authManager, CREATOR));
-        Mockito.verifyZeroInteractions(authManager);
+        Mockito.verifyNoInteractions(authManager);
     }
 
     @Test

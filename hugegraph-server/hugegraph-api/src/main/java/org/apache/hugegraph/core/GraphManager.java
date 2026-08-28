@@ -2414,7 +2414,7 @@ public final class GraphManager {
         cores
     }
 
-    public static class ConsumerWrapper<T> implements Consumer<T> {
+    private static class ConsumerWrapper<T> implements Consumer<T> {
 
         private final Consumer<T> consumer;
 
@@ -2422,18 +2422,14 @@ public final class GraphManager {
             this.consumer = consumer;
         }
 
-        public static ConsumerWrapper wrap(Consumer consumer) {
+        private static ConsumerWrapper wrap(Consumer consumer) {
             return new ConsumerWrapper(consumer);
         }
 
         @Override
         public void accept(T t) {
             try {
-                if (Thread.currentThread().getName().contains("grpc")) {
-                    HugeGraphAuthProxy.runAsAdmin(() -> this.consumer.accept(t));
-                } else {
-                    this.consumer.accept(t);
-                }
+                HugeGraphAuthProxy.runAsAdmin(() -> this.consumer.accept(t));
             } catch (Throwable e) {
                 LOG.error("Listener exception occurred.", e);
             }

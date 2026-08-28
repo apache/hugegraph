@@ -19,9 +19,7 @@ package org.apache.hugegraph.unit.auth;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.HugeGraph;
@@ -54,9 +52,7 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
-import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -173,6 +169,31 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     }
 
     @Test
+    public void testRunAsAdminClearsAndRestoresAllContexts() {
+        HugeAuthenticator.User requestUser = new HugeAuthenticator.User(
+                "request_user", RolePermission.admin());
+        HugeAuthenticator.User taskUser = new HugeAuthenticator.User(
+                "task_user", RolePermission.admin());
+        setContext(new HugeGraphAuthProxy.Context(requestUser));
+        HugeGraphAuthProxy.setRequestGraphSpace("request_space");
+        TaskManager.setContext(taskUser.toJson());
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Assert.assertEquals(HugeAuthenticator.USER_ADMIN,
+                                HugeGraphAuthProxy.username());
+            Assert.assertNull(HugeGraphAuthProxy.getRequestGraphSpace());
+            Assert.assertNull(TaskManager.getContext());
+        });
+
+        Assert.assertEquals("task_user", HugeGraphAuthProxy.username());
+        Assert.assertEquals("request_space",
+                            HugeGraphAuthProxy.getRequestGraphSpace());
+        Assert.assertEquals(taskUser.toJson(), TaskManager.getContext());
+        TaskManager.resetContext();
+        Assert.assertEquals("request_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
     public void testRunAsAdminDoesNotPropagateToChildThread()
             throws InterruptedException {
         AtomicReference<String> username = new AtomicReference<>();
@@ -191,6 +212,36 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         });
 
         Assert.assertEquals("anonymous", username.get());
+    }
+
+    @Test
+    public void testTraversalStrategyListKeepsAuthProxyAndIsImmutable() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthManager authManager = Mockito.mock(AuthManager.class);
+        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+
+        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE))
+               .thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY))
+               .thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
+               .thenReturn(1000D);
+
+        GraphTraversalSource traversal =
+                new HugeGraphAuthProxy(graph).traversal();
+        List<?> strategies = traversal.getStrategies().toList();
+        Assert.assertFalse(strategies.isEmpty());
+        strategies.forEach(strategy -> {
+            Assert.assertEquals("TraversalStrategyProxy",
+                                strategy.getClass().getSimpleName());
+        });
+        Assert.assertThrows(UnsupportedOperationException.class,
+                            strategies::clear);
     }
 
     @Test
@@ -545,53 +596,6 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
     }
 
     @Test
-    public void testTraversalPermissions() throws Exception {
-        Traversal.Admin<?, ?> read = __.V().asAdmin();
-        Assert.assertTrue(traversalPermissions(read).isEmpty());
-
-        Traversal.Admin<?, ?> write =
-                __.addV("person").property("name", "marko").asAdmin();
-        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
-                            traversalPermissions(write));
-
-        Traversal.Admin<?, ?> delete = __.V().drop().asAdmin();
-        Assert.assertEquals(Collections.singleton(HugePermission.DELETE),
-                            traversalPermissions(delete));
-
-        Traversal.Admin<?, ?> parent =
-                __.V().sideEffect(__.addE("knows")).asAdmin();
-        Assert.assertEquals(Collections.singleton(HugePermission.WRITE),
-                            traversalPermissions(parent));
-    }
-
-    @Test
-    public void testTraversalStrategyListKeepsAuthProxy() {
-        HugeGraph graph = Mockito.mock(HugeGraph.class);
-        HugeConfig config = Mockito.mock(HugeConfig.class);
-        AuthManager authManager = Mockito.mock(AuthManager.class);
-        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
-
-        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
-        Mockito.when(graph.configuration()).thenReturn(config);
-        Mockito.when(graph.authManager()).thenReturn(authManager);
-        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
-        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE))
-               .thenReturn(3600L);
-        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY))
-               .thenReturn(100L);
-        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
-               .thenReturn(1000D);
-
-        GraphTraversalSource traversal =
-                new HugeGraphAuthProxy(graph).traversal();
-        Assert.assertFalse(traversal.getStrategies().toList().isEmpty());
-        traversal.getStrategies().toList().forEach(strategy -> {
-            Assert.assertEquals("TraversalStrategyProxy",
-                                strategy.getClass().getSimpleName());
-        });
-    }
-
-    @Test
     public void testSpaceMemberDoesNotGrantMutationPermissions() {
         RolePermission role = RolePermission.fromJson(
                 "{\"roles\":{\"DEFAULT\":{\"*\":{" +
@@ -660,21 +664,12 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
                 managerRole, memberGrant, otherSpace));
         Assert.assertFalse(HugeAuthenticator.RolePerm.match(
                 managerRole, otherSpaceGrant, ownSpace));
-        Assert.assertTrue(HugeAuthenticator.RolePerm.match(
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
                 managerRole, multiSpaceGrant, ownSpace));
         Assert.assertFalse(HugeAuthenticator.RolePerm.match(
                 managerRole, memberGrant, admin));
         Assert.assertFalse(HugeAuthenticator.RolePerm.match(
                 managerRole, RolePermission.admin(), ownSpace));
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Set<HugePermission> traversalPermissions(
-            Traversal.Admin<?, ?> traversal) throws Exception {
-        Method method = HugeGraphAuthProxy.class.getDeclaredMethod(
-                "traversalPermissions", Traversal.Admin.class);
-        method.setAccessible(true);
-        return (Set<HugePermission>) method.invoke(null, traversal);
     }
 
     private static class TestAppender extends AbstractAppender {

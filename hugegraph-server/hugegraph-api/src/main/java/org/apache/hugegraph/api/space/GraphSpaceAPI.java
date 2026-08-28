@@ -161,11 +161,6 @@ public class GraphSpaceAPI extends API {
             result.put("graph", graph);
         } else {
             authManager.createSpaceDefaultRole(name, user, role);
-            if (role.equals(HugeDefaultRole.OBSERVER)) {
-                for (String currentGraph : manager.graphs(name)) {
-                    authManager.deleteDefaultRole(name, user, role, currentGraph);
-                }
-            }
         }
 
         return manager.serializer().writeMap(result);
@@ -213,17 +208,11 @@ public class GraphSpaceAPI extends API {
 
         boolean result;
         if (hasGraph) {
-            result = authManager.isDefaultRole(name, graph, user, defaultRole);
+            result = authManager.isDefaultRole(name, graph, user,
+                                               defaultRole) ||
+                     authManager.isDefaultRole(name, user, defaultRole);
         } else {
             result = authManager.isDefaultRole(name, user, defaultRole);
-            if (!result && defaultRole.equals(HugeDefaultRole.OBSERVER)) {
-                for (String currentGraph : manager.graphs(name)) {
-                    if (authManager.isDefaultRole(name, currentGraph, user, defaultRole)) {
-                        result = true;
-                        break;
-                    }
-                }
-            }
         }
         return manager.serializer().writeMap(ImmutableMap.of("check", result));
     }
@@ -274,11 +263,6 @@ public class GraphSpaceAPI extends API {
             authManager.deleteDefaultRole(name, user, defaultRole, graph);
         } else {
             authManager.deleteDefaultRole(name, user, defaultRole);
-            if (defaultRole.equals(HugeDefaultRole.OBSERVER)) {
-                for (String currentGraph : manager.graphs(name)) {
-                    authManager.deleteDefaultRole(name, user, defaultRole, currentGraph);
-                }
-            }
         }
     }
 

@@ -22,6 +22,7 @@ import org.apache.hugegraph.StandardHugeGraph;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
+import org.apache.hugegraph.backend.tx.ISchemaTransaction;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.testutil.Assert;
@@ -103,6 +104,16 @@ public class StandardHugeGraphClearBackendTest extends BaseUnitTest {
 
         Assert.assertThrows(HugeException.class, this.graph::clearBackend);
         Mockito.verify(this.schemaTransaction).clear();
+    }
+
+    @Test
+    public void testHstoreRejectsUnexpectedSchemaTransaction() {
+        ISchemaTransaction unexpected = Mockito.mock(ISchemaTransaction.class);
+        Mockito.doReturn(unexpected).when(this.graph).schemaTransaction();
+
+        Assert.assertThrows(IllegalStateException.class,
+                            this.graph::clearBackend);
+        Mockito.verify(this.provider, Mockito.never()).clear();
     }
 
     @Test

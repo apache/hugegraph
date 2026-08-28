@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
-import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -93,18 +92,10 @@ import org.apache.tinkerpop.gremlin.process.computer.GraphComputer;
 import org.apache.tinkerpop.gremlin.process.traversal.Bytecode;
 import org.apache.tinkerpop.gremlin.process.traversal.Bytecode.Instruction;
 import org.apache.tinkerpop.gremlin.process.traversal.Script;
-import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
-import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
-import org.apache.tinkerpop.gremlin.process.traversal.step.filter.DropStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeStartStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddEdgeStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStartStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.translator.GroovyTranslator;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Element;
@@ -205,15 +196,37 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     }
 
     public static void runAsAdmin(Runnable runnable) {
-        String old = AuthContext.getContext();
+        String oldAuthContext = AuthContext.getContext();
+        Context oldContext = CONTEXTS.get();
+        String oldGraphSpace = REQUEST_GRAPH_SPACE.get();
+        String oldTaskContext = TaskManager.getContext();
         try {
+            AuthContext.resetContext();
+            CONTEXTS.remove();
+            REQUEST_GRAPH_SPACE.remove();
+            TaskManager.resetContext();
             AuthContext.setContext(User.ADMIN.toJson());
             runnable.run();
         } finally {
-            if (old == null) {
+            if (oldAuthContext == null) {
                 AuthContext.resetContext();
             } else {
-                AuthContext.setContext(old);
+                AuthContext.setContext(oldAuthContext);
+            }
+            if (oldContext == null) {
+                CONTEXTS.remove();
+            } else {
+                CONTEXTS.set(oldContext);
+            }
+            if (oldGraphSpace == null) {
+                REQUEST_GRAPH_SPACE.remove();
+            } else {
+                REQUEST_GRAPH_SPACE.set(oldGraphSpace);
+            }
+            if (oldTaskContext == null) {
+                TaskManager.resetContext();
+            } else {
+                TaskManager.setContext(oldTaskContext);
             }
         }
     }
@@ -2379,7 +2392,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         public List<TraversalStrategy<?>> toList() {
             List<TraversalStrategy<?>> proxies = new ArrayList<>();
             this.iterator().forEachRemaining(proxies::add);
-            return proxies;
+            return Collections.unmodifiableList(proxies);
         }
 
         @Override
@@ -2466,11 +2479,6 @@ public final class HugeGraphAuthProxy implements HugeGraph {
              */
             String caller = Thread.currentThread().getName();
             if (!caller.contains(TraversalStrategiesProxy.REST_WORKER)) {
-                for (HugePermission permission :
-                     traversalPermissions(traversal)) {
-                    verifyNamePermission(permission, ResourceType.GREMLIN,
-                                         script);
-                }
                 verifyNamePermission(HugePermission.EXECUTE,
                                      ResourceType.GREMLIN, script);
             }
@@ -2519,35 +2527,4 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
     }
 
-    private static Set<HugePermission> traversalPermissions(
-                                       Traversal.Admin<?, ?> traversal) {
-        Set<HugePermission> permissions = EnumSet.noneOf(HugePermission.class);
-        collectTraversalPermissions(traversal, permissions);
-        return permissions;
-    }
-
-    private static void collectTraversalPermissions(
-                        Traversal.Admin<?, ?> traversal,
-                        Set<HugePermission> permissions) {
-        for (Step<?, ?> step : traversal.getSteps()) {
-            if (step instanceof AddVertexStartStep ||
-                step instanceof AddVertexStep ||
-                step instanceof AddEdgeStartStep ||
-                step instanceof AddEdgeStep ||
-                step instanceof AddPropertyStep) {
-                permissions.add(HugePermission.WRITE);
-            } else if (step instanceof DropStep) {
-                permissions.add(HugePermission.DELETE);
-            }
-            if (step instanceof TraversalParent) {
-                TraversalParent parent = (TraversalParent) step;
-                for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
-                    collectTraversalPermissions(child, permissions);
-                }
-                for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
-                    collectTraversalPermissions(child, permissions);
-                }
-            }
-        }
-    }
 }

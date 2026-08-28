@@ -112,43 +112,43 @@ public class GraphSpaceAPITest extends BaseUnitTest {
     }
 
     @Test
-    public void testCurrentUserObserverCheckFallsBackToLegacyGraphRole() {
+    public void testCurrentUserConcreteGraphCheckIncludesSpaceObserver() {
         ManagerAPI api = new ManagerAPI();
         GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
         AuthManager auth = manager.authManager();
-        Mockito.when(auth.isDefaultRole(
-                     GRAPHSPACE, TARGET, HugeDefaultRole.OBSERVER))
+        Mockito.when(auth.isDefaultRole(GRAPHSPACE, GRAPH, TARGET,
+                                        HugeDefaultRole.OBSERVER))
                .thenReturn(false);
         setContext(TARGET);
 
         String result = api.checkDefaultRole(manager, GRAPHSPACE,
-                                             "OBSERVER", null);
+                                             "OBSERVER", GRAPH);
 
         Assert.assertContains("\"check\":true", result);
-        Mockito.verify(auth).isDefaultRole(
-                GRAPHSPACE, GRAPH, TARGET, HugeDefaultRole.OBSERVER);
+        Mockito.verify(auth).isDefaultRole(GRAPHSPACE, TARGET,
+                                           HugeDefaultRole.OBSERVER);
     }
 
     @Test
-    public void testObserverCheckFallsBackToLegacyGraphRole() {
+    public void testConcreteGraphCheckIncludesSpaceObserver() {
         GraphSpaceAPI api = new GraphSpaceAPI();
         GraphManager manager = managerWithDefaultRoleContext(ADMIN, true);
         AuthManager auth = manager.authManager();
-        Mockito.when(auth.isDefaultRole(
-                     GRAPHSPACE, TARGET, HugeDefaultRole.OBSERVER))
+        Mockito.when(auth.isDefaultRole(GRAPHSPACE, GRAPH, TARGET,
+                                        HugeDefaultRole.OBSERVER))
                .thenReturn(false);
         setContext(ADMIN);
 
         String result = api.checkDefaultRole(manager, GRAPHSPACE, TARGET,
-                                             "OBSERVER", null);
+                                             "OBSERVER", GRAPH);
 
         Assert.assertContains("\"check\":true", result);
-        Mockito.verify(auth).isDefaultRole(
-                GRAPHSPACE, GRAPH, TARGET, HugeDefaultRole.OBSERVER);
+        Mockito.verify(auth).isDefaultRole(GRAPHSPACE, TARGET,
+                                           HugeDefaultRole.OBSERVER);
     }
 
     @Test
-    public void testObserverDeleteCleansSpaceAndLegacyGraphRoles() {
+    public void testSpaceObserverDeleteDoesNotModifyGraphRoles() {
         GraphSpaceAPI api = new GraphSpaceAPI();
         GraphManager manager = managerWithDefaultRoleContext(ADMIN, true);
         AuthManager auth = manager.authManager();
@@ -158,8 +158,9 @@ public class GraphSpaceAPITest extends BaseUnitTest {
 
         Mockito.verify(auth).deleteDefaultRole(
                 GRAPHSPACE, TARGET, HugeDefaultRole.OBSERVER);
-        Mockito.verify(auth).deleteDefaultRole(
-                GRAPHSPACE, TARGET, HugeDefaultRole.OBSERVER, GRAPH);
+        Mockito.verify(auth, Mockito.never()).deleteDefaultRole(
+                Mockito.eq(GRAPHSPACE), Mockito.eq(TARGET),
+                Mockito.eq(HugeDefaultRole.OBSERVER), Mockito.anyString());
     }
 
     @Test

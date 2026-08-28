@@ -294,17 +294,11 @@ public class ManagerAPI extends API {
 
         boolean result;
         if (hasGraph) {
-            result = authManager.isDefaultRole(graphSpace, graph, user, defaultRole);
+            result = authManager.isDefaultRole(graphSpace, graph, user,
+                                               defaultRole) ||
+                     authManager.isDefaultRole(graphSpace, user, defaultRole);
         } else {
             result = authManager.isDefaultRole(graphSpace, user, defaultRole);
-            if (!result && defaultRole.equals(HugeDefaultRole.OBSERVER)) {
-                for (String currentGraph : manager.graphs(graphSpace)) {
-                    if (authManager.isDefaultRole(graphSpace, currentGraph, user, defaultRole)) {
-                        result = true;
-                        break;
-                    }
-                }
-            }
         }
         return manager.serializer().writeMap(ImmutableMap.of("check", result));
     }

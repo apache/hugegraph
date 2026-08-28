@@ -1825,7 +1825,12 @@ public class StandardAuthManagerV2 implements AuthManager {
     public boolean isDefaultRole(String graphSpace, String graph,
                                  String owner, HugeDefaultRole role) {
         String roleName = getGraphDefaultRole(graph, role.toString());
-        return isDefaultRole(graphSpace, owner, roleName);
+        if (isDefaultRole(graphSpace, owner, roleName)) {
+            return true;
+        }
+        String allGraphsRole = getGraphDefaultRole(ALL_GRAPHS,
+                                                   role.toString());
+        return isDefaultRole(graphSpace, owner, allGraphsRole);
     }
 
     @Override
