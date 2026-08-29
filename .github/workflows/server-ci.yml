@@ -12,7 +12,7 @@ jobs:
   wait-storage-shell-test:
     permissions:
       contents: read
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,8 +23,7 @@ jobs:
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
 
   build-server:
-    # TODO: we need test & replace it to ubuntu-24.04 or ubuntu-latest
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
@@ -160,7 +159,7 @@ jobs:
         run: |
           # Note: lsof removed from prerequisites; check_port now uses ss, falling back
           # to netstat, and warns without blocking when neither can answer.
-          # This job always runs on Linux (ubuntu-22.04), which uses fuser for port cleanup.
+          # This job always runs on Linux (ubuntu-24.04), which uses fuser for port cleanup.
           for tool in crontab curl java; do
             if ! command -v "$tool" >/dev/null 2>&1; then
               echo "can_run=false" >> "$GITHUB_OUTPUT"

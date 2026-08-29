@@ -83,6 +83,7 @@ message ScanStreamReq {
   bytes position = 12;
   uint32 closeFlag = 13;
   SelectParam selects = 14;
+  ScanOrderType orderType = 15;
 }
 
 message SelectParam {
@@ -97,6 +98,11 @@ message KvPageRes {
   repeated Kv data = 3;
   uint32 version = 4;
   bytes stream = 5;
+}
+
+enum ScanStreamVersion {
+  SCAN_STREAM_VERSION_UNKNOWN = 0;
+  SCAN_STREAM_VERSION_ORDERED_BY_KEY = 1;
 }
 
 enum KvStreamType {

@@ -154,13 +154,30 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     }
 
     public static void resetContext() {
+        AuthContext.resetContext();
         CONTEXTS.remove();
         REQUEST_GRAPH_SPACE.remove();
     }
 
     public static void resetSpaceContext() {
+        AuthContext.resetContext();
         CONTEXTS.remove();
         REQUEST_GRAPH_SPACE.remove();
+    }
+
+    private void prepareAuditLimiter(UserWithRole user) {
+        if (user == null || user.role() == null ||
+            HugeAuthenticator.ROLE_NONE.equals(user.role())) {
+            return;
+        }
+        Id userKey = auditLimiterKey(user.username());
+        this.auditLimiters.getOrFetch(userKey, id -> {
+            return RateLimiter.create(this.auditLogMaxRate);
+        });
+    }
+
+    private static Id auditLimiterKey(String username) {
+        return IdGenerator.of(username);
     }
 
     /**
@@ -178,13 +195,49 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         REQUEST_GRAPH_SPACE.set(graphSpace);
     }
 
-    public static Context setAdmin() {
-        Context old = getContext();
-        AuthContext.useAdmin();
-        return old;
+    public static void runAsAdmin(Runnable runnable) {
+        String oldAuthContext = AuthContext.getContext();
+        Context oldContext = CONTEXTS.get();
+        String oldGraphSpace = REQUEST_GRAPH_SPACE.get();
+        String oldTaskContext = TaskManager.getContext();
+        try {
+            AuthContext.resetContext();
+            CONTEXTS.remove();
+            REQUEST_GRAPH_SPACE.remove();
+            TaskManager.resetContext();
+            AuthContext.setContext(User.ADMIN.toJson());
+            runnable.run();
+        } finally {
+            if (oldAuthContext == null) {
+                AuthContext.resetContext();
+            } else {
+                AuthContext.setContext(oldAuthContext);
+            }
+            if (oldContext == null) {
+                CONTEXTS.remove();
+            } else {
+                CONTEXTS.set(oldContext);
+            }
+            if (oldGraphSpace == null) {
+                REQUEST_GRAPH_SPACE.remove();
+            } else {
+                REQUEST_GRAPH_SPACE.set(oldGraphSpace);
+            }
+            if (oldTaskContext == null) {
+                TaskManager.resetContext();
+            } else {
+                TaskManager.setContext(oldTaskContext);
+            }
+        }
     }
 
     public static Context getContext() {
+        String internalContext = AuthContext.getContext();
+        User internalUser = User.fromJson(internalContext);
+        if (internalUser != null) {
+            return new Context(internalUser);
+        }
+
         // Return task context first
         String taskContext = TaskManager.getContext();
 
@@ -1200,8 +1253,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
         }
 
         // Log user action, limit rate for each user
-        Id usrId = context.user().userId();
-        RateLimiter auditLimiter = this.auditLimiters.getOrFetch(usrId, id -> {
+        Id userKey = auditLimiterKey(username);
+        RateLimiter auditLimiter = this.auditLimiters.getOrFetch(userKey, id -> {
             return RateLimiter.create(this.auditLogMaxRate);
         });
 
@@ -1546,7 +1599,8 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             String username = currentUsername();
             HugeUser user = this.authManager.getUser(updatedUser.id());
             if (!user.name().equals(username)) {
-                E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(username),
+                E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(username) ||
+                                this.authManager.isAdminManager(username),
                                 "Only the user themselves or the admin can change this user",
                                 user.name());
                 this.updateCreator(updatedUser);
@@ -1560,9 +1614,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             HugeUser user = this.authManager.getUser(id);
             E.checkArgument(!HugeAuthenticator.USER_ADMIN.equals(user.name()),
                             "Can't delete user '%s'", user.name());
-            E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(currentUsername()),
+            String username = currentUsername();
+            E.checkArgument(HugeAuthenticator.USER_ADMIN.equals(username) ||
+                            this.authManager.isAdminManager(username),
                             "only admin can delete user", user.name());
-            HugeGraphAuthProxy.this.auditLimiters.invalidate(user.id());
+            HugeGraphAuthProxy.this.auditLimiters.invalidate(
+                    auditLimiterKey(user.name()));
             this.invalidRoleCache();
             return this.authManager.deleteUser(id);
         }
@@ -2006,9 +2063,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
             try {
                 Id userKey = IdGenerator.of(username + password);
-                return HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(userKey, id -> {
-                    return this.authManager.validateUser(username, password);
-                });
+                UserWithRole user =
+                        HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(
+                                userKey, id -> this.authManager.validateUser(
+                                        username, password));
+                HugeGraphAuthProxy.this.prepareAuditLimiter(user);
+                return user;
             } catch (Exception e) {
                 LOG.error("Failed to validate user {} with error: ",
                           username, e);
@@ -2025,9 +2085,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
             try {
                 Id userKey = IdGenerator.of(token);
-                return HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(userKey, id -> {
-                    return this.authManager.validateUser(token);
-                });
+                UserWithRole user =
+                        HugeGraphAuthProxy.this.usersRoleCache.getOrFetch(
+                                userKey,
+                                id -> this.authManager.validateUser(token));
+                HugeGraphAuthProxy.this.prepareAuditLimiter(user);
+                return user;
             } catch (Exception e) {
                 LOG.error("Failed to validate token with error: ", e);
                 throw e;
@@ -2327,7 +2390,9 @@ public final class HugeGraphAuthProxy implements HugeGraph {
 
         @Override
         public List<TraversalStrategy<?>> toList() {
-            return this.strategies.toList();
+            List<TraversalStrategy<?>> proxies = new ArrayList<>();
+            this.iterator().forEachRemaining(proxies::add);
+            return Collections.unmodifiableList(proxies);
         }
 
         @Override
@@ -2461,4 +2526,5 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             return this.origin.toString();
         }
     }
+
 }
