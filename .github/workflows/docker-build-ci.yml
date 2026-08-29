@@ -25,7 +25,6 @@ on:
   pull_request:
     paths:
       - '.github/workflows/docker-build-ci.yml'
-      - '**/Dockerfile*'
       - 'docker-bake.hcl'
       - '.dockerignore'
       - '.mvn/**'

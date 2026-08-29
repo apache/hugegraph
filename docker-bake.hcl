@@ -73,6 +73,9 @@ target "pd" {
     "type=registry,ref=hugegraph/hugegraph:shared-${CACHE_CHANNEL}",
     "type=registry,ref=hugegraph/pd:buildcache-${CACHE_CHANNEL}",
   ]
+  cache-to = EXPORT_CACHE ? [
+    "type=registry,ref=hugegraph/pd:buildcache-${CACHE_CHANNEL},mode=min",
+  ] : []
 }
 
 target "store" {
@@ -84,6 +87,9 @@ target "store" {
     "type=registry,ref=hugegraph/hugegraph:shared-${CACHE_CHANNEL}",
     "type=registry,ref=hugegraph/store:buildcache-${CACHE_CHANNEL}",
   ]
+  cache-to = EXPORT_CACHE ? [
+    "type=registry,ref=hugegraph/store:buildcache-${CACHE_CHANNEL},mode=min",
+  ] : []
 }
 
 target "server-hstore" {
@@ -95,6 +101,9 @@ target "server-hstore" {
     "type=registry,ref=hugegraph/hugegraph:shared-${CACHE_CHANNEL}",
     "type=registry,ref=hugegraph/server:buildcache-${CACHE_CHANNEL}",
   ]
+  cache-to = EXPORT_CACHE ? [
+    "type=registry,ref=hugegraph/server:buildcache-${CACHE_CHANNEL},mode=min",
+  ] : []
 }
 
 target "server-standalone" {
@@ -106,6 +115,9 @@ target "server-standalone" {
     "type=registry,ref=hugegraph/hugegraph:shared-${CACHE_CHANNEL}",
     "type=registry,ref=hugegraph/hugegraph:buildcache-${CACHE_CHANNEL}",
   ]
+  cache-to = EXPORT_CACHE ? [
+    "type=registry,ref=hugegraph/hugegraph:buildcache-${CACHE_CHANNEL},mode=min",
+  ] : []
 }
 
 group "default" {
