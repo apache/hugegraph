@@ -342,7 +342,7 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
    - Try modifying a test and see what breaks
 
 5. **Code Standards**
-   - Line length: 100 characters
+   - Line length: 120 characters
    - Indentation: 4 spaces
    - No star imports
    - Commit format: `feat|fix|refactor(module): description`

@@ -127,7 +127,8 @@ public class RaftEngine {
 
         final PeerId serverId = JRaftUtils.getPeerId(config.getAddress());
 
-        rpcServer = createRaftRpcServer(config.getAddress(), initConf.getPeers());
+        rpcServer = createRaftRpcServer(config.getAddress(), initConf.getPeers(),
+                                        config.isIpWhitelistEnabled());
         // construct raft group and start raft
         this.raftGroupService =
                 new RaftGroupService(groupId, serverId, nodeOptions, rpcServer, true);
@@ -140,16 +141,22 @@ public class RaftEngine {
     /**
      * Create a Raft RPC Server for communication between PDs
      */
-    private RpcServer createRaftRpcServer(String raftAddr, List<PeerId> peers) {
+    private RpcServer createRaftRpcServer(String raftAddr, List<PeerId> peers,
+                                          boolean ipWhitelistEnabled) {
         Endpoint endpoint = JRaftUtils.getEndPoint(raftAddr);
         RpcServer rpcServer = RaftRpcServerFactory.createRaftRpcServer(endpoint);
-        configureRaftServerIpWhitelist(peers, rpcServer);
+        configureRaftServerIpWhitelist(peers, rpcServer, ipWhitelistEnabled);
         RaftRpcProcessor.registerProcessor(rpcServer, this);
         rpcServer.init(null);
         return rpcServer;
     }
 
-    private static void configureRaftServerIpWhitelist(List<PeerId> peers, RpcServer rpcServer) {
+    private static void configureRaftServerIpWhitelist(List<PeerId> peers, RpcServer rpcServer,
+                                                       boolean enabled) {
+        if (!enabled) {
+            log.info("PD Raft IP whitelist is disabled");
+            return;
+        }
         if (rpcServer instanceof BoltRpcServer) {
             ((BoltRpcServer) rpcServer).getServer().option(
                     BoltServerOption.EXTENDED_NETTY_CHANNEL_HANDLER,

@@ -290,6 +290,10 @@ public interface HugeAuthenticator extends Authenticator {
             }
             for (Map.Entry<HugePermission, Object> e : perms.entrySet()) {
                 HugePermission permission = e.getKey();
+                if (permission == HugePermission.SPACE ||
+                    permission == HugePermission.SPACE_MEMBER) {
+                    continue;
+                }
                 // Maybe required = ANY
                 if (action.match(permission) ||
                     action.equals(HugePermission.EXECUTE)) {
@@ -359,8 +363,17 @@ public interface HugeAuthenticator extends Authenticator {
                 }
             }
 
-            RolePermission rolePerm = RolePermission.fromJson(role);
-            return rolePerm.contains(grant);
+            RolePermission grantedRole = RolePermission.fromJson(grant);
+            RolePermission currentRole = RolePermission.fromJson(role);
+            RolePerm rolePerm = RolePerm.fromJson(currentRole);
+            if (resourceObject != null &&
+                !RolePermission.isAdmin(grantedRole) &&
+                grantedRole.roles().size() == 1 &&
+                grantedRole.roles().containsKey(resourceObject.graphSpace()) &&
+                rolePerm.matchSpace(resourceObject.graphSpace(), "space")) {
+                return true;
+            }
+            return currentRole.contains(grantedRole);
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})

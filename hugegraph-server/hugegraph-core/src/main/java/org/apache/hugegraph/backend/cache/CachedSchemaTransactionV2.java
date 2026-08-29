@@ -467,6 +467,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         // Clear schema info firstly
         super.clear();
         this.clearCache(false);
+        this.notifySchemaCacheClear();
     }
 
     private static final class SchemaCaches<V extends SchemaElement> {

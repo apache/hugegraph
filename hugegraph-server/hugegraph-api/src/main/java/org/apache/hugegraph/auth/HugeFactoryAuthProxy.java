@@ -159,7 +159,7 @@ public final class HugeFactoryAuthProxy {
                                            "lambda$16", "lambda$17", "lambda$18", "lambda$19",
                                            "lambda$20", "lambda$21", "lambda$22", "lambda$23",
                                            "lambda$24", "access$8", "access$9", "access$10",
-                                           "setContext", "getContext");
+                                           "setContext", "getContext", "runAsAdmin");
         Reflection.registerFieldsToFilter(HugeGraphAuthProxy.AuthManagerProxy.class, "authManager",
                                           "this$0");
         Reflection.registerMethodsToFilter(HugeGraphAuthProxy.AuthManagerProxy.class,
