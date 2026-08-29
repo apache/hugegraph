@@ -61,6 +61,9 @@ target "build-cache" {
   ] : []
 }
 
+# Runtime targets intentionally use Docker's local exporter. The publishing
+# workflow enables the containerd image store, verifies both loaded platforms,
+# runs functional checks against these exact tags, and only then pushes them.
 target "pd" {
   inherits   = ["_common"]
   dockerfile = "hugegraph-pd/Dockerfile"

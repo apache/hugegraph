@@ -67,6 +67,10 @@ jobs:
           }
 
           reference="hugegraph-pd/Dockerfile"
+          if [ -z "$(extract_build_stage "$reference")" ]; then
+            echo "ERROR: no 'AS build' stage found in $reference"
+            exit 1
+          fi
           for dockerfile in \
             hugegraph-store/Dockerfile \
             hugegraph-server/Dockerfile \
