@@ -51,6 +51,7 @@ import org.apache.hugegraph.task.TaskCallable.SysTaskCallable;
 import org.apache.hugegraph.task.TaskManager.ContextCallable;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -360,6 +361,71 @@ public class StandardTaskScheduler implements TaskScheduler {
             return withResult ? task : task.copyWithoutResult();
         }
         return this.findTask(id, withResult);
+    }
+
+    @Override
+    public TaskResultSnapshot taskResultSnapshot(Id id) {
+        E.checkArgumentNotNull(id, "Parameter task id can't be null");
+        HugeTask<?> task = this.tasks.get(id);
+        if (task != null && task.status() != TaskStatus.SUCCESS) {
+            return new TaskResultSnapshot(id, task.status(), null);
+        }
+
+        TaskResultSnapshot snapshot = this.call(() -> {
+            Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
+            HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
+            if (vertex == null) {
+                return task == null ? null :
+                       new TaskResultSnapshot(id, task.status(), null);
+            }
+
+            TaskStatus status = task == null ?
+                                HugeTask.fromVertex(vertex, false).status() :
+                                task.status();
+            if (status != TaskStatus.SUCCESS) {
+                return new TaskResultSnapshot(id, status, null);
+            }
+            Blob blob = vertex.getPropertyValue(
+                    vertex.graph().propertyKey(P.RESULT).id());
+            byte[] result = blob == null ? null : blob.bytes();
+            return new TaskResultSnapshot(id, status, result);
+        });
+        if (snapshot == null) {
+            throw new NotFoundException("Can't find task with id '%s'", id);
+        }
+        return snapshot;
+    }
+
+    @Override
+    public TaskResultMetadata taskResultMetadata(Id id) {
+        E.checkArgumentNotNull(id, "Parameter task id can't be null");
+        HugeTask<?> task = this.tasks.get(id);
+        if (task != null && task.status() != TaskStatus.SUCCESS) {
+            return new TaskResultMetadata(id, task.status(), false);
+        }
+
+        TaskResultMetadata metadata = this.call(() -> {
+            Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
+            HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
+            if (vertex == null) {
+                return task == null ? null :
+                       new TaskResultMetadata(id, task.status(), false);
+            }
+
+            TaskStatus status = task == null ?
+                                HugeTask.fromVertex(vertex, false).status() :
+                                task.status();
+            if (status != TaskStatus.SUCCESS) {
+                return new TaskResultMetadata(id, status, false);
+            }
+            boolean hasResult = vertex.hasProperty(
+                    vertex.graph().propertyKey(P.RESULT).id());
+            return new TaskResultMetadata(id, status, hasResult);
+        });
+        if (metadata == null) {
+            throw new NotFoundException("Can't find task with id '%s'", id);
+        }
+        return metadata;
     }
 
     @Override

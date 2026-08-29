@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -110,6 +111,156 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testGetCompleteResult() {
+        int taskId = this.gremlinJob("[1, 2, 3]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().get(resultPath(taskId));
+
+        Assert.assertEquals("no-store",
+                            response.getHeaderString("Cache-Control"));
+        Assert.assertEquals("[1,2,3]", assertResponseStatus(200, response));
+    }
+
+    @Test
+    public void testGetCompleteResultWithCompression() {
+        int taskId = this.gremlinJob("[1, 2, 3]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().target().path(resultPath(taskId))
+                                    .request()
+                                    .header("Accept-Encoding", "gzip")
+                                    .get();
+
+        Assert.assertEquals("gzip",
+                            response.getHeaderString("Content-Encoding"));
+        Assert.assertEquals("[1,2,3]", assertResponseStatus(200, response));
+    }
+
+    @Test
+    public void testHeadResultUsesMetadataOnlyResponse() {
+        int taskId = this.gremlinJob("[1, 2, 3]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().target().path(resultPath(taskId))
+                                    .request()
+                                    .header("Accept-Encoding", "gzip")
+                                    .head();
+
+        Assert.assertEquals(200, response.getStatus());
+        Assert.assertEquals("no-store",
+                            response.getHeaderString("Cache-Control"));
+        Assert.assertEquals("gzip",
+                            response.getHeaderString("Content-Encoding"));
+        Assert.assertFalse(response.hasEntity());
+    }
+
+    @Test
+    public void testGetArrayResultByPage() {
+        int taskId = this.gremlinJob("[1, 2, 3, 4]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().get(resultPath(taskId),
+                                         ImmutableMap.of("limit", 2));
+        Map<?, ?> first = JsonUtil.fromJson(
+                assertResponseStatus(200, response), Map.class);
+        Assert.assertEquals("array", first.get("root_type"));
+        Assert.assertEquals(List.of(1, 2), first.get("items"));
+        String nextPage = (String) first.get("page");
+        Assert.assertNotNull(nextPage);
+
+        response = client().get(resultPath(taskId),
+                                ImmutableMap.of("page", nextPage));
+        Map<?, ?> second = JsonUtil.fromJson(
+                assertResponseStatus(200, response), Map.class);
+        Assert.assertEquals("array", second.get("root_type"));
+        Assert.assertEquals(List.of(3, 4), second.get("items"));
+        Assert.assertNull(second.get("page"));
+    }
+
+    @Test
+    public void testGetObjectResultByPage() {
+        int taskId = this.gremlinJob("['a': 1, 'b': 2]");
+        waitTaskSuccess(taskId);
+
+        Response response = client().get(resultPath(taskId),
+                                         ImmutableMap.of("limit", 1));
+        Map<?, ?> first = JsonUtil.fromJson(
+                assertResponseStatus(200, response), Map.class);
+        List<?> items = (List<?>) first.get("items");
+        Assert.assertEquals(1, items.size());
+        Assert.assertEquals(ImmutableMap.of("key", "a", "value", 1),
+                            items.get(0));
+        Assert.assertNotNull(first.get("page"));
+    }
+
+    @Test
+    public void testRejectScalarPaginationAndConflictingParameters() {
+        int taskId = this.gremlinJob("1 + 2");
+        waitTaskSuccess(taskId);
+
+        Response response = client().get(resultPath(taskId),
+                                         ImmutableMap.of("limit", 1));
+        String content = assertResponseStatus(400, response);
+        assertTaskResultError(content, "TaskResultNotPageableException");
+
+        response = client().get(resultPath(taskId),
+                                ImmutableMap.of("limit", 1,
+                                                 "page", "invalid"));
+        assertResponseStatus(400, response);
+    }
+
+    @Test
+    public void testRejectResultUntilTaskSucceeds() {
+        int taskId = this.gremlinJob("Thread.sleep(2000L); 3");
+
+        Response response = client().get(resultPath(taskId));
+
+        String content = assertResponseStatus(409, response);
+        assertTaskResultError(content, "TaskResultNotReadyException");
+        waitTaskSuccess(taskId);
+    }
+
+    @Test
+    public void testFailedResultRemainsOnTaskDetailsEndpoint() {
+        int taskId = this.gremlinJob(
+                "throw new RuntimeException('expected failure')");
+        waitTaskCompleted(taskId);
+
+        Response response = client().get(resultPath(taskId));
+        String content = assertResponseStatus(409, response);
+        assertTaskResultError(content, "TaskResultNotReadableException");
+
+        response = client().get(PATH, String.valueOf(taskId));
+        content = assertResponseStatus(200, response);
+        Assert.assertEquals("failed",
+                            assertJsonContains(content, "task_status"));
+        Assert.assertContains("expected failure",
+                              assertJsonContains(content, "task_result"));
+    }
+
+    @Test
+    public void testRejectTamperedPageToken() {
+        int taskId = this.gremlinJob("[1, 2, 3]");
+        waitTaskSuccess(taskId);
+        Response response = client().get(resultPath(taskId),
+                                         ImmutableMap.of("limit", 1));
+        Map<?, ?> page = JsonUtil.fromJson(
+                assertResponseStatus(200, response), Map.class);
+        String token = (String) page.get("page");
+        int index = token.indexOf('.') + 2;
+        char replacement = token.charAt(index) == 'A' ? 'B' : 'A';
+        String tampered = token.substring(0, index) + replacement +
+                          token.substring(index + 1);
+
+        response = client().get(resultPath(taskId),
+                                ImmutableMap.of("page", tampered));
+
+        String content = assertResponseStatus(400, response);
+        assertTaskResultError(content, "InvalidTaskResultPageTokenException");
+    }
+
+    @Test
     public void testCancel() {
         // create a task
         int taskId = this.gremlinJob();
@@ -177,6 +328,17 @@ public class TaskApiTest extends BaseApiTest {
         String path = "/graphspaces/DEFAULT/graphs/hugegraph/jobs/gremlin";
         String content = assertResponseStatus(201, client().post(path, body));
         return assertJsonContains(content, "task_id");
+    }
+
+    private static String resultPath(int taskId) {
+        return PATH + taskId + "/result";
+    }
+
+    private static void assertTaskResultError(String content,
+                                              String exception) {
+        Map<?, ?> error = JsonUtil.fromJson(content, Map.class);
+        Assert.assertContains(exception, (String) error.get("exception"));
+        Assert.assertFalse(error.containsKey("reason"));
     }
 
     private void sleepAWhile() {

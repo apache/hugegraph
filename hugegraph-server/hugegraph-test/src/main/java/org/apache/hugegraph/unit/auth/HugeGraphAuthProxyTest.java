@@ -28,11 +28,15 @@ import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.UserWithRole;
+import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.config.AuthOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.task.TaskManager;
+import org.apache.hugegraph.task.TaskResultMetadata;
 import org.apache.hugegraph.task.TaskScheduler;
+import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.logging.log4j.Level;
@@ -320,6 +324,46 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
             Assert.assertNotNull(proxy.getClass().getDeclaredMethod(
                                  method.getName(), parameters));
         }
+    }
+
+    @Test
+    public void testTaskResultMetadataDelegatesAfterPermissionCheck() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthManager authManager = Mockito.mock(AuthManager.class);
+        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+        HugeTask<Object> task = Mockito.mock(HugeTask.class);
+        Id taskId = IdGenerator.of(1L);
+        TaskResultMetadata metadata = new TaskResultMetadata(
+                taskId, TaskStatus.SUCCESS, true);
+
+        Mockito.when(graph.name()).thenReturn("hugegraph");
+        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE))
+               .thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY))
+               .thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
+               .thenReturn(1000D);
+        Mockito.when(task.id()).thenReturn(taskId);
+        Mockito.when(scheduler.task(taskId, false)).thenReturn(task);
+        Mockito.when(scheduler.taskResultMetadata(taskId))
+               .thenReturn(metadata);
+        setContext(new HugeGraphAuthProxy.Context(
+                HugeAuthenticator.User.ADMIN));
+
+        TaskResultMetadata actual = new HugeGraphAuthProxy(graph)
+                .taskScheduler().taskResultMetadata(taskId);
+
+        Assert.assertSame(metadata, actual);
+        Mockito.verify(scheduler).task(taskId, false);
+        Mockito.verify(scheduler).taskResultMetadata(taskId);
+        Mockito.verify(scheduler, Mockito.never())
+               .taskResultSnapshot(taskId);
     }
 
     @Test

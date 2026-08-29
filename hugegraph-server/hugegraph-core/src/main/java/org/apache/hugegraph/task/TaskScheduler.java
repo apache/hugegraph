@@ -53,6 +53,16 @@ public interface TaskScheduler {
         return this.task(id);
     }
 
+    default TaskResultSnapshot taskResultSnapshot(Id id) {
+        throw new UnsupportedOperationException(
+                "The task scheduler doesn't support result streaming");
+    }
+
+    default TaskResultMetadata taskResultMetadata(Id id) {
+        throw new UnsupportedOperationException(
+                "The task scheduler doesn't support result metadata");
+    }
+
     <V> Iterator<HugeTask<V>> tasks(List<Id> ids);
 
     default <V> Iterator<HugeTask<V>> tasks(List<Id> ids,
