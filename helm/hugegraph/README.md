@@ -83,6 +83,20 @@ resource names (`kubectl get svc,secret -n <namespace>` lists them).
 **Authentication is enabled by default.** The chart creates a kept Secret
 named `<release>-admin` (for example `hugegraph-admin`) with a random
 password unless `server.auth.admin.existingSecret` points at a pre-created Secret.
+To manage the credential yourself, create the Secret before installing and set
+`server.auth.admin.existingSecret`. It always takes priority, and the chart does
+not overwrite or manage that Secret:
+
+```bash
+kubectl -n hugegraph create secret generic my-hugegraph-admin \
+  --from-literal=password='CHANGE_ME'
+```
+
+Then add `--set-string server.auth.admin.existingSecret=my-hugegraph-admin` to
+the install command. The Secret must contain a `password` key with no newlines,
+carriage returns, backslashes, or leading whitespace. The JWT signing key uses
+the same shape under `server.auth.token` (`value`, `existingSecret`,
+`autoGenerate`), and its value must be at least 32 bytes.
 Read the password and exercise the API:
 
 ```bash
@@ -117,7 +131,8 @@ Sharding below.
 
 This chart is at an early 0.1.x version. While the contribution is a draft, its
 component image tags and `appVersion` track `latest` with pull policy `Always`.
-Before stable publication, pin all three component tags and `appVersion` to the
+Before stable publication, pin all four component tags (PD, Store, Server and
+Hubble) and `appVersion` to the
 next HugeGraph release and switch the component pull policies to
 `IfNotPresent`.
 
@@ -202,6 +217,13 @@ helm uninstall hugegraph --namespace hugegraph
 Helm does not remove PersistentVolumeClaims created by StatefulSets. Delete
 them explicitly, and only when the data is no longer needed.
 
+The chart-managed authentication Secret is kept on uninstall and reused by a
+later install of the same release name. Do not delete it unless you intend to
+manage the password separately. `helm template` and client-side dry runs cannot
+read an existing Secret, so the password they generate is only a render-time
+placeholder; a live install or upgrade reuses the existing Secret when Helm has
+permission to read it.
+
 ## Configuration
 
 The following table lists the configurable parameters of the chart and their
@@ -222,6 +244,7 @@ default values.
 | `pd.replicas` | PD StatefulSet replicas. Maximum `99` | `3` |
 | `pd.image.repository` | PD image repository | `hugegraph/pd` |
 | `pd.image.tag` | PD image tag. Tracks the development image until the next release is pinned | `latest` |
+| `pd.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `pd.image.pullPolicy` | PD image pull policy | `Always` |
 | `pd.javaOpts` | Extra JVM flags, rendered after the chart-derived `-D` properties below so an explicit duplicate here wins. The image's automatic heap sizing is preserved unless heap flags are set | `""` |
 | `pd.raftIpWhitelistEnabled` | Enable PD's raft peer IP whitelist. Off in-cluster because PD resolves peers once at boot; requires a PD image carrying the upstream switch | `false` |
@@ -265,6 +288,7 @@ default values.
 | `store.replicas` | Store StatefulSet replicas. Maximum `99` | `3` |
 | `store.image.repository` | Store image repository | `hugegraph/store` |
 | `store.image.tag` | Store image tag. Tracks the development image until the next release is pinned | `latest` |
+| `store.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `store.image.pullPolicy` | Store image pull policy | `Always` |
 | `store.javaOpts` | Empty preserves the image's automatic JVM sizing | `""` |
 | `store.ports.grpc` | Store gRPC port | `8500` |
@@ -304,6 +328,7 @@ default values.
 | `server.replicas` | Server Deployment replicas. Ignored when `server.hpa.enabled` | `3` |
 | `server.image.repository` | Server image repository | `hugegraph/server` |
 | `server.image.tag` | Server image tag. Tracks the development image until the next release is pinned | `latest` |
+| `server.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `server.image.pullPolicy` | Server image pull policy | `Always` |
 | `server.javaOpts` | Empty preserves the image's automatic JVM sizing | `""` |
 | `server.port` | Server REST port, container port, and Service port | `8080` |
@@ -337,7 +362,7 @@ default values.
 | `server.auth.admin.existingSecret` | Pre-created Secret name (key defaults to `password`); takes priority | `""` |
 | `server.auth.admin.key` | Key inside the admin password Secret | `password` |
 | `server.auth.admin.autoGenerate` | Create and keep a random release-admin Secret when password and existingSecret are empty | `true` |
-| `server.auth.token.value` | Optional inline JWT signing key; prefer a Secret in shared clusters | `""` |
+| `server.auth.token.value` | Optional inline JWT signing key, minimum 32 bytes; prefer a Secret in shared clusters | `""` |
 | `server.auth.token.existingSecret` | Pre-created Secret for the JWT signing key (`auth.token_secret`) | `""` |
 | `server.auth.token.key` | Key inside the JWT signing Secret | `token_secret` |
 | `server.auth.token.autoGenerate` | Create and keep a random release-auth-token Secret when value and existingSecret are empty | `true` |
@@ -517,6 +542,7 @@ trusted network.
 | `hubble.allowWithoutServerAuth` | Renders Hubble without `server.auth`, for future images whose login does not require cluster authentication | `false` |
 | `hubble.image.repository` | Hubble image repository | `hugegraph/hubble` |
 | `hubble.image.tag` | Hubble image tag. Tracks the development image until the next release is pinned | `latest` |
+| `hubble.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `hubble.image.pullPolicy` | Hubble image pull policy | `Always` |
 | `hubble.port` | Hubble HTTP port, container port, and Service port | `8088` |
 | `hubble.persistence.enabled` | Persist UI connection metadata in a PVC | `false` |
@@ -837,15 +863,15 @@ independently of the release name.
   in-cluster via the upstream `raft.ip-whitelist.enabled` switch, leaving
   peer authentication to Kubernetes-level controls. Setting
   `pd.raftIpWhitelistEnabled=true` restores the image default along with
-  its one-shot resolution semantics — bring-up races and pod-IP-change
-  rejections included — at the operator's own risk. PD images that predate
+  its one-shot resolution semantics (bring-up races and pod-IP-change
+  rejections included) at the operator's own risk. PD images that predate
   the switch ignore the flag and keep the whitelist active, so they remain
   exposed to those failure modes; use images built from a source tree that
   includes the switch.
 - The PD management REST endpoints (`/v1/members`, `/v1/stores`) reject
   requests on current images (`invalid service name`), and unauthenticated
   GETs return HTTP 200 with an `Unauthorized` JSON body. Until that is
-  resolved upstream, the operator-triggered Disaster Recovery flow below may
+  resolved upstream, the operator-triggered Disaster Recovery flow above may
   be unavailable; rely on `helm test`, Pod readiness, and Server APIs for
   health checks.
 - No TLS, backups, Operator, multi-cluster support, automatic leader transfer,
