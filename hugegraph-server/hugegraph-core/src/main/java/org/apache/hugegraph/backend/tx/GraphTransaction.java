@@ -775,6 +775,12 @@ public class GraphTransaction extends IndexableTransaction {
                                                   boolean checkMustExist, HugeType type) {
         Query.checkForceCapacity(vertexIds.length);
 
+        if (vertexIds.length == 1) {
+            // Fast path: skip the id list, map and mapper iterator for one id
+            return this.queryVertexById(vertexIds[0], adjacentVertex,
+                                        checkMustExist, type);
+        }
+
         // NOTE: allowed duplicated vertices if query by duplicated ids
         List<Id> ids = InsertionOrderUtil.newList();
         Map<Id, HugeVertex> vertices = new HashMap<>(vertexIds.length);
@@ -808,22 +814,67 @@ public class GraphTransaction extends IndexableTransaction {
         }
 
         return new MapperIterator<>(ids.iterator(), id -> {
-            HugeVertex vertex = vertices.get(id);
-            if (vertex == null) {
-                if (checkMustExist) {
-                    throw new NotFoundException(
-                            "Vertex '%s' does not exist", id);
-                } else if (adjacentVertex) {
-                    assert !checkMustExist;
-                    // Return undefined if adjacentVertex but !checkMustExist
-                    vertex = HugeVertex.undefined(this.graph(), id);
-                } else {
-                    // Return null
-                    assert vertex == null;
-                }
-            }
-            return vertex;
+            return this.resolveVertex(vertices.get(id), id,
+                                         adjacentVertex, checkMustExist);
         });
+    }
+
+    /**
+     * Query a single vertex by id, with the same semantics as the multi-id
+     * path of {@link #queryVerticesByIds(Object[], boolean, boolean, HugeType)}
+     * but without allocating the id list, the result map and the mapper
+     * iterator; only an {@link IdQuery.OneIdQuery} is created on a miss.
+     */
+    private Iterator<Vertex> queryVertexById(Object vertexId, boolean adjacentVertex,
+                                             boolean checkMustExist, HugeType type) {
+        Id id = HugeVertex.getIdValue(vertexId);
+        if (id == null) {
+            return QueryResults.emptyIterator();
+        }
+
+        HugeVertex vertex = null;
+        if (this.verticesInTxSize() > 0) {
+            if (this.removedVertices.containsKey(id)) {
+                // The record has been deleted
+                return QueryResults.emptyIterator();
+            }
+            vertex = this.addedVertices.get(id);
+            if (vertex == null) {
+                vertex = this.updatedVertices.get(id);
+            }
+            if (vertex != null && vertex.expired()) {
+                // Found from local tx but expired
+                return QueryResults.emptyIterator();
+            }
+        }
+
+        if (vertex == null) {
+            // Query from backend store
+            IdQuery query = new IdQuery.OneIdQuery(type, id);
+            vertex = QueryResults.one(this.queryVerticesFromBackend(query));
+        }
+
+        vertex = this.resolveVertex(vertex, id, adjacentVertex, checkMustExist);
+        if (vertex == null) {
+            return QueryResults.emptyIterator();
+        }
+        return QueryResults.iterator(vertex);
+    }
+
+    private HugeVertex resolveVertex(HugeVertex vertex, Id id,
+                                     boolean adjacentVertex, boolean checkMustExist) {
+        if (vertex != null) {
+            return vertex;
+        }
+        if (checkMustExist) {
+            throw new NotFoundException("Vertex '%s' does not exist", id);
+        }
+        if (adjacentVertex) {
+            // Return undefined if adjacentVertex but !checkMustExist
+            return HugeVertex.undefined(this.graph(), id);
+        }
+        // Return null to skip the vertex
+        return null;
     }
 
     public Iterator<Vertex> queryVertices() {
@@ -934,6 +985,11 @@ public class GraphTransaction extends IndexableTransaction {
                                              boolean verifyId) {
         Query.checkForceCapacity(edgeIds.length);
 
+        if (edgeIds.length == 1) {
+            // Fast path: skip the id list, map and mapper iterator for one id
+            return this.queryEdgeById(edgeIds[0], verifyId);
+        }
+
         // NOTE: allowed duplicated edges if query by duplicated ids
         List<Id> ids = InsertionOrderUtil.newList();
         Map<Id, HugeEdge> edges = new HashMap<>(edgeIds.length);
@@ -989,6 +1045,50 @@ public class GraphTransaction extends IndexableTransaction {
             Edge edge = edges.get(id);
             return edge;
         });
+    }
+
+    /**
+     * Query a single edge by id, with the same semantics as the multi-id
+     * path of {@link #queryEdgesByIds(Object[], boolean)} but without
+     * allocating the id list, the result map and the mapper iterator; only
+     * an {@link IdQuery.OneIdQuery} is created on a miss.
+     */
+    private Iterator<Edge> queryEdgeById(Object edgeId, boolean verifyId) {
+        EdgeId id = HugeEdge.getIdValue(edgeId, !verifyId);
+        if (id == null) {
+            return QueryResults.emptyIterator();
+        }
+        if (id.direction() == Directions.IN) {
+            id = id.switchDirection();
+        }
+
+        if (this.edgesInTxSize() > 0) {
+            if (this.removedEdges.containsKey(id)) {
+                // The record has been deleted
+                return QueryResults.emptyIterator();
+            }
+            HugeEdge edge = this.addedEdges.get(id);
+            if (edge == null) {
+                edge = this.updatedEdges.get(id);
+            }
+            if (edge != null) {
+                // Found from local tx
+                if (edge.expired()) {
+                    return QueryResults.emptyIterator();
+                }
+                return QueryResults.iterator(edge);
+            }
+        }
+
+        /*
+         * Query from backend store and return the results directly, just
+         * like the multi-id path does when there is no local edge.
+         */
+        IdQuery query = new IdQuery.OneIdQuery(HugeType.EDGE, id);
+        Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        Iterator<Edge> r = (Iterator) it;
+        return r;
     }
 
     public Iterator<Edge> queryEdges() {
