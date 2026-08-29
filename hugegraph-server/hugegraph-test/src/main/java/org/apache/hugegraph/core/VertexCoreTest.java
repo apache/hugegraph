@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Random;
@@ -51,11 +52,13 @@ import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.exception.NotAllowException;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeElement;
+import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.FakeObjects;
 import org.apache.hugegraph.testutil.Utils;
@@ -3122,6 +3125,174 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertTrue(graph.vertices(vertex1.id()).hasNext());
         Assert.assertTrue(graph.vertices(vertex2.id()).hasNext());
         Assert.assertTrue(graph.vertices(vertex1.id(), vertex2.id()).hasNext());
+    }
+
+    @Test
+    public void testQueryVerticesByNonConsecutiveDuplicateIds() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        List<Vertex> all = graph.traversal().V().toList();
+        Object id1 = all.get(0).id();
+        Object id2 = all.get(1).id();
+
+        List<Vertex> vertices = ImmutableList.copyOf(graph.vertices(id1, id2, id1));
+        Assert.assertEquals(3, vertices.size());
+        Assert.assertEquals(id1, vertices.get(0).id());
+        Assert.assertEquals(id2, vertices.get(1).id());
+        Assert.assertEquals(id1, vertices.get(2).id());
+    }
+
+    @Test
+    public void testQueryVerticesByIdsWithLocalAndDuplicateIds() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        Object id1 = graph.traversal().V().toList().get(0).id();
+        // Added but not committed
+        Vertex local = graph.addVertex(T.label, "author", "id", 3,
+                                       "name", "Dennis Ritchie", "age", 70,
+                                       "lived", "New York");
+        Object id2 = local.id();
+
+        List<Vertex> vertices = ImmutableList.copyOf(graph.vertices(id2, id1, id2));
+        Assert.assertEquals(3, vertices.size());
+        Assert.assertSame(local, vertices.get(0));
+        Assert.assertEquals(id1, vertices.get(1).id());
+        Assert.assertSame(local, vertices.get(2));
+
+        graph.tx().rollback();
+    }
+
+    @Test
+    public void testQuerySingleVertexByIdInLocalTx() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        // Added but not committed
+        Vertex vertex = graph.addVertex(T.label, "author", "id", 3,
+                                        "name", "Dennis Ritchie", "age", 70,
+                                        "lived", "New York");
+        Object id = vertex.id();
+
+        List<Vertex> vertices = ImmutableList.copyOf(graph.vertices(id));
+        Assert.assertEquals(1, vertices.size());
+        Assert.assertSame(vertex, vertices.get(0));
+        Assert.assertSame(vertex, graph.vertex(id));
+        Assert.assertSame(vertex, graph.adjacentVertex(id).next());
+        this.commitTx();
+
+        // Updated but not committed
+        vertex = graph.vertex(id);
+        vertex.property("age", 71);
+
+        vertices = ImmutableList.copyOf(graph.vertices(id));
+        Assert.assertEquals(1, vertices.size());
+        Assert.assertSame(vertex, vertices.get(0));
+        Assert.assertEquals(71, (int) graph.vertex(id).value("age"));
+        graph.tx().rollback();
+
+        Assert.assertEquals(70, (int) graph.vertex(id).value("age"));
+    }
+
+    @Test
+    public void testQuerySingleVertexByIdRemovedInLocalTx() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        Vertex vertex = graph.traversal().V().hasLabel("author")
+                             .has("id", 1).next();
+        Object id = vertex.id();
+        Assert.assertTrue(graph.vertices(id).hasNext());
+        Assert.assertTrue(graph.adjacentVertex(id).hasNext());
+
+        vertex.remove();
+        Assert.assertFalse(graph.vertices(id).hasNext());
+        // Removed vertex must not be reported as an undefined adjacent vertex
+        Assert.assertFalse(graph.adjacentVertex(id).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.vertex(id);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+
+        graph.tx().rollback();
+        Assert.assertTrue(graph.vertices(id).hasNext());
+        Assert.assertTrue(graph.adjacentVertex(id).hasNext());
+    }
+
+    @Test
+    public void testQuerySingleVertexByIdNotFound() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        Id id = SplicingIdGenerator.splicing("author", "not-exists-id");
+        Assert.assertFalse(graph.vertices(id).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.vertex(id);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+
+        // Adjacent vertex not found is returned as an undefined vertex
+        // (vertex.check_adjacent_vertex_exist=false, the default)
+        List<Vertex> vertices = ImmutableList.copyOf(graph.adjacentVertex(id));
+        Assert.assertEquals(1, vertices.size());
+        Assert.assertEquals(id, vertices.get(0).id());
+        Assert.assertEquals("~undefined", vertices.get(0).label());
+    }
+
+    @Test
+    public void testQuerySingleVertexByNullId() {
+        HugeGraph graph = graph();
+        this.init10VerticesAndCommit();
+
+        Assert.assertFalse(graph.vertices((Object) null).hasNext());
+        Assert.assertFalse(graph.adjacentVertex(null).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.vertex(null);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+
+        // Same as querying by multiple ids
+        Assert.assertFalse(graph.vertices(null, null).hasNext());
+    }
+
+    @Test
+    public void testQuerySingleVertexByIdExpiredInLocalTx() {
+        HugeGraph graph = graph();
+
+        Vertex vertex = graph.addVertex(T.label, "fan", "name", "Baby",
+                                        "age", 3, "city", "Beijing");
+        Object id = vertex.id();
+        this.commitTx();
+
+        vertex = graph.vertex(id);
+        Assert.assertTrue(graph.vertices(id).hasNext());
+        graph.tx().rollback();
+
+        try {
+            Thread.sleep(3100L);
+        } catch (InterruptedException e) {
+            // Ignore
+        }
+
+        // Update the expired vertex in a new tx (not committed)
+        vertex.property("age", 4);
+        Map<Id, HugeVertex> updated = Whitebox.getInternalState(
+                params().graphTransaction(), "updatedVertices");
+        Assert.assertTrue(updated.containsKey(vertex.id()));
+        Assert.assertTrue(((HugeVertex) vertex).expired());
+
+        Assert.assertFalse(graph.vertices(id).hasNext());
+        Assert.assertFalse(graph.adjacentVertex(id).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.vertex(id);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+        graph.tx().rollback();
     }
 
     @Test

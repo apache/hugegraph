@@ -23,6 +23,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
@@ -33,6 +34,7 @@ import java.util.function.Function;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.backend.id.EdgeId;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
@@ -46,6 +48,7 @@ import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NoIndexException;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.structure.HugeEdge;
@@ -2729,6 +2732,176 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByIdsWithLocalAndDuplicateIds() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        Object id1 = graph.traversal().E().toList().get(0).id();
+        // Added but not committed
+        Vertex james = graph.addVertex(T.label, "author", "id", 3,
+                                       "name", "Dennis Ritchie", "age", 70,
+                                       "lived", "New York");
+        Vertex book = graph.addVertex(T.label, "book", "name", "c-book");
+        Edge local = james.addEdge("authored", book, "score", 5);
+        Object id2 = local.id();
+
+        List<Edge> edges = ImmutableList.copyOf(graph.edges(id2, id1, id2));
+        Assert.assertEquals(3, edges.size());
+        Assert.assertSame(local, edges.get(0));
+        Assert.assertEquals(id1, edges.get(1).id());
+        Assert.assertSame(local, edges.get(2));
+
+        graph.tx().rollback();
+    }
+
+    @Test
+    public void testQuerySingleEdgeByIdInLocalTx() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        // Added but not committed
+        Vertex james = graph.addVertex(T.label, "author", "id", 3,
+                                       "name", "Dennis Ritchie", "age", 70,
+                                       "lived", "New York");
+        Vertex book = graph.addVertex(T.label, "book", "name", "c-book");
+        Edge edge = james.addEdge("authored", book, "score", 5);
+        Object id = edge.id();
+
+        List<Edge> edges = ImmutableList.copyOf(graph.edges(id));
+        Assert.assertEquals(1, edges.size());
+        Assert.assertSame(edge, edges.get(0));
+        Assert.assertSame(edge, graph.edge(id));
+        graph.tx().commit();
+
+        // Updated but not committed
+        edge = graph.edge(id);
+        edge.property("score", 6);
+
+        edges = ImmutableList.copyOf(graph.edges(id));
+        Assert.assertEquals(1, edges.size());
+        Assert.assertSame(edge, edges.get(0));
+        Assert.assertEquals(6, (int) graph.edge(id).value("score"));
+        graph.tx().rollback();
+
+        Assert.assertEquals(5, (int) graph.edge(id).value("score"));
+    }
+
+    @Test
+    public void testQuerySingleEdgeByIdRemovedInLocalTx() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        Edge edge = graph.traversal().E().toList().get(0);
+        Object id = edge.id();
+        Assert.assertTrue(graph.edges(id).hasNext());
+
+        edge.remove();
+        Assert.assertFalse(graph.edges(id).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.edge(id);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+
+        graph.tx().rollback();
+        Assert.assertTrue(graph.edges(id).hasNext());
+        Assert.assertEquals(id, graph.edge(id).id());
+    }
+
+    @Test
+    public void testQuerySingleEdgeByIdNotFound() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        String id = graph.traversal().E().toList().get(0).id() + "-not-exist";
+        Assert.assertFalse(graph.edges(id).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.edge(id);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+    }
+
+    @Test
+    public void testQuerySingleEdgeByInvalidId() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        // Invalid id is skipped by edges() and rejected by edge()
+        Assert.assertFalse(graph.edges("invalid-edge-id").hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.edge("invalid-edge-id");
+        }, e -> {
+            Assert.assertContains("Edge id must be formatted", e.getMessage());
+        });
+
+        Assert.assertFalse(graph.edges((Object) null).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.edge(null);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+    }
+
+    @Test
+    public void testQuerySingleEdgeByIdWithInDirection() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        HugeEdge edge = (HugeEdge) graph.traversal().E().toList().get(0);
+        EdgeId inId = edge.idWithDirection().switchDirection();
+        Assert.assertEquals(Directions.IN, inId.direction());
+
+        List<Edge> edges = ImmutableList.copyOf(graph.edges(inId));
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals(edge.id(), edges.get(0).id());
+        Assert.assertEquals(edge.id(), graph.edge(inId).id());
+
+        edges = ImmutableList.copyOf(graph.edges(inId.asString()));
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals(edge.id(), edges.get(0).id());
+    }
+
+    @Test
+    public void testQuerySingleEdgeByIdExpiredInLocalTx() {
+        HugeGraph graph = graph();
+
+        Vertex baby = graph.addVertex(T.label, "person", "name", "Baby",
+                                      "age", 3, "city", "Beijing");
+        Vertex java = graph.addVertex(T.label, "book",
+                                      "name", "Java in action");
+        Edge edge = baby.addEdge("read", java, "place", "library of school",
+                                 "date", "2019-12-23 12:00:00");
+        Object id = edge.id();
+        graph.tx().commit();
+
+        edge = graph.edge(id);
+        Assert.assertTrue(graph.edges(id).hasNext());
+        graph.tx().rollback();
+
+        try {
+            Thread.sleep(3100L);
+        } catch (InterruptedException e) {
+            // Ignore
+        }
+
+        // Update the expired edge in a new tx (not committed)
+        edge.property("place", "home");
+        Map<Id, HugeEdge> updated = Whitebox.getInternalState(
+                params().graphTransaction(), "updatedEdges");
+        Assert.assertTrue(updated.containsKey(edge.id()));
+        Assert.assertTrue(((HugeEdge) edge).expired());
+
+        Assert.assertFalse(graph.edges(id).hasNext());
+        Assert.assertThrows(NotFoundException.class, () -> {
+            graph.edge(id);
+        }, e -> {
+            Assert.assertContains("does not exist", e.getMessage());
+        });
+        graph.tx().rollback();
+    }
+
+    @Test
     public void testQueryEdgesByIdNotFound() {
         HugeGraph graph = graph();
         init18Edges();
@@ -3324,6 +3497,49 @@ public class EdgeCoreTest extends BaseCoreTest {
             Whitebox.setInternalState(params().graphTransaction(),
                                       "checkAdjacentVertexExist", false);
         }
+    }
+
+    @Test
+    public void testQueryAdjacentVertexRemovedInLocalTx()
+            throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+
+        Vertex james = graph.addVertex(T.label, "author", "id", 1,
+                                       "name", "James Gosling", "age", 62,
+                                       "lived", "Canadian");
+        Vertex java = graph.addVertex(T.label, "book", "name", "java");
+        james.addEdge("authored", java, "score", 3);
+        graph.tx().commit();
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+
+        Edge edge = graph.traversal().V(james.id()).outE().next();
+        HugeVertex adjacent = (HugeVertex) edge.inVertex();
+        Assert.assertFalse(adjacent.isPropLoaded());
+        Assert.assertEquals("book", adjacent.label());
+
+        // Remove the adjacent vertex but don't commit
+        graph.vertex(java.id()).remove();
+        Assert.assertFalse(graph.vertices(java.id()).hasNext());
+        Assert.assertFalse(graph.adjacentVertex(java.id()).hasNext());
+        // Querying by one id must agree with querying by multiple ids
+        List<Vertex> vertices = ImmutableList.copyOf(
+                params().graphTransaction()
+                        .queryAdjacentVertices(java.id(), james.id()));
+        Assert.assertEquals(1, vertices.size());
+        Assert.assertEquals(james.id(), vertices.get(0).id());
+
+        /*
+         * Loading the adjacent vertex of an edge held before the removal
+         * must not turn it into an undefined vertex
+         */
+        adjacent.forceLoad();
+        Assert.assertFalse(adjacent.schemaLabel().undefined());
+        Assert.assertEquals("book", adjacent.label());
+
+        graph.tx().rollback();
+        Assert.assertTrue(graph.vertices(java.id()).hasNext());
+        Assert.assertEquals("book", graph.adjacentVertex(java.id())
+                                         .next().label());
     }
 
     @Test
