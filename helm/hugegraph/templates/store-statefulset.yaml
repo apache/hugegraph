@@ -124,7 +124,7 @@ spec:
           {{- end }}
       containers:
         - name: store
-          image: "{{ .Values.store.image.repository }}:{{ .Values.store.image.tag | default $.Chart.AppVersion }}"
+          image: {{ include "hugegraph.image" (dict "image" .Values.store.image "appVersion" $.Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.store.image.pullPolicy }}
           {{- with .Values.store.securityContext }}
           securityContext:

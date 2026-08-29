@@ -632,3 +632,18 @@ affinity:
           topologyKey: kubernetes.io/hostname
 {{- end }}
 {{- end }}
+
+{{/*
+Render a container image reference. An explicit image.digest pins immutably and wins
+over tag; otherwise fall back to tag, then to the chart appVersion. Takes a dict of
+(image, appVersion).
+*/}}
+{{- define "hugegraph.image" -}}
+{{- $img := .image -}}
+{{- $digest := trim (get $img "digest" | default "") -}}
+{{- if ne $digest "" -}}
+{{- printf "%s@%s" $img.repository $digest -}}
+{{- else -}}
+{{- printf "%s:%s" $img.repository (default .appVersion $img.tag) -}}
+{{- end -}}
+{{- end }}

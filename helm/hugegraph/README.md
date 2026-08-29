@@ -823,6 +823,14 @@ independently of the release name.
 
 ## Limitations
 
+- The default values set no container resources, so every pod is QoS class
+  BestEffort and each JVM sizes its heap against total NODE memory rather than
+  a cgroup limit. That is fine for a single-node or development install, but on
+  a multi-node cluster where several pods share a node the heaps oversubscribe
+  it and pods abort. A measured example: on 7.6 GB workers the default install
+  gave PD `-Xmx3299m` and, with three to four pods per node, never converged.
+  Use `values-cluster.yaml`, or set your own `resources`, for any multi-node
+  deployment.
 - PD's raft IP whitelist resolves peer hostnames to IPs once at startup,
   which under Kubernetes can block peers whose pod IPs were unpublished at
   that moment or change later. The chart therefore disables the whitelist

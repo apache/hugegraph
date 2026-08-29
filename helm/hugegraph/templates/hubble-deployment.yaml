@@ -86,7 +86,7 @@ spec:
       {{- end }}
       containers:
         - name: hubble
-          image: "{{ .Values.hubble.image.repository }}:{{ .Values.hubble.image.tag }}"
+          image: {{ include "hugegraph.image" (dict "image" .Values.hubble.image "appVersion" $.Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.hubble.image.pullPolicy }}
           {{- with .Values.hubble.securityContext }}
           securityContext:

@@ -85,7 +85,7 @@ spec:
       {{- end }}
       containers:
         - name: pd
-          image: "{{ .Values.pd.image.repository }}:{{ .Values.pd.image.tag | default $.Chart.AppVersion }}"
+          image: {{ include "hugegraph.image" (dict "image" .Values.pd.image "appVersion" $.Chart.AppVersion) | quote }}
           imagePullPolicy: {{ .Values.pd.image.pullPolicy }}
           {{- with .Values.pd.securityContext }}
           securityContext:

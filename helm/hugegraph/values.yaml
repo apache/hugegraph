@@ -30,6 +30,10 @@ pd:
     # The draft tracks latest until the next HugeGraph release tag is available.
     # Pin the release tag and switch to IfNotPresent before stable publication.
     tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
     pullPolicy: Always
   # Empty preserves the image entrypoint's automatic JVM sizing. The chart
   # renders its partition settings below as -D system properties ahead of
@@ -148,6 +152,10 @@ store:
     # The draft tracks latest until the next HugeGraph release tag is available.
     # Pin the release tag and switch to IfNotPresent before stable publication.
     tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
     pullPolicy: Always
   # Empty preserves the image entrypoint's automatic JVM sizing.
   javaOpts: ""
@@ -227,6 +235,10 @@ server:
     # The draft tracks latest until the next HugeGraph release tag is available.
     # Pin the release tag and switch to IfNotPresent before stable publication.
     tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
     pullPolicy: Always
   # Empty preserves the image entrypoint's automatic JVM sizing.
   javaOpts: ""
@@ -270,7 +282,15 @@ server:
   # Image used by the Helm test hook.
   waitImage: curlimages/curl:8.5.0
   # Optional resources for the Helm test hook container.
-  testResources: {}
+  # Resources for the Helm test hook container. Bounded by default so the hook
+  # cannot run unlimited on a restricted or quota-managed namespace.
+  testResources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 64Mi
   restServer:
     # Empty preserves the image's restserver.min_free_memory default.
     minFreeMemory: ""
@@ -364,6 +384,10 @@ hubble:
     # The draft tracks latest until the next HugeGraph release tag is available.
     # Pin the release tag and switch to IfNotPresent before stable publication.
     tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
     pullPolicy: Always
   port: 8088
   # Hubble keeps UI connection metadata, including any graph credentials

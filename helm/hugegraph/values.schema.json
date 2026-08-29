@@ -72,6 +72,10 @@
             "IfNotPresent",
             "Never"
           ]
+        },
+        "digest": {
+          "type": "string",
+          "description": "Optional immutable image digest, for example sha256:...  Wins over tag when set."
         }
       }
     },
@@ -688,7 +692,16 @@
               ],
               "properties": {
                 "value": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "JWT signing key. Either empty, which defers to existingSecret or autoGenerate, or at least 32 characters: the Server entrypoint rejects a shorter key and the pods CrashLoop.",
+                  "anyOf": [
+                    {
+                      "maxLength": 0
+                    },
+                    {
+                      "minLength": 32
+                    }
+                  ]
                 },
                 "existingSecret": {
                   "type": "string"

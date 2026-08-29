@@ -97,3 +97,9 @@ set pd.antiAffinity=required; see values-cluster.yaml.
 One or more components have no resource requests or limits. Set them before
 production use; see values-cluster.yaml.
 {{- end }}
+
+{{- if not .Values.pd.resources }}
+WARNING: no resources are set, so every pod is BestEffort and each JVM sizes its
+heap against total node memory. On a multi-node cluster this oversubscribes the
+nodes and pods may abort. Use values-cluster.yaml or set resources explicitly.
+{{- end }}
