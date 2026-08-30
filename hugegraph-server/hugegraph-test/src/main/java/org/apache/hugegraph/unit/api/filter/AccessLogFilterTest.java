@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit.api.filter;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Serializable;
@@ -27,11 +28,14 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+import java.util.zip.GZIPOutputStream;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.api.filter.AccessLogFilter;
+import org.apache.hugegraph.api.filter.DecompressInterceptor;
 import org.apache.hugegraph.api.filter.DecompressInterceptor.Decompress;
 import org.apache.hugegraph.api.filter.PathFilter;
 import org.apache.hugegraph.config.HugeConfig;
@@ -62,6 +66,7 @@ import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.UriInfo;
+import jakarta.ws.rs.ext.ReaderInterceptorContext;
 import sun.misc.Unsafe;
 
 /**
@@ -316,12 +321,15 @@ public class AccessLogFilterTest extends BaseUnitTest {
      */
     @Test
     public void testSkipBody_ForBatchImport() throws IOException {
+        String body = "[{\"id\":1}]";
+        InputStream entity = new ByteArrayInputStream(gzip(body));
         this.mockResourceMethod("decompressResource");
-        this.mockRequest("POST", "graphs/hugegraph/graph/vertices/batch", "[{}]");
+        this.mockStreamRequest("POST", "graphs/hugegraph/graph/vertices/batch", entity);
         Mockito.when(this.requestContext.getHeaderString("Content-Encoding"))
                .thenReturn("gzip");
         this.filter.filter(this.requestContext);
         this.verifyNoCapture();
+        Assert.assertEquals(body, decompress(entity));
 
         this.mockRequest("PUT", "graphs/hugegraph/graph/edges/batch", "[{}]");
         this.filter.filter(this.requestContext);
@@ -460,6 +468,38 @@ public class AccessLogFilterTest extends BaseUnitTest {
                                  body.getBytes(StandardCharsets.UTF_8));
             Mockito.when(this.requestContext.getEntityStream()).thenReturn(entity);
         }
+    }
+
+    private void mockStreamRequest(String method, String path, InputStream entity) {
+        Mockito.when(this.requestContext.getMethod()).thenReturn(method);
+        Mockito.when(this.uriInfo.getPath()).thenReturn(path);
+        Mockito.when(this.uriInfo.getRequestUri())
+               .thenReturn(URI.create("http://localhost:8080/" + path));
+        Mockito.when(this.requestContext.getEntityStream()).thenReturn(entity);
+    }
+
+    private static byte[] gzip(String body) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(output)) {
+            gzip.write(body.getBytes(StandardCharsets.UTF_8));
+        }
+        return output.toByteArray();
+    }
+
+    private static String decompress(InputStream entity) throws IOException {
+        ReaderInterceptorContext context = Mockito.mock(ReaderInterceptorContext.class);
+        MultivaluedHashMap<String, String> headers = new MultivaluedHashMap<>();
+        headers.putSingle("Content-Encoding", "gzip");
+        AtomicReference<InputStream> input = new AtomicReference<>(entity);
+        Mockito.when(context.getHeaders()).thenReturn(headers);
+        Mockito.when(context.getInputStream()).thenAnswer(invocation -> input.get());
+        Mockito.doAnswer(invocation -> {
+            input.set(invocation.getArgument(0));
+            return null;
+        }).when(context).setInputStream(Mockito.any(InputStream.class));
+        Mockito.when(context.proceed()).thenAnswer(invocation ->
+                new String(input.get().readAllBytes(), StandardCharsets.UTF_8));
+        return (String) new DecompressInterceptor().aroundReadFrom(context);
     }
 
     private void mockResourceMethod(String name) {
