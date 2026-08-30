@@ -19,6 +19,7 @@ package org.apache.hugegraph.traversal.optimize;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
@@ -30,7 +31,6 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.AbstractTraversalStrategy;
 import org.apache.tinkerpop.gremlin.structure.T;
-import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty.Cardinality;
 
 public class HugePrimaryKeyStrategy
@@ -77,20 +77,33 @@ public class HugePrimaryKeyStrategy
                 || propertyStep.getCardinality() == null) {
 
                 Object[] kvs = new Object[2];
+                boolean extraParams = false;
 
-                propertyStep.getParameters().getRaw().forEach((k, v) -> {
-                    if (T.key.equals(k)) {
-                        kvs[0] = v.get(0);
-                    } else if (T.value.equals(k)) {
-                        kvs[1] = v.get(0);
+                for (Map.Entry<Object, List<Object>> param :
+                     propertyStep.getParameters().getRaw().entrySet()) {
+                    Object paramKey = param.getKey();
+                    if (T.key.equals(paramKey)) {
+                        kvs[0] = param.getValue().get(0);
+                    } else if (T.value.equals(paramKey)) {
+                        kvs[1] = param.getValue().get(0);
                     } else {
-                        throw VertexProperty.Exceptions.metaPropertiesNotSupported();
+                        extraParams = true;
                     }
-                });
+                }
 
                 curAddStep.configure(kvs);
 
-                removeSteps.add(step);
+                if (extraParams) {
+                    /*
+                     * Rejecting here would run for every child traversal, so an
+                     * unreachable coalesce()/choose() branch would fail too. Leave
+                     * the step for HugeVertex.property() to reject when it really
+                     * runs, and stop folding across it.
+                     */
+                    curAddStep = null;
+                } else {
+                    removeSteps.add(step);
+                }
             } else {
                 curAddStep = null;
             }
