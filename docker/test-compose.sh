@@ -89,6 +89,9 @@ assert_hubble() {
         .services.hubble.image == "example.invalid/hugegraph/hubble:ci" and
         .services.hubble.pull_policy == "missing" and
         .services.hubble.environment.SPRING_DATASOURCE_URL == $datasource and
+        any(.services.hubble.ports[];
+            .target == 8088 and .published == "8088" and
+            .host_ip == "127.0.0.1") and
         (.services.hubble.depends_on | keys | sort) == $dependencies and
         all(.services.hubble.depends_on[];
             .condition == "service_healthy") and
@@ -275,14 +278,16 @@ http_status() {
 
 wait_hubble_mode() {
     local expected_pd="$1"
+    local expected_auth="$2"
     local response=""
     local _
     for _ in {1..30}; do
         response="$(curl -fsS http://localhost:8088/api/v1.3/config || true)"
-        if jq -e --argjson expected_pd "${expected_pd}" '
+        if jq -e --argjson expected_pd "${expected_pd}" \
+                 --argjson expected_auth "${expected_auth}" '
             .status == 200 and
             .data.pd_enabled == $expected_pd and
-            .data.auth_enabled == true and
+            .data.auth_enabled == $expected_auth and
             .data.server_capabilities_verified == true
         ' <<<"${response}" >/dev/null 2>&1; then
             return
@@ -302,10 +307,22 @@ check_hubble_login() {
        <<<"${response}" >/dev/null
 }
 
+check_hubble_anonymous() {
+    curl -fsS http://localhost:8088/api/v1.3/auth/status |
+        jq -e '.status == 200 and .data.level == "ANONYMOUS"' >/dev/null
+    curl -fsS http://localhost:8088/api/v1.3/auth/context |
+        jq -e '
+            .status == 200 and
+            .data.mode == "NON_AUTH" and
+            .data.role == "ANONYMOUS"
+        ' >/dev/null
+}
+
 smoke() {
     local name="$1"
     local expected_pd="$2"
-    shift 2
+    local expected_auth="$3"
+    shift 3
     ACTIVE_PROJECT="hg-ci-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-$$-${name}"
     ACTIVE_FILES=()
     while (($#)); do
@@ -318,23 +335,40 @@ smoke() {
         return 1
     fi
     curl -fsS http://localhost:8080/versions >/dev/null
-    [[ "$(http_status http://localhost:8080/graphspaces/DEFAULT/graphs)" == 401 ]]
-    [[ "$(http_status -u "admin:${PASSWORD}" \
-        http://localhost:8080/graphspaces/DEFAULT/graphs)" == 200 ]]
+    if [[ "${expected_auth}" == true ]]; then
+        [[ "$(http_status \
+            http://localhost:8080/graphspaces/DEFAULT/graphs)" == 401 ]]
+        [[ "$(http_status -u "admin:${PASSWORD}" \
+            http://localhost:8080/graphspaces/DEFAULT/graphs)" == 200 ]]
+    else
+        [[ "$(http_status \
+            http://localhost:8080/graphspaces/DEFAULT/graphs)" == 200 ]]
+    fi
     curl -fsS http://localhost:8088/about |
         jq -e '.status == 200 and .data.name == "hugegraph-hubble"' >/dev/null
-    wait_hubble_mode "${expected_pd}"
-    check_hubble_login
+    wait_hubble_mode "${expected_pd}" "${expected_auth}"
+    if [[ "${expected_auth}" == true ]]; then
+        check_hubble_login
+    else
+        check_hubble_anonymous
+    fi
     compose_active down -v --remove-orphans
     ACTIVE_PROJECT=""
     ACTIVE_FILES=()
-    echo "Compose auth-on smoke passed: ${name}"
+    echo "Compose smoke passed: ${name}"
 }
 
 run_smoke() {
     trap cleanup EXIT INT TERM
-    smoke standalone false "${DOCKER_DIR}/docker-compose.yml"
-    smoke hstore true "${DOCKER_DIR}/docker-compose-hstore.yml"
+    smoke standalone false true "${DOCKER_DIR}/docker-compose.yml"
+    smoke hstore true true "${DOCKER_DIR}/docker-compose-hstore.yml"
+}
+
+run_smoke_auth_off() {
+    PASSWORD=""
+    trap cleanup EXIT INT TERM
+    smoke standalone-anon false false "${DOCKER_DIR}/docker-compose.yml"
+    smoke hstore-anon true false "${DOCKER_DIR}/docker-compose-hstore.yml"
 }
 
 case "${1:-}" in
@@ -344,12 +378,15 @@ case "${1:-}" in
     smoke)
         run_smoke
         ;;
+    smoke-auth-off)
+        run_smoke_auth_off
+        ;;
     all)
         run_render
         run_smoke
         ;;
     *)
-        echo "Usage: $0 {render|smoke|all}" >&2
+        echo "Usage: $0 {render|smoke|smoke-auth-off|all}" >&2
         exit 2
         ;;
 esac

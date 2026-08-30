@@ -56,7 +56,7 @@ services:
     environment:
       SPRING_DATASOURCE_URL: jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE
     ports:
-      - "8088:8088"
+      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
     volumes:
       - hubble-data:/hubble/data
       - ./conf/hubble/standalone.properties:/hubble/conf/hugegraph-hubble.properties:ro

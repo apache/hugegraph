@@ -29,13 +29,19 @@ JWT secret. For this simple single-quoted format, do not use a password that
 contains a single quote or newline.
 
 ```bash
-umask 077
-test ! -e .env || {
-  echo ".env already exists; edit it instead of overwriting it" >&2
-  exit 1
-}
-printf "HUGEGRAPH_ADMIN_PASSWORD='%s'\nHUGEGRAPH_AUTH_TOKEN_SECRET='%s'\n" \
-  'replace-with-your-password' "$(openssl rand -hex 32)" > .env
+(
+  set -eu
+  command -v openssl >/dev/null
+  jwt_secret="$(openssl rand -hex 32)"
+  test "${#jwt_secret}" -eq 64
+  umask 077
+  test ! -e .env || {
+    echo ".env already exists; edit it instead of overwriting it" >&2
+    exit 1
+  }
+  printf "HUGEGRAPH_ADMIN_PASSWORD='%s'\nHUGEGRAPH_AUTH_TOKEN_SECRET='%s'\n" \
+    'replace-with-your-password' "${jwt_secret}" > .env
+)
 ```
 
 Do not commit `.env`. Keeping the same JWT secret preserves authentication
@@ -46,6 +52,8 @@ A non-empty `HUGEGRAPH_ADMIN_PASSWORD` enables Server authentication, and
 Hubble detects that mode automatically. Omitting the variable or setting it to
 an empty value disables authentication. Auth-off is only suitable for a
 trusted local environment; never expose it to a public or untrusted network.
+Hubble listens on host loopback by default. Set `HUBBLE_PUBLISH_HOST` only
+behind an HTTPS reverse proxy and trusted network controls.
 
 For the verification commands below, set the password in your current shell:
 
@@ -153,7 +161,8 @@ docker compose -f docker-compose-hstore.yml down -v
 
 The HA topology is resource-intensive. Running it locally is not required on
 resource-constrained machines, but its Compose configuration must always render
-successfully.
+successfully. This PR validates HA by rendering and static review only; it does
+not start HA locally or in default CI.
 
 Start:
 
@@ -331,6 +340,18 @@ its ten containers.
 
 Run focused auth-on smoke checks for standalone and minimal HStore with the
 corresponding `up -d --wait`, status, authentication, Hubble `/about`, and
-`down -v` commands from the Users section. An auth-off smoke check may be run
-locally by temporarily setting `HUGEGRAPH_ADMIN_PASSWORD=`; it is non-gating
-and must remain on a trusted local machine.
+`down -v` commands from the Users section:
+
+```bash
+bash test-compose.sh smoke
+```
+
+Run the required local auth-off checks separately:
+
+```bash
+bash test-compose.sh smoke-auth-off
+```
+
+The auth-off mode is intentionally excluded from the default CI matrix and must
+remain on a trusted local machine. Both smoke modes remove only the isolated
+Compose projects and volumes that they create.
