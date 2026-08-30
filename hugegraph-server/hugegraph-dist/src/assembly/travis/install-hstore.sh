@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-set -ev
+set -e
 
 TRAVIS_DIR=$(dirname "$0")
 

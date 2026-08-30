@@ -378,6 +378,8 @@ jobs:
           $TRAVIS_DIR/run-unit-test.sh $BACKEND
 
       - name: Run core test
+        env:
+          HUGEGRAPH_TEST_TASK_LOG_LEVEL: WARN
         run: |
           $TRAVIS_DIR/run-core-test.sh $BACKEND
 

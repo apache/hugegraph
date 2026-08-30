@@ -2,7 +2,7 @@
   Thank you very much for contributing to Apache HugeGraph, we are happy that you want to help us improve it!
 
   Here are some tips for you:
-    1. If this is your first time, please read the [contributing guidelines](https://github.com/apache/hugegraph/blob/master/CONTRIBUTING.md)
+    1. If this is your first time, please read the [contributing guidelines](https://github.com/apache/hugegraph/blob/master/docs/CONTRIBUTING.md)
 
     2. If a PR fix/close an issue, type the message "close xxx" (xxx is the link of related 
 issue) in the content, GitHub will auto link it (Required)

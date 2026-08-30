@@ -126,7 +126,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
     }
 
     private void onEvent(WatchResponse value, Consumer<T> consumer) {
-        log.info("receive message for {},event Count:{}", value, value.getEventsCount());
+        log.debug("receive message for {},event Count:{}", value, value.getEventsCount());
         clientId.compareAndSet(0L, value.getClientId());
         if (value.getEventsCount() != 0) {
             try {

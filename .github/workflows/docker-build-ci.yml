@@ -25,6 +25,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/docker-build-ci.yml'
+      - 'docker/bake.hcl'
       - '.dockerignore'
       - '.mvn/**'
       - 'pom.xml'
@@ -38,8 +39,71 @@ on:
       - 'install-dist/**'
 
 jobs:
+  docker-bake-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify shared Maven stages stay identical
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          extract_build_stage() {
+            awk '
+              /^FROM .* AS build$/ {
+                in_build = 1
+              }
+              in_build && seen && /^FROM / {
+                exit
+              }
+              in_build {
+                print
+                seen = 1
+              }
+            ' "$1"
+          }
+
+          reference="hugegraph-pd/Dockerfile"
+          if [ -z "$(extract_build_stage "$reference")" ]; then
+            echo "ERROR: no 'AS build' stage found in $reference"
+            exit 1
+          fi
+          for dockerfile in \
+            hugegraph-store/Dockerfile \
+            hugegraph-server/Dockerfile \
+            hugegraph-server/Dockerfile-hstore; do
+            diff -u \
+              <(extract_build_stage "$reference") \
+              <(extract_build_stage "$dockerfile")
+          done
+
+      - name: Validate shared image build graph
+        run: |
+          set -euo pipefail
+
+          docker buildx bake --file docker/bake.hcl --print > /tmp/hugegraph-bake.json
+          jq -e '
+            .group.default.targets == [
+              "build-cache",
+              "pd",
+              "server-hstore",
+              "server-standalone",
+              "store"
+            ] and
+            ([.target[] | .platforms] |
+              all(. == ["linux/amd64", "linux/arm64"])) and
+            .target["build-cache"].target == "build" and
+            .target["build-cache"].output[0].type == "cacheonly" and
+            ([.target | to_entries[] |
+              select(.key != "build-cache") |
+              .value.output[0].type] |
+              all(. == "docker"))
+          ' /tmp/hugegraph-bake.json
+
   docker-build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:

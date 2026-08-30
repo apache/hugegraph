@@ -127,6 +127,11 @@
             <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </logger>
+        <AsyncLogger name="org.apache.hugegraph.task.DistributedTaskScheduler"
+                     level="${env:HUGEGRAPH_TEST_TASK_LOG_LEVEL:-INFO}" additivity="false">
+            <appender-ref ref="console"/>
+            <appender-ref ref="file"/>
+        </AsyncLogger>
         <!-- Use mixed async way to output logs -->
         <AsyncLogger name="org.apache.hugegraph" level="INFO" additivity="false">
             <appender-ref ref="console"/>
