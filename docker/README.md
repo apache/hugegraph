@@ -55,6 +55,10 @@ trusted local environment; never expose it to a public or untrusted network.
 Hubble listens on host loopback by default. Set `HUBBLE_PUBLISH_HOST` only
 behind an HTTPS reverse proxy and trusted network controls.
 
+`HUGEGRAPH_ADMIN_PASSWORD` initializes the built-in `admin` account on its
+first authenticated startup. Changing `.env` does not rotate an existing
+administrator password; use the HugeGraph user API for credential changes.
+
 For the verification commands below, set the password in your current shell:
 
 ```bash

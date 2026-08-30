@@ -179,6 +179,10 @@ assert_ha() {
         all([.services.server0, .services.server1, .services.server2][];
             .image == "hugegraph/server:ci-version" and
             .pull_policy == "missing" and
+            .environment.STORE_REST == "store0:8520" and
+            .environment.HG_SERVER_BACKEND == "hstore" and
+            .environment.HG_SERVER_PD_PEERS ==
+                "pd0:8686,pd1:8686,pd2:8686" and
             .environment.HG_SERVER_CLUSTER == "hg" and
             .environment.HG_SERVER_USE_PD == "true" and
             .environment.HG_SERVER_INIT_STORE_ENABLED == "false") and
