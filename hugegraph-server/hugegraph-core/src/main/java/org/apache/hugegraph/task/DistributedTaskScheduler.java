@@ -137,8 +137,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         while (!this.closed.get() && news.hasNext()) {
             HugeTask<?> newTask = news.next();
-            LOG.info("Try to start task({})@({}/{})", newTask.id(),
-                     this.graphSpace, this.graphName);
+            LOG.debug("Try to start task({})@({}/{})", newTask.id(),
+                      this.graphSpace, this.graphName);
             if (!tryStartHugeTask(newTask)) {
                 // Task submission failed when the thread pool is full.
                 break;
@@ -272,8 +272,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         this.save(task);
 
         if (!this.closed.get()) {
-            LOG.info("Try to start task({})@({}/{}) immediately", task.id(),
-                     this.graphSpace, this.graphName);
+            LOG.debug("Try to start task({})@({}/{}) immediately", task.id(),
+                      this.graphSpace, this.graphName);
             tryStartHugeTask(task);
         } else {
             LOG.info("TaskScheduler has closed");
@@ -751,8 +751,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         if (executor.getActiveCount() < executor.getMaximumPoolSize()) {
             TaskRunner<?> runner = new TaskRunner<>(task);
             chosenExecutor.submit(runner);
-            LOG.info("Submit task({})@({}/{})", task.id(),
-                     this.graphSpace, this.graphName);
+            LOG.debug("Submit task({})@({}/{})", task.id(),
+                      this.graphSpace, this.graphName);
 
             return true;
         }
@@ -770,9 +770,9 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         int olapActive =
                 ((ThreadPoolExecutor) olapTaskExecutor).getActiveCount();
 
-        LOG.info("Current State: gremlinTaskExecutor({}), schemaTaskExecutor" +
-                 "({}), ephemeralTaskExecutor({}), olapTaskExecutor({})",
-                 gremlinActive, schemaActive, ephemeralActive, olapActive);
+        LOG.debug("Current State: gremlinTaskExecutor({}), schemaTaskExecutor" +
+                  "({}), ephemeralTaskExecutor({}), olapTaskExecutor({})",
+                  gremlinActive, schemaActive, ephemeralActive, olapActive);
     }
 
     private LockResult tryLockTask(String taskId) {
@@ -836,7 +836,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             initTaskParams(task);
             if (lockResult.lockSuccess() && !task.completed()) {
 
-                LOG.info("Start task({})", task.id());
+                LOG.debug("Start task({})", task.id());
 
                 TaskManager.setContext(task.context());
                 try {
@@ -861,7 +861,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                     deletingTasks.remove(task.id());
                     unlockTask(task.id().asString(), lockResult);
 
-                    LOG.info("task({}) finished.", task.id().toString());
+                    LOG.debug("task({}) finished.", task.id().toString());
                 }
             }
         }
