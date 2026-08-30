@@ -2,6 +2,8 @@
 
 This guide covers running HugeGraph with HBase backend.
 
+> **Deprecation notice:** The HBase backend is deprecated and is planned for removal in HugeGraph 2.0. Existing deployments should plan a migration to a maintained backend.
+
 > All commands below run from the repository root (this project folder).
 
 Use this once at the start of your terminal session:
@@ -158,7 +160,7 @@ After either path is up, run the shared tests below.
 
 - Base URL: `http://localhost:8080`
 - Graph target name: `hugegraph`
-- Storage backend: persistent (HBase/Cassandra/RocksDB)
+- Storage backend: persistent (HBase/RocksDB/HStore)
 
 ---
 

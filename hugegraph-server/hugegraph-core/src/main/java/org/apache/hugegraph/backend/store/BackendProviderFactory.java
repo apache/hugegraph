@@ -37,6 +37,7 @@ import org.slf4j.Logger;
  * since 1.7.0, only "hstore, rocksdb, hbase, memory" are supported for backend.
  * if you want to use cassandra, mysql, postgresql, cockroachdb or palo as backend,
  * please find a version before 1.7.0 of apache hugegraph for your application.
+ * TODO: Remove hbase backend support in 2.0.
  */
 public class BackendProviderFactory {
 

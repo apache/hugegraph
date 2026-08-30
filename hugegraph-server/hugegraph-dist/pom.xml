@@ -34,6 +34,8 @@
         <assembly.descriptor.dir>${assembly.dir}/descriptor</assembly.descriptor.dir>
         <assembly.static.dir>${assembly.dir}/static</assembly.static.dir>
         <jansi.version>2.4.0</jansi.version>
+        <jamm.version>0.3.2</jamm.version>
+        <hugegraph.backends>rocksdb, hbase, hstore</hugegraph.backends>
     </properties>
 
     <dependencies>
@@ -61,51 +63,9 @@
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-cassandra</artifactId>
-            <version>${revision}</version>
-            <exclusions>
-                <exclusion>
-                    <artifactId>metrics-core</artifactId>
-                    <groupId>io.dropwizard.metrics</groupId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-scylladb</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-rocksdb</artifactId>
             <version>${revision}</version>
         </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-mysql</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-palo</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-hbase</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-postgresql</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-hstore</artifactId>
-            <version>${revision}</version>
-        </dependency>
-
         <dependency>
             <groupId>org.apache.tinkerpop</groupId>
             <artifactId>gremlin-console</artifactId>
@@ -124,6 +84,11 @@
             <artifactId>grpc-stub</artifactId>
             <version>${grpc.version}</version>
         </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- Added updated jar to avoid java.lang.NoClassDefFoundError: org/fusesource/jansi/AnsiConsole when launching
              gremlin console on arm64 -->
@@ -131,6 +96,13 @@
             <groupId>org.fusesource.jansi</groupId>
             <artifactId>jansi</artifactId>
             <version>${jansi.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- Required by the -javaagent option in bin/gremlin-console.sh -->
+        <dependency>
+            <groupId>com.github.jbellis</groupId>
+            <artifactId>jamm</artifactId>
+            <version>${jamm.version}</version>
             <scope>runtime</scope>
         </dependency>
     </dependencies>
@@ -144,6 +116,16 @@
             <resource>
                 <directory>${basedir}/src/main/resources</directory>
                 <filtering>false</filtering>
+                <excludes>
+                    <exclude>backend.properties</exclude>
+                </excludes>
+            </resource>
+            <resource>
+                <directory>${basedir}/src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes>
+                    <include>backend.properties</include>
+                </includes>
             </resource>
         </resources>
 
@@ -289,6 +271,37 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>supported-backends</id>
+            <activation>
+                <property>
+                    <name>!rocksdb-only</name>
+                </property>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.hugegraph</groupId>
+                    <artifactId>hugegraph-hbase</artifactId>
+                    <version>${revision}</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hugegraph</groupId>
+                    <artifactId>hugegraph-hstore</artifactId>
+                    <version>${revision}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>rocksdb-only</id>
+            <activation>
+                <property>
+                    <name>rocksdb-only</name>
+                </property>
+            </activation>
+            <properties>
+                <hugegraph.backends>rocksdb</hugegraph.backends>
+            </properties>
+        </profile>
         <profile>
             <id>assembly-hugegraph</id>
             <build>

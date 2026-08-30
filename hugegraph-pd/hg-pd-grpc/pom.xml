@@ -32,7 +32,7 @@
 
 
     <properties>
-        <os.plugin.version>1.6.0</os.plugin.version>
+        <os.plugin.version>1.7.1</os.plugin.version>
         <grpc.version>1.39.0</grpc.version>
         <protoc.version>3.17.2</protoc.version>
         <protobuf.plugin.version>0.6.1</protobuf.plugin.version>
@@ -127,4 +127,39 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>riscv64-protobuf-tools</id>
+            <activation>
+                <os>
+                    <arch>riscv64</arch>
+                </os>
+            </activation>
+            <properties>
+                <!-- Compatible with the distro generators and Server runtime -->
+                <grpc.version>1.47.0</grpc.version>
+                <riscv64.protobuf.java.version>3.21.7</riscv64.protobuf.java.version>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>com.google.protobuf</groupId>
+                    <artifactId>protobuf-java</artifactId>
+                    <version>${riscv64.protobuf.java.version}</version>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.xolstice.maven.plugins</groupId>
+                        <artifactId>protobuf-maven-plugin</artifactId>
+                        <configuration>
+                            <protocExecutable>/usr/bin/protoc</protocExecutable>
+                            <pluginExecutable>/usr/bin/grpc_java_plugin</pluginExecutable>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

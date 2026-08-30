@@ -19,20 +19,21 @@
 
 function command_available() {
     local cmd=$1
-    if [ `command -v $cmd >/dev/null 2>&1` ]; then
-        return 1
-    else
+    if command -v "$cmd" >/dev/null 2>&1; then
         return 0
     fi
+    return 1
 }
 
 # read a property from .properties file
 function read_property() {
     # file path
+    local file_name
+    local property_name
     file_name=$1
     # replace "." to "\."
-    property_name=`echo $2 | sed 's/\./\\\./g'`
-    cat $file_name | sed -n -e "s/^[ ]*//g;/^#/d;s/^$property_name=//p" | tail -1
+    property_name=$(echo "$2" | sed 's/\./\\\./g')
+    cat "$file_name" | sed -n -e "s/^[ ]*//g;/^#/d;s/^$property_name=//p" | tail -1
 }
 
 function write_property() {
@@ -40,7 +41,7 @@ function write_property() {
     local key=$2
     local value=$3
 
-    local os=`uname`
+    local os=$(uname)
     case $os in
         # Note: in mac os should use sed -i '' "xxx" to replace string,
         # otherwise prompt 'command c expects \ followed by text'.
@@ -55,7 +56,7 @@ function parse_yaml() {
     local version=$2
     local module=$3
 
-    cat $file | tr -d '\n {}'| awk -F',+|:' '''{
+    cat "$file" | tr -d '\n {}'| awk -F',+|:' '''{
         pre="";
         for(i=1; i<=NF; ) {
             if(match($i, /version/)) {
@@ -71,27 +72,13 @@ function parse_yaml() {
 }
 
 function process_num() {
-    num=`ps -ef | grep $1 | grep -v grep | wc -l`
-    return $num
+    num=$(ps -ef | grep "$1" | grep -v grep | wc -l)
+    return "$num"
 }
 
 function process_id() {
-    pid=`ps -ef | grep $1 | grep -v grep | awk '{print $2}'`
-    return $pid
-}
-
-# check the port of rest server is occupied
-function check_port() {
-    local port=$(echo "$1" | sed 's|.*:||' | sed 's|/.*||')
-    if ! command_available "lsof"; then
-        echo "Required lsof but it is unavailable"
-        exit 1
-    fi
-    lsof -i :$port >/dev/null
-    if [ $? -eq 0 ]; then
-        echo "The port $port has already been used"
-        exit 1
-    fi
+    pid=$(ps -ef | grep "$1" | grep -v grep | awk '{print $2}')
+    return "$pid"
 }
 
 function crontab_append() {
@@ -129,13 +116,14 @@ function wait_for_startup() {
     local server_url="$3"
     local timeout_s="$4"
 
-    local now_s=`date '+%s'`
-    local stop_s=$(( $now_s + $timeout_s ))
+    local now_s
+    now_s=$(date '+%s')
+    local stop_s=$(( now_s + timeout_s ))
 
     local status
 
     echo -n "Connecting to $server_name ($server_url)"
-    while [ $now_s -le $stop_s ]; do
+    while [ "$now_s" -le "$stop_s" ]; do
         echo -n .
         process_status "$server_name" "$pid" >/dev/null
         if [ $? -eq 1 ]; then
@@ -143,14 +131,14 @@ function wait_for_startup() {
             return 1
         fi
 
-        status=`curl -o /dev/null -s -k -w %{http_code} $server_url`
-        if [[ $status -eq 200 || $status -eq 401 ]]; then
+        status=$(curl -o /dev/null -s -k -w '%{http_code}' "$server_url")
+        if [[ "$status" -eq 200 || "$status" -eq 401 ]]; then
             echo "OK"
             echo "Started [pid $pid]"
             return 0
         fi
         sleep 2
-        now_s=`date '+%s'`
+        now_s=$(date '+%s')
     done
 
     echo "The operation timed out when attempting to connect to $server_url" >&2
@@ -159,22 +147,28 @@ function wait_for_startup() {
 
 function free_memory() {
     local free=""
-    local os=`uname`
+    local os=$(uname)
     if [ "$os" == "Linux" ]; then
-        local mem_free=`cat /proc/meminfo | grep -w "MemFree" | awk '{print $2}'`
-        local mem_buffer=`cat /proc/meminfo | grep -w "Buffers" | awk '{print $2}'`
-        local mem_cached=`cat /proc/meminfo | grep -w "Cached" | awk '{print $2}'`
+        local mem_free=$(cat /proc/meminfo | grep -w "MemFree" | awk '{print $2}')
+        local mem_buffer=$(cat /proc/meminfo | grep -w "Buffers" | awk '{print $2}')
+        local mem_cached=$(cat /proc/meminfo | grep -w "Cached" | awk '{print $2}')
         if [[ "$mem_free" == "" || "$mem_buffer" == "" || "$mem_cached" == "" ]]; then
             echo "Failed to get free memory"
             exit 1
         fi
-        free=`expr $mem_free + $mem_buffer + $mem_cached`
-        free=`expr $free / 1024`
+        free=$(expr "$mem_free" + "$mem_buffer" + "$mem_cached")
+        free=$(expr "$free" / 1024)
     elif [ "$os" == "Darwin" ]; then
-        local pages_free=`vm_stat | awk '/Pages free/{print $0}' | awk -F'[:.]+' '{print $2}' | tr -d " "`
-        local pages_inactive=`vm_stat | awk '/Pages inactive/{print $0}' | awk -F'[:.]+' '{print $2}' | tr -d " "`
-        local pages_available=`expr $pages_free + $pages_inactive`
-        free=`expr $pages_available \* 4096 / 1024 / 1024`
+        local pages_free pages_inactive
+        pages_free=$(vm_stat | awk '/Pages free/{print $0}' | awk -F'[:.]+' '{print $2}' | tr -d " ")
+        pages_inactive=$(vm_stat | awk '/Pages inactive/{print $0}' | awk -F'[:.]+' '{print $2}' | tr -d " ")
+        if [[ -z "$pages_free" || -z "$pages_inactive" ]]; then
+            echo "Failed to get free memory"
+            exit 1
+        fi
+        local pages_available
+        pages_available=$(expr "$pages_free" + "$pages_inactive")
+        free=$(expr "$pages_available" \* 4096 / 1024 / 1024)
     else
         echo "Unsupported operating system $os"
         exit 1
@@ -186,8 +180,8 @@ function calc_xmx() {
     local min_mem=$1
     local max_mem=$2
     # Get machine available memory
-    local free=`free_memory`
-    local half_free=$[free/2]
+    local free=$(free_memory)
+    local half_free=$((free/2))
 
     local xmx=$min_mem
     if [[ "$free" -lt "$min_mem" ]]; then
@@ -235,47 +229,78 @@ function ensure_path_writable() {
 }
 
 function get_ip() {
-    local os=`uname`
+    local os=$(uname)
     local loopback="127.0.0.1"
     local ip=""
     case $os in
         Linux)
             if command_available "ifconfig"; then
-                ip=`ifconfig | grep 'inet addr:' | grep -v "$loopback" | cut -d: -f2 | awk '{ print $1}'`
+                ip=$(ifconfig | grep 'inet addr:' | grep -v "$loopback" | cut -d: -f2 | awk '{ print $1}')
             elif command_available "ip"; then
-                ip=`ip addr | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | awk -F"/" '{print $1}'`
+                ip=$(ip addr | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | awk -F"/" '{print $1}')
             else
                 ip=$loopback
             fi
             ;;
         FreeBSD|OpenBSD|Darwin)
             if command_available "ifconfig"; then
-                ip=`ifconfig | grep -E 'inet.[0-9]' | grep -v "$loopback" | awk '{ print $2}'`
+                ip=$(ifconfig | grep -E 'inet.[0-9]' | grep -v "$loopback" | awk '{ print $2}')
             else
                 ip=$loopback
             fi
             ;;
         SunOS)
             if command_available "ifconfig"; then
-                ip=`ifconfig -a | grep inet | grep -v "$loopback" | awk '{ print $2} '`
+                ip=$(ifconfig -a | grep inet | grep -v "$loopback" | awk '{ print $2} ')
             else
                 ip=$loopback
             fi
             ;;
         *) ip=$loopback;;
     esac
-    echo $ip
+    [[ -z "$ip" ]] && ip=$loopback
+    echo "$ip"
 }
 
 function download() {
     local path=$1
     local link_url=$2
 
-    if command_available "wget"; then
-        wget --help | grep -q '\--show-progress' && progress_opt="-q --show-progress" || progress_opt=""
-        wget ${link_url} -P ${path} $progress_opt
-    elif command_available "curl"; then
-        curl ${link_url} -o ${path}/${link_url}
+    if [ ! -d "$path" ]; then
+        mkdir -p "$path" || {
+            echo "Failed to create directory: $path"
+            exit 1
+        }
+    fi
+
+    local filename tmp
+    filename=$(basename "${link_url%%[?#]*}")
+    local dest="${path}/${filename}"
+    # mktemp, not $$: a PID is shared by concurrent background subshells.
+    tmp=$(mktemp -- "${path}/.${filename}.XXXXXX") || {
+        echo "Failed to create a temporary file in $path"
+        return 1
+    }
+
+    if command_available "curl"; then
+        # -o must appear before -- so it is parsed as an option, not an extra URL.
+        if curl -fL -o "$tmp" -- "${link_url}"; then
+            mv -f -- "$tmp" "$dest" || { rm -f -- "$tmp"; return 1; }
+        else
+            rm -f -- "$tmp"
+            return 1
+        fi
+    elif command_available "wget"; then
+        local -a progress_opt=()
+        if wget --help 2>&1 | grep -q -- '--show-progress'; then
+            progress_opt=(-q --show-progress)
+        fi
+        if wget ${progress_opt[@]+"${progress_opt[@]}"} -O "$tmp" -- "${link_url}"; then
+            mv -f -- "$tmp" "$dest" || { rm -f -- "$tmp"; return 1; }
+        else
+            rm -f -- "$tmp"
+            return 1
+        fi
     else
         echo "Required wget or curl but they are unavailable"
         exit 1
@@ -286,14 +311,15 @@ download_and_verify() {
     local url=$1
     local filepath=$2
     local expected_md5=$3
+    local actual_md5
 
-    if [[ -f $filepath ]]; then
+    if [[ -f "$filepath" ]]; then
         echo "File $filepath exists. Verifying MD5 checksum..."
-        actual_md5=$(md5sum $filepath | awk '{ print $1 }')
-        if [[ $actual_md5 != $expected_md5 ]]; then
+        actual_md5=$(md5sum -- "$filepath" | awk '{ print $1 }')
+        if [[ "$actual_md5" != "$expected_md5" ]]; then
             echo "MD5 checksum verification failed for $filepath. Expected: $expected_md5, but got: $actual_md5"
-            echo "Deleting $filepath..."
-            rm -f $filepath
+            # Keep the shared destination until a verified temporary file is
+            # ready; a stale reader must not delete another caller's replacement.
         else
             echo "MD5 checksum verification succeeded for $filepath."
             return 0
@@ -301,11 +327,21 @@ download_and_verify() {
     fi
 
     echo "Downloading $filepath..."
-    curl -L -o $filepath $url
-
-    actual_md5=$(md5sum $filepath | awk '{ print $1 }')
-    if [[ $actual_md5 != $expected_md5 ]]; then
-        echo "MD5 checksum verification failed for $filepath after download. Expected: $expected_md5, but got: $actual_md5"
+    local tmp
+    # mktemp, not $$: a PID is shared by concurrent background subshells.
+    tmp=$(mktemp -- "${filepath}.XXXXXX") || return 1
+    if curl -fL -o "$tmp" -- "$url"; then
+        actual_md5=$(md5sum -- "$tmp" | awk '{ print $1 }')
+        if [[ "$actual_md5" != "$expected_md5" ]]; then
+            echo "MD5 checksum verification failed for $filepath after download. Expected: $expected_md5, but got: $actual_md5"
+            rm -f -- "$tmp"
+            return 1
+        fi
+        # A failed rename must not report success: callers export LD_PRELOAD
+        # from $filepath and would otherwise use a library that never installed.
+        mv -f -- "$tmp" "$filepath" || { rm -f -- "$tmp"; return 1; }
+    else
+        rm -f -- "$tmp"
         return 1
     fi
 
@@ -318,19 +354,17 @@ function ensure_package_exist() {
     local tar=$3
     local link=$4
 
-    if [ ! -d ${path}/${dir} ]; then
-        if [ ! -f ${path}/${tar} ]; then
+    if [ ! -d "${path}/${dir}" ]; then
+        if [ ! -f "${path}/${tar}" ]; then
             echo "Downloading the compressed package '${tar}'"
-            download ${path} ${link}
-            if [ $? -ne 0 ]; then
+            if ! download "${path}" "${link}"; then
                 echo "Failed to download, please ensure the network is available and link is valid"
                 exit 1
             fi
             echo "[OK] Finished download"
         fi
         echo "Unzip the compressed package '$tar'"
-        tar -zxvf ${path}/${tar} -C ${path} >/dev/null 2>&1
-        if [ $? -ne 0 ]; then
+        if ! tar -zxvf "${path}/${tar}" -C "${path}" >/dev/null 2>&1; then
             echo "Failed to unzip, please check the compressed package"
             exit 1
         fi
@@ -345,7 +379,7 @@ function wait_for_shutdown() {
     local pid="$2"
     local timeout_s="$3"
 
-    local now_s=`date '+%s'`
+    local now_s=$(date '+%s')
     local stop_s=$(( $now_s + $timeout_s ))
 
     echo -n "Killing $process_name(pid $pid)" >&2
@@ -357,7 +391,7 @@ function wait_for_shutdown() {
             return 0
         fi
         sleep 2
-        now_s=`date '+%s'`
+        now_s=$(date '+%s')
     done
     echo "$process_name shutdown timeout(exceeded $timeout_s seconds)" >&2
     return 1
@@ -386,7 +420,7 @@ function kill_process() {
         return 0
     fi
 
-    case "`uname`" in
+    case "$(uname)" in
         CYGWIN*) taskkill /F /PID "$pid" ;;
         *)       kill "$pid" ;;
     esac

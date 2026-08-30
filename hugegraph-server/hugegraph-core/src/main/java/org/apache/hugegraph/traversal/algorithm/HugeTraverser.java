@@ -393,10 +393,35 @@ public class HugeTraverser {
         if (labels == null || labels.isEmpty()) {
             return this.edgesOfVertex(source, dir, (Id) null, limit);
         }
+        return this.edgesOfVertexByLabels(source, dir, labels.keySet(), limit);
+    }
+
+    protected Iterator<Edge> edgesOfVertex(Id source, Directions dir,
+                                           List<Id> labels, long limit) {
+        if (labels == null || labels.isEmpty()) {
+            return this.edgesOfVertex(source, dir, (Id) null, limit);
+        }
+        return this.edgesOfVertexByLabels(source, dir, labels, limit);
+    }
+
+    private Iterator<Edge> edgesOfVertexByLabels(Id source, Directions dir,
+                                                 Iterable<Id> labels,
+                                                 long limit) {
         ExtendableIterator<Edge> results = new ExtendableIterator<>();
-        for (Id label : labels.keySet()) {
-            E.checkNotNull(label, "edge label");
-            results.extend(this.edgesOfVertex(source, dir, label, limit));
+        List<Iterator<Edge>> opened = new ArrayList<>();
+        try {
+            for (Id label : labels) {
+                E.checkNotNull(label, "edge label");
+                Iterator<Edge> edges = this.edgesOfVertex(source, dir,
+                                                          label, limit);
+                opened.add(edges);
+                results.extend(edges);
+            }
+        } catch (RuntimeException | Error e) {
+            for (Iterator<Edge> edges : opened) {
+                closeIterator(edges, e);
+            }
+            throw e;
         }
 
         if (limit == NO_LIMIT) {
@@ -407,23 +432,18 @@ public class HugeTraverser {
         return new LimitIterator<>(results, e -> count[0]++ >= limit);
     }
 
-    protected Iterator<Edge> edgesOfVertex(Id source, Directions dir,
-                                           List<Id> labels, long limit) {
-        if (labels == null || labels.isEmpty()) {
-            return this.edgesOfVertex(source, dir, (Id) null, limit);
+    protected static void closeIterator(Iterator<?> iterator,
+                                        Throwable failure) {
+        try {
+            CloseableIterator.closeIterator(iterator);
+        } catch (RuntimeException | Error closeFailure) {
+            if (failure == null) {
+                throw closeFailure;
+            }
+            if (failure != closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
         }
-        ExtendableIterator<Edge> results = new ExtendableIterator<>();
-        for (Id label : labels) {
-            E.checkNotNull(label, "edge label");
-            results.extend(this.edgesOfVertex(source, dir, label, limit));
-        }
-
-        if (limit == NO_LIMIT) {
-            return results;
-        }
-
-        long[] count = new long[1];
-        return new LimitIterator<>(results, e -> count[0]++ >= limit);
     }
 
     protected Iterator<Edge> edgesOfVertex(Id source, EdgeStep edgeStep) {

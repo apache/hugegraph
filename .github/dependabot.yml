@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+  - package-ecosystem: "maven"
+    directories:
+      - "/"
+      - "/hugegraph-*"
+      - "/hugegraph-*/*"
+      - "/install-dist"
+    schedule:
+      interval: "weekly"
+    # Keep version updates disabled while retaining security updates.
+    open-pull-requests-limit: 0
+    groups:
+      jackson-security:
+        applies-to: "security-updates"
+        patterns:
+          - "com.fasterxml.jackson*"
+      grpc-protobuf-security:
+        applies-to: "security-updates"
+        patterns:
+          - "io.grpc:*"
+          - "com.google.protobuf:*"
+      logging-security:
+        applies-to: "security-updates"
+        patterns:
+          - "org.apache.logging.log4j:*"
+          - "org.slf4j:*"
+          - "ch.qos.logback:*"
+      spring-security:
+        applies-to: "security-updates"
+        patterns:
+          - "org.springframework*"
+      apache-commons-security:
+        applies-to: "security-updates"
+        patterns:
+          - "org.apache.commons:*"
+          - "commons-*:*"
+      other-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"

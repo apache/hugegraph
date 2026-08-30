@@ -46,18 +46,19 @@
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.4</version>
-                        <configuration>
-                            <excludes>
-                                <exclude>**/grpc/**.*</exclude>
-                                <exclude>**/config/**.*</exclude>
-                            </excludes>
-                        </configuration>
+                        <version>0.8.8</version>
                         <executions>
                             <execution>
+                                <id>coverage-report</id>
+                                <phase>verify</phase>
                                 <goals>
-                                    <goal>prepare-agent</goal>
+                                    <goal>report-aggregate</goal>
                                 </goals>
+                                <configuration>
+                                    <outputDirectory>
+                                        ${project.basedir}/target/site/jacoco
+                                    </outputDirectory>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>
@@ -258,25 +259,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.4</version>
-                <executions>
-                    <execution>
-                        <id>pre-test</id>
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>post-test</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report-aggregate</goal>
-                        </goals>
-                        <configuration>
-                            <outputDirectory>${basedir}/target/site/jacoco</outputDirectory>
-                        </configuration>
-                    </execution>
-                </executions>
+                <version>0.8.8</version>
                 <configuration>
                     <excludes>
                         <exclude>org/apache/hugegraph/pd/rest/*.class</exclude>

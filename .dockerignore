@@ -46,6 +46,7 @@ apache-hugegraph-*/
 # Env files
 .env.local
 .env.*.local
+/docker/.env
 
 # Git internals
 .git

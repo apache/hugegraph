@@ -47,32 +47,12 @@
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-cassandra</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-scylladb</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-rocksdb</artifactId>
             <version>${revision}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-hbase</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-mysql</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-postgresql</artifactId>
             <version>${revision}</version>
         </dependency>
         <dependency>
@@ -95,13 +75,6 @@
         <dependency>
             <groupId>org.glassfish.jersey.test-framework.providers</groupId>
             <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
-        </dependency>
-
-        <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>8.0.28</version>
-            <scope>test</scope>
         </dependency>
 
         <dependency>

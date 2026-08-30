@@ -19,8 +19,7 @@ Apache HugeGraph is a fast-speed, highly-scalable graph database supporting 10+ 
 - **Graph Framework**: Apache TinkerPop 3.5.1
 - **RPC**: gRPC + Protocol Buffers
 - **API Docs**: Swagger (io.swagger.core.v3)
-- **Storage**: RocksDB (default/embedded), HStore (distributed/production)
-- **Legacy backends** (≤1.5.0): MySQL, PostgreSQL, Cassandra, ScyllaDB, HBase, Palo
+- **Storage**: RocksDB (default/embedded), HStore (distributed/production), HBase (deprecated; planned for removal in 2.0)
 
 ## Version
 - Current: 1.7.0 (`${revision}` property, Maven flatten plugin)

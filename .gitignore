@@ -19,9 +19,7 @@ gen-java
 .svn
 
 ### IntelliJ IDEA ###
-.idea/*
-!.idea/vcs.xml
-!.idea/icon.png
+.idea/
 *.iws
 *.iml
 *.ipr
@@ -45,6 +43,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+docker/.env
 
 *.orig
 *.rej

@@ -18,7 +18,7 @@
 package org.apache.hugegraph.backend.store;
 
 /**
- * Shard is used for backend storage (like cassandra, hbase) scanning
+ * Shard is used for distributed backend storage scanning.
  * operations. Each shard represents a range of tokens for a node.
  * Reading data from a given shard does not cross multiple nodes.
  */

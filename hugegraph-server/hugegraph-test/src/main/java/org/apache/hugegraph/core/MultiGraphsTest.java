@@ -72,6 +72,56 @@ public class MultiGraphsTest extends BaseCoreTest {
     }
 
     @Test
+    public void testTruncateBackendKeepsVersionAndResetsSchemaIds() {
+        // hstore keeps the schema in PD meta after truncate and caches id ranges
+        Assume.assumeFalse("skip this test for hstore",
+                           "hstore".equals(graph().backend()));
+
+        HugeGraph graph = openGraphs("truncate_g").get(0);
+        try {
+            // Start from a clean backend in case a previous run failed midway
+            graph.clearBackend();
+            graph.initBackend();
+            graph.serverStarted(GlobalMasterInfo.master("server-truncate"));
+
+            BackendStoreInfo backendStoreInfo = graph.backendStoreInfo();
+            Assert.assertTrue(backendStoreInfo.checkVersion());
+
+            SchemaManager schema = graph.schema();
+            schema.propertyKey("name").asText().create();
+            VertexLabel person = schema.vertexLabel("person")
+                                       .properties("name")
+                                       .useAutomaticId().create();
+            graph.addVertex(T.label, "person", "name", "marko");
+            graph.tx().commit();
+            Assert.assertEquals(1L, graph.traversal().V().count().next());
+
+            graph.truncateBackend();
+
+            // The backend version written by init() survives the truncate
+            Assert.assertTrue(backendStoreInfo.exists());
+            Assert.assertTrue(backendStoreInfo.checkVersion());
+            // The schema and the data are gone
+            Assert.assertEquals(0L, graph.traversal().V().count().next());
+            Assert.assertTrue(schema.getVertexLabels().isEmpty());
+            Assert.assertTrue(schema.getPropertyKeys().isEmpty());
+            // The schema id counters are reset: the same ids are handed out
+            schema.propertyKey("name").asText().create();
+            VertexLabel person2 = schema.vertexLabel("person")
+                                        .properties("name")
+                                        .useAutomaticId().create();
+            Assert.assertEquals(person.id(), person2.id());
+            graph.addVertex(T.label, "person", "name", "marko");
+            graph.tx().commit();
+            Assert.assertEquals(1L, graph.traversal().V().count().next());
+
+            graph.clearBackend();
+        } finally {
+            destroyGraphs(ImmutableList.of(graph));
+        }
+    }
+
+    @Test
     public void testCreateMultiGraphs() {
         List<HugeGraph> graphs = openGraphs("g_1", NAME48);
         for (HugeGraph graph : graphs) {

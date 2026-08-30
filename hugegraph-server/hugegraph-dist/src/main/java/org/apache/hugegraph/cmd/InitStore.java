@@ -17,13 +17,16 @@
 
 package org.apache.hugegraph.cmd;
 
+import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
-import org.apache.commons.collections.map.MultiValueMap;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.StandardAuthenticator;
@@ -44,21 +47,18 @@ public class InitStore {
 
     private static final Logger LOG = Log.logger(InitStore.class);
 
-    // 6~8 retries may be needed under high load for Cassandra backend
-    private static final int RETRIES = 10;
-    // Less than 5000 may cause mismatch exception with Cassandra backend
-    private static final long RETRY_INTERVAL = 5000;
-
-    private static final MultiValueMap EXCEPTIONS = new MultiValueMap();
-
-    static {
-        EXCEPTIONS.put("OperationTimedOutException",
-                       "Timed out waiting for server response");
-        EXCEPTIONS.put("NoHostAvailableException",
-                       "All host(s) tried for query failed");
-        EXCEPTIONS.put("InvalidQueryException", "does not exist");
-        EXCEPTIONS.put("InvalidQueryException", "unconfigured table");
-    }
+    /**
+     * Where to record that initialization actually happened. The caller that
+     * wants the record supplies the path; nothing is read or written when it
+     * is unset, so tarball callers are unaffected. A present marker skips
+     * re-initialization only: the disabled path's fail-closed check runs
+     * before it is consulted, since a marker left by an earlier release or an
+     * earlier enabled run says nothing about the current configuration.
+     */
+    public static final String INIT_COMPLETE_MARKER =
+                               "hugegraph.init_complete_marker";
+    private static final String INIT_COMPLETE_MARKER_ENV =
+                                "HG_SERVER_INIT_COMPLETE_MARKER";
 
     public static void main(String[] args) throws Exception {
         E.checkArgument(args.length == 1,
@@ -69,11 +69,39 @@ public class InitStore {
 
         String restConf = args[0];
 
-        RegisterUtil.registerBackends();
-        RegisterUtil.registerPlugins();
+        // Server options alone can answer the gate below. Backend and plugin
+        // registration waits for the enabled path, because registerPlugins()
+        // runs every plugin's register() and propagates its failures.
         RegisterUtil.registerServer();
 
         HugeConfig restServerConfig = new HugeConfig(restConf);
+
+        /*
+         * PD/HStore deployments let the storage side own the metadata, so
+         * init-store has nothing to do; on Kubernetes it re-ran on every Server
+         * pod restart, since the entrypoint's flag file does not survive one.
+         * Skipping also skips creating the built-in admin, which only the PD
+         * startup path can replace, and only for a PD-backed HStore auth graph.
+         */
+        if (!restServerConfig.get(ServerOptions.INIT_STORE_ENABLED)) {
+            LOG.warn("Skipping init-store: '{}' is false in '{}'. Local " +
+                     "backend and admin initialization are not performed.",
+                     ServerOptions.INIT_STORE_ENABLED.name(), restConf);
+            checkAdminBootstrapReachable(restServerConfig, restConf);
+            return;
+        }
+
+        String initedMarker = presentInitCompleteMarker();
+        if (initedMarker != null) {
+            LOG.info("Skipping init-store: completion marker '{}' is " +
+                     "present, so this deployment is already initialized",
+                     initedMarker);
+            return;
+        }
+
+        RegisterUtil.registerBackends();
+        RegisterUtil.registerPlugins();
+
         PDAuthConfig.setAuthority(
                 ServiceConstant.SERVICE_NAME,
                 ServiceConstant.AUTHORITY);
@@ -86,7 +114,7 @@ public class InitStore {
             for (Map.Entry<String, String> entry : graph2ConfigPaths.entrySet()) {
                 String configPath = entry.getValue();
                 HugeConfig config = new HugeConfig(configPath);
-                if (Objects.equals(config.get(CoreOptions.BACKEND), "hstore")) {
+                if (isHstoreBackend(config.get(CoreOptions.BACKEND))) {
                     // skip initializing hstore backend
                     continue;
                 }
@@ -98,6 +126,154 @@ public class InitStore {
                 graph.close();
             }
             HugeFactory.shutdown(30L, true);
+        }
+
+        recordInitComplete();
+    }
+
+    private static String configuredInitCompleteMarker() {
+        String marker = System.getProperty(INIT_COMPLETE_MARKER,
+                                           System.getenv(INIT_COMPLETE_MARKER_ENV));
+        return marker == null || marker.isEmpty() ? null : marker;
+    }
+
+    /**
+     * The configured marker path, or null when none is configured or the
+     * file does not exist yet. Consulted only after the disabled-path check,
+     * so an existing marker can never bypass the fail-closed validation.
+     */
+    private static String presentInitCompleteMarker() {
+        String marker = configuredInitCompleteMarker();
+        if (marker == null) {
+            return null;
+        }
+        Path path = Paths.get(marker);
+        if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+            return marker;
+        }
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            throw invalidInitCompleteMarker(path);
+        }
+        return null;
+    }
+
+    /**
+     * Only this process knows whether it initialized anything. The Docker
+     * entrypoint used to decide from its environment variable alone, so a
+     * mounted config that disabled init-store was still recorded as done and a
+     * later re-enable skipped for good. Reached only on the enabled path, and
+     * only after initialization succeeded.
+     */
+    private static void recordInitComplete() throws IOException {
+        String marker = configuredInitCompleteMarker();
+        if (marker == null) {
+            return;
+        }
+        Path path = Paths.get(marker);
+        Path dir = path.toAbsolutePath().getParent();
+        if (dir != null) {
+            Files.createDirectories(dir);
+        }
+        try {
+            Files.createFile(path);
+        } catch (FileAlreadyExistsException e) {
+            // A concurrent container finishing its own successful init has
+            // already recorded it, which is the same outcome
+            if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                throw invalidInitCompleteMarker(path);
+            }
+        }
+        LOG.info("Recorded init-store completion at '{}'", path);
+    }
+
+    private static IllegalStateException invalidInitCompleteMarker(Path path) {
+        return new IllegalStateException(String.format(
+                "Init-store completion marker '%s' must be a regular file",
+                path));
+    }
+
+    /**
+     * Skipping leaves the built-in admin to GraphManager.initAdminUserIfNeeded()
+     * on the PD startup path, which writes it to PD metadata. Only an HStore
+     * auth graph reads that metadata back, so every other local built-in-auth
+     * configuration would start a server nobody can log in to. Remote auth and
+     * custom authenticators keep their identities elsewhere and are exempt.
+     */
+    private static void checkAdminBootstrapReachable(HugeConfig conf,
+                                                     String restConf) {
+        if (!requiresLocalBuiltinAdmin(conf)) {
+            return;
+        }
+        if (!conf.get(ServerOptions.USE_PD)) {
+            throw unreachableAdmin(restConf, ServerOptions.USE_PD.name() +
+                                             " is false");
+        }
+
+        String name = conf.get(ServerOptions.AUTH_GRAPH_STORE);
+        String path = ConfigUtil.scanGraphsDir(
+                conf.get(ServerOptions.GRAPHS)).get(name);
+        if (path == null) {
+            throw unreachableAdmin(restConf, "auth graph '" + name +
+                                             "' has no local configuration");
+        }
+        String backend = new HugeConfig(path).get(CoreOptions.BACKEND);
+        if (!isHstoreBackend(backend)) {
+            throw unreachableAdmin(restConf, "auth graph '" + name +
+                                             "' uses backend '" + backend +
+                                             "', not 'hstore'");
+        }
+
+        // The server creates the admin from this value and cannot prompt for
+        // it, and Docker PASSWORD never reaches this path. An absent or empty
+        // one would hand out the public 'pa' default, so fail instead. Checked
+        // with containsKey because the default is not a configured secret.
+        if (!conf.containsKey(ServerOptions.ADMIN_PA.name()) ||
+            conf.get(ServerOptions.ADMIN_PA).isEmpty()) {
+            throw unreachableAdmin(restConf, "no explicit non-empty '" +
+                                             ServerOptions.ADMIN_PA.name() +
+                                             "' is configured, so the admin " +
+                                             "would be created with the " +
+                                             "public default");
+        }
+    }
+
+    private static IllegalStateException unreachableAdmin(String restConf,
+                                                          String reason) {
+        return new IllegalStateException(String.format(
+                "Refusing to skip init-store: '%s' configures the built-in " +
+                "authenticator but %s, so the admin created on the PD startup " +
+                "path would be unreachable. See docker/README.md.",
+                restConf, reason));
+    }
+
+    private static boolean isHstoreBackend(String backend) {
+        return "hstore".equalsIgnoreCase(backend);
+    }
+
+    /**
+     * HugeAuthenticator.loadAuthenticator() accepts any implementation class,
+     * and only StandardAuthenticator bootstraps HugeGraph's built-in admin
+     * account. A custom one (LDAP, OIDC, a plugin) manages its identities
+     * elsewhere, so it must not be held to the requirement above. The class is
+     * resolved without initializing it, and one that is not on the init-store
+     * classpath is by definition not the built-in authenticator.
+     */
+    private static boolean requiresLocalBuiltinAdmin(HugeConfig conf) {
+        if (!conf.get(ServerOptions.AUTH_REMOTE_URL).isEmpty()) {
+            return false;
+        }
+        String authClass = conf.get(ServerOptions.AUTHENTICATOR);
+        if (authClass.isEmpty()) {
+            return false;
+        }
+        try {
+            Class<?> clazz = Class.forName(authClass, false,
+                                           InitStore.class.getClassLoader());
+            return StandardAuthenticator.class.isAssignableFrom(clazz);
+        } catch (ClassNotFoundException | LinkageError e) {
+            LOG.info("Authenticator '{}' is not on the init-store classpath, " +
+                     "so it is not the built-in one", authClass);
+            return false;
         }
     }
 
@@ -129,33 +305,8 @@ public class InitStore {
         return graph;
     }
 
-    private static void initBackend(final HugeGraph graph)
-            throws InterruptedException {
-        int retries = RETRIES;
-        retry:
-        do {
-            try {
-                graph.initBackend();
-            } catch (Exception e) {
-                String clz = e.getClass().getSimpleName();
-                String message = e.getMessage();
-                if (EXCEPTIONS.containsKey(clz) && retries > 0) {
-                    @SuppressWarnings("unchecked")
-                    Collection<String> keywords = EXCEPTIONS.getCollection(clz);
-                    for (String keyword : keywords) {
-                        if (message.contains(keyword)) {
-                            LOG.info("Init failed with exception '{} : {}', " +
-                                     "retry  {}...",
-                                     clz, message, RETRIES - retries + 1);
-
-                            Thread.sleep(RETRY_INTERVAL);
-                            continue retry;
-                        }
-                    }
-                }
-                throw e;
-            }
-            break;
-        } while (retries-- > 0);
+    private static void initBackend(final HugeGraph graph) {
+        // Only explicitly transient backend failures can be retried safely
+        graph.initBackend();
     }
 }

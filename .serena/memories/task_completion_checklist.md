@@ -9,7 +9,7 @@ mvn clean compile -Dmaven.javadoc.skip=true  # Compile warnings
 ```
 
 ## 2. Testing
-- Choose backend: `memory` (fast), `rocksdb` (realistic), `hbase` (distributed)
+- Choose backend: `memory` (fast), `rocksdb` (realistic), `hbase` (deprecated compatibility)
 - Single test: `-Dtest=ClassName` works with all profiles
 - Bug fix → existing tests; New feature → write tests; Refactor → affected module tests
 

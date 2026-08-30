@@ -76,10 +76,27 @@ cleanup() {
         kill "$(cat "$PID_FILE")" 2>/dev/null || true
     fi
     rm -f "$PID_FILE"
-    # kill anything still holding server ports so check_port doesn't fail next test
-    lsof -ti :8080 | xargs kill -9 2>/dev/null || true
-    lsof -ti :8182 | xargs kill -9 2>/dev/null || true
-    lsof -ti :8088 | xargs kill -9 2>/dev/null || true
+    # kill anything still holding server ports: fuser on Linux, lsof on macOS,
+    # which ships no fuser.  Only the Linux path had to lose its lsof dependency.
+    if [[ "$(uname)" == "Darwin" ]]; then
+        local port pids pid
+        for port in 8080 8182 8088; do
+            pids=$(lsof -ti ":$port" 2>/dev/null)
+            if [[ -n "$pids" ]]; then
+                for pid in $pids; do
+                    kill -9 "$pid" 2>/dev/null || true
+                done
+            fi
+        done
+    elif command -v fuser >/dev/null 2>&1; then
+        # fuser exists and should work on Linux; suppress failures but log if debug needed
+        fuser -k 8080/tcp 2>/dev/null || true
+        fuser -k 8182/tcp 2>/dev/null || true
+        fuser -k 8088/tcp 2>/dev/null || true
+    else
+        # Neither lsof nor fuser available; ports may remain occupied
+        echo "Warning: Neither lsof nor fuser available for port cleanup"
+    fi
     sleep 3
     crontab -l 2>/dev/null | grep -v monitor-hugegraph | crontab - 2>/dev/null || true
 }
@@ -145,7 +162,12 @@ if [[ ! -f "$STOP_SCRIPT" ]]; then
     exit 1
 fi
 
-for tool in lsof crontab curl java; do
+if [[ "$(uname)" == "Darwin" ]]; then
+    _prereq_tools="lsof crontab curl java"
+else
+    _prereq_tools="fuser crontab curl java"
+fi
+for tool in $_prereq_tools; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "SKIP: required tool '$tool' not found — skipping test suite"
         exit 77
@@ -155,7 +177,8 @@ done
 # start-monitor.sh requires JAVA_HOME
 if [[ -z "${JAVA_HOME:-}" ]]; then
     if command -v /usr/libexec/java_home >/dev/null 2>&1; then
-        export JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null)"
+        JAVA_HOME="$(/usr/libexec/java_home 2>/dev/null)"
+        export JAVA_HOME
     fi
 fi
 

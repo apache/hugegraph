@@ -31,7 +31,7 @@ achieved through the powerful [Gremlin](https://tinkerpop.apache.org/gremlin.htm
 
 - **Schema Metadata Management**: VertexLabel, EdgeLabel, PropertyKey, and IndexLabel
 - **Multi-type Indexes**: Exact query, range query, and complex conditions combination query
-- **Plug-in Backend Store Framework**: Mainly supports `RocksDB`/`HStore` + `HBase`; other backends available in [legacy versions](https://hugegraph.apache.org/docs/download/download/) ≤ `1.5.0` (MySQL/PostgreSQL/Cassandra...)
+- **Plug-in Backend Store Framework**: RocksDB powers standalone deployments and HStore powers distributed clusters. See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility) for compatibility details.
 - **Big Data Integration**: Seamless integration with `Flink`/`Spark`/`HDFS`
 - **Complete Graph Ecosystem**: In/out-memory Graph Computing + Graph Visualization & Tools + Graph Learning & AI
 - **Dual Query Language Support**: [Gremlin](https://tinkerpop.apache.org/gremlin.html) (via [Apache TinkerPop 3](https://tinkerpop.apache.org/)) and [Cypher](https://en.wikipedia.org/wiki/Cypher_(query_language)) (OpenCypher)
@@ -75,35 +75,37 @@ HugeGraph supports both **standalone** and **distributed** deployments:
                         │            └────────┬────────┘                      │
                         └─────────────────────┼───────────────────────────────┘
                                               │
-             ┌────────────────────────────────┼────────────────────────────────┐
-             │                                │                                │
-┌────────────▼────────────┐   ┌───────────────▼───────────────┐   ┌───────────▼──────────┐
-│    Standalone Mode      │   │      Distributed Mode         │   │   Legacy Backends    │
-│  ┌───────────────────┐  │   │  ┌─────────────────────────┐  │   │      (≤v1.5)         │
-│  │      RocksDB      │  │   │  │     HugeGraph-PD        │  │   │  MySQL │ PostgreSQL  │
-│  │    (embedded)     │  │   │  │   (Raft, 3-5 nodes)     │  │   │  Cassandra           │
-│  └───────────────────┘  │   │  │      :8620/:8686        │  │   │  HBase (≤v1.7)       │
-│                         │   │  └────────────┬────────────┘  │   └──────────────────────┘
-│  Use Case:              │   │               │               │
-│  Development/Testing    │   │  ┌────────────▼────────────┐  │
-│  Single Node            │   │  │    HugeGraph-Store      │  │
-│                         │   │  │    (Raft + RocksDB)     │  │
-│  Data Scale: < 1TB      │   │  │   (3+ nodes) :8520      │  │
-└─────────────────────────┘   │  └─────────────────────────┘  │
-                              │                               │
-                              │  Use Case:                    │
-                              │  Production/HA/Cluster        │
-                              │                               │
-                              │  Data Scale: < 1000 TB        │
-                              └───────────────────────────────┘
+                            ┌─────────────────┴─────────────────┐
+                            │                                   │
+             ┌──────────────▼──────────────┐     ┌──────────────▼──────────────┐
+             │        Standalone Mode      │     │       Distributed Mode      │
+             │  ┌───────────────────────┐  │     │  ┌───────────────────────┐  │
+             │  │        RocksDB        │  │     │  │     HugeGraph-PD      │  │
+             │  │      (embedded)       │  │     │  │   (Raft, 3-5 nodes)   │  │
+             │  └───────────────────────┘  │     │  │      :8620/:8686      │  │
+             │                             │     │  └───────────┬───────────┘  │
+             │  Use Case:                  │     │              │              │
+             │  Development/Testing        │     │  ┌───────────▼───────────┐  │
+             │  Single Node                │     │  │         HStore        │  │
+             │                             │     │  │    (Raft, 3+ nodes)   │  │
+             │  Data Scale: < 1TB          │     │  │         :8520         │  │
+             └─────────────────────────────┘     │  └───────────────────────┘  │
+                                                 │                             │
+                                                 │  Use Case:                  │
+                                                 │  Production/HA/Cluster      │
+                                                 │                             │
+                                                 │  Data Scale: < 1000 TB      │
+                                                 └─────────────────────────────┘
 ```
+
+See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility) for lifecycle and historical compatibility guidance.
 
 ### Deployment Mode Comparison
 
 | Mode | Components | Use Case | Data Scale | High Availability |
 |------|------------|----------|------------|-------------------|
 | **Standalone** | Server + RocksDB | Development, Testing, Single Node | < 1TB | Basic |
-| **Distributed** | Server + PD (3-5 nodes) + Store (3+ nodes) | Production, HA, Horizontal Scaling | < 1000 TB | Yes |
+| **Distributed** | Server + PD + HStore | Production, HA, Horizontal Scaling | < 1000 TB | Yes |
 
 ### Module Overview
 
@@ -119,12 +121,7 @@ HugeGraph supports both **standalone** and **distributed** deployments:
 
 ```mermaid
 flowchart TB
-    subgraph Clients["Client Layer"]
-        GC[Gremlin Console]
-        REST[REST Client]
-        CYPHER[Cypher Client]
-        SDK[SDK/Tools]
-    end
+    CLIENTS["Client Layer<br/>Gremlin Console · REST Client · Cypher Client · SDK/Tools"]
 
     subgraph Server["HugeGraph Server :8080"]
         API[REST API<br/>Jersey 3]
@@ -143,23 +140,13 @@ flowchart TB
         end
 
         subgraph Distributed["Distributed Mode"]
-            PD[HugeGraph-PD<br/>Raft Cluster<br/>:8620/:8686]
-            STORE[HugeGraph-Store<br/>Raft + RocksDB<br/>:8520]
-            PD <--> STORE
-        end
-
-        subgraph Legacy["Legacy Backends (≤v1.5)"]
-            MYSQL[(MySQL)]
-            PG[(PostgreSQL)]
-            CASS[(Cassandra)]
-            HBASE[(HBase, ≤v1.7)]
+            PD_HSTORE[PD + HStore<br/>Raft Cluster]
         end
     end
 
-    Clients --> Server
+    CLIENTS --> Server
     CORE --> ROCKS
-    CORE --> PD
-    CORE -.-> Legacy
+    CORE --> PD_HSTORE
 
     style Server fill:#e1f5ff
     style Distributed fill:#fff4e1
@@ -276,7 +263,7 @@ bin/init-store.sh
 bin/start-hugegraph.sh
 ```
 
-For detailed build instructions, see [BUILDING.md](BUILDING.md) and [Build from Source Guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#33-source-code-compilation).
+For detailed build instructions, see [BUILDING.md](docs/BUILDING.md) and [Build from Source Guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#33-source-code-compilation).
 
 </details>
 
@@ -341,7 +328,7 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
 
 2. **Set Up Your Environment**
    - Install Java 11+ and Maven 3.5+
-   - Follow [BUILDING.md](BUILDING.md) for build instructions
+   - Follow [BUILDING.md](docs/BUILDING.md) for build instructions
    - Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 
 3. **Find Your First Issue**
@@ -355,13 +342,13 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
    - Try modifying a test and see what breaks
 
 5. **Code Standards**
-   - Line length: 100 characters
+   - Line length: 120 characters
    - Indentation: 4 spaces
    - No star imports
    - Commit format: `feat|fix|refactor(module): description`
 
 6. **Submit Your Contribution**
-   - Read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
+   - Read [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines
    - Follow the [Contribution Guidelines](https://hugegraph.apache.org/docs/contribution-guidelines/)
    - Use [GitHub Desktop](https://desktop.github.com/) to simplify the PR process
 
@@ -371,7 +358,7 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
 
 Welcome to contribute to HugeGraph!
 
-- **How to Contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md) and [Contribution Guidelines](https://hugegraph.apache.org/docs/contribution-guidelines/)
+- **How to Contribute**: See [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [Contribution Guidelines](https://hugegraph.apache.org/docs/contribution-guidelines/)
 - **Code Style**: Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 - **PR Tool**: [GitHub Desktop](https://desktop.github.com/) is recommended for simpler workflow
 

@@ -75,7 +75,7 @@ public class ContextGremlinServer extends GremlinServer {
             LOG.debug("GremlinServer accepts event '{}'", event.name());
             event.checkArgs(HugeGraph.class);
             HugeGraph graph = (HugeGraph) event.args()[0];
-            this.removeGraph(graph.spaceGraphName());
+            this.removeGraph(graph);
             return null;
         });
     }
@@ -123,7 +123,7 @@ public class ContextGremlinServer extends GremlinServer {
         }
     }
 
-    private void injectGraph(HugeGraph graph) {
+    private synchronized void injectGraph(HugeGraph graph) {
         String name = graph.spaceGraphName();
         GraphManager manager = this.getServerGremlinExecutor()
                                    .getGraphManager();
@@ -140,17 +140,25 @@ public class ContextGremlinServer extends GremlinServer {
                         "put", name, graph);
     }
 
-    private void removeGraph(String name) {
+    private synchronized void removeGraph(HugeGraph graph) {
+        String name = graph.spaceGraphName();
         GraphManager manager = this.getServerGremlinExecutor()
                                    .getGraphManager();
         GremlinExecutor executor = this.getServerGremlinExecutor()
                                        .getGremlinExecutor();
         try {
-            manager.removeGraph(name);
-            manager.removeTraversalSource(G_PREFIX + name);
+            if (manager.getGraph(name) != graph) {
+                return;
+            }
+            if (manager.getTraversalSource(G_PREFIX + name) != null) {
+                manager.removeTraversalSource(G_PREFIX + name);
+            }
             Whitebox.invoke(executor, "globalBindings",
                             new Class<?>[]{Object.class},
                             "remove", name);
+            if (manager.getGraph(name) != null) {
+                manager.removeGraph(name);
+            }
         } catch (Exception e) {
             throw new HugeException("Failed to remove graph '%s' from " +
                                     "gremlin server context", e, name);

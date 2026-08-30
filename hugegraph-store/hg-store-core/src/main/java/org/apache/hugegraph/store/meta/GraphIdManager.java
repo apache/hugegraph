@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.store.meta;
 
+import static org.apache.hugegraph.store.constant.HugeServerTables.VERTEX_TABLE;
+
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
@@ -128,8 +130,13 @@ public class GraphIdManager extends PartitionMetaStore {
     private boolean checkCount(long l) {
         var start = new byte[2];
         Bits.putShort(start, 0, (short) l);
-        try (var itr = sessionBuilder.getSession(partitionId).sessionOp().scan("g+v", start)) {
-            return itr == null || !itr.hasNext();
+        try (var session = sessionBuilder.getSession(partitionId)) {
+            if (!session.tableIsExist(VERTEX_TABLE)) {
+                return true;
+            }
+            try (var itr = session.sessionOp().scan(VERTEX_TABLE, start)) {
+                return itr == null || !itr.hasNext();
+            }
         }
     }
 

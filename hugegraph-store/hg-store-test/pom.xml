@@ -39,22 +39,30 @@
             <activation>
                 <activeByDefault>false</activeByDefault>
             </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.hugegraph</groupId>
+                    <artifactId>hg-store-rocksdb</artifactId>
+                    <version>${revision}</version>
+                </dependency>
+            </dependencies>
             <build>
                 <plugins>
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.4</version>
+                        <version>0.8.8</version>
 
                         <executions>
                             <execution>
-                                <id>default</id>
+                                <id>coverage-report</id>
                                 <phase>verify</phase>
                                 <goals>
                                     <goal>report-aggregate</goal>
                                 </goals>
                                 <configuration>
-                                    <outputDirectory>${project.basedir}/../target/site/jacoco
+                                    <outputDirectory>
+                                        ${project.basedir}/target/site/jacoco
                                     </outputDirectory>
                                 </configuration>
                             </execution>
@@ -236,6 +244,7 @@
                             </testClassesDirectory>
                             <includes>
                                 <include>**/CoreSuiteTest.java</include>
+                                <include>**/BatchGraphIsolationTest.java</include>
                             </includes>
                         </configuration>
                     </execution>
@@ -295,26 +304,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.4</version>
-                <executions>
-                    <execution>
-                        <id>pre-test</id>
-
-                        <goals>
-                            <goal>prepare-agent</goal>
-                        </goals>
-                    </execution>
-                    <execution>
-                        <id>post-test</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>report-aggregate</goal>
-                        </goals>
-                        <configuration>
-                            <outputDirectory>${basedir}/target/site/jacoco</outputDirectory>
-                        </configuration>
-                    </execution>
-                </executions>
+                <version>0.8.8</version>
                 <configuration>
                     <excludes>
                         <exclude>**/grpc/**/*</exclude>

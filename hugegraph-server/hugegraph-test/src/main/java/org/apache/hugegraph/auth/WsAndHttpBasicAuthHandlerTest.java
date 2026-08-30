@@ -132,9 +132,39 @@ public class WsAndHttpBasicAuthHandlerTest {
         channel.finishAndReleaseAll();
     }
 
+    @SuppressWarnings("unchecked")
     @Test
-    public void testBearerTokenIsRejected() throws Exception {
-        assertUnauthorized("Bearer server-token");
+    public void testBearerTokenAuthenticatesHttpGremlinRequest()
+            throws Exception {
+        Authenticator authenticator = Mockito.mock(Authenticator.class);
+        AuthenticatedUser user = new AuthenticatedUser("admin");
+        Mockito.when(authenticator.authenticate(Mockito.anyMap()))
+               .thenReturn(user);
+        EmbeddedChannel channel = channel(authenticator);
+
+        channel.writeInbound(request("Bearer server-token"));
+
+        ArgumentCaptor<Map<String, String>> credentials =
+                ArgumentCaptor.forClass(Map.class);
+        Mockito.verify(authenticator, Mockito.times(1))
+               .authenticate(credentials.capture());
+        Assert.assertEquals("server-token", credentials.getValue().get(
+                HugeAuthenticator.KEY_TOKEN));
+        Assert.assertFalse(credentials.getValue().containsKey("username"));
+        Assert.assertFalse(credentials.getValue().containsKey("password"));
+        Assert.assertSame(user,
+                          channel.attr(StateKey.AUTHENTICATED_USER).get());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    public void testWhitespaceOnlyBearerTokenIsRejected() throws Exception {
+        assertUnauthorized("Bearer   ");
+    }
+
+    @Test
+    public void testBearerTokenWithWhitespaceIsRejected() throws Exception {
+        assertUnauthorized("Bearer token with-space");
     }
 
     @Test

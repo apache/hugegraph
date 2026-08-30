@@ -118,6 +118,13 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
                         sendError(ctx, msg);
                         return;
                     }
+                } else if ("Bearer".equalsIgnoreCase(scheme)) {
+                    String token = payload.trim();
+                    if (token.isEmpty() || containsWhitespace(token)) {
+                        sendError(ctx, msg);
+                        return;
+                    }
+                    credentials.put(HugeAuthenticator.KEY_TOKEN, token);
                 } else {
                     sendError(ctx, msg);
                     return;
@@ -139,6 +146,15 @@ public class WsAndHttpBasicAuthHandler extends SaslAuthenticationHandler {
                     sendError(ctx, msg);
                 }
             }
+        }
+
+        private static boolean containsWhitespace(String value) {
+            for (int i = 0; i < value.length(); i++) {
+                if (Character.isWhitespace(value.charAt(i))) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private boolean parseBasicCredentials(String encoded,

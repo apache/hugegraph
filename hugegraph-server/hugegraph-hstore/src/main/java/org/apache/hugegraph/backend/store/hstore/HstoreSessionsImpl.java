@@ -53,7 +53,6 @@ import org.apache.hugegraph.store.HgStoreSession;
 import org.apache.hugegraph.store.client.grpc.KvCloseableIterator;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.grpc.common.ScanOrderType;
-import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
@@ -128,8 +127,9 @@ public class HstoreSessionsImpl extends HstoreSessions {
             synchronized (infoInitializedGraph) {
                 if (!infoInitializedGraph.contains(this.graphName)) {
                     Integer partitionCount = this.config.get(HstoreOptions.PARTITION_COUNT);
-                    Assert.assertTrue("The value of hstore.partition_count" +
-                                      " cannot be less than 0.", partitionCount > -1);
+                    E.checkArgument(partitionCount > -1,
+                                    "The value of hstore.partition_count " +
+                                    "cannot be less than 0.");
                     defaultPdClient.setGraph(Metapb.Graph.newBuilder()
                                                          .setGraphName(this.graphName)
                                                          .setPartitionCount(partitionCount)
@@ -726,6 +726,31 @@ public class HstoreSessionsImpl extends HstoreSessions {
             result.seek(position);
             return new ColumnIterator<>(table, result, keyFrom, keyTo,
                                         scanType);
+        }
+
+        @Override
+        public BackendColumnIterator scanOrdered(String table,
+                                                 byte[] ownerKeyFrom,
+                                                 byte[] ownerKeyTo,
+                                                 byte[] keyFrom,
+                                                 byte[] keyTo,
+                                                 int scanType,
+                                                 byte[] query,
+                                                 long limit) {
+            assert !this.hasChanges();
+            HgKvIterator<HgKvEntry> result = this.graph.scanIteratorOrdered(
+                    table, HgOwnerKey.of(ownerKeyFrom, keyFrom),
+                    HgOwnerKey.of(ownerKeyTo, keyTo), toHstoreLimit(limit),
+                    scanType, query);
+            return new ColumnIterator<>(table, result, keyFrom, keyTo,
+                                        scanType);
+        }
+
+        private long toHstoreLimit(long limit) {
+            if (limit <= 0L || limit == Query.NO_LIMIT) {
+                return HgStoreClientConst.NO_LIMIT;
+            }
+            return limit;
         }
 
         @Override

@@ -64,13 +64,8 @@
         <module>hugegraph-example</module>
         <module>hugegraph-dist</module>
         <module>hugegraph-test</module>
-        <module>hugegraph-cassandra</module>
-        <module>hugegraph-scylladb</module>
         <module>hugegraph-rocksdb</module>
-        <module>hugegraph-mysql</module>
-        <module>hugegraph-palo</module>
         <module>hugegraph-hbase</module>
-        <module>hugegraph-postgresql</module>
         <module>hugegraph-hstore</module>
     </modules>
 

@@ -41,4 +41,4 @@
 - `stale.yml` — Stale issue/PR cleanup
 
 ## Docs
-- `README.md`, `BUILDING.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`
+- `README.md`, `docs/BUILDING.md`, `docs/CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`
