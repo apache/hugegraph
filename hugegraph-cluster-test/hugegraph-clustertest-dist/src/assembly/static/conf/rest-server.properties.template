@@ -70,3 +70,5 @@ server.role=$ROLE$
 
 # slow query log
 log.slow_query_threshold=1000
+# bytes of request body recorded as-is (may contain sensitive literals), 0 to disable
+log.slow_query_body_limit=512

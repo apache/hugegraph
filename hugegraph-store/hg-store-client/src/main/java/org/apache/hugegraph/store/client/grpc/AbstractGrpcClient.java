@@ -91,39 +91,43 @@ public abstract class AbstractGrpcClient {
     public abstract AbstractBlockingStub getBlockingStub(ManagedChannel channel);
 
     public AbstractBlockingStub getBlockingStub(String target) {
-        ManagedChannel[] channels = getChannels(target);
-        HgPair<ManagedChannel, AbstractBlockingStub>[] pairs = blockingStubs.get(target);
-        long l = counter.getAndIncrement();
-        if (l >= limit) {
-            counter.set(0);
-        }
-        int index = (int) (l & (concurrency - 1));
-        if (pairs == null) {
+        while (true) {
+            ManagedChannel[] channels = getChannels(target);
+            HgPair<ManagedChannel, AbstractBlockingStub>[] pairs =
+                    blockingStubs.get(target);
+            int index = nextStubIndex();
+            if (usesChannels(pairs, channels)) {
+                return (AbstractBlockingStub) setBlockingStubOption(
+                        pairs[index].getValue());
+            }
             synchronized (blockingStubs) {
+                channels = getChannels(target);
                 pairs = blockingStubs.get(target);
-                if (pairs == null) {
-                    HgPair<ManagedChannel, AbstractBlockingStub>[] value = new HgPair[concurrency];
-                    IntStream.range(0, concurrency).forEach(i -> {
-                        ManagedChannel channel = channels[i];
-                        AbstractBlockingStub stub = getBlockingStub(channel);
-                        value[i] = new HgPair<>(channel, stub);
-                        // log.info("create channel for {}",target);
-                    });
-                    blockingStubs.put(target, value);
-                    AbstractBlockingStub stub = value[index].getValue();
-                    return (AbstractBlockingStub) setBlockingStubOption(stub);
+                if (usesChannels(pairs, channels)) {
+                    return (AbstractBlockingStub) setBlockingStubOption(
+                            pairs[index].getValue());
                 }
+                ManagedChannel[] currentChannels = channels;
+                HgPair<ManagedChannel, AbstractBlockingStub>[] value =
+                        new HgPair[concurrency];
+                IntStream.range(0, concurrency).forEach(i -> {
+                    ManagedChannel channel = currentChannels[i];
+                    AbstractBlockingStub stub = getBlockingStub(channel);
+                    value[i] = new HgPair<>(channel, stub);
+                });
+                if (!publishStubs(target, currentChannels, blockingStubs, value)) {
+                    continue;
+                }
+                return (AbstractBlockingStub) setBlockingStubOption(
+                        value[index].getValue());
             }
         }
-        return (AbstractBlockingStub) setBlockingStubOption(pairs[index].getValue());
     }
 
     private AbstractStub setBlockingStubOption(AbstractBlockingStub stub) {
         return stub.withDeadlineAfter(config.getGrpcTimeoutSeconds(), TimeUnit.SECONDS)
-                   .withMaxInboundMessageSize(
-                           config.getGrpcMaxInboundMessageSize())
-                   .withMaxOutboundMessageSize(
-                           config.getGrpcMaxOutboundMessageSize());
+                   .withMaxInboundMessageSize(config.getGrpcMaxInboundMessageSize())
+                   .withMaxOutboundMessageSize(config.getGrpcMaxOutboundMessageSize());
     }
 
     public AbstractAsyncStub getAsyncStub(ManagedChannel channel) {
@@ -131,46 +135,85 @@ public abstract class AbstractGrpcClient {
     }
 
     public AbstractAsyncStub getAsyncStub(String target) {
-        ManagedChannel[] channels = getChannels(target);
-        HgPair<ManagedChannel, AbstractAsyncStub>[] pairs = asyncStubs.get(target);
-        long l = counter.getAndIncrement();
-        if (l >= limit) {
-            counter.set(0);
-        }
-        int index = (int) (l & (concurrency - 1));
-        if (pairs == null) {
+        while (true) {
+            ManagedChannel[] channels = getChannels(target);
+            HgPair<ManagedChannel, AbstractAsyncStub>[] pairs = asyncStubs.get(target);
+            int index = nextStubIndex();
+            if (usesChannels(pairs, channels)) {
+                return (AbstractAsyncStub) setStubOption(pairs[index].getValue());
+            }
             synchronized (asyncStubs) {
+                channels = getChannels(target);
                 pairs = asyncStubs.get(target);
-                if (pairs == null) {
-                    HgPair<ManagedChannel, AbstractAsyncStub>[] value = new HgPair[concurrency];
-                    IntStream.range(0, concurrency).parallel().forEach(i -> {
-                        ManagedChannel channel = channels[i];
-                        AbstractAsyncStub stub = getAsyncStub(channel);
-                        // stub.withMaxInboundMessageSize(config.getGrpcMaxInboundMessageSize())
-                        //    .withMaxOutboundMessageSize(config.getGrpcMaxOutboundMessageSize());
-                        value[i] = new HgPair<>(channel, stub);
-                        // log.info("create channel for {}",target);
-                    });
-                    asyncStubs.put(target, value);
-                    AbstractAsyncStub stub =
-                            (AbstractAsyncStub) setStubOption(value[index].getValue());
-                    return stub;
+                if (usesChannels(pairs, channels)) {
+                    return (AbstractAsyncStub) setStubOption(
+                            pairs[index].getValue());
                 }
+                ManagedChannel[] currentChannels = channels;
+                HgPair<ManagedChannel, AbstractAsyncStub>[] value =
+                        new HgPair[concurrency];
+                IntStream.range(0, concurrency).parallel().forEach(i -> {
+                    ManagedChannel channel = currentChannels[i];
+                    AbstractAsyncStub stub = getAsyncStub(channel);
+                    value[i] = new HgPair<>(channel, stub);
+                });
+                if (!publishStubs(target, currentChannels, asyncStubs, value)) {
+                    continue;
+                }
+                return (AbstractAsyncStub) setStubOption(value[index].getValue());
             }
         }
-        return (AbstractAsyncStub) setStubOption(pairs[index].getValue());
+    }
 
+    private static boolean usesChannels(HgPair<ManagedChannel, ?>[] pairs,
+                                        ManagedChannel[] channels) {
+        if (pairs == null || pairs.length != channels.length) {
+            return false;
+        }
+        return IntStream.range(0, channels.length)
+                        .allMatch(i -> pairs[i].getKey() == channels[i]);
+    }
+
+    private static int nextStubIndex() {
+        long value = counter.getAndIncrement();
+        if (value >= limit) {
+            counter.set(0);
+        }
+        return (int) (value & (concurrency - 1));
+    }
+
+    private static <S> boolean publishStubs(
+            String target, ManagedChannel[] currentChannels,
+            Map<String, HgPair<ManagedChannel, S>[]> stubs,
+            HgPair<ManagedChannel, S>[] value) {
+        synchronized (channels) {
+            if (channels.get(target) != currentChannels) {
+                return false;
+            }
+            stubs.put(target, value);
+            return true;
+        }
     }
 
     protected AbstractStub setStubOption(AbstractStub value) {
-        return value.withMaxInboundMessageSize(
-                            config.getGrpcMaxInboundMessageSize())
-                    .withMaxOutboundMessageSize(
-                            config.getGrpcMaxOutboundMessageSize());
+        return value.withMaxInboundMessageSize(config.getGrpcMaxInboundMessageSize())
+                    .withMaxOutboundMessageSize(config.getGrpcMaxOutboundMessageSize());
+    }
+
+    public static void closeChannel(String target) {
+        ManagedChannel[] targetChannels;
+        synchronized (channels) {
+            targetChannels = channels.remove(target);
+        }
+        if (targetChannels != null) {
+            IntStream.range(0, targetChannels.length)
+                     .mapToObj(i -> targetChannels[i])
+                     .filter(channel -> channel != null)
+                     .forEach(ManagedChannel::shutdown);
+        }
     }
 
     protected ManagedChannel createChannel(String target) {
         return ManagedChannelBuilder.forTarget(target).usePlaintext().build();
     }
-
 }

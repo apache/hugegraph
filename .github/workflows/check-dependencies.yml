@@ -47,7 +47,7 @@ jobs:
       - name: 'Checkout Repository'
         uses: actions/checkout@v4
       - name: 'Dependency Review'
-        uses: actions/dependency-review-action@v3
+        uses: actions/dependency-review-action@v5
         # Refer: https://github.com/actions/dependency-review-action
         with:
           # TODO: reset critical to low before releasing

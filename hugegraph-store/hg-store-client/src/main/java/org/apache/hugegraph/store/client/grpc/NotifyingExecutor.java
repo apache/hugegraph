@@ -38,6 +38,7 @@ import org.apache.hugegraph.store.grpc.session.PartitionLeader;
 
 import com.google.protobuf.util.JsonFormat;
 
+import io.grpc.Status;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -242,11 +243,15 @@ final class NotifyingExecutor {
 
     private Consumer<Throwable> notifyErrConsumer(HgNodeStatus status) {
         return t -> {
-            nodeManager.notifying(
-                    this.graphName,
+            HgStoreNotice notice =
                     HgStoreNotice.of(this.nodeSession.getStoreNode().getNodeId(), status,
-                                     t.getMessage())
-            );
+                                     t.getMessage());
+            if (Status.fromThrowable(t).getCode() == Status.Code.UNAVAILABLE) {
+                nodeManager.notifying(this.graphName, notice,
+                                      this.nodeSession.getStoreNode());
+            } else {
+                nodeManager.notifying(this.graphName, notice);
+            }
         };
     }
 

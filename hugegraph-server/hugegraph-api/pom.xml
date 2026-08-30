@@ -201,8 +201,8 @@
                             </addDefaultSpecificationEntries>
                         </manifest>
                         <manifestEntries>
-                            <!-- TODO: update it -->
-                            <Implementation-Version>0.71.0.0</Implementation-Version>
+                            <!-- Bump when the public REST API contract changes -->
+                            <Implementation-Version>0.72.0.0</Implementation-Version>
                         </manifestEntries>
                     </archive>
                 </configuration>
