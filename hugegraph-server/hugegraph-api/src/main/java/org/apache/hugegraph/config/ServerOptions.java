@@ -657,6 +657,17 @@ public class ServerOptions extends OptionHolder {
                     nonNegativeInt(),
                     1000L
             );
+
+    public static final ConfigOption<Integer> SLOW_QUERY_LOG_BODY_LIMIT =
+            new ConfigOption<>(
+                    "log.slow_query_body_limit",
+                    "The max bytes of request body recorded in the slow query log, " +
+                    "the recorded prefix is written as-is and may contain sensitive " +
+                    "literals of gremlin/cypher scripts, 0 means the body is not recorded.",
+                    rangeInt(0, 1024 * 1024),
+                    512
+            );
+
     public static final ConfigOption<Double> JVM_MEMORY_MONITOR_THRESHOLD =
             new ConfigOption<>(
                     "memory_monitor.threshold",

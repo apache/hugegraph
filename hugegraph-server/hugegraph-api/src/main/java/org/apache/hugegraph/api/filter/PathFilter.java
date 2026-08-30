@@ -50,7 +50,6 @@ public class PathFilter implements ContainerRequestFilter {
     private static final String ARTHAS_START = "arthas";
 
     public static final String REQUEST_TIME = "request_time";
-    public static final String REQUEST_PARAMS_JSON = "request_params_json";
 
     private static final String DELIMITER = "/";
     private static final Set<String> WHITE_API_LIST = ImmutableSet.of(
