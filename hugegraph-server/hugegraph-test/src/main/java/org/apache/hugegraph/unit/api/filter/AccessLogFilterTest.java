@@ -25,6 +25,7 @@ import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,9 @@ import org.apache.hugegraph.api.filter.AccessLogFilter;
 import org.apache.hugegraph.api.filter.DecompressInterceptor;
 import org.apache.hugegraph.api.filter.DecompressInterceptor.Decompress;
 import org.apache.hugegraph.api.filter.PathFilter;
+import org.apache.hugegraph.api.filter.RedirectFilter;
+import org.apache.hugegraph.api.filter.RedirectFilter.RedirectMasterRole;
+import org.apache.hugegraph.api.filter.RedirectFilterDynamicFeature;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.core.GraphManager;
@@ -61,9 +65,12 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import jakarta.inject.Provider;
+import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ResourceInfo;
+import jakarta.ws.rs.core.FeatureContext;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.UriInfo;
 import jakarta.ws.rs.ext.ReaderInterceptorContext;
@@ -107,8 +114,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
         Mockito.when(this.requestContext.getUriInfo()).thenReturn(this.uriInfo);
         this.mockResourceMethod("plainResource");
         Whitebox.setInternalState(this.filter, "resourceInfo", this.resourceInfo);
-        Mockito.when(this.uriInfo.getPathParameters())
-               .thenReturn(new MultivaluedHashMap<>());
+        Mockito.when(this.uriInfo.getPathParameters()).thenReturn(new MultivaluedHashMap<>());
         Mockito.when(this.responseContext.getStatus()).thenReturn(200);
         Mockito.when(this.request.getRemoteAddr()).thenReturn(CLIENT_IP);
 
@@ -127,8 +133,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
          * synchronous one during the test and put it back afterwards
          */
         LoggerConfig existing = this.loggerConfiguration.getLoggerConfig(TEST_LOGGER_NAME);
-        this.originalLoggerConfig = TEST_LOGGER_NAME.equals(existing.getName()) ?
-                                    existing : null;
+        this.originalLoggerConfig = TEST_LOGGER_NAME.equals(existing.getName()) ? existing : null;
         if (this.originalLoggerConfig != null) {
             this.loggerConfiguration.removeLogger(TEST_LOGGER_NAME);
         }
@@ -159,10 +164,8 @@ public class AccessLogFilterTest extends BaseUnitTest {
         Assert.assertTrue(this.needRecordLog("POST", "graphs/hugegraph/cypher"));
         Assert.assertTrue(this.needRecordLog("GET", "graphs/hugegraph/graph/vertices"));
         // PathFilter redirects requests under graphspaces/, they must stay loggable
-        Assert.assertTrue(this.needRecordLog("POST",
-                                             "graphspaces/DEFAULT/graphs/hugegraph/cypher"));
-        Assert.assertTrue(this.needRecordLog(
-                "GET", "graphspaces/DEFAULT/graphs/hugegraph/graph/vertices"));
+        Assert.assertTrue(this.needRecordLog("POST", "graphspaces/DEFAULT/graphs/hugegraph/cypher"));
+        Assert.assertTrue(this.needRecordLog("GET", "graphspaces/DEFAULT/graphs/hugegraph/graph/vertices"));
 
         Assert.assertFalse(this.needRecordLog("POST", "graphs/hugegraph/graph/vertices/batch"));
         Assert.assertFalse(this.needRecordLog("PUT", "graphs/hugegraph/graph/edges/batch"));
@@ -189,8 +192,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
      * Test only the configured prefix is recorded while the full body is replayed
      */
     @Test
-    public void testCaptureBody_LongBodyIsTruncatedButReplayedInFull()
-                throws IOException {
+    public void testCaptureBody_LongBodyIsTruncatedButReplayedInFull() throws IOException {
         this.setConfig(1000L, 16);
         String body = "{\"gremlin\":\"g.V().hasLabel('person').limit(1)\"}";
         this.mockRequest("POST", "gremlin", body);
@@ -232,6 +234,20 @@ public class AccessLogFilterTest extends BaseUnitTest {
         Assert.assertEquals(body, this.replayedEntity());
     }
 
+    @Test
+    public void testCaptureBody_UsesRequestCharset() throws IOException {
+        String body = "MATCH (张三) RETURN 张三";
+        InputStream entity = new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_16LE));
+        this.mockStreamRequest("POST", "graphs/hugegraph/cypher", entity);
+        Mockito.when(this.requestContext.getMediaType())
+               .thenReturn(MediaType.valueOf("application/json; charset=UTF-16LE"));
+
+        this.filter.filter(this.requestContext);
+
+        Assert.assertEquals(body, this.capturedBody());
+        Assert.assertEquals(body, this.replayedEntity(StandardCharsets.UTF_16LE));
+    }
+
     /**
      * Test line breaks in the body are kept in the preview and in the replay
      */
@@ -254,8 +270,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
     public void testCaptureBody_ContentEncodingHeaderIsIgnored() throws IOException {
         String body = "{\"gremlin\":\"g.V()\"}";
         this.mockRequest("POST", "gremlin", body);
-        Mockito.when(this.requestContext.getHeaderString("Content-Encoding"))
-               .thenReturn("gzip");
+        Mockito.when(this.requestContext.getHeaderString("Content-Encoding")).thenReturn("gzip");
 
         this.filter.filter(this.requestContext);
 
@@ -325,8 +340,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
         InputStream entity = new ByteArrayInputStream(gzip(body));
         this.mockResourceMethod("decompressResource");
         this.mockStreamRequest("POST", "graphs/hugegraph/graph/vertices/batch", entity);
-        Mockito.when(this.requestContext.getHeaderString("Content-Encoding"))
-               .thenReturn("gzip");
+        Mockito.when(this.requestContext.getHeaderString("Content-Encoding")).thenReturn("gzip");
         this.filter.filter(this.requestContext);
         this.verifyNoCapture();
         Assert.assertEquals(body, decompress(entity));
@@ -348,8 +362,17 @@ public class AccessLogFilterTest extends BaseUnitTest {
 
         Assert.assertEquals("<encoded>", this.capturedBody());
         Mockito.verify(this.requestContext, Mockito.never()).getEntityStream();
-        Mockito.verify(this.requestContext, Mockito.never())
-               .setEntityStream(Mockito.any(InputStream.class));
+        Mockito.verify(this.requestContext, Mockito.never()).setEntityStream(Mockito.any(InputStream.class));
+    }
+
+    @Test
+    public void testRedirectRunsAfterBodyCapture() {
+        this.mockResourceMethod("redirectResource");
+        FeatureContext context = Mockito.mock(FeatureContext.class);
+
+        new RedirectFilterDynamicFeature().configure(this.resourceInfo, context);
+
+        Mockito.verify(context).register(RedirectFilter.class, Priorities.USER + 1);
     }
 
     /**
@@ -399,13 +422,11 @@ public class AccessLogFilterTest extends BaseUnitTest {
     @Test
     public void testSlowQueryLog_StaysOnOneLine() throws IOException {
         this.mockRequest("GET", "graphs/hugegraph/graph/vertices", null);
-        Mockito.when(this.uriInfo.getPath())
-               .thenReturn("graphs/hugegraph/graph/vertices\nforged path");
+        Mockito.when(this.uriInfo.getPath()).thenReturn("graphs/hugegraph/graph/vertices\nforged path");
         // URI.getQuery() decodes %0A into a line feed
         Mockito.when(this.uriInfo.getRequestUri()).thenReturn(URI.create(
                 "http://localhost:8080/graphs/hugegraph/graph/vertices?x=%0Aforged%20query"));
-        Mockito.when(this.requestContext.getProperty(AccessLogFilter.REQUEST_BODY))
-               .thenReturn("a\r\nforged body");
+        Mockito.when(this.requestContext.getProperty(AccessLogFilter.REQUEST_BODY)).thenReturn("a\r\nforged body");
         this.mockElapsed(5000L);
 
         this.filter.filter(this.requestContext, this.responseContext);
@@ -433,8 +454,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
 
         List<String> messages = this.slowQueryMessages();
         Assert.assertEquals(1, messages.size());
-        Assert.assertTrue(messages.get(0),
-                          messages.get(0).contains("ip=" + AccessLogFilter.UNKNOWN_IP + ","));
+        Assert.assertTrue(messages.get(0), messages.get(0).contains("ip=" + AccessLogFilter.UNKNOWN_IP + ","));
     }
 
     /**
@@ -461,11 +481,9 @@ public class AccessLogFilterTest extends BaseUnitTest {
     private void mockRequest(String method, String path, String body) {
         Mockito.when(this.requestContext.getMethod()).thenReturn(method);
         Mockito.when(this.uriInfo.getPath()).thenReturn(path);
-        Mockito.when(this.uriInfo.getRequestUri())
-               .thenReturn(URI.create("http://localhost:8080/" + path));
+        Mockito.when(this.uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:8080/" + path));
         if (body != null) {
-            InputStream entity = new ByteArrayInputStream(
-                                 body.getBytes(StandardCharsets.UTF_8));
+            InputStream entity = new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8));
             Mockito.when(this.requestContext.getEntityStream()).thenReturn(entity);
         }
     }
@@ -473,8 +491,7 @@ public class AccessLogFilterTest extends BaseUnitTest {
     private void mockStreamRequest(String method, String path, InputStream entity) {
         Mockito.when(this.requestContext.getMethod()).thenReturn(method);
         Mockito.when(this.uriInfo.getPath()).thenReturn(path);
-        Mockito.when(this.uriInfo.getRequestUri())
-               .thenReturn(URI.create("http://localhost:8080/" + path));
+        Mockito.when(this.uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:8080/" + path));
         Mockito.when(this.requestContext.getEntityStream()).thenReturn(entity);
     }
 
@@ -526,6 +543,11 @@ public class AccessLogFilterTest extends BaseUnitTest {
         // pass
     }
 
+    @RedirectMasterRole
+    public void redirectResource() {
+        // pass
+    }
+
     private void mockElapsed(long elapsed) {
         Mockito.when(this.requestContext.getProperty(PathFilter.REQUEST_TIME))
                .thenReturn(System.currentTimeMillis() - elapsed);
@@ -536,32 +558,32 @@ public class AccessLogFilterTest extends BaseUnitTest {
         conf.setProperty(ServerOptions.SLOW_QUERY_LOG_TIME_THRESHOLD.name(), threshold);
         conf.setProperty(ServerOptions.SLOW_QUERY_LOG_BODY_LIMIT.name(), bodyLimit);
         HugeConfig config = new HugeConfig(conf);
-        Whitebox.setInternalState(this.filter, "configProvider",
-                                  (Provider<HugeConfig>) () -> config);
+        Whitebox.setInternalState(this.filter, "configProvider", (Provider<HugeConfig>) () -> config);
     }
 
     private void setRemoteRequest(Request request) {
-        Whitebox.setInternalState(this.filter, "requestProvider",
-                                  (Provider<Request>) () -> request);
+        Whitebox.setInternalState(this.filter, "requestProvider", (Provider<Request>) () -> request);
     }
 
     private String capturedBody() {
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
-        Mockito.verify(this.requestContext)
-               .setProperty(Mockito.eq(AccessLogFilter.REQUEST_BODY), captor.capture());
+        Mockito.verify(this.requestContext).setProperty(Mockito.eq(AccessLogFilter.REQUEST_BODY), captor.capture());
         return (String) captor.getValue();
     }
 
     private String replayedEntity() throws IOException {
+        return this.replayedEntity(StandardCharsets.UTF_8);
+    }
+
+    private String replayedEntity(Charset charset) throws IOException {
         ArgumentCaptor<InputStream> captor = ArgumentCaptor.forClass(InputStream.class);
         Mockito.verify(this.requestContext).setEntityStream(captor.capture());
-        return new String(captor.getValue().readAllBytes(), StandardCharsets.UTF_8);
+        return new String(captor.getValue().readAllBytes(), charset);
     }
 
     private void verifyNoCapture() {
         Mockito.verify(this.requestContext, Mockito.never()).getEntityStream();
-        Mockito.verify(this.requestContext, Mockito.never())
-               .setEntityStream(Mockito.any(InputStream.class));
+        Mockito.verify(this.requestContext, Mockito.never()).setEntityStream(Mockito.any(InputStream.class));
         Mockito.verify(this.requestContext, Mockito.never())
                .setProperty(Mockito.eq(AccessLogFilter.REQUEST_BODY), Mockito.any());
     }

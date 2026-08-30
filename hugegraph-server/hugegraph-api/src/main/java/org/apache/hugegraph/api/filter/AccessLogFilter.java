@@ -54,6 +54,7 @@ import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.ext.Provider;
 
@@ -74,7 +75,7 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
 
     private static final String TRUNCATED_MARK = "...";
     private static final String ENCODED_BODY = "<encoded>";
-    private static final Charset CHARSET = Charset.forName(API.CHARSET);
+    private static final Charset DEFAULT_CHARSET = Charset.forName(API.CHARSET);
 
     @Context
     private jakarta.inject.Provider<HugeConfig> configProvider;
@@ -109,8 +110,7 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
         // Replace variable parts of the path with placeholders
         String requestPath = requestContext.getUriInfo().getPath();
         // get uri params
-        MultivaluedMap<String, String> pathParameters = requestContext.getUriInfo()
-                                                                      .getPathParameters();
+        MultivaluedMap<String, String> pathParameters = requestContext.getUriInfo().getPathParameters();
 
         String newPath = requestPath;
         for (Map.Entry<String, java.util.List<String>> entry : pathParameters.entrySet()) {
@@ -128,9 +128,8 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
 
     /**
      * Keep a bounded preview of the request body for the slow query log.
-     * Only the first {@link ServerOptions#SLOW_QUERY_LOG_BODY_LIMIT} bytes are
-     * read, and they are replayed in front of the untouched remainder of the
-     * entity stream, so the resource method still receives the whole body.
+     * Only the first {@link ServerOptions#SLOW_QUERY_LOG_BODY_LIMIT} bytes are read, and they are replayed in front
+     * of the untouched remainder of the entity stream, so the resource method still receives the whole body.
      *
      * @param requestContext requestContext
      */
@@ -148,8 +147,7 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
         }
 
         if (this.decodesEntity()) {
-            // The resource decodes its entity later (DecompressInterceptor), the raw bytes
-            // available here are not readable
+            // The resource decodes its entity later (DecompressInterceptor), so the raw bytes here are not readable
             requestContext.setProperty(REQUEST_BODY, ENCODED_BODY);
             return;
         }
@@ -158,9 +156,9 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
         // Read one byte past the limit to know whether the preview is truncated
         byte[] prefix = new byte[bodyLimit + 1];
         int length = entity.readNBytes(prefix, 0, prefix.length);
-        requestContext.setEntityStream(new SequenceInputStream(
-                new ByteArrayInputStream(prefix, 0, length), entity));
-        requestContext.setProperty(REQUEST_BODY, preview(prefix, length, bodyLimit));
+        requestContext.setEntityStream(new SequenceInputStream(new ByteArrayInputStream(prefix, 0, length), entity));
+        Charset charset = requestCharset(requestContext);
+        requestContext.setProperty(REQUEST_BODY, preview(prefix, length, bodyLimit, charset));
     }
 
     /**
@@ -170,8 +168,8 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
      * @param responseContext responseContext
      */
     @Override
-    public void filter(ContainerRequestContext requestContext,
-                       ContainerResponseContext responseContext) throws IOException {
+    public void filter(ContainerRequestContext requestContext, ContainerResponseContext responseContext)
+            throws IOException {
         // Grab corresponding request / response info from context;
         URI uri = requestContext.getUriInfo().getRequestUri();
         String method = requestContext.getMethod();
@@ -208,8 +206,7 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
             HugeConfig config = configProvider.get();
             long timeThreshold = config.get(ServerOptions.SLOW_QUERY_LOG_TIME_THRESHOLD);
             // Record slow query if meet needs, watch out the perf
-            if (timeThreshold > 0 && executeTime > timeThreshold &&
-                needRecordLog(requestContext)) {
+            if (timeThreshold > 0 && executeTime > timeThreshold && needRecordLog(requestContext)) {
                 String clientIp = this.clientIp();
                 Object body = requestContext.getProperty(REQUEST_BODY);
                 LOG.info("[Slow Query] ip={}, execTime={}ms, method={}, path={}, query={}, " +
@@ -236,11 +233,19 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
         return method != null && method.isAnnotationPresent(Decompress.class);
     }
 
-    private static String preview(byte[] bytes, int length, int limit) {
+    private static Charset requestCharset(ContainerRequestContext requestContext) {
+        MediaType mediaType = requestContext.getMediaType();
+        if (mediaType == null) {
+            return DEFAULT_CHARSET;
+        }
+        String charset = mediaType.getParameters().get(MediaType.CHARSET_PARAMETER);
+        return charset == null ? DEFAULT_CHARSET : Charset.forName(charset);
+    }
+
+    private static String preview(byte[] bytes, int length, int limit, Charset charset) {
         boolean truncated = length > limit;
         int size = Math.min(length, limit);
-        CharsetDecoder decoder = CHARSET.newDecoder()
-                                        .onMalformedInput(CodingErrorAction.REPLACE)
+        CharsetDecoder decoder = charset.newDecoder().onMalformedInput(CodingErrorAction.REPLACE)
                                         .onUnmappableCharacter(CodingErrorAction.REPLACE);
         CharBuffer chars = CharBuffer.allocate((int) (size * decoder.maxCharsPerByte()) + 1);
         /*
@@ -258,8 +263,7 @@ public class AccessLogFilter implements ContainerRequestFilter, ContainerRespons
 
     private static String singleLine(Object value) {
         // Path, query and body are client controlled, keep the log entry on a single line
-        return value == null ? null : value.toString().replace("\r", "\\r")
-                                                       .replace("\n", "\\n");
+        return value == null ? null : value.toString().replace("\r", "\\r").replace("\n", "\\n");
     }
 
     private String clientIp() {
