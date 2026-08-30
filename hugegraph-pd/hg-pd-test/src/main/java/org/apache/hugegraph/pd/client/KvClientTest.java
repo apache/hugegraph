@@ -31,6 +31,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -388,6 +391,40 @@ public class KvClientTest extends BaseClientTest {
             verify(secondConsumer).accept(secondEvent);
             verify(firstConsumer, never()).accept(secondEvent);
             verify(secondConsumer, never()).accept(firstEvent);
+        }
+    }
+
+    @Test(timeout = 5000L)
+    public void testBlockedReconnectReschedulesOtherSubscription() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("first", response -> { });
+            context.client.call(0).observer.onNext(startingResponse(11L));
+            context.client.listenPrefix("second", response -> { });
+
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.client.call(1).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+
+            assertThat(context.client.calls).hasSize(3);
+            ExecutorService reconnectRunner = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> secondReconnect = reconnectRunner.submit(context::runNextReconnect);
+                secondReconnect.get(1L, TimeUnit.SECONDS);
+            } finally {
+                reconnectRunner.shutdownNow();
+                assertThat(reconnectRunner.awaitTermination(1L, TimeUnit.SECONDS)).isTrue();
+            }
+
+            assertThat(context.client.calls).hasSize(3);
+            assertThat(context.reconnectTasks).hasSize(1);
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L, 1000L, 1000L);
+
+            context.client.call(2).observer.onNext(startingResponse(12L));
+            context.runNextReconnect();
+            assertThat(context.client.calls).hasSize(4);
+            assertThat(context.client.call(3).methodName)
+                    .isEqualTo(KvServiceGrpc.getWatchPrefixMethod().getFullMethodName());
+            assertThat(context.client.call(3).request.getKey()).isEqualTo("second");
         }
     }
 

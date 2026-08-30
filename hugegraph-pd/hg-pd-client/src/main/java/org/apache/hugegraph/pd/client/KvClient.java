@@ -238,6 +238,11 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
     }
 
     private boolean startWatch(WatchSubscription subscription) throws PDException {
+        return startWatch(subscription, true);
+    }
+
+    private boolean startWatch(WatchSubscription subscription,
+                               boolean waitForPermit) throws PDException {
         if (closed.get()) {
             return false;
         }
@@ -249,7 +254,12 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             return false;
         }
 
-        acquire(watchClientId, watchSemaphore);
+        if (waitForPermit) {
+            acquire(watchClientId, watchSemaphore);
+        } else if (!tryAcquire(watchClientId, watchSemaphore)) {
+            subscription.observer.compareAndSet(observer, null);
+            return false;
+        }
         if (closed.get()) {
             subscription.observer.compareAndSet(observer, null);
             release(watchSemaphore);
@@ -325,7 +335,9 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             return;
         }
         try {
-            startWatch(subscription);
+            if (!startWatch(subscription, false)) {
+                scheduleReconnect(subscription);
+            }
         } catch (PDException e) {
             log.warn("Failed to reconnect watch for key {}", subscription.key, e);
             StreamObserver<WatchResponse> observer = subscription.observer.get();
@@ -335,6 +347,20 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                 scheduleReconnect(subscription);
             }
         }
+    }
+
+    private boolean tryAcquire(AtomicLong clientId, Semaphore semaphore) {
+        if (clientId.get() != 0L) {
+            return true;
+        }
+        if (!semaphore.tryAcquire()) {
+            return false;
+        }
+        if (clientId.get() != 0L) {
+            semaphore.release();
+        }
+        log.info("wait for client starting....");
+        return true;
     }
 
     private void acquire(AtomicLong clientId, Semaphore semaphore) {
