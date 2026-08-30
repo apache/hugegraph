@@ -62,3 +62,87 @@ logging:
   config: 'file:./conf/log4j2.xml'
   level:
     root: info
+
+# ---------------------------------------------------------------------------
+# Cloud Storage (pluggable provider – disabled by default)
+# ---------------------------------------------------------------------------
+# To enable, set enabled=true and add the desired provider JAR to the
+# classpath (e.g. hg-store-cloud-s3-*.jar for Amazon S3 / S3-compatible).
+#
+# cloud:
+#   storage:
+#     enabled: true
+#     provider: s3                         # must match CloudStorageProvider.providerName()
+#     path-prefix: hugegraph               # key prefix inside the bucket
+#     # --- Upload retry & dead-letter queue (common for all providers) ---
+#     upload-retry-max-attempts: 3         # whole-file retries after first failure; default 3 (0 disables)
+#     upload-retry-initial-delay-ms: 1000  # delay before first retry (ms); default 1000
+#     upload-retry-max-delay-ms: 60000     # exponential-backoff ceiling (ms); default 60000
+#     upload-backpressure-high-watermark: 0   # opt-in: >0 parks RocksDB flush/compaction thread while backlog exceeds this; 0 (default) disables
+#     dlq-max-size: 100000                 # max DLQ entries before oldest are evicted; bounds memory/disk on outage
+#     metadata-sync-debounce-ms: 1000      # coalesce per-SST metadata sync; <= 0 publishes on every SST
+#     metadata-sync-max-unpublished: 32    # force a publish after N unmirrored SSTs (count-bounded RPO); <= 0 disables
+#     node-id:                             # stable per-node identity for the cloud key scope; blank = persist
+#                                          # one in the data dir (seeded from address). Set a stable value
+#                                          # (e.g. StatefulSet ordinal / provisioned UUID) for recovery after
+#                                          # IP/hostname change or local disk loss.
+#     # Metadata sync is event-triggered by storage events; no background interval scheduler.
+#     # --- S3 provider settings (cloud.storage.s3.*) ---
+#     s3:
+#       bucket: hugegraph-store            # S3 bucket name
+#       region: us-east-1                  # AWS region
+#       endpoint:                          # custom S3-compatible endpoint (MinIO, Ceph...)
+#       access-key: AKIAIOSFODNN7EXAMPLE   # omit to use the AWS default credentials chain
+#       secret-key: wJalrXUtnFEMI/...      # omit to use the AWS default credentials chain
+#       multipart-part-retry-max-attempts: 3
+#       multipart-part-retry-base-backoff-ms: 1000
+#       multipart-exhausted-direct-dlq: false
+cloud:
+  storage:
+    enabled: false
+    provider: s3
+    path-prefix: hugegraph
+    # Hydration controls
+    startup-hydration-enabled: true        # download missing remote files on DB opening before serving
+    read-miss-guard-window-ms: 3000        # guard window (ms) to throttle repeated read-miss hydration attempts
+    # Whole-file upload retries after a first failure (default 3). Set 0 to disable
+    # (failures go straight to the DLQ) when the provider has sufficient internal retry.
+    upload-retry-max-attempts: 3
+    upload-retry-initial-delay-ms: 1000
+    upload-retry-max-delay-ms: 60000
+    # Backpressure high-watermark on the pending-upload backlog; 0 (default) disables it.
+    # Opt-in only: when > 0 the throttle parks RocksDB's flush/compaction thread (up to 30s per
+    # SST event), which under a sustained cloud outage can stall memtable flushes / stop writes for
+    # the partition. Set > 0 only if bounding local-only data during an outage is worth that trade.
+    upload-backpressure-high-watermark: 0
+    # Max dead-letter-queue entries retained before the oldest are evicted; bounds memory/disk
+    # during a prolonged provider outage (evicted files stay recoverable via delete guard/backfill).
+    dlq-max-size: 100000
+    # Debounce window (ms) for the per-SST metadata sync; coalesces checkpoint+list/prune cost under
+    # write-heavy load. <= 0 publishes on every SST. Event-driven publishes are never debounced.
+    metadata-sync-debounce-ms: 1000
+    # Force a metadata publish once this many SSTs are uploaded-but-unmirrored, bounding the cloud
+    # recovery point by count (not just time) during heavy-ingestion bursts. <= 0 disables.
+    metadata-sync-max-unpublished: 32
+    # Mirror a consistent CURRENT/MANIFEST/OPTIONS snapshot so cloud objects stay
+    # recoverable (a node that lost its local disk reopens from cloud, not an empty DB).
+    # Metadata sync is always enabled when cloud storage is enabled.
+    # Sync is event-triggered by storage events; there is no background interval scheduler.
+    # Capture forces a MemTable flush so the un-flushed tail is persisted into an SST and mirrored;
+    # the RocksDB WAL is disabled under Raft (the Raft log is the tail's durability source), so a
+    # flush is the only way to push recent writes into cloud.
+    # Stable per-node identity for the cloud key scope (store-<node-id>). Blank => a scope is
+    # persisted in the data dir on first start (seeded from the network address), which is stable
+    # across IP/hostname drift but lost with the disk. Set a deployment-stable value here for
+    # guaranteed recovery of prior remote data after an address change or local disk loss.
+    node-id:
+    s3:
+      bucket:
+      region:
+      endpoint:
+      access-key:
+      secret-key:
+      multipart-part-retry-max-attempts: 3
+      multipart-part-retry-base-backoff-ms: 1000
+      multipart-exhausted-direct-dlq: false
+

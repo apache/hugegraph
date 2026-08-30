@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -78,6 +79,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     final AtomicInteger refCount;
     final AtomicBoolean shutdown;
     final String tempSuffix = "_temp_";
+    final String cloudMetaTempMarker = "_cloudmeta_";
     private final transient String graphName;
     private final HugeConfig hugeConfig;
     private final ReentrantReadWriteLock cfHandleLock;
@@ -90,7 +92,22 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
     @Getter
     private Map<String, String> iteratorMap;
 
+    /**
+     * Invoked after the DB directory path is resolved and its directory is created, but BEFORE
+     * {@code RocksDB.open}. Lets a caller populate the directory (e.g. hydrate it from cloud) so
+     * that RocksDB opens on the recovered data rather than creating a fresh empty DB.
+     */
+    @FunctionalInterface
+    public interface PreOpenHook {
+        void beforeOpen(String dbName, String resolvedDbPath);
+    }
+
     public RocksDBSession(HugeConfig hugeConfig, String dbDataPath, String graphName, long version) {
+        this(hugeConfig, dbDataPath, graphName, version, null);
+    }
+
+    public RocksDBSession(HugeConfig hugeConfig, String dbDataPath, String graphName, long version,
+                          PreOpenHook preOpenHook) {
         this.hugeConfig = hugeConfig;
         this.graphName = graphName;
         this.cfHandleLock = new ReentrantReadWriteLock();
@@ -100,7 +117,30 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         this.writeOptions = new WriteOptions();
         this.rocksDbStats = new Statistics();
         this.iteratorMap = new ConcurrentHashMap<>();
-        openRocksDB(dbDataPath, version);
+        try {
+            openRocksDB(dbDataPath, version, preOpenHook);
+        } catch (RuntimeException | Error e) {
+            // Open (or the pre-open hydration hook) failed: release the native objects allocated
+            // so far so a failed — and possibly retried — creation does not leak native memory.
+            // shutdown() only frees these when dbOptions is set, which is not the case if the
+            // failure occurred before RocksDB.open.
+            closeQuietly(this.rocksDB);
+            closeQuietly(this.dbOptions);
+            closeQuietly(this.writeOptions);
+            closeQuietly(this.rocksDbStats);
+            throw e;
+        }
+    }
+
+    private static void closeQuietly(AutoCloseable resource) {
+        if (resource == null) {
+            return;
+        }
+        try {
+            resource.close();
+        } catch (Exception ignore) {
+            // best-effort native cleanup on a failed open
+        }
     }
 
     private RocksDBSession(RocksDBSession origin) {
@@ -318,23 +358,32 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
             dbs.ensureCapacity(files.length);
             // search all db path
             for (final File sFile : files) {
+                if (!sFile.isDirectory()) {
+                    continue;
+                }
                 final String name = sFile.getName();
                 if (!name.startsWith(prefix) && !name.equals(defaultName)) {
                     continue;
                 }
-                if (name.endsWith(tempSuffix)) {
+                // Ignore transient dirs created by snapshot/checkpoint capture.
+                if (name.endsWith(tempSuffix) || name.contains(cloudMetaTempMarker)) {
                     continue;
                 }
                 long v1 = -1L;
                 long v2 = -1L;
                 if (name.length() > defaultName.length()) {
                     String[] versions = name.substring(prefix.length()).split("_");
-                    if (versions.length == 1) {
+                    if (versions.length != 1 && versions.length != 2) {
+                        continue;
+                    }
+                    try {
                         v1 = Long.parseLong(versions[0]);
-                    } else if (versions.length == 2) {
-                        v1 = Long.parseLong(versions[0]);
-                        v2 = Long.parseLong(versions[1]);
-                    } else {
+                        if (versions.length == 2) {
+                            v2 = Long.parseLong(versions[1]);
+                        }
+                    } catch (NumberFormatException e) {
+                        log.debug("Skip invalid db-path candidate '{}': {}", name,
+                                  e.getMessage());
                         continue;
                     }
                 }
@@ -411,7 +460,7 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         return this.tables.containsKey(table);
     }
 
-    private void openRocksDB(String dbDataPath, long version) {
+    private void openRocksDB(String dbDataPath, long version, PreOpenHook preOpenHook) {
 
         if (dbDataPath.endsWith(File.separator)) {
             this.dbPath = dbDataPath + this.graphName;
@@ -427,10 +476,23 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         //makedir for rocksdb
         createDirectory(dbPath);
 
+        // Hydrate the directory (e.g. from cloud) BEFORE opening, so RocksDB opens on any recovered
+        // CURRENT/MANIFEST/SST rather than creating a fresh empty DB. Running this before open is
+        // essential: with createIfMissing=true, opening an empty dir first would create a local
+        // CURRENT that later hydration would skip, silently yielding an empty database.
+        if (preOpenHook != null) {
+            preOpenHook.beforeOpen(this.graphName, this.dbPath);
+        }
+
         Options opts = new Options();
         RocksDBSession.initOptions(hugeConfig, opts, opts, opts, opts);
         dbOptions = new DBOptions(opts);
         dbOptions.setStatistics(rocksDbStats);
+        // Register the factory-level event listener so that table-file events
+        // (onTableFileCreated / onTableFileDeleted) are forwarded to all
+        // RocksdbChangedListener implementations (e.g. cloud storage providers).
+        dbOptions.setListeners(
+                Collections.singletonList(RocksDBFactory.getInstance().getEventListener()));
 
         try {
             List<ColumnFamilyDescriptor> columnFamilyDescriptorList =
@@ -598,8 +660,27 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         tableNames.remove(defaultCF);
 
         log.info("truncate table: {}", String.join(",", tableNames));
-        this.dropTables(tableNames.toArray(new String[0]));
-        this.createTables(tableNames.toArray(new String[0]));
+        // Notify listeners before table recreation so they can suppress cloud sync callbacks.
+        RocksDBFactory.getInstance().notifyTruncateBegin(this.graphName, this.dbPath);
+        boolean truncated = false;
+        try {
+            this.dropTables(tableNames.toArray(new String[0]));
+            this.createTables(tableNames.toArray(new String[0]));
+            truncated = true;
+        } finally {
+            // Guarantee a terminal notification either way. dropTables/createTables raise the
+            // unchecked DBStoreException; without this, a mid-truncate failure would leave the
+            // begin-notification unmatched and listeners (e.g. cloud storage) stuck in a
+            // "truncating" state forever, silently disabling their sync/cleanup for this DB.
+            if (truncated) {
+                // Success: content cleared — listeners may purge remote state.
+                RocksDBFactory.getInstance().notifyTruncate(this.graphName, this.dbPath);
+            } else {
+                // Failure: undo the "truncating" suppression WITHOUT purging, since the data that
+                // was meant to be cleared may still be present locally and must stay recoverable.
+                RocksDBFactory.getInstance().notifyTruncateAbort(this.graphName, this.dbPath);
+            }
+        }
     }
 
     public void flush(boolean wait) {
@@ -691,6 +772,69 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         }
         log.info("saved snapshot into {}, time cost {} ms", snapshotPath,
                  System.currentTimeMillis() - startTime);
+    }
+
+    /**
+     * Captures a consistent copy of this DB's metadata (CURRENT / MANIFEST-* / OPTIONS-* / WAL) plus
+     * hard-links to the live SST set into a temporary directory, using a RocksDB
+     * {@link Checkpoint}. See {@link RocksDBFactory#captureMetadataSnapshot(String)} for the metadata
+     * rationale.
+     *
+     * <p>The temporary directory is a sibling of the DB directory (same filesystem), so SST files
+     * are hard-linked rather than copied. The caller owns cleanup via
+     * {@link RocksDBFactory.MetadataSnapshot#cleanup()}.
+     *
+     * @return the captured snapshot; never {@code null}
+     * @throws DBStoreException if the checkpoint cannot be created
+     */
+    RocksDBFactory.MetadataSnapshot captureMetadataCheckpoint() throws DBStoreException {
+        String tempDir = this.dbPath + "_cloudmeta_" + System.nanoTime();
+        cfHandleLock.readLock().lock();
+        try (final Checkpoint checkpoint = Checkpoint.create(this.rocksDB)) {
+            final File tempFile = new File(tempDir);
+            // Clean any stale temp checkpoint dir from a previous failed/interrupted attempt.
+            // If it exists, RocksDB checkpoint creation can fail on pre-existing files.
+            FileUtils.deleteDirectory(tempFile);
+            checkpoint.createCheckpoint(tempDir);
+        } catch (final Exception e) {
+            try {
+                FileUtils.deleteDirectory(new File(tempDir));
+            } catch (IOException ignore) {
+                // best-effort cleanup of a partial checkpoint
+            }
+            log.error("Fail to create metadata checkpoint at {}", tempDir, e);
+            throw new DBStoreException("Fail to create metadata checkpoint at %s", e, tempDir);
+        } finally {
+            cfHandleLock.readLock().unlock();
+        }
+        return categoriseCheckpoint(tempDir);
+    }
+
+    /** Classifies the files a checkpoint materialized into the metadata snapshot descriptor. */
+    private RocksDBFactory.MetadataSnapshot categoriseCheckpoint(String tempDir) {
+        long generation = this.getLatestSequenceNumber();
+        String currentFileName = null;
+        String manifestFileName = null;
+        List<String> optionsFileNames = new ArrayList<>();
+        List<String> sstFileNames = new ArrayList<>();
+        File[] files = new File(tempDir).listFiles();
+        if (files != null) {
+            for (File f : files) {
+                String name = f.getName();
+                if (name.equals("CURRENT")) {
+                    currentFileName = name;
+                } else if (name.startsWith("MANIFEST-")) {
+                    manifestFileName = name;
+                } else if (name.startsWith("OPTIONS-")) {
+                    optionsFileNames.add(name);
+                } else if (name.endsWith(".sst")) {
+                    sstFileNames.add(name);
+                }
+            }
+        }
+        return new RocksDBFactory.MetadataSnapshot(this.dbPath, tempDir, currentFileName,
+                                                   manifestFileName, optionsFileNames,
+                                                   sstFileNames, generation);
     }
 
     private boolean verifySnapshot(String snapshotPath) {

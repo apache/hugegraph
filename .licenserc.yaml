@@ -66,6 +66,7 @@ header: # `header` section is configurations for source codes license header.
     - '**/*.log'
     - '**/*.txt'
     - '**/*.json'
+    - '**/*.ipynb'
     - '**/*.conf'
     - '**/*.map'
     - '**/*.properties'

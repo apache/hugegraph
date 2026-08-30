@@ -1050,7 +1050,18 @@ public class BusinessHandlerImpl implements BusinessHandler {
     }
 
     /**
-     * Clear map data
+     * Clear one graph's data within a partition.
+     *
+     * <p>A partition's RocksDB instance is shared by every graph mapped to that partition, so this
+     * clears only {@code graphName}'s key range via {@code deleteRange}. It deliberately does NOT
+     * fire the {@code notifyTruncate*} callbacks: those drive a whole-DB-prefix cloud purge (see
+     * {@link RocksdbChangedListener#onDBTruncated(String, String)}), which
+     * for a shared instance would delete the SSTs and metadata of the co-tenant graphs from cloud
+     * — destroying their durable copy even though their data is untouched locally. The
+     * range-tombstoned SSTs produced here converge in cloud through the normal
+     * {@code onTableFileCreated}/{@code onTableFileDeleted} mirroring instead. A genuine
+     * whole-instance clear ({@link org.apache.hugegraph.rocksdb.access.RocksDBSession#truncate()})
+     * still fires those callbacks and is the only path that should purge the whole prefix.
      */
     @Override
     public void truncate(String graphName, int partId) throws HgStoreException {
