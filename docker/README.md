@@ -83,7 +83,7 @@ Uses pre-built images from Docker Hub. Best for **end users** who want to run Hu
 
 Builds images locally from source Dockerfiles. Best for **developers** who want to test local changes. Build the matching `hugegraph-toolchain` Hubble source as `local/hugegraph-hubble:dev` before starting this stack.
 
-The publishing pipeline uses `docker/bake.hcl` from the repository root to compile the Java reactor once and build the PD, Store, HStore Server, and standalone Server runtime images from that shared result.
+The publishing pipeline uses [`docker/bake.hcl`](./bake.hcl) from the repository root to compile the Java reactor once and build the PD, Store, HStore Server, and standalone Server runtime images from that shared result.
 
 Run Bake commands from the repository root. Use `--print` to inspect the resolved targets without building, or run the default group to build all four amd64/arm64 images. Loading both platforms under the same local tags requires Docker's containerd image store.
 
@@ -94,6 +94,18 @@ docker buildx bake --file docker/bake.hcl --print
 # Build the default multi-platform target group
 IMAGE_TAG=local docker buildx bake --file docker/bake.hcl
 ```
+
+Local source changes are included because Bake uses the current repository working tree as its build context. For routine development, override all targets to the host architecture so the four images still share one Maven build without requiring the multi-platform containerd image store.
+
+```bash
+# x86_64 host
+IMAGE_TAG=local docker buildx bake --file docker/bake.hcl --set '*.platform=linux/amd64'
+
+# ARM64 host
+IMAGE_TAG=local docker buildx bake --file docker/bake.hcl --set '*.platform=linux/arm64'
+```
+
+These local commands can read existing Registry caches but do not publish images or write remote caches because `EXPORT_CACHE` defaults to `false`.
 
 ```bash
 (
