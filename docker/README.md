@@ -83,7 +83,17 @@ Uses pre-built images from Docker Hub. Best for **end users** who want to run Hu
 
 Builds images locally from source Dockerfiles. Best for **developers** who want to test local changes. Build the matching `hugegraph-toolchain` Hubble source as `local/hugegraph-hubble:dev` before starting this stack.
 
-The publishing pipeline uses the repository-root `docker-bake.hcl` to compile the Java reactor once and build the PD, Store, HStore Server, and standalone Server runtime images from that shared result.
+The publishing pipeline uses `docker/bake.hcl` from the repository root to compile the Java reactor once and build the PD, Store, HStore Server, and standalone Server runtime images from that shared result.
+
+Run Bake commands from the repository root. Use `--print` to inspect the resolved targets without building, or run the default group to build all four amd64/arm64 images. Loading both platforms under the same local tags requires Docker's containerd image store.
+
+```bash
+# Inspect the resolved build graph
+docker buildx bake --file docker/bake.hcl --print
+
+# Build the default multi-platform target group
+IMAGE_TAG=local docker buildx bake --file docker/bake.hcl
+```
 
 ```bash
 (

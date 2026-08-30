@@ -25,7 +25,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/docker-build-ci.yml'
-      - 'docker-bake.hcl'
+      - 'docker/bake.hcl'
       - '.dockerignore'
       - '.mvn/**'
       - 'pom.xml'
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker buildx bake --print > /tmp/hugegraph-bake.json
+          docker buildx bake --file docker/bake.hcl --print > /tmp/hugegraph-bake.json
           jq -e '
             .group.default.targets == [
               "build-cache",
