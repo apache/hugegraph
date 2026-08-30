@@ -30,6 +30,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.AbstractTraversalStrategy;
 import org.apache.tinkerpop.gremlin.structure.T;
+import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty.Cardinality;
 
 public class HugePrimaryKeyStrategy
@@ -76,7 +77,6 @@ public class HugePrimaryKeyStrategy
                 || propertyStep.getCardinality() == null) {
 
                 Object[] kvs = new Object[2];
-                List<Object> kvList = new LinkedList<>();
 
                 propertyStep.getParameters().getRaw().forEach((k, v) -> {
                     if (T.key.equals(k)) {
@@ -84,16 +84,11 @@ public class HugePrimaryKeyStrategy
                     } else if (T.value.equals(k)) {
                         kvs[1] = v.get(0);
                     } else {
-                        kvList.add(k.toString());
-                        kvList.add(v.get(0));
+                        throw VertexProperty.Exceptions.metaPropertiesNotSupported();
                     }
                 });
 
                 curAddStep.configure(kvs);
-
-                if (!kvList.isEmpty()) {
-                    curAddStep.configure(kvList.toArray(new Object[0]));
-                }
 
                 removeSteps.add(step);
             } else {
