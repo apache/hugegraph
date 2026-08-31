@@ -28,6 +28,7 @@ volumes:
   hg-store0-data:
   hg-store1-data:
   hg-store2-data:
+  hubble-data:
 
 # ── Shared service defaults ──────────────────────────────────────────
 x-pd-common: &pd-common
@@ -58,6 +59,18 @@ x-store-common: &store-common
     retries: 40
     start_period: 120s
 
+x-server-environment: &server-environment
+  STORE_REST: store0:8520
+  HG_SERVER_BACKEND: hstore
+  HG_SERVER_PD_PEERS: pd0:8686,pd1:8686,pd2:8686
+  HG_SERVER_CLUSTER: hg
+  HG_SERVER_USE_PD: "true"
+  HG_SERVER_MIN_FREE_MEMORY: "0"
+  HG_SERVER_INIT_STORE_ENABLED: "false"
+  HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET: "true"
+  HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
+  PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:-}
+
 x-server-common: &server-common
   image: hugegraph/server:${HUGEGRAPH_VERSION:-latest}
   pull_policy: missing
@@ -68,11 +81,9 @@ x-server-common: &server-common
     store1: { condition: service_healthy }
     store2: { condition: service_healthy }
   environment:
-    STORE_REST: store0:8520
-    HG_SERVER_BACKEND: hstore
-    HG_SERVER_PD_PEERS: pd0:8686,pd1:8686,pd2:8686
+    <<: *server-environment
   healthcheck:
-    test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null || exit 1"]
+    test: ["CMD-SHELL", "curl -fsS http://$$(hostname):8080/versions >/dev/null"]
     interval: 10s
     timeout: 5s
     retries: 30
@@ -188,15 +199,52 @@ services:
     container_name: hg-server0
     hostname: server0
     ports: ["8080:8080"]
+    environment:
+      <<: *server-environment
+      HG_SERVER_REST_URL: http://server0:8080
 
   server1:
     <<: *server-common
     container_name: hg-server1
     hostname: server1
     ports: ["8081:8080"]
+    environment:
+      <<: *server-environment
+      HG_SERVER_REST_URL: http://server1:8080
 
   server2:
     <<: *server-common
     container_name: hg-server2
     hostname: server2
     ports: ["8082:8080"]
+    environment:
+      <<: *server-environment
+      HG_SERVER_REST_URL: http://server2:8080
+
+  hubble:
+    image: ${HUBBLE_IMAGE:-hugegraph/hubble:latest}
+    pull_policy: ${HUBBLE_PULL_POLICY:-missing}
+    restart: unless-stopped
+    networks: [hg-net]
+    depends_on:
+      server0: { condition: service_healthy }
+      server1: { condition: service_healthy }
+      server2: { condition: service_healthy }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE
+    ports:
+      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
+    volumes:
+      - hubble-data:/hubble/data
+      - ./conf/hubble/hstore-ha.properties:/hubble/conf/hugegraph-hubble.properties:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          body=$$(curl -fsS http://localhost:8088/about) &&
+          printf '%s' "$$body" | grep -q '"status":200' &&
+          printf '%s' "$$body" | grep -q '"name":"hugegraph-hubble"'
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s

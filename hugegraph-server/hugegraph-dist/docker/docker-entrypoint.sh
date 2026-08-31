@@ -98,6 +98,13 @@ if [[ -n "${HG_SERVER_AUTH_TOKEN_SECRET:-}" ]]; then
     fi
 fi
 
+if [[ -n "${PASSWORD:-}" &&
+      "${HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET:-false}" == "true" &&
+      -z "${HG_SERVER_AUTH_TOKEN_SECRET:-}" ]]; then
+    log "ERROR: HG_SERVER_AUTH_TOKEN_SECRET is required when authentication is enabled"
+    exit 1
+fi
+
 AUTH_TOKEN_SECRET_ENCODED=""
 if [[ -n "${PASSWORD:-}" && -z "${HG_SERVER_AUTH_TOKEN_SECRET:-}" ]]; then
     rest_secret=$(get_prop_encoded "auth.token_secret" "${REST_SERVER_CONF}")

@@ -104,6 +104,36 @@ cmp "${TEST_HOME}/conf/graphs/hugegraph.properties.before-short-secret" \
     "${TEST_HOME}/conf/graphs/hugegraph.properties"
 [[ ! -e "${TEST_HOME}/docker/enable-auth-calls" ]]
 
+if (
+    cd "${TEST_HOME}"
+    PASSWORD=pa \
+    HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET=true \
+        bash ./docker-entrypoint.sh
+); then
+    echo "required authentication token secret unexpectedly succeeded" >&2
+    exit 1
+fi
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 1 ]]
+[[ ! -e "${TEST_HOME}/docker/enable-auth-calls" ]]
+
+(
+    cd "${TEST_HOME}"
+    HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET=true \
+        bash ./docker-entrypoint.sh
+)
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 2 ]]
+[[ ! -e "${TEST_HOME}/docker/enable-auth-calls" ]]
+
+(
+    cd "${TEST_HOME}"
+    PASSWORD=pa \
+    HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET=true \
+    HG_SERVER_AUTH_TOKEN_SECRET=12345678901234567890123456789012 \
+        bash ./docker-entrypoint.sh
+)
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 3 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")" -eq 1 ]]
+
 sed -i '/^auth\.token_secret=/d' "${TEST_HOME}/conf/rest-server.properties"
 sed -i '/^auth\.token_secret=/d' "${TEST_HOME}/conf/graphs/hugegraph.properties"
 (
@@ -147,8 +177,8 @@ sed -i "s|^auth\\.token_secret=.*|auth.token_secret  ${rest_secret}|" \
 grep -qx "auth.token_secret=${rest_secret}" \
     "${TEST_HOME}/conf/rest-server.properties"
 
-[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 5 ]]
-[[ "$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")" -eq 4 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 7 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")" -eq 5 ]]
 
 (
     cd "${TEST_HOME}"
