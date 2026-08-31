@@ -92,7 +92,16 @@ public class SchemaDriver {
                  long expiration) {
         this.client = Objects.requireNonNull(client, "client");
         this.caches = new SchemaCaches(cacheSize, expiration);
-        this.listenMetaChanges();
+        try {
+            this.listenMetaChanges();
+        } catch (RuntimeException e) {
+            try {
+                this.closeResources();
+            } catch (RuntimeException closeException) {
+                e.addSuppressed(closeException);
+            }
+            throw e;
+        }
         log.info(String.format(
                 "The SchemaDriver initialized successfully, cacheSize = %s," +
                 " expiration = %s s", cacheSize, expiration / 1000));
@@ -103,7 +112,7 @@ public class SchemaDriver {
         init(pdConfig, 300, 300 * 1000);
     }
 
-    public static void init(PDConfig pdConfig, int cacheSize, long expiration) {
+    public static synchronized void init(PDConfig pdConfig, int cacheSize, long expiration) {
         SchemaDriver instance = INSTANCE.get();
         if (instance != null) {
             throw new NotAllowException(
@@ -112,19 +121,26 @@ public class SchemaDriver {
                     "allowed to be initialized again", instance.caches.limit(),
                     instance.caches.expiration(), instance.client);
         }
-        INSTANCE.compareAndSet(null, new SchemaDriver(pdConfig, cacheSize,
-                                                      expiration));
+        INSTANCE.set(new SchemaDriver(pdConfig, cacheSize, expiration));
     }
 
-    public static void destroy() {
-        SchemaDriver instance = INSTANCE.getAndSet(null);
+    public static synchronized void destroy() {
+        SchemaDriver instance = INSTANCE.get();
         if (instance != null) {
             try {
-                instance.client.close();
+                instance.closeResources();
             } finally {
-                instance.caches.cancelScheduleCacheClean();
-                instance.caches.destroyAll();
+                INSTANCE.compareAndSet(instance, null);
             }
+        }
+    }
+
+    private void closeResources() {
+        try {
+            this.client.close();
+        } finally {
+            this.caches.cancelScheduleCacheClean();
+            this.caches.destroyAll();
         }
     }
 

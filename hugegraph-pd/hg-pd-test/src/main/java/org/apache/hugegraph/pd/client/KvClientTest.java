@@ -27,6 +27,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -57,6 +58,15 @@ import org.apache.hugegraph.pd.grpc.kv.WatchRequest;
 import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchState;
 import org.apache.hugegraph.pd.grpc.kv.WatchType;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.Filter;
+import org.apache.logging.log4j.core.Layout;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.config.Property;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -373,11 +383,7 @@ public class KvClientTest extends BaseClientTest {
 
                 assertThat(context.reconnectTasks).hasSize(1);
                 assertThat(context.reconnectDelaysMs).containsExactly(1000L);
-                if (status.getCode() == Status.Code.UNAVAILABLE) {
-                    assertThat(context.client.stubInvalidations).isEqualTo(1);
-                } else {
-                    assertThat(context.client.stubInvalidations).isZero();
-                }
+                assertThat(context.client.stubInvalidations).isEqualTo(1);
             }
         }
     }
@@ -457,6 +463,55 @@ public class KvClientTest extends BaseClientTest {
     }
 
     @Test
+    public void testFollowerErrorReconnectsToNewPeer() throws Exception {
+        AtomicReference<String> firstAddress = new AtomicReference<>();
+        AtomicReference<String> secondAddress = new AtomicReference<>();
+        RejectingWatchService firstWatchService = new RejectingWatchService();
+        RecordingWatchService secondWatchService = new RecordingWatchService(12L);
+        Server firstServer = ServerBuilder.forPort(0)
+                                          .addService(new MutableLeaderService(firstAddress))
+                                          .addService(firstWatchService)
+                                          .build()
+                                          .start();
+        Server secondServer = ServerBuilder.forPort(0)
+                                           .addService(new MutableLeaderService(secondAddress))
+                                           .addService(secondWatchService)
+                                           .build()
+                                           .start();
+        firstAddress.set("127.0.0.1:" + firstServer.getPort());
+        secondAddress.set("127.0.0.1:" + secondServer.getPort());
+        ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+        Deque<Runnable> reconnectTasks = new ArrayDeque<>();
+        CountDownLatch reconnectScheduled = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            long delay = invocation.getArgument(1);
+            if (invocation.<TimeUnit>getArgument(2).toMillis(delay) == 1000L) {
+                reconnectTasks.addLast(invocation.getArgument(0));
+                reconnectScheduled.countDown();
+            }
+            return mock(ScheduledFuture.class);
+        }).when(executor).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+        PDConfig config = PDConfig.of(firstAddress.get() + "," + secondAddress.get())
+                                  .setAuthority(user, pwd);
+
+        try (KvClient<WatchResponse> testClient = new KvClient<>(config, executor)) {
+            testClient.listen("key", response -> { });
+            Assert.assertTrue(firstWatchService.failed.await(2L, TimeUnit.SECONDS));
+            Assert.assertTrue(reconnectScheduled.await(2L, TimeUnit.SECONDS));
+            assertThat(reconnectTasks).hasSize(1);
+
+            reconnectTasks.removeFirst().run();
+
+            Assert.assertTrue(secondWatchService.started.await(2L, TimeUnit.SECONDS));
+            assertThat(firstWatchService.calls).hasValue(1);
+            assertThat(secondWatchService.calls).hasValue(1);
+        } finally {
+            firstServer.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+            secondServer.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     public void testMissingFirstFrameSchedulesReconnect() throws Exception {
         try (WatchTestContext context = newWatchTestContext()) {
             context.client.listen("key", response -> { });
@@ -483,6 +538,50 @@ public class KvClientTest extends BaseClientTest {
 
             assertThat(context.reconnectTasks).isEmpty();
             assertThat(context.client.stubInvalidations).isZero();
+        }
+    }
+
+    @Test
+    public void testFirstFrameDuringTimeoutTransitionPreventsReconnect() throws Exception {
+        String loggerName = KvClient.class.getName();
+        LoggerContext loggerContext = (LoggerContext) LogManager.getContext(false);
+        org.apache.logging.log4j.core.config.Configuration loggerConfiguration =
+                loggerContext.getConfiguration();
+        LoggerConfig existingConfig = loggerConfiguration.getLoggerConfig(loggerName);
+        LoggerConfig originalConfig =
+                loggerName.equals(existingConfig.getName()) ? existingConfig : null;
+        AtomicReference<Runnable> timeoutAction = new AtomicReference<>();
+        TimeoutRaceAppender appender = new TimeoutRaceAppender(timeoutAction);
+        appender.start();
+        if (originalConfig != null) {
+            loggerConfiguration.removeLogger(loggerName);
+        }
+        LoggerConfig testConfig = new LoggerConfig(loggerName, Level.WARN, false);
+        testConfig.addAppender(appender, Level.WARN, null);
+        loggerConfiguration.addLogger(loggerName, testConfig);
+        loggerContext.updateLoggers();
+
+        try (WatchTestContext context = newWatchTestContext()) {
+            Consumer<WatchResponse> consumer = mock(Consumer.class);
+            context.client.listen("key", consumer);
+            StreamObserver<WatchResponse> observer = context.client.call(0).observer;
+            timeoutAction.set(() -> observer.onNext(startingResponse(9L)));
+
+            context.runNextWatchTimeout();
+
+            assertThat(appender.triggered).isTrue();
+            assertThat(context.reconnectTasks).isEmpty();
+            assertThat(context.client.stubInvalidations).isZero();
+            WatchResponse event = eventResponse(9L);
+            observer.onNext(event);
+            verify(consumer).accept(event);
+        } finally {
+            loggerConfiguration.removeLogger(loggerName);
+            if (originalConfig != null) {
+                loggerConfiguration.addLogger(loggerName, originalConfig);
+            }
+            loggerContext.updateLoggers();
+            appender.stop();
         }
     }
 
@@ -577,7 +676,7 @@ public class KvClientTest extends BaseClientTest {
             context.runNextReconnect();
 
             assertThat(context.reconnectTasks).hasSize(1);
-            assertThat(context.client.stubInvalidations).isZero();
+            assertThat(context.client.stubInvalidations).isEqualTo(1);
             WatchResponse activeEvent = eventResponse(21L);
             context.client.call(1).observer.onNext(activeEvent);
             verify(activeConsumer).accept(activeEvent);
@@ -980,6 +1079,42 @@ public class KvClientTest extends BaseClientTest {
             this.observer.set(observer);
             observer.onNext(startingResponse(this.clientId));
             this.started.countDown();
+        }
+    }
+
+    private static class RejectingWatchService extends KvServiceGrpc.KvServiceImplBase {
+
+        private static final String NOT_LEADER =
+                "node is not leader,it is necessary to  redirect to the leader on the client";
+
+        private final AtomicInteger calls = new AtomicInteger();
+        private final CountDownLatch failed = new CountDownLatch(1);
+
+        @Override
+        public void watch(WatchRequest request, StreamObserver<WatchResponse> observer) {
+            this.calls.incrementAndGet();
+            observer.onError(new PDException(-1, NOT_LEADER));
+            this.failed.countDown();
+        }
+    }
+
+    private static class TimeoutRaceAppender extends AbstractAppender {
+
+        private final AtomicReference<Runnable> action;
+        private final AtomicBoolean triggered = new AtomicBoolean(false);
+
+        TimeoutRaceAppender(AtomicReference<Runnable> action) {
+            super("KvClientTimeoutRaceAppender", (Filter) null,
+                  (Layout<? extends Serializable>) null, false, Property.EMPTY_ARRAY);
+            this.action = action;
+        }
+
+        @Override
+        public void append(LogEvent event) {
+            Runnable callback = this.action.get();
+            if (callback != null && this.triggered.compareAndSet(false, true)) {
+                callback.run();
+            }
         }
     }
 

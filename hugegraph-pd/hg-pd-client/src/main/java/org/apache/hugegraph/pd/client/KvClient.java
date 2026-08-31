@@ -54,6 +54,8 @@ import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchType;
 
 import io.grpc.Status;
+import io.grpc.StatusException;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.AbstractBlockingStub;
 import io.grpc.stub.AbstractStub;
 import io.grpc.stub.StreamObserver;
@@ -349,15 +351,23 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         }
         log.warn("Watch for key {} did not receive its first response in {} ms",
                  subscription.key, WATCH_START_TIMEOUT_MS);
-        requestReconnect(subscription, sourceObserver, true);
+        requestReconnect(subscription, sourceObserver, true, true);
     }
 
     private void requestReconnect(WatchSubscription subscription,
                                   StreamObserver<WatchResponse> sourceObserver,
                                   boolean rotateTransport) {
+        requestReconnect(subscription, sourceObserver, rotateTransport, false);
+    }
+
+    private void requestReconnect(WatchSubscription subscription,
+                                  StreamObserver<WatchResponse> sourceObserver,
+                                  boolean rotateTransport,
+                                  boolean requireMissingFirstFrame) {
         long attemptGeneration;
         synchronized (subscription) {
-            if (closed.get() || subscription.observer.get() != sourceObserver) {
+            if (closed.get() || subscription.observer.get() != sourceObserver ||
+                (requireMissingFirstFrame && subscription.firstFrameReceived)) {
                 return;
             }
             subscription.observer.set(null);
@@ -392,7 +402,20 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
     }
 
     private static boolean shouldRotateWatchTransport(Throwable throwable) {
-        return Status.fromThrowable(throwable).getCode() == Status.Code.UNAVAILABLE;
+        Throwable cause = throwable;
+        while (cause != null) {
+            Status.Code code = null;
+            if (cause instanceof StatusException) {
+                code = ((StatusException) cause).getStatus().getCode();
+            } else if (cause instanceof StatusRuntimeException) {
+                code = ((StatusRuntimeException) cause).getStatus().getCode();
+            }
+            if (code != null) {
+                return code == Status.Code.UNAVAILABLE || code == Status.Code.UNKNOWN;
+            }
+            cause = cause.getCause();
+        }
+        return false;
     }
 
     private void stopWatch(WatchSubscription subscription,
