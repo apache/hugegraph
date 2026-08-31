@@ -46,7 +46,8 @@ contains a single quote or newline.
 
 Do not commit `.env`. Keeping the same JWT secret preserves authentication
 tokens when containers are recreated. For authenticated topologies with
-multiple Server replicas, all replicas receive this same secret.
+multiple Server replicas, all replicas receive this same secret. The HA
+topology fails fast if authentication is enabled without this shared secret.
 
 A non-empty `HUGEGRAPH_ADMIN_PASSWORD` enables Server authentication, and
 Hubble detects that mode automatically. Omitting the variable or setting it to

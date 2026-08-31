@@ -24,6 +24,7 @@ SECRET="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 VERSION="ci-version"
 RENDER_HUBBLE_IMAGE="example.invalid/hugegraph/hubble:ci"
 DATASOURCE="jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE"
+CURL_TIMEOUTS=(--connect-timeout 5 --max-time 15)
 ACTIVE_PROJECT=""
 ACTIVE_FILES=()
 RENDER_DIR=""
@@ -185,7 +186,8 @@ assert_ha() {
                 "pd0:8686,pd1:8686,pd2:8686" and
             .environment.HG_SERVER_CLUSTER == "hg" and
             .environment.HG_SERVER_USE_PD == "true" and
-            .environment.HG_SERVER_INIT_STORE_ENABLED == "false") and
+            .environment.HG_SERVER_INIT_STORE_ENABLED == "false" and
+            .environment.HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET == "true") and
         [.services.server0.environment.HG_SERVER_REST_URL,
          .services.server1.environment.HG_SERVER_REST_URL,
          .services.server2.environment.HG_SERVER_REST_URL] ==
@@ -277,7 +279,7 @@ diagnose() {
 }
 
 http_status() {
-    curl -sS -o /dev/null -w '%{http_code}' "$@"
+    curl "${CURL_TIMEOUTS[@]}" -sS -o /dev/null -w '%{http_code}' "$@"
 }
 
 wait_hubble_mode() {
@@ -286,7 +288,8 @@ wait_hubble_mode() {
     local response=""
     local _
     for _ in {1..30}; do
-        response="$(curl -fsS http://localhost:8088/api/v1.3/config || true)"
+        response="$(curl "${CURL_TIMEOUTS[@]}" -fsS \
+            http://localhost:8088/api/v1.3/config || true)"
         if jq -e --argjson expected_pd "${expected_pd}" \
                  --argjson expected_auth "${expected_auth}" '
             .status == 200 and
@@ -304,7 +307,8 @@ wait_hubble_mode() {
 
 check_hubble_login() {
     local response
-    response="$(curl -fsS -H "Content-Type: application/json" \
+    response="$(curl "${CURL_TIMEOUTS[@]}" -fsS \
+        -H "Content-Type: application/json" \
         --data "{\"user_name\":\"admin\",\"user_password\":\"${PASSWORD}\"}" \
         http://localhost:8088/api/v1.3/auth/login)"
     jq -e '.status == 200 and .data.user_name == "admin"' \
@@ -312,9 +316,11 @@ check_hubble_login() {
 }
 
 check_hubble_anonymous() {
-    curl -fsS http://localhost:8088/api/v1.3/auth/status |
+    curl "${CURL_TIMEOUTS[@]}" -fsS \
+        http://localhost:8088/api/v1.3/auth/status |
         jq -e '.status == 200 and .data.level == "ANONYMOUS"' >/dev/null
-    curl -fsS http://localhost:8088/api/v1.3/auth/context |
+    curl "${CURL_TIMEOUTS[@]}" -fsS \
+        http://localhost:8088/api/v1.3/auth/context |
         jq -e '
             .status == 200 and
             .data.mode == "NON_AUTH" and
@@ -338,7 +344,8 @@ smoke() {
         diagnose
         return 1
     fi
-    curl -fsS http://localhost:8080/versions >/dev/null
+    curl "${CURL_TIMEOUTS[@]}" -fsS \
+        http://localhost:8080/versions >/dev/null
     if [[ "${expected_auth}" == true ]]; then
         [[ "$(http_status \
             http://localhost:8080/graphspaces/DEFAULT/graphs)" == 401 ]]
@@ -348,7 +355,7 @@ smoke() {
         [[ "$(http_status \
             http://localhost:8080/graphspaces/DEFAULT/graphs)" == 200 ]]
     fi
-    curl -fsS http://localhost:8088/about |
+    curl "${CURL_TIMEOUTS[@]}" -fsS http://localhost:8088/about |
         jq -e '.status == 200 and .data.name == "hugegraph-hubble"' >/dev/null
     wait_hubble_mode "${expected_pd}" "${expected_auth}"
     if [[ "${expected_auth}" == true ]]; then
