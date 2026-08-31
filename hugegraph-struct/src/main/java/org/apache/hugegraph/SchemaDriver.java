@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
@@ -84,7 +85,12 @@ public class SchemaDriver {
 
     private SchemaDriver(PDConfig pdConfig, int cacheSize,
                          long expiration) {
-        this.client = new KvClient<>(pdConfig);
+        this(new KvClient<>(pdConfig), cacheSize, expiration);
+    }
+
+    SchemaDriver(KvClient<WatchResponse> client, int cacheSize,
+                 long expiration) {
+        this.client = Objects.requireNonNull(client, "client");
         this.caches = new SchemaCaches(cacheSize, expiration);
         this.listenMetaChanges();
         log.info(String.format(
@@ -111,11 +117,14 @@ public class SchemaDriver {
     }
 
     public static void destroy() {
-        SchemaDriver instance = INSTANCE.get();
+        SchemaDriver instance = INSTANCE.getAndSet(null);
         if (instance != null) {
-            instance.caches.cancelScheduleCacheClean();
-            instance.caches.destroyAll();
-            INSTANCE.set(null);
+            try {
+                instance.client.close();
+            } finally {
+                instance.caches.cancelScheduleCacheClean();
+                instance.caches.destroyAll();
+            }
         }
     }
 

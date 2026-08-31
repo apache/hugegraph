@@ -22,10 +22,12 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -61,9 +63,9 @@ import lombok.extern.slf4j.Slf4j;
 public class KvClient<T extends WatchResponse> extends AbstractClient implements Closeable {
 
     private static final long RECONNECT_DELAY_MS = 1000L;
+    private static final long WATCH_START_TIMEOUT_MS = 5000L;
     private static final Set<Status.Code> NON_RETRYABLE_WATCH_ERRORS =
-            Set.of(Status.Code.CANCELLED,
-                   Status.Code.INVALID_ARGUMENT,
+            Set.of(Status.Code.INVALID_ARGUMENT,
                    Status.Code.NOT_FOUND,
                    Status.Code.ALREADY_EXISTS,
                    Status.Code.PERMISSION_DENIED,
@@ -74,12 +76,11 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                    Status.Code.UNAUTHENTICATED);
 
     private final AtomicLong lockClientId = new AtomicLong(0);
-    private final AtomicLong watchClientId = new AtomicLong(0);
     private final Semaphore lockSemaphore = new Semaphore(1);
-    private final Semaphore watchSemaphore = new Semaphore(1);
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final Set<WatchSubscription> subscriptions = ConcurrentHashMap.newKeySet();
     private final ScheduledExecutorService reconnectExecutor;
+    private long transportGeneration;
 
     public KvClient(PDConfig pdConfig) {
         this(pdConfig, Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -156,7 +157,6 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
 
     private void onEvent(WatchResponse value, Consumer<T> consumer) {
         log.debug("receive message for {},event Count:{}", value, value.getEventsCount());
-        watchClientId.compareAndSet(0L, value.getClientId());
         if (value.getEventsCount() != 0) {
             try {
                 consumer.accept((T) value);
@@ -173,22 +173,21 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         return new StreamObserver<WatchResponse>() {
             @Override
             public void onNext(WatchResponse value) {
-                if (subscription.observer.get() != this) {
+                if (!acceptFirstFrame(subscription, this)) {
                     return;
                 }
                 switch (value.getState()) {
                     case Starting:
-                        boolean b = watchClientId.compareAndSet(0, value.getClientId());
+                        boolean b = subscription.clientId.compareAndSet(0, value.getClientId());
                         if (b) {
                             log.info("set watch client id to :{}", value.getClientId());
                         }
-                        release(watchSemaphore);
                         break;
                     case Started:
                         onEvent(value, subscription.consumer);
                         break;
                     case Leader_Changed:
-                        requestReconnect(subscription, this);
+                        requestReconnect(subscription, this, true);
                         break;
                     case Alive:
                         // only for check client is alive, do nothing
@@ -201,7 +200,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             @Override
             public void onError(Throwable t) {
                 if (isRetryableWatchError(t)) {
-                    requestReconnect(subscription, this);
+                    requestReconnect(subscription, this, shouldRotateWatchTransport(t));
                 } else {
                     stopWatch(subscription, this, t);
                 }
@@ -209,21 +208,37 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
 
             @Override
             public void onCompleted() {
-                requestReconnect(subscription, this);
+                requestReconnect(subscription, this, false);
             }
         };
     }
 
     public void listen(String key, Consumer<T> consumer) throws PDException {
-        listen(key, consumer, false);
+        listen(key, consumer, throwable -> { }, false);
+    }
+
+    public void listen(String key, Consumer<T> consumer,
+                       Consumer<Throwable> errorConsumer) throws PDException {
+        listen(key, consumer, errorConsumer, false);
     }
 
     public void listenPrefix(String prefix, Consumer<T> consumer) throws PDException {
-        listen(prefix, consumer, true);
+        listen(prefix, consumer, throwable -> { }, true);
     }
 
-    private void listen(String key, Consumer<T> consumer, boolean prefix) throws PDException {
-        WatchSubscription subscription = new WatchSubscription(key, consumer, prefix);
+    public void listenPrefix(String prefix, Consumer<T> consumer,
+                             Consumer<Throwable> errorConsumer) throws PDException {
+        listen(prefix, consumer, errorConsumer, true);
+    }
+
+    private void listen(String key, Consumer<T> consumer,
+                        Consumer<Throwable> errorConsumer,
+                        boolean prefix) throws PDException {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(consumer, "consumer");
+        Objects.requireNonNull(errorConsumer, "errorConsumer");
+        WatchSubscription subscription =
+                new WatchSubscription(key, consumer, errorConsumer, prefix);
         subscriptions.add(subscription);
         try {
             if (!startWatch(subscription)) {
@@ -231,54 +246,55 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
                                       "KvClient is closed");
             }
         } catch (PDException e) {
-            subscription.observer.set(null);
+            cleanupFailedStart(subscription);
+            subscriptions.remove(subscription);
+            throw e;
+        } catch (RuntimeException e) {
+            cleanupFailedStart(subscription);
             subscriptions.remove(subscription);
             throw e;
         }
     }
 
-    private boolean startWatch(WatchSubscription subscription) throws PDException {
-        return startWatch(subscription, true);
+    private void cleanupFailedStart(WatchSubscription subscription) {
+        synchronized (subscription) {
+            subscription.observer.set(null);
+            cancelStartTimeout(subscription);
+        }
     }
 
-    private boolean startWatch(WatchSubscription subscription,
-                               boolean waitForPermit) throws PDException {
-        if (closed.get()) {
-            return false;
-        }
-
-        StreamObserver<WatchResponse> observer = getObserver(subscription);
-        subscription.observer.set(observer);
-        if (closed.get()) {
-            subscription.observer.compareAndSet(observer, null);
-            return false;
-        }
-
-        if (waitForPermit) {
-            acquire(watchClientId, watchSemaphore);
-        } else if (!tryAcquire(watchClientId, watchSemaphore)) {
-            subscription.observer.compareAndSet(observer, null);
-            return false;
-        }
-        if (closed.get()) {
-            subscription.observer.compareAndSet(observer, null);
-            release(watchSemaphore);
+    private boolean startWatch(WatchSubscription subscription) throws PDException {
+        if (closed.get() || !subscriptions.contains(subscription)) {
             return false;
         }
 
         WatchRequest request = WatchRequest.newBuilder()
-                                           .setClientId(watchClientId.get())
+                                           .setClientId(subscription.clientId.get())
                                            .setKey(subscription.key)
                                            .build();
+        StreamObserver<WatchResponse> observer = getObserver(subscription);
         try {
-            if (subscription.prefix) {
-                streamingCall(KvServiceGrpc.getWatchPrefixMethod(), request, observer, 1);
-            } else {
-                streamingCall(KvServiceGrpc.getWatchMethod(), request, observer, 1);
+            synchronized (this) {
+                synchronized (subscription) {
+                    if (closed.get() || !subscriptions.contains(subscription)) {
+                        return false;
+                    }
+                    if (subscription.observer.get() != null) {
+                        return true;
+                    }
+                    subscription.firstFrameReceived = false;
+                    subscription.attemptGeneration = this.transportGeneration;
+                    subscription.observer.set(observer);
+                }
+                if (subscription.prefix) {
+                    streamingCall(KvServiceGrpc.getWatchPrefixMethod(), request, observer, 1);
+                } else {
+                    streamingCall(KvServiceGrpc.getWatchMethod(), request, observer, 1);
+                }
             }
+            scheduleStartTimeout(subscription, observer);
             return true;
         } catch (Exception e) {
-            release(watchSemaphore);
             if (e instanceof PDException) {
                 throw (PDException) e;
             }
@@ -286,15 +302,88 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         }
     }
 
+    private boolean acceptFirstFrame(WatchSubscription subscription,
+                                     StreamObserver<WatchResponse> sourceObserver) {
+        synchronized (subscription) {
+            if (subscription.observer.get() != sourceObserver) {
+                return false;
+            }
+            subscription.firstFrameReceived = true;
+            cancelStartTimeout(subscription);
+            return true;
+        }
+    }
+
+    private void scheduleStartTimeout(WatchSubscription subscription,
+                                      StreamObserver<WatchResponse> sourceObserver)
+            throws PDException {
+        ScheduledFuture<?> timeout;
+        try {
+            timeout = reconnectExecutor.schedule(
+                    () -> onStartTimeout(subscription, sourceObserver),
+                    WATCH_START_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+        } catch (RuntimeException e) {
+            throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                  "Failed to schedule watch start timeout", e);
+        }
+        synchronized (subscription) {
+            if (closed.get() || subscription.observer.get() != sourceObserver ||
+                subscription.firstFrameReceived) {
+                timeout.cancel(false);
+                return;
+            }
+            ScheduledFuture<?> previous = subscription.startTimeout.getAndSet(timeout);
+            if (previous != null) {
+                previous.cancel(false);
+            }
+        }
+    }
+
+    private void onStartTimeout(WatchSubscription subscription,
+                                StreamObserver<WatchResponse> sourceObserver) {
+        synchronized (subscription) {
+            if (subscription.observer.get() != sourceObserver ||
+                subscription.firstFrameReceived) {
+                return;
+            }
+        }
+        log.warn("Watch for key {} did not receive its first response in {} ms",
+                 subscription.key, WATCH_START_TIMEOUT_MS);
+        requestReconnect(subscription, sourceObserver, true);
+    }
+
     private void requestReconnect(WatchSubscription subscription,
-                                  StreamObserver<WatchResponse> sourceObserver) {
-        if (closed.get() ||
-            !subscription.observer.compareAndSet(sourceObserver, null)) {
+                                  StreamObserver<WatchResponse> sourceObserver,
+                                  boolean rotateTransport) {
+        long attemptGeneration;
+        synchronized (subscription) {
+            if (closed.get() || subscription.observer.get() != sourceObserver) {
+                return;
+            }
+            subscription.observer.set(null);
+            cancelStartTimeout(subscription);
+            subscription.clientId.set(0L);
+            attemptGeneration = subscription.attemptGeneration;
+        }
+        if (rotateTransport) {
+            invalidateAttemptStub(attemptGeneration);
+        }
+        scheduleReconnect(subscription);
+    }
+
+    private synchronized void invalidateAttemptStub(long attemptGeneration) {
+        if (attemptGeneration != this.transportGeneration) {
             return;
         }
-        watchClientId.set(0L);
-        release(watchSemaphore);
-        scheduleReconnect(subscription);
+        this.transportGeneration++;
+        invalidateAsyncStub();
+    }
+
+    private void cancelStartTimeout(WatchSubscription subscription) {
+        ScheduledFuture<?> timeout = subscription.startTimeout.getAndSet(null);
+        if (timeout != null) {
+            timeout.cancel(false);
+        }
     }
 
     private static boolean isRetryableWatchError(Throwable throwable) {
@@ -302,20 +391,48 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         return !NON_RETRYABLE_WATCH_ERRORS.contains(code);
     }
 
+    private static boolean shouldRotateWatchTransport(Throwable throwable) {
+        return Status.fromThrowable(throwable).getCode() == Status.Code.UNAVAILABLE;
+    }
+
     private void stopWatch(WatchSubscription subscription,
                            StreamObserver<WatchResponse> sourceObserver,
                            Throwable throwable) {
-        if (!subscription.observer.compareAndSet(sourceObserver, null)) {
-            return;
+        synchronized (subscription) {
+            if (subscription.observer.get() != sourceObserver) {
+                return;
+            }
+            subscription.observer.set(null);
+            cancelStartTimeout(subscription);
         }
-        release(watchSemaphore);
         subscriptions.remove(subscription);
         log.error("Watch for key {} stopped after a non-retryable error: {}",
                   subscription.key, Status.fromThrowable(throwable), throwable);
+        notifyWatchStopped(subscription, unwrapWatchError(throwable));
+    }
+
+    private static Throwable unwrapWatchError(Throwable throwable) {
+        Throwable result = throwable;
+        while (result instanceof PDException && result.getCause() != null) {
+            result = result.getCause();
+        }
+        return result;
+    }
+
+    private void notifyWatchStopped(WatchSubscription subscription, Throwable throwable) {
+        if (!subscription.terminated.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            subscription.errorConsumer.accept(throwable);
+        } catch (RuntimeException e) {
+            log.warn("Failed to report stopped watch for key {}", subscription.key, e);
+        }
     }
 
     private void scheduleReconnect(WatchSubscription subscription) {
-        if (closed.get() || !subscription.reconnectScheduled.compareAndSet(false, true)) {
+        if (closed.get() || !subscriptions.contains(subscription) ||
+            !subscription.reconnectScheduled.compareAndSet(false, true)) {
             return;
         }
         try {
@@ -325,42 +442,40 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
             subscription.reconnectScheduled.set(false);
             if (!closed.get()) {
                 log.warn("Failed to schedule watch reconnect for key {}", subscription.key, e);
+                subscriptions.remove(subscription);
+                notifyWatchStopped(subscription, e);
             }
         }
     }
 
     private void reconnect(WatchSubscription subscription) {
         subscription.reconnectScheduled.set(false);
-        if (closed.get()) {
+        if (closed.get() || !subscriptions.contains(subscription)) {
             return;
         }
         try {
-            if (!startWatch(subscription, false)) {
+            if (!startWatch(subscription)) {
                 scheduleReconnect(subscription);
             }
-        } catch (PDException e) {
-            log.warn("Failed to reconnect watch for key {}", subscription.key, e);
+        } catch (RuntimeException | PDException e) {
             StreamObserver<WatchResponse> observer = subscription.observer.get();
-            if (observer != null) {
-                requestReconnect(subscription, observer);
+            if (!isRetryableWatchError(e)) {
+                log.error("Watch reconnect for key {} failed permanently",
+                          subscription.key, e);
+                if (observer != null) {
+                    stopWatch(subscription, observer, e);
+                } else {
+                    subscriptions.remove(subscription);
+                    notifyWatchStopped(subscription, unwrapWatchError(e));
+                }
+            } else if (observer != null) {
+                log.warn("Failed to reconnect watch for key {}", subscription.key, e);
+                requestReconnect(subscription, observer, shouldRotateWatchTransport(e));
             } else {
+                log.warn("Failed to reconnect watch for key {}", subscription.key, e);
                 scheduleReconnect(subscription);
             }
         }
-    }
-
-    private boolean tryAcquire(AtomicLong clientId, Semaphore semaphore) {
-        if (clientId.get() != 0L) {
-            return true;
-        }
-        if (!semaphore.tryAcquire()) {
-            return false;
-        }
-        if (clientId.get() != 0L) {
-            semaphore.release();
-        }
-        log.info("wait for client starting....");
-        return true;
     }
 
     private void acquire(AtomicLong clientId, Semaphore semaphore) {
@@ -488,36 +603,52 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
         }
         reconnectExecutor.shutdownNow();
         release(lockSemaphore);
-        release(watchSemaphore);
-        for (WatchSubscription subscription : subscriptions) {
-            try {
-                StreamObserver<WatchResponse> observer =
-                        subscription.observer.getAndSet(null);
-                if (observer != null) {
-                    observer.onCompleted();
+        synchronized (this) {
+            for (WatchSubscription subscription : subscriptions) {
+                try {
+                    StreamObserver<WatchResponse> observer;
+                    synchronized (subscription) {
+                        observer = subscription.observer.getAndSet(null);
+                        cancelStartTimeout(subscription);
+                    }
+                    if (observer != null) {
+                        observer.onCompleted();
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to close watch for key {}", subscription.key, e);
                 }
-            } catch (Exception e) {
-                log.warn("Failed to close watch for key {}", subscription.key, e);
             }
+            subscriptions.clear();
+            super.close();
         }
-        subscriptions.clear();
-        super.close();
     }
 
     private final class WatchSubscription {
 
         private final String key;
         private final Consumer<T> consumer;
+        private final Consumer<Throwable> errorConsumer;
         private final boolean prefix;
         private final AtomicReference<StreamObserver<WatchResponse>> observer;
         private final AtomicBoolean reconnectScheduled;
+        private final AtomicBoolean terminated;
+        private final AtomicLong clientId;
+        private final AtomicReference<ScheduledFuture<?>> startTimeout;
+        private boolean firstFrameReceived;
+        private long attemptGeneration;
 
-        private WatchSubscription(String key, Consumer<T> consumer, boolean prefix) {
+        private WatchSubscription(String key, Consumer<T> consumer,
+                                  Consumer<Throwable> errorConsumer,
+                                  boolean prefix) {
             this.key = key;
             this.consumer = consumer;
+            this.errorConsumer = errorConsumer;
             this.prefix = prefix;
             this.observer = new AtomicReference<>();
             this.reconnectScheduled = new AtomicBoolean(false);
+            this.terminated = new AtomicBoolean(false);
+            this.clientId = new AtomicLong(0L);
+            this.startTimeout = new AtomicReference<>();
         }
     }
 }

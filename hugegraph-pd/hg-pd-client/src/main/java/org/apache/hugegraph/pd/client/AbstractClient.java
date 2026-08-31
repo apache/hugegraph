@@ -26,7 +26,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.pd.client.interceptor.Authentication;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
@@ -128,12 +127,15 @@ public abstract class AbstractClient implements Closeable {
         return setAsyncParams(proxy.getStub(), config);
     }
 
+    protected synchronized void invalidateAsyncStub() {
+        proxy.setStub(null);
+    }
+
     protected abstract AbstractStub createStub();
 
     protected abstract AbstractBlockingStub createBlockingStub();
 
     private String resetStub() {
-        String leaderHost = "";
         Exception ex = null;
         for (int i = 0; i < proxy.getHostCount(); i++) {
             String host = proxy.nextHost();
@@ -147,7 +149,7 @@ public abstract class AbstractClient implements Closeable {
                                                                   .setHeader(header).build();
                 GetMembersResponse members = blockingStub.getMembers(request);
                 Metapb.Member leader = members.getLeader();
-                leaderHost = leader.getGrpcUrl();
+                String leaderHost = leader.getGrpcUrl();
                 if (!host.equals(leaderHost)) {
                     closeConnections();
                     channel = ManagedChannelBuilder.forTarget(leaderHost).usePlaintext().build();
@@ -155,10 +157,9 @@ public abstract class AbstractClient implements Closeable {
                 proxy.setBlockingStub(setBlockingParams(createBlockingStub(), config));
                 proxy.setStub(setAsyncParams(createStub(), config));
                 log.info("AbstractClient connect to host = {} success", leaderHost);
-                break;
+                return leaderHost;
             } catch (StatusRuntimeException se) {
                 ex = se;
-                continue;
             } catch (Exception e) {
                 ex = e;
                 String msg =
@@ -166,11 +167,14 @@ public abstract class AbstractClient implements Closeable {
                                       e.getMessage());
                 log.error(msg, e);
             }
+            proxy.setBlockingStub(null);
+            proxy.setStub(null);
         }
-        if (StringUtils.isEmpty(leaderHost) && ex != null) {
+        closeConnections();
+        if (ex != null) {
             log.error(String.format("connect to %s with error: ", config.getServerHost()), ex);
         }
-        return leaderHost;
+        return "";
     }
 
     protected <ReqT, RespT> RespT blockingUnaryCall(
@@ -258,7 +262,7 @@ public abstract class AbstractClient implements Closeable {
             if (e instanceof StatusRuntimeException) {
                 if (retry < proxy.getHostCount()) {
                     synchronized (this) {
-                        proxy.setStub(null);
+                        invalidateAsyncStub();
                     }
                     streamingCall(method, request, responseObserver, ++retry);
                     return;

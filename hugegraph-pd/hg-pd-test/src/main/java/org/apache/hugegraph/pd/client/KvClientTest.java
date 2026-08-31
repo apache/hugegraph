@@ -25,19 +25,19 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -58,12 +58,14 @@ import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.apache.hugegraph.pd.grpc.kv.WatchState;
 import org.apache.hugegraph.pd.grpc.kv.WatchType;
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
+import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.Server;
@@ -149,6 +151,40 @@ public class KvClientTest extends BaseClientTest {
         }
     }
 
+    @Test
+    public void testStubCreationFailureIsReportedAsPdException() throws Exception {
+        AtomicReference<String> grpcAddress = new AtomicReference<>();
+        Server server = ServerBuilder.forPort(0)
+                                     .addService(new PDGrpc.PDImplBase() {
+                                         @Override
+                                         public void getMembers(
+                                                 Pdpb.GetMembersRequest request,
+                                                 StreamObserver<Pdpb.GetMembersResponse> observer) {
+                                             Metapb.Member leader =
+                                                     Metapb.Member.newBuilder()
+                                                                   .setGrpcUrl(grpcAddress.get())
+                                                                   .build();
+                                             observer.onNext(
+                                                     Pdpb.GetMembersResponse.newBuilder()
+                                                                            .setLeader(leader)
+                                                                            .build());
+                                             observer.onCompleted();
+                                         }
+                                     })
+                                     .build()
+                                     .start();
+        grpcAddress.set("127.0.0.1:" + server.getPort());
+        try (FailingStubCreationKvClient testClient =
+                     new FailingStubCreationKvClient(
+                             PDConfig.of(grpcAddress.get()).setAuthority(user, pwd))) {
+            assertThatThrownBy(testClient::initializeTransport)
+                    .isInstanceOf(PDException.class)
+                    .hasMessageContaining("PD unreachable");
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
     @Test(timeout = 2000L)
     public void testStreamingFailurePropagatesToListenCaller() {
         ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
@@ -172,18 +208,41 @@ public class KvClientTest extends BaseClientTest {
 
     @Test(timeout = 2000L)
     public void testStreamingFailureRetriesNextPeer() throws Exception {
+        AtomicReference<String> firstAddress = new AtomicReference<>();
+        AtomicReference<String> secondAddress = new AtomicReference<>();
+        MutableLeaderService firstPdService = new MutableLeaderService(firstAddress);
+        MutableLeaderService secondPdService = new MutableLeaderService(secondAddress);
+        RecordingWatchService secondWatchService = new RecordingWatchService(12L);
+        Server firstServer = ServerBuilder.forPort(0)
+                                          .addService(firstPdService)
+                                          .build()
+                                          .start();
+        Server secondServer = ServerBuilder.forPort(0)
+                                           .addService(secondPdService)
+                                           .addService(secondWatchService)
+                                           .build()
+                                           .start();
+        firstAddress.set("127.0.0.1:" + firstServer.getPort());
+        secondAddress.set("127.0.0.1:" + secondServer.getPort());
         ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
+        when(reconnectExecutor.schedule(any(Runnable.class), anyLong(), any(TimeUnit.class)))
+                .thenReturn(mock(ScheduledFuture.class));
         StatusRuntimeException failure =
                 Status.UNAVAILABLE.withDescription("first peer failed").asRuntimeException();
-        AtomicBoolean secondPeerCalled = new AtomicBoolean(false);
-        PDConfig config = PDConfig.of("first:8686,second:8686").setAuthority(user, pwd);
-        try (SequentialStreamingKvClient testClient =
-                     new SequentialStreamingKvClient(config, reconnectExecutor,
-                                                     new FailingChannel(failure),
-                                                     new SuccessfulChannel(secondPeerCalled))) {
+        PDConfig config = PDConfig.of(firstAddress.get() + "," + secondAddress.get())
+                                  .setAuthority(user, pwd);
+        try (FailFirstStreamingKvClient testClient =
+                     new FailFirstStreamingKvClient(config, reconnectExecutor, failure)) {
             testClient.listen("key", response -> { });
 
-            assertThat(secondPeerCalled).isTrue();
+            Assert.assertTrue(secondWatchService.started.await(2L, TimeUnit.SECONDS));
+            assertThat(firstPdService.calls).hasValue(1);
+            assertThat(secondPdService.calls).hasValue(1);
+            assertThat(secondWatchService.calls).hasValue(1);
+            assertThat(testClient.stubCreations).hasValue(2);
+        } finally {
+            firstServer.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+            secondServer.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
         }
     }
 
@@ -269,8 +328,7 @@ public class KvClientTest extends BaseClientTest {
 
     @Test
     public void testPermanentErrorStopsReconnect() throws Exception {
-        for (Status status : List.of(Status.CANCELLED,
-                                     Status.INVALID_ARGUMENT,
+        for (Status status : List.of(Status.INVALID_ARGUMENT,
                                      Status.NOT_FOUND,
                                      Status.ALREADY_EXISTS,
                                      Status.PERMISSION_DENIED,
@@ -294,6 +352,18 @@ public class KvClientTest extends BaseClientTest {
     }
 
     @Test
+    public void testChannelResetCancellationSchedulesReconnect() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("key", response -> { });
+
+            context.client.call(0).observer.onError(Status.CANCELLED.asRuntimeException());
+
+            assertThat(context.reconnectTasks).hasSize(1);
+            assertThat(context.client.stubInvalidations).isZero();
+        }
+    }
+
+    @Test
     public void testRetryableErrorSchedulesReconnect() throws Exception {
         for (Status status : List.of(Status.UNAVAILABLE, Status.UNKNOWN)) {
             try (WatchTestContext context = newWatchTestContext()) {
@@ -303,6 +373,11 @@ public class KvClientTest extends BaseClientTest {
 
                 assertThat(context.reconnectTasks).hasSize(1);
                 assertThat(context.reconnectDelaysMs).containsExactly(1000L);
+                if (status.getCode() == Status.Code.UNAVAILABLE) {
+                    assertThat(context.client.stubInvalidations).isEqualTo(1);
+                } else {
+                    assertThat(context.client.stubInvalidations).isZero();
+                }
             }
         }
     }
@@ -322,9 +397,193 @@ public class KvClientTest extends BaseClientTest {
 
             assertThat(context.reconnectTasks).hasSize(1);
             assertThat(context.reconnectDelaysMs).containsExactly(1000L);
+            assertThat(context.client.stubInvalidations).isEqualTo(1);
             context.runNextReconnect();
             assertThat(context.client.calls).hasSize(2);
             assertThat(context.client.call(1).request.getClientId()).isZero();
+        }
+    }
+
+    @Test
+    public void testLeaderChangedReconnectsToNewPeer() throws Exception {
+        AtomicReference<String> leaderAddress = new AtomicReference<>();
+        RecordingWatchService firstWatchService = new RecordingWatchService(11L);
+        RecordingWatchService secondWatchService = new RecordingWatchService(12L);
+        Server firstServer = ServerBuilder.forPort(0)
+                                          .addService(new MutableLeaderService(leaderAddress))
+                                          .addService(firstWatchService)
+                                          .build()
+                                          .start();
+        Server secondServer = ServerBuilder.forPort(0)
+                                           .addService(new MutableLeaderService(leaderAddress))
+                                           .addService(secondWatchService)
+                                           .build()
+                                           .start();
+        String firstAddress = "127.0.0.1:" + firstServer.getPort();
+        String secondAddress = "127.0.0.1:" + secondServer.getPort();
+        leaderAddress.set(firstAddress);
+        ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+        Deque<Runnable> reconnectTasks = new ArrayDeque<>();
+        CountDownLatch reconnectScheduled = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            long delay = invocation.getArgument(1);
+            if (invocation.<TimeUnit>getArgument(2).toMillis(delay) == 1000L) {
+                reconnectTasks.addLast(invocation.getArgument(0));
+                reconnectScheduled.countDown();
+            }
+            return mock(ScheduledFuture.class);
+        }).when(executor).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+        PDConfig config = PDConfig.of(firstAddress + "," + secondAddress)
+                                  .setAuthority(user, pwd);
+
+        try (KvClient<WatchResponse> testClient = new KvClient<>(config, executor)) {
+            testClient.listen("key", response -> { });
+            Assert.assertTrue(firstWatchService.started.await(2L, TimeUnit.SECONDS));
+
+            leaderAddress.set(secondAddress);
+            firstWatchService.observer.get().onNext(
+                    WatchResponse.newBuilder().setState(WatchState.Leader_Changed).build());
+            Assert.assertTrue(reconnectScheduled.await(2L, TimeUnit.SECONDS));
+            assertThat(reconnectTasks).hasSize(1);
+            reconnectTasks.removeFirst().run();
+
+            Assert.assertTrue(secondWatchService.started.await(2L, TimeUnit.SECONDS));
+            assertThat(firstWatchService.calls).hasValue(1);
+            assertThat(secondWatchService.calls).hasValue(1);
+        } finally {
+            firstServer.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+            secondServer.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    public void testMissingFirstFrameSchedulesReconnect() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("key", response -> { });
+
+            assertThat(context.watchTimeoutTasks).hasSize(1);
+            assertThat(context.watchTimeoutDelaysMs).containsExactly(5000L);
+            context.runNextWatchTimeout();
+
+            assertThat(context.reconnectTasks).hasSize(1);
+            assertThat(context.client.stubInvalidations).isEqualTo(1);
+            context.runNextReconnect();
+            assertThat(context.client.calls).hasSize(2);
+            assertThat(context.client.call(1).request.getClientId()).isZero();
+        }
+    }
+
+    @Test
+    public void testFirstFramePreventsWatchTimeoutReconnect() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("key", response -> { });
+            context.client.call(0).observer.onNext(startingResponse(7L));
+
+            context.runNextWatchTimeout();
+
+            assertThat(context.reconnectTasks).isEmpty();
+            assertThat(context.client.stubInvalidations).isZero();
+        }
+    }
+
+    @Test
+    public void testStaleWatchTimeoutDoesNotReplaceCurrentObserver() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("key", response -> { });
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+
+            context.runNextWatchTimeout();
+
+            assertThat(context.client.calls).hasSize(2);
+            assertThat(context.reconnectTasks).isEmpty();
+            context.client.call(1).observer.onNext(startingResponse(9L));
+            assertThat(context.client.call(1).request.getClientId()).isZero();
+        }
+    }
+
+    @Test
+    public void testPermanentReconnectFailureStopsSubscription() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            AtomicReference<Throwable> terminalError = new AtomicReference<>();
+            context.client.listen("key", response -> { }, terminalError::set);
+            StatusRuntimeException failure = Status.UNAUTHENTICATED.asRuntimeException();
+            context.client.failNextCallWith(
+                    new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                    "permanent reconnect failure", failure));
+
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+
+            assertThat(context.reconnectTasks).isEmpty();
+            assertThat(context.client.subscriptionCount()).isZero();
+            assertThat(terminalError.get()).isSameAs(failure);
+        }
+    }
+
+    @Test
+    public void testPermanentAsyncErrorIsReportedOnce() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            List<Throwable> terminalErrors = new ArrayList<>();
+            context.client.listenPrefix("prefix", response -> { }, terminalErrors::add);
+            StatusRuntimeException failure = Status.PERMISSION_DENIED.asRuntimeException();
+            StreamObserver<WatchResponse> observer = context.client.call(0).observer;
+
+            observer.onError(failure);
+            observer.onCompleted();
+
+            assertThat(terminalErrors).containsExactly(failure);
+            assertThat(context.client.subscriptionCount()).isZero();
+        }
+    }
+
+    @Test
+    public void testInvalidWatchDoesNotLeakSubscription() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            assertThatThrownBy(() -> context.client.listen(null, response -> { }))
+                    .isInstanceOf(NullPointerException.class);
+
+            assertThat(context.client.subscriptionCount()).isZero();
+            context.client.listen("valid", response -> { });
+            assertThat(context.client.calls).hasSize(1);
+        }
+    }
+
+    @Test
+    public void testStreamingStartFailureDoesNotLeakSubscription() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.failNextCalls(1);
+
+            assertThatThrownBy(() -> context.client.listen("failed", response -> { }))
+                    .isInstanceOf(PDException.class);
+            assertThat(context.client.subscriptionCount()).isZero();
+
+            context.client.listen("valid", response -> { });
+            assertThat(context.client.subscriptionCount()).isEqualTo(1);
+            assertThat(context.client.calls).hasSize(2);
+            assertThat(context.client.call(1).request.getKey()).isEqualTo("valid");
+        }
+    }
+
+    @Test
+    public void testUncheckedReconnectFailureIsRetried() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            Consumer<WatchResponse> activeConsumer = mock(Consumer.class);
+            context.client.listen("key", response -> { });
+            context.client.listen("active", activeConsumer);
+            context.client.failNextCallWith(new IllegalStateException("reconnect setup failed"));
+
+            context.client.call(0).observer.onError(Status.UNKNOWN.asRuntimeException());
+            context.runNextReconnect();
+
+            assertThat(context.reconnectTasks).hasSize(1);
+            assertThat(context.client.stubInvalidations).isZero();
+            WatchResponse activeEvent = eventResponse(21L);
+            context.client.call(1).observer.onNext(activeEvent);
+            verify(activeConsumer).accept(activeEvent);
+            context.runNextReconnect();
+            assertThat(context.client.calls).hasSize(4);
+            assertThat(context.reconnectTasks).isEmpty();
         }
     }
 
@@ -337,6 +596,7 @@ public class KvClientTest extends BaseClientTest {
 
             assertThat(context.reconnectTasks).hasSize(1);
             assertThat(context.reconnectDelaysMs).containsExactly(1000L);
+            assertThat(context.client.stubInvalidations).isZero();
             context.runNextReconnect();
             assertThat(context.client.calls).hasSize(2);
         }
@@ -364,6 +624,7 @@ public class KvClientTest extends BaseClientTest {
             context.client.listen("first", firstConsumer);
             context.client.call(0).observer.onNext(startingResponse(11L));
             context.client.listenPrefix("second", secondConsumer);
+            assertThat(context.client.call(1).request.getClientId()).isZero();
 
             context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
             context.client.call(1).observer.onError(Status.UNAVAILABLE.asRuntimeException());
@@ -383,6 +644,7 @@ public class KvClientTest extends BaseClientTest {
             assertThat(context.client.call(3).methodName)
                     .isEqualTo(KvServiceGrpc.getWatchPrefixMethod().getFullMethodName());
             assertThat(context.client.call(3).request.getKey()).isEqualTo("second");
+            assertThat(context.client.call(3).request.getClientId()).isZero();
             context.client.call(3).observer.onNext(startingResponse(12L));
             WatchResponse secondEvent = eventResponse(13L);
             context.client.call(3).observer.onNext(secondEvent);
@@ -394,8 +656,8 @@ public class KvClientTest extends BaseClientTest {
         }
     }
 
-    @Test(timeout = 5000L)
-    public void testBlockedReconnectReschedulesOtherSubscription() throws Exception {
+    @Test
+    public void testReconnectsDoNotSharePermit() throws Exception {
         try (WatchTestContext context = newWatchTestContext()) {
             context.client.listen("first", response -> { });
             context.client.call(0).observer.onNext(startingResponse(11L));
@@ -404,27 +666,47 @@ public class KvClientTest extends BaseClientTest {
             context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
             context.client.call(1).observer.onError(Status.UNAVAILABLE.asRuntimeException());
             context.runNextReconnect();
+            context.runNextReconnect();
+
+            assertThat(context.client.calls).hasSize(4);
+            assertThat(context.client.call(2).request.getClientId()).isZero();
+            assertThat(context.client.call(3).request.getClientId()).isZero();
+            assertThat(context.reconnectTasks).isEmpty();
+            assertThat(context.reconnectDelaysMs).containsExactly(1000L, 1000L);
+        }
+    }
+
+    @Test
+    public void testActiveSubscriptionDoesNotRestoreFailedSubscriptionClientId()
+            throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("first", response -> { });
+            context.client.call(0).observer.onNext(startingResponse(11L));
+            context.client.listen("second", response -> { });
+
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.client.call(1).observer.onNext(eventResponse(11L));
+            context.runNextReconnect();
 
             assertThat(context.client.calls).hasSize(3);
-            ExecutorService reconnectRunner = Executors.newSingleThreadExecutor();
-            try {
-                Future<?> secondReconnect = reconnectRunner.submit(context::runNextReconnect);
-                secondReconnect.get(1L, TimeUnit.SECONDS);
-            } finally {
-                reconnectRunner.shutdownNow();
-                assertThat(reconnectRunner.awaitTermination(1L, TimeUnit.SECONDS)).isTrue();
-            }
+            assertThat(context.client.call(2).request.getClientId()).isZero();
+        }
+    }
 
-            assertThat(context.client.calls).hasSize(3);
-            assertThat(context.reconnectTasks).hasSize(1);
-            assertThat(context.reconnectDelaysMs).containsExactly(1000L, 1000L, 1000L);
+    @Test
+    public void testStaleChannelErrorDoesNotInvalidateFreshStub() throws Exception {
+        try (WatchTestContext context = newWatchTestContext()) {
+            context.client.listen("first", response -> { });
+            context.client.listen("second", response -> { });
+            StreamObserver<WatchResponse> oldSecondObserver = context.client.call(1).observer;
 
-            context.client.call(2).observer.onNext(startingResponse(12L));
+            context.client.call(0).observer.onError(Status.UNAVAILABLE.asRuntimeException());
+            context.runNextReconnect();
+            oldSecondObserver.onError(Status.CANCELLED.asRuntimeException());
+
+            assertThat(context.client.stubInvalidations).isEqualTo(1);
             context.runNextReconnect();
             assertThat(context.client.calls).hasSize(4);
-            assertThat(context.client.call(3).methodName)
-                    .isEqualTo(KvServiceGrpc.getWatchPrefixMethod().getFullMethodName());
-            assertThat(context.client.call(3).request.getKey()).isEqualTo("second");
         }
     }
 
@@ -488,6 +770,54 @@ public class KvClientTest extends BaseClientTest {
             assertThat(context.reconnectTasks).isEmpty();
             verify(context.reconnectExecutor).shutdownNow();
         }
+    }
+
+    @Test(timeout = 3000L)
+    public void testCloseWaitsForRunningReconnectAndClosesItsChannel() throws Exception {
+        ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
+        Deque<Runnable> reconnectTasks = new ArrayDeque<>();
+        doAnswer(invocation -> {
+            long delay = invocation.getArgument(1);
+            TimeUnit unit = invocation.getArgument(2);
+            if (unit.toMillis(delay) == 1000L) {
+                reconnectTasks.addLast(invocation.getArgument(0));
+            }
+            return mock(ScheduledFuture.class);
+        }).when(reconnectExecutor).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
+        ManagedChannel reconnectChannel = mock(ManagedChannel.class);
+        when(reconnectChannel.shutdownNow()).thenReturn(reconnectChannel);
+        when(reconnectChannel.awaitTermination(anyLong(), any(TimeUnit.class))).thenReturn(true);
+        CloseRaceKvClient testClient =
+                new CloseRaceKvClient(getPdConfig(), reconnectExecutor, reconnectChannel);
+        Thread reconnectThread = null;
+        Thread closeThread = null;
+        try {
+            testClient.listen("key", response -> { });
+            testClient.observer.get().onError(Status.UNKNOWN.asRuntimeException());
+            Runnable reconnect = reconnectTasks.removeFirst();
+            reconnectThread = new Thread(reconnect, "test-watch-reconnect");
+            reconnectThread.start();
+            Assert.assertTrue(testClient.reconnectStarted.await(1L, TimeUnit.SECONDS));
+
+            closeThread = new Thread(testClient::close, "test-kv-client-close");
+            closeThread.start();
+            Assert.assertTrue(testClient.closeEntered.await(1L, TimeUnit.SECONDS));
+            assertThat(testClient.closeReturned.await(200L, TimeUnit.MILLISECONDS)).isFalse();
+        } finally {
+            testClient.allowReconnectStart.countDown();
+            if (reconnectThread != null) {
+                reconnectThread.join(1000L);
+            }
+            if (closeThread != null) {
+                closeThread.join(1000L);
+            }
+        }
+
+        assertThat(reconnectThread).isNotNull();
+        assertThat(closeThread).isNotNull();
+        assertThat(reconnectThread.isAlive()).isFalse();
+        assertThat(closeThread.isAlive()).isFalse();
+        verify(reconnectChannel).shutdownNow();
     }
 
     String key = "key";
@@ -562,17 +892,26 @@ public class KvClientTest extends BaseClientTest {
     private WatchTestContext newWatchTestContext() {
         ScheduledExecutorService reconnectExecutor = mock(ScheduledExecutorService.class);
         Deque<Runnable> reconnectTasks = new ArrayDeque<>();
+        Deque<Runnable> watchTimeoutTasks = new ArrayDeque<>();
         List<Long> reconnectDelaysMs = new ArrayList<>();
+        List<Long> watchTimeoutDelaysMs = new ArrayList<>();
         doAnswer(invocation -> {
-            reconnectTasks.addLast(invocation.getArgument(0));
             long delay = invocation.getArgument(1);
             TimeUnit unit = invocation.getArgument(2);
-            reconnectDelaysMs.add(unit.toMillis(delay));
+            long delayMs = unit.toMillis(delay);
+            if (delayMs == 1000L) {
+                reconnectTasks.addLast(invocation.getArgument(0));
+                reconnectDelaysMs.add(delayMs);
+            } else {
+                watchTimeoutTasks.addLast(invocation.getArgument(0));
+                watchTimeoutDelaysMs.add(delayMs);
+            }
             return mock(ScheduledFuture.class);
         }).when(reconnectExecutor).schedule(any(Runnable.class), anyLong(), any(TimeUnit.class));
         TestKvClient testClient = new TestKvClient(getPdConfig(), reconnectExecutor);
         return new WatchTestContext(testClient, reconnectExecutor,
-                                    reconnectTasks, reconnectDelaysMs);
+                                    reconnectTasks, watchTimeoutTasks,
+                                    reconnectDelaysMs, watchTimeoutDelaysMs);
     }
 
     private static class InitializableKvClient extends KvClient<WatchResponse> {
@@ -583,6 +922,64 @@ public class KvClientTest extends BaseClientTest {
 
         void initializeTransport() throws PDException {
             getStub();
+        }
+    }
+
+    private static class FailingStubCreationKvClient extends KvClient<WatchResponse> {
+
+        FailingStubCreationKvClient(PDConfig pdConfig) {
+            super(pdConfig);
+        }
+
+        @Override
+        protected AbstractStub createStub() {
+            throw new IllegalStateException("stub creation failed");
+        }
+
+        void initializeTransport() throws PDException {
+            getStub();
+        }
+    }
+
+    private static class MutableLeaderService extends PDGrpc.PDImplBase {
+
+        private final AtomicReference<String> leaderAddress;
+        private final AtomicInteger calls = new AtomicInteger();
+
+        MutableLeaderService(AtomicReference<String> leaderAddress) {
+            this.leaderAddress = leaderAddress;
+        }
+
+        @Override
+        public void getMembers(Pdpb.GetMembersRequest request,
+                               StreamObserver<Pdpb.GetMembersResponse> observer) {
+            this.calls.incrementAndGet();
+            Metapb.Member leader = Metapb.Member.newBuilder()
+                                                 .setGrpcUrl(this.leaderAddress.get())
+                                                 .build();
+            observer.onNext(Pdpb.GetMembersResponse.newBuilder().setLeader(leader).build());
+            observer.onCompleted();
+        }
+    }
+
+    private static class RecordingWatchService extends KvServiceGrpc.KvServiceImplBase {
+
+        private final long clientId;
+        private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicReference<StreamObserver<WatchResponse>> observer =
+                new AtomicReference<>();
+        private final CountDownLatch started = new CountDownLatch(1);
+
+        RecordingWatchService(long clientId) {
+            this.clientId = clientId;
+        }
+
+        @Override
+        public void watch(WatchRequest request, StreamObserver<WatchResponse> observer) {
+            this.calls.incrementAndGet();
+            this.observer.set(observer);
+            observer.onNext(startingResponse(this.clientId));
+            this.started.countDown();
         }
     }
 
@@ -602,6 +999,74 @@ public class KvClientTest extends BaseClientTest {
         @Override
         protected AbstractStub getStub() {
             return KvServiceGrpc.newStub(this.channels.removeFirst());
+        }
+    }
+
+    private static class FailFirstStreamingKvClient extends KvClient<WatchResponse> {
+
+        private final StatusRuntimeException firstFailure;
+        private final AtomicInteger stubCreations = new AtomicInteger();
+
+        FailFirstStreamingKvClient(PDConfig pdConfig,
+                                   ScheduledExecutorService reconnectExecutor,
+                                   StatusRuntimeException firstFailure) {
+            super(pdConfig, reconnectExecutor);
+            this.firstFailure = firstFailure;
+        }
+
+        @Override
+        protected AbstractStub createStub() {
+            if (this.stubCreations.getAndIncrement() == 0) {
+                return KvServiceGrpc.newStub(new FailingChannel(this.firstFailure));
+            }
+            return super.createStub();
+        }
+    }
+
+    private static class CloseRaceKvClient extends KvClient<WatchResponse> {
+
+        private final ManagedChannel reconnectChannel;
+        private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicReference<StreamObserver<WatchResponse>> observer =
+                new AtomicReference<>();
+        private final CountDownLatch reconnectStarted = new CountDownLatch(1);
+        private final CountDownLatch allowReconnectStart = new CountDownLatch(1);
+        private final CountDownLatch closeEntered = new CountDownLatch(1);
+        private final CountDownLatch closeReturned = new CountDownLatch(1);
+
+        CloseRaceKvClient(PDConfig pdConfig,
+                          ScheduledExecutorService reconnectExecutor,
+                          ManagedChannel reconnectChannel) {
+            super(pdConfig, reconnectExecutor);
+            this.reconnectChannel = reconnectChannel;
+        }
+
+        @Override
+        protected <ReqT, RespT> void streamingCall(MethodDescriptor<ReqT, RespT> method,
+                                                   ReqT request,
+                                                   StreamObserver<RespT> responseObserver,
+                                                   int retry) {
+            this.observer.set((StreamObserver<WatchResponse>) responseObserver);
+            if (this.calls.incrementAndGet() == 1) {
+                return;
+            }
+            this.reconnectStarted.countDown();
+            try {
+                if (!this.allowReconnectStart.await(1L, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting to start reconnect");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Reconnect was interrupted", e);
+            }
+            this.channel = this.reconnectChannel;
+        }
+
+        @Override
+        public void close() {
+            this.closeEntered.countDown();
+            super.close();
+            this.closeReturned.countDown();
         }
     }
 
@@ -655,71 +1120,27 @@ public class KvClientTest extends BaseClientTest {
         }
     }
 
-    private static class SuccessfulChannel extends Channel {
-
-        private final AtomicBoolean called;
-
-        SuccessfulChannel(AtomicBoolean called) {
-            this.called = called;
-        }
-
-        @Override
-        public String authority() {
-            return "test";
-        }
-
-        @Override
-        public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
-                MethodDescriptor<ReqT, RespT> method, CallOptions callOptions) {
-            return new SuccessfulClientCall<>(this.called);
-        }
-    }
-
-    private static class SuccessfulClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
-
-        private final AtomicBoolean called;
-
-        SuccessfulClientCall(AtomicBoolean called) {
-            this.called = called;
-        }
-
-        @Override
-        public void start(Listener<RespT> responseListener, Metadata headers) {
-            this.called.set(true);
-        }
-
-        @Override
-        public void request(int numMessages) {
-        }
-
-        @Override
-        public void cancel(String message, Throwable cause) {
-        }
-
-        @Override
-        public void halfClose() {
-        }
-
-        @Override
-        public void sendMessage(ReqT message) {
-        }
-    }
-
     private static class WatchTestContext implements AutoCloseable {
 
         private final TestKvClient client;
         private final ScheduledExecutorService reconnectExecutor;
         private final Deque<Runnable> reconnectTasks;
+        private final Deque<Runnable> watchTimeoutTasks;
         private final List<Long> reconnectDelaysMs;
+        private final List<Long> watchTimeoutDelaysMs;
 
         WatchTestContext(TestKvClient client,
                          ScheduledExecutorService reconnectExecutor,
                          Deque<Runnable> reconnectTasks,
-                         List<Long> reconnectDelaysMs) {
+                         Deque<Runnable> watchTimeoutTasks,
+                         List<Long> reconnectDelaysMs,
+                         List<Long> watchTimeoutDelaysMs) {
             this.client = client;
             this.reconnectExecutor = reconnectExecutor;
             this.reconnectTasks = reconnectTasks;
+            this.watchTimeoutTasks = watchTimeoutTasks;
             this.reconnectDelaysMs = reconnectDelaysMs;
+            this.watchTimeoutDelaysMs = watchTimeoutDelaysMs;
         }
 
         Runnable takeNextReconnect() {
@@ -729,6 +1150,11 @@ public class KvClientTest extends BaseClientTest {
 
         void runNextReconnect() {
             takeNextReconnect().run();
+        }
+
+        void runNextWatchTimeout() {
+            assertThat(watchTimeoutTasks).isNotEmpty();
+            watchTimeoutTasks.removeFirst().run();
         }
 
         @Override
@@ -742,6 +1168,9 @@ public class KvClientTest extends BaseClientTest {
         private final List<WatchCall> calls = new ArrayList<>();
         private final List<LockCall> lockCalls = new ArrayList<>();
         private int remainingFailures;
+        private PDException nextFailure;
+        private RuntimeException nextRuntimeFailure;
+        private int stubInvalidations;
         private long lockClientId;
 
         TestKvClient(PDConfig pdConfig, ScheduledExecutorService reconnectExecutor) {
@@ -750,6 +1179,20 @@ public class KvClientTest extends BaseClientTest {
 
         void failNextCalls(int failures) {
             this.remainingFailures = failures;
+        }
+
+        void failNextCallWith(PDException failure) {
+            this.nextFailure = failure;
+        }
+
+        void failNextCallWith(RuntimeException failure) {
+            this.nextRuntimeFailure = failure;
+        }
+
+        int subscriptionCount() throws Exception {
+            Field field = KvClient.class.getDeclaredField("subscriptions");
+            field.setAccessible(true);
+            return ((java.util.Set<?>) field.get(this)).size();
         }
 
         WatchCall call(int index) {
@@ -784,11 +1227,26 @@ public class KvClientTest extends BaseClientTest {
             this.calls.add(new WatchCall(method.getFullMethodName(),
                                          (WatchRequest) request,
                                          (StreamObserver<WatchResponse>) responseObserver));
+            if (this.nextRuntimeFailure != null) {
+                RuntimeException failure = this.nextRuntimeFailure;
+                this.nextRuntimeFailure = null;
+                throw failure;
+            }
+            if (this.nextFailure != null) {
+                PDException failure = this.nextFailure;
+                this.nextFailure = null;
+                throw failure;
+            }
             if (this.remainingFailures > 0) {
                 this.remainingFailures--;
                 throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
                                       "PD is still unreachable");
             }
+        }
+
+        @Override
+        protected void invalidateAsyncStub() {
+            this.stubInvalidations++;
         }
     }
 
