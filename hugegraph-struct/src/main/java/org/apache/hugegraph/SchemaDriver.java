@@ -28,6 +28,7 @@ import java.util.Objects;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
@@ -78,6 +79,9 @@ public class SchemaDriver {
 
     private static final AtomicReference<SchemaDriver> INSTANCE =
             new AtomicReference<>();
+    private static final Object LIFECYCLE_LOCK = new Object();
+    private static boolean destroying;
+    private static CountDownLatch destroyCompletion = new CountDownLatch(0);
     // Client for accessing PD
     private final KvClient<WatchResponse> client;
 
@@ -112,26 +116,65 @@ public class SchemaDriver {
         init(pdConfig, 300, 300 * 1000);
     }
 
-    public static synchronized void init(PDConfig pdConfig, int cacheSize, long expiration) {
-        SchemaDriver instance = INSTANCE.get();
-        if (instance != null) {
-            throw new NotAllowException(
-                    "The SchemaDriver [cacheSize=%s, expiration=%s, " +
-                    "client=%s] has already been initialized and is not " +
-                    "allowed to be initialized again", instance.caches.limit(),
-                    instance.caches.expiration(), instance.client);
+    public static void init(PDConfig pdConfig, int cacheSize, long expiration) {
+        synchronized (LIFECYCLE_LOCK) {
+            SchemaDriver instance = INSTANCE.get();
+            if (instance != null) {
+                throw new NotAllowException(
+                        "The SchemaDriver [cacheSize=%s, expiration=%s, " +
+                        "client=%s] has already been initialized and is not " +
+                        "allowed to be initialized again", instance.caches.limit(),
+                        instance.caches.expiration(), instance.client);
+            }
+            INSTANCE.set(new SchemaDriver(pdConfig, cacheSize, expiration));
         }
-        INSTANCE.set(new SchemaDriver(pdConfig, cacheSize, expiration));
     }
 
-    public static synchronized void destroy() {
-        SchemaDriver instance = INSTANCE.get();
-        if (instance != null) {
-            try {
-                instance.closeResources();
-            } finally {
-                INSTANCE.compareAndSet(instance, null);
+    public static void destroy() {
+        SchemaDriver instance = null;
+        CountDownLatch completion;
+        boolean closeResources = false;
+        synchronized (LIFECYCLE_LOCK) {
+            if (destroying) {
+                completion = destroyCompletion;
+            } else {
+                instance = INSTANCE.get();
+                if (instance == null) {
+                    return;
+                }
+                destroying = true;
+                completion = new CountDownLatch(1);
+                destroyCompletion = completion;
+                closeResources = true;
             }
+        }
+        if (!closeResources) {
+            awaitDestroy(completion);
+            return;
+        }
+        try {
+            instance.closeResources();
+        } finally {
+            synchronized (LIFECYCLE_LOCK) {
+                INSTANCE.compareAndSet(instance, null);
+                destroying = false;
+            }
+            completion.countDown();
+        }
+    }
+
+    private static void awaitDestroy(CountDownLatch completion) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                completion.await();
+                break;
+            } catch (InterruptedException ignored) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 

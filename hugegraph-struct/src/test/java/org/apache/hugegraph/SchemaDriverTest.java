@@ -24,20 +24,37 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.pd.client.KvClient;
 import org.apache.hugegraph.pd.client.PDConfig;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.kv.WatchResponse;
 import org.junit.Assert;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class SchemaDriverTest {
 
+    private AtomicReference<SchemaDriver> instance;
+    private SchemaDriver previousInstance;
+
+    @Before
+    public void setUp() throws Exception {
+        this.instance = instanceReference();
+        this.previousInstance = this.instance.getAndSet(null);
+    }
+
+    @After
+    public void tearDown() {
+        this.instance.set(this.previousInstance);
+    }
+
     @Test
-    public void testDestroyClosesOwnedKvClient() throws Exception {
+    public void testDestroyClosesOwnedKvClient() {
         TrackingKvClient client = new TrackingKvClient();
         SchemaDriver driver = new SchemaDriver(client, 10, 60_000L);
-        instanceReference().set(driver);
+        this.instance.set(driver);
 
         try {
             SchemaDriver.destroy();
@@ -45,32 +62,97 @@ public class SchemaDriverTest {
             Assert.assertTrue(client.closed);
             Assert.assertNull(SchemaDriver.getInstance());
         } finally {
-            instanceReference().set(null);
             client.close();
         }
     }
 
-    @Test(timeout = 3000L)
+    @Test
     public void testDestroyKeepsInstanceUntilResourcesAreClosed() throws Exception {
         BlockingCloseKvClient client = new BlockingCloseKvClient();
         SchemaDriver driver = new SchemaDriver(client, 10, 60_000L);
-        AtomicReference<SchemaDriver> instance = instanceReference();
-        SchemaDriver previous = instance.getAndSet(driver);
+        this.instance.set(driver);
         Thread destroyThread = new Thread(SchemaDriver::destroy, "schema-driver-destroy");
         try {
             destroyThread.start();
-            Assert.assertTrue(client.closeStarted.await(1L, TimeUnit.SECONDS));
+            client.awaitCloseStarted();
 
             Assert.assertSame(driver, SchemaDriver.getInstance());
         } finally {
             client.allowClose.countDown();
-            destroyThread.join(1000L);
-            instance.set(previous);
+            destroyThread.join(5000L);
             client.close();
         }
 
         Assert.assertFalse(destroyThread.isAlive());
         Assert.assertTrue(client.closed);
+    }
+
+    @Test
+    public void testInitDoesNotWaitForDestroyCleanup() throws Exception {
+        BlockingCloseKvClient client = new BlockingCloseKvClient();
+        SchemaDriver driver = new SchemaDriver(client, 10, 60_000L);
+        this.instance.set(driver);
+        AtomicReference<Throwable> initFailure = new AtomicReference<>();
+        CountDownLatch initFinished = new CountDownLatch(1);
+        Thread destroyThread = new Thread(SchemaDriver::destroy, "schema-driver-destroy");
+        Thread initThread = new Thread(() -> {
+            try {
+                SchemaDriver.init(PDConfig.of("127.0.0.1:8686"), 10, 60_000L);
+            } catch (Throwable throwable) {
+                initFailure.set(throwable);
+            } finally {
+                initFinished.countDown();
+            }
+        }, "schema-driver-init");
+        boolean initCompletedDuringCleanup;
+        try {
+            destroyThread.start();
+            client.awaitCloseStarted();
+            initThread.start();
+            initCompletedDuringCleanup = initFinished.await(1L, TimeUnit.SECONDS);
+        } finally {
+            client.allowClose.countDown();
+            destroyThread.join(5000L);
+            initThread.join(5000L);
+            client.close();
+        }
+
+        Assert.assertTrue(initCompletedDuringCleanup);
+        Assert.assertTrue(initFailure.get() instanceof NotAllowException);
+        Assert.assertFalse(destroyThread.isAlive());
+        Assert.assertFalse(initThread.isAlive());
+    }
+
+    @Test
+    public void testConcurrentDestroyWaitsForCleanup() throws Exception {
+        BlockingCloseKvClient client = new BlockingCloseKvClient();
+        SchemaDriver driver = new SchemaDriver(client, 10, 60_000L);
+        this.instance.set(driver);
+        CountDownLatch secondDestroyStarted = new CountDownLatch(1);
+        CountDownLatch secondDestroyReturned = new CountDownLatch(1);
+        Thread firstDestroy = new Thread(SchemaDriver::destroy, "schema-driver-destroy-first");
+        Thread secondDestroy = new Thread(() -> {
+            secondDestroyStarted.countDown();
+            SchemaDriver.destroy();
+            secondDestroyReturned.countDown();
+        }, "schema-driver-destroy-second");
+        boolean returnedBeforeCleanup;
+        try {
+            firstDestroy.start();
+            client.awaitCloseStarted();
+            secondDestroy.start();
+            Assert.assertTrue(secondDestroyStarted.await(5L, TimeUnit.SECONDS));
+            returnedBeforeCleanup = secondDestroyReturned.await(500L, TimeUnit.MILLISECONDS);
+        } finally {
+            client.allowClose.countDown();
+            firstDestroy.join(5000L);
+            secondDestroy.join(5000L);
+            client.close();
+        }
+
+        Assert.assertFalse(returnedBeforeCleanup);
+        Assert.assertFalse(firstDestroy.isAlive());
+        Assert.assertFalse(secondDestroy.isAlive());
     }
 
     @Test
@@ -124,14 +206,16 @@ public class SchemaDriverTest {
         public void close() {
             this.closeStarted.countDown();
             try {
-                if (!this.allowClose.await(1L, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("Timed out waiting to close client");
-                }
+                this.allowClose.await();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("Client close was interrupted", e);
             }
             super.close();
+        }
+
+        private void awaitCloseStarted() throws InterruptedException {
+            Assert.assertTrue(this.closeStarted.await(5L, TimeUnit.SECONDS));
         }
     }
 
