@@ -666,6 +666,8 @@ public final class TraversalUtil {
 
     private static boolean hasUnsafeLabelInChain(Step<?, ?> step) {
         // Partial pushdown can lose candidates before local label filtering.
+        // FIXME: Restore selective pushdown when every candidate schema label
+        // has compatible index coverage for extracted property predicates.
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
             if (step instanceof HasStep &&
                 hasUnsafeLabelPredicate((HasContainerHolder) step)) {

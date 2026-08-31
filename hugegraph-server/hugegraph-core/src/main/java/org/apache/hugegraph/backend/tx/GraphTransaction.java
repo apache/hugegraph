@@ -1056,7 +1056,7 @@ public class GraphTransaction extends IndexableTransaction {
                     ConditionQueryFlatten.flatten((ConditionQuery) query, supportIn).stream();
 
             Stream<Iterator<HugeEdge>> edgeIterators = flattenedQueries.map(cq -> {
-                Id label = cq.uniqueConditionValue(HugeKeys.LABEL);
+                Id label = cq.singleConditionValueOrNull(HugeKeys.LABEL);
                 if (this.storeFeatures().supportsFatherAndSubEdgeLabel() &&
                     label != null &&
                     graph().edgeLabel(label).isFather() &&
@@ -1386,7 +1386,7 @@ public class GraphTransaction extends IndexableTransaction {
                                              boolean matchAll,
                                              HugeGraph graph) {
         assert query.resultType().isEdge();
-        Id label = query.uniqueConditionValue(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
         if (label == null) {
             return false;
         }
@@ -1519,7 +1519,7 @@ public class GraphTransaction extends IndexableTransaction {
             throw new HugeException("Not supported querying by id and conditions: %s", query);
         }
 
-        Id label = query.uniqueConditionValue(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
 
         // Optimize vertex query
         if (label != null && query.resultType().isVertex()) {
@@ -1911,7 +1911,7 @@ public class GraphTransaction extends IndexableTransaction {
         }
 
         ConditionQuery cq = (ConditionQuery) query;
-        if (cq.uniqueConditionValue(HugeKeys.LABEL) != null &&
+        if (cq.singleConditionValueOrNull(HugeKeys.LABEL) != null &&
             cq.resultType().isEdge()) {
             if (cq.conditions().size() == 1) {
                 // g.E().hasLabel(xxx)

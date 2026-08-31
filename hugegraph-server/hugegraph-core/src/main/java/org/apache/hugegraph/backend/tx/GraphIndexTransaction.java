@@ -400,7 +400,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
         // Query by index
         query.optimized(OptimizedType.INDEX);
-        Id label = query.uniqueConditionValue(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
         if (query.allSysprop() && conds.size() == 1 &&
             label != null) {
             // Query only by one EQ/IN-resolved label
@@ -486,7 +486,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         }
         Set<MatchedIndex> indexes = this.collectMatchedIndexes(query);
         if (indexes.isEmpty()) {
-            Id label = query.uniqueConditionValue(HugeKeys.LABEL);
+            Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
             throw noIndexException(this.graph(), query, label);
         }
 
@@ -1804,7 +1804,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
 
             // Check label is matched
-            Id label = query.uniqueConditionValue(HugeKeys.LABEL);
+            Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
             // NOTE: original condition query may not have label condition,
             // which means possibly label == null.
             if (label != null && !element.schemaLabel().id().equals(label)) {

@@ -272,8 +272,9 @@ public class ConditionQuery extends IdQuery {
      * <li>throws if multiple values remain after resolving several relations</li>
      * </ul>
      *
-     * Prefer {@link #conditionValues(Object)}, {@link #uniqueConditionValue(Object)}
-     * or {@link #conditionValue(Object)} for new code that needs explicit
+     * Prefer {@link #conditionValues(Object)},
+     * {@link #singleConditionValueOrNull(Object)} or
+     * {@link #conditionValue(Object)} for new code that needs explicit
      * semantics.
      */
     @Watched
@@ -388,7 +389,7 @@ public class ConditionQuery extends IdQuery {
      * Use this method when callers want "single-or-null" semantics instead of
      * treating multiple remaining values as an error.
      */
-    public <T> T uniqueConditionValue(Object key) {
+    public <T> T singleConditionValueOrNull(Object key) {
         Set<Object> values = this.conditionValues(key);
         if (values.size() != 1) {
             return null;
