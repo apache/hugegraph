@@ -145,6 +145,7 @@ assert_hstore() {
             .pull_policy == "missing") and
         .services.server.environment.HG_SERVER_BACKEND == "hstore" and
         .services.server.environment.HG_SERVER_PD_PEERS == "pd:8686" and
+        .services.server.environment.HG_SERVER_CLUSTER == "hg" and
         .services.server.environment.HG_SERVER_USE_PD == "true" and
         .services.server.environment.HG_SERVER_REST_URL ==
             "http://server:8080" and
@@ -194,12 +195,13 @@ assert_ha() {
             ["http://server0:8080",
              "http://server1:8080",
              "http://server2:8080"] and
-        [.services.server0.healthcheck.test[1],
-         .services.server1.healthcheck.test[1],
-         .services.server2.healthcheck.test[1]] ==
-            ["curl -fsS http://server0:8080/versions >/dev/null",
-             "curl -fsS http://server1:8080/versions >/dev/null",
-             "curl -fsS http://server2:8080/versions >/dev/null"]
+        all([.services.server0, .services.server1, .services.server2][];
+            .healthcheck.test[1] ==
+                "curl -fsS http://$$(hostname):8080/versions >/dev/null" and
+            .healthcheck.interval == "10s" and
+            .healthcheck.timeout == "5s" and
+            .healthcheck.retries == 30 and
+            .healthcheck.start_period == "1m0s")
     ' "${rendered}" >/dev/null
     assert_file_property "${DOCKER_DIR}/conf/hubble/hstore-ha.properties" \
                          "pd.peers=pd0:8686,pd1:8686,pd2:8686"

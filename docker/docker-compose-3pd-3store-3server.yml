@@ -83,7 +83,7 @@ x-server-common: &server-common
   environment:
     <<: *server-environment
   healthcheck:
-    test: ["CMD-SHELL", "curl -fsS http://server0:8080/versions >/dev/null"]
+    test: ["CMD-SHELL", "curl -fsS http://$$(hostname):8080/versions >/dev/null"]
     interval: 10s
     timeout: 5s
     retries: 30
@@ -202,8 +202,6 @@ services:
     environment:
       <<: *server-environment
       HG_SERVER_REST_URL: http://server0:8080
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://server0:8080/versions >/dev/null"]
 
   server1:
     <<: *server-common
@@ -213,8 +211,6 @@ services:
     environment:
       <<: *server-environment
       HG_SERVER_REST_URL: http://server1:8080
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://server1:8080/versions >/dev/null"]
 
   server2:
     <<: *server-common
@@ -224,8 +220,6 @@ services:
     environment:
       <<: *server-environment
       HG_SERVER_REST_URL: http://server2:8080
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://server2:8080/versions >/dev/null"]
 
   hubble:
     image: ${HUBBLE_IMAGE:-hugegraph/hubble:latest}

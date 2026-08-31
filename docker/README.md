@@ -327,17 +327,7 @@ Hubble detects Server authentication through the Server API. Do not add an
 Render every topology with auth-on inputs before submitting a change:
 
 ```bash
-for file in \
-  docker-compose.yml \
-  docker-compose-hstore.yml \
-  docker-compose-3pd-3store-3server.yml
-do
-  docker compose -f "${file}" config --quiet
-done
-docker compose \
-  -f docker-compose-hstore.yml \
-  -f docker-compose.dev.yml \
-  config --quiet
+bash test-compose.sh render
 ```
 
 The HA render is mandatory even when local resources are insufficient to start
