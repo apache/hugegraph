@@ -845,7 +845,7 @@ public class GraphTransaction extends IndexableTransaction {
         query.resetActualOffset();
 
         Iterator<HugeVertex> results = this.queryVerticesFromBackend(query);
-        results = this.filterUnmatchedRecords(results, query);
+        results = this.filterInvalidRecords(results, query);
 
         @SuppressWarnings("unchecked")
         Iterator<Vertex> r = (Iterator<Vertex>) joinTxVertices(query, results);
@@ -861,6 +861,7 @@ public class GraphTransaction extends IndexableTransaction {
         Iterator<HugeVertex> vertices = new MapperIterator<>(entries,
                                                              this::parseEntry);
         vertices = this.filterExpiredResultFromBackend(query, vertices);
+        vertices = this.filterUnmatchedRecords(vertices, query);
 
         if (!this.store().features().supportsQuerySortByInputIds()) {
             // There is no id in BackendEntry, so sort after deserialization
@@ -1011,7 +1012,7 @@ public class GraphTransaction extends IndexableTransaction {
         query.resetActualOffset();
 
         Iterator<HugeEdge> results = this.queryEdgesFromBackend(query);
-        results = this.filterUnmatchedRecords(results, query);
+        results = this.filterInvalidRecords(results, query);
 
         /*
          * Without repeated edges if not querying by BOTH all edges
@@ -1100,6 +1101,7 @@ public class GraphTransaction extends IndexableTransaction {
         });
 
         edges = this.filterExpiredResultFromBackend(query, edges);
+        edges = this.filterUnmatchedRecords(edges, query);
 
         if (!this.store().features().supportsQuerySortByInputIds()) {
             // There is no id in BackendEntry, so sort after deserialization
@@ -1870,10 +1872,10 @@ public class GraphTransaction extends IndexableTransaction {
         }
     }
 
-    private <T extends HugeElement> Iterator<T> filterUnmatchedRecords(
+    private <T extends HugeElement> Iterator<T> filterInvalidRecords(
             Iterator<T> results,
             Query query) {
-        // Filter unused or incorrect records
+        // Filter unused records
         return new FilterIterator<>(results, elem -> {
             // TODO: Left vertex/edge should to be auto removed via async task
             if (elem.schemaLabel().undefined()) {
@@ -1890,6 +1892,19 @@ public class GraphTransaction extends IndexableTransaction {
                 !query.showDeleting()) {
                 return false;
             }
+            return true;
+        });
+    }
+
+    private <T extends HugeElement> Iterator<T> filterUnmatchedRecords(
+            Iterator<T> results,
+            Query query) {
+        /*
+         * Filter against the current index sub-query before restoring input
+         * order, since the order iterator may prefetch the next sub-query and
+         * update the results filter of the origin query.
+         */
+        return new FilterIterator<>(results, elem -> {
             // Process results that query from left index or primary-key
             // Only index query will come here
             return query.resultType().isVertex() != elem.type().isVertex() ||

@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit.cache;
 
 import java.lang.reflect.Field;
+import java.util.Collections;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +31,10 @@ import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
@@ -40,6 +45,7 @@ import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
@@ -519,6 +525,64 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         Assert.assertEquals(0L,
                             Whitebox.invoke(cache, "edgesCache", "size"));
         Assert.assertFalse(cache.queryEdgesByVertex(IdGenerator.of(2)).hasNext());
+    }
+
+    @Test
+    public void testQueryNeedsPostFilter() {
+        Id key = IdGenerator.of(1);
+        ConditionQuery search = new ConditionQuery(HugeType.EDGE);
+        search.query(Condition.textContains(key, "word"));
+
+        Class<?>[] classes = new Class<?>[]{Query.class};
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter", search));
+
+        ConditionQuery searchAny = new ConditionQuery(HugeType.EDGE);
+        searchAny.query(Condition.textContainsAny(
+                        key, Collections.singleton("word")));
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter",
+                                                searchAny));
+
+        ConditionQuery exact = new ConditionQuery(HugeType.EDGE);
+        exact.query(Condition.eq(key, "word"));
+        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                 classes,
+                                                 "queryNeedsPostFilter", exact));
+        exact.optimized(OptimizedType.INDEX_FILTER);
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter", exact));
+
+        ConditionQuery index = new ConditionQuery(HugeType.EDGE);
+        index.query(Condition.eq(key, "word"));
+        index.optimized(OptimizedType.INDEX);
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter", index));
+
+        ConditionQuery labelIndex = new ConditionQuery(HugeType.EDGE);
+        labelIndex.query(Condition.eq(HugeKeys.LABEL, IdGenerator.of(2)));
+        labelIndex.query(Condition.eq(key, "word"));
+        labelIndex.optimized(OptimizedType.INDEX);
+        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                 classes,
+                                                 "queryNeedsPostFilter",
+                                                 labelIndex));
+
+        ConditionQuery sortKeys = new ConditionQuery(HugeType.EDGE);
+        sortKeys.query(Condition.eq(key, "word"));
+        sortKeys.optimized(OptimizedType.SORT_KEYS);
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter",
+                                                sortKeys));
+        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                 classes,
+                                                 "queryNeedsPostFilter",
+                                                 new Query(HugeType.EDGE)));
     }
 
     @Test

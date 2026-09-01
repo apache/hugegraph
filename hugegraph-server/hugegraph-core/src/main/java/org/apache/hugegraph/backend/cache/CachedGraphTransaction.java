@@ -30,6 +30,9 @@ import java.util.concurrent.ConcurrentMap;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.query.Condition.Relation;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
@@ -50,6 +53,7 @@ import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Events;
 
@@ -394,9 +398,9 @@ public final class CachedGraphTransaction extends GraphTransaction {
             return ramtable.query(query);
         }
 
-        if (!this.enableCacheEdge() || query.empty() ||
-            query.paging() || query.bigCapacity()) {
-            // Query all edges or query edges in paging, don't cache it
+        if (!this.enableCacheEdge() || query.empty() || query.paging() ||
+            query.bigCapacity() || queryNeedsPostFilter(query)) {
+            // Don't cache all-edge, paging, large, or post-filtered queries
             return super.queryEdgesFromBackend(query);
         }
 
@@ -420,6 +424,10 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         Iterator<HugeEdge> rs = super.queryEdgesFromBackend(query);
+        if (queryNeedsPostFilter(query)) {
+            // Query optimization may mark a joint-index query for post-filtering
+            return rs;
+        }
 
         /*
          * Iterator can't be cached, caching list instead
@@ -439,6 +447,33 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         return new ExtendableIterator<>(edges.iterator(), rs);
+    }
+
+    private static boolean queryNeedsPostFilter(Query query) {
+        if (!(query instanceof ConditionQuery)) {
+            return false;
+        }
+
+        ConditionQuery cq = (ConditionQuery) query;
+        OptimizedType optimized = cq.optimized();
+        boolean indexWithoutLabel = optimized == OptimizedType.INDEX &&
+                                    cq.condition(HugeKeys.LABEL) == null;
+        if (optimized == OptimizedType.INDEX_FILTER ||
+            optimized == OptimizedType.SORT_KEYS || indexWithoutLabel) {
+            return true;
+        }
+
+        /*
+         * Search index results can also need post-filtering against the current
+         * index sub-query. Avoid eagerly scanning an unbounded number of
+         * candidates here just to fill the edge cache with matched results.
+         */
+        for (Relation relation : cq.relations()) {
+            if (relation.relation().isSearchType()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
