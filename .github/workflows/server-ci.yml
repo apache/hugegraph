@@ -86,56 +86,11 @@ jobs:
         if: ${{ env.BACKEND == 'rocksdb' }}
         run: |
           bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh
-          check_compose() {
-            local file="$1"
-            local server_policy="$2"
-            local hubble_policy="$3"
-            local rendered
-            rendered="$(mktemp)"
+          bash docker/test-compose.sh render
 
-            if env -u HUGEGRAPH_ADMIN_PASSWORD \
-                 docker compose -f "$file" config -q >/dev/null 2>&1; then
-              echo "$file accepted an unset admin password" >&2
-              return 1
-            fi
-            if HUGEGRAPH_ADMIN_PASSWORD= \
-                 docker compose -f "$file" config -q >/dev/null 2>&1; then
-              echo "$file accepted an empty admin password" >&2
-              return 1
-            fi
-
-            HUGEGRAPH_ADMIN_PASSWORD=ci-test-password \
-              docker compose -f "$file" config --format json > "$rendered"
-            jq -e \
-              --arg server_policy "$server_policy" \
-              --arg hubble_policy "$hubble_policy" '
-                .services.server.pull_policy == $server_policy and
-                .services.hubble.pull_policy == $hubble_policy and
-                .services.server.environment.HG_SERVER_USE_PD == "true" and
-                .services.server.environment.HG_SERVER_CLUSTER == "hg" and
-                .services.server.environment.HG_SERVER_REST_URL ==
-                  "http://server:8080" and
-                .services.server.environment.HG_SERVER_INIT_STORE_ENABLED ==
-                  "false" and
-                .services.server.environment.PASSWORD ==
-                  "ci-test-password" and
-                (.services.server.environment.HG_SERVER_AUTH_TOKEN_SECRET !=
-                  null) and
-                .services.hubble.depends_on.server.condition ==
-                  "service_healthy" and
-                (.services.hubble.healthcheck.test[1] |
-                  contains("http://127.0.0.1:8088/about") and
-                  contains("\"status\":200") and
-                  contains("\"name\":\"hugegraph-hubble\"")) and
-                any(.services.hubble.ports[];
-                    .target == 8088 and .published == "8088" and
-                    .host_ip == "127.0.0.1")
-              ' "$rendered" >/dev/null
-            rm -f "$rendered"
-          }
-
-          check_compose docker/docker-compose.yml always always
-          check_compose docker/docker-compose.dev.yml build missing
+      - name: Run Compose auth-on smoke tests
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: bash docker/test-compose.sh smoke
 
       - name: Run check_port unit tests
         if: ${{ env.BACKEND == 'rocksdb' }}
