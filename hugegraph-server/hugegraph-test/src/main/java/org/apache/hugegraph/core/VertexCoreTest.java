@@ -9225,6 +9225,27 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByNonEqLabelAndIndexedPropertyAcrossMixedKeyOr() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        init5Persons();
+        graph.addVertex(T.label, "fan", "name", "unindexed-city-fan",
+                        "age", 20, "city", "Beijing");
+        this.commitTx();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Object> names = g.V().has("city", "Beijing")
+                              .or(__.has(T.label, P.neq("author")),
+                                  __.has("age", 20))
+                              .values("name").toList();
+        Assert.assertEquals(4, names.size());
+        Assert.assertEquals(ImmutableSet.of("James", "Tom Cat", "Lisa",
+                                            "unindexed-city-fan"),
+                            ImmutableSet.copyOf(names));
+    }
+
+    @Test
     public void testQueryByNonEqLabel() {
         HugeGraph graph = graph();
         init10Vertices();

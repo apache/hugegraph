@@ -64,8 +64,10 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
@@ -694,6 +696,43 @@ public final class TraversalUtil {
                 }
             }
             step = step.getNextStep();
+        }
+        // Unflattened Or/And/Not hide label predicates in child traversals.
+        return hasUnsafeLabelInLogicalStep(step);
+    }
+
+    private static boolean hasUnsafeLabelInLogicalStep(Step<?, ?> step) {
+        if (!(step instanceof OrStep ||
+              step instanceof AndStep ||
+              step instanceof NotStep)) {
+            return false;
+        }
+        return hasUnsafeLabelInLocalChildren(step);
+    }
+
+    private static boolean hasUnsafeLabelInLocalChildren(Step<?, ?> step) {
+        if (!(step instanceof TraversalParent)) {
+            return false;
+        }
+        TraversalParent parent = (TraversalParent) step;
+        for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+            if (hasUnsafeLabelInChildTraversal(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUnsafeLabelInChildTraversal(
+            Traversal.Admin<?, ?> traversal) {
+        for (Step<?, ?> childStep : traversal.getSteps()) {
+            if (childStep instanceof HasStep &&
+                hasUnsafeLabelPredicate((HasContainerHolder) childStep)) {
+                return true;
+            }
+            if (hasUnsafeLabelInLocalChildren(childStep)) {
+                return true;
+            }
         }
         return false;
     }
