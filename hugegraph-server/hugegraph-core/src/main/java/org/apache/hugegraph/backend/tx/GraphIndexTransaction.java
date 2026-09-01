@@ -484,6 +484,11 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 }
             }
         }
+        boolean paging = query.paging();
+        if (query.containsConditionValues(HugeKeys.LABEL) &&
+            query.conditionValues(HugeKeys.LABEL).isEmpty()) {
+            return IdHolderList.empty(paging);
+        }
         Set<MatchedIndex> indexes = this.collectMatchedIndexes(query);
         if (indexes.isEmpty()) {
             Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
@@ -491,7 +496,6 @@ public class GraphIndexTransaction extends AbstractTransaction {
         }
 
         // Value type of Condition not matched
-        boolean paging = query.paging();
         if (!validQueryConditionValues(this.graph(), query)) {
             return IdHolderList.empty(paging);
         }

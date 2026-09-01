@@ -174,7 +174,7 @@ public final class TraversalUtil {
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         Step<?, ?> step = newStep.getNextStep();
-        if (hasUnsafeLabelInChain(step)) {
+        if (hasUnsafeLabelInChain(step, true)) {
             return;
         }
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
@@ -263,13 +263,8 @@ public final class TraversalUtil {
             return null;
         }
 
-        List<Object> labels = new ArrayList<>();
-        for (Traversal.Admin<?, ?> child : orStep.getLocalChildren()) {
-            if (!collectPositiveLabelValues(child, labels)) {
-                return null;
-            }
-        }
-        if (labels.isEmpty()) {
+        List<Object> labels = positiveLabelValuesOrNull(orStep);
+        if (labels == null) {
             return null;
         }
 
@@ -295,6 +290,16 @@ public final class TraversalUtil {
             return null;
         }
         return (OrStep<?>) next;
+    }
+
+    private static List<Object> positiveLabelValuesOrNull(OrStep<?> orStep) {
+        List<Object> labels = new ArrayList<>();
+        for (Traversal.Admin<?, ?> child : orStep.getLocalChildren()) {
+            if (!collectPositiveLabelValues(child, labels)) {
+                return null;
+            }
+        }
+        return labels.isEmpty() ? null : labels;
     }
 
     private static boolean collectPositiveLabelValues(
@@ -605,7 +610,7 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
-        if (hasUnsafeLabelInChain(newStep.getNextStep())) {
+        if (hasUnsafeLabelInChain(newStep.getNextStep(), false)) {
             return;
         }
         Step<?, ?> step = newStep;
@@ -664,14 +669,26 @@ public final class TraversalUtil {
         return true;
     }
 
-    private static boolean hasUnsafeLabelInChain(Step<?, ?> step) {
+    private static boolean hasUnsafeLabelInChain(Step<?, ?> step,
+                                                 boolean followPositiveLabelOr) {
         // Partial pushdown can lose candidates before local label filtering.
         // FIXME: Restore selective pushdown when every candidate schema label
         // has compatible index coverage for extracted property predicates.
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
-            if (step instanceof HasStep &&
-                hasUnsafeLabelPredicate((HasContainerHolder) step)) {
-                return true;
+            if (step instanceof HasStep) {
+                HasContainerHolder holder = (HasContainerHolder) step;
+                if (hasUnsafeLabelPredicate(holder)) {
+                    return true;
+                }
+                if (followPositiveLabelOr &&
+                    hasMatchIndexSensitivePredicate(holder)) {
+                    OrStep<?> orStep = positiveLabelOnlyOrStepAfter(step);
+                    if (orStep != null &&
+                        positiveLabelValuesOrNull(orStep) != null) {
+                        step = orStep.getNextStep();
+                        continue;
+                    }
+                }
             }
             step = step.getNextStep();
         }

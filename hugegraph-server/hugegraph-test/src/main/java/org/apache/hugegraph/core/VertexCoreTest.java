@@ -41,6 +41,7 @@ import org.apache.hugegraph.backend.id.Id.IdType;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
 import org.apache.hugegraph.backend.id.SplicingIdGenerator;
+import org.apache.hugegraph.backend.page.IdHolderList;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
@@ -53,8 +54,8 @@ import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeElement;
@@ -9297,6 +9298,28 @@ public class VertexCoreTest extends BaseCoreTest {
                                          "collectMatchedIndexes",
                                          conflicting);
         Assert.assertEquals(0, matchedIndexes.size());
+    }
+
+    @Test
+    public void testQueryByUserpropWithConflictingLabels() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+
+        VertexLabel person = graph.vertexLabel("person");
+        VertexLabel computer = graph.vertexLabel("computer");
+        PropertyKey city = graph.propertyKey("city");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.eq(HugeKeys.LABEL, person.id());
+        query.eq(HugeKeys.LABEL, computer.id());
+        query.query(Condition.eq(city.id(), "Beijing"));
+
+        IdHolderList holders = Whitebox.invoke(params().graphTransaction(),
+                                               "indexTx",
+                                               "queryByUserprop",
+                                               query);
+        Assert.assertTrue(holders.isEmpty());
+        Assert.assertFalse(holders.paging());
     }
 
     @Test

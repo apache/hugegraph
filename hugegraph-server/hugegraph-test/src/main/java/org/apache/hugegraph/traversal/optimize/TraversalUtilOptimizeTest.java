@@ -166,6 +166,31 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerKeepsUnsafeLabelAfterPositiveLabelOr() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        PropertyKey city = propertyKey(2L, "city", DataType.TEXT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+        Mockito.when(graph.propertyKey("city")).thenReturn(city);
+        Mockito.when(graph.vertexLabels()).thenReturn(Collections.emptyList());
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("age", P.gt(1))
+                  .or(__.hasLabel("person"), __.hasLabel("software"))
+                  .has(T.label, P.neq("author"))
+                  .has("city", "Beijing"), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
     public void testExtractHasContainerKeepsUnsupportedOrLabelLocal() {
         Traversal.Admin<?, ?> traversal = __.V()
                                            .has("age", P.gt(18))
@@ -348,6 +373,26 @@ public class TraversalUtilOptimizeTest {
 
         Assert.assertTrue(newStep.getHasContainers().isEmpty());
         Assert.assertEquals(2, countHasSteps(traversal));
+    }
+
+    @Test
+    public void testExtractHasContainerStopsVertexChainAtPositiveLabelOr() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().out().has("age", P.gt(18))
+                  .or(__.hasLabel("person"), __.hasLabel("software"))
+                  .has(T.label, P.neq("author")), graph);
+        HugeVertexStep<?> newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertEquals(1, newStep.getHasContainers().size());
+        Assert.assertEquals("age",
+                            newStep.getHasContainers().get(0).getKey());
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
     }
 
     @Test
