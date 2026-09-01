@@ -114,6 +114,15 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
                           .collect(Collectors.toList());
     }
 
+    /**
+     * The tables to truncate when the graph is cleared, all the tables of
+     * the store by default. A store that keeps backend metadata which must
+     * survive a clear excludes it here, see {@link HbaseSystemStore}.
+     */
+    protected List<String> tableNamesToTruncate() {
+        return this.tableNames();
+    }
+
     public String namespace() {
         return this.namespace;
     }
@@ -371,7 +380,7 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
         };
 
         // Truncate tables
-        List<String> tables = this.tableNames();
+        List<String> tables = this.tableNamesToTruncate();
         Map<String, Future<Void>> futures = new HashMap<>(tables.size());
 
         try {
@@ -383,7 +392,7 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
                 wait.apply(entry.getKey(), entry.getValue());
             }
         } catch (Exception e) {
-            this.enableTables();
+            this.enableTables(tables);
             throw new BackendException(
                     "Failed to disable table for '%s' store", e, this.store);
         }
@@ -397,7 +406,7 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
                 wait.apply(entry.getKey(), entry.getValue());
             }
         } catch (Exception e) {
-            this.enableTables();
+            this.enableTables(tables);
             throw new BackendException(
                     "Failed to truncate table for '%s' store", e, this.store);
         }
@@ -405,8 +414,8 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
         LOG.debug("Store truncated: {}", this.store);
     }
 
-    private void enableTables() {
-        for (String table : this.tableNames()) {
+    private void enableTables(List<String> tables) {
+        for (String table : tables) {
             try {
                 this.sessions.enableTable(table);
             } catch (Exception e) {
@@ -572,6 +581,18 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
         protected List<String> tableNames() {
             List<String> tableNames = super.tableNames();
             tableNames.add(this.meta.table());
+            return tableNames;
+        }
+
+        @Override
+        protected List<String> tableNamesToTruncate() {
+            /*
+             * Keep the meta table: it holds the backend version written by
+             * init(), truncating it makes the version check fail at the next
+             * startup (see #2209)
+             */
+            List<String> tableNames = this.tableNames();
+            tableNames.remove(this.meta.table());
             return tableNames;
         }
 

@@ -626,13 +626,20 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         ConditionQuery cq;
         Query origin = query.originQuery();
         byte[] position = null;
-        if (query.paging() && !query.page().isEmpty()) {
-            position = PageState.fromString(query.page()).position();
-        }
         byte[] ownerStart = this.ownerByQueryDelegate.apply(query.resultType(),
                                                             query.start());
         byte[] ownerEnd = this.ownerByQueryDelegate.apply(query.resultType(),
                                                           query.end());
+        if (shouldUseOrderedRangeScan(query)) {
+            start = rangeIndexScanStart(query, start);
+            type = rangeIndexScanType(query, type);
+            return session.scanOrdered(this.table(), ownerStart, ownerEnd,
+                                       start, end, type, null,
+                                       rangeScanBudget(query));
+        }
+        if (query.paging() && !query.page().isEmpty()) {
+            position = PageState.fromString(query.page()).position();
+        }
         if (origin instanceof ConditionQuery &&
             (query.resultType().isEdge() || query.resultType().isVertex())) {
             cq = (ConditionQuery) query.originQuery();
@@ -648,6 +655,37 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
         return session.scan(this.table(), ownerStart,
                             ownerEnd, start, end, type, null, position);
+    }
+
+    static boolean shouldUseOrderedRangeScan(IdRangeQuery query) {
+        return query.resultType().isRangeIndex() &&
+               (query.paging() || !query.noLimitAndOffset());
+    }
+
+    static byte[] rangeIndexScanStart(IdRangeQuery query, byte[] start) {
+        if (query.paging() && !query.page().isEmpty()) {
+            return PageState.fromString(query.page()).position();
+        }
+        return start;
+    }
+
+    static int rangeIndexScanType(IdRangeQuery query, int scanType) {
+        if (query.paging() && !query.page().isEmpty()) {
+            scanType &= ~Session.SCAN_GTE_BEGIN;
+            scanType |= Session.SCAN_GTE_BEGIN;
+        }
+        return scanType;
+    }
+
+    static long rangeScanBudget(IdRangeQuery query) {
+        if (query.noLimit()) {
+            return HgStoreClientConst.NO_LIMIT;
+        }
+        long total = query.total();
+        if (total < 0L || total == Long.MAX_VALUE) {
+            return HgStoreClientConst.NO_LIMIT;
+        }
+        return total + 1L;
     }
 
     protected BackendColumnIterator queryByCond(Session session,

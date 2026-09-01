@@ -18,7 +18,9 @@
 package org.apache.hugegraph.pd.raft;
 
 import java.util.Collections;
+import java.util.List;
 
+import org.apache.hugegraph.pd.config.PDConfig;
 import org.apache.hugegraph.pd.raft.auth.IpAuthHandler;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.After;
@@ -26,11 +28,17 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.alipay.remoting.ExtendedNettyChannelHandler;
+import com.alipay.remoting.config.BoltServerOption;
 import com.alipay.sofa.jraft.Closure;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.error.RaftError;
+import com.alipay.sofa.jraft.rpc.RpcServer;
+import com.alipay.sofa.jraft.rpc.impl.BoltRpcServer;
+
+import io.netty.channel.ChannelHandler;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -114,6 +122,43 @@ public class RaftEngineIpAuthIntegrationTest {
         // Handler should NOT be refreshed — old IP still allowed
         Assert.assertTrue(invokeIsIpAllowed(handler, "10.0.0.1"));
         Assert.assertFalse(invokeIsIpAllowed(handler, "127.0.0.1"));
+    }
+
+    @Test
+    public void testIpWhitelistConfigurationControlsPipeline() {
+        assertIpWhitelistPipeline(null, true);
+        assertIpWhitelistPipeline(true, true);
+        assertIpWhitelistPipeline(false, false);
+    }
+
+    private void assertIpWhitelistPipeline(Boolean configured,
+                                           boolean expectedInstalled) {
+        PDConfig pdConfig = new PDConfig();
+        PDConfig.Raft raftConfig = pdConfig.new Raft();
+        if (configured != null) {
+            raftConfig.setIpWhitelistEnabled(configured);
+        }
+
+        com.alipay.remoting.rpc.RpcServer server =
+                new com.alipay.remoting.rpc.RpcServer();
+        RpcServer rpcServer = new BoltRpcServer(server);
+        Whitebox.invokeStatic(
+                RaftEngine.class,
+                new Class[]{List.class, RpcServer.class, boolean.class},
+                "configureRaftServerIpWhitelist",
+                Collections.emptyList(), rpcServer,
+                raftConfig.isIpWhitelistEnabled());
+
+        ExtendedNettyChannelHandler pipeline =
+                server.option(BoltServerOption.EXTENDED_NETTY_CHANNEL_HANDLER);
+        if (!expectedInstalled) {
+            Assert.assertNull(pipeline);
+            return;
+        }
+        Assert.assertNotNull(pipeline);
+        List<ChannelHandler> handlers = pipeline.frontChannelHandlers();
+        Assert.assertEquals(1, handlers.size());
+        Assert.assertTrue(handlers.get(0) instanceof IpAuthHandler);
     }
 
     private boolean invokeIsIpAllowed(IpAuthHandler handler, String ip) {

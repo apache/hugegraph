@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.client.util;
 
+import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -35,10 +36,17 @@ public final class ExecutorPool {
 
     public static ThreadPoolExecutor createExecutor(String name, long keepAliveTime,
                                                     int coreThreads, int maxThreads) {
+        return createExecutor(name, keepAliveTime, coreThreads, maxThreads,
+                              new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    public static ThreadPoolExecutor createExecutor(String name, long keepAliveTime,
+                                                    int coreThreads, int maxThreads,
+                                                    RejectedExecutionHandler handler) {
         return new ThreadPoolExecutor(coreThreads, maxThreads, keepAliveTime, TimeUnit.SECONDS,
                                       new SynchronousQueue<>(),
                                       newThreadFactory(name),
-                                      new ThreadPoolExecutor.CallerRunsPolicy()
+                                      handler
         );
     }
 

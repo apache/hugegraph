@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.api.filter;
 
+import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.container.DynamicFeature;
 import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.FeatureContext;
@@ -27,9 +28,8 @@ public class RedirectFilterDynamicFeature implements DynamicFeature {
 
     @Override
     public void configure(ResourceInfo resourceInfo, FeatureContext context) {
-        if (resourceInfo.getResourceMethod()
-                        .isAnnotationPresent(RedirectFilter.RedirectMasterRole.class)) {
-            context.register(RedirectFilter.class);
+        if (resourceInfo.getResourceMethod().isAnnotationPresent(RedirectFilter.RedirectMasterRole.class)) {
+            context.register(RedirectFilter.class, Priorities.USER + 1);
         }
     }
 }

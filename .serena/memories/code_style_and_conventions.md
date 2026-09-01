@@ -6,7 +6,7 @@
 - `.licenserc.yaml` + apache-rat-plugin + skywalking-eyes — License header validation
 
 ## Core Rules
-- **Line length**: 100 chars (120 for XML)
+- **Line length**: 120 chars
 - **Indent**: 4 spaces, continuation 8 spaces
 - **Charset**: UTF-8, LF line endings, final newline
 - **Imports**: Sorted `$*` → `java` → `javax` → `org` → `com` → `*`, no star imports (threshold 100)
