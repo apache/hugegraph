@@ -583,6 +583,24 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
                                                  "queryNeedsPostFilter",
                                                  labelIndexIds));
 
+        ConditionQuery vertexLabelIndex =
+                new ConditionQuery(HugeType.VERTEX);
+        vertexLabelIndex.query(Condition.eq(HugeKeys.LABEL,
+                                            IdGenerator.of(2)));
+        vertexLabelIndex.query(Condition.eq(key, "word"));
+        vertexLabelIndex.optimized(OptimizedType.INDEX);
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter",
+                                                vertexLabelIndex));
+
+        ConditionQuery primaryKey = new ConditionQuery(HugeType.VERTEX);
+        primaryKey.optimized(OptimizedType.PRIMARY_KEY);
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter",
+                                                primaryKey));
+
         ConditionQuery sortKeys = new ConditionQuery(HugeType.EDGE);
         sortKeys.query(Condition.eq(key, "word"));
         sortKeys.optimized(OptimizedType.SORT_KEYS);

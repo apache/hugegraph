@@ -5166,6 +5166,10 @@ public class EdgeCoreTest extends BaseCoreTest {
                      .has("contribution", Text.contains("2"))
                      .toList();
         Assert.assertEquals(2, edges.size());
+        assertContains(edges, "authored", james, book2,
+                       "contribution", "1992 2 2", "score", 4);
+        assertContains(edges, "authored", james, book3,
+                       "contribution", "1993 3 2", "score", 3);
 
         edges = graph.traversal().E().hasLabel("authored")
                      .has("score", P.gt(3))

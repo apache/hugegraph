@@ -454,12 +454,16 @@ public final class CachedGraphTransaction extends GraphTransaction {
             if (query instanceof ConditionQuery) {
                 ConditionQuery cq = (ConditionQuery) query;
                 OptimizedType optimized = cq.optimized();
-                boolean indexWithoutLabel =
+                if (cq.hasSearchCondition()) {
+                    return true;
+                }
+
+                boolean edgeIndexWithLabel =
+                        cq.resultType().isEdge() &&
                         optimized == OptimizedType.INDEX &&
-                        cq.condition(HugeKeys.LABEL) == null;
-                if (optimized == OptimizedType.INDEX_FILTER ||
-                    optimized == OptimizedType.SORT_KEYS ||
-                    indexWithoutLabel || cq.hasSearchCondition()) {
+                        cq.condition(HugeKeys.LABEL) != null;
+                if (optimized != OptimizedType.NONE &&
+                    !edgeIndexWithLabel) {
                     return true;
                 }
             }
