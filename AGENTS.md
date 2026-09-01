@@ -85,7 +85,7 @@ Before writing new tests, check existing suites under `hugegraph-server/hugegrap
 
 ## Style & Pre-commit
 
-- Line 100, 4-space indent, LF, UTF-8, **no star imports**
+- Line 120, 4-space indent, LF, UTF-8, **no star imports**
 - Commit format: `feat|fix|refactor(module): msg`
 - Run before pushing:
   ```bash

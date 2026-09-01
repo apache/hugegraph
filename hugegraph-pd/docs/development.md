@@ -282,7 +282,7 @@ HugeGraph PD follows Apache HugeGraph code style.
 
 **Key Style Rules**:
 - **Indentation**: 4 spaces (no tabs)
-- **Line length**: 100 characters (Java), 120 characters (comments)
+- **Line length**: 120 characters
 - **Braces**: K&R style (opening brace on same line)
 - **Imports**: No wildcard imports (`import java.util.*`)
 

@@ -653,8 +653,20 @@ public class GraphIndexTransaction extends AbstractTransaction {
         } else {
             return new PagingIdHolder(query, q -> {
                 return this.doIndexQueryOnce(indexLabel, q);
-            });
+            }, this.keepBackendIndexOrder(indexLabel, query));
         }
+    }
+
+    private boolean keepBackendIndexOrder(IndexLabel indexLabel,
+                                          ConditionQuery query) {
+        return keepBackendIndexOrder(this.store().provider().isHstore(),
+                                     indexLabel.indexType(), query);
+    }
+
+    static boolean keepBackendIndexOrder(boolean hstore, IndexType indexType,
+                                         ConditionQuery query) {
+        return hstore && indexType.isRange() &&
+               (query.paging() || !query.noLimitAndOffset());
     }
 
     @Watched(prefix = "index")
@@ -693,7 +705,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             } finally {
                 locks.unlock();
             }
-        });
+        }, this.keepBackendIndexOrder(indexLabel, query));
     }
 
     private void recordIndexValue(ConditionQuery query, HugeIndex index) {

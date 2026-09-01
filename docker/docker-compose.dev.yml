@@ -15,122 +15,28 @@
 # limitations under the License.
 #
 
-name: hugegraph-single
-
-networks:
-  hg-net:
-    driver: bridge
-
-volumes:
-  hg-pd-data:
-  hg-store-data:
-
 services:
   pd:
+    image: hugegraph/pd:dev
+    pull_policy: build
     build:
       context: ..
       dockerfile: hugegraph-pd/Dockerfile
-    container_name: hg-pd
-    hostname: pd
-    restart: unless-stopped
-    networks: [hg-net]
-    environment:
-      HG_PD_GRPC_HOST: pd
-      HG_PD_GRPC_PORT: "8686"
-      HG_PD_REST_PORT: "8620"
-      HG_PD_RAFT_ADDRESS: pd:8610
-      HG_PD_RAFT_PEERS_LIST: pd:8610
-      HG_PD_INITIAL_STORE_LIST: store:8500
-      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
-    ports:
-      - "8620:8620"
-    volumes:
-      - hg-pd-data:/hugegraph-pd/pd_data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8620/v1/health >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
       start_period: 20s
 
   store:
+    image: hugegraph/store:dev
+    pull_policy: build
     build:
       context: ..
       dockerfile: hugegraph-store/Dockerfile
-    container_name: hg-store
-    hostname: store
-    restart: unless-stopped
-    networks: [hg-net]
-    depends_on:
-      pd:
-        condition: service_healthy
-    environment:
-      HG_STORE_PD_ADDRESS: pd:8686
-      HG_STORE_GRPC_HOST: store
-      HG_STORE_GRPC_PORT: "8500"
-      HG_STORE_REST_PORT: "8520"
-      HG_STORE_RAFT_ADDRESS: store:8510
-      HG_STORE_DATA_PATH: /hugegraph-store/storage
-    ports:
-      - "8520:8520"
-    volumes:
-      - hg-store-data:/hugegraph-store/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8520/v1/health >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 10s
-      retries: 30
       start_period: 30s
 
   server:
-    image: ${HUGEGRAPH_SERVER_IMAGE:-hugegraph/server:dev}
-    pull_policy: ${HUGEGRAPH_SERVER_PULL_POLICY:-build}
+    image: hugegraph/server:dev
+    pull_policy: build
     build:
       context: ..
       dockerfile: hugegraph-server/Dockerfile-hstore
-    container_name: hg-server
-    hostname: server
-    restart: unless-stopped
-    networks: [hg-net]
-    depends_on:
-      store:
-        condition: service_healthy
-    environment:
-      HG_SERVER_BACKEND: hstore
-      HG_SERVER_PD_PEERS: pd:8686
-      HG_SERVER_CLUSTER: hg
-      HG_SERVER_USE_PD: "true"
-      HG_SERVER_REST_URL: http://server:8080
-      HG_SERVER_MIN_FREE_MEMORY: "0"
-      HG_SERVER_INIT_STORE_ENABLED: "false"
-      HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
-      PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:?Set a non-default admin password}
-    ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://server:8080/versions >/dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-
-  hubble:
-    image: ${HUBBLE_IMAGE:-hugegraph/hubble:latest}
-    pull_policy: ${HUBBLE_PULL_POLICY:-missing}
-    container_name: hg-hubble
-    hostname: hubble
-    restart: unless-stopped
-    networks: [hg-net]
-    depends_on:
-      server:
-        condition: service_healthy
-    ports:
-      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
-    volumes:
-      - ./hugegraph-hubble.properties:/hubble/conf/hugegraph-hubble.properties:ro
-    healthcheck:
-      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8088/about) && printf '%s' \"$$body\" | grep -q '\"status\":200' && printf '%s' \"$$body\" | grep -q '\"name\":\"hugegraph-hubble\"'"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s

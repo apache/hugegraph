@@ -140,6 +140,8 @@ public class PDConfig {
 
         @Value("${raft.enable:true }")
         private boolean enable;
+        @Value("${raft.ip-whitelist.enabled:true}")
+        private boolean ipWhitelistEnabled = true;
         @Value("${raft.address}")
         private String address;
         @Value("${pd.data-path}")

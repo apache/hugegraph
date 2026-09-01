@@ -146,10 +146,7 @@ public class GraphSpaceAPI extends API {
             throw new ForbiddenException("Forbidden to set role " + role.toString());
         }
 
-        boolean hasGraph = role.equals(HugeDefaultRole.OBSERVER);
-
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = role.equals(HugeDefaultRole.OBSERVER) && StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, name, graph);
         }
@@ -203,9 +200,8 @@ public class GraphSpaceAPI extends API {
             defaultRole.equals(HugeDefaultRole.SPACE)) {
             throw new ForbiddenException("Forbidden to check role " + role);
         }
-        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) &&
+                           StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, name, graph);
         }
@@ -213,10 +209,10 @@ public class GraphSpaceAPI extends API {
         boolean result;
         if (hasGraph) {
             result = authManager.isDefaultRole(name, graph, user,
-                                               defaultRole);
+                                               defaultRole) ||
+                     authManager.isDefaultRole(name, user, defaultRole);
         } else {
-            result = authManager.isDefaultRole(name, user,
-                                               defaultRole);
+            result = authManager.isDefaultRole(name, user, defaultRole);
         }
         return manager.serializer().writeMap(ImmutableMap.of("check", result));
     }
@@ -259,9 +255,7 @@ public class GraphSpaceAPI extends API {
             E.checkArgument(false, "Invalid role value '%s'", role);
             defaultRole = null; // unreachable, satisfies compiler
         }
-        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) && StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, name, graph);
         }

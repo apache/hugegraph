@@ -8478,6 +8478,54 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByRangeIndexKeepsOrderAcrossStorePages() {
+        Assume.assumeTrue("Not support paging",
+                          storeFeatures().supportsQueryByPage());
+
+        initRangeIndexOrderTestData();
+
+        GraphTraversalSource g = graph().traversal();
+        List<Vertex> vertices = g.V().hasLabel("ranked")
+                                 .has("rank", P.between(0, 130))
+                                 .limit(70)
+                                 .toList();
+        assertRanks(vertices, 0, 70);
+
+        GraphTraversal<Vertex, Vertex> firstPage =
+                g.V().hasLabel("ranked")
+                 .has("rank", P.between(0, 130))
+                 .has("~page", "")
+                 .limit(70);
+        vertices = firstPage.toList();
+        assertRanks(vertices, 0, 70);
+
+        String page = TraversalUtil.page(firstPage);
+        Assert.assertNotNull(page);
+        Assert.assertFalse(page.isEmpty());
+
+        vertices = g.V().hasLabel("ranked")
+                    .has("rank", P.between(0, 130))
+                    .has("~page", page)
+                    .limit(70)
+                    .toList();
+        assertRanks(vertices, 70, 60);
+    }
+
+    @Test
+    public void testQueryByRangeIndexKeepsOffsetOrderInHstore() {
+        Assume.assumeTrue("Only run for hstore",
+                          Objects.equals("hstore", graph().backend()));
+
+        initRangeIndexOrderTestData();
+
+        List<Vertex> vertices = graph().traversal().V().hasLabel("ranked")
+                                       .has("rank", P.between(0, 130))
+                                       .range(65, 75)
+                                       .toList();
+        assertRanks(vertices, 65, 10);
+    }
+
+    @Test
     public void testQueryByPropertyInPageWithLimitGtPageSize() {
         // FIXME: The legacy HStore guard and related coverage debt are tracked in
         // https://github.com/apache/hugegraph/issues/3090
@@ -9504,12 +9552,45 @@ public class VertexCoreTest extends BaseCoreTest {
         this.commitTx();
     }
 
+    private void initRangeIndexOrderTestData() {
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("rank").asInt().create();
+        schema.vertexLabel("ranked")
+              .properties("rank")
+              .useCustomizeStringId()
+              .create();
+        schema.indexLabel("rankedByRank")
+              .onV("ranked")
+              .by("rank")
+              .range()
+              .create();
+
+        for (int rank = 129; rank >= 0; rank--) {
+            graph().addVertex(T.label, "ranked", T.id, "ranked-" + rank,
+                              "rank", rank);
+        }
+        this.commitTx();
+    }
+
     private Vertex vertex(String label, String pkName, Object pkValue) {
         List<Vertex> vertices = graph().traversal().V()
                                        .hasLabel(label).has(pkName, pkValue)
                                        .toList();
         Assert.assertTrue(vertices.size() <= 1);
         return vertices.size() == 1 ? vertices.get(0) : null;
+    }
+
+    private static void assertRanks(List<Vertex> vertices, int firstRank,
+                                    int expectedSize) {
+        List<Integer> actualRanks = new ArrayList<>(vertices.size());
+        for (Vertex vertex : vertices) {
+            actualRanks.add(vertex.value("rank"));
+        }
+        Assert.assertEquals(expectedSize, vertices.size());
+        for (int i = 0; i < expectedSize; i++) {
+            Assert.assertEquals("Unexpected ranks: " + actualRanks,
+                                firstRank + i, (int) actualRanks.get(i));
+        }
     }
 
     private static void assertContains(List<Vertex> vertices,

@@ -67,10 +67,25 @@ public class ExtendableIterator<T> extends WrappedIterator<T> {
 
     @Override
     public void close() throws Exception {
+        Throwable failure = null;
         for (Iterator<T> iter : this.itors) {
             if (iter instanceof AutoCloseable) {
-                ((AutoCloseable) iter).close();
+                try {
+                    ((AutoCloseable) iter).close();
+                } catch (Exception | Error e) {
+                    if (failure == null) {
+                        failure = e;
+                    } else if (failure != e) {
+                        failure.addSuppressed(e);
+                    }
+                }
             }
+        }
+        if (failure instanceof Exception) {
+            throw (Exception) failure;
+        }
+        if (failure != null) {
+            throw (Error) failure;
         }
     }
 

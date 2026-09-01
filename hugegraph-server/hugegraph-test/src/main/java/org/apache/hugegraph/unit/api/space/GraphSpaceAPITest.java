@@ -88,6 +88,82 @@ public class GraphSpaceAPITest extends BaseUnitTest {
     }
 
     @Test
+    public void testAdminCanCheckSpaceWideObserverRole() {
+        GraphSpaceAPI api = new GraphSpaceAPI();
+        GraphManager manager = managerWithDefaultRoleContext(ADMIN, true);
+        setContext(ADMIN);
+
+        String result = api.checkDefaultRole(manager, GRAPHSPACE, TARGET,
+                                             "OBSERVER", null);
+
+        Assert.assertContains("\"check\":true", result);
+    }
+
+    @Test
+    public void testCurrentUserCanCheckSpaceWideObserverRole() {
+        ManagerAPI api = new ManagerAPI();
+        GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
+        setContext(TARGET);
+
+        String result = api.checkDefaultRole(manager, GRAPHSPACE,
+                                             "OBSERVER", null);
+
+        Assert.assertContains("\"check\":true", result);
+    }
+
+    @Test
+    public void testCurrentUserConcreteGraphCheckIncludesSpaceObserver() {
+        ManagerAPI api = new ManagerAPI();
+        GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
+        AuthManager auth = manager.authManager();
+        Mockito.when(auth.isDefaultRole(GRAPHSPACE, GRAPH, TARGET,
+                                        HugeDefaultRole.OBSERVER))
+               .thenReturn(false);
+        setContext(TARGET);
+
+        String result = api.checkDefaultRole(manager, GRAPHSPACE,
+                                             "OBSERVER", GRAPH);
+
+        Assert.assertContains("\"check\":true", result);
+        Mockito.verify(auth).isDefaultRole(GRAPHSPACE, TARGET,
+                                           HugeDefaultRole.OBSERVER);
+    }
+
+    @Test
+    public void testConcreteGraphCheckIncludesSpaceObserver() {
+        GraphSpaceAPI api = new GraphSpaceAPI();
+        GraphManager manager = managerWithDefaultRoleContext(ADMIN, true);
+        AuthManager auth = manager.authManager();
+        Mockito.when(auth.isDefaultRole(GRAPHSPACE, GRAPH, TARGET,
+                                        HugeDefaultRole.OBSERVER))
+               .thenReturn(false);
+        setContext(ADMIN);
+
+        String result = api.checkDefaultRole(manager, GRAPHSPACE, TARGET,
+                                             "OBSERVER", GRAPH);
+
+        Assert.assertContains("\"check\":true", result);
+        Mockito.verify(auth).isDefaultRole(GRAPHSPACE, TARGET,
+                                           HugeDefaultRole.OBSERVER);
+    }
+
+    @Test
+    public void testSpaceObserverDeleteDoesNotModifyGraphRoles() {
+        GraphSpaceAPI api = new GraphSpaceAPI();
+        GraphManager manager = managerWithDefaultRoleContext(ADMIN, true);
+        AuthManager auth = manager.authManager();
+        setContext(ADMIN);
+
+        api.deleteDefaultRole(manager, GRAPHSPACE, TARGET, "OBSERVER", null);
+
+        Mockito.verify(auth).deleteDefaultRole(
+                GRAPHSPACE, TARGET, HugeDefaultRole.OBSERVER);
+        Mockito.verify(auth, Mockito.never()).deleteDefaultRole(
+                Mockito.eq(GRAPHSPACE), Mockito.eq(TARGET),
+                Mockito.eq(HugeDefaultRole.OBSERVER), Mockito.anyString());
+    }
+
+    @Test
     public void testManagerDefaultRoleRejectsMissingGraphSpace() {
         ManagerAPI api = new ManagerAPI();
         GraphManager manager = managerWithDefaultRoleContext(TARGET, false);
@@ -191,6 +267,9 @@ public class GraphSpaceAPITest extends BaseUnitTest {
         Mockito.when(authManager.isDefaultRole(GRAPHSPACE, TARGET,
                                                HugeDefaultRole.SPACE))
                .thenReturn(true);
+        Mockito.when(authManager.isDefaultRole(GRAPHSPACE, TARGET,
+                                               HugeDefaultRole.OBSERVER))
+               .thenReturn(true);
         Mockito.when(authManager.findUser(TARGET))
                .thenReturn(new HugeUser(TARGET));
 
@@ -206,7 +285,8 @@ public class GraphSpaceAPITest extends BaseUnitTest {
 
         MetaManager metaManager = Mockito.mock(MetaManager.class);
         Mockito.when(metaManager.graphConfigs(GRAPHSPACE))
-               .thenReturn(Collections.emptyMap());
+               .thenReturn(Collections.singletonMap(
+                       GRAPHSPACE + "-" + GRAPH, Collections.emptyMap()));
         Whitebox.setInternalState(manager, "metaManager", metaManager);
 
         Map<String, Graph> graphs = new ConcurrentHashMap<>();
