@@ -3629,6 +3629,24 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByNonEqLabelAndIndexedPropertyAcrossRange() {
+        HugeGraph graph = graph();
+        initEdgeLabelQueryEdges();
+
+        GraphTraversalSource g = graph.traversal();
+
+        List<Edge> edges = g.E().has("score", 2).skip(0)
+                            .has(T.label, P.neq("reviewed")).toList();
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals("recommended", edges.get(0).label());
+
+        edges = g.E().has("score", 2).limit(1000)
+                 .has(T.label, P.neq("reviewed")).toList();
+        Assert.assertEquals(1, edges.size());
+        Assert.assertEquals("recommended", edges.get(0).label());
+    }
+
+    @Test
     public void testQueryEdgesByMixedConnectiveLabel() {
         HugeGraph graph = graph();
         init18Edges();
