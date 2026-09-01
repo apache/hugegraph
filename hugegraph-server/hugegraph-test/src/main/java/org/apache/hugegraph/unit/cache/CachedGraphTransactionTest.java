@@ -34,6 +34,7 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.event.EventHub;
@@ -537,6 +538,11 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
                                                 classes,
                                                 "queryNeedsPostFilter", search));
+        IdQuery searchIds = new IdQuery(search, IdGenerator.of(2));
+        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                classes,
+                                                "queryNeedsPostFilter",
+                                                searchIds));
 
         ConditionQuery searchAny = new ConditionQuery(HugeType.EDGE);
         searchAny.query(Condition.textContainsAny(
@@ -571,6 +577,11 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
                                                  classes,
                                                  "queryNeedsPostFilter",
                                                  labelIndex));
+        IdQuery labelIndexIds = new IdQuery(labelIndex, IdGenerator.of(2));
+        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
+                                                 classes,
+                                                 "queryNeedsPostFilter",
+                                                 labelIndexIds));
 
         ConditionQuery sortKeys = new ConditionQuery(HugeType.EDGE);
         sortKeys.query(Condition.eq(key, "word"));

@@ -30,7 +30,6 @@ import java.util.concurrent.ConcurrentMap;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.Condition.Relation;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.IdQuery;
@@ -322,7 +321,8 @@ public final class CachedGraphTransaction extends GraphTransaction {
     @Watched(prefix = "graphcache")
     protected Iterator<HugeVertex> queryVerticesFromBackend(Query query) {
         if (this.enableCacheVertex() &&
-            query.idsSize() > 0 && query.conditionsSize() == 0) {
+            query.idsSize() > 0 && query.conditionsSize() == 0 &&
+            !queryNeedsPostFilter(query)) {
             return this.queryVerticesByIds((IdQuery) query);
         } else {
             return super.queryVerticesFromBackend(query);
@@ -450,28 +450,20 @@ public final class CachedGraphTransaction extends GraphTransaction {
     }
 
     private static boolean queryNeedsPostFilter(Query query) {
-        if (!(query instanceof ConditionQuery)) {
-            return false;
-        }
-
-        ConditionQuery cq = (ConditionQuery) query;
-        OptimizedType optimized = cq.optimized();
-        boolean indexWithoutLabel = optimized == OptimizedType.INDEX &&
-                                    cq.condition(HugeKeys.LABEL) == null;
-        if (optimized == OptimizedType.INDEX_FILTER ||
-            optimized == OptimizedType.SORT_KEYS || indexWithoutLabel) {
-            return true;
-        }
-
-        /*
-         * Search index results can also need post-filtering against the current
-         * index sub-query. Avoid eagerly scanning an unbounded number of
-         * candidates here just to fill the edge cache with matched results.
-         */
-        for (Relation relation : cq.relations()) {
-            if (relation.relation().isSearchType()) {
-                return true;
+        while (query != null) {
+            if (query instanceof ConditionQuery) {
+                ConditionQuery cq = (ConditionQuery) query;
+                OptimizedType optimized = cq.optimized();
+                boolean indexWithoutLabel =
+                        optimized == OptimizedType.INDEX &&
+                        cq.condition(HugeKeys.LABEL) == null;
+                if (optimized == OptimizedType.INDEX_FILTER ||
+                    optimized == OptimizedType.SORT_KEYS ||
+                    indexWithoutLabel || cq.hasSearchCondition()) {
+                    return true;
+                }
             }
+            query = query.originQuery();
         }
         return false;
     }
