@@ -51,6 +51,8 @@ mvn clean install -pl hugegraph-server -am -DskipTests
 For separate distributed-module builds, install `hugegraph-struct` first,
 then build PD, Store and Server. Module guidance covers tests and CI prerequisites.
 Commons tests require `-DskipCommonsTests=false`; a successful build does not imply its tests ran.
+Add `-Dwith-ranger-plugin` to a `hugegraph-dist` build to bundle the Apache Ranger
+authorization plugin jar into `lib/` (opt-in — heavy transitive deps, off by default).
 
 - Java style: 120 columns, 4 spaces, no star imports; see [.editorconfig](.editorconfig).
 - Before pushing code: `mvn editorconfig:format`,

@@ -1,0 +1,170 @@
+{
+  "id": 200,
+  "guid": "a0b1c2d3-e4f5-6789-abcd-ef0123456789",
+  "isEnabled": true,
+  "createdBy": "Admin",
+  "updatedBy": "Admin",
+  "name": "hugegraph",
+  "displayName": "HugeGraph",
+  "description": "Apache Ranger service definition for HugeGraph graph database",
+  "implClass": "org.apache.hugegraph.ranger.RangerHugeGraphService",
+  "label": "HugeGraph",
+  "version": 1,
+
+  "resources": [
+    {
+      "itemId": 1,
+      "name": "graphspace",
+      "type": "string",
+      "level": 10,
+      "parent": "",
+      "mandatory": true,
+      "lookupSupported": true,
+      "recursiveSupported": false,
+      "excludesSupported": true,
+      "matcher": "org.apache.ranger.plugin.resourcematcher.RangerDefaultResourceMatcher",
+      "matcherOptions": {"wildCard": "true", "ignoreCase": "false"},
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "Graph Space",
+      "description": "HugeGraph graph space (multi-tenancy)"
+    },
+    {
+      "itemId": 2,
+      "name": "graph",
+      "type": "string",
+      "level": 20,
+      "parent": "graphspace",
+      "mandatory": true,
+      "lookupSupported": true,
+      "recursiveSupported": false,
+      "excludesSupported": true,
+      "matcher": "org.apache.ranger.plugin.resourcematcher.RangerDefaultResourceMatcher",
+      "matcherOptions": {"wildCard": "true", "ignoreCase": "false"},
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "Graph",
+      "description": "HugeGraph graph name (e.g. hugegraph)"
+    },
+    {
+      "itemId": 3,
+      "name": "resource-type",
+      "type": "string",
+      "level": 30,
+      "parent": "graph",
+      "mandatory": false,
+      "lookupSupported": true,
+      "recursiveSupported": false,
+      "excludesSupported": true,
+      "matcher": "org.apache.ranger.plugin.resourcematcher.RangerDefaultResourceMatcher",
+      "matcherOptions": {"wildCard": "true", "ignoreCase": "true"},
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "Resource Type",
+      "description": "HugeGraph resource type: vertex, edge, schema, gremlin, task, meta, all, …"
+    },
+    {
+      "itemId": 4,
+      "name": "label",
+      "type": "string",
+      "level": 40,
+      "parent": "resource-type",
+      "mandatory": false,
+      "lookupSupported": false,
+      "recursiveSupported": false,
+      "excludesSupported": true,
+      "matcher": "org.apache.ranger.plugin.resourcematcher.RangerDefaultResourceMatcher",
+      "matcherOptions": {"wildCard": "true", "ignoreCase": "false"},
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "Label",
+      "description": "Vertex or edge label name (* for all)"
+    }
+  ],
+
+  "accessTypes": [
+    {
+      "itemId": 1,
+      "name": "read",
+      "label": "Read",
+      "impliedGrants": []
+    },
+    {
+      "itemId": 2,
+      "name": "write",
+      "label": "Write",
+      "impliedGrants": ["read"]
+    },
+    {
+      "itemId": 3,
+      "name": "delete",
+      "label": "Delete",
+      "impliedGrants": ["read"]
+    },
+    {
+      "itemId": 4,
+      "name": "execute",
+      "label": "Execute",
+      "impliedGrants": []
+    },
+    {
+      "itemId": 5,
+      "name": "admin",
+      "label": "Admin",
+      "impliedGrants": ["read", "write", "delete", "execute"]
+    }
+  ],
+
+  "configs": [
+    {
+      "itemId": 1,
+      "name": "username",
+      "type": "string",
+      "subType": "",
+      "mandatory": true,
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "Username",
+      "defaultValue": ""
+    },
+    {
+      "itemId": 2,
+      "name": "password",
+      "type": "password",
+      "subType": "",
+      "mandatory": true,
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "Password",
+      "defaultValue": ""
+    },
+    {
+      "itemId": 3,
+      "name": "hugegraph.url",
+      "type": "string",
+      "subType": "",
+      "mandatory": true,
+      "validationRegEx": "",
+      "validationMessage": "",
+      "uiHint": "",
+      "label": "HugeGraph REST URL",
+      "defaultValue": "http://localhost:8080"
+    }
+  ],
+
+  "enums": [],
+
+  "contextEnrichers": [],
+
+  "policyConditions": [],
+
+  "dataMaskDef": {},
+
+  "rowFilterDef": {}
+}

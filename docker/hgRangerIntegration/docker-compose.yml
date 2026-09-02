@@ -1,0 +1,90 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+services:
+
+  ranger-solr:
+    image: solr:8.11
+    container_name: ranger-solr
+    ports:
+      - "8983:8983"
+    environment:
+      SOLR_JAVA_MEM: "-Xms512m -Xmx512m"
+    volumes:
+      - ./solr-init.sh:/solr-init.sh:ro
+      - ./ranger-audits-conf:/ranger-audits-conf:ro
+    entrypoint: ["/solr-init.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s 'http://localhost:8983/solr/admin/cores?action=STATUS&core=ranger_audits&wt=json' | grep -q '\"status\":0' || exit 1"]
+      interval: 10s
+      start_period: 60s
+      retries: 10
+
+  ranger-db:
+    image: postgres:14
+    container_name: ranger-db
+    environment:
+      POSTGRES_DB: ranger
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: rangeradmin
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ranger"]
+      interval: 10s
+      retries: 10
+
+  ranger:
+    image: apache/ranger:2.4.0
+    container_name: ranger
+    depends_on:
+      ranger-db:
+        condition: service_healthy
+      ranger-solr:
+        condition: service_healthy
+    environment:
+      RANGER_ADMIN_DB_HOST: ranger-db
+      RANGER_ADMIN_DB_NAME: ranger
+      RANGER_ADMIN_DB_USER: rangeradmin
+      RANGER_ADMIN_DB_PASS: rangeradmin
+      RANGER_ADMIN_DB_ROOT_USER: postgres
+      RANGER_ADMIN_DB_ROOT_PASS: rangeradmin
+      RANGER_ADMIN_HTTP_PORT: "6080"
+      RANGER_AUDIT_SOLR_URLS: "http://ranger-solr:8983/solr/ranger_audits"
+    ports:
+      - "6080:6080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --server-response -O/dev/null http://localhost:6080/login.jsp 2>&1 | grep -q '200 OK' || exit 1"]
+      interval: 15s
+      start_period: 180s
+      retries: 20
+
+  hugegraph:
+    build:
+      context: ../..
+      dockerfile: docker/hgRangerIntegration/Dockerfile.hugegraph
+    image: hugegraph-ranger-local:1.7.0
+    container_name: hugegraph
+    depends_on:
+      ranger:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./ranger-hugegraph-security.xml:/hugegraph-server/conf/ranger-hugegraph-security.xml:ro
+      - ./rest-server.properties:/hugegraph-server/conf/rest-server.properties:ro
+      - ./hugegraph.properties:/hugegraph-server/conf/graphs/hugegraph.properties:ro
