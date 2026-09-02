@@ -726,10 +726,15 @@ reachable through the PD client Service:
 
 ```bash
 kubectl port-forward -n hugegraph svc/hugegraph-pd-client 8620:8620
-curl http://127.0.0.1:8620/v1/task/patrolPartitions   # reconcile shard groups, process tombstoned Stores
-curl http://127.0.0.1:8620/v1/task/balanceLeaders     # spread Raft leaders
-curl http://127.0.0.1:8620/v1/task/balancePartitions  # spread partition data
+curl -u hg: http://127.0.0.1:8620/v1/task/patrolPartitions   # reconcile shard groups, process tombstoned Stores
+curl -u hg: http://127.0.0.1:8620/v1/task/balanceLeaders     # spread Raft leaders
+curl -u hg: http://127.0.0.1:8620/v1/task/balancePartitions  # spread partition data
 ```
+
+The `-u hg:` credential is required. Without it these endpoints answer HTTP 200
+with an `Unauthorized` body and the task does not run, so a recovery attempt
+looks successful while doing nothing. The password is empty on purpose: current
+PD images check only the service name. See Limitations.
 
 Run `patrolPartitions` after replacing a Store that is not coming back,
 `balancePartitions` once the cluster is stable again, and `balanceLeaders`
@@ -866,12 +871,16 @@ independently of the release name.
   the switch ignore the flag and keep the whitelist active, so they remain
   exposed to those failure modes; use images built from a source tree that
   includes the switch.
-- The PD management REST endpoints (`/v1/members`, `/v1/stores`) reject
-  requests on current images (`invalid service name`), and unauthenticated
-  GETs return HTTP 200 with an `Unauthorized` JSON body. Until that is
-  resolved upstream, the operator-triggered Disaster Recovery flow above may
-  be unavailable; rely on `helm test`, Pod readiness, and Server APIs for
-  health checks.
+- The PD management REST endpoints (`/v1/members`, `/v1/stores`,
+  `/v1/task/*`) authenticate on service name only. Current images compare the
+  Basic-auth username against a fixed internal set (`hg`, `store`, `hubble`,
+  `vermeer`) and do not validate the password at all, so any password,
+  including an empty one, is accepted for those names while every other name
+  is refused. Treat these endpoints as unauthenticated: keep the PD client
+  Service on ClusterIP and do not expose it. All three outcomes, success,
+  refusal, and a missing credential, return HTTP 200 with the result in the
+  body, so the status code carries no signal and no health check should key on
+  it. The Disaster Recovery calls above therefore need `-u hg:` to run.
 - No TLS, backups, Operator, multi-cluster support, automatic leader transfer,
   or a complete monitoring stack. Store recovery is manual on current builds:
   re-replication after Store loss, leader balancing, and partition
