@@ -569,9 +569,11 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         }
         if (newConditions.size() > 0) {
             // NOTE: copy before reset, the origin query is still used by core
-            // for result filtering after the backend scan returns
+            // for result filtering after the backend scan returns; drop the
+            // back reference so the serialized payload stays flat
             ConditionQuery pushdown = conditionQuery.copy();
             pushdown.resetConditions(newConditions);
+            pushdown.setOriginQuery(null);
             return pushdown;
         } else {
             return null;
@@ -600,6 +602,7 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             // NOTE: copy before reset, see prepareConditionQuery()
             ConditionQuery pushdown = conditionQuery.copy();
             pushdown.resetConditions(newConditions);
+            pushdown.setOriginQuery(null);
             return pushdown;
         } else {
             return null;

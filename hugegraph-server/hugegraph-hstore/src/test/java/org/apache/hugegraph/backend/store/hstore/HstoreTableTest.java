@@ -169,6 +169,12 @@ public class HstoreTableTest {
         // the pushed-down query is a copy: the origin query keeps all its
         // conditions for core-side filtering after the scan returns
         Assert.assertEquals(before, origin.conditions().size());
+        // pushed payload: user-prop condition survives, owner-vertex is
+        // dropped, and the back reference to the origin query is cleared
+        ConditionQuery pushed = ConditionQuery.fromBytes(session.lastQueryBytes);
+        Assert.assertNull(pushed.condition(HugeKeys.OWNER_VERTEX));
+        Assert.assertFalse(pushed.userpropConditions().isEmpty());
+        Assert.assertNull(pushed.originQuery());
     }
 
     private HstoreTable newTestTable() {
