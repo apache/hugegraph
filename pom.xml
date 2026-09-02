@@ -222,7 +222,9 @@
                             <exclude>**/src/main/java/org/apache/hugegraph/pd/grpc/**</exclude>
                             <exclude>**/src/main/java/org/apache/hugegraph/store/grpc/**</exclude>
                             <!-- Docker local data and notebook -->
-                            <exclude>docker/**</exclude>
+                            <exclude>docker/data/**</exclude>
+                            <exclude>docker/.ipynb_checkpoints/**</exclude>
+                            <exclude>docker/aml_sql_showcase_hugegraph.ipynb</exclude>
                         </excludes>
                         <consoleOutput>true</consoleOutput>
                     </configuration>
