@@ -139,6 +139,8 @@ pd:
   # path and the PD never turns Ready. Startup and liveness stay on
   # /v1/health regardless, so a PD that merely lost its leader is not
   # restarted.
+  # TODO(apache/hugegraph#3185): change the default to /v1/ready in the same
+  # commit that pins the image tag to 1.8.0 or newer.
   readinessPath: /v1/health
   probes:
     startup:
@@ -215,6 +217,8 @@ store:
   # up, not a raft quorum. On PD images that carry /v1/ready (1.8.0 on,
   # apache/hugegraph#3185) set /v1/ready so the count means quorum members;
   # on older images that path does not exist and Stores never leave Init.
+  # TODO(apache/hugegraph#3185): change the default to /v1/ready in the same
+  # commit that pins the image tag to 1.8.0 or newer.
   waitPath: /v1/health
   # Bound the PD wait so a cluster whose PDs never come up fails visibly
   # instead of sitting in Init:0/1 forever.
