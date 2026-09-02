@@ -326,14 +326,9 @@ server:
       key: token_secret
       # When existingSecret and value are empty, create a kept release-auth-token Secret.
       autoGenerate: true
-  # URL announced to PD via server.urls_to_pd for discovery clients such as
-  # Hubble. Empty keeps the in-cluster Server Service URL
-  # (http://<release>-server.<ns>.svc:<port>). Set this to a URL reachable
-  # from outside the cluster (NodePort, LoadBalancer, or Ingress) when an
-  # external Hubble uses PD mode; PD will hand that address back to Hubble.
-  # Trade-off: in-cluster discovery clients then receive the same URL, so it
-  # must also be reachable from inside the cluster (or keep Hubble in-cluster
-  # and leave this empty).
+  # URL announced to PD via server.urls_to_pd for discovery clients such as Hubble.
+  # Empty announces each Server Pod IP so in-cluster clients retain the full replica list.
+  # Set this to a URL reachable from outside the cluster (NodePort, LoadBalancer, or Ingress) when an external Hubble uses PD mode; all replicas then announce that shared logical endpoint.
   advertiseUrl: ""
   service:
     type: ClusterIP

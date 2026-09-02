@@ -369,7 +369,7 @@ default values.
 | `server.ingress.enabled` | Create an Ingress for the Server Service | `false` |
 | `server.ingress.className` | IngressClass name | `""` |
 | `server.ingress.annotations` | Ingress annotations (cert-manager, nginx, ALB) | `{}` |
-| `server.advertiseUrl` | Absolute Server URL registered with PD (`server.urls_to_pd`). Empty uses the in-cluster Service URL | `""` |
+| `server.advertiseUrl` | Absolute Server URL registered with PD (`server.urls_to_pd`). Empty registers each Server Pod IP for in-cluster discovery | `""` |
 | `server.service.type` | Server Service type | `ClusterIP` |
 | `server.service.annotations` | Server Service annotations | `{}` |
 | `server.ingress.hosts` | Ingress hosts and paths | see `values.yaml` |
@@ -463,9 +463,7 @@ pd.peers=<reachable-pd-host>:<grpc-port>
 pd.server=<reachable-pd-host>:<rest-port>
 ```
 
-Trade-off: when `server.advertiseUrl` is set, PD returns that same URL to
-every discovery client, including an in-cluster Hubble. Leave it empty for the
-default in-cluster path.
+Trade-off: when `server.advertiseUrl` is set, every Server replica registers that same logical URL and PD returns it to every discovery client, including an in-cluster Hubble. Leave it empty for the default in-cluster path, where each Server Pod registers its own IP and Hubble can retain the replica list.
 
 Local quick test (cluster and Hubble on the same machine): port-forward Server
 `8080` and PD client `8620`/`8686`, set
@@ -475,7 +473,7 @@ Local quick test (cluster and Hubble on the same machine): port-forward Server
 
 | Parameter | Description | Default |
 |---|---|---|
-| `server.advertiseUrl` | Absolute Server URL registered with PD for discovery clients. Empty uses the in-cluster Server Service URL | `""` |
+| `server.advertiseUrl` | Absolute Server URL registered with PD for discovery clients. Empty registers each Server Pod IP for in-cluster discovery | `""` |
 | `pd.service.type` | PD client Service type (`ClusterIP`, `NodePort`, `LoadBalancer`) | `ClusterIP` |
 | `pd.service.annotations` | Annotations on the PD client Service | `{}` |
 | `pd.service.restNodePort` | Optional fixed NodePort for PD REST; requires NodePort/LoadBalancer | unset |
@@ -497,7 +495,7 @@ single flag (see Installing above). Login uses the admin credential from
 `pd` mode the chart points `pd.peers` at the PD gRPC peers, `pd.server` at
 the PD client Service REST port, and the Store metrics allow-list at the
 Store REST endpoints, so the cluster view works without manual wiring; the
-Server is additionally configured to register its client Service URL with PD
+Server is additionally configured to register each Server Pod IP with PD
 (see below). In `direct` mode Hubble only receives `server.direct_url`
 pointing at the Server client Service; there is no PD discovery and no
 operations view. Everything else in `hugegraph-hubble.properties` keeps the

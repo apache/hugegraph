@@ -258,6 +258,10 @@ spec:
             - name: http
               containerPort: {{ .Values.server.port }}
           env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: HG_SERVER_BACKEND
               value: {{ .Values.server.backend | quote }}
             - name: HG_SERVER_PD_PEERS

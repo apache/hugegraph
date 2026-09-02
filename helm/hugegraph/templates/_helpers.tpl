@@ -260,9 +260,7 @@ First store REST endpoint for STORE_REST / wait-partition.
 {{- end }}
 
 {{/*
-Server REST URL reached through the client Service. Announced to PD via
-server.urls_to_pd so PD-discovered clients (Hubble) get a resolvable address
-instead of the in-pod 0.0.0.0 default.
+Server REST URL reached through the client Service.
 */}}
 {{- define "hugegraph.server.clientUrl" -}}
 {{- printf "http://%s.%s.svc:%d" (include "hugegraph.server.name" .) .Release.Namespace (int .Values.server.port) -}}
@@ -270,15 +268,14 @@ instead of the in-pod 0.0.0.0 default.
 
 {{/*
 URL registered with PD (server.urls_to_pd / HG_SERVER_URLS_TO_PD).
-server.advertiseUrl wins when set so outside PD-mode Hubble receives a
-reachable address; otherwise the in-cluster Server Service URL is used.
+server.advertiseUrl wins when set so outside PD-mode Hubble receives a reachable address; otherwise each Server Pod announces its own Pod IP so PD discovery preserves the replica list for in-cluster clients.
 */}}
 {{- define "hugegraph.server.urlsToPd" -}}
 {{- $advertise := trim (default "" .Values.server.advertiseUrl) -}}
 {{- if $advertise -}}
 {{- $advertise -}}
 {{- else -}}
-{{- include "hugegraph.server.clientUrl" . -}}
+{{- printf "http://$(POD_IP):%d" (int .Values.server.port) -}}
 {{- end -}}
 {{- end }}
 
@@ -561,7 +558,7 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- $reservedEnv := dict
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
       "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
-      "server" (list "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
+      "server" (list "POD_IP" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
       "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}
