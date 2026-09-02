@@ -137,7 +137,7 @@ spec:
             {{- with include "hugegraph.probeTuning" .Values.pd.probes.startup }}{{ . | trim | nindent 12 }}{{- end }}
           readinessProbe:
             httpGet:
-              path: /v1/health
+              path: {{ .Values.pd.readinessPath | default "/v1/health" }}
               port: rest
             periodSeconds: {{ .Values.pd.probes.readiness.periodSeconds }}
             failureThreshold: {{ .Values.pd.probes.readiness.failureThreshold }}

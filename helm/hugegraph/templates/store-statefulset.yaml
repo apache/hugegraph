@@ -99,25 +99,26 @@ spec:
               HEALTH_PEERS=$(echo "{{ include "hugegraph.pd.restPeersList" . }}" | tr ',' ' ')
               TIMEOUT={{ .Values.store.waitTimeoutSeconds | default 900 }}
               DEADLINE=$(( $(date +%s) + TIMEOUT ))
-              echo "Waiting for PD quorum (${REQUIRED}) among: ${HEALTH_PEERS}"
+              WAIT_PATH={{ .Values.store.waitPath | default "/v1/health" | quote }}
+              echo "Waiting for ${REQUIRED} PD peers to answer ${WAIT_PATH} among: ${HEALTH_PEERS}"
               until [ "$(
                 ok=0
                 for peer in ${HEALTH_PEERS}; do
-                  if curl -fsS "http://${peer}/v1/health" >/dev/null 2>&1; then
+                  if curl -fsS "http://${peer}${WAIT_PATH}" >/dev/null 2>&1; then
                     ok=$((ok+1))
                   fi
                 done
                 echo "$ok"
               )" -ge "${REQUIRED}" ]; do
                 if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
-                  echo "Timed out after ${TIMEOUT}s waiting for PD quorum (${REQUIRED}) among: ${HEALTH_PEERS}" >&2
+                  echo "Timed out after ${TIMEOUT}s waiting for ${REQUIRED} PD peers to answer ${WAIT_PATH} among: ${HEALTH_PEERS}" >&2
                   echo "Check PD Pods: kubectl get pods -l app.kubernetes.io/component=pd" >&2
                   exit 1
                 fi
-                echo "Waiting for PD quorum..."
+                echo "Waiting for PD peers..."
                 sleep 5
               done
-              echo "PD quorum reached."
+              echo "Enough PD peers answered ${WAIT_PATH}."
           {{- with .Values.store.waitResources }}
           resources:
             {{- toYaml . | nindent 12 }}

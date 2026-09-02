@@ -131,6 +131,15 @@ pd:
     whenDeleted: Retain
     whenScaled: Retain
   # Startup can take a while during Raft bootstrap
+  # HTTP path the PD readinessProbe hits. /v1/health answers 200 as soon as
+  # the REST listener is up and never consults raft, so a PD outside the
+  # quorum still passes readiness. PD images from 1.8.0 on add /v1/ready
+  # (apache/hugegraph#3185), which answers 503 without a raft leader; switch
+  # this to /v1/ready only on such an image, an older image has no such
+  # path and the PD never turns Ready. Startup and liveness stay on
+  # /v1/health regardless, so a PD that merely lost its leader is not
+  # restarted.
+  readinessPath: /v1/health
   probes:
     startup:
       failureThreshold: 30
@@ -201,10 +210,16 @@ store:
     enabled: true
     minAvailable: 2
   waitImage: curlimages/curl:8.5.0
-  # Bound the PD-quorum wait so a cluster that never reaches quorum fails
-  # visibly instead of sitting in Init:0/1 forever.
+  # HTTP path the init container polls on every PD peer; a majority must
+  # answer 2xx before the Store starts. /v1/health proves the listener is
+  # up, not a raft quorum. On PD images that carry /v1/ready (1.8.0 on,
+  # apache/hugegraph#3185) set /v1/ready so the count means quorum members;
+  # on older images that path does not exist and Stores never leave Init.
+  waitPath: /v1/health
+  # Bound the PD wait so a cluster whose PDs never come up fails visibly
+  # instead of sitting in Init:0/1 forever.
   waitTimeoutSeconds: 900
-  # Optional bounds for the PD-quorum wait init container.
+  # Optional bounds for the PD wait init container.
   waitResources: {}
   # Explicit rollout strategy instead of the implicit StatefulSet default.
   updateStrategy:

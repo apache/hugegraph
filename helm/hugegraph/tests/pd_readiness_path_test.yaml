@@ -1,0 +1,77 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: PD readiness path and Store wait path
+tests:
+  - it: keeps every PD probe on /v1/health by default
+    template: pd-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /v1/health
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /v1/health
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /v1/health
+
+  - it: moves only the PD readiness probe when pd.readinessPath is set
+    template: pd-statefulset.yaml
+    set:
+      pd.readinessPath: /v1/ready
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /v1/ready
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /v1/health
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /v1/health
+
+  - it: polls /v1/health on each PD peer in the Store wait by default
+    template: store-statefulset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'WAIT_PATH="/v1/health"'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'curl -fsS "http://\${peer}\${WAIT_PATH}"'
+
+  - it: polls store.waitPath on each PD peer when set
+    template: store-statefulset.yaml
+    set:
+      store.waitPath: /v1/ready
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'WAIT_PATH="/v1/ready"'
+      - notMatchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'v1/health'
+
+  - it: leaves the Store's own probes on /v1/health when store.waitPath is set
+    template: store-statefulset.yaml
+    set:
+      store.waitPath: /v1/ready
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /v1/health

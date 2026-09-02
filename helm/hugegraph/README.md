@@ -40,11 +40,14 @@ so operators do not have to:
 - **Every Server uses PD for graph metadata.** The startup wrapper always writes
   `usePD=true` and the chart-derived `pd.peers` into
   `rest-server.properties`, so all Server replicas share the graph catalog
-  through PD. It also registers the Server client Service URL for Kubernetes
-  discovery. This is required for distributed HStore and does not make a local
-  RocksDB backend shared across replicas.
-- **Store waits for PD quorum** in an init container before starting, so Store
-  never registers against an incomplete PD Raft group.
+  through PD. It also registers each Server Pod IP with PD for in-cluster
+  discovery (`server.advertiseUrl` replaces that with one shared URL). This is
+  required for distributed HStore and does not make a local RocksDB backend
+  shared across replicas.
+- **Store waits for PD** in an init container before starting: a majority of
+  the PD peers must answer `store.waitPath`. The default `/v1/health` proves
+  each PD's listener is up, not that a raft quorum exists; see Limitations for
+  the `/v1/ready` switch.
 - **The Server startup probe allows at least 450 seconds.** The image may spend
   300 seconds waiting for storage and a further 120 seconds in the start
   command. A lower configured `failureThreshold` is raised to this floor rather
@@ -275,6 +278,7 @@ default values.
 | `pd.serviceAccount.automountServiceAccountToken` | Mount an API token. The chart makes no API calls | `false` |
 | `pd.pdb.enabled` | Create a PodDisruptionBudget for PD | `true` |
 | `pd.pdb.minAvailable` | Must be strictly less than `pd.replicas`. No PDB is rendered when `pd.replicas` is 1 | `2` |
+| `pd.readinessPath` | Path the PD readinessProbe hits. `/v1/health` is liveness only; set `/v1/ready` on PD images from 1.8.0 that carry it, never on older images | `/v1/health` |
 | `pd.probes.*.periodSeconds` | Probe interval | see `values.yaml` |
 | `pd.probes.*.failureThreshold` | Probe failure threshold | see `values.yaml` |
 | `pd.probes.*.timeoutSeconds` | Probe timeout. Defaults to `5` on readiness/liveness; Kubernetes would otherwise apply `1` | `5` |
@@ -299,8 +303,9 @@ default values.
 | `store.storage.storageClassName` | Empty uses the cluster default StorageClass | `""` |
 | `store.resources` | Store container resources. Set these for production | `{}` |
 | `store.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
-| `store.securityContext` | Container-level securityContext; also applied to the PD-quorum init container. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
-| `store.waitTimeoutSeconds` | Bound on the PD-quorum wait before the init container fails | `900` |
+| `store.securityContext` | Container-level securityContext; also applied to the PD wait init container. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
+| `store.waitPath` | Path the init container polls on each PD peer; a majority must answer 2xx. `/v1/health` counts listeners; `/v1/ready` counts quorum members but exists only on PD images from 1.8.0 | `/v1/health` |
+| `store.waitTimeoutSeconds` | Bound on the PD wait before the init container fails | `900` |
 | `store.antiAffinity` | One of `required`, `preferred`, `disabled`. `preferred` schedules on clusters with fewer nodes than replicas; production should use `required` so one node failure cannot co-locate shard replicas | `preferred` |
 | `store.nodeSelector` | Node selector for store Pods | `{}` |
 | `store.tolerations` | Tolerations for store Pods | `[]` |
@@ -317,7 +322,7 @@ default values.
 | `store.serviceAccount.automountServiceAccountToken` | Mount an API token. The chart makes no API calls | `false` |
 | `store.pdb.enabled` | Create a PodDisruptionBudget for Store | `true` |
 | `store.pdb.minAvailable` | Must be strictly less than `store.replicas`. No PDB is rendered when `store.replicas` is 1 | `2` |
-| `store.waitImage` | Image for the PD-quorum init container | `curlimages/curl:8.5.0` |
+| `store.waitImage` | Image for the PD wait init container | `curlimages/curl:8.5.0` |
 | `store.waitResources` | Resources for the init container | `{}` |
 | `store.probes.*` | Same probe keys as PD | see `values.yaml` |
 
@@ -763,7 +768,8 @@ overwrite the autoscaler's live replica count.
 
 ### Store Pods Stuck in `Init:0/1`
 
-The Store init container waits for PD to reach Raft quorum. Check PD first:
+The Store init container waits for a majority of PD peers to answer
+`store.waitPath`. Check PD first:
 
 ```bash
 kubectl get pods -l app.kubernetes.io/component=pd
@@ -881,6 +887,28 @@ independently of the release name.
   refusal, and a missing credential, return HTTP 200 with the result in the
   body, so the status code carries no signal and no health check should key on
   it. The Disaster Recovery calls above therefore need `-u hg:` to run.
+- PD's `/v1/health` is liveness only: it answers 200 as soon as the REST
+  listener is up and never consults raft. Measured on a 3-PD install with two
+  PDs deleted, the survivor logged `Raft lost leader` within a second and kept
+  answering 200 while quorum-dependent calls failed. Every PD and Store probe
+  in this chart, and the Store init container's PD wait, key on that endpoint,
+  so a listening-but-leaderless PD passes readiness and the wait counts
+  listeners rather than quorum members. Tracked upstream as
+  [#3183](https://github.com/apache/hugegraph/issues/3183); the fix,
+  [#3185](https://github.com/apache/hugegraph/pull/3185), adds an
+  unauthenticated `/v1/ready` that answers 503 without a raft leader, plus
+  raft gauges, from 1.8.0. On such an image set `pd.readinessPath=/v1/ready`
+  and `store.waitPath=/v1/ready`; keep startup and liveness on `/v1/health`
+  so a PD that merely lost its leader is not restarted. Do not set either
+  path on an older image: it does not exist there, the PD never turns Ready
+  and Stores never leave Init.
+- Server discovery is a lease. Each Server re-registers its Pod IP with PD
+  every 15 seconds and PD drops an entry after three missed heartbeats, so a
+  replaced or evicted Server can stay in PD's list for up to 45 seconds after
+  it stops (measured 30 to 35 seconds on a live rollout). Hubble's cluster
+  view and other discovery clients may show that stale address for the
+  duration; application traffic is unaffected because it reaches Servers
+  through the Service, which drops the Pod immediately.
 - No TLS, backups, Operator, multi-cluster support, automatic leader transfer,
   or a complete monitoring stack. Store recovery is manual on current builds:
   re-replication after Store loss, leader balancing, and partition

@@ -436,6 +436,11 @@
               "maximum": 32767
             }
           }
+        },
+        "readinessPath": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "HTTP path for the PD readinessProbe; /v1/health (default) or /v1/ready on PD images that have it"
         }
       }
     },
@@ -560,6 +565,11 @@
               "type": "boolean"
             }
           }
+        },
+        "waitPath": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "HTTP path the Store init container polls on each PD peer; /v1/health (default) or /v1/ready on PD images that have it"
         }
       }
     },
