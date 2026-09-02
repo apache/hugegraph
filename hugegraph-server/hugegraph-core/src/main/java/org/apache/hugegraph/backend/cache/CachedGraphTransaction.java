@@ -30,8 +30,6 @@ import java.util.concurrent.ConcurrentMap;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
@@ -52,7 +50,6 @@ import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
-import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Events;
 
@@ -425,7 +422,8 @@ public final class CachedGraphTransaction extends GraphTransaction {
 
         Iterator<HugeEdge> rs = super.queryEdgesFromBackend(query);
         if (queryNeedsPostFilter(query)) {
-            // Query optimization may mark a joint-index query for post-filtering
+            // The backend query may promote query.optimized() through origin-
+            // query propagation, so re-check before caching
             return rs;
         }
 
@@ -447,29 +445,6 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         return new ExtendableIterator<>(edges.iterator(), rs);
-    }
-
-    private static boolean queryNeedsPostFilter(Query query) {
-        while (query != null) {
-            if (query instanceof ConditionQuery) {
-                ConditionQuery cq = (ConditionQuery) query;
-                OptimizedType optimized = cq.optimized();
-                if (cq.hasSearchCondition()) {
-                    return true;
-                }
-
-                boolean edgeIndexWithLabel =
-                        cq.resultType().isEdge() &&
-                        optimized == OptimizedType.INDEX &&
-                        cq.condition(HugeKeys.LABEL) != null;
-                if (optimized != OptimizedType.NONE &&
-                    !edgeIndexWithLabel) {
-                    return true;
-                }
-            }
-            query = query.originQuery();
-        }
-        return false;
     }
 
     @Override

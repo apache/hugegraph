@@ -19,6 +19,7 @@ package org.apache.hugegraph.unit.cache;
 
 import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -34,7 +35,6 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
-import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.event.EventHub;
@@ -46,8 +46,8 @@ import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
-import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.IdStrategy;
+import org.apache.hugegraph.type.define.SchemaStatus;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.Events;
@@ -529,89 +529,50 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @Test
-    public void testQueryNeedsPostFilter() {
-        Id key = IdGenerator.of(1);
-        ConditionQuery search = new ConditionQuery(HugeType.EDGE);
-        search.query(Condition.textContains(key, "word"));
+    public void testPostFilterDefersDeletingLabelToInvalidFilter() {
+        HugeVertex vertex = this.newVertex(IdGenerator.of(1));
+        vertex.schemaLabel().status(SchemaStatus.DELETING);
 
-        Class<?>[] classes = new Class<?>[]{Query.class};
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter", search));
-        IdQuery searchIds = new IdQuery(search, IdGenerator.of(2));
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter",
-                                                searchIds));
+        Id name = this.graph.propertyKey("name").id();
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.eq(name, "marko"));
+        query.optimized(OptimizedType.INDEX);
 
-        ConditionQuery searchAny = new ConditionQuery(HugeType.EDGE);
-        searchAny.query(Condition.textContainsAny(
-                        key, Collections.singleton("word")));
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter",
-                                                searchAny));
+        Class<?>[] classes = new Class<?>[]{Iterator.class, Query.class};
+        Iterator<HugeVertex> unmatched = Whitebox.invoke(
+                CachedGraphTransaction.class, classes,
+                "filterUnmatchedRecords", this.cache,
+                Collections.singleton(vertex).iterator(), query);
+        Assert.assertTrue(unmatched.hasNext());
 
-        ConditionQuery exact = new ConditionQuery(HugeType.EDGE);
-        exact.query(Condition.eq(key, "word"));
-        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                 classes,
-                                                 "queryNeedsPostFilter", exact));
-        exact.optimized(OptimizedType.INDEX_FILTER);
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter", exact));
+        Iterator<HugeVertex> invalid = Whitebox.invoke(
+                CachedGraphTransaction.class, classes,
+                "filterInvalidRecords", this.cache,
+                Collections.singleton(vertex).iterator(), query);
+        Assert.assertFalse(invalid.hasNext());
+    }
 
-        ConditionQuery index = new ConditionQuery(HugeType.EDGE);
-        index.query(Condition.eq(key, "word"));
-        index.optimized(OptimizedType.INDEX);
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter", index));
+    @Test
+    public void testQueryByIdsFiltersDeletingLabels() {
+        CachedGraphTransaction cache = this.cache();
+        HugeVertex v1 = this.newVertex(IdGenerator.of(1));
+        HugeVertex v2 = this.newVertex(IdGenerator.of(2));
+        cache.addVertex(v1);
+        cache.addVertex(v2);
+        cache.commit();
 
-        ConditionQuery labelIndex = new ConditionQuery(HugeType.EDGE);
-        labelIndex.query(Condition.eq(HugeKeys.LABEL, IdGenerator.of(2)));
-        labelIndex.query(Condition.eq(key, "word"));
-        labelIndex.optimized(OptimizedType.INDEX);
-        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                 classes,
-                                                 "queryNeedsPostFilter",
-                                                 labelIndex));
-        IdQuery labelIndexIds = new IdQuery(labelIndex, IdGenerator.of(2));
-        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                 classes,
-                                                 "queryNeedsPostFilter",
-                                                 labelIndexIds));
+        HugeEdge edge = this.newEdge(v1, v2);
+        cache.addEdge(edge);
+        cache.commit();
 
-        ConditionQuery vertexLabelIndex =
-                new ConditionQuery(HugeType.VERTEX);
-        vertexLabelIndex.query(Condition.eq(HugeKeys.LABEL,
-                                            IdGenerator.of(2)));
-        vertexLabelIndex.query(Condition.eq(key, "word"));
-        vertexLabelIndex.optimized(OptimizedType.INDEX);
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter",
-                                                vertexLabelIndex));
+        v1.schemaLabel().status(SchemaStatus.DELETING);
+        edge.schemaLabel().status(SchemaStatus.DELETING);
 
-        ConditionQuery primaryKey = new ConditionQuery(HugeType.VERTEX);
-        primaryKey.optimized(OptimizedType.PRIMARY_KEY);
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter",
-                                                primaryKey));
-
-        ConditionQuery sortKeys = new ConditionQuery(HugeType.EDGE);
-        sortKeys.query(Condition.eq(key, "word"));
-        sortKeys.optimized(OptimizedType.SORT_KEYS);
-        Assert.assertTrue(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                classes,
-                                                "queryNeedsPostFilter",
-                                                sortKeys));
-        Assert.assertFalse(Whitebox.invokeStatic(CachedGraphTransaction.class,
-                                                 classes,
-                                                 "queryNeedsPostFilter",
-                                                 new Query(HugeType.EDGE)));
+        Assert.assertFalse(cache.queryVertices(v1.id()).hasNext());
+        Assert.assertFalse(cache.queryEdges(edge.id()).hasNext());
+        // Re-query to exercise cached records too
+        Assert.assertFalse(cache.queryVertices(v1.id()).hasNext());
+        Assert.assertFalse(cache.queryEdges(edge.id()).hasNext());
     }
 
     @Test

@@ -262,17 +262,23 @@ public final class HugeFactoryAuthProxy {
                                            "checkVertexExistIfCustomizedId",
                                            "checkAggregateProperty", "checkAggregateProperty",
                                            "checkNonnullProperty", "queryEdgesFromBackend",
+                                           "queryValidEdgesFromBackend",
                                            "commitPartOfEdgeDeletions", "optimizeQueries",
                                            "checkVertexLabel", "checkId",
-                                           "queryVerticesFromBackend", "joinTxVertices",
+                                           "queryVerticesFromBackend",
+                                           "queryValidVerticesFromBackend", "joinTxVertices",
                                            "joinTxEdges", "lockForUpdateProperty", "optimizeQuery",
                                            "verifyVerticesConditionQuery",
                                            "verifyEdgesConditionQuery", "indexQuery",
                                            "joinTxRecords", "propertyUpdated", "parseEntry",
                                            "traverseByLabel", "reset", "queryVerticesByIds",
-                                           "filterUnmatchedRecords", "skipOffsetOrStopLimit",
+                                           "filterInvalidRecords", "filterUnmatchedRecords",
+                                           "invalidRecord", "warnLeftRecord",
+                                           "skipOffsetOrStopLimit",
                                            "filterExpiredResultFromFromBackend", "queryEdgesByIds",
-                                           "matchEdgeSortKeys", "rightResultFromIndexQuery");
+                                           "matchEdgeSortKeys", "rightResultFromIndexQuery",
+                                           "queryNeedsPostFilter",
+                                           "conditionQueryNeedsPostFilter");
         Reflection.registerFieldsToFilter(IndexableTransaction.class, "$assertionsDisabled");
         Reflection.registerMethodsToFilter(IndexableTransaction.class, "indexTransaction",
                                            "commit2Backend", "reset");

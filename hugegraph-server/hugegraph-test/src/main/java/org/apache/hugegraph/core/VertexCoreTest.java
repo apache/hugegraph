@@ -5443,8 +5443,12 @@ public class VertexCoreTest extends BaseCoreTest {
         graph.addVertex(T.label, "test", "name", "诚信文明",
                         "confirmType", 3, "type", 1, "kid", 3);
 
+        this.assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin();
         this.commitTx();
+        this.assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin();
+    }
 
+    private void assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin() {
         List<Vertex> vertices;
         vertices = graph().traversal().V()
                           .has("type", 1)
