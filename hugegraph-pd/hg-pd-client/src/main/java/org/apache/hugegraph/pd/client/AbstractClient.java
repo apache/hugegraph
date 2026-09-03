@@ -23,10 +23,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.pd.client.interceptor.Authentication;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
@@ -58,8 +58,9 @@ public abstract class AbstractClient implements Closeable {
     protected final Pdpb.RequestHeader header;
     protected final AbstractClientStubProxy proxy;
     protected final PDConfig config;
-    protected ManagedChannel channel = null;
+    protected volatile ManagedChannel channel = null;
     protected ConcurrentMap<String, AbstractBlockingStub> stubs = null;
+    private final ThreadLocal<Consumer<Channel>> streamingAttemptConsumer = new ThreadLocal<>();
 
     protected AbstractClient(PDConfig config) {
         String[] hosts = config.getServerHost().split(",");
@@ -85,7 +86,12 @@ public abstract class AbstractClient implements Closeable {
     }
 
     public static <T extends AbstractStub> T setBlockingParams(T stub, PDConfig config) {
-        stub = (T) stub.withDeadlineAfter(config.getGrpcTimeOut(), TimeUnit.MILLISECONDS)
+        return setBlockingParams(stub, config, config.getGrpcTimeOut());
+    }
+
+    private static <T extends AbstractStub> T setBlockingParams(T stub, PDConfig config,
+                                                                 long timeoutMillis) {
+        stub = (T) stub.withDeadlineAfter(timeoutMillis, TimeUnit.MILLISECONDS)
                        .withMaxInboundMessageSize(PDConfig.getInboundMessageSize());
         return (T) stub.withInterceptors(
                 new Authentication(config.getUserName(), config.getAuthority()));
@@ -98,34 +104,47 @@ public abstract class AbstractClient implements Closeable {
                                new Authentication(config.getUserName(), config.getAuthority()));
     }
 
-    protected AbstractBlockingStub getBlockingStub() throws PDException {
+    protected synchronized AbstractBlockingStub getBlockingStub() throws PDException {
         if (proxy.getBlockingStub() == null) {
-            synchronized (this) {
-                if (proxy.getBlockingStub() == null) {
-                    String host = resetStub();
-                    if (host.isEmpty()) {
-                        throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
-                                              "PD unreachable, pd.peers=" + config.getServerHost());
-                    }
-                }
+            String host = resetStub();
+            if (host.isEmpty()) {
+                throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                      "PD unreachable, pd.peers=" + config.getServerHost());
             }
         }
         return setBlockingParams(proxy.getBlockingStub(), config);
     }
 
-    protected AbstractStub getStub() throws PDException {
+    protected synchronized AbstractStub getStub() throws PDException {
         if (proxy.getStub() == null) {
-            synchronized (this) {
-                if (proxy.getStub() == null) {
-                    String host = resetStub();
-                    if (host.isEmpty()) {
-                        throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
-                                              "PD unreachable, pd.peers=" + config.getServerHost());
-                    }
-                }
+            String host = resetStub();
+            if (host.isEmpty()) {
+                throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                      "PD unreachable, pd.peers=" + config.getServerHost());
             }
         }
         return setAsyncParams(proxy.getStub(), config);
+    }
+
+    protected synchronized void invalidateAsyncStub() {
+        proxy.setStub(null);
+    }
+
+    protected synchronized boolean invalidateAsyncStub(Channel expectedChannel) {
+        AbstractStub stub = proxy.getStub();
+        if (stub == null || stub.getChannel() != expectedChannel) {
+            return false;
+        }
+        proxy.setStub(null);
+        return true;
+    }
+
+    protected long stubResetTimeoutMillis() {
+        return (long) config.getGrpcTimeOut() * Math.max(1, proxy.getHostCount());
+    }
+
+    protected boolean isShutdown() {
+        return false;
     }
 
     protected abstract AbstractStub createStub();
@@ -133,32 +152,77 @@ public abstract class AbstractClient implements Closeable {
     protected abstract AbstractBlockingStub createBlockingStub();
 
     private String resetStub() {
-        String leaderHost = "";
         Exception ex = null;
+        long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(stubResetTimeoutMillis());
+        long deadlineNanos = System.nanoTime() + timeoutNanos;
         for (int i = 0; i < proxy.getHostCount(); i++) {
+            if (isShutdown() || remainingMillis(deadlineNanos) <= 0L) {
+                break;
+            }
             String host = proxy.nextHost();
-            close();
+            closeConnections();
 
-            channel = ManagedChannelBuilder.forTarget(host).usePlaintext().build();
+            if (isShutdown()) {
+                break;
+            }
+            ManagedChannel candidate =
+                    ManagedChannelBuilder.forTarget(host).usePlaintext().build();
+            if (isShutdown()) {
+                closeChannel(candidate);
+                break;
+            }
+            channel = candidate;
+            if (isShutdown()) {
+                closeChannel(candidate);
+                break;
+            }
+            long remaining = remainingMillis(deadlineNanos);
+            if (remaining <= 0L) {
+                break;
+            }
+            int remainingHosts = proxy.getHostCount() - i;
+            long peerTimeout = Math.max(1L, Math.min(config.getGrpcTimeOut(),
+                                                     remaining / remainingHosts));
             PDBlockingStub blockingStub =
-                    setBlockingParams(PDGrpc.newBlockingStub(channel), config);
+                    setBlockingParams(PDGrpc.newBlockingStub(channel), config,
+                                      peerTimeout);
             try {
                 GetMembersRequest request = Pdpb.GetMembersRequest.newBuilder()
                                                                   .setHeader(header).build();
                 GetMembersResponse members = blockingStub.getMembers(request);
-                Metapb.Member leader = members.getLeader();
-                leaderHost = leader.getGrpcUrl();
-                if (!host.equals(leaderHost)) {
-                    close();
-                    channel = ManagedChannelBuilder.forTarget(leaderHost).usePlaintext().build();
+                if (isShutdown()) {
+                    break;
                 }
-                proxy.setBlockingStub(setBlockingParams(createBlockingStub(), config));
-                proxy.setStub(setAsyncParams(createStub(), config));
+                Metapb.Member leader = members.getLeader();
+                String leaderHost = leader.getGrpcUrl();
+                if (!host.equals(leaderHost)) {
+                    closeConnections();
+                    if (isShutdown()) {
+                        break;
+                    }
+                    candidate = ManagedChannelBuilder.forTarget(leaderHost).usePlaintext().build();
+                    if (isShutdown()) {
+                        closeChannel(candidate);
+                        break;
+                    }
+                    channel = candidate;
+                    if (isShutdown()) {
+                        closeChannel(candidate);
+                        break;
+                    }
+                }
+                AbstractBlockingStub newBlockingStub =
+                        setBlockingParams(createBlockingStub(), config);
+                AbstractStub newStub = setAsyncParams(createStub(), config);
+                if (isShutdown()) {
+                    break;
+                }
+                proxy.setBlockingStub(newBlockingStub);
+                proxy.setStub(newStub);
                 log.info("AbstractClient connect to host = {} success", leaderHost);
-                break;
+                return leaderHost;
             } catch (StatusRuntimeException se) {
                 ex = se;
-                continue;
             } catch (Exception e) {
                 ex = e;
                 String msg =
@@ -166,11 +230,24 @@ public abstract class AbstractClient implements Closeable {
                                       e.getMessage());
                 log.error(msg, e);
             }
+            proxy.setBlockingStub(null);
+            proxy.setStub(null);
         }
-        if (StringUtils.isEmpty(leaderHost) && ex != null) {
+        proxy.setBlockingStub(null);
+        proxy.setStub(null);
+        closeConnections();
+        if (ex != null) {
             log.error(String.format("connect to %s with error: ", config.getServerHost()), ex);
         }
-        return leaderHost;
+        return "";
+    }
+
+    private static long remainingMillis(long deadlineNanos) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0L) {
+            return 0L;
+        }
+        return Math.max(1L, TimeUnit.NANOSECONDS.toMillis(remainingNanos));
     }
 
     protected <ReqT, RespT> RespT blockingUnaryCall(
@@ -249,7 +326,17 @@ public abstract class AbstractClient implements Closeable {
     protected <ReqT, RespT> void streamingCall(MethodDescriptor<ReqT, RespT> method, ReqT request,
                                                StreamObserver<RespT> responseObserver,
                                                int retry) throws PDException {
-        AbstractStub stub = getStub();
+        AbstractStub stub;
+        Channel attemptChannel;
+        synchronized (this) {
+            stub = getStub();
+            AbstractStub currentStub = proxy.getStub();
+            attemptChannel = currentStub == null ? stub.getChannel() : currentStub.getChannel();
+            Consumer<Channel> attemptConsumer = this.streamingAttemptConsumer.get();
+            if (attemptConsumer != null) {
+                attemptConsumer.accept(attemptChannel);
+            }
+        }
         try {
             ClientCall<ReqT, RespT> call = stub.getChannel().newCall(method, stub.getCallOptions());
             ClientCalls.asyncServerStreamingCall(call, request, responseObserver);
@@ -257,31 +344,52 @@ public abstract class AbstractClient implements Closeable {
             log.error("rpc call with exception :", e);
             if (e instanceof StatusRuntimeException) {
                 if (retry < proxy.getHostCount()) {
-                    synchronized (this) {
-                        proxy.setStub(null);
-                    }
+                    invalidateAsyncStub(attemptChannel);
                     streamingCall(method, request, responseObserver, ++retry);
+                    return;
                 }
+            }
+            throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+                                  "RPC streaming call failed", e);
+        }
+    }
+
+    protected <ReqT, RespT> void streamingCall(MethodDescriptor<ReqT, RespT> method, ReqT request,
+                                               StreamObserver<RespT> responseObserver,
+                                               int retry,
+                                               Consumer<Channel> attemptConsumer)
+            throws PDException {
+        Consumer<Channel> previous = this.streamingAttemptConsumer.get();
+        this.streamingAttemptConsumer.set(attemptConsumer);
+        try {
+            streamingCall(method, request, responseObserver, retry);
+        } finally {
+            if (previous == null) {
+                this.streamingAttemptConsumer.remove();
+            } else {
+                this.streamingAttemptConsumer.set(previous);
             }
         }
     }
 
     @Override
     public void close() {
+        closeConnections();
+    }
+
+    private void closeConnections() {
         closeChannel(channel);
         if (stubs != null) {
             for (AbstractBlockingStub stub : stubs.values()) {
                 closeChannel((ManagedChannel) stub.getChannel());
             }
         }
-
     }
 
     private void closeChannel(ManagedChannel channel) {
         try {
-            while (channel != null &&
-                   !channel.shutdownNow().awaitTermination(100, TimeUnit.MILLISECONDS)) {
-                continue;
+            if (channel != null) {
+                channel.shutdownNow().awaitTermination(100, TimeUnit.MILLISECONDS);
             }
         } catch (Exception e) {
             log.info("Close channel with error :.", e);
