@@ -377,8 +377,7 @@ public class GraphTransaction extends IndexableTransaction {
             }
             // Query all edges of the vertex and remove them
             Query query = constructEdgesQuery(v.id(), Directions.BOTH, new Id[0]);
-            Iterator<HugeEdge> vedges =
-                    this.queryValidEdgesFromBackend(query);
+            Iterator<HugeEdge> vedges = this.queryEdgesFromBackend(query);
             try {
                 while (vedges.hasNext()) {
                     this.checkTxEdgesCapacity();
@@ -804,8 +803,7 @@ public class GraphTransaction extends IndexableTransaction {
         if (!query.empty()) {
             // Query from backend store
             query.mustSortByInput(false);
-            Iterator<HugeVertex> it =
-                    this.queryValidVerticesFromBackend(query);
+            Iterator<HugeVertex> it = this.queryVerticesFromBackend(query);
             QueryResults.fillMap(it, vertices);
         }
 
@@ -982,16 +980,14 @@ public class GraphTransaction extends IndexableTransaction {
                  * Sort at the lower layer and return directly if there is no
                  * local vertex and duplicated id.
                  */
-                Iterator<HugeEdge> it =
-                        this.queryValidEdgesFromBackend(query);
+                Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
                 @SuppressWarnings({"unchecked", "rawtypes"})
                 Iterator<Edge> r = (Iterator) it;
                 return r;
             }
 
             query.mustSortByInput(false);
-            Iterator<HugeEdge> it =
-                    this.queryValidEdgesFromBackend(query);
+            Iterator<HugeEdge> it = this.queryEdgesFromBackend(query);
             QueryResults.fillMap(it, edges);
         }
 
@@ -1810,8 +1806,7 @@ public class GraphTransaction extends IndexableTransaction {
             return;
         }
         IdQuery idQuery = new IdQuery(HugeType.VERTEX, ids);
-        Iterator<HugeVertex> results =
-                this.queryValidVerticesFromBackend(idQuery);
+        Iterator<HugeVertex> results = this.queryVerticesFromBackend(idQuery);
         try {
             if (!results.hasNext()) {
                 return;
@@ -1876,8 +1871,7 @@ public class GraphTransaction extends IndexableTransaction {
             return;
         }
         IdQuery idQuery = new IdQuery(HugeType.VERTEX, ids);
-        Iterator<HugeVertex> results =
-                this.queryValidVerticesFromBackend(idQuery);
+        Iterator<HugeVertex> results = this.queryVerticesFromBackend(idQuery);
         try {
             while (results.hasNext()) {
                 HugeVertex existedVertex = results.next();
@@ -2023,8 +2017,13 @@ public class GraphTransaction extends IndexableTransaction {
                  * Search conditions need post-filtering even before query
                  * optimization marks the query with an optimized type.
                  */
+                boolean edgeIndexWithLabel =
+                        cq.resultType().isEdge() &&
+                        cq.optimized() == OptimizedType.INDEX &&
+                        cq.condition(HugeKeys.LABEL) != null;
                 if (cq.hasSearchCondition() ||
-                    conditionQueryNeedsPostFilter(cq)) {
+                    (conditionQueryNeedsPostFilter(cq) &&
+                     !edgeIndexWithLabel)) {
                     return true;
                 }
             }
@@ -2034,12 +2033,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     private static boolean conditionQueryNeedsPostFilter(ConditionQuery query) {
-        boolean edgeIndexWithLabel =
-                query.resultType().isEdge() &&
-                query.optimized() == OptimizedType.INDEX &&
-                query.condition(HugeKeys.LABEL) != null;
-        return query.optimized() != OptimizedType.NONE &&
-               !edgeIndexWithLabel;
+        return query.optimized() != OptimizedType.NONE;
     }
 
     private <T extends HugeElement> Iterator<T> filterExpiredResultFromBackend(

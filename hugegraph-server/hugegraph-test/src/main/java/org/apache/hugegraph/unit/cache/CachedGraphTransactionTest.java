@@ -553,7 +553,21 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @Test
-    public void testQueryByIdsFiltersDeletingLabels() {
+    public void testQueryVertexByIdKeepsDeletingLabel() {
+        CachedGraphTransaction cache = this.cache();
+        HugeVertex v1 = this.newVertex(IdGenerator.of(1));
+        cache.addVertex(v1);
+        cache.commit();
+
+        v1.schemaLabel().status(SchemaStatus.DELETING);
+
+        Assert.assertTrue(cache.queryVertices(v1.id()).hasNext());
+        // Re-query to exercise cached records too
+        Assert.assertTrue(cache.queryVertices(v1.id()).hasNext());
+    }
+
+    @Test
+    public void testQueryEdgeByIdKeepsDeletingLabel() {
         CachedGraphTransaction cache = this.cache();
         HugeVertex v1 = this.newVertex(IdGenerator.of(1));
         HugeVertex v2 = this.newVertex(IdGenerator.of(2));
@@ -565,14 +579,11 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         cache.addEdge(edge);
         cache.commit();
 
-        v1.schemaLabel().status(SchemaStatus.DELETING);
         edge.schemaLabel().status(SchemaStatus.DELETING);
 
-        Assert.assertFalse(cache.queryVertices(v1.id()).hasNext());
-        Assert.assertFalse(cache.queryEdges(edge.id()).hasNext());
+        Assert.assertTrue(cache.queryEdges(edge.id()).hasNext());
         // Re-query to exercise cached records too
-        Assert.assertFalse(cache.queryVertices(v1.id()).hasNext());
-        Assert.assertFalse(cache.queryEdges(edge.id()).hasNext());
+        Assert.assertTrue(cache.queryEdges(edge.id()).hasNext());
     }
 
     @Test
