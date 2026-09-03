@@ -26,6 +26,18 @@ mkdir -p "${DOCKER_FOLDER}"
 
 log() { echo "[hugegraph-server-entrypoint] $*"; }
 
+# Property reading/writing goes through props.awk, which implements the
+# java.util.Properties grammar HugeConfig applies (escapes, `:`/whitespace
+# separators, continuations, first-definition-wins duplicates).  grep/sed
+# rewrites disagree with it on mounted or upgraded configs, silently
+# producing two definitions of one key.  Values move through environment
+# variables rather than argv so a PASSWORD never shows up in `ps` output.
+PROPS_AWK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/props.awk"
+if [[ ! -f "${PROPS_AWK}" ]]; then
+    log "ERROR: props.awk not found next to the entrypoint"
+    exit 1
+fi
+
 encode_prop_value() {
     local value="$1" encoded="" char
     local i
@@ -48,18 +60,10 @@ encode_prop_value() {
 
 set_prop_encoded() {
     local key="$1" encoded_val="$2" file="$3"
-    local esc_key esc_val key_re
 
-    esc_key=$(printf '%s' "$key" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g')
-    esc_val=$(printf '%s' "$encoded_val" | sed -e 's/[&|\\~]/\\&/g')
-    key_re="^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+|[[:space:]]*$)"
-
-    if grep -qE "${key_re}" "${file}"; then
-        sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}"
-        sed -ri "0,/${key_re}/s~${key_re}.*~${key}=${esc_val}~" "${file}"
-    else
-        printf '%s=%s\n' "$key" "$encoded_val" >> "${file}"
-    fi
+    PROPS_MODE=set PROPS_KEY="${key}" \
+        PROPS_VALUE_ENCODED="${encoded_val}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
 }
 
 set_prop() {
@@ -70,12 +74,58 @@ set_prop() {
 
 get_prop_encoded() {
     local key="$1" file="$2"
-    local esc_key
 
-    esc_key=$(printf '%s' "$key" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g')
-    sed -nE \
-        "s~^[[:space:]]*${esc_key}([[:space:]]*[:=][[:space:]]*|[[:space:]]+)(.*)$~\\2~p" \
-        "${file}" | head -n 1
+    PROPS_MODE=get PROPS_KEY="${key}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
+}
+
+# First uncommented `authenticator:` inside the gremlin-server.yaml
+# authentication block.  snakeyaml resolves duplicate top-level keys to the
+# last one, but a mounted file carrying two authentication blocks is
+# pathological; report the first and let the mismatch WARN handle it.
+get_yaml_authenticator() {
+    local yaml="./conf/gremlin-server.yaml"
+
+    [[ -f "${yaml}" ]] || return 0
+    awk '
+        /^[ \t]*#/ { next }
+        /^[ \t]*authentication[ \t]*:/ { inblk = 1; next }
+        inblk && /^[ \t]+authenticator[ \t]*:/ {
+            line = $0
+            sub(/^[ \t]*authenticator[ \t]*:[ \t]*/, "", line)
+            sub(/[,:].*$/, "", line)
+            print line
+            exit
+        }
+    ' "./conf/gremlin-server.yaml"
+}
+
+# enable-auth.sh appends definitions to files it did not write.  On a
+# mounted config those appended definitions are duplicates the two parsers
+# resolve in opposite directions — HugeConfig (commons-configuration) takes
+# the first, snakeyaml takes the last — so Gremlin and REST can land on
+# different authenticators with no error from either.  Normalize both sides
+# to one definition of the same authenticator here; enable-auth.sh's
+# per-file guards then make its appends no-ops on anything already set.
+align_auth_config() {
+    local rest_auth yaml_auth
+
+    rest_auth=$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}")
+    yaml_auth=$(get_yaml_authenticator)
+    if [[ -n "${rest_auth}" && -n "${yaml_auth}" && "${rest_auth}" != "${yaml_auth}" ]]; then
+        log "WARN: REST and Gremlin name different authenticators" \
+            "('${rest_auth}' vs '${yaml_auth}'); leaving both untouched"
+        return
+    fi
+    if [[ -z "${rest_auth}" && -z "${yaml_auth}" ]]; then
+        export AUTHENTICATOR_CLASS="org.apache.hugegraph.auth.StandardAuthenticator"
+    elif [[ -n "${yaml_auth}" ]]; then
+        set_prop_encoded "auth.authenticator" "${yaml_auth}" "${REST_SERVER_CONF}"
+    else
+        export AUTHENTICATOR_CLASS="${rest_auth}"
+    fi
+    # auth.graph_store and the gremlin.graph flip are left to enable-auth.sh,
+    # which appends/rewrites only what is absent or still the plain default.
 }
 
 migrate_env() {
@@ -147,6 +197,7 @@ elif [[ -n "${AUTH_TOKEN_SECRET_ENCODED}" ]]; then
 fi
 if [[ -n "${PASSWORD:-}" ]]; then
     set_prop "auth.admin_pa" "${PASSWORD}" "${REST_SERVER_CONF}"
+    align_auth_config
     # This script is idempotent and must run outside the initialization guard:
     # an upgrade can preserve the marker from an unauthenticated deployment.
     ./bin/enable-auth.sh
