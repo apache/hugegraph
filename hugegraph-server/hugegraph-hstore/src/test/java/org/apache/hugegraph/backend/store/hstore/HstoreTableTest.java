@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.backend.store.hstore;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -29,6 +30,7 @@ import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.IdPrefixQuery;
 import org.apache.hugegraph.backend.query.IdRangeQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.store.BackendEntry;
@@ -177,6 +179,42 @@ public class HstoreTableTest {
         Assert.assertNull(pushed.originQuery());
     }
 
+    @Test
+    public void testPrefixListQueryPushesCopyAndKeepsOrigin() {
+        // prepareConditionQueryList() is reached from queryByPrefixList() and
+        // from the streaming query(Session, Iterator, String); one origin
+        // query is shared by every prefix query of the batch
+        ConditionQuery origin = new ConditionQuery(HugeType.EDGE);
+        origin.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of("v1"));
+        origin.eq(HugeKeys.DIRECTION, Directions.OUT);
+        origin.eq(HugeKeys.LABEL, IdGenerator.of(1L));
+        origin.query(Condition.eq(IdGenerator.of(7L), 100));
+        int before = origin.conditions().size();
+        List<IdPrefixQuery> queries = Arrays.asList(
+                new IdPrefixQuery(origin, IdGenerator.of(keyBytes(1),
+                                                         IdType.STRING)),
+                new IdPrefixQuery(origin, IdGenerator.of(keyBytes(2),
+                                                         IdType.STRING)));
+
+        ScanRecordingSession session = new ScanRecordingSession();
+        List<BackendColumnIterator> iterators = this.newTestTable()
+                .queryByPrefixList(session, queries, "g+oe");
+
+        Assert.assertTrue(session.scanCalled);
+        Assert.assertEquals(2, session.lastOwnerKeys.size());
+        Assert.assertEquals(2, iterators.size());
+        Assert.assertNotNull(session.lastQueryBytes);
+        // the shared origin query keeps every condition, including the
+        // owner vertex that the pushed copy drops
+        Assert.assertEquals(before, origin.conditions().size());
+        Assert.assertNotNull(origin.condition(HugeKeys.OWNER_VERTEX));
+        ConditionQuery pushed = ConditionQuery.fromBytes(session.lastQueryBytes);
+        Assert.assertNull(pushed.condition(HugeKeys.OWNER_VERTEX));
+        Assert.assertNotNull(pushed.condition(HugeKeys.LABEL));
+        Assert.assertFalse(pushed.userpropConditions().isEmpty());
+        Assert.assertNull(pushed.originQuery());
+    }
+
     private HstoreTable newTestTable() {
         HstoreTable table = new HstoreTable("hugegraph", "g+oe");
         table.ownerByQueryDelegate = (type, id) -> new byte[]{0};
@@ -210,6 +248,7 @@ public class HstoreTableTest {
 
         private boolean scanCalled = false;
         private byte[] lastQueryBytes = null;
+        private List<HgOwnerKey> lastOwnerKeys = null;
 
         @Override
         public BackendColumnIterator scan(String table, byte[] ownerKeyFrom,
@@ -219,6 +258,21 @@ public class HstoreTableTest {
             this.scanCalled = true;
             this.lastQueryBytes = query;
             return new TestColumnIterator();
+        }
+
+        @Override
+        public List<BackendColumnIterator> scan(String table,
+                                                List<HgOwnerKey> keys,
+                                                int scanType, long limit,
+                                                byte[] query) {
+            this.scanCalled = true;
+            this.lastQueryBytes = query;
+            this.lastOwnerKeys = keys;
+            List<BackendColumnIterator> iterators = new ArrayList<>();
+            for (int i = 0; i < keys.size(); i++) {
+                iterators.add(new TestColumnIterator());
+            }
+            return iterators;
         }
 
         @Override
@@ -311,14 +365,6 @@ public class HstoreTableTest {
         @Override
         public BackendColumnIterator scan(String table, byte[] ownerKey,
                                           byte[] prefix) {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public List<BackendColumnIterator> scan(String table,
-                                                List<HgOwnerKey> keys,
-                                                int scanType, long limit,
-                                                byte[] query) {
             throw new UnsupportedOperationException();
         }
 

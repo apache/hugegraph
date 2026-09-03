@@ -631,7 +631,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             type |= query.inclusiveEnd() ?
                     Session.SCAN_LTE_END : Session.SCAN_LT_END;
         }
-        ConditionQuery cq;
         Query origin = query.originQuery();
         byte[] position = null;
         byte[] ownerStart = this.ownerByQueryDelegate.apply(query.resultType(),
@@ -648,6 +647,7 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         if (query.paging() && !query.page().isEmpty()) {
             position = PageState.fromString(query.page()).position();
         }
+        byte[] queryBytes = null;
         if (origin instanceof ConditionQuery &&
             (query.resultType().isEdge() || query.resultType().isVertex())) {
             // Same guard as queryByPrefix(): only push the query down to the
@@ -656,13 +656,11 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             // label, sort values), which are already enforced by the key
             // range, and the store-side row decoder cannot parse the raw
             // property layout written by the server (see issue #3090).
-            cq = prepareConditionQuery((ConditionQuery) origin);
-            byte[] queryBytes = cq == null ? null : cq.bytes();
-            return session.scan(this.table(), ownerStart,
-                                ownerEnd, start, end, type, queryBytes, position);
+            ConditionQuery cq = prepareConditionQuery((ConditionQuery) origin);
+            queryBytes = cq == null ? null : cq.bytes();
         }
-        return session.scan(this.table(), ownerStart,
-                            ownerEnd, start, end, type, null, position);
+        return session.scan(this.table(), ownerStart, ownerEnd, start, end,
+                            type, queryBytes, position);
     }
 
     static boolean shouldUseOrderedRangeScan(IdRangeQuery query) {
