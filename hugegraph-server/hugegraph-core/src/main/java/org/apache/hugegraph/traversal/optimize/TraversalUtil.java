@@ -64,10 +64,8 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
-import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
@@ -175,10 +173,10 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
-        Step<?, ?> step = newStep.getNextStep();
-        if (hasUnsafeLabelInChain(step, true)) {
+        if (hasUnsafeLabelInTraversal(traversal, newStep)) {
             return;
         }
+        Step<?, ?> step = newStep.getNextStep();
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
             Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
@@ -612,7 +610,7 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
-        if (hasUnsafeLabelInChain(newStep.getNextStep(), false)) {
+        if (hasUnsafeLabelInTraversal(traversal, newStep)) {
             return;
         }
         Step<?, ?> step = newStep;
@@ -671,51 +669,45 @@ public final class TraversalUtil {
         return true;
     }
 
-    private static boolean hasUnsafeLabelInChain(Step<?, ?> step,
-                                                 boolean followPositiveLabelOr) {
+    private static boolean hasUnsafeLabelInTraversal(
+            Traversal.Admin<?, ?> traversal, Step<?, ?> sourceStep) {
         // Partial pushdown can lose candidates before local label filtering.
+        // Scan conservatively across the remaining traversal and its children;
+        // arbitrary extension steps don't reliably expose element identity.
         // FIXME: Restore selective pushdown when every candidate schema label
         // has compatible index coverage for extracted property predicates.
-        while (step instanceof HasStep ||
-               step instanceof NoOpBarrierStep ||
-               step instanceof RangeGlobalStep ||
-               step instanceof IdentityStep) {
+        List<Step> steps = traversal.getSteps();
+        int start = 0;
+        while (start < steps.size() && steps.get(start) != sourceStep) {
+            start++;
+        }
+        start++;
+        for (int i = start; i < steps.size(); i++) {
+            Step<?, ?> step = steps.get(i);
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
                 if (hasUnsafeLabelPredicate(holder)) {
                     return true;
                 }
-                if (followPositiveLabelOr &&
-                    hasMatchIndexSensitivePredicate(holder)) {
-                    OrStep<?> orStep = positiveLabelOnlyOrStepAfter(step);
-                    if (orStep != null &&
-                        positiveLabelValuesOrNull(orStep) != null) {
-                        step = orStep.getNextStep();
-                        continue;
-                    }
-                }
             }
-            step = step.getNextStep();
+            if (hasUnsafeLabelInChildren(step)) {
+                return true;
+            }
         }
-        // Unflattened Or/And/Not hide label predicates in child traversals.
-        return hasUnsafeLabelInLogicalStep(step);
+        return false;
     }
 
-    private static boolean hasUnsafeLabelInLogicalStep(Step<?, ?> step) {
-        if (!(step instanceof OrStep ||
-              step instanceof AndStep ||
-              step instanceof NotStep)) {
-            return false;
-        }
-        return hasUnsafeLabelInLocalChildren(step);
-    }
-
-    private static boolean hasUnsafeLabelInLocalChildren(Step<?, ?> step) {
+    private static boolean hasUnsafeLabelInChildren(Step<?, ?> step) {
         if (!(step instanceof TraversalParent)) {
             return false;
         }
         TraversalParent parent = (TraversalParent) step;
         for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+            if (hasUnsafeLabelInChildTraversal(child)) {
+                return true;
+            }
+        }
+        for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
             if (hasUnsafeLabelInChildTraversal(child)) {
                 return true;
             }
@@ -730,7 +722,7 @@ public final class TraversalUtil {
                 hasUnsafeLabelPredicate((HasContainerHolder) childStep)) {
                 return true;
             }
-            if (hasUnsafeLabelInLocalChildren(childStep)) {
+            if (hasUnsafeLabelInChildren(childStep)) {
                 return true;
             }
         }

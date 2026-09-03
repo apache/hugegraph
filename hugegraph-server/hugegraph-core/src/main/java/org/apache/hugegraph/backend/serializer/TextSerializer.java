@@ -516,17 +516,6 @@ public class TextSerializer extends AbstractSerializer {
         return null;
     }
 
-    private Object edgeIdConditionValue(ConditionQuery cq, HugeKeys key) {
-        if (key == HugeKeys.LABEL) {
-            /*
-             * LABEL may still be represented by multiple top-level EQ/IN
-             * relations before strict edge-id serialization.
-             */
-            return cq.conditionValue(key);
-        }
-        return cq.condition(key);
-    }
-
     @Override
     protected Query writeQueryCondition(Query query) {
         ConditionQuery result = (ConditionQuery) query;

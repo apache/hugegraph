@@ -213,6 +213,24 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerKeepsGlobalChildUnsafeLabelLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey city = propertyKey(2L, "city", DataType.TEXT);
+        Mockito.when(graph.propertyKey("city")).thenReturn(city);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("city", "Beijing")
+                  .union(__.has(T.label, P.neq("author")),
+                         __.identity()), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+    }
+
+    @Test
     public void testExtractHasContainerKeepsUnsupportedOrLabelLocal() {
         Traversal.Admin<?, ?> traversal = __.V()
                                            .has("age", P.gt(18))
@@ -419,7 +437,7 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
-    public void testExtractHasContainerStopsVertexChainAtPositiveLabelOr() {
+    public void testExtractHasContainerKeepsTrailingUnsafeVertexLabelLocal() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         PropertyKey age = propertyKey(1L, "age", DataType.INT);
         Mockito.when(graph.propertyKey("age")).thenReturn(age);
@@ -432,9 +450,8 @@ public class TraversalUtilOptimizeTest {
 
         TraversalUtil.extractHasContainer(newStep, traversal);
 
-        Assert.assertEquals(1, newStep.getHasContainers().size());
-        Assert.assertEquals("age",
-                            newStep.getHasContainers().get(0).getKey());
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "age"));
         Assert.assertTrue(stepExists(traversal, OrStep.class));
     }
 
