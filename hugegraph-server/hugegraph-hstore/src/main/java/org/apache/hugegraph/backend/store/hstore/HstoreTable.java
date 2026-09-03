@@ -568,8 +568,13 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             }
         }
         if (newConditions.size() > 0) {
-            conditionQuery.resetConditions(newConditions);
-            return conditionQuery;
+            // NOTE: copy before reset, the origin query is still used by core
+            // for result filtering after the backend scan returns; drop the
+            // back reference so the serialized payload stays flat
+            ConditionQuery pushdown = conditionQuery.copy();
+            pushdown.resetConditions(newConditions);
+            pushdown.setOriginQuery(null);
+            return pushdown;
         } else {
             return null;
         }
@@ -594,8 +599,11 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             }
         }
         if (newConditions.size() > 0) {
-            conditionQuery.resetConditions(newConditions);
-            return conditionQuery;
+            // NOTE: copy before reset, see prepareConditionQuery()
+            ConditionQuery pushdown = conditionQuery.copy();
+            pushdown.resetConditions(newConditions);
+            pushdown.setOriginQuery(null);
+            return pushdown;
         } else {
             return null;
         }
@@ -623,7 +631,6 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
             type |= query.inclusiveEnd() ?
                     Session.SCAN_LTE_END : Session.SCAN_LT_END;
         }
-        ConditionQuery cq;
         Query origin = query.originQuery();
         byte[] position = null;
         byte[] ownerStart = this.ownerByQueryDelegate.apply(query.resultType(),
@@ -640,21 +647,20 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
         if (query.paging() && !query.page().isEmpty()) {
             position = PageState.fromString(query.page()).position();
         }
+        byte[] queryBytes = null;
         if (origin instanceof ConditionQuery &&
             (query.resultType().isEdge() || query.resultType().isVertex())) {
-            cq = (ConditionQuery) query.originQuery();
-
-            // LOG.debug("query {} with ownerKeyFrom: {}, ownerKeyTo: {}, " +
-            //          "keyFrom: {}, keyTo: {}, " +
-            //          "scanType: {}, conditionQuery: {}",
-            //          this.table(), bytes2String(ownerStart),
-            //          bytes2String(ownerEnd), bytes2String(start),
-            //          bytes2String(end), type, cq.bytes());
-            return session.scan(this.table(), ownerStart,
-                                ownerEnd, start, end, type, cq.bytes(), position);
+            // Same guard as queryByPrefix(): only push the query down to the
+            // store when user-prop conditions remain. A sort-key prefix/range
+            // query keeps sysprop conditions only (owner vertex, direction,
+            // label, sort values), which are already enforced by the key
+            // range, and the store-side row decoder cannot parse the raw
+            // property layout written by the server (see issue #3090).
+            ConditionQuery cq = prepareConditionQuery((ConditionQuery) origin);
+            queryBytes = cq == null ? null : cq.bytes();
         }
-        return session.scan(this.table(), ownerStart,
-                            ownerEnd, start, end, type, null, position);
+        return session.scan(this.table(), ownerStart, ownerEnd, start, end,
+                            type, queryBytes, position);
     }
 
     static boolean shouldUseOrderedRangeScan(IdRangeQuery query) {
