@@ -82,6 +82,7 @@ RUN sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/
 COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
 COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/scripts/detect-storage.groovy ./scripts
 COPY --chown=${HG_UID}:${HG_GID} --chmod=755 hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
+COPY --chown=${HG_UID}:${HG_GID} hugegraph-server/hugegraph-dist/docker/props.awk .
 
 EXPOSE 8080
 VOLUME /hugegraph-server

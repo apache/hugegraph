@@ -41,16 +41,34 @@ if [ ! -d "$BAK_CONF" ]; then
     cp "${CONF}/${GREMLIN_SERVER_CONF}" "${BAK_CONF}/${GREMLIN_SERVER_CONF}.bak"
     cp "${CONF}/${REST_SERVER_CONF}" "${BAK_CONF}/${REST_SERVER_CONF}.bak"
     cp "${CONF}/graphs/${GRAPH_CONF}" "${BAK_CONF}/${GRAPH_CONF}.bak"
+fi
 
+# The appends below are guarded per file and match only an absent or still
+# commented-out definition, so they are no-ops on any config that already
+# carries authentication (e.g. a mounted one, or a re-run of this script).
+# Appending unconditionally used to create duplicate definitions that the
+# properties parser (first definition wins) and the yaml parser (last wins)
+# resolved in opposite directions, leaving Gremlin and REST on different
+# authenticators.
 
+AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
+
+if ! grep -Eq '^[ \t]*authentication[ \t]*:' "${CONF}/${GREMLIN_SERVER_CONF}"; then
     sed -i -e '$a\authentication: {' \
-        -e '$a\  authenticator: org.apache.hugegraph.auth.StandardAuthenticator,' \
+        -e "\$a\\  authenticator: ${AUTHENTICATOR_CLASS}," \
         -e '$a\  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler,' \
         -e '$a\  config: {tokens: conf/rest-server.properties}' \
         -e '$a\}' ${CONF}/${GREMLIN_SERVER_CONF}
+fi
 
-    sed -i -e '$a\auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
-        -e '$a\auth.graph_store=hugegraph' ${CONF}/${REST_SERVER_CONF}
+if ! grep -Eq '^[ \t]*auth\.authenticator[ \t]*=' "${CONF}/${REST_SERVER_CONF}"; then
+    sed -i -e "\$a\\auth.authenticator=${AUTHENTICATOR_CLASS}" ${CONF}/${REST_SERVER_CONF}
+fi
 
-    sed -i 's/gremlin.graph=org.apache.hugegraph.HugeFactory/gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy/g' ${CONF}/graphs/${GRAPH_CONF}
+if ! grep -Eq '^[ \t]*auth\.graph_store[ \t]*=' "${CONF}/${REST_SERVER_CONF}"; then
+    sed -i -e '$a\auth.graph_store=hugegraph' ${CONF}/${REST_SERVER_CONF}
+fi
+
+if grep -Eq '^gremlin\.graph[ \t]*=org\.apache\.hugegraph\.HugeFactory[ \t]*$' "${CONF}/graphs/${GRAPH_CONF}"; then
+    sed -i 's/^gremlin\.graph[ \t]*=org\.apache\.hugegraph\.HugeFactory[ \t]*$/gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy/' ${CONF}/graphs/${GRAPH_CONF}
 fi
