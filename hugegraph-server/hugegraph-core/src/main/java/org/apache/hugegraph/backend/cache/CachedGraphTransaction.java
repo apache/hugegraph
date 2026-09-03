@@ -318,7 +318,8 @@ public final class CachedGraphTransaction extends GraphTransaction {
     @Watched(prefix = "graphcache")
     protected Iterator<HugeVertex> queryVerticesFromBackend(Query query) {
         if (this.enableCacheVertex() &&
-            query.idsSize() > 0 && query.conditionsSize() == 0) {
+            query.idsSize() > 0 && query.conditionsSize() == 0 &&
+            !queryNeedsPostFilter(query)) {
             return this.queryVerticesByIds((IdQuery) query);
         } else {
             return super.queryVerticesFromBackend(query);
@@ -394,9 +395,9 @@ public final class CachedGraphTransaction extends GraphTransaction {
             return ramtable.query(query);
         }
 
-        if (!this.enableCacheEdge() || query.empty() ||
-            query.paging() || query.bigCapacity()) {
-            // Query all edges or query edges in paging, don't cache it
+        if (!this.enableCacheEdge() || query.empty() || query.paging() ||
+            query.bigCapacity() || queryNeedsPostFilter(query)) {
+            // Don't cache all-edge, paging, large, or post-filtered queries
             return super.queryEdgesFromBackend(query);
         }
 
@@ -420,6 +421,11 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         Iterator<HugeEdge> rs = super.queryEdgesFromBackend(query);
+        if (queryNeedsPostFilter(query)) {
+            // The backend query may promote query.optimized() through origin-
+            // query propagation, so re-check before caching
+            return rs;
+        }
 
         /*
          * Iterator can't be cached, caching list instead

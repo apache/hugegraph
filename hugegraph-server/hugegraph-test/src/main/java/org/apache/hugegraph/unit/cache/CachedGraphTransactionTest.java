@@ -18,6 +18,8 @@
 package org.apache.hugegraph.unit.cache;
 
 import java.lang.reflect.Field;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +32,10 @@ import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
@@ -41,6 +47,7 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.IdStrategy;
+import org.apache.hugegraph.type.define.SchemaStatus;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.Events;
@@ -519,6 +526,64 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
         Assert.assertEquals(0L,
                             Whitebox.invoke(cache, "edgesCache", "size"));
         Assert.assertFalse(cache.queryEdgesByVertex(IdGenerator.of(2)).hasNext());
+    }
+
+    @Test
+    public void testPostFilterDefersDeletingLabelToInvalidFilter() {
+        HugeVertex vertex = this.newVertex(IdGenerator.of(1));
+        vertex.schemaLabel().status(SchemaStatus.DELETING);
+
+        Id name = this.graph.propertyKey("name").id();
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.eq(name, "marko"));
+        query.optimized(OptimizedType.INDEX);
+
+        Class<?>[] classes = new Class<?>[]{Iterator.class, Query.class};
+        Iterator<HugeVertex> unmatched = Whitebox.invoke(
+                CachedGraphTransaction.class, classes,
+                "filterUnmatchedRecords", this.cache,
+                Collections.singleton(vertex).iterator(), query);
+        Assert.assertTrue(unmatched.hasNext());
+
+        Iterator<HugeVertex> invalid = Whitebox.invoke(
+                CachedGraphTransaction.class, classes,
+                "filterInvalidRecords", this.cache,
+                Collections.singleton(vertex).iterator(), query);
+        Assert.assertFalse(invalid.hasNext());
+    }
+
+    @Test
+    public void testQueryVertexByIdKeepsDeletingLabel() {
+        CachedGraphTransaction cache = this.cache();
+        HugeVertex v1 = this.newVertex(IdGenerator.of(1));
+        cache.addVertex(v1);
+        cache.commit();
+
+        v1.schemaLabel().status(SchemaStatus.DELETING);
+
+        Assert.assertTrue(cache.queryVertices(v1.id()).hasNext());
+        // Re-query to exercise cached records too
+        Assert.assertTrue(cache.queryVertices(v1.id()).hasNext());
+    }
+
+    @Test
+    public void testQueryEdgeByIdKeepsDeletingLabel() {
+        CachedGraphTransaction cache = this.cache();
+        HugeVertex v1 = this.newVertex(IdGenerator.of(1));
+        HugeVertex v2 = this.newVertex(IdGenerator.of(2));
+        cache.addVertex(v1);
+        cache.addVertex(v2);
+        cache.commit();
+
+        HugeEdge edge = this.newEdge(v1, v2);
+        cache.addEdge(edge);
+        cache.commit();
+
+        edge.schemaLabel().status(SchemaStatus.DELETING);
+
+        Assert.assertTrue(cache.queryEdges(edge.id()).hasNext());
+        // Re-query to exercise cached records too
+        Assert.assertTrue(cache.queryEdges(edge.id()).hasNext());
     }
 
     @Test

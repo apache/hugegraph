@@ -3349,6 +3349,25 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByPrimaryValuesAndPropsWithCachedVertex() {
+        HugeGraph graph = graph();
+        Vertex vertex = graph.addVertex(T.label, "person",
+                                        "name", "marko", "age", 29,
+                                        "city", "Beijing");
+        this.commitTx();
+
+        Vertex cached = graph.vertices(vertex.id()).next();
+        Assert.assertEquals(vertex.id(), cached.id());
+
+        long count = graph.traversal().V().hasLabel("person")
+                          .has("name", "marko")
+                          .has("age", 30)
+                          .count()
+                          .next();
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
     public void testQueryFilterByPropName() {
         HugeGraph graph = graph();
         Assume.assumeTrue("Not support CONTAINS_KEY query",
@@ -5424,8 +5443,12 @@ public class VertexCoreTest extends BaseCoreTest {
         graph.addVertex(T.label, "test", "name", "诚信文明",
                         "confirmType", 3, "type", 1, "kid", 3);
 
-        this.mayCommitTx();
+        this.assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin();
+        this.commitTx();
+        this.assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin();
+    }
 
+    private void assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin() {
         List<Vertex> vertices;
         vertices = graph().traversal().V()
                           .has("type", 1)
@@ -5433,6 +5456,9 @@ public class VertexCoreTest extends BaseCoreTest {
                           .has("name", Text.contains("诚信"))
                           .toList();
         Assert.assertEquals(3, vertices.size());
+        assertContains(vertices, T.label, "test", "kid", 1);
+        assertContains(vertices, T.label, "test", "kid", 2);
+        assertContains(vertices, T.label, "test", "kid", 3);
 
         vertices = graph().traversal().V()
                           .has("type", 1)
@@ -5440,6 +5466,8 @@ public class VertexCoreTest extends BaseCoreTest {
                           .has("name", Text.contains("文明"))
                           .toList();
         Assert.assertEquals(2, vertices.size());
+        assertContains(vertices, T.label, "test", "kid", 2);
+        assertContains(vertices, T.label, "test", "kid", 3);
 
         vertices = graph().traversal().V()
                           .has("type", 0)
@@ -5447,6 +5475,7 @@ public class VertexCoreTest extends BaseCoreTest {
                           .has("name", Text.contains("诚信"))
                           .toList();
         Assert.assertEquals(1, vertices.size());
+        assertContains(vertices, T.label, "test", "kid", 0);
     }
 
     @Test
