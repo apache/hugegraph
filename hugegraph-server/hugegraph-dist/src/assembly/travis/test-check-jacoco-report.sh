@@ -499,21 +499,22 @@ assert "mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \\ " \
        "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(store_job.split())
 assert selected_profiles(store_job, "store") == {
     "store-common-test", "store-client-test", "store-rocksdb-test",
-    "store-raftcore-test",
+    "store-raftcore-test", "store-core-test",
 }
 assert reports_for_option(store_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.client.ClientSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.core.CoreSuiteTest.xml",
 }
 assert not reports_for_option(store_job, "--require-suite-report")
 assert values_for_option(store_job, "--require-covered-group") == {
-    "hg-store-common", "hg-store-client", "hg-store-rocksdb",
+    "hg-store-common", "hg-store-client", "hg-store-rocksdb", "hg-store-core",
 }
 assert required_modules(store_job) == {
     "hg-store-grpc", "hg-store-common", "hg-store-client",
-    "hg-store-rocksdb",
+    "hg-store-rocksdb", "hg-store-core",
 }
 
 print("PASS: JaCoCo aggregation configuration contract")
