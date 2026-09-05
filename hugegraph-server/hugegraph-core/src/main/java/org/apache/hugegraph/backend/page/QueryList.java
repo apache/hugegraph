@@ -334,10 +334,6 @@ public final class QueryList<R> implements AutoCloseable {
 
     public static class PageResults<R> {
 
-        public static final PageResults<?> EMPTY = new PageResults<>(
-                QueryResults.empty(), null,
-                PageState.EMPTY);
-
         private final QueryResults<R> results;
         private final PageState pageState;
         private final Query query;
@@ -373,9 +369,9 @@ public final class QueryList<R> implements AutoCloseable {
             return this.pageState.total();
         }
 
-        @SuppressWarnings("unchecked")
         public static <R> PageResults<R> emptyIterator() {
-            return (PageResults<R>) EMPTY;
+            // Batch cursors are single-use, including those for empty pages.
+            return new PageResults<>(QueryResults.empty(), null, PageState.EMPTY);
         }
     }
 }

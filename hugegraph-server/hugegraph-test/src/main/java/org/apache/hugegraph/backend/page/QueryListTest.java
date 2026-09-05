@@ -31,6 +31,7 @@ import org.apache.hugegraph.backend.page.IdHolder.FixedIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.PagingIdHolder;
 import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.serializer.TextBackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry;
@@ -41,6 +42,18 @@ import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.junit.Test;
 
 public class QueryListTest {
+
+    @Test
+    public void testEmptyPagesHaveIndependentBatchLifecycles() {
+        Iterator<QueryBatch<Object>> first = QueryList.PageResults.emptyIterator().results().batches();
+        Iterator<QueryBatch<Object>> second = QueryList.PageResults.emptyIterator().results().batches();
+        Assert.assertTrue(first.hasNext());
+        Assert.assertTrue(second.hasNext());
+        Assert.assertFalse(second.next().results().hasNext());
+        Assert.assertFalse(second.hasNext());
+        Assert.assertFalse(first.next().results().hasNext());
+        Assert.assertFalse(first.hasNext());
+    }
 
     @Test
     public void testPageWithoutBackendBatchesEndsHolder() {

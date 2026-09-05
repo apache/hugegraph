@@ -319,7 +319,8 @@ public final class CachedGraphTransaction extends GraphTransaction {
     @Override
     @Watched(prefix = "graphcache")
     protected QueryResults<HugeVertex> fetchVertexBatch(Query query) {
-        if (!this.enableCacheVertex() || query.idsSize() == 0 || query.conditionsSize() != 0) {
+        if (!this.enableCacheVertex() || query.paging() ||
+            query.idsSize() == 0 || query.conditionsSize() != 0) {
             return super.fetchVertexBatch(query);
         }
         QueryResultContext context = new QueryResultContext(query);
