@@ -1,0 +1,1224 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HugeGraph HStore Helm values",
+  "type": "object",
+  "required": [
+    "pd",
+    "store",
+    "server"
+  ],
+  "properties": {
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "pd": {
+      "$ref": "#/definitions/pd"
+    },
+    "store": {
+      "$ref": "#/definitions/store"
+    },
+    "server": {
+      "$ref": "#/definitions/server"
+    },
+    "global": {
+      "type": "object"
+    },
+    "hubble": {
+      "$ref": "#/definitions/hubble"
+    }
+  },
+  "definitions": {
+    "optionalPositiveInteger": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "string",
+          "pattern": "^([1-9][0-9]*)?$"
+        }
+      ]
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "tag",
+        "pullPolicy"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "digest": {
+          "type": "string",
+          "description": "Optional immutable image digest, for example sha256:...  Wins over tag when set."
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "$ref": "#/definitions/resourceList"
+        },
+        "limits": {
+          "$ref": "#/definitions/resourceList"
+        }
+      }
+    },
+    "updateStrategy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "RollingUpdate",
+            "OnDelete"
+          ]
+        },
+        "rollingUpdate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "partition": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "persistentVolumeClaimRetentionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "whenDeleted": {
+          "type": "string",
+          "enum": [
+            "Retain",
+            "Delete"
+          ]
+        },
+        "whenScaled": {
+          "type": "string",
+          "enum": [
+            "Retain",
+            "Delete"
+          ]
+        }
+      }
+    },
+    "resourceList": {
+      "type": "object",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number"
+        ]
+      },
+      "properties": {
+        "cpu": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "memory": {
+          "type": [
+            "string",
+            "number"
+          ]
+        },
+        "ephemeral-storage": {
+          "type": [
+            "string",
+            "number"
+          ]
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "storageClassName"
+      ],
+      "properties": {
+        "size": {
+          "type": "string",
+          "minLength": 1
+        },
+        "storageClassName": {
+          "type": "string"
+        }
+      }
+    },
+    "pdb": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "minAvailable"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "periodSeconds",
+        "failureThreshold"
+      ],
+      "properties": {
+        "periodSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "failureThreshold": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "initialDelaySeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "successThreshold": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startup",
+        "readiness",
+        "liveness"
+      ],
+      "properties": {
+        "startup": {
+          "$ref": "#/definitions/probe"
+        },
+        "readiness": {
+          "$ref": "#/definitions/probe"
+        },
+        "liveness": {
+          "$ref": "#/definitions/probe"
+        }
+      }
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grpc",
+        "rest",
+        "raft"
+      ],
+      "properties": {
+        "grpc": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "rest": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "raft": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "pd": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replicas",
+        "image",
+        "ports",
+        "dataPath",
+        "storage",
+        "resources",
+        "antiAffinity",
+        "pdb",
+        "probes"
+      ],
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "javaOpts": {
+          "type": "string"
+        },
+        "raftIpWhitelistEnabled": {
+          "type": "boolean"
+        },
+        "updateStrategy": {
+          "$ref": "#/definitions/updateStrategy"
+        },
+        "persistentVolumeClaimRetentionPolicy": {
+          "$ref": "#/definitions/persistentVolumeClaimRetentionPolicy"
+        },
+        "partition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "defaultShardCount": {
+              "$ref": "#/definitions/optionalPositiveInteger"
+            },
+            "storeMaxShardCount": {
+              "$ref": "#/definitions/optionalPositiveInteger"
+            }
+          }
+        },
+        "ports": {
+          "$ref": "#/definitions/ports"
+        },
+        "dataPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "existingSecret",
+            "key",
+            "autoGenerate"
+          ],
+          "description": "PD REST Basic-auth secret (auth.secret-key). Required by PD images from 1.8.0; shared with the Server storage wait and Hubble.",
+          "properties": {
+            "value": {
+              "type": "string",
+              "pattern": "^[^\\r\\n\\\\]*$",
+              "description": "Plaintext secret. Empty defers to existingSecret or autoGenerate. No newlines, carriage returns, or backslashes: the value lands in Hubble's Java properties file."
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "autoGenerate": {
+              "type": "boolean"
+            }
+          },
+          "anyOf": [
+            {
+              "properties": {
+                "existingSecret": {
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "value": {
+                  "minLength": 1
+                },
+                "existingSecret": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "autoGenerate": {
+                  "const": true
+                },
+                "existingSecret": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
+        "storage": {
+          "$ref": "#/definitions/storage"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "antiAffinity": {
+          "type": "string",
+          "enum": [
+            "required",
+            "preferred",
+            "disabled"
+          ]
+        },
+        "pdb": {
+          "$ref": "#/definitions/pdb"
+        },
+        "probes": {
+          "$ref": "#/definitions/probes"
+        },
+        "podSecurityContext": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "topologySpreadConstraints": {
+          "type": "array"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "podAnnotations": {
+          "type": "object"
+        },
+        "podLabels": {
+          "type": "object"
+        },
+        "extraEnv": {
+          "type": "array"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "automountServiceAccountToken": {
+              "type": "boolean"
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer"
+              ]
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "restNodePort": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 30000,
+              "maximum": 32767
+            },
+            "grpcNodePort": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 30000,
+              "maximum": 32767
+            }
+          }
+        },
+        "readinessPath": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "HTTP path for the PD readinessProbe; /v1/health (default) or /v1/ready on PD images that have it"
+        }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replicas",
+        "image",
+        "ports",
+        "dataPath",
+        "storage",
+        "resources",
+        "antiAffinity",
+        "pdb",
+        "waitImage",
+        "probes"
+      ],
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 99
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "javaOpts": {
+          "type": "string"
+        },
+        "ports": {
+          "$ref": "#/definitions/ports"
+        },
+        "dataPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "storage": {
+          "$ref": "#/definitions/storage"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "antiAffinity": {
+          "type": "string",
+          "enum": [
+            "required",
+            "preferred",
+            "disabled"
+          ]
+        },
+        "pdb": {
+          "$ref": "#/definitions/pdb"
+        },
+        "waitImage": {
+          "type": "string",
+          "minLength": 1
+        },
+        "waitResources": {
+          "$ref": "#/definitions/resources"
+        },
+        "probes": {
+          "$ref": "#/definitions/probes"
+        },
+        "podSecurityContext": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "waitTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "updateStrategy": {
+          "$ref": "#/definitions/updateStrategy"
+        },
+        "persistentVolumeClaimRetentionPolicy": {
+          "$ref": "#/definitions/persistentVolumeClaimRetentionPolicy"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "topologySpreadConstraints": {
+          "type": "array"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "podAnnotations": {
+          "type": "object"
+        },
+        "podLabels": {
+          "type": "object"
+        },
+        "extraEnv": {
+          "type": "array"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "automountServiceAccountToken": {
+              "type": "boolean"
+            }
+          }
+        },
+        "waitPath": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "HTTP path the Store init container polls on each PD peer; /v1/health (default) or /v1/ready on PD images that have it"
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "replicas",
+        "image",
+        "port",
+        "backend",
+        "resources",
+        "waitImage",
+        "initStoreEnabled",
+        "auth",
+        "ingress",
+        "hpa",
+        "probes"
+      ],
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "javaOpts": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "backend": {
+          "type": "string",
+          "const": "hstore"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "waitImage": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Image used by the Helm test hook"
+        },
+        "waitResources": {
+          "$ref": "#/definitions/resources"
+        },
+        "restServer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "minFreeMemory": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "const": ""
+                }
+              ]
+            },
+            "batchMaxWriteThreads": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "const": ""
+                }
+              ]
+            }
+          }
+        },
+        "initStoreEnabled": {
+          "type": "boolean",
+          "const": false
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "admin",
+            "token"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "admin": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "password",
+                "existingSecret",
+                "key",
+                "autoGenerate"
+              ],
+              "properties": {
+                "password": {
+                  "type": "string"
+                },
+                "existingSecret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "autoGenerate": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "token": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "existingSecret",
+                "key",
+                "autoGenerate"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "description": "JWT signing key. Either empty, which defers to existingSecret or autoGenerate, or at least 32 characters: the Server entrypoint rejects a shorter key and the pods CrashLoop.",
+                  "anyOf": [
+                    {
+                      "maxLength": 0
+                    },
+                    {
+                      "minLength": 32
+                    }
+                  ]
+                },
+                "existingSecret": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "autoGenerate": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "admin": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "existingSecret": {
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "password": {
+                            "minLength": 1
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "autoGenerate": {
+                            "const": true
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "token": {
+                    "anyOf": [
+                      {
+                        "properties": {
+                          "existingSecret": {
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "value": {
+                            "minLength": 1
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      },
+                      {
+                        "properties": {
+                          "autoGenerate": {
+                            "const": true
+                          },
+                          "existingSecret": {
+                            "const": ""
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "enabled": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "admin": {
+                    "properties": {
+                      "existingSecret": {
+                        "const": ""
+                      },
+                      "password": {
+                        "const": ""
+                      }
+                    }
+                  },
+                  "token": {
+                    "properties": {
+                      "existingSecret": {
+                        "const": ""
+                      },
+                      "value": {
+                        "const": ""
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ingress": {
+          "$ref": "#/definitions/ingress"
+        },
+        "hpa": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "minReplicas",
+            "maxReplicas",
+            "targetCPUUtilizationPercentage"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "minReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxReplicas": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetCPUUtilizationPercentage": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        },
+        "probes": {
+          "$ref": "#/definitions/probes"
+        },
+        "antiAffinity": {
+          "type": "string",
+          "enum": [
+            "required",
+            "preferred",
+            "disabled"
+          ]
+        },
+        "podSecurityContext": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "pdb": {
+          "$ref": "#/definitions/pdb"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "topologySpreadConstraints": {
+          "type": "array"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "podAnnotations": {
+          "type": "object"
+        },
+        "podLabels": {
+          "type": "object"
+        },
+        "extraEnv": {
+          "type": "array"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "automountServiceAccountToken": {
+              "type": "boolean"
+            }
+          }
+        },
+        "testResources": {
+          "$ref": "#/definitions/resources"
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        },
+        "advertiseUrl": {
+          "type": "string",
+          "description": "URL registered with PD via server.urls_to_pd. Empty uses the in-cluster Server Service URL. Set to an externally reachable URL for outside Hubble PD discovery."
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer"
+          ]
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "nodePort": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 30000,
+          "maximum": 32767
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "className",
+        "hosts",
+        "tls"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "host",
+              "paths"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "path",
+                    "pathType"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "enum": [
+                        "Exact",
+                        "Prefix",
+                        "ImplementationSpecific"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "allowPlainHttp": {
+          "type": "boolean"
+        }
+      }
+    },
+    "hubble": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "mode",
+        "image",
+        "port",
+        "persistence",
+        "resources",
+        "service",
+        "ingress",
+        "probes"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "pd",
+            "direct"
+          ]
+        },
+        "allowWithoutServerAuth": {
+          "type": "boolean"
+        },
+        "image": {
+          "$ref": "#/definitions/image"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "size",
+            "storageClassName"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "size": {
+              "type": "string",
+              "minLength": 1
+            },
+            "storageClassName": {
+              "type": "string"
+            }
+          }
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        },
+        "podSecurityContext": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "nodeSelector": {
+          "type": "object"
+        },
+        "tolerations": {
+          "type": "array"
+        },
+        "affinity": {
+          "type": "object"
+        },
+        "topologySpreadConstraints": {
+          "type": "array"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "podAnnotations": {
+          "type": "object"
+        },
+        "podLabels": {
+          "type": "object"
+        },
+        "extraEnv": {
+          "type": "array"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serviceAccount": {
+          "type": "object",
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "automountServiceAccountToken": {
+              "type": "boolean"
+            }
+          }
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        },
+        "ingress": {
+          "$ref": "#/definitions/ingress"
+        },
+        "probes": {
+          "$ref": "#/definitions/probes"
+        }
+      }
+    }
+  }
+}

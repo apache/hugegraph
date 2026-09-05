@@ -1,0 +1,495 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Default values for HugeGraph HStore Helm chart.
+# See values-single.yaml and values-cluster.yaml for presets.
+
+fullnameOverride: ""
+nameOverride: ""
+
+imagePullSecrets: []
+
+pd:
+  replicas: 3
+  image:
+    repository: hugegraph/pd
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
+    pullPolicy: Always
+  # Empty preserves the image entrypoint's automatic JVM sizing. The chart
+  # renders its partition settings below as -D system properties ahead of
+  # this value, so flags placed here win on conflict.
+  javaOpts: ""
+  # Partition sharding, rendered as -D system properties that outrank the
+  # image's conf/application.yml. PD copies both values into its own
+  # persisted metadata at first bootstrap only; from then on the stored
+  # values are authoritative, so changing these later (or scaling
+  # store.replicas across the derivation boundary) has no effect on an
+  # initialized cluster. Post-bootstrap changes go through PD's config API
+  # and take effect on existing shard groups only when a partition patrol
+  # is triggered; see the README's Partition Sharding section.
+  partition:
+    # Shard replicas per partition, seeding PD at first bootstrap only.
+    # Empty derives 3 when store.replicas is at least 3, else 1, so a fresh
+    # multi-store install gets store-level HA instead of the image default
+    # of 1. The derivation skips 2 because PD clamps a shard count of 2 to
+    # 1 (two shards cannot elect a leader). An explicit value must be odd
+    # and must not exceed store.replicas.
+    defaultShardCount: ""
+    # Maximum shards per store, seeding PD at first bootstrap only. Also
+    # fixes the initial partition count: store.replicas x this value /
+    # shard count. The derived shard count of 3 gives the default topology
+    # 12 partitions instead of 36; raise this value to compensate when more
+    # partitions are wanted. Empty preserves the image default of 12.
+    storeMaxShardCount: ""
+  ports:
+    grpc: 8686
+    rest: 8620
+    raft: 8610
+  dataPath: /hugegraph-pd/pd_data
+  # PD REST Basic-auth credential. PD images from 1.8.0
+  # (apache/hugegraph#3189) compare the password of every /v1 request
+  # against auth.secret-key and refuse to start without one
+  # (HG_PD_AUTH_SECRET_KEY). The chart hands the same value to the Server
+  # storage wait (PD_AUTH_PASSWORD, user store) and to Hubble
+  # (operations.pd.password, user hubble). Older images accept the variable
+  # and ignore the password, so the wiring is harmless there. The Secret is
+  # kept on uninstall like the Server auth Secrets. The value must not
+  # contain newlines, carriage returns, or backslashes: it is written into
+  # Hubble's Java properties file. Priority: existingSecret > value >
+  # autoGenerate.
+  auth:
+    # Optional plaintext secret (prefer existingSecret in shared clusters).
+    value: ""
+    # Pre-created Secret name. Must contain the key below; chart does not manage it.
+    existingSecret: ""
+    key: secret-key
+    # When existingSecret and value are empty, create a kept release-pd-auth Secret.
+    autoGenerate: true
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  resources: {}
+  # Pod-level and container-level securityContext. Empty by default because the
+  # published images run as root; set these to satisfy a restricted namespace.
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  # required | preferred | disabled. "preferred" schedules on clusters with
+  # fewer nodes than replicas; production should use "required" (see
+  # values-cluster.yaml) so one node failure cannot take out PD quorum.
+  antiAffinity: preferred
+  # Scheduling. `affinity` takes precedence over the antiAffinity preset.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the pd container.
+  extraEnv: []
+  # Gives a JVM with an on-disk store time to shut down cleanly on drain.
+  terminationGracePeriodSeconds: 300
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  # Client Service for PD REST/gRPC. Defaults to ClusterIP for in-cluster
+  # consumers (Server, Store, in-chart Hubble). Set type to NodePort or
+  # LoadBalancer when an outside Hubble must reach PD for discovery.
+  service:
+    type: ClusterIP
+    annotations: {}
+    # Optional fixed NodePorts; require service.type NodePort or LoadBalancer.
+    restNodePort:
+    grpcNodePort:
+  pdb:
+    enabled: true
+    minAvailable: 2
+  # PD's raft IP whitelist resolves peers once at boot, which under
+  # Kubernetes blocks peers whose pod IPs were not yet published or change
+  # later. Off by default in-cluster (upstream switch
+  # raft.ip-whitelist.enabled); k8s network policy/auth owns that layer.
+  # Ignored by images that predate the switch. Set true to restore the
+  # image default.
+  raftIpWhitelistEnabled: false
+  # Explicit rollout strategy instead of the implicit StatefulSet default.
+  updateStrategy:
+    type: RollingUpdate
+  # Keep graph metadata PVCs across delete and scale-down; data outlives the
+  # workload by default. Set to Delete for disposable environments. Honored
+  # on Kubernetes >=1.27 (or with the StatefulSetAutoDeletePVC feature gate);
+  # older API servers drop the field, which matches Retain behavior anyway.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  # Startup can take a while during Raft bootstrap
+  # HTTP path the PD readinessProbe hits. /v1/health answers 200 as soon as
+  # the REST listener is up and never consults raft, so a PD outside the
+  # quorum still passes readiness. PD images from 1.8.0 on add /v1/ready
+  # (apache/hugegraph#3185), which answers 503 without a raft leader; switch
+  # this to /v1/ready only on such an image, an older image has no such
+  # path and the PD never turns Ready. Startup and liveness stay on
+  # /v1/health regardless, so a PD that merely lost its leader is not
+  # restarted.
+  # TODO(apache/hugegraph#3185): change the default to /v1/ready in the same
+  # commit that pins the image tag to 1.8.0 or newer.
+  readinessPath: /v1/health
+  probes:
+    startup:
+      failureThreshold: 30
+      periodSeconds: 10
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+store:
+  replicas: 3
+  image:
+    repository: hugegraph/store
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
+    pullPolicy: Always
+  # Empty preserves the image entrypoint's automatic JVM sizing.
+  javaOpts: ""
+  ports:
+    grpc: 8500
+    raft: 8510
+    rest: 8520
+  dataPath: /hugegraph-store/storage
+  storage:
+    size: 50Gi
+    storageClassName: ""
+  resources: {}
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  # required | preferred | disabled. "preferred" schedules on clusters with
+  # fewer nodes than replicas; production should use "required" (see
+  # values-cluster.yaml) so one node failure cannot co-locate shard replicas.
+  antiAffinity: preferred
+  # Scheduling. `affinity` takes precedence over the antiAffinity preset.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the store container.
+  extraEnv: []
+  # Gives a JVM with an on-disk store time to shut down cleanly on drain.
+  terminationGracePeriodSeconds: 300
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  pdb:
+    enabled: true
+    minAvailable: 2
+  waitImage: curlimages/curl:8.5.0
+  # HTTP path the init container polls on every PD peer; a majority must
+  # answer 2xx before the Store starts. /v1/health proves the listener is
+  # up, not a raft quorum. On PD images that carry /v1/ready (1.8.0 on,
+  # apache/hugegraph#3185) set /v1/ready so the count means quorum members;
+  # on older images that path does not exist and Stores never leave Init.
+  # TODO(apache/hugegraph#3185): change the default to /v1/ready in the same
+  # commit that pins the image tag to 1.8.0 or newer.
+  waitPath: /v1/health
+  # Bound the PD wait so a cluster whose PDs never come up fails visibly
+  # instead of sitting in Init:0/1 forever.
+  waitTimeoutSeconds: 900
+  # Optional bounds for the PD wait init container.
+  waitResources: {}
+  # Explicit rollout strategy instead of the implicit StatefulSet default.
+  updateStrategy:
+    type: RollingUpdate
+  # Keep graph data PVCs across delete and scale-down; data outlives the
+  # workload by default. Set to Delete for disposable environments.
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  probes:
+    startup:
+      failureThreshold: 40
+      periodSeconds: 10
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+server:
+  replicas: 3
+  image:
+    repository: hugegraph/server
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
+    pullPolicy: Always
+  # Empty preserves the image entrypoint's automatic JVM sizing.
+  javaOpts: ""
+  port: 8080
+  backend: hstore
+  resources: {}
+  # Server is stateless and may scale past the node count via HPA, so the
+  # default only prefers spreading. Use "required" when replicas are always
+  # fewer than schedulable nodes.
+  # required | preferred | disabled
+  antiAffinity: preferred
+  # Scheduling. `affinity` takes precedence over the antiAffinity preset.
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the server container.
+  extraEnv: []
+  # Allows in-flight requests to drain before the Server is stopped.
+  terminationGracePeriodSeconds: 60
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  # Server has no quorum to preserve, so no PodDisruptionBudget by default.
+  pdb:
+    enabled: false
+    minAvailable: 2
+  # Image used by the Helm test hook.
+  waitImage: curlimages/curl:8.5.0
+  # Optional resources for the Helm test hook container.
+  # Resources for the Helm test hook container. Bounded by default so the hook
+  # cannot run unlimited on a restricted or quota-managed namespace.
+  testResources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 64Mi
+  restServer:
+    # Empty preserves the image's restserver.min_free_memory default.
+    minFreeMemory: ""
+    # Empty preserves the image's batch.max_write_threads default.
+    batchMaxWriteThreads: ""
+  # Distributed HStore: the init-store gate must be explicitly false, so that
+  # concurrent Server replicas never initialize the same backend. No
+  # HG_SERVER_SKIP_INIT and no init Job.
+  initStoreEnabled: false
+  auth:
+    # On by default: a chart-managed release-admin Secret supplies the password
+    # unless admin.existingSecret or admin.password is set. Set enabled=false
+    # only for trusted networks.
+    enabled: true
+    # Admin password: inline value vs Kubernetes Secret name are separate keys.
+    # Priority: existingSecret > password > autoGenerate.
+    admin:
+      # Optional plaintext password (prefer existingSecret in shared clusters).
+      password: ""
+      # Pre-created Secret name. Must contain key below; chart does not manage it.
+      existingSecret: ""
+      key: password
+      # When existingSecret and password are empty, create a kept release-admin Secret.
+      autoGenerate: true
+    # JWT signing key for auth.token_secret / HG_SERVER_AUTH_TOKEN_SECRET.
+    # Must be identical on every Server replica or Hubble login fails behind
+    # the Service. Priority: existingSecret > value > autoGenerate.
+    token:
+      # Optional plaintext signing key (prefer existingSecret in shared clusters).
+      value: ""
+      # Pre-created Secret name. Chart does not manage it.
+      existingSecret: ""
+      key: token_secret
+      # When existingSecret and value are empty, create a kept release-auth-token Secret.
+      autoGenerate: true
+  # URL announced to PD via server.urls_to_pd for discovery clients such as Hubble.
+  # Empty announces each Server Pod IP so in-cluster clients retain the full replica list.
+  # Set this to a URL reachable from outside the cluster (NodePort, LoadBalancer, or Ingress) when an external Hubble uses PD mode; all replicas then announce that shared logical endpoint.
+  advertiseUrl: ""
+  service:
+    type: ClusterIP
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: hugegraph.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  hpa:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  probes:
+    startup:
+      # 450s covers the 300s storage wait and Server process startup.
+      failureThreshold: 90
+      periodSeconds: 5
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# Optional Hubble UI. Serves plain HTTP; keep it on a ClusterIP Service or
+# behind an HTTPS-terminating Ingress, never directly on an untrusted network.
+hubble:
+  enabled: false
+  # pd: discover the cluster through PD (enables the cluster operations view).
+  # direct: talk to the Server client Service only, without PD discovery.
+  # Current Hubble images require server.auth to be enabled: the UI login
+  # authenticates against the cluster, so rendering fails otherwise unless
+  # allowWithoutServerAuth explicitly overrides for images that support it.
+  mode: pd
+  allowWithoutServerAuth: false
+  image:
+    repository: hugegraph/hubble
+    # The draft tracks latest until the next HugeGraph release tag is available.
+    # Pin the release tag and switch to IfNotPresent before stable publication.
+    tag: latest
+    # Optional immutable digest, for example sha256:abc...  When set it wins over
+    # tag and the image is pulled by digest, which is what a release gate should
+    # assert instead of a mutable tag.
+    digest: ""
+    pullPolicy: Always
+  port: 8088
+  # Hubble keeps UI connection metadata, including any graph credentials
+  # entered in the UI, in an embedded per-instance H2 database, so the
+  # Deployment is fixed at a single replica (pointing SPRING_DATASOURCE_URL
+  # at an external database via extraEnv is not a supported configuration).
+  # Without persistence that metadata is lost on Pod replacement; graph data
+  # is unaffected. size and storageClassName apply at install time only, and
+  # the PVC is kept on helm uninstall.
+  persistence:
+    enabled: false
+    size: 1Gi
+    storageClassName: ""
+  resources: {}
+  # When persistence is enabled and the pod runs as non-root, set a matching
+  # fsGroup here so H2 can write /hubble-data.
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  podAnnotations: {}
+  podLabels: {}
+  # Extra environment variables appended to the hubble container.
+  extraEnv: []
+  terminationGracePeriodSeconds: 30
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+    # This chart makes no Kubernetes API calls, so no token is mounted.
+    automountServiceAccountToken: false
+  service:
+    type: ClusterIP
+    annotations: {}
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: hubble.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+    # Hubble serves plain HTTP, so an Ingress without tls is rejected at
+    # render time unless this is explicitly set to true for a trusted
+    # network.
+    allowPlainHttp: false
+  probes:
+    startup:
+      failureThreshold: 30
+      periodSeconds: 5
+      timeoutSeconds: 5
+    readiness:
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+    liveness:
+      periodSeconds: 20
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# No init Job; see README.md for the HStore initialization contract.
+# Install with: helm install ... --wait   (no --wait-for-jobs)

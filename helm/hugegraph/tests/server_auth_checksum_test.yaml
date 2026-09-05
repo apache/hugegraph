@@ -1,0 +1,66 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Server auth checksum and secret wiring
+templates:
+  - server-deployment.yaml
+tests:
+  - it: stamps a checksum/auth annotation on the pod template
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          pattern: "^[a-f0-9]{64}$"
+
+  - it: keeps a valid checksum when an external admin Secret is supplied
+    set:
+      server.auth.admin.existingSecret: ext-admin-secret
+      server.auth.admin.key: password
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          pattern: "^[a-f0-9]{64}$"
+
+  - it: never places credential material in pod metadata
+    set:
+      server.auth.admin.password: sup3rs3cr3tpw
+      server.auth.token.value: t0k3nvalu3PADDINGtoREACH32charsMIN
+    asserts:
+      - notMatchRegex:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          pattern: "(sup3rs3cr3tpw|t0k3nvalu3PADDING)"
+
+  - it: sources the admin password from a Secret, never a literal value
+    set:
+      server.auth.admin.password: sup3rs3cr3tpw
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[0].env[?(@.name=="PASSWORD")].valueFrom.secretKeyRef
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=="PASSWORD")].value
+
+  - it: points the admin Secret ref at an operator-supplied Secret when set
+    set:
+      server.auth.admin.existingSecret: ext-admin-secret
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=="PASSWORD")].valueFrom.secretKeyRef.name
+          value: ext-admin-secret
+
+  - it: shares one JWT signing key across replicas via a Secret ref
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_SERVER_AUTH_TOKEN_SECRET")].valueFrom.secretKeyRef

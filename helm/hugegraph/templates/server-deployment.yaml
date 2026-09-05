@@ -1,0 +1,324 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{- include "hugegraph.validateValues" . }}
+{{- $restServer := .Values.server.restServer | default dict }}
+{{- $minFreeMemory := "" }}
+{{- $batchMaxWriteThreads := "" }}
+{{- if hasKey $restServer "minFreeMemory" }}
+{{- $minFreeMemory = toString (get $restServer "minFreeMemory") }}
+{{- end }}
+{{- if hasKey $restServer "batchMaxWriteThreads" }}
+{{- $batchMaxWriteThreads = toString (get $restServer "batchMaxWriteThreads") }}
+{{- end }}
+{{- $customPort := ne (int .Values.server.port) 8080 }}
+{{/*
+Distributed HStore requires every Server replica to share graph metadata
+through PD. The same registration properties let PD-mode Hubble discover the
+Server and let the built-in authenticator create the admin on the PD path.
+*/}}
+{{- $pdMeta := true }}
+{{- $wrapper := or $pdMeta $customPort (ne $minFreeMemory "") (ne $batchMaxWriteThreads "") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hugegraph.server.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if not .Values.server.hpa.enabled }}
+  replicas: {{ .Values.server.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        {{- include "hugegraph.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+        {{- with .Values.server.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
+      annotations:
+        {{- if .Values.server.auth.enabled }}
+        # Rolls Server pods when the resolved auth Secrets change, so rotating
+        # an existingSecret takes effect without a manual restart.
+        checksum/auth: {{ include "hugegraph.server.authChecksum" . | quote }}
+        {{- end }}
+        # Rolls Server pods when the PD REST Secret its storage wait uses changes.
+        checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" . | quote }}
+        {{- with .Values.server.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+    spec:
+      automountServiceAccountToken: {{ get (get .Values.server "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
+      serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.server "name" (include "hugegraph.server.name" .) ) }}
+      {{- with .Values.server.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ . }}
+      {{- end }}
+      {{- with .Values.server.priorityClassName }}
+      priorityClassName: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.server.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.server.affinity }}
+      affinity:
+        {{- toYaml .Values.server.affinity | nindent 8 }}
+      {{- else }}
+      {{- with include "hugegraph.antiAffinity" (dict "mode" (.Values.server.antiAffinity | default "preferred") "component" "server" "labels" (include "hugegraph.selectorLabels" . | fromYaml)) }}{{ . | trim | nindent 6 }}{{- end }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "hugegraph.image" (dict "image" .Values.server.image "appVersion" $.Chart.AppVersion) | quote }}
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          {{- with .Values.server.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if $wrapper }}
+          command:
+            - /usr/bin/dumb-init
+            - --
+            - /bin/bash
+            - -c
+          args:
+            - |
+              set -euo pipefail
+              {{- if .Values.server.auth.enabled }}
+              : "${PASSWORD:?auth Secret key 'password' must not be empty}"
+              # The value is written into a Java properties file, whose parser
+              # treats CR as a line terminator, unescapes backslashes, and
+              # skips whitespace after the separator, so these shapes would
+              # inject config lines or silently store a password that differs
+              # from the Secret.
+              case "${PASSWORD}" in
+                *$'\n'* | *$'\r'* | *\\* | ' '* | $'\t'*)
+                  echo "auth Secret key 'password' must not contain newlines," \
+                       "carriage returns, or backslashes, or start with" \
+                       "whitespace" >&2
+                  exit 1
+                  ;;
+              esac
+              {{- end }}
+              CONF=./conf/rest-server.properties
+              if [[ ! -r "${CONF}" ]]; then
+                echo "missing or unreadable ${CONF}; refusing to write a stub config" >&2
+                exit 1
+              fi
+              TMP=$(mktemp)
+              {{- if $pdMeta }}
+              FOUND_USE_PD=false
+              FOUND_PD_PEERS=false
+              FOUND_URLS_TO_PD=false
+              FOUND_DEPLOY_IN_K8S=false
+              {{- end }}
+              {{- if .Values.server.auth.enabled }}
+              FOUND_AUTH_ADMIN_PA=false
+              {{- end }}
+              {{- if $customPort }}
+              FOUND_RESTSERVER_URL=false
+              {{- end }}
+              {{- if ne $minFreeMemory "" }}
+              FOUND_MIN_FREE_MEMORY=false
+              {{- end }}
+              {{- if ne $batchMaxWriteThreads "" }}
+              FOUND_BATCH_MAX_WRITE_THREADS=false
+              {{- end }}
+              while IFS= read -r LINE || [[ -n "${LINE}" ]]; do
+                case "${LINE}" in
+                  {{- if $pdMeta }}
+                  usePD=*)
+                    printf 'usePD=true\n' >>"${TMP}"
+                    FOUND_USE_PD=true
+                    ;;
+                  pd.peers=*)
+                    printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
+                    FOUND_PD_PEERS=true
+                    ;;
+                  server.urls_to_pd=*)
+                    printf 'server.urls_to_pd=%s\n' "${HG_SERVER_URLS_TO_PD}" >>"${TMP}"
+                    FOUND_URLS_TO_PD=true
+                    ;;
+                  server.deploy_in_k8s=*)
+                    printf 'server.deploy_in_k8s=true\n' >>"${TMP}"
+                    FOUND_DEPLOY_IN_K8S=true
+                    ;;
+                  {{- end }}
+                  {{- if .Values.server.auth.enabled }}
+                  auth.admin_pa=*)
+                    printf 'auth.admin_pa=%s\n' "${PASSWORD}" >>"${TMP}"
+                    FOUND_AUTH_ADMIN_PA=true
+                    ;;
+                  {{- end }}
+                  {{- if $customPort }}
+                  restserver.url=*)
+                    printf 'restserver.url=http://0.0.0.0:%s\n' \
+                      {{ .Values.server.port | quote }} >>"${TMP}"
+                    FOUND_RESTSERVER_URL=true
+                    ;;
+                  {{- end }}
+                  {{- if ne $minFreeMemory "" }}
+                  restserver.min_free_memory=*)
+                    printf 'restserver.min_free_memory=%s\n' \
+                      {{ $minFreeMemory | quote }} >>"${TMP}"
+                    FOUND_MIN_FREE_MEMORY=true
+                    ;;
+                  {{- end }}
+                  {{- if ne $batchMaxWriteThreads "" }}
+                  batch.max_write_threads=*)
+                    printf 'batch.max_write_threads=%s\n' \
+                      {{ $batchMaxWriteThreads | quote }} >>"${TMP}"
+                    FOUND_BATCH_MAX_WRITE_THREADS=true
+                    ;;
+                  {{- end }}
+                  *)
+                    printf '%s\n' "${LINE}" >>"${TMP}"
+                    ;;
+                esac
+              done <"${CONF}"
+              {{- if $pdMeta }}
+              if [[ "${FOUND_USE_PD}" == false ]]; then
+                printf 'usePD=true\n' >>"${TMP}"
+              fi
+              if [[ "${FOUND_PD_PEERS}" == false ]]; then
+                printf 'pd.peers=%s\n' "${HG_SERVER_PD_PEERS}" >>"${TMP}"
+              fi
+              # PD hands this URL to discovery clients such as Hubble.
+              # HG_SERVER_URLS_TO_PD uses server.advertiseUrl when set,
+              # otherwise the in-cluster Server Service URL. The k8s
+              # branch is taken only when server.deploy_in_k8s is true;
+              # otherwise the announcement falls back to restserver.url,
+              # whose 0.0.0.0 is never resolvable from another Pod.
+              if [[ "${FOUND_URLS_TO_PD}" == false ]]; then
+                printf 'server.urls_to_pd=%s\n' "${HG_SERVER_URLS_TO_PD}" >>"${TMP}"
+              fi
+              if [[ "${FOUND_DEPLOY_IN_K8S}" == false ]]; then
+                printf 'server.deploy_in_k8s=true\n' >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if .Values.server.auth.enabled }}
+              if [[ "${FOUND_AUTH_ADMIN_PA}" == false ]]; then
+                printf 'auth.admin_pa=%s\n' "${PASSWORD}" >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if $customPort }}
+              if [[ "${FOUND_RESTSERVER_URL}" == false ]]; then
+                printf 'restserver.url=http://0.0.0.0:%s\n' \
+                  {{ .Values.server.port | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if ne $minFreeMemory "" }}
+              if [[ "${FOUND_MIN_FREE_MEMORY}" == false ]]; then
+                printf 'restserver.min_free_memory=%s\n' \
+                  {{ $minFreeMemory | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              {{- if ne $batchMaxWriteThreads "" }}
+              if [[ "${FOUND_BATCH_MAX_WRITE_THREADS}" == false ]]; then
+                printf 'batch.max_write_threads=%s\n' \
+                  {{ $batchMaxWriteThreads | quote }} >>"${TMP}"
+              fi
+              {{- end }}
+              chmod 600 "${TMP}"
+              mv "${TMP}" "${CONF}"
+              exec ./docker-entrypoint.sh
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HG_SERVER_BACKEND
+              value: {{ .Values.server.backend | quote }}
+            - name: HG_SERVER_PD_PEERS
+              value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
+            - name: HG_SERVER_PD_REST_ENDPOINT
+              value: {{ include "hugegraph.pd.restPeersList" . | quote }}
+            # wait-storage.sh authenticates its PD readiness checks as the
+            # store service user with this password (PD images from 1.8.0).
+            - name: PD_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.pd.authSecretName" . | quote }}
+                  key: {{ include "hugegraph.pd.authSecretKey" . | quote }}
+            - name: STORE_REST
+              value: {{ include "hugegraph.store.restPrimary" . | quote }}
+            - name: HG_SERVER_INIT_STORE_ENABLED
+              value: {{ .Values.server.initStoreEnabled | quote }}
+            {{- if $pdMeta }}
+            - name: HG_SERVER_URLS_TO_PD
+              value: {{ include "hugegraph.server.urlsToPd" . | quote }}
+            {{- end }}
+            {{- with .Values.server.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
+            {{- with include "hugegraph.javaOptsEnv" .Values.server.javaOpts }}{{ . | trim | nindent 12 }}{{- end }}
+            {{- if .Values.server.auth.enabled }}
+            - name: PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.server.authSecretName" . | quote }}
+                  key: {{ include "hugegraph.server.authSecretKey" . | quote }}
+            - name: HG_SERVER_AUTH_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.server.authTokenSecretName" . | quote }}
+                  key: {{ include "hugegraph.server.authTokenSecretKey" . | quote }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /versions
+              port: http
+            failureThreshold: {{ include "hugegraph.server.startupFailureThreshold" . }}
+            periodSeconds: {{ .Values.server.probes.startup.periodSeconds }}
+            {{- with include "hugegraph.probeTuning" .Values.server.probes.startup }}{{ . | trim | nindent 12 }}{{- end }}
+          readinessProbe:
+            httpGet:
+              path: /versions
+              port: http
+            periodSeconds: {{ .Values.server.probes.readiness.periodSeconds }}
+            failureThreshold: {{ .Values.server.probes.readiness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.server.probes.readiness }}{{ . | trim | nindent 12 }}{{- end }}
+          livenessProbe:
+            httpGet:
+              path: /versions
+              port: http
+            periodSeconds: {{ .Values.server.probes.liveness.periodSeconds }}
+            failureThreshold: {{ .Values.server.probes.liveness.failureThreshold }}
+            {{- with include "hugegraph.probeTuning" .Values.server.probes.liveness }}{{ . | trim | nindent 12 }}{{- end }}
+          {{- with .Values.server.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
