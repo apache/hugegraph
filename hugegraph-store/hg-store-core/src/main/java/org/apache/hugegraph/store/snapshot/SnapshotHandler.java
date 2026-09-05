@@ -24,7 +24,6 @@ import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.Checksum;
 
 import org.apache.commons.io.FileUtils;
@@ -94,35 +93,41 @@ public class SnapshotHandler {
         final String snapshotDir = writer.getPath();
         if (partitionEngine != null) {
             Integer groupId = partitionEngine.getGroupId();
-            AtomicInteger state = businessHandler.getState(groupId);
-            if (state != null && state.get() == BusinessHandler.doing) {
-                return;
+            if (!businessHandler.tryLockCompactionRange(groupId)) {
+                throw new HgStoreException(HgStoreException.EC_RKDB_SNAPSHOT_SAVE_BUSY_FAIL,
+                                            String.format(
+                                                    "Partition %d snapshot save failed: " +
+                                                    "compaction in progress", groupId));
             }
-            // rocks db snapshot
-            final String graphSnapshotDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
-            businessHandler.saveSnapshot(graphSnapshotDir, "", groupId);
+            try {
+                // rocks db snapshot
+                final String graphSnapshotDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
+                businessHandler.saveSnapshot(graphSnapshotDir, "", groupId);
 
-            List<String> files = new ArrayList<>();
-            File dir = new File(graphSnapshotDir);
-            File rootDirFile = new File(writer.getPath());
-            // add all files in data dir
-            findFileList(dir, rootDirFile, files);
+                List<String> files = new ArrayList<>();
+                File dir = new File(graphSnapshotDir);
+                File rootDirFile = new File(writer.getPath());
+                // add all files in data dir
+                findFileList(dir, rootDirFile, files);
 
-            // load snapshot by learner ??
-            for (String file : files) {
-                String checksum = calculateChecksum(writer.getPath() + File.separator + file);
-                if (checksum.length() != 0) {
-                    LocalFileMetaOutter.LocalFileMeta meta =
-                            LocalFileMetaOutter.LocalFileMeta.newBuilder()
-                                                             .setChecksum(checksum)
-                                                             .build();
-                    writer.addFile(file, meta);
-                } else {
-                    writer.addFile(file);
+                // load snapshot by learner ??
+                for (String file : files) {
+                    String checksum = calculateChecksum(writer.getPath() + File.separator + file);
+                    if (checksum.length() != 0) {
+                        LocalFileMetaOutter.LocalFileMeta meta =
+                                LocalFileMetaOutter.LocalFileMeta.newBuilder()
+                                                                 .setChecksum(checksum)
+                                                                 .build();
+                        writer.addFile(file, meta);
+                    } else {
+                        writer.addFile(file);
+                    }
                 }
+                // should_not_load wound not sync to learner
+                markShouldNotLoad(writer, true);
+            } finally {
+                businessHandler.unlockCompactionRange(groupId);
             }
-            // should_not_load wound not sync to learner
-            markShouldNotLoad(writer, true);
         }
     }
 
@@ -169,6 +174,15 @@ public class SnapshotHandler {
     public void onSnapshotLoad(final SnapshotReader reader, long committedIndex) throws
                                                                                  HgStoreException {
         final String snapshotDir = reader.getPath();
+        final String graphSnapshotDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
+
+        if (!new File(graphSnapshotDir).isDirectory()) {
+            throw new HgStoreException(HgStoreException.EC_RKDB_IMPORT_SNAPSHOT_FAIL,
+                                        String.format(
+                                                "Raft %d snapshot is corrupt, data dir %s is " +
+                                                "missing", partitionEngine.getGroupId(),
+                                                graphSnapshotDir));
+        }
 
         // No need to load locally saved snapshots
         if (shouldNotLoad(reader)) {
@@ -177,7 +191,6 @@ public class SnapshotHandler {
         }
 
         // Use snapshot directly
-        final String graphSnapshotDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
         log.info("Raft {} begin loadSnapshot, {}", partitionEngine.getGroupId(), graphSnapshotDir);
         businessHandler.loadSnapshot(graphSnapshotDir, "", partitionEngine.getGroupId(),
                                      committedIndex);

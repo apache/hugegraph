@@ -18,29 +18,40 @@
 package org.apache.hugegraph.store.core.snapshot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
+import org.apache.hugegraph.store.snapshot.SnapshotHandler;
+import org.apache.hugegraph.store.util.HgStoreException;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import com.alipay.sofa.jraft.entity.RaftOutter;
 import com.alipay.sofa.jraft.storage.snapshot.SnapshotReader;
 import com.alipay.sofa.jraft.storage.snapshot.SnapshotWriter;
 import com.google.protobuf.Message;
 
-
 public class HgSnapshotHandlerTest extends StoreEngineTestBase {
 
     private static HgSnapshotHandler hgSnapshotHandlerUnderTest;
+
+    @Rule
+    public TemporaryFolder tmpDir = new TemporaryFolder();
 
     @Before
     public void setUp() throws IOException {
@@ -183,5 +194,91 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
         HgSnapshotHandler.findFileList(dir, rootDir, List.of("value"));
 
         // Verify the results
+    }
+
+    /**
+     * Test that onSnapshotLoad validates corruption when should_not_load is present but data/ missing.
+     */
+    @Test
+    public void testOnSnapshotLoadThrowsWhenShouldNotLoadPresentButDataMissing()
+            throws Exception {
+        // Arrange: snapshot dir has should_not_load but NO data/ subdirectory.
+        File snapDir = tmpDir.newFolder("snapshot-corrupt");
+        File shouldNotLoad = new File(snapDir, "should_not_load");
+        Files.write(shouldNotLoad.toPath(), "saved snapshot".getBytes(StandardCharsets.UTF_8));
+        // data/ deliberately not created
+
+        SnapshotHandler handler = new SnapshotHandler(createPartitionEngine(1));
+        SnapshotReader stubReader = stubReader(snapDir.getAbsolutePath());
+
+        // The missing data/ dir is checked before should_not_load, so this throws
+        // immediately rather than falling through to businessHandler.loadSnapshot.
+        assertThrows(
+                "onSnapshotLoad must throw when should_not_load present but data/ missing",
+                HgStoreException.class,
+                () -> handler.onSnapshotLoad(stubReader, 0L));
+    }
+
+    /**
+     * Test that onSnapshotLoad skips loading when snapshot is locally saved (both flags present).
+     */
+    @Test
+    public void testOnSnapshotLoadSkipsWhenShouldNotLoadPresentAndDataExists() throws Exception {
+        // Arrange: a healthy local snapshot, both should_not_load and data/ present.
+        File snapDir = tmpDir.newFolder("snapshot-healthy");
+        File shouldNotLoad = new File(snapDir, "should_not_load");
+        Files.write(shouldNotLoad.toPath(), "saved snapshot".getBytes(StandardCharsets.UTF_8));
+        FileUtils.forceMkdir(new File(snapDir, "data"));
+
+        SnapshotHandler handler = new SnapshotHandler(createPartitionEngine(2));
+        SnapshotReader stubReader = stubReader(snapDir.getAbsolutePath());
+
+        // Must not throw; should return early at the should_not_load + data-exists check.
+        handler.onSnapshotLoad(stubReader, 0L);
+    }
+
+    /**
+     * Test that the compaction-range lock used by onSnapshotSave to guard against a concurrent
+     * compactRange() call is mutually exclusive and releasable, using the real BusinessHandlerImpl
+     * rather than a mock, so the actual lock instance backing the check is exercised. The
+     * concurrent attempt runs on a separate thread because the lock is a ReentrantLock: the
+     * owning thread can always re-acquire it, so checking from the same thread would not
+     * exercise exclusion. In production dbCompaction() and onSnapshotSave() run on different
+     * executor threads, which is what this mirrors.
+     */
+    @Test
+    public void testCompactionRangeLockIsMutuallyExclusiveAndReleasable() throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 3;
+
+        assertEquals("first reservation must succeed", true,
+                     businessHandler.tryLockCompactionRange(partitionId));
+
+        AtomicBoolean concurrentResult = new AtomicBoolean();
+        Thread other = new Thread(
+                () -> concurrentResult.set(businessHandler.tryLockCompactionRange(partitionId)));
+        other.start();
+        other.join();
+        assertEquals("a concurrent reservation from another thread must fail while the first " +
+                     "is held", false, concurrentResult.get());
+
+        businessHandler.unlockCompactionRange(partitionId);
+
+        assertEquals("reservation must succeed again once released", true,
+                     businessHandler.tryLockCompactionRange(partitionId));
+        businessHandler.unlockCompactionRange(partitionId);
+    }
+
+    private static SnapshotReader stubReader(String path) {
+        return new SnapshotReader() {
+            @Override public RaftOutter.SnapshotMeta load() { return null; }
+            @Override public String generateURIForCopy() { return null; }
+            @Override public boolean init(Void opts) { return false; }
+            @Override public void shutdown() {}
+            @Override public String getPath() { return path; }
+            @Override public Set<String> listFiles() { return null; }
+            @Override public Message getFileMeta(String fileName) { return null; }
+            @Override public void close() {}
+        };
     }
 }
