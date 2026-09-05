@@ -9199,6 +9199,30 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testChildSourceBeforeParentNegativeLabel() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        init5Persons();
+        Vertex fan = graph.addVertex(T.label, "fan", "name", "unindexed-city-fan",
+                                     "age", 20, "city", "Beijing");
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Set<Object> expected = g.V().hasLabel(P.neq("author"))
+                                .has("city", "Beijing").id().toSet();
+        Assert.assertEquals(4, expected.size());
+        Assert.assertTrue(expected.contains(fan.id()));
+
+        List<Object> ids = g.inject(1).union(__.V().has("city", "Beijing"))
+                            .hasLabel(P.neq("author")).id().toList();
+        Assert.assertEquals(4, ids.size());
+        Assert.assertEquals(expected, ImmutableSet.copyOf(ids));
+        ids = g.inject(1).local(__.union(__.V().has("city", "Beijing")))
+               .hasLabel(P.neq("author")).id().toList();
+        Assert.assertEquals(4, ids.size());
+        Assert.assertEquals(expected, ImmutableSet.copyOf(ids));
+    }
+
+    @Test
     public void testQueryByNonEqLabelAndIndexedPropertyAcrossBarrier() {
         HugeGraph graph = graph();
         initPersonIndex(true);

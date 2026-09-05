@@ -496,6 +496,63 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testLocalSearchWithoutGraphKeepsPredicate() {
+        ConditionP search = Text.contains("alpha");
+        Traversal.Admin<?, ?> traversal = __.V().has("body", search)
+                                           .limit(10).hasLabel(P.neq("author")).asAdmin();
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(traversal);
+        HasContainer original = ((HasStep<?>) graphStep.getNextStep()).getHasContainers().get(0);
+        TraversalUtil.extractHasContainer(graphStep, traversal);
+        Assert.assertTrue(graphStep.getHasContainers().isEmpty());
+        Assert.assertSame(original, ((HasStep<?>) graphStep.getNextStep()).getHasContainers().get(0));
+        Assert.assertSame(search, original.getPredicate());
+        Assert.assertTrue(search.test("alpha beta"));
+        Assert.assertFalse(search.test("beta"));
+
+        traversal = __.outE().has("body", Text.contains("alpha"))
+                      .limit(10).hasLabel(P.neq("knows")).asAdmin();
+        HugeVertexStep<?> vertexStep = replaceVertexStep(traversal);
+        original = ((HasStep<?>) vertexStep.getNextStep()).getHasContainers().get(0);
+        TraversalUtil.extractHasContainer(vertexStep, traversal);
+        Assert.assertTrue(vertexStep.getHasContainers().isEmpty());
+        Assert.assertSame(original, ((HasStep<?>) vertexStep.getNextStep()).getHasContainers().get(0));
+    }
+
+    @Test
+    public void testChildSourceKeepsPropertyBeforeParentUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        GraphTraversal<?, ?> child = __.V().has("city", "Beijing");
+        traversal(__.inject(1).union(child).hasLabel(P.neq("author")), graph);
+        Traversal.Admin<?, ?> admin = traversal(child, graph);
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(graphStep, admin);
+        Assert.assertTrue(graphStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(admin, "city"));
+
+        child = __.out().has("city", "Beijing");
+        traversal(__.V().local(child).hasLabel(P.neq("author")), graph);
+        admin = traversal(child, graph);
+        HugeVertexStep<?> vertexStep = replaceVertexStep(admin);
+        TraversalUtil.extractHasContainer(vertexStep, admin);
+        Assert.assertTrue(vertexStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(admin, "city"));
+    }
+
+    @Test
+    public void testChildSourceStillExtractsWithoutDownstreamUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        GraphTraversal<?, ?> child = __.V().has("city", "Beijing");
+        traversal(__.inject(1).union(child).hasLabel("person"), graph);
+        Traversal.Admin<?, ?> admin = traversal(child, graph);
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(graphStep, admin);
+        Assert.assertTrue(hasContainer(graphStep, "city"));
+        Assert.assertFalse(hasStepExists(admin, "city"));
+    }
+
+    @Test
     public void testConnectiveLabelStepStrategyApplyPost() {
         Set<Class<? extends TraversalStrategy.OptimizationStrategy>> post =
                 HugeConnectiveLabelStepStrategy.instance().applyPost();

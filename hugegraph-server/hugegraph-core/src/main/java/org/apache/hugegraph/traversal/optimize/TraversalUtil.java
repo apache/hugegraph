@@ -81,6 +81,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ElementValueComparator;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.EmptyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ReducingBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.util.AndP;
@@ -694,7 +695,12 @@ public final class TraversalUtil {
                     collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
                     if (predicates.stream().anyMatch(p ->
                             p.getBiPredicate() == Condition.RelationType.TEXT_CONTAINS)) {
-                        HugeGraph graph = getGraph(source);
+                        HugeGraph graph = tryGetGraph(source);
+                        if (graph == null) {
+                            // Child traversals may not have a graph yet. Keep
+                            // their original local predicate in that case.
+                            continue;
+                        }
                         holder.removeHasContainer(has);
                         holder.addHasContainer(new HasContainer(has.getKey(),
                                 localSearchPredicate(has.getPredicate(), graph)));
@@ -736,8 +742,9 @@ public final class TraversalUtil {
     private static boolean hasUnsafeLabelInTraversal(
             Traversal.Admin<?, ?> traversal, Step<?, ?> sourceStep) {
         // Partial pushdown can lose candidates before local label filtering.
-        // Scan conservatively across the remaining traversal and its children;
-        // arbitrary extension steps don't reliably expose element identity.
+        // Scan the remaining traversal, its children and each ancestor's
+        // remaining steps for filters on child output. Arbitrary extension
+        // steps don't reliably expose element identity, so stay conservative.
         // FIXME: Restore selective pushdown when every candidate schema label
         // has compatible index coverage for extracted property predicates.
         List<Step> steps = traversal.getSteps();
@@ -757,6 +764,13 @@ public final class TraversalUtil {
             if (hasUnsafeLabelInChildren(step)) {
                 return true;
             }
+        }
+        TraversalParent parent = traversal.getParent();
+        if (parent instanceof Step && !(parent instanceof EmptyStep)) {
+            Step<?, ?> parentStep = (Step<?, ?>) parent;
+            // Start AFTER the owning step: scanning its children again would
+            // revisit this traversal and could create an upward/downward cycle.
+            return hasUnsafeLabelInTraversal(parentStep.getTraversal(), parentStep);
         }
         return false;
     }
