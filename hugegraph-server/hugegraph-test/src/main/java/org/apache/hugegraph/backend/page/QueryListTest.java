@@ -43,6 +43,57 @@ import org.junit.Test;
 public class QueryListTest {
 
     @Test
+    public void testPageWithoutBackendBatchesEndsHolder() {
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.page("");
+        query.limit(2L);
+        int[] firstFetches = {0};
+        IdHolderList holders = new IdHolderList(true);
+        holders.add(new PagingIdHolder(query, page -> {
+            firstFetches[0]++;
+            return new PageIds(ids(1L), new PageState(new byte[]{1}, 0, 1));
+        }));
+        holders.add(new PagingIdHolder(query, page -> new PageIds(ids(2L), PageState.EMPTY)));
+        QueryList<Item> list = new QueryList<>(query, batch -> {
+            if (batch.ids().contains(IdGenerator.of(1L))) {
+                return QueryResults.fromBatches(Collections.emptyIterator());
+            }
+            return new QueryResults<>(Collections.singletonList(new Item(IdGenerator.of(2L)))
+                                                 .iterator(), batch);
+        });
+        list.add(holders, 1L);
+        Iterator<Item> results = list.fetch(1).iterator();
+        Assert.assertEquals(IdGenerator.of(2L), results.next().id());
+        Assert.assertFalse(results.hasNext());
+        Assert.assertEquals(1, firstFetches[0]);
+        Assert.assertNull(PageInfo.pageInfo(results));
+    }
+
+    @Test
+    public void testFilteredEmptyBatchKeepsFollowingPage() {
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.page("");
+        query.limit(2L);
+        int[] pages = {0};
+        IdHolderList holders = new IdHolderList(true);
+        holders.add(new PagingIdHolder(query, page -> {
+            long id = ++pages[0];
+            return new PageIds(ids(id), new PageState(id == 1L ? new byte[]{1} : new byte[0], 0, 1));
+        }));
+        QueryList<Item> list = new QueryList<>(query, batch -> {
+            Item item = new Item(batch.ids().iterator().next());
+            return new QueryResults<>(Collections.singletonList(item).iterator(), batch)
+                    .filter((context, value) -> value.id().asLong() == 2L);
+        });
+        list.add(holders, 1L);
+        Iterator<Item> results = list.fetch(1).iterator();
+        Assert.assertEquals(IdGenerator.of(2L), results.next().id());
+        Assert.assertFalse(results.hasNext());
+        Assert.assertEquals(2, pages[0]);
+        Assert.assertNull(PageInfo.pageInfo(results));
+    }
+
+    @Test
     public void testPagingRetainsOnlyCurrentQuery() throws Exception {
         ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
         query.page("");

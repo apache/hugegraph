@@ -61,6 +61,12 @@ public class PageEntryIterator<R> extends BatchIterator<QueryBatch<R>> {
                         Math.min(this.pageSize, this.remaining);
             QueryList.PageResults<R> page = this.queries.fetchNext(this.pageInfo, size);
             this.pageBatches = page.results().batches();
+            if (!this.pageBatches.hasNext()) {
+                // Preserve the raw-empty-page boundary. An existing batch
+                // emptied by parsing or TTL filtering still follows its cursor.
+                this.pageInfo.increase();
+                continue;
+            }
             if (page.hasNextPage()) {
                 this.pageInfo.page(page.page());
             } else {

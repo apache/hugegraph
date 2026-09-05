@@ -20,6 +20,7 @@ package org.apache.hugegraph.backend.cache;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -337,6 +338,9 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
         if (!missing.empty()) {
             QueryResults<HugeVertex> fetched = super.fetchVertexBatch(vertices.isEmpty() ? query : missing);
+            if (vertices.isEmpty() && !fetched.batches().hasNext()) {
+                return fetched;
+            }
             ListIterator<HugeVertex> candidates = QueryResults.toList(fetched.iterator());
             for (HugeVertex vertex : candidates.list()) {
                 if (this.needCacheVertex(vertex)) {
@@ -384,6 +388,10 @@ public final class CachedGraphTransaction extends GraphTransaction {
             return this.filterExpiredBatches(new QueryResults<>(cached.iterator(), context));
         }
         QueryResults<HugeEdge> fetched = super.fetchEdgeBatch(query);
+        if (!fetched.batches().hasNext()) {
+            this.cacheEdgeBatch(cacheKey, batchKey, Collections.emptyList());
+            return fetched;
+        }
         return fetched.mapBatches(batch -> {
             Iterator<HugeEdge> source = batch.results();
             List<HugeEdge> candidates = new ArrayList<>(MAX_CACHE_EDGES_PER_QUERY + 1);
@@ -392,16 +400,20 @@ public final class CachedGraphTransaction extends GraphTransaction {
                 candidates.add(source.next());
             }
             if (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY) {
-                synchronized (this.edgesCache) {
-                    CachedEdgeQuery existing = new CachedEdgeQuery(this.edgesCache.get(cacheKey));
-                    if (existing.put(batchKey, candidates)) {
-                        this.edgesCache.update(cacheKey, existing.values);
-                    }
-                }
+                this.cacheEdgeBatch(cacheKey, batchKey, candidates);
             }
             return new QueryBatch<>(
                     new ExtendableIterator<>(candidates.iterator(), source), batch.context());
         });
+    }
+
+    private void cacheEdgeBatch(Id cacheKey, Id batchKey, List<HugeEdge> candidates) {
+        synchronized (this.edgesCache) {
+            CachedEdgeQuery existing = new CachedEdgeQuery(this.edgesCache.get(cacheKey));
+            if (existing.put(batchKey, candidates)) {
+                this.edgesCache.update(cacheKey, existing.values);
+            }
+        }
     }
 
     /** Nested lists retain the existing off-heap cache's serialization support. */

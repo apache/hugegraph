@@ -869,6 +869,11 @@ public class GraphTransaction extends IndexableTransaction {
 
     private QueryResults<BackendEntry> backendBatches(Query query) {
         QueryResults<BackendEntry> results = super.query(query);
+        if (!results.iterator().hasNext()) {
+            // No raw records means no batch. Filtering a nonempty source may
+            // still produce an empty batch, which must keep its page cursor.
+            return results;
+        }
         QueryResultContext context = new QueryResultContext(
                 query, this.storeFeatures().supportsQuerySortByInputIds());
         return results.mapBatches(batch -> new QueryBatch<>(batch.results(), context));

@@ -171,6 +171,34 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
     }
 
     @Test
+    public void testMissingVertexDoesNotCreateAnEmptyBatch() {
+        Query query = new IdQuery(HugeType.VERTEX, IdGenerator.of(999L));
+        QueryResults<HugeVertex> results = Whitebox.invoke(
+                CachedGraphTransaction.class, new Class<?>[]{Query.class},
+                "fetchVertexBatch", this.cache, query);
+        Assert.assertFalse(results.batches().hasNext());
+    }
+
+    @Test
+    public void testExpiredVertexKeepsItsBatchAfterCacheMaterialization() throws InterruptedException {
+        this.graph.schema().vertexLabel("expiring").useCustomizeNumberId()
+                  .ttl(1000L).create();
+        Vertex vertex = this.graph.addVertex(T.label, "expiring", T.id, 1L);
+        this.graph.tx().commit();
+        Thread.sleep(1100L);
+        // TTL is evaluated at transaction opening time, including internal fetches.
+        this.graph.tx().open();
+        Assert.assertTrue(((HugeVertex) vertex).expired());
+        Query query = new IdQuery(HugeType.VERTEX, (Id) vertex.id());
+        QueryResults<HugeVertex> results = Whitebox.invoke(
+                CachedGraphTransaction.class, new Class<?>[]{Query.class},
+                "fetchVertexBatch", this.cache, query);
+        Assert.assertTrue(results.batches().hasNext());
+        Assert.assertFalse(results.batches().next().results().hasNext());
+        Assert.assertFalse(results.batches().hasNext());
+    }
+
+    @Test
     public void testEventClear() throws Exception {
         CachedGraphTransaction cache = this.cache();
 
