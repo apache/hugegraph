@@ -36,6 +36,7 @@ import com.alipay.sofa.jraft.Closure;
 import com.alipay.sofa.jraft.Iterator;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
+import com.alipay.sofa.jraft.core.State;
 import com.alipay.sofa.jraft.core.StateMachineAdapter;
 import com.alipay.sofa.jraft.entity.LeaderChangeContext;
 import com.alipay.sofa.jraft.entity.LocalFileMetaOutter;
@@ -56,6 +57,11 @@ public class RaftStateMachine extends StateMachineAdapter {
     private static final String SNAPSHOT_DIR_NAME = "snapshot";
     private static final String SNAPSHOT_ARCHIVE_NAME = "snapshot.zip";
     private final AtomicLong leaderTerm = new AtomicLong(-1);
+    // Kept for the readiness probe and the raft gauges, which must answer without
+    // touching the raft node: during an election jraft holds the node lock while it
+    // reconnects to peers, and a reader stalls for the connect timeout.
+    private volatile State probeState = State.STATE_UNINITIALIZED;
+    private volatile boolean seesLeader = false;
     private List<RaftTaskHandler> taskHandlers;
     private List<RaftStateListener> stateListeners;
 
@@ -74,6 +80,21 @@ public class RaftStateMachine extends StateMachineAdapter {
 
     public boolean isLeader() {
         return this.leaderTerm.get() > 0;
+    }
+
+    /**
+     * The last node state a raft callback announced. jraft emits no callback for candidacy
+     * or leadership transfer, so a candidate reads as a follower that sees no leader.
+     */
+    public State getProbeState() {
+        return this.probeState;
+    }
+
+    /**
+     * Whether the last raft callback left this node with a visible leader.
+     */
+    public boolean seesLeader() {
+        return this.seesLeader;
     }
 
     @Override
@@ -105,17 +126,23 @@ public class RaftStateMachine extends StateMachineAdapter {
 
     @Override
     public void onError(final RaftException e) {
+        this.probeState = State.STATE_ERROR;
+        this.seesLeader = false;
         log.error("Raft StateMachine on error {}", e);
     }
 
     @Override
     public void onShutdown() {
+        this.probeState = State.STATE_SHUTDOWN;
+        this.seesLeader = false;
         super.onShutdown();
     }
 
     @Override
     public void onLeaderStart(final long term) {
         this.leaderTerm.set(term);
+        this.probeState = State.STATE_LEADER;
+        this.seesLeader = true;
         super.onLeaderStart(term);
 
         log.info("Raft becomes leader");
@@ -129,12 +156,16 @@ public class RaftStateMachine extends StateMachineAdapter {
     @Override
     public void onLeaderStop(final Status status) {
         this.leaderTerm.set(-1);
+        this.probeState = State.STATE_FOLLOWER;
+        this.seesLeader = false;
         super.onLeaderStop(status);
         log.info("Raft  lost leader ");
     }
 
     @Override
     public void onStartFollowing(final LeaderChangeContext ctx) {
+        this.probeState = State.STATE_FOLLOWER;
+        this.seesLeader = true;
         super.onStartFollowing(ctx);
         Utils.runInThread(() -> {
             if (!CollectionUtils.isEmpty(stateListeners)) {
@@ -145,6 +176,7 @@ public class RaftStateMachine extends StateMachineAdapter {
 
     @Override
     public void onStopFollowing(final LeaderChangeContext ctx) {
+        this.seesLeader = false;
         super.onStopFollowing(ctx);
     }
 

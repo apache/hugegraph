@@ -86,7 +86,7 @@ public final class PDMetrics {
      */
     private void registerRaftMeters() {
         RaftEngine raft = RaftEngine.getInstance();
-        Gauge.builder(PREFIX + ".raft.leader", () -> raft.isLeader() ? 1 : 0)
+        Gauge.builder(PREFIX + ".raft.leader", () -> raft.getRaftStatus().isLocalLeader() ? 1 : 0)
              .description("1 if this PD is the raft leader, 0 otherwise")
              .register(registry);
         Gauge.builder(PREFIX + ".raft.has.leader", () -> raft.hasLeader() ? 1 : 0)

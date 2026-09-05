@@ -801,6 +801,12 @@ the quorum is lost the PD keeps answering `/v1/health` with `200` but
 `/v1/ready` turns into `503` with `"ready": false`. Being unauthenticated, the
 body carries no cluster addresses; the leader's address stays on `/v1/members`.
 
+The answer is served from state the raft callbacks maintain rather than from
+the raft node, so it stays prompt while an election is running and never waits
+on the node lock. `state` is therefore the last change raft announced: jraft
+emits no callback for candidacy or leadership transfer, so a candidate reports
+`STATE_FOLLOWER` with `"ready": false`.
+
 Point Kubernetes readiness probes, `depends_on` healthchecks and any
 "wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health`
 so a PD that merely lost its leader is not restarted.
