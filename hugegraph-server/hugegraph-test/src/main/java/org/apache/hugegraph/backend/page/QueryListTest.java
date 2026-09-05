@@ -35,6 +35,7 @@ import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.serializer.TextBackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry;
+import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.Idfiable;
@@ -297,6 +298,89 @@ public class QueryListTest {
             Assert.assertEquals((int) ((id + 1L) / 2L), idFetches[0]);
         }
         Assert.assertFalse(values.hasNext());
+    }
+
+    @Test
+    public void testClosingQueryListReleasesUnconsumedHolders() throws Exception {
+        this.assertHoldersClosed(false);
+    }
+
+    @Test
+    public void testFetcherFailureReleasesAllHolders() throws Exception {
+        this.assertHoldersClosed(true);
+    }
+
+    private void assertHoldersClosed(boolean failFetcher) throws Exception {
+        ConditionQuery root = new ConditionQuery(HugeType.VERTEX);
+        IdHolderList holders = new IdHolderList(false);
+        List<TrackedSource> sources = new ArrayList<>();
+        for (long id = 1L; id <= 2L; id++) {
+            TrackedSource source = new TrackedSource(id);
+            sources.add(source);
+            holders.add(new BatchIdHolder(new ConditionQuery(HugeType.SECONDARY_INDEX, root),
+                                          source, size -> ids(source.next().id().asLong())));
+        }
+        RuntimeException failure = new IllegalStateException("fetcher");
+        QueryList<Item> list = new QueryList<>(root, query -> {
+            if (failFetcher) {
+                throw failure;
+            }
+            return new QueryResults<>(Collections.singletonList(new Item(query.ids().iterator().next()))
+                                                 .iterator(), query);
+        });
+        list.add(holders, 1L);
+        Iterator<Item> results = list.fetch(1).iterator();
+        if (failFetcher) {
+            try {
+                results.hasNext();
+                Assert.fail("Expected fetcher failure");
+            } catch (IllegalStateException actual) {
+                Assert.assertSame(failure, actual);
+            }
+            Assert.assertEquals(1, sources.get(0).closed);
+            Assert.assertEquals(1, sources.get(1).closed);
+        } else {
+            Assert.assertTrue(results.hasNext());
+        }
+        ((AutoCloseable) results).close();
+        ((AutoCloseable) results).close();
+        Assert.assertEquals(1, sources.get(0).read);
+        Assert.assertEquals(0, sources.get(1).read);
+        Assert.assertEquals(1, sources.get(0).closed);
+        Assert.assertEquals(1, sources.get(1).closed);
+        Assert.assertFalse(results.hasNext());
+    }
+
+    private static final class TrackedSource implements CIter<BackendEntry> {
+
+        private final BackendEntry entry;
+        private int read;
+        private int closed;
+
+        private TrackedSource(long id) {
+            this.entry = new TextBackendEntry(HugeType.VERTEX, IdGenerator.of(id));
+        }
+
+        @Override
+        public boolean hasNext() {
+            return this.read == 0;
+        }
+
+        @Override
+        public BackendEntry next() {
+            this.read++;
+            return this.entry;
+        }
+
+        @Override
+        public void close() {
+            this.closed++;
+        }
+
+        @Override
+        public Object metadata(String meta, Object... args) {
+            return null;
+        }
     }
 
     private static Set<Id> ids(Long... values) {

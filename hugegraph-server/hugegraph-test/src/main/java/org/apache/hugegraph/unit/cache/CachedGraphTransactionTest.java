@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
@@ -34,6 +35,7 @@ import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.cache.OffheapCache;
+import org.apache.hugegraph.backend.id.EdgeId;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.query.Condition;
@@ -683,6 +685,134 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             AutoCloseable nativeCache = Whitebox.getInternalState(offheap, "cache");
             nativeCache.close();
         }
+    }
+
+    @Test
+    public void testEdgeCacheKeepsDistinctBatchesWithinTotalCandidateLimit() {
+        List<Id> ids = this.persistEdges(101);
+        ConditionQuery root = this.edgeCacheRequest();
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params, store);
+        try {
+            transaction.clearCache(null, false);
+            for (int start : new int[]{0, 50}) {
+                List<Id> batch = ids.subList(start, start + 50);
+                IdQuery query = new IdQuery(root, new LinkedHashSet<>(batch));
+                this.assertEdgeIds(batch, this.fetchEdgeIds(transaction, query));
+            }
+            Mockito.clearInvocations(store);
+            for (int start : new int[]{50, 0}) {
+                List<Id> batch = ids.subList(start, start + 50);
+                IdQuery query = new IdQuery(root, new LinkedHashSet<>(batch));
+                this.assertEdgeIds(batch, this.fetchEdgeIds(transaction, query));
+            }
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+
+            List<Id> overflow = ids.subList(100, 101);
+            for (int i = 0; i < 2; i++) {
+                IdQuery query = new IdQuery(root, new LinkedHashSet<>(overflow));
+                this.assertEdgeIds(overflow, this.fetchEdgeIds(transaction, query));
+            }
+            Mockito.verify(store, Mockito.times(2)).query(Mockito.any(Query.class));
+            Mockito.clearInvocations(store);
+            IdQuery cached = new IdQuery(root, new LinkedHashSet<>(ids.subList(0, 50)));
+            this.assertEdgeIds(ids.subList(0, 50), this.fetchEdgeIds(transaction, cached));
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+        } finally {
+            transaction.close();
+        }
+    }
+
+    @Test
+    public void testOversizedEdgeBatchReturnsEveryCandidateWithoutCaching() {
+        List<Id> all = this.persistEdges(102);
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params, store);
+        try {
+            transaction.clearCache(null, false);
+            for (int size : new int[]{101, 102}) {
+                List<Id> ids = all.subList(0, size);
+                IdQuery query = new IdQuery(this.edgeCacheRequest(), new LinkedHashSet<>(ids));
+                this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, query));
+                Mockito.clearInvocations(store);
+                this.assertEdgeIds(ids, this.fetchEdgeIds(transaction, query));
+                Mockito.verify(store, Mockito.times(1)).query(Mockito.any(Query.class));
+            }
+        } finally {
+            transaction.close();
+        }
+    }
+
+    @Test
+    public void testEmptyEdgeBatchesRespectBatchCountLimit() {
+        this.persistEdges(1);
+        ConditionQuery root = this.edgeCacheRequest();
+        Id label = this.graph.edgeLabel("person_know_person").id();
+        List<IdQuery> batches = new ArrayList<>();
+        for (long id = 1000L; id <= 1100L; id++) {
+            Id edge = new EdgeId(IdGenerator.of(1L), Directions.OUT, label, label,
+                                 "", IdGenerator.of(id));
+            batches.add(new IdQuery(root, edge));
+        }
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params, store);
+        try {
+            transaction.clearCache(null, false);
+            for (IdQuery batch : batches) {
+                Assert.assertTrue(this.fetchEdgeIds(transaction, batch).isEmpty());
+            }
+            Mockito.clearInvocations(store);
+            for (int i = 0; i < 100; i++) {
+                Assert.assertTrue(this.fetchEdgeIds(transaction, batches.get(i)).isEmpty());
+            }
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+            Assert.assertTrue(this.fetchEdgeIds(transaction, batches.get(100)).isEmpty());
+            Mockito.verify(store, Mockito.times(1)).query(Mockito.any(Query.class));
+        } finally {
+            transaction.close();
+        }
+    }
+
+    private List<Id> persistEdges(int count) {
+        HugeVertex first = this.newVertex(IdGenerator.of(1L));
+        this.cache.addVertex(first);
+        List<HugeVertex> targets = new ArrayList<>();
+        for (long id = 2L; id < count + 2L; id++) {
+            HugeVertex vertex = new HugeVertex(this.graph, IdGenerator.of(id), first.schemaLabel());
+            this.cache.addVertex(vertex);
+            targets.add(vertex);
+        }
+        this.cache.commit();
+        List<Id> ids = new ArrayList<>();
+        for (HugeVertex target : targets) {
+            HugeEdge edge = this.newEdge(first, target);
+            this.cache.addEdge(edge);
+            ids.add(edge.id());
+        }
+        this.cache.commit();
+        return ids;
+    }
+
+    private ConditionQuery edgeCacheRequest() {
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1L));
+        query.eq(HugeKeys.DIRECTION, Directions.OUT);
+        return query;
+    }
+
+    private void assertEdgeIds(List<Id> expected, List<Id> actual) {
+        // Candidate-cache tests protect membership and cardinality, independent of backend ordering.
+        Assert.assertEquals(expected.size(), actual.size());
+        Assert.assertEquals(new LinkedHashSet<>(expected), new LinkedHashSet<>(actual));
+    }
+
+    private List<Id> fetchEdgeIds(CachedGraphTransaction transaction, Query query) {
+        QueryResults<HugeEdge> results = Whitebox.invoke(
+                CachedGraphTransaction.class, new Class<?>[]{Query.class},
+                "fetchEdgeBatch", transaction, query);
+        List<Id> ids = new ArrayList<>();
+        results.iterator().forEachRemaining(edge -> ids.add(edge.id()));
+        return ids;
     }
 
     @Test

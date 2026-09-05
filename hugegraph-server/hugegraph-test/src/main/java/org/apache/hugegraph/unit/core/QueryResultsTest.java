@@ -321,6 +321,44 @@ public class QueryResultsTest {
     }
 
     @Test
+    public void testSourceFailuresCloseMappedResultsOnce() throws Exception {
+        for (boolean failHasNext : new boolean[]{true, false}) {
+            CountingIterator source = new CountingIterator(1L);
+            RuntimeException failure = new IllegalStateException("source");
+            if (failHasNext) {
+                source.hasNextFailure = failure;
+            } else {
+                source.nextFailure = failure;
+            }
+            Iterator<TestIdfiable> values = new QueryResults<>(source, queryOf(1L))
+                    .map(item -> item).iterator();
+            try {
+                values.hasNext();
+                Assert.fail("Expected source failure");
+            } catch (IllegalStateException actual) {
+                Assert.assertSame(failure, actual);
+            }
+            Assert.assertEquals(1, source.closed);
+            Assert.assertFalse(values.hasNext());
+            ((AutoCloseable) values).close();
+            Assert.assertEquals(1, source.closed);
+        }
+    }
+
+    @Test
+    public void testCloseBeforeMappedSourceActivation() throws Exception {
+        CountingIterator source = new CountingIterator(1L);
+        source.hasNextFailure = new IllegalStateException("Source must not be probed");
+        Iterator<TestIdfiable> values = new QueryResults<>(source, queryOf(1L))
+                .map(item -> item).iterator();
+        ((AutoCloseable) values).close();
+        ((AutoCloseable) values).close();
+        Assert.assertEquals(0, source.consumed);
+        Assert.assertEquals(1, source.closed);
+        Assert.assertFalse(values.hasNext());
+    }
+
+    @Test
     public void testMapperExceptionPreservesCloseFailure() {
         CountingIterator source = new CountingIterator(1L);
         RuntimeException failure = new IllegalArgumentException("mapper");
@@ -449,6 +487,8 @@ public class QueryResultsTest {
         private int consumed;
         private int closed;
         private RuntimeException closeFailure;
+        private RuntimeException hasNextFailure;
+        private RuntimeException nextFailure;
 
         private CountingIterator(Long... values) {
             this.values = Arrays.asList(values).iterator();
@@ -456,11 +496,17 @@ public class QueryResultsTest {
 
         @Override
         public boolean hasNext() {
+            if (this.hasNextFailure != null) {
+                throw this.hasNextFailure;
+            }
             return this.values.hasNext();
         }
 
         @Override
         public TestIdfiable next() {
+            if (this.nextFailure != null) {
+                throw this.nextFailure;
+            }
             this.consumed++;
             return new TestIdfiable(IdGenerator.of(this.values.next()));
         }
