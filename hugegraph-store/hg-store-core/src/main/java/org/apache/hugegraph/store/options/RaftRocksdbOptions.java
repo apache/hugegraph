@@ -44,6 +44,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RaftRocksdbOptions {
 
     private static RocksdbConfig rocksdbConfig = null;
+    private static boolean raftRocksdbConfigRegistered = false;
 
     private static RocksdbConfig getRocksdbConfig(HugeConfig options) {
         if (rocksdbConfig == null) {
@@ -55,6 +56,15 @@ public class RaftRocksdbOptions {
     }
 
     private static void registerRaftRocksdbConfig(HugeConfig options) {
+        // StorageOptionsFactory.releaseAllOptions() (called by test setup between runs)
+        // does not clear its table-format-config table, so registering RocksDBLogStorage's
+        // config more than once per JVM throws IllegalStateException. Register only once.
+        synchronized (RaftRocksdbOptions.class) {
+            if (raftRocksdbConfigRegistered) {
+                return;
+            }
+            raftRocksdbConfigRegistered = true;
+        }
         Cache blockCache = new LRUCache(SizeUnit.GB);
         BlockBasedTableConfig tableConfig = new BlockBasedTableConfig()
                 .setIndexType(IndexType.kTwoLevelIndexSearch)

@@ -33,11 +33,9 @@ public class HgStoreException extends RuntimeException {
     public static final int EC_RKDB_DOMERGE_FAIL = 1207;
     public static final int EC_RKDB_DOGET_FAIL = 1208;
     public static final int EC_RKDB_PD_FAIL = 1209;
-    public static final int EC_RKDB_TRUNCATE_FAIL = 1212;
     public static final int EC_RKDB_EXPORT_SNAPSHOT_FAIL = 1214;
     public static final int EC_RKDB_IMPORT_SNAPSHOT_FAIL = 1215;
-    public static final int EC_RKDB_TRANSFER_SNAPSHOT_FAIL = 1216;
-    public static final int EC_METRIC_FAIL = 1401;
+    public static final int EC_RKDB_SNAPSHOT_SAVE_BUSY_FAIL = 1217;
     private static final long serialVersionUID = 5193624480997934335L;
     private final int code;
 

@@ -34,8 +34,6 @@ import org.apache.hugegraph.store.pd.FakePdServiceProvider;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
-import com.alipay.sofa.jraft.util.StorageOptionsFactory;
-
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -76,7 +74,6 @@ public class StoreEngineTestBase {
         }});
 
         if (initCount == 0) {
-            StorageOptionsFactory.releaseAllOptions();
             RaftRocksdbOptions.initRocksdbGlobalConfig(options.getRocksdbConfig());
             initCount++;
         }
