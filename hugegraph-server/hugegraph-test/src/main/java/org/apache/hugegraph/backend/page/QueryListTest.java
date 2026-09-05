@@ -43,6 +43,34 @@ import org.junit.Test;
 public class QueryListTest {
 
     @Test
+    public void testPagingRetainsOnlyCurrentQuery() throws Exception {
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.page("");
+        query.limit(10000L);
+        int[] pages = {0};
+        IdHolderList holders = new IdHolderList(true);
+        holders.add(new PagingIdHolder(query, page -> {
+            long id = ++pages[0];
+            return new PageIds(ids(id), new PageState(new byte[]{1}, 0, 1));
+        }));
+        QueryList<Item> list = new QueryList<>(query, batch -> new QueryResults<>(
+                Collections.singletonList(new Item(batch.ids().iterator().next())).iterator(),
+                batch));
+        list.add(holders, 1L);
+        QueryResults<Item> results = list.fetch(1);
+        Iterator<Item> iterator = results.iterator();
+        for (long id = 1L; id <= 10000L; id++) {
+            Assert.assertEquals(IdGenerator.of(id), iterator.next().id());
+            Assert.assertEquals(1, results.queries().size());
+            Assert.assertEquals(Collections.singletonList(IdGenerator.of(id)),
+                                results.queries().get(0).ids());
+        }
+        Assert.assertEquals(10000, pages[0]);
+        ((AutoCloseable) iterator).close();
+        Assert.assertTrue(results.queries().isEmpty());
+    }
+
+    @Test
     public void testOrderingDoesNotFetchNextIndexPage() {
         ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
         query.page("");

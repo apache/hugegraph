@@ -26,12 +26,15 @@ import java.util.Set;
 
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.page.PageInfo;
+import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.exception.LimitExceedException;
+import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.Idfiable;
@@ -41,6 +44,99 @@ import org.junit.Test;
 import com.google.common.collect.ImmutableList;
 
 public class QueryResultsTest {
+
+    @Test
+    public void testMaterializationKeepsPageMetadataAfterClosingSource() {
+        PageState page = new PageState(new byte[]{1, 2}, 0, 2);
+        CountingIterator source = new CountingIterator(1L, 2L);
+        CIter<TestIdfiable> paged = new CIter<TestIdfiable>() {
+            @Override
+            public boolean hasNext() {
+                return source.hasNext();
+            }
+
+            @Override
+            public TestIdfiable next() {
+                return source.next();
+            }
+
+            @Override
+            public void close() {
+                source.close();
+            }
+
+            @Override
+            public Object metadata(String meta, Object... args) {
+                Assert.assertEquals(PageInfo.PAGE, meta);
+                return page;
+            }
+        };
+        QueryResults<TestIdfiable> results = new QueryResults<>(paged, queryOf(1L, 2L));
+        Assert.assertTrue(results.iterator().hasNext());
+        QueryResults<TestIdfiable> fetched = results.toList();
+        Assert.assertEquals(1, source.closed);
+        Assert.assertSame(page, PageInfo.pageState(results.iterator()));
+        Assert.assertSame(page, PageInfo.pageState(fetched.iterator()));
+        List<Id> actual = new ArrayList<>();
+        fetched.iterator().forEachRemaining(item -> actual.add(item.id()));
+        Assert.assertEquals(Arrays.asList(IdGenerator.of(1L), IdGenerator.of(2L)), actual);
+        Assert.assertSame(page, PageInfo.pageState(fetched.iterator()));
+    }
+
+    @Test
+    public void testMaterializeAfterPeekAndPartialConsumption() {
+        for (int consumed = 0; consumed <= 2; consumed++) {
+            CountingIterator first = new CountingIterator(1L, 2L);
+            CountingIterator second = new CountingIterator(3L, 4L);
+            QueryResults<TestIdfiable> results = QueryResults.flatMap(
+                    Arrays.asList(0, 1).iterator(), index -> new QueryResults<>(
+                            index == 0 ? first : second,
+                            index == 0 ? queryOf(1L, 2L) : queryOf(3L, 4L)));
+            Iterator<TestIdfiable> iterator = results.iterator();
+            for (int i = 0; i < consumed; i++) {
+                Assert.assertEquals(IdGenerator.of(i + 1L), iterator.next().id());
+            }
+            Assert.assertTrue(iterator.hasNext());
+            QueryResults<TestIdfiable> fetched = results.toList();
+            List<Id> actual = new ArrayList<>();
+            fetched.filter((context, item) -> {
+                Assert.assertTrue(context.inputIds().contains(item.id()));
+                return true;
+            }).iterator().forEachRemaining(item -> actual.add(item.id()));
+            List<Id> expected = new ArrayList<>();
+            for (long id = consumed + 1L; id <= 4L; id++) {
+                expected.add(IdGenerator.of(id));
+            }
+            Assert.assertEquals(expected, actual);
+            Assert.assertFalse(iterator.hasNext());
+            Assert.assertEquals(1, first.closed);
+            Assert.assertEquals(1, second.closed);
+        }
+    }
+
+    @Test
+    public void testMapAfterPeekKeepsCurrentBatch() {
+        CountingIterator source = new CountingIterator(1L, 2L);
+        QueryResults<TestIdfiable> results = new QueryResults<>(source, queryOf(1L, 2L));
+        Assert.assertTrue(results.iterator().hasNext());
+        List<Id> actual = new ArrayList<>();
+        results.map(TestIdfiable::id).iterator().forEachRemaining(actual::add);
+        Assert.assertEquals(Arrays.asList(IdGenerator.of(1L), IdGenerator.of(2L)), actual);
+        Assert.assertEquals(1, source.closed);
+    }
+
+    @Test
+    public void testQueryDiagnosticsDoNotDuplicateAndClearOnClose() throws Exception {
+        IdQuery query = queryOf(1L, 2L);
+        QueryResults<TestIdfiable> results = new QueryResults<>(
+                new CountingIterator(1L, 2L), query);
+        Assert.assertEquals(Collections.singletonList(query), results.queries());
+        Iterator<TestIdfiable> iterator = results.iterator();
+        Assert.assertTrue(iterator.hasNext());
+        Assert.assertEquals(Collections.singletonList(query), results.queries());
+        ((AutoCloseable) iterator).close();
+        Assert.assertTrue(results.queries().isEmpty());
+    }
 
     @Test
     public void testMaterializationCapacityAppliesAcrossBatches() {

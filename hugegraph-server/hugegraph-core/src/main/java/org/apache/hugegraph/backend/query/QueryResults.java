@@ -37,7 +37,7 @@ import org.apache.hugegraph.type.Idfiable;
 /** A lazy stream of query batches. Only the final consumer flattens the stream. */
 public class QueryResults<R> {
 
-    private final Iterator<QueryBatch<R>> batches;
+    private final BatchIterator<QueryBatch<R>> batches;
     private final List<Query> queries;
     private final Object metadata;
     private Iterator<R> results;
@@ -48,7 +48,8 @@ public class QueryResults<R> {
 
     public QueryResults(Iterator<R> results, QueryResultContext context) {
         QueryBatch<R> batch = new QueryBatch<>(results, context);
-        this.batches = new BatchIterator<QueryBatch<R>>() {
+        this.queries = new ArrayList<>(Collections.singletonList(context.queries().get(0)));
+        this.batches = this.trackBatches(new BatchIterator<QueryBatch<R>>() {
             private boolean fetched;
 
             @Override
@@ -64,15 +65,47 @@ public class QueryResults<R> {
             protected void closeResources() throws Exception {
                 batch.close();
             }
-        };
-        this.queries = new ArrayList<>(Collections.singletonList(context.queries().get(0)));
+        });
         this.metadata = batch.results();
     }
 
     private QueryResults(Iterator<QueryBatch<R>> batches, Object metadata) {
-        this.batches = batches;
-        this.metadata = metadata;
         this.queries = new ArrayList<>();
+        this.batches = this.trackBatches(batches);
+        this.metadata = metadata;
+    }
+
+    private BatchIterator<QueryBatch<R>> trackBatches(Iterator<QueryBatch<R>> origin) {
+        return new BatchIterator<QueryBatch<R>>() {
+            private QueryBatch<R> active;
+
+            @Override
+            protected QueryBatch<R> fetch() throws Exception {
+                QueryBatch<R> previous = this.active;
+                this.active = null;
+                QueryBatch.closeAll(previous);
+                if (!origin.hasNext()) {
+                    return null;
+                }
+                this.active = origin.next();
+                queries.clear();
+                queries.add(this.active.context().queries().get(0));
+                return this.active;
+            }
+
+            @Override
+            protected void closeResources() throws Exception {
+                QueryBatch<R> previous = this.active;
+                this.active = null;
+                queries.clear();
+                QueryBatch.closeAll(previous, origin);
+            }
+
+            @Override
+            public Object metadata(String meta, Object... args) {
+                return QueryBatch.metadataOf(origin, meta, args);
+            }
+        };
     }
 
     public static <R> QueryResults<R> fromBatches(Iterator<QueryBatch<R>> batches) {
@@ -85,29 +118,49 @@ public class QueryResults<R> {
 
     public Iterator<R> iterator() {
         if (this.results == null) {
-            this.results = new BatchIterator<R>() {
-                private QueryBatch<R> active;
+            this.results = new CIter<R>() {
+                private boolean closed;
 
                 @Override
-                protected R fetch() throws Exception {
-                    while (true) {
-                        if (this.active != null && this.active.results().hasNext()) {
-                            return this.active.results().next();
+                public boolean hasNext() {
+                    if (this.closed) {
+                        return false;
+                    }
+                    try {
+                        while (batches.hasNext()) {
+                            // Leave the batch and its prefetched element in the shared cursor.
+                            if (batches.peek().results().hasNext()) {
+                                return true;
+                            }
+                            batches.next().close();
                         }
-                        QueryBatch<R> previous = this.active;
-                        this.active = null;
-                        QueryBatch.closeAll(previous);
-                        if (!batches.hasNext()) {
-                            return null;
-                        }
-                        this.active = batches.next();
-                        queries.add(this.active.context().queries().get(0));
+                        this.close();
+                        return false;
+                    } catch (Throwable failure) {
+                        QueryResults.close(this, failure);
+                        throw QueryBatch.propagate(failure);
                     }
                 }
 
                 @Override
-                protected void closeResources() throws Exception {
-                    QueryBatch.closeAll(this.active, batches);
+                public R next() {
+                    if (!this.hasNext()) {
+                        throw new NoSuchElementException();
+                    }
+                    try {
+                        return batches.peek().results().next();
+                    } catch (Throwable failure) {
+                        QueryResults.close(this, failure);
+                        throw QueryBatch.propagate(failure);
+                    }
+                }
+
+                @Override
+                public void close() throws Exception {
+                    if (!this.closed) {
+                        this.closed = true;
+                        batches.close();
+                    }
                 }
 
                 @Override
@@ -165,6 +218,10 @@ public class QueryResults<R> {
         return one(this.iterator());
     }
 
+    /**
+     * Source query of the current batch. A known single source is available before
+     * activation; composed streams start empty. Closing clears the diagnostics.
+     */
     public List<Query> queries() {
         return Collections.unmodifiableList(this.queries);
     }
@@ -189,7 +246,9 @@ public class QueryResults<R> {
             close(this.batches, failure);
         }
         QueryResults<R> result = new QueryResults<>(fetched.iterator(), this.metadata);
-        result.queries.addAll(this.queries);
+        if (!fetched.isEmpty()) {
+            result.queries.add(fetched.get(0).context().queries().get(0));
+        }
         return result;
     }
 

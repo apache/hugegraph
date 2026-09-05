@@ -164,6 +164,13 @@ public final class QueryBatch<R> implements AutoCloseable {
 
         protected abstract void closeResources() throws Exception;
 
+        final T peek() {
+            if (!this.hasNext()) {
+                throw new NoSuchElementException();
+            }
+            return this.current;
+        }
+
         @Override
         public final boolean hasNext() {
             if (this.closed) {
