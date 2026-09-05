@@ -25,15 +25,17 @@ import java.util.Set;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.page.IdHolder.BatchIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.FixedIdHolder;
-import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
+import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
 
-public final class QueryList<R> {
+public final class QueryList<R> implements AutoCloseable {
 
     private final Query parent;
     // The size of each page fetched by the inner page
@@ -87,16 +89,32 @@ public final class QueryList<R> {
         if (this.parent.paging()) {
             @SuppressWarnings("resource") // closed by QueryResults
             PageEntryIterator<R> iter = new PageEntryIterator<>(this, pageSize);
-            /*
-             * NOTE: PageEntryIterator query will change every fetch time.
-             * QueryResults tracks this change and restores input-id order
-             * within each page without fetching later pages eagerly.
-             */
-            return iter.results();
+            return QueryResults.fromBatches(iter);
         }
 
-        // Fetch all results once
-        return QueryResults.flatMap(this.queries.iterator(), FlattenQuery::iterator);
+        Iterator<FlattenQuery<R>> source = this.queries.iterator();
+        return QueryResults.flatMap(new BatchIterator<FlattenQuery<R>>() {
+            @Override
+            protected FlattenQuery<R> fetch() {
+                return source.hasNext() ? source.next() : null;
+            }
+
+            @Override
+            protected void closeResources() throws Exception {
+                QueryList.this.close();
+            }
+        }, FlattenQuery::iterator);
+    }
+
+    @Override
+    public void close() throws Exception {
+        List<Object> resources = new ArrayList<>();
+        for (FlattenQuery<R> query : this.queries) {
+            if (query instanceof QueryList.IndexQuery) {
+                resources.addAll(((IndexQuery) query).holders);
+            }
+        }
+        QueryBatch.closeAll(resources.toArray());
     }
 
     PageResults<R> fetchNext(PageInfo pageInfo, long pageSize) {
@@ -179,7 +197,7 @@ public final class QueryList<R> {
             QueryResults<R> fetched = results.toList();
             PageState pageState = PageInfo.pageState(results.iterator());
 
-            return new PageResults<>(fetched, pageState);
+            return new PageResults<>(fetched, query, pageState);
         }
 
         @Override
@@ -220,7 +238,6 @@ public final class QueryList<R> {
         private QueryResults<R> each(IdHolder holder) {
             assert !holder.paging();
             Query bindQuery = holder.query();
-            this.updateResultsFilter(bindQuery);
             this.updateOffsetIfNeeded(bindQuery);
 
             // Iterate by all
@@ -237,7 +254,7 @@ public final class QueryList<R> {
                  * in order by ids weight. In addition all the ids (IdQuery)
                  * can be collected by upper layer.
                  */
-                return this.queryByIndexIds(ids, holder.keepOrder());
+                return this.queryByIndexIds(bindQuery, ids, holder.keepOrder());
             }
 
             // Iterate by batch
@@ -259,7 +276,7 @@ public final class QueryList<R> {
                     return null;
                 }
 
-                return this.queryByIndexIds(ids, holder.keepOrder());
+                return this.queryByIndexIds(bindQuery, ids, holder.keepOrder());
             });
         }
 
@@ -270,16 +287,14 @@ public final class QueryList<R> {
                             "Invalid page index %s", index);
             IdHolder holder = this.holders.get(index);
             Query bindQuery = holder.query();
-            this.updateResultsFilter(bindQuery);
             PageIds pageIds = holder.fetchNext(page, pageSize);
             if (pageIds.empty()) {
                 return PageResults.emptyIterator();
             }
 
-            QueryResults<R> results = this.queryByIndexIds(pageIds.ids(),
-                                                           holder.keepOrder());
-
-            return new PageResults<>(results, pageIds.pageState());
+            IdQuery query = this.indexIdQuery(bindQuery, pageIds.ids(), holder.keepOrder());
+            QueryResults<R> results = fetcher().apply(query);
+            return new PageResults<>(results, query, pageIds.pageState());
         }
 
         @Override
@@ -303,34 +318,29 @@ public final class QueryList<R> {
             query.copyOffset(parent);
         }
 
-        private void updateResultsFilter(Query query) {
-            while (query != null) {
-                if (query instanceof ConditionQuery) {
-                    ((ConditionQuery) query).updateResultsFilter();
-                    return;
-                }
-                query = query.originQuery();
-            }
+        private QueryResults<R> queryByIndexIds(Query bindQuery, Set<Id> ids,
+                                                boolean inOrder) {
+            return fetcher().apply(this.indexIdQuery(bindQuery, ids, inOrder));
         }
 
-        private QueryResults<R> queryByIndexIds(Set<Id> ids, boolean inOrder) {
-            IdQuery query = new IdQuery(parent(), ids);
+        private IdQuery indexIdQuery(Query bindQuery, Set<Id> ids, boolean inOrder) {
+            // The holder can query an index table; fetch graph elements by ID.
+            IdQuery query = new IdQuery(parent().resultType(), bindQuery);
+            query.query(ids);
             query.mustSortByInput(inOrder);
-            return fetcher().apply(query);
+            return query;
         }
     }
 
     public static class PageResults<R> {
 
-        public static final PageResults<?> EMPTY = new PageResults<>(
-                QueryResults.empty(),
-                PageState.EMPTY);
-
         private final QueryResults<R> results;
         private final PageState pageState;
+        private final Query query;
 
-        public PageResults(QueryResults<R> results, PageState pageState) {
+        public PageResults(QueryResults<R> results, Query query, PageState pageState) {
             this.results = results;
+            this.query = query;
             this.pageState = pageState;
         }
 
@@ -344,10 +354,11 @@ public final class QueryList<R> {
         }
 
         public Query query() {
-            List<Query> queries = this.results.queries();
-            E.checkState(queries.size() == 1,
-                         "Expect query size 1, but got: %s", queries);
-            return queries.get(0);
+            return this.query;
+        }
+
+        public QueryResults<R> results() {
+            return this.results;
         }
 
         public String page() {
@@ -358,9 +369,9 @@ public final class QueryList<R> {
             return this.pageState.total();
         }
 
-        @SuppressWarnings("unchecked")
         public static <R> PageResults<R> emptyIterator() {
-            return (PageResults<R>) EMPTY;
+            // Batch cursors are single-use, including those for empty pages.
+            return new PageResults<>(QueryResults.empty(), null, PageState.EMPTY);
         }
     }
 }
