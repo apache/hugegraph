@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -34,6 +35,7 @@ import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.BackendException;
 import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.query.Aggregate;
@@ -688,6 +690,12 @@ public final class TraversalUtil {
                         holder.removeHasContainer(has);
                         continue;
                     }
+                    if (T.id.getAccessor().equals(has.getKey())) {
+                        holder.removeHasContainer(has);
+                        holder.addHasContainer(new HasContainer(has.getKey(),
+                                localIdPredicate(has.getPredicate())));
+                        continue;
+                    }
                     if (isSysProp(has.getKey())) {
                         continue;
                     }
@@ -719,6 +727,28 @@ public final class TraversalUtil {
             // those filters; a filtered page may contain fewer results.
             query.setRange(0, ((RangeGlobalStep<?>) step).getHighRange());
         }
+    }
+
+    private static P<?> localIdPredicate(P<?> predicate) {
+        // Keep IDs local to preserve source-ID intersections and step ordering.
+        // UUID values need the same representation as HugeElement.id(). Leave
+        // strings unchanged so HasContainer retains its string-ID comparison.
+        P<?> copy = predicate.clone();
+        List<P<Object>> leaves = new ArrayList<>();
+        collectPredicates(leaves, ImmutableList.of(copy));
+        for (P<Object> leaf : leaves) {
+            Object value = leaf.getValue();
+            if (value instanceof UUID) {
+                leaf.setValue(IdGenerator.of((UUID) value));
+            } else if (value instanceof Collection) {
+                List<Object> values = new ArrayList<>();
+                for (Object item : (Collection<?>) value) {
+                    values.add(item instanceof UUID ? IdGenerator.of((UUID) item) : item);
+                }
+                leaf.setValue(values);
+            }
+        }
+        return copy;
     }
 
     private static P<?> localSearchPredicate(P<?> predicate, HugeGraph graph) {
@@ -768,8 +798,12 @@ public final class TraversalUtil {
         TraversalParent parent = traversal.getParent();
         if (parent instanceof Step && !(parent instanceof EmptyStep)) {
             Step<?, ?> parentStep = (Step<?, ?>) parent;
-            // Start AFTER the owning step: scanning its children again would
-            // revisit this traversal and could create an upward/downward cycle.
+            // RepeatStep's until/emit siblings can filter this child's output.
+            // This helper only descends, so revisiting the owning step's children
+            // cannot recurse back into this ancestor walk.
+            if (hasUnsafeLabelInChildren(parentStep)) {
+                return true;
+            }
             return hasUnsafeLabelInTraversal(parentStep.getTraversal(), parentStep);
         }
         return false;

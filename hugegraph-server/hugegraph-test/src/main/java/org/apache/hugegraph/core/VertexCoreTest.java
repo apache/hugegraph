@@ -9223,6 +9223,60 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testLocalUuidIdBeforeNegativeLabel() {
+        HugeGraph graph = graph();
+        graph.schema().vertexLabel("uuid").useCustomizeUuidId().create();
+        UUID first = UUID.fromString("835e1153-9281-4957-8691-cf79258e90eb");
+        UUID second = UUID.fromString("835e1153-9281-4957-8691-cf79258e90ec");
+        Vertex one = graph.addVertex(T.label, "uuid", T.id, first);
+        Vertex two = graph.addVertex(T.label, "uuid", T.id, second);
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Assert.assertEquals(ImmutableList.of(one), g.V().hasId(first).toList());
+        Assert.assertEquals(ImmutableList.of(one),
+                            g.V().hasId(first).limit(10).hasLabel(P.neq("other")).toList());
+        Assert.assertEquals(ImmutableSet.of(one, two),
+                            g.V().hasId(P.within(first, second)).limit(10)
+                             .hasLabel(P.neq("other")).toSet());
+        Assert.assertEquals(ImmutableList.of(one),
+                            g.V(first).hasId(P.within(first, second)).limit(10)
+                             .hasLabel(P.neq("other")).toList());
+        Assert.assertTrue(g.V(second).hasId(first).limit(10)
+                           .hasLabel(P.neq("other")).toList().isEmpty());
+        P<UUID> predicate = P.eq(first).or(P.eq(second));
+        Assert.assertEquals(ImmutableSet.of(one, two),
+                            g.V().hasId(predicate).limit(10)
+                             .hasLabel(P.neq("other")).toSet());
+        // A reused predicate must still accept the caller's original UUIDs.
+        Assert.assertTrue(predicate.test(first));
+        Assert.assertTrue(predicate.test(second));
+        Assert.assertEquals(ImmutableList.of(two),
+                            g.V().hasId(P.without(first)).limit(10)
+                             .hasLabel(P.neq("other")).toList());
+    }
+
+    @Test
+    public void testRepeatSiblingNegativeLabel() {
+        HugeGraph graph = graph();
+        graph.schema().propertyKey("city").asText().ifNotExist().create();
+        graph.schema().vertexLabel("indexed").properties("city").useAutomaticId().create();
+        graph.schema().vertexLabel("unindexed").properties("city").useAutomaticId().create();
+        graph.schema().indexLabel("byCity").onV("indexed").by("city").secondary().create();
+        Vertex indexed = graph.addVertex(T.label, "indexed", "city", "Beijing");
+        Vertex unindexed = graph.addVertex(T.label, "unindexed", "city", "Beijing");
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Set<Vertex> expected = ImmutableSet.of(indexed, unindexed);
+        Assert.assertEquals(expected,
+                            g.V(indexed.id()).repeat(__.V().has("city", "Beijing"))
+                             .until(__.hasLabel(P.neq("author"))).toSet());
+        List<Vertex> emitted = g.V(indexed.id()).repeat(__.V().has("city", "Beijing"))
+                                .emit(__.hasLabel(P.neq("author"))).times(2).toList();
+        Assert.assertEquals(6, emitted.size());
+        Assert.assertEquals(expected, ImmutableSet.copyOf(emitted));
+    }
+
+    @Test
     public void testQueryByNonEqLabelAndIndexedPropertyAcrossBarrier() {
         HugeGraph graph = graph();
         initPersonIndex(true);
