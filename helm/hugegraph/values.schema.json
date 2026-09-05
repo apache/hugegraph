@@ -333,6 +333,63 @@
           "type": "string",
           "minLength": 1
         },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value",
+            "existingSecret",
+            "key",
+            "autoGenerate"
+          ],
+          "description": "PD REST Basic-auth secret (auth.secret-key). Required by PD images from 1.8.0; shared with the Server storage wait and Hubble.",
+          "properties": {
+            "value": {
+              "type": "string",
+              "pattern": "^[^\\r\\n\\\\]*$",
+              "description": "Plaintext secret. Empty defers to existingSecret or autoGenerate. No newlines, carriage returns, or backslashes: the value lands in Hubble's Java properties file."
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "autoGenerate": {
+              "type": "boolean"
+            }
+          },
+          "anyOf": [
+            {
+              "properties": {
+                "existingSecret": {
+                  "minLength": 1
+                }
+              }
+            },
+            {
+              "properties": {
+                "value": {
+                  "minLength": 1
+                },
+                "existingSecret": {
+                  "const": ""
+                }
+              }
+            },
+            {
+              "properties": {
+                "autoGenerate": {
+                  "const": true
+                },
+                "existingSecret": {
+                  "const": ""
+                }
+              }
+            }
+          ]
+        },
         "storage": {
           "$ref": "#/definitions/storage"
         },

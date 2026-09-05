@@ -66,6 +66,25 @@ pd:
     rest: 8620
     raft: 8610
   dataPath: /hugegraph-pd/pd_data
+  # PD REST Basic-auth credential. PD images from 1.8.0
+  # (apache/hugegraph#3189) compare the password of every /v1 request
+  # against auth.secret-key and refuse to start without one
+  # (HG_PD_AUTH_SECRET_KEY). The chart hands the same value to the Server
+  # storage wait (PD_AUTH_PASSWORD, user store) and to Hubble
+  # (operations.pd.password, user hubble). Older images accept the variable
+  # and ignore the password, so the wiring is harmless there. The Secret is
+  # kept on uninstall like the Server auth Secrets. The value must not
+  # contain newlines, carriage returns, or backslashes: it is written into
+  # Hubble's Java properties file. Priority: existingSecret > value >
+  # autoGenerate.
+  auth:
+    # Optional plaintext secret (prefer existingSecret in shared clusters).
+    value: ""
+    # Pre-created Secret name. Must contain the key below; chart does not manage it.
+    existingSecret: ""
+    key: secret-key
+    # When existingSecret and value are empty, create a kept release-pd-auth Secret.
+    autoGenerate: true
   storage:
     size: 10Gi
     storageClassName: ""

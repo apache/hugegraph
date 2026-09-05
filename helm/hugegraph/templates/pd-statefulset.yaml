@@ -44,10 +44,11 @@ spec:
         {{- include "hugegraph.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: pd
         {{- with .Values.pd.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
-      {{- with .Values.pd.podAnnotations }}
       annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        # Rolls PD pods when the resolved REST auth Secret changes, so rotating
+        # an existingSecret takes effect without a manual restart.
+        checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" . | quote }}
+        {{- with .Values.pd.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -123,6 +124,11 @@ spec:
               value: {{ .Values.store.replicas | quote }}
             - name: HG_PD_DATA_PATH
               value: {{ .Values.pd.dataPath | quote }}
+            - name: HG_PD_AUTH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.pd.authSecretName" . | quote }}
+                  key: {{ include "hugegraph.pd.authSecretKey" . | quote }}
             {{- with .Values.pd.extraEnv }}{{ toYaml . | nindent 12 }}{{- end }}
             {{- with include "hugegraph.javaOptsEnv" (include "hugegraph.pd.effectiveJavaOpts" .) }}{{ . | trim | nindent 12 }}{{- end }}
           volumeMounts:

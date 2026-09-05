@@ -31,6 +31,11 @@ Watch the cluster come up:
 Store Pods stay in Init until a majority of PD peers answer store.waitPath
 (/v1/health by default, which proves the listener is up, not a raft quorum).
 
+PD's management REST API (Disaster Recovery calls in the README) takes the
+release's PD secret as the Basic-auth password:
+
+  PD_SECRET="$(kubectl get secret -n {{ .Release.Namespace }} {{ include "hugegraph.pd.authSecretName" . }} -o jsonpath='{.data.{{ include "hugegraph.pd.authSecretKey" . }}}' | base64 --decode)"
+
 Verify the release:
 
   helm test {{ .Release.Name }} --namespace {{ .Release.Namespace }}

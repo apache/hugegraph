@@ -54,15 +54,15 @@ spec:
         {{- include "hugegraph.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
         {{- with .Values.server.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
-      {{- if or .Values.server.auth.enabled .Values.server.podAnnotations }}
       annotations:
         {{- if .Values.server.auth.enabled }}
         # Rolls Server pods when the resolved auth Secrets change, so rotating
         # an existingSecret takes effect without a manual restart.
         checksum/auth: {{ include "hugegraph.server.authChecksum" . | quote }}
         {{- end }}
+        # Rolls Server pods when the PD REST Secret its storage wait uses changes.
+        checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" . | quote }}
         {{- with .Values.server.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
-      {{- end }}
     spec:
       automountServiceAccountToken: {{ get (get .Values.server "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
       serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.server "name" (include "hugegraph.server.name" .) ) }}
@@ -268,6 +268,13 @@ spec:
               value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
             - name: HG_SERVER_PD_REST_ENDPOINT
               value: {{ include "hugegraph.pd.restPeersList" . | quote }}
+            # wait-storage.sh authenticates its PD readiness checks as the
+            # store service user with this password (PD images from 1.8.0).
+            - name: PD_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.pd.authSecretName" . | quote }}
+                  key: {{ include "hugegraph.pd.authSecretKey" . | quote }}
             - name: STORE_REST
               value: {{ include "hugegraph.store.restPrimary" . | quote }}
             - name: HG_SERVER_INIT_STORE_ENABLED

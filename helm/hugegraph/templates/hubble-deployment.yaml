@@ -47,10 +47,12 @@ spec:
         {{- include "hugegraph.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: hubble
         {{- with .Values.hubble.podLabels }}{{ toYaml . | nindent 8 }}{{- end }}
-      {{- with .Values.hubble.podAnnotations }}
       annotations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- if $pdMode }}
+        # Rolls Hubble when the PD REST Secret written into its properties changes.
+        checksum/pd-auth: {{ include "hugegraph.pd.authChecksum" . | quote }}
+        {{- end }}
+        {{- with .Values.hubble.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
     spec:
       automountServiceAccountToken: {{ get (get .Values.hubble "serviceAccount" | default dict) "automountServiceAccountToken" | default false }}
       serviceAccountName: {{ include "hugegraph.serviceAccountName" (dict "component" .Values.hubble "name" (include "hugegraph.hubble.name" .) ) }}
@@ -113,6 +115,8 @@ spec:
               {{- if $pdMode }}
               FOUND_PD_PEERS=false
               FOUND_PD_SERVER=false
+              FOUND_PD_USERNAME=false
+              FOUND_PD_PASSWORD=false
               FOUND_STORE_TARGETS=false
               {{- else }}
               FOUND_DIRECT_URL=false
@@ -136,6 +140,14 @@ spec:
                   pd.server=*)
                     printf 'pd.server=%s\n' "${HG_HUBBLE_PD_SERVER}" >>"${TMP}"
                     FOUND_PD_SERVER=true
+                    ;;
+                  operations.pd.username=*)
+                    printf 'operations.pd.username=hubble\n' >>"${TMP}"
+                    FOUND_PD_USERNAME=true
+                    ;;
+                  operations.pd.password=*)
+                    printf 'operations.pd.password=%s\n' "${HG_HUBBLE_PD_PASSWORD}" >>"${TMP}"
+                    FOUND_PD_PASSWORD=true
                     ;;
                   operations.store.allowed_targets=*)
                     printf 'operations.store.allowed_targets=%s\n' \
@@ -177,6 +189,13 @@ spec:
               if [[ "${FOUND_PD_SERVER}" == false ]]; then
                 printf 'pd.server=%s\n' "${HG_HUBBLE_PD_SERVER}" >>"${TMP}"
               fi
+              # PD REST credential (PD images from 1.8.0 check the password).
+              if [[ "${FOUND_PD_USERNAME}" == false ]]; then
+                printf 'operations.pd.username=hubble\n' >>"${TMP}"
+              fi
+              if [[ "${FOUND_PD_PASSWORD}" == false ]]; then
+                printf 'operations.pd.password=%s\n' "${HG_HUBBLE_PD_PASSWORD}" >>"${TMP}"
+              fi
               if [[ "${FOUND_STORE_TARGETS}" == false ]]; then
                 printf 'operations.store.allowed_targets=%s\n' \
                   "${HG_HUBBLE_STORE_TARGETS}" >>"${TMP}"
@@ -213,6 +232,11 @@ spec:
               value: {{ include "hugegraph.pd.grpcPeersList" . | quote }}
             - name: HG_HUBBLE_PD_SERVER
               value: {{ include "hugegraph.pd.restClientEndpoint" . | quote }}
+            - name: HG_HUBBLE_PD_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "hugegraph.pd.authSecretName" . | quote }}
+                  key: {{ include "hugegraph.pd.authSecretKey" . | quote }}
             - name: HG_HUBBLE_STORE_TARGETS
               value: {{ include "hugegraph.store.restOriginsList" . | quote }}
             {{- else }}

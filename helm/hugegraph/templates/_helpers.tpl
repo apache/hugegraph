@@ -171,6 +171,61 @@ same signing key.
 {{- end }}
 
 {{/*
+Resolve the PD REST auth Secret. User-provided pd.auth.existingSecret wins;
+otherwise a stable chart-managed name shared by PD, the Server storage wait
+and Hubble.
+*/}}
+{{- define "hugegraph.pd.authSecretName" -}}
+{{- $auth := get .Values.pd "auth" | default dict -}}
+{{- $existing := get $auth "existingSecret" | default "" -}}
+{{- if $existing -}}
+{{- $existing -}}
+{{- else -}}
+{{- printf "%s-pd-auth" (.Release.Name | trunc 55 | trimSuffix "-") -}}
+{{- end -}}
+{{- end }}
+
+{{- define "hugegraph.pd.authSecretKey" -}}
+{{- $auth := get .Values.pd "auth" | default dict -}}
+{{- get $auth "key" | default "secret-key" -}}
+{{- end }}
+
+{{/*
+Return the chart-managed PD REST secret (base64). Inline pd.auth.value wins
+on first write; otherwise lookup keeps every PD, Server and Hubble Pod, and
+every upgrade, on the same secret.
+*/}}
+{{- define "hugegraph.pd.authSecretValue" -}}
+{{- $auth := get .Values.pd "auth" | default dict -}}
+{{- $value := get $auth "value" | default "" -}}
+{{- if $value -}}
+{{- $value | b64enc -}}
+{{- else -}}
+{{- $name := include "hugegraph.pd.authSecretName" . -}}
+{{- $key := include "hugegraph.pd.authSecretKey" . -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $name -}}
+{{- if and $secret (hasKey $secret "data") (hasKey (get $secret "data") $key) -}}
+{{- get (get $secret "data") $key -}}
+{{- else -}}
+{{- randAlphaNum 32 | b64enc -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Checksum for the PD, Server and Hubble pod templates so rotating the PD REST
+Secret rolls the Pods that read it. Same contract as hugegraph.server.authChecksum:
+names, key and metadata.resourceVersion only, never Secret data; lookup-based,
+so template-only renders emit a constant.
+*/}}
+{{- define "hugegraph.pd.authChecksum" -}}
+{{- $parts := list (include "hugegraph.pd.authSecretName" .) (include "hugegraph.pd.authSecretKey" .) -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (include "hugegraph.pd.authSecretName" .) -}}
+{{- if $secret -}}{{- $parts = append $parts (dig "metadata" "resourceVersion" "" $secret) -}}{{- end -}}
+{{- join "|" $parts | sha256sum -}}
+{{- end }}
+
+{{/*
 PD Raft peers list: pod-0.svc.ns.svc:8610,...
 Uses short headless DNS (cluster.local optional) resolvable inside the namespace.
 */}}
@@ -556,10 +611,10 @@ JAVA_OPTIONS arrives preset in the environment (verified in
 start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 */}}
 {{- $reservedEnv := dict
-      "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
+      "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "HG_PD_AUTH_SECRET_KEY" "JAVA_OPTS" "JAVA_OPTIONS")
       "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
-      "server" (list "POD_IP" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
-      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
+      "server" (list "POD_IP" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
+      "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}
 {{- range $entry := get $componentValues "extraEnv" | default list -}}
@@ -585,6 +640,10 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- if and (get $hubbleIngress "enabled" | default false) (empty (get $hubbleIngress "tls")) (not (get $hubbleIngress "allowPlainHttp" | default false)) -}}
 {{- fail "hubble.ingress.enabled without tls publishes the plain-HTTP, unauthenticated Hubble UI; configure hubble.ingress.tls, or set hubble.ingress.allowPlainHttp=true to accept that on a trusted network" -}}
 {{- end -}}
+{{- end -}}
+{{- $pdAuth := get .Values.pd "auth" | default dict -}}
+{{- if and (not (get $pdAuth "existingSecret" | default "")) (not (get $pdAuth "value" | default "")) (not (get $pdAuth "autoGenerate" | default false)) -}}
+{{- fail "pd.auth requires existingSecret, value, or autoGenerate=true: PD images from 1.8.0 refuse to start without a REST secret" -}}
 {{- end -}}
 {{- $auth := get .Values.server "auth" | default dict -}}
 {{- $admin := get $auth "admin" | default dict -}}

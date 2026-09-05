@@ -48,6 +48,15 @@ so operators do not have to:
   the PD peers must answer `store.waitPath`. The default `/v1/health` proves
   each PD's listener is up, not that a raft quorum exists; see Limitations for
   the `/v1/ready` switch.
+- **One PD REST secret, three readers.** PD images from 1.8.0
+  ([#3189](https://github.com/apache/hugegraph/pull/3189)) check the Basic-auth
+  password of every management call against `auth.secret-key` and refuse to
+  start without one. The chart keeps that value in a release-pd-auth Secret
+  (or `pd.auth.existingSecret`) and hands it to PD as `HG_PD_AUTH_SECRET_KEY`,
+  to the Server storage wait as `PD_AUTH_PASSWORD`, and to Hubble as
+  `operations.pd.password`; a `checksum/pd-auth` annotation rolls all three
+  when the Secret changes. Older images ignore the password, so the wiring is
+  harmless on them.
 - **The Server startup probe allows at least 450 seconds.** The image may spend
   300 seconds waiting for storage and a further 120 seconds in the start
   command. A lower configured `failureThreshold` is raised to this floor rather
@@ -180,6 +189,15 @@ are worth knowing about in advance:
   Secrets. Template-only pipelines (`helm template`, GitOps renderers) never
   see live Secrets, so there the annotation is a constant and Secret rotation
   does not roll pods.
+- **PD and Hubble** roll once on the first `helm upgrade` after a fresh
+  install as well, when the `checksum/pd-auth` annotation first observes the
+  install-created PD REST Secret (same mechanism as the Server annotation
+  above; measured on a kind cluster: PD, Server and Hubble replaced, Store
+  untouched). A PD roll is a raft rolling restart, one pod at a time; for a
+  maintenance-window upgrade set `pd.updateStrategy.type=OnDelete` and
+  restart the PD pods yourself. Rotating the PD REST Secret later rolls the
+  same three workloads together, which keeps their copies of the secret in
+  step.
 
 Every optional field stays optional, so a release created by an earlier
 revision continues to render under `--reuse-values`. Note that `--reuse-values`
@@ -279,6 +297,10 @@ default values.
 | `pd.pdb.enabled` | Create a PodDisruptionBudget for PD | `true` |
 | `pd.pdb.minAvailable` | Must be strictly less than `pd.replicas`. No PDB is rendered when `pd.replicas` is 1 | `2` |
 | `pd.readinessPath` | Path the PD readinessProbe hits. `/v1/health` is liveness only; set `/v1/ready` on PD images from 1.8.0 that carry it, never on older images | `/v1/health` |
+| `pd.auth.value` | Plaintext PD REST secret (`auth.secret-key`). Prefer `existingSecret` in shared clusters. No newlines, carriage returns, or backslashes | `""` |
+| `pd.auth.existingSecret` | Pre-created Secret holding the PD REST secret under `pd.auth.key`. Wins over `value` and `autoGenerate`; the chart does not manage it | `""` |
+| `pd.auth.key` | Key inside the PD REST Secret | `secret-key` |
+| `pd.auth.autoGenerate` | Create and keep a random release-pd-auth Secret when `value` and `existingSecret` are empty | `true` |
 | `pd.probes.*.periodSeconds` | Probe interval | see `values.yaml` |
 | `pd.probes.*.failureThreshold` | Probe failure threshold | see `values.yaml` |
 | `pd.probes.*.timeoutSeconds` | Probe timeout. Defaults to `5` on readiness/liveness; Kubernetes would otherwise apply `1` | `5` |
@@ -731,15 +753,19 @@ reachable through the PD client Service:
 
 ```bash
 kubectl port-forward -n hugegraph svc/hugegraph-pd-client 8620:8620
-curl -u hg: http://127.0.0.1:8620/v1/task/patrolPartitions   # reconcile shard groups, process tombstoned Stores
-curl -u hg: http://127.0.0.1:8620/v1/task/balanceLeaders     # spread Raft leaders
-curl -u hg: http://127.0.0.1:8620/v1/task/balancePartitions  # spread partition data
+PD_SECRET="$(kubectl -n hugegraph get secret hugegraph-pd-auth \
+  -o jsonpath='{.data.secret-key}' | base64 --decode)"
+curl -u "hg:${PD_SECRET}" http://127.0.0.1:8620/v1/task/patrolPartitions   # reconcile shard groups, process tombstoned Stores
+curl -u "hg:${PD_SECRET}" http://127.0.0.1:8620/v1/task/balanceLeaders     # spread Raft leaders
+curl -u "hg:${PD_SECRET}" http://127.0.0.1:8620/v1/task/balancePartitions  # spread partition data
 ```
 
-The `-u hg:` credential is required. Without it these endpoints answer HTTP 200
-with an `Unauthorized` body and the task does not run, so a recovery attempt
-looks successful while doing nothing. The password is empty on purpose: current
-PD images check only the service name. See Limitations.
+The credential is required. PD images from 1.8.0 answer 401 without it; older
+images answer HTTP 200 with an `Unauthorized` body and the task does not run,
+so a recovery attempt looks successful while doing nothing. On those older
+images the password is not checked, so `-u hg:` alone also works. The Secret
+name follows the release (`<release>-pd-auth`) unless `pd.auth.existingSecret`
+is set. See Limitations.
 
 Run `patrolPartitions` after replacing a Store that is not coming back,
 `balancePartitions` once the cluster is stable again, and `balanceLeaders`
@@ -878,15 +904,19 @@ independently of the release name.
   exposed to those failure modes; use images built from a source tree that
   includes the switch.
 - The PD management REST endpoints (`/v1/members`, `/v1/stores`,
-  `/v1/task/*`) authenticate on service name only. Current images compare the
-  Basic-auth username against a fixed internal set (`hg`, `store`, `hubble`,
-  `vermeer`) and do not validate the password at all, so any password,
-  including an empty one, is accepted for those names while every other name
-  is refused. Treat these endpoints as unauthenticated: keep the PD client
-  Service on ClusterIP and do not expose it. All three outcomes, success,
+  `/v1/task/*`) authenticate on service name only on PD images up to 1.7.0.
+  Those images compare the Basic-auth username against a fixed internal set
+  (`hg`, `store`, `hubble`, `vermeer`) and do not validate the password at
+  all, so any password, including an empty one, is accepted for those names
+  while every other name is refused, and all three outcomes, success,
   refusal, and a missing credential, return HTTP 200 with the result in the
-  body, so the status code carries no signal and no health check should key on
-  it. The Disaster Recovery calls above therefore need `-u hg:` to run.
+  body. Treat these endpoints as unauthenticated on such images: keep the PD
+  client Service on ClusterIP and do not expose it, and do not key a health
+  check on the status code. PD images from 1.8.0
+  ([#3189](https://github.com/apache/hugegraph/pull/3189)) check the password
+  against `auth.secret-key` and answer 401 on refusal; the chart supplies that
+  secret through `pd.auth` (see Chart Details), and the Disaster Recovery
+  calls above need it.
 - PD's `/v1/health` is liveness only: it answers 200 as soon as the REST
   listener is up and never consults raft. Measured on a 3-PD install with two
   PDs deleted, the survivor logged `Raft lost leader` within a second and kept
