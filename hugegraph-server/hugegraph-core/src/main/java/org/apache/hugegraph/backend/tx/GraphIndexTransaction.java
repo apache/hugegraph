@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -916,12 +917,20 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     private boolean matchSearchIndexWords(String propValue, String fieldValue) {
-        Set<String> propValues = this.segmentWords(propValue);
-        Set<String> words = this.segmentWords(fieldValue);
-        return CollectionUtil.hasIntersection(propValues, words);
+        return searchPredicate(this.textAnalyzer, fieldValue).test(propValue);
     }
 
     private Set<String> segmentWords(String text) {
+        return segmentWords(this.textAnalyzer, text);
+    }
+
+    public static Predicate<Object> searchPredicate(Analyzer analyzer, String text) {
+        Set<String> words = segmentWords(analyzer, text);
+        return value -> CollectionUtil.hasIntersection(words,
+                segmentWords(analyzer, propertyValueToString(value)));
+    }
+
+    private static Set<String> segmentWords(Analyzer analyzer, String text) {
         /*
          Support 3 kinds of query:
          - Text.contains("(word)"): query by user-specified word;
@@ -938,7 +947,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 return ImmutableSet.of(subText);
             }
         }
-        Set<String> segments = this.textAnalyzer.segment(text);
+        Set<String> segments = analyzer.segment(text);
 
         /*
          * Add original text to segments at the insertion stage,

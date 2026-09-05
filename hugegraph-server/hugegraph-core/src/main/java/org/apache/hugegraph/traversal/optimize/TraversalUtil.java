@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -174,6 +175,7 @@ public final class TraversalUtil {
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         if (hasUnsafeLabelInTraversal(traversal, newStep)) {
+            prepareLocalHasContainers(newStep, traversal);
             return;
         }
         Step<?, ?> step = newStep.getNextStep();
@@ -611,6 +613,7 @@ public final class TraversalUtil {
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
         if (hasUnsafeLabelInTraversal(traversal, newStep)) {
+            prepareLocalHasContainers(newStep, traversal);
             return;
         }
         Step<?, ?> step = newStep;
@@ -667,6 +670,67 @@ public final class TraversalUtil {
             }
         }
         return true;
+    }
+
+    private static void prepareLocalHasContainers(
+            Step<?, ?> source, Traversal.Admin<?, ?> traversal) {
+        QueryHolder query = (QueryHolder) source;
+        Step<?, ?> step = source.getNextStep();
+        while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
+            Step<?, ?> next = step.getNextStep();
+            if (step instanceof HasStep) {
+                HasContainerHolder holder = (HasContainerHolder) step;
+                for (HasContainer has : new ArrayList<>(holder.getHasContainers())) {
+                    // Paging is query metadata, never an element property filter.
+                    if (QueryHolder.SYSPROP_PAGE.equals(has.getKey())) {
+                        query.addHasContainer(has);
+                        holder.removeHasContainer(has);
+                        continue;
+                    }
+                    if (isSysProp(has.getKey())) {
+                        continue;
+                    }
+                    List<P<Object>> predicates = new ArrayList<>();
+                    collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+                    if (predicates.stream().anyMatch(p ->
+                            p.getBiPredicate() == Condition.RelationType.TEXT_CONTAINS)) {
+                        HugeGraph graph = getGraph(source);
+                        holder.removeHasContainer(has);
+                        holder.addHasContainer(new HasContainer(has.getKey(),
+                                localSearchPredicate(has.getPredicate(), graph)));
+                    }
+                }
+                if (holder.getHasContainers().isEmpty()) {
+                    TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
+                    traversal.removeStep(step);
+                }
+            }
+            step = next;
+        }
+        if (query.queryInfo().paging() && step instanceof RangeGlobalStep) {
+            // Bound the raw backend page even when local filters prevent normal
+            // range extraction. Keep the range step to apply offset/limit after
+            // those filters; a filtered page may contain fewer results.
+            query.setRange(0, ((RangeGlobalStep<?>) step).getHighRange());
+        }
+    }
+
+    private static P<?> localSearchPredicate(P<?> predicate, HugeGraph graph) {
+        if (predicate instanceof ConnectiveP) {
+            List<P<Object>> children = new ArrayList<>();
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                @SuppressWarnings("unchecked")
+                P<Object> converted = (P<Object>) localSearchPredicate(child, graph);
+                children.add(converted);
+            }
+            return predicate instanceof AndP ? new AndP<>(children) : new OrP<>(children);
+        }
+        if (predicate.getBiPredicate() != Condition.RelationType.TEXT_CONTAINS) {
+            return predicate.clone();
+        }
+        // Match SEARCH terms in place, preserving range and side-effect ordering.
+        Predicate<Object> matcher = graph.searchPredicate((String) predicate.getValue());
+        return new P<>((actual, ignored) -> matcher.test(actual), predicate.getValue());
     }
 
     private static boolean hasUnsafeLabelInTraversal(

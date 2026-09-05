@@ -476,6 +476,26 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testPageIsConsumedBeforeUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("~page", "").limit(2).has(T.label, P.neq("author")), graph);
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(graphStep, traversal);
+        Assert.assertTrue(graphStep.queryInfo().paging());
+        Assert.assertFalse(hasStepExists(traversal, "~page"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+
+        traversal = traversal(
+                __.V().outE().has("~page", "").limit(2).has(T.label, P.neq("knows")), graph);
+        HugeVertexStep<?> vertexStep = replaceVertexStep(traversal);
+        TraversalUtil.extractHasContainer(vertexStep, traversal);
+        Assert.assertTrue(vertexStep.queryInfo().paging());
+        Assert.assertFalse(hasStepExists(traversal, "~page"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+    }
+
+    @Test
     public void testConnectiveLabelStepStrategyApplyPost() {
         Set<Class<? extends TraversalStrategy.OptimizationStrategy>> post =
                 HugeConnectiveLabelStepStrategy.instance().applyPost();

@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.auth.AuthManager;
@@ -288,6 +289,9 @@ public interface HugeGraph extends Graph {
     long now();
 
     <K, V> V option(TypedOption<K, V> option);
+
+    // Build the same term matcher used by SEARCH indexes, without reading data.
+    Predicate<Object> searchPredicate(String text);
 
     void registerRpcServices(RpcServiceConfig4Server serverConfig,
                              RpcServiceConfig4Client clientConfig);

@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.unit.core;
 
+import java.util.List;
+
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
@@ -116,6 +118,20 @@ public class QueryTest {
         Assert.assertNull(query.conditionValue(HugeKeys.LABEL));
         Assert.assertEquals(ImmutableList.of(),
                             query.condition(HugeKeys.LABEL));
+    }
+
+    @Test
+    public void testConditionWithSingletonAndDuplicateInValues() {
+        Id label = IdGenerator.of(1);
+        for (List<Id> values : ImmutableList.of(ImmutableList.of(label),
+                                                ImmutableList.of(label, label))) {
+            ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+            query.query(Condition.in(HugeKeys.LABEL, values));
+            Assert.assertEquals(values, query.condition(HugeKeys.LABEL));
+            Assert.assertEquals(ImmutableSet.of(label), query.conditionValues(HugeKeys.LABEL));
+            Assert.assertEquals(label, query.conditionValue(HugeKeys.LABEL));
+            Assert.assertEquals(label, query.singleConditionValueOrNull(HugeKeys.LABEL));
+        }
     }
 
     @Test

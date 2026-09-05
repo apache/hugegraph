@@ -20,6 +20,7 @@ package org.apache.hugegraph.core;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
@@ -9638,6 +9639,125 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(2, vertices.size());
         Assert.assertTrue(vertices.contains(vertex3));
         Assert.assertTrue(vertices.contains(vertex4));
+    }
+
+    @Test
+    public void testSearchBeforeDownstreamNegativeLabel() {
+        HugeGraph graph = graph();
+        graph.schema().propertyKey("body").asText().create();
+        graph.schema().vertexLabel("doc").properties("body").useAutomaticId().create();
+        graph.schema().vertexLabel("unindexedDoc").properties("body").useAutomaticId().create();
+        graph.schema().indexLabel("docByBody").onV("doc").by("body").search().create();
+        Vertex alpha = graph.addVertex(T.label, "doc", "body", "alpha");
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        for (String text : ImmutableList.of("(alpha)", "(alpha|beta)", "alpha", "alpha beta")) {
+            Assert.assertEquals(ImmutableList.of(alpha.id()),
+                                g.V().hasLabel("doc")
+                                 .has("body", Text.contains(text)).id().toList());
+            Assert.assertEquals(ImmutableList.of(alpha.id()),
+                                g.V().hasLabel("doc")
+                                 .has("body", Text.contains(text)).limit(10)
+                                 .has(T.label, P.neq("author")).id().toList());
+        }
+        Assert.assertEquals(ImmutableList.of(alpha.id()),
+                            g.V().has("body", Text.contains("(alpha)").or(P.eq("beta")))
+                             .limit(10).has(T.label, P.neq("author")).id().toList());
+        Vertex unindexed = graph.addVertex(T.label, "unindexedDoc", "body", "alpha");
+        this.commitTx();
+        List<Object> ids = g.V().has("body", Text.contains("(alpha|beta)"))
+                            .limit(10).has(T.label, P.neq("author")).id().toList();
+        Assert.assertEquals(2, ids.size());
+        Assert.assertEquals(ImmutableSet.of(alpha.id(), unindexed.id()), ImmutableSet.copyOf(ids));
+    }
+
+    @Test
+    public void testNegativeLabelPreservesRangeAndAggregate() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        graph.schema().vertexLabel("author").properties("city").nullableKeys("city").append();
+        graph.addVertex(T.label, "person", "name", "a", "city", "Beijing", "age", 20);
+        Vertex excluded = graph.addVertex(T.label, "author", "name", "b",
+                                          "id", 1, "age", 20, "city", "Beijing");
+        Vertex included = graph.addVertex(T.label, "fan", "name", "c",
+                                          "age", 20, "city", "Beijing");
+        graph.addVertex(T.label, "person", "name", "d", "city", "Beijing", "age", 20);
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Assert.assertEquals(ImmutableList.of(included.id()),
+                            g.V().has("city", "Beijing").order().by("name").range(1, 3)
+                             .has(T.label, P.neq("author")).id().toList());
+        GraphTraversal<Vertex, Vertex> traversal = g.V().has("city", "Beijing")
+                .order().by("name").range(1, 3).aggregate("seen")
+                .has(T.label, P.neq("author"));
+        Assert.assertEquals(ImmutableList.of(included), traversal.toList());
+        Collection<Vertex> seen = traversal.asAdmin().getSideEffects().get("seen");
+        Assert.assertEquals(2, seen.size());
+        Assert.assertTrue(seen.contains(excluded));
+        Assert.assertTrue(seen.contains(included));
+    }
+
+    @Test
+    public void testPageBeforeDownstreamNegativeLabel() {
+        Assume.assumeTrue("Not support paging", storeFeatures().supportsQueryByPage());
+        HugeGraph graph = graph();
+        Set<Object> expected = new HashSet<>();
+        for (int i = 0; i < 5; i++) {
+            expected.add(graph.addVertex(T.label, "person", "name", "page-" + i,
+                                         "city", "Beijing", "age", 20).id());
+        }
+        // More excluded vertices than matches also exercises empty filtered
+        // pages whose backend cursor must still be followed.
+        for (int i = 0; i < 10; i++) {
+            graph.addVertex(T.label, "author", "id", i, "name", "excluded-" + i);
+        }
+        this.commitTx();
+        assertNegativeLabelPages(graph, expected, false);
+        assertNegativeLabelPages(graph, expected, true);
+    }
+
+    private static void assertNegativeLabelPages(HugeGraph graph, Set<Object> expected,
+                                                 boolean localFilter) {
+        Set<Object> actual = new HashSet<>();
+        String page = "";
+        int pages = 0;
+        do {
+            GraphTraversal<Vertex, Vertex> traversal = graph.traversal().V();
+            if (localFilter) {
+                traversal.hasLabel("person").has("age", 20);
+            }
+            traversal.has("~page", page).limit(2).has(T.label, P.neq("author"));
+            traversal.asAdmin().applyStrategies();
+            Assert.assertNotNull(TraversalUtil.firstPageStep(traversal));
+            List<Vertex> vertices = traversal.toList();
+            Assert.assertTrue(vertices.size() <= 2);
+            for (Vertex vertex : vertices) {
+                Assert.assertTrue(actual.add(vertex.id()));
+            }
+            page = TraversalUtil.page(traversal);
+            Assert.assertTrue(++pages <= 10);
+        } while (page != null && !page.isEmpty());
+        Assert.assertEquals(expected, actual);
+        Assert.assertTrue(pages >= 3);
+    }
+
+    @Test
+    public void testSelectedLabelsExcludeIndexedInterference() {
+        HugeGraph graph = graph();
+        Set<Object> expected = new HashSet<>();
+        for (String label : ImmutableList.of("selectedA", "selectedB", "outside")) {
+            graph.schema().vertexLabel(label).properties("age").useAutomaticId().create();
+            graph.schema().indexLabel(label + "ByAge").onV(label).by("age").secondary().create();
+            Vertex vertex = graph.addVertex(T.label, label, "age", 20);
+            if (!label.equals("outside")) {
+                expected.add(vertex.id());
+            }
+        }
+        this.commitTx();
+        List<Object> ids = graph.traversal().V().hasLabel("selectedA", "selectedB")
+                                .has("age", 20).id().toList();
+        Assert.assertEquals(2, ids.size());
+        Assert.assertEquals(expected, new HashSet<>(ids));
     }
 
     private void init10VerticesAndCommit() {
