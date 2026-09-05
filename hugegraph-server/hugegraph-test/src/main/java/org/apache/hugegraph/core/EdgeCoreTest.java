@@ -3611,6 +3611,34 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testLocalEdgeIdAndLabelRepresentations() {
+        HugeGraph graph = graph();
+        graph.schema().vertexLabel("localEV").useCustomizeNumberId().create();
+        graph.schema().edgeLabel("localE").link("localEV", "localEV").create();
+        Vertex source = graph.addVertex(T.label, "localEV", T.id, 123);
+        Vertex target = graph.addVertex(T.label, "localEV", T.id, 456);
+        Edge edge = source.addEdge("localE", target);
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Assert.assertEquals(ImmutableList.of(edge), g.E().hasId(edge).toList());
+        Assert.assertEquals(ImmutableList.of(edge),
+                            g.E().hasId(edge).limit(10).hasLabel(P.neq("other")).toList());
+        Assert.assertEquals(ImmutableList.of(edge),
+                            g.V(source.id()).outE().hasId(P.within(edge)).limit(10)
+                             .hasLabel(P.neq("other")).toList());
+        Id label = graph.edgeLabel("localE").id();
+        for (Object value : ImmutableList.of("localE", label, label.asLong())) {
+            Assert.assertEquals(ImmutableList.of(edge), g.E().has(T.label, value).toList());
+            Assert.assertEquals(ImmutableList.of(edge),
+                                g.E().has(T.label, value).limit(10)
+                                 .hasLabel(P.neq("other")).toList());
+            Assert.assertEquals(ImmutableList.of(edge),
+                                g.V(source.id()).outE().barrier().has(T.label, P.within(value)).limit(10)
+                                 .hasLabel(P.neq("other")).toList());
+        }
+    }
+
+    @Test
     public void testQueryEdgesByNonEqLabelAndIndexedPropertyAcrossBarrier() {
         HugeGraph graph = graph();
         initEdgeLabelQueryEdges();

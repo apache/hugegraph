@@ -9256,6 +9256,81 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testLocalElementIdAndLabelRepresentations() {
+        HugeGraph graph = graph();
+        graph.schema().vertexLabel("localV").useCustomizeNumberId().create();
+        Vertex one = graph.addVertex(T.label, "localV", T.id, 123);
+        Vertex two = graph.addVertex(T.label, "localV", T.id, 456);
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Assert.assertEquals(ImmutableList.of(one), g.V().hasId(one).toList());
+        Assert.assertEquals(ImmutableList.of(one),
+                            g.V().hasId(one).limit(10).hasLabel(P.neq("other")).toList());
+        Assert.assertEquals(ImmutableSet.of(one, two),
+                            g.V().hasId(P.within(one, two)).limit(10)
+                             .hasLabel(P.neq("other")).toSet());
+        Assert.assertEquals(ImmutableList.of(one),
+                            g.V(one.id()).hasId(P.within(one, two)).limit(10)
+                             .hasLabel(P.neq("other")).toList());
+        Assert.assertTrue(g.V(two.id()).hasId(one).limit(10)
+                           .hasLabel(P.neq("other")).toList().isEmpty());
+        P<Vertex> ids = P.eq(one).or(P.eq(two));
+        Assert.assertEquals(ImmutableSet.of(one, two),
+                            g.V().hasId(ids).limit(10).hasLabel(P.neq("other")).toSet());
+        Assert.assertTrue(ids.test(one));
+        Id label = graph.vertexLabel("localV").id();
+        Set<Vertex> expected = ImmutableSet.of(one, two);
+        for (Object value : ImmutableList.of("localV", label, label.asLong())) {
+            Assert.assertEquals(expected, g.V().has(T.label, value).toSet());
+            Assert.assertEquals(expected, g.V().has(T.label, value).limit(10)
+                                          .hasLabel(P.neq("other")).toSet());
+            Assert.assertEquals(expected, g.inject(1).local(__.union(__.V().has(T.label, value)))
+                                          .hasLabel(P.neq("other")).toSet());
+        }
+        P<Object> labels = P.eq((Object) label).or(P.eq("localV"));
+        GraphTraversal<Vertex, Vertex> traversal = g.V().has(T.label, labels)
+                                                    .limit(10).hasLabel(P.neq("other"));
+        traversal.asAdmin().applyStrategies();
+        GraphTraversal.Admin<Vertex, Vertex> clone = traversal.asAdmin().clone();
+        Assert.assertEquals(expected, traversal.toSet());
+        Assert.assertEquals(expected, clone.toSet());
+        traversal.asAdmin().reset();
+        Assert.assertEquals(expected, traversal.toSet());
+        Assert.assertTrue(labels.test(label));
+        Assert.assertEquals(expected, g.V().has(T.label, P.eq((Object) label).and(P.neq(-1L)))
+                                      .limit(10).hasLabel(P.neq("other")).toSet());
+        Assert.assertEquals(expected, g.V().has(T.label, P.within(label, IdGenerator.of(-1L)))
+                                      .limit(10).hasLabel(P.neq("other")).toSet());
+        Assert.assertEquals(expected, g.V().has(T.label, P.without(IdGenerator.of(-1L)))
+                                      .limit(10).hasLabel(P.neq("other")).toSet());
+        Assert.assertTrue(g.V().has(T.label, IdGenerator.of(-1L)).limit(10)
+                           .hasLabel(P.neq("other")).toList().isEmpty());
+        Assert.assertTrue(g.V().has(T.label, P.without(label)).limit(10)
+                           .hasLabel(P.neq("other")).toList().isEmpty());
+    }
+
+    @Test
+    public void testNotLabelContextKeepsUnindexedCandidates() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        init5Persons();
+        Vertex fan = graph.addVertex(T.label, "fan", "name", "unindexed-city-fan",
+                                     "age", 20, "city", "Beijing");
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Set<Vertex> expected = g.V().hasLabel(P.neq("author")).has("city", "Beijing").toSet();
+        Assert.assertEquals(4, expected.size());
+        Assert.assertTrue(expected.contains(fan));
+        Assert.assertEquals(expected, g.V().has("city", "Beijing")
+                                      .not(__.hasLabel("author")).toSet());
+        Assert.assertEquals(expected, g.V().has("city", "Beijing")
+                                      .not(__.or(__.hasLabel("author"), __.hasLabel("missing")))
+                                      .toSet());
+        Assert.assertEquals(expected, g.inject(1).union(__.V().has("city", "Beijing"))
+                                      .not(__.hasLabel("author")).toSet());
+    }
+
+    @Test
     public void testRepeatSiblingNegativeLabel() {
         HugeGraph graph = graph();
         graph.schema().propertyKey("city").asText().ifNotExist().create();

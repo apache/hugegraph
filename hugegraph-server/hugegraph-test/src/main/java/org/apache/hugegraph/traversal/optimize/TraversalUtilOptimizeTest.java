@@ -25,6 +25,8 @@ import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
@@ -519,6 +521,23 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testLocalLabelIdWithoutGraphAndAfterClone() {
+        Id id = IdGenerator.of(12L);
+        Traversal.Admin<?, ?> traversal = __.V().has(T.label, id).limit(10)
+                                           .hasLabel(P.neq("other")).asAdmin();
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        HasContainer filter = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, id, "v"));
+        Assert.assertTrue(filter.test(vertex));
+        Assert.assertTrue(filter.clone().test(vertex));
+        Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, IdGenerator.of(13L), "v"));
+        Assert.assertFalse(filter.test(vertex));
+        Assert.assertFalse(filter.clone().test(vertex));
+    }
+
+    @Test
     public void testChildSourceKeepsPropertyBeforeParentUnsafeLabel() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
@@ -550,6 +569,24 @@ public class TraversalUtilOptimizeTest {
         TraversalUtil.extractHasContainer(graphStep, admin);
         Assert.assertTrue(hasContainer(graphStep, "city"));
         Assert.assertFalse(hasStepExists(admin, "city"));
+    }
+
+    @Test
+    public void testNotContextOnlyBlocksLabelDependentPushdown() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("city", "Beijing").not(__.hasLabel("author")), graph);
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        Assert.assertTrue(source.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+
+        traversal = traversal(__.V().has("city", "Beijing").not(__.has("name", "Tom")), graph);
+        source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        Assert.assertTrue(hasContainer(source, "city"));
+        Assert.assertFalse(hasStepExists(traversal, "city"));
     }
 
     @Test

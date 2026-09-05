@@ -69,6 +69,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
@@ -696,6 +697,11 @@ public final class TraversalUtil {
                                 localIdPredicate(has.getPredicate())));
                         continue;
                     }
+                    if (T.label.getAccessor().equals(has.getKey())) {
+                        holder.removeHasContainer(has);
+                        holder.addHasContainer(new LocalLabelHasContainer(has.getPredicate()));
+                        continue;
+                    }
                     if (isSysProp(has.getKey())) {
                         continue;
                     }
@@ -731,24 +737,79 @@ public final class TraversalUtil {
 
     private static P<?> localIdPredicate(P<?> predicate) {
         // Keep IDs local to preserve source-ID intersections and step ordering.
-        // UUID values need the same representation as HugeElement.id(). Leave
+        // UUID/Element values need the same representation as HugeElement.id(). Leave
         // strings unchanged so HasContainer retains its string-ID comparison.
         P<?> copy = predicate.clone();
         List<P<Object>> leaves = new ArrayList<>();
         collectPredicates(leaves, ImmutableList.of(copy));
         for (P<Object> leaf : leaves) {
             Object value = leaf.getValue();
-            if (value instanceof UUID) {
-                leaf.setValue(IdGenerator.of((UUID) value));
-            } else if (value instanceof Collection) {
+            if (value instanceof Collection) {
                 List<Object> values = new ArrayList<>();
                 for (Object item : (Collection<?>) value) {
-                    values.add(item instanceof UUID ? IdGenerator.of((UUID) item) : item);
+                    values.add(localIdValue(item));
                 }
                 leaf.setValue(values);
+            } else {
+                leaf.setValue(localIdValue(value));
             }
         }
         return copy;
+    }
+
+    private static Object localIdValue(Object value) {
+        if (value instanceof UUID || value instanceof Element) {
+            return HugeElement.getIdValue(HugeType.VERTEX, value);
+        }
+        return value;
+    }
+
+    private static final class LocalLabelHasContainer extends HasContainer {
+
+        private static final long serialVersionUID = 1L;
+
+        private LocalLabelHasContainer(P<?> predicate) {
+            super(T.label.getAccessor(), predicate.clone());
+        }
+
+        @Override
+        protected boolean testLabel(Element element) {
+            // Resolve against the actual element, not a graph captured while
+            // strategies run. Child traversals may be unbound or later cloned.
+            return testLabelPredicate(this.getPredicate(), ((HugeElement) element).schemaLabel());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean testLabelPredicate(P<?> predicate, SchemaLabel label) {
+        if (predicate instanceof ConnectiveP) {
+            boolean and = predicate instanceof AndP;
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                if (testLabelPredicate(child, label) != and) {
+                    return !and;
+                }
+            }
+            return and;
+        }
+        BiPredicate<?, ?> bp = predicate.getBiPredicate();
+        Object value = predicate.getValue();
+        if (bp == Contains.within || bp == Contains.without) {
+            for (Object item : (Collection<?>) value) {
+                if (testLabelValue(Compare.eq, label, item)) {
+                    return bp == Contains.within;
+                }
+            }
+            return bp == Contains.without;
+        }
+        return testLabelValue((BiPredicate<Object, Object>) bp, label, value);
+    }
+
+    private static boolean testLabelValue(BiPredicate<Object, Object> predicate,
+                                          SchemaLabel label, Object value) {
+        if (value instanceof Number) {
+            value = IdGenerator.of(((Number) value).longValue());
+        }
+        return predicate.test(value instanceof Id ? label.id() : label.name(), value);
     }
 
     private static P<?> localSearchPredicate(P<?> predicate, HugeGraph graph) {
@@ -810,17 +871,24 @@ public final class TraversalUtil {
     }
 
     private static boolean hasUnsafeLabelInChildren(Step<?, ?> step) {
+        return hasUnsafeLabelInChildren(step, false);
+    }
+
+    private static boolean hasUnsafeLabelInChildren(Step<?, ?> step, boolean negated) {
         if (!(step instanceof TraversalParent)) {
             return false;
         }
         TraversalParent parent = (TraversalParent) step;
+        // Even an EQ label under not() describes a complement, whose property
+        // index coverage is unknown. Stay conservative for nested negations too.
+        negated |= step instanceof NotStep;
         for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
-            if (hasUnsafeLabelInChildTraversal(child)) {
+            if (hasUnsafeLabelInChildTraversal(child, negated)) {
                 return true;
             }
         }
         for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
-            if (hasUnsafeLabelInChildTraversal(child)) {
+            if (hasUnsafeLabelInChildTraversal(child, negated)) {
                 return true;
             }
         }
@@ -828,13 +896,13 @@ public final class TraversalUtil {
     }
 
     private static boolean hasUnsafeLabelInChildTraversal(
-            Traversal.Admin<?, ?> traversal) {
+            Traversal.Admin<?, ?> traversal, boolean negated) {
         for (Step<?, ?> childStep : traversal.getSteps()) {
             if (childStep instanceof HasStep &&
-                hasUnsafeLabelPredicate((HasContainerHolder) childStep)) {
+                hasUnsafeLabelPredicate((HasContainerHolder) childStep, negated)) {
                 return true;
             }
-            if (hasUnsafeLabelInChildren(childStep)) {
+            if (hasUnsafeLabelInChildren(childStep, negated)) {
                 return true;
             }
         }
@@ -842,9 +910,13 @@ public final class TraversalUtil {
     }
 
     private static boolean hasUnsafeLabelPredicate(HasContainerHolder holder) {
+        return hasUnsafeLabelPredicate(holder, false);
+    }
+
+    private static boolean hasUnsafeLabelPredicate(HasContainerHolder holder, boolean negated) {
         for (HasContainer has : holder.getHasContainers()) {
             if (has.getKey().equals(T.label.getAccessor()) &&
-                !isEqInLabelPredicate(has)) {
+                (negated || !isEqInLabelPredicate(has))) {
                 return true;
             }
         }
