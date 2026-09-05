@@ -17,112 +17,71 @@
 
 package org.apache.hugegraph.backend.page;
 
-import java.util.NoSuchElementException;
+import java.util.Iterator;
 
 import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.query.QueryResults;
+import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
+import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.exception.NotSupportException;
-import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.util.E;
-import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 
-public class PageEntryIterator<R> implements CIter<R> {
+/** Produces pages without probing the following page to delimit the current one. */
+public class PageEntryIterator<R> extends BatchIterator<QueryBatch<R>> {
 
     private final QueryList<R> queries;
     private final long pageSize;
     private final PageInfo pageInfo;
-    private final QueryResults<R> queryResults; // for upper layer
-
-    private QueryList.PageResults<R> pageResults;
+    private Iterator<QueryBatch<R>> pageBatches;
     private long remaining;
 
     public PageEntryIterator(QueryList<R> queries, long pageSize) {
         this.queries = queries;
         this.pageSize = pageSize;
-        this.pageInfo = this.parsePageInfo();
-        this.queryResults = new QueryResults<>(this, queries.parent());
-
-        this.pageResults = QueryList.PageResults.emptyIterator();
+        this.pageInfo = PageInfo.fromString(queries.parent().pageWithoutCheck());
+        E.checkState(this.pageInfo.offset() < queries.total(),
+                     "Invalid page offset '%s' exceeds the size of IdHolderList",
+                     this.pageInfo.offset());
         this.remaining = queries.parent().limit();
     }
 
-    private PageInfo parsePageInfo() {
-        String page = this.queries.parent().pageWithoutCheck();
-        PageInfo pageInfo = PageInfo.fromString(page);
-        E.checkState(pageInfo.offset() < this.queries.total(),
-                     "Invalid page '%s' with an offset '%s' exceeds " +
-                     "the size of IdHolderList", page, pageInfo.offset());
-        return pageInfo;
-    }
-
     @Override
-    public boolean hasNext() {
-        if (this.pageResults.get().hasNext()) {
-            return true;
-        }
-        return this.fetch();
-    }
-
-    private boolean fetch() {
-        if ((this.remaining != Query.NO_LIMIT && this.remaining <= 0L) ||
-            this.pageInfo.offset() >= this.queries.total()) {
-            return false;
-        }
-
-        long pageSize = this.pageSize;
-        if (this.remaining != Query.NO_LIMIT && this.remaining < pageSize) {
-            pageSize = this.remaining;
-        }
-        this.closePageResults();
-        this.pageResults = this.queries.fetchNext(this.pageInfo, pageSize);
-        assert this.pageResults != null;
-        this.queryResults.setQuery(this.pageResults.query());
-
-        if (this.pageResults.get().hasNext()) {
-            if (!this.pageResults.hasNextPage()) {
-                this.pageInfo.increase();
-            } else {
-                this.pageInfo.page(this.pageResults.page());
+    protected QueryBatch<R> fetch() throws Exception {
+        while (true) {
+            if (this.pageBatches != null && this.pageBatches.hasNext()) {
+                return this.pageBatches.next();
             }
-            this.remaining -= this.pageResults.total();
-            return true;
-        } else {
-            this.pageInfo.increase();
-            return this.fetch();
-        }
-    }
-
-    private void closePageResults() {
-        if (this.pageResults != QueryList.PageResults.EMPTY) {
-            CloseableIterator.closeIterator(this.pageResults.get());
+            Iterator<QueryBatch<R>> previous = this.pageBatches;
+            this.pageBatches = null;
+            QueryBatch.closeAll(previous);
+            if ((this.remaining != Query.NO_LIMIT && this.remaining <= 0L) ||
+                this.pageInfo.offset() >= this.queries.total()) {
+                return null;
+            }
+            long size = this.remaining == Query.NO_LIMIT ? this.pageSize :
+                        Math.min(this.pageSize, this.remaining);
+            QueryList.PageResults<R> page = this.queries.fetchNext(this.pageInfo, size);
+            this.pageBatches = page.results().batches();
+            if (page.hasNextPage()) {
+                this.pageInfo.page(page.page());
+            } else {
+                this.pageInfo.increase();
+            }
+            if (this.remaining != Query.NO_LIMIT) {
+                this.remaining -= page.total();
+            }
         }
     }
 
     @Override
-    public R next() {
-        if (!this.hasNext()) {
-            throw new NoSuchElementException();
-        }
-        return this.pageResults.get().next();
+    protected void closeResources() throws Exception {
+        QueryBatch.closeAll(this.pageBatches, this.queries);
     }
 
     @Override
     public Object metadata(String meta, Object... args) {
         if (PageInfo.PAGE.equals(meta)) {
-            if (this.pageInfo.offset() >= this.queries.total()) {
-                return null;
-            }
-            return this.pageInfo;
+            return this.pageInfo.offset() >= this.queries.total() ? null : this.pageInfo;
         }
         throw new NotSupportException("Invalid meta '%s'", meta);
-    }
-
-    @Override
-    public void close() throws Exception {
-        this.closePageResults();
-    }
-
-    public QueryResults<R> results() {
-        return this.queryResults;
     }
 }

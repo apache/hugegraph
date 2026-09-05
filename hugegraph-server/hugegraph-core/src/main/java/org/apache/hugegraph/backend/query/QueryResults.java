@@ -18,234 +18,303 @@
 package org.apache.hugegraph.backend.query;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
 import org.apache.hugegraph.iterator.CIter;
-import org.apache.hugegraph.iterator.FlatMapperIterator;
 import org.apache.hugegraph.iterator.ListIterator;
-import org.apache.hugegraph.iterator.MapperIterator;
-import org.apache.hugegraph.iterator.WrappedIterator;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.type.Idfiable;
-import org.apache.hugegraph.util.E;
-import org.apache.hugegraph.util.InsertionOrderUtil;
-import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 
+/** A lazy stream of query batches. Only the final consumer flattens the stream. */
 public class QueryResults<R> {
 
-    private static final Iterator<?> EMPTY_ITERATOR = new EmptyIterator<>();
-
-    private static final QueryResults<?> EMPTY = new QueryResults<>(
-            emptyIterator(), Query.NONE);
-
-    private final Iterator<R> results;
+    private final Iterator<QueryBatch<R>> batches;
     private final List<Query> queries;
-    private List<Query> currentQueries;
-    private long queryVersion;
+    private final Object metadata;
+    private Iterator<R> results;
 
     public QueryResults(Iterator<R> results, Query query) {
-        this(results);
-        this.addQuery(query);
+        this(results, new QueryResultContext(query));
     }
 
-    private QueryResults(Iterator<R> results) {
-        this.results = results;
-        this.queries = InsertionOrderUtil.newList();
-        this.currentQueries = Collections.emptyList();
-        this.queryVersion = 0L;
+    public QueryResults(Iterator<R> results, QueryResultContext context) {
+        QueryBatch<R> batch = new QueryBatch<>(results, context);
+        this.batches = new BatchIterator<QueryBatch<R>>() {
+            private boolean fetched;
+
+            @Override
+            protected QueryBatch<R> fetch() {
+                if (this.fetched) {
+                    return null;
+                }
+                this.fetched = true;
+                return batch;
+            }
+
+            @Override
+            protected void closeResources() throws Exception {
+                batch.close();
+            }
+        };
+        this.queries = new ArrayList<>(Collections.singletonList(context.queries().get(0)));
+        this.metadata = batch.results();
     }
 
-    public void setQuery(Query query) {
-        if (!this.queries.isEmpty()) {
-            this.queries.clear();
-        }
-        this.addQuery(query);
+    private QueryResults(Iterator<QueryBatch<R>> batches, Object metadata) {
+        this.batches = batches;
+        this.metadata = metadata;
+        this.queries = new ArrayList<>();
     }
 
-    private void addQuery(Query query) {
-        E.checkNotNull(query, "query");
-        this.addQueries(Collections.singletonList(query));
+    public static <R> QueryResults<R> fromBatches(Iterator<QueryBatch<R>> batches) {
+        return new QueryResults<>(batches, batches);
     }
 
-    private void addQueries(List<Query> queries) {
-        assert !queries.isEmpty();
-        for (Query query : queries) {
-            E.checkNotNull(query, "query");
-            this.queries.add(query);
-        }
-        this.currentQueries = new ArrayList<>(queries);
-        this.queryVersion++;
+    public Iterator<QueryBatch<R>> batches() {
+        return this.batches;
     }
 
     public Iterator<R> iterator() {
+        if (this.results == null) {
+            this.results = new BatchIterator<R>() {
+                private QueryBatch<R> active;
+
+                @Override
+                protected R fetch() throws Exception {
+                    while (true) {
+                        if (this.active != null && this.active.results().hasNext()) {
+                            return this.active.results().next();
+                        }
+                        QueryBatch<R> previous = this.active;
+                        this.active = null;
+                        QueryBatch.closeAll(previous);
+                        if (!batches.hasNext()) {
+                            return null;
+                        }
+                        this.active = batches.next();
+                        queries.add(this.active.context().queries().get(0));
+                    }
+                }
+
+                @Override
+                protected void closeResources() throws Exception {
+                    QueryBatch.closeAll(this.active, batches);
+                }
+
+                @Override
+                public Object metadata(String meta, Object... args) {
+                    return QueryBatch.metadataOf(metadata, meta, args);
+                }
+            };
+        }
         return this.results;
     }
 
-    public R one() {
-        return one(this.results);
+    public <T> QueryResults<T> mapBatches(Function<QueryBatch<R>, QueryBatch<T>> mapper) {
+        Iterator<QueryBatch<R>> origin = this.batches;
+        return new QueryResults<>(new BatchIterator<QueryBatch<T>>() {
+            private QueryBatch<?> active;
+
+            @Override
+            protected QueryBatch<T> fetch() throws Exception {
+                QueryBatch.closeAll(this.active);
+                this.active = null;
+                if (!origin.hasNext()) {
+                    return null;
+                }
+                QueryBatch<R> batch = origin.next();
+                this.active = batch;
+                QueryBatch<T> mapped = mapper.apply(batch);
+                this.active = mapped;
+                return mapped;
+            }
+
+            @Override
+            protected void closeResources() throws Exception {
+                QueryBatch.closeAll(this.active, origin);
+            }
+        }, this.metadata);
     }
 
-    public QueryResults<R> toList() {
-        QueryResults<R> fetched = new QueryResults<>(toList(this.results));
-        fetched.addQueries(this.queries);
-        return fetched;
+    public <T> QueryResults<T> map(Function<R, T> mapper) {
+        return this.mapBatches(batch -> batch.map(mapper));
+    }
+
+    public <T> QueryResults<T> flatMap(Function<R, Iterator<T>> mapper) {
+        return this.mapBatches(batch -> batch.flatMap(mapper));
+    }
+
+    public QueryResults<R> filter(BiPredicate<QueryResultContext, R> predicate) {
+        return this.mapBatches(batch -> batch.filter(predicate));
+    }
+
+    public <T extends Idfiable> QueryResults<T> keepInputOrderIfNeeded() {
+        return this.mapBatches(QueryBatch::keepInputOrder);
+    }
+
+    public R one() {
+        return one(this.iterator());
     }
 
     public List<Query> queries() {
         return Collections.unmodifiableList(this.queries);
     }
 
-    public <T extends Idfiable> Iterator<T> keepInputOrderIfNeeded(
-            Iterator<T> origin) {
-        if (!origin.hasNext()) {
-            // None result found
-            return origin;
-        }
-        if (!mustSortByInputIds(this.currentQueries)) {
-            return origin;
-        }
-        return new InputOrderIterator<>(this, origin);
-    }
-
-    private static boolean mustSortByInputIds(List<Query> queries) {
-        assert !queries.isEmpty() : queries;
-        for (Query query : queries) {
-            if (query instanceof IdQuery &&
-                ((IdQuery) query).mustSortByInput()) {
-                return true;
+    public QueryResults<R> toList() {
+        List<QueryBatch<R>> fetched = new ArrayList<>();
+        long count = 0L;
+        Throwable failure = null;
+        try {
+            while (this.batches.hasNext()) {
+                QueryBatch<R> batch = this.batches.next();
+                ListIterator<R> values = toList(batch.results());
+                count += values.list().size();
+                Query.checkForceCapacity(count);
+                fetched.add(new QueryBatch<>(values, batch.context()));
+                Query.checkForceCapacity(fetched.size());
             }
+        } catch (Throwable e) {
+            failure = e;
+            throw QueryBatch.propagate(e);
+        } finally {
+            close(this.batches, failure);
         }
-        return false;
+        QueryResults<R> result = new QueryResults<>(fetched.iterator(), this.metadata);
+        result.queries.addAll(this.queries);
+        return result;
     }
 
-    @SuppressWarnings("unused")
-    private boolean bigCapacity() {
-        assert !this.queries.isEmpty();
-        for (Query query : this.queries) {
-            if (query.bigCapacity()) {
-                return true;
+    public static <T, R> QueryResults<R> flatMap(
+            Iterator<T> inputs, Function<T, QueryResults<R>> mapper) {
+        return fromBatches(new BatchIterator<QueryBatch<R>>() {
+            private QueryResults<R> child;
+
+            @Override
+            protected QueryBatch<R> fetch() throws Exception {
+                while (true) {
+                    if (this.child != null && this.child.batches.hasNext()) {
+                        return this.child.batches.next();
+                    }
+                    QueryResults<R> previous = this.child;
+                    this.child = null;
+                    QueryBatch.closeAll(previous == null ? null : previous.batches);
+                    if (!inputs.hasNext()) {
+                        return null;
+                    }
+                    this.child = mapper.apply(inputs.next());
+                }
             }
-        }
-        return false;
-    }
 
-    private static Collection<Id> queryIds(List<Query> queries) {
-        assert !queries.isEmpty();
-        if (queries.size() == 1) {
-            return queries.get(0).ids();
-        }
-
-        Set<Id> ids = InsertionOrderUtil.newSet();
-        for (Query query : queries) {
-            ids.addAll(query.ids());
-        }
-        return ids;
+            @Override
+            protected void closeResources() throws Exception {
+                QueryBatch.closeAll(this.child == null ? null : this.child.batches, inputs);
+            }
+        });
     }
 
     @Watched
     public static <T> ListIterator<T> toList(Iterator<T> iterator) {
+        Throwable failure = null;
         try {
             return new ListIterator<>(Query.DEFAULT_CAPACITY, iterator);
+        } catch (Throwable e) {
+            failure = e;
+            throw QueryBatch.propagate(e);
         } finally {
-            CloseableIterator.closeIterator(iterator);
+            close(iterator, failure);
         }
     }
 
     @Watched
     public static <T> void fillList(Iterator<T> iterator, List<T> list) {
+        Throwable failure = null;
         try {
             while (iterator.hasNext()) {
-                T result = iterator.next();
-                list.add(result);
+                list.add(iterator.next());
                 Query.checkForceCapacity(list.size());
             }
+        } catch (Throwable e) {
+            failure = e;
+            throw QueryBatch.propagate(e);
         } finally {
-            CloseableIterator.closeIterator(iterator);
+            close(iterator, failure);
         }
     }
 
     @Watched
-    public static <T extends Idfiable> void fillMap(Iterator<T> iterator,
-                                                    Map<Id, T> map) {
+    public static <T extends Idfiable> void fillMap(Iterator<T> iterator, Map<Id, T> map) {
+        Throwable failure = null;
         try {
             while (iterator.hasNext()) {
-                T result = iterator.next();
-                assert result.id() != null;
-                map.put(result.id(), result);
+                T value = iterator.next();
+                map.put(value.id(), value);
                 Query.checkForceCapacity(map.size());
             }
+        } catch (Throwable e) {
+            failure = e;
+            throw QueryBatch.propagate(e);
         } finally {
-            CloseableIterator.closeIterator(iterator);
+            close(iterator, failure);
         }
-    }
-
-    public static <T, R> QueryResults<R> flatMap(
-            Iterator<T> iterator, Function<T, QueryResults<R>> func) {
-        @SuppressWarnings("unchecked")
-        QueryResults<R>[] qr = new QueryResults[1];
-        qr[0] = new QueryResults<>(new FlatMapperIterator<>(iterator, i -> {
-            QueryResults<R> results = func.apply(i);
-            if (results == null || !results.iterator().hasNext()) {
-                return null;
-            }
-            return new QueryTrackingIterator<>(qr[0], results);
-        }));
-        return qr[0];
-    }
-
-    private long queryVersion() {
-        return this.queryVersion;
-    }
-
-    private List<Query> currentQueries() {
-        return new ArrayList<>(this.currentQueries);
     }
 
     @Watched
     public static <T> T one(Iterator<T> iterator) {
+        Throwable failure = null;
         try {
             if (iterator.hasNext()) {
-                T result = iterator.next();
+                T value = iterator.next();
                 if (iterator.hasNext()) {
-                    throw new HugeException("Expect just one result, " +
-                                            "but got at least two: [%s, %s]",
-                                            result, iterator.next());
+                    throw new HugeException("Expect just one result, but got at least two: [%s, %s]",
+                                            value, iterator.next());
                 }
-                return result;
+                return value;
             }
+            return null;
+        } catch (Throwable e) {
+            failure = e;
+            throw QueryBatch.propagate(e);
         } finally {
-            CloseableIterator.closeIterator(iterator);
+            close(iterator, failure);
         }
-        return null;
     }
 
-    public static <T> Iterator<T> iterator(T elem) {
-        return new OneIterator<>(elem);
+    private static void close(Object iterator, Throwable failure) {
+        try {
+            QueryBatch.closeAll(iterator);
+        } catch (Throwable closing) {
+            if (failure == null) {
+                throw QueryBatch.propagate(closing);
+            }
+            if (closing != failure) {
+                failure.addSuppressed(closing);
+            }
+        }
     }
 
-    @SuppressWarnings("unchecked")
+    public static <T> Iterator<T> iterator(T value) {
+        return new OneIterator<>(value);
+    }
+
     public static <T> QueryResults<T> empty() {
-        return (QueryResults<T>) EMPTY;
+        return new QueryResults<T>(QueryResults.<T>emptyIterator(), Query.NONE);
     }
 
-    @SuppressWarnings("unchecked")
     public static <T> Iterator<T> emptyIterator() {
-        return (Iterator<T>) EMPTY_ITERATOR;
+        return new EmptyIterator<>();
     }
 
     public interface Fetcher<R> extends Function<Query, QueryResults<R>> {
-
     }
-
     private static class EmptyIterator<T> implements CIter<T> {
 
         @Override
@@ -304,118 +373,4 @@ public class QueryResults<R> {
         }
     }
 
-    private static class QueryTrackingIterator<R>
-            extends WrappedIterator<R> {
-
-        private final QueryResults<R> parent;
-        private final QueryResults<R> child;
-        private long childQueryVersion;
-
-        public QueryTrackingIterator(QueryResults<R> parent,
-                                     QueryResults<R> child) {
-            this.parent = parent;
-            this.child = child;
-            this.childQueryVersion = -1L;
-        }
-
-        @Override
-        protected Iterator<R> originIterator() {
-            return this.child.iterator();
-        }
-
-        @Override
-        protected boolean fetch() {
-            Iterator<R> origin = this.child.iterator();
-            if (!origin.hasNext()) {
-                return false;
-            }
-            R result = origin.next();
-            long queryVersion = this.child.queryVersion();
-            if (this.childQueryVersion != queryVersion) {
-                this.parent.addQueries(this.child.currentQueries());
-                this.childQueryVersion = queryVersion;
-            }
-            assert this.current == none();
-            this.current = result;
-            return true;
-        }
-    }
-
-    private static class InputOrderIterator<T extends Idfiable>
-            extends WrappedIterator<T> {
-
-        private final QueryResults<?> queryResults;
-        private final Iterator<T> origin;
-        private Iterator<T> currentBatch;
-
-        public InputOrderIterator(QueryResults<?> queryResults,
-                                  Iterator<T> origin) {
-            this.queryResults = queryResults;
-            this.origin = origin;
-            this.currentBatch = Collections.emptyIterator();
-        }
-
-        @Override
-        protected Iterator<T> originIterator() {
-            return this.origin;
-        }
-
-        @Override
-        protected boolean fetch() {
-            while (true) {
-                if (this.currentBatch.hasNext()) {
-                    assert this.current == none();
-                    this.current = this.currentBatch.next();
-                    return true;
-                }
-                if (!this.origin.hasNext()) {
-                    return false;
-                }
-                this.currentBatch = this.fetchBatch();
-            }
-        }
-
-        private Iterator<T> fetchBatch() {
-            long queryVersion = this.queryResults.queryVersion();
-            List<Query> queries = this.queryResults.currentQueries();
-            List<T> results = InsertionOrderUtil.newList();
-            do {
-                results.add(this.origin.next());
-                Query.checkForceCapacity(results.size());
-            } while (this.origin.hasNext() &&
-                     queryVersion == this.queryResults.queryVersion());
-
-            if (!mustSortByInputIds(queries)) {
-                return results.iterator();
-            }
-            Collection<Id> ids = queryIds(queries);
-            if (ids.size() <= 1) {
-                return results.iterator();
-            }
-
-            Map<Id, T> byId = InsertionOrderUtil.newMap();
-            for (T result : results) {
-                assert result.id() != null;
-                byId.put(result.id(), result);
-            }
-            if (byId.size() > ids.size()) {
-                /*
-                 * The current query only describes part of this segment.
-                 * Preserve backend order because it can't fully define the
-                 * order of every returned result.
-                 */
-                return results.iterator();
-            }
-
-            List<T> ordered = new ArrayList<>(results.size());
-            for (Id id : ids) {
-                T result = byId.remove(id);
-                if (result != null) {
-                    ordered.add(result);
-                }
-            }
-            ordered.addAll(byId.values());
-            return ordered.iterator();
-        }
-    }
 }
