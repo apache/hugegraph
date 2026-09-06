@@ -297,7 +297,7 @@ docker/docker-compose-3pd-3store-3server.yml
   data movement), and the gRPC and Raft ports carry no authentication.
 - REST requests need HTTP Basic auth: one of the internal service names
   (`hg`, `store`, `hubble`, `vermeer`) with the `auth.secret-key` value as
-  the password. Health probes (`/v1/health`, `/actuator/*`,
+  the password. Health probes (`/v1/health`, `/actuator/**`,
   `/v1/prom/targets/*`) stay unauthenticated.
 - `auth.secret-key` has no shipped default, because a secret in the source
   tree is published to everyone. Generate one per deployment (`openssl rand

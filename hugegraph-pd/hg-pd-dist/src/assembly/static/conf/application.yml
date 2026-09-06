@@ -27,7 +27,7 @@ management:
   endpoints:
     web:
       exposure:
-        # Allowlist, not "*": /actuator/* is excluded from the REST auth
+        # Allowlist, not "*": /actuator/** is excluded from the REST auth
         # interceptor, so anything exposed here is anonymous on this port.
         include: "health,metrics,prometheus"
 

@@ -767,7 +767,7 @@ internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user, and
 the `auth.secret-key` value from PD's `conf/application.yml` as the password.
 A missing or wrong credential gets HTTP 401. The `curl` examples that follow
 omit `-u` for readability; add it to every call except `/v1/health`,
-`/actuator/*` and `/v1/prom/targets/*`, which stay unauthenticated for probes.
+`/actuator/**` and `/v1/prom/targets/*`, which stay unauthenticated for probes.
 
 ```bash
 curl -u hg:<secret> http://localhost:8620/v1/stores

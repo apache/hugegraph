@@ -3,7 +3,7 @@
 This guide covers monitoring, troubleshooting, backup & recovery, and operational procedures for HugeGraph Store in production.
 
 > **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than
-> `/v1/health`, `/actuator/*` and `/v1/prom/targets/*`, need HTTP Basic auth:
+> `/v1/health`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth:
 > one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and
 > PD's `auth.secret-key` value as the password. A call without it gets HTTP
 > 401, which for a mutating step such as `balanceLeaders` means the step did

@@ -84,7 +84,7 @@ server:
 Every REST request except the probes below must carry HTTP Basic auth: one of
 the internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user,
 and the shared secret as the password. A missing or wrong credential gets
-HTTP 401. Unauthenticated paths: `/v1/health`, `/actuator/*` and
+HTTP 401. Unauthenticated paths: `/v1/health`, `/actuator/**` and
 `/v1/prom/targets/*`.
 
 ```yaml
@@ -284,7 +284,7 @@ management:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `management.metrics.export.prometheus.enabled` | Boolean | `true` | Enable Prometheus-compatible metrics at `/actuator/prometheus`. |
-| `management.endpoints.web.exposure.include` | String | `"health,metrics,prometheus"` | Actuator endpoints to expose. `/actuator/*` is excluded from the REST authentication interceptor, so every endpoint listed here is reachable without a credential on port 8620. Prefer an allowlist over `"*"`. |
+| `management.endpoints.web.exposure.include` | String | `"health,metrics,prometheus"` | Actuator endpoints to expose. `/actuator/**` is excluded from the REST authentication interceptor, so every endpoint listed here is reachable without a credential on port 8620. Prefer an allowlist over `"*"`. |
 
 ## Deployment Scenarios
 
