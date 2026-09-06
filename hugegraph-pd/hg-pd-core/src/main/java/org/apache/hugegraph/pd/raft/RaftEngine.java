@@ -46,6 +46,7 @@ import com.alipay.sofa.jraft.RaftGroupService;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.Replicator;
+import com.alipay.sofa.jraft.core.State;
 import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.entity.Task;
 import com.alipay.sofa.jraft.error.RaftError;
@@ -69,7 +70,7 @@ public class RaftEngine {
     private PDConfig.Raft config;
     private RaftGroupService raftGroupService;
     private RpcServer rpcServer;
-    private Node raftNode;
+    private volatile Node raftNode;
     private RaftRpcClient raftRpcClient;
 
     public RaftEngine() {
@@ -203,7 +204,97 @@ public class RaftEngine {
     }
 
     public boolean isLeader() {
-        return this.raftNode.isLeader(true);
+        Node node = this.raftNode;
+        return node != null && node.isLeader(true);
+    }
+
+    /**
+     * Whether this node currently sees a raft leader.
+     * <p>
+     * A follower only keeps its leader while heartbeats keep arriving inside the election
+     * timeout, and a leader only keeps its role while it can reach a quorum. Seeing a leader
+     * therefore means this node is part of a quorum from its own point of view, which is the
+     * signal a readiness probe needs. Served from the state machine callbacks, not from the
+     * raft node, so it never waits on the node lock.
+     */
+    public boolean hasLeader() {
+        return this.raftNode != null && this.stateMachine.getProbeView().seesLeader;
+    }
+
+    /**
+     * Take a view of the local raft state from the volatile copies the state machine
+     * callbacks maintain, never from the raft node itself. During an election jraft holds
+     * the node lock while it reconnects to peers, so a probe that read the node stalled for
+     * the connect timeout instead of answering its 503 promptly. All fields derive from one
+     * read of one immutable view, swapped in whole per callback, so they cannot contradict
+     * each other.
+     * <p>
+     * The state reported is the last one a callback announced: leader, follower, error or
+     * shutdown. jraft emits no callback for candidacy or leadership transfer, so a candidate
+     * reads as a follower that sees no leader, which yields the same not-ready answer. The
+     * view trails the node by whatever sits in the FSM queue ahead of the announcement,
+     * which is the price of never waiting on the node lock.
+     */
+    public RaftStatus getRaftStatus() {
+        if (this.raftNode == null) {
+            return new RaftStatus(false, State.STATE_UNINITIALIZED.name(), false);
+        }
+        RaftStateMachine.ProbeView view = this.stateMachine.getProbeView();
+        return new RaftStatus(view.state.isActive() && view.seesLeader,
+                              view.state.name(), State.STATE_LEADER == view.state);
+    }
+
+    /**
+     * Immutable view of the raft state behind {@code GET /v1/ready}. It carries no cluster
+     * addresses: the endpoint is unauthenticated, and the leader's address stays on the
+     * authenticated {@code /v1/members}.
+     */
+    public static final class RaftStatus {
+
+        private final boolean ready;
+        private final String state;
+        private final boolean localLeader;
+
+        RaftStatus(boolean ready, String state, boolean localLeader) {
+            this.ready = ready;
+            this.state = state;
+            this.localLeader = localLeader;
+        }
+
+        public boolean isReady() {
+            return this.ready;
+        }
+
+        /**
+         * @return the jraft node state name, never null
+         */
+        public String getState() {
+            return this.state;
+        }
+
+        public boolean isLocalLeader() {
+            return this.localLeader;
+        }
+    }
+
+    /**
+     * Number of raft peers, this node included, that the leader has heard from within the
+     * leader lease timeout, which jraft derives as 90% of the election timeout by default.
+     * Only the leader tracks replication state, so any other node returns -1. The leader
+     * check is the state machine's lock-free term flag, so a scrape on a non-leader never
+     * waits on the node lock; {@code listAlivePeers} itself only runs on a settled leader.
+     */
+    public int getAlivePeerCount() {
+        Node node = this.raftNode;
+        if (node == null || !this.stateMachine.isLeader()) {
+            return -1;
+        }
+        try {
+            return node.listAlivePeers().size();
+        } catch (IllegalStateException e) {
+            // Lost leadership between the check and the call
+            return -1;
+        }
     }
 
     /**
@@ -232,7 +323,8 @@ public class RaftEngine {
     }
 
     public PeerId getLeader() {
-        return raftNode.getLeaderId();
+        Node node = this.raftNode;
+        return node == null ? null : node.getLeaderId();
     }
 
     /**

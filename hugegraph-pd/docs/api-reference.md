@@ -774,6 +774,56 @@ curl http://localhost:8620/actuator/health
 }
 ```
 
+### Liveness and Readiness
+
+Two unauthenticated endpoints are meant for probes and startup gates:
+
+| Endpoint | Meaning | Status |
+|----------|---------|--------|
+| `GET /v1/health` | Liveness: the REST listener is up. Does not consult raft. | always `200` |
+| `GET /v1/ready` | Readiness: the raft node is active and sees a leader, so this PD is inside a quorum. | `200` when ready, `503` otherwise |
+
+```bash
+curl -i http://localhost:8620/v1/ready
+```
+
+**Response** (leader of a healthy cluster):
+```json
+{
+  "ready": true,
+  "state": "STATE_LEADER",
+  "isLeader": true
+}
+```
+
+A follower reports `"state": "STATE_FOLLOWER"` with `"isLeader": false`. When
+the quorum is lost the PD keeps answering `/v1/health` with `200` but
+`/v1/ready` turns into `503` with `"ready": false`. Being unauthenticated, the
+body carries no cluster addresses; the leader's address stays on `/v1/members`.
+
+The answer is served from state the raft callbacks maintain rather than from
+the raft node, so it stays prompt while an election is running and never waits
+on the node lock. `state` is therefore the last change raft announced. A PD
+reports `STATE_UNINITIALIZED` with `"ready": false` from process start until
+its first raft callback, which is the ordinary startup window before a quorum
+first forms, and jraft emits no callback for candidacy or leadership transfer,
+so a candidate reports `STATE_FOLLOWER` with `"ready": false`.
+
+Point Kubernetes readiness probes, `depends_on` healthchecks and any
+"wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health`
+so a PD that merely lost its leader is not restarted.
+
+Match on the body rather than on the status code alone. A PD that predates this
+endpoint does not reliably answer `404` for it: `RestAuthentication` refuses a
+request it does not exclude by writing an error envelope, and as of 1.7.0 it
+does so without setting a status, so an unknown path answers `200` with
+`{"status":-1,"error":"Unauthorized!"}`. A status-only probe therefore reads
+such a PD as ready. The body match holds whichever status a refusal carries: a
+shell gate should use
+`curl -fsS http://<pd-host>:8620/v1/ready | grep -q '"ready":true'`, and a
+Kubernetes `httpGet` probe should be paired with a PD image that carries the
+endpoint.
+
 ### Metrics
 
 ```bash
@@ -795,6 +845,26 @@ pd_store_count{state="Offline"} 0.0
 # TYPE pd_partition_count gauge
 pd_partition_count 36.0
 ```
+
+#### Raft membership gauges
+
+Exported on `/actuator/prometheus` for alerting on quorum loss:
+
+| Gauge | Value |
+|-------|-------|
+| `hg_raft_leader` | `1` on the raft leader, `0` elsewhere |
+| `hg_raft_has_leader` | `1` while this PD sees a leader (is inside a quorum), `0` otherwise |
+| `hg_raft_alive_peers` | On the leader, the number of peers (itself included) heard from within the leader lease timeout (90% of the election timeout by default); `NaN` on other nodes |
+
+A cluster has lost its quorum when `sum(hg_raft_leader) == 0` or when
+`hg_raft_has_leader == 0` on every member. Both are briefly true during a
+normal election, so alert on them with a `for:` clause longer than the
+election timeout rather than on the instantaneous value.
+
+Do not aggregate `hg_raft_alive_peers` across instances: it is `NaN` on every
+node but the leader, and one `NaN` sample turns the result of `sum()` or
+`avg()` into `NaN` as well. Select the leader's series instead, for example
+`hg_raft_alive_peers and on(instance) (hg_raft_leader == 1)`.
 
 ### Partition API
 

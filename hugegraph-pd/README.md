@@ -284,6 +284,8 @@ docker/docker-compose-3pd-3store-3server.yml
 
 PD exposes metrics via REST API at:
 - Health check: `http://<pd-host>:8620/actuator/health`
+- Liveness: `http://<pd-host>:8620/v1/health` (REST listener is up)
+- Readiness: `http://<pd-host>:8620/v1/ready` (`200` only while the PD sees a raft leader)
 - Metrics: `http://<pd-host>:8620/actuator/metrics`
 
 ## Community
