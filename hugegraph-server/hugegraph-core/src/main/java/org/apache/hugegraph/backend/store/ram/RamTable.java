@@ -269,7 +269,7 @@ public final class RamTable {
         int conditionsSize = cq.conditionsSize();
         Object owner = cq.condition(HugeKeys.OWNER_VERTEX);
         Directions direction = cq.condition(HugeKeys.DIRECTION);
-        Id label = cq.condition(HugeKeys.LABEL);
+        Id label = cq.singleConditionValueOrNull(HugeKeys.LABEL);
 
         if (direction == null && conditionsSize > 1) {
             for (Condition cond : cq.conditions()) {
@@ -316,7 +316,7 @@ public final class RamTable {
         if (dir == null) {
             dir = Directions.BOTH;
         }
-        Id label = query.condition(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
         if (label == null) {
             label = IdGenerator.ZERO;
         }

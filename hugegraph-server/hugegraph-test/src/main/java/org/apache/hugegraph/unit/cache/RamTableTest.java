@@ -23,6 +23,8 @@ import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.store.ram.RamTable;
 import org.apache.hugegraph.schema.EdgeLabel;
 import org.apache.hugegraph.schema.SchemaManager;
@@ -30,11 +32,15 @@ import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableList;
 
 public class RamTableTest {
 
@@ -79,6 +85,24 @@ public class RamTableTest {
 
     private HugeGraph graph() {
         return this.graph;
+    }
+
+    @Test
+    public void testMatchedLabelCandidateContract() {
+        RamTable table = new RamTable(this.graph(), 10, 20);
+        table.addEdge(true, 1, 2, Directions.OUT, 1);
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+        query.query(Condition.in(HugeKeys.LABEL, ImmutableList.of(IdGenerator.of(1))));
+        Assert.assertTrue(table.matched(query));
+
+        query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(IdGenerator.of(1), IdGenerator.of(2))));
+        Assert.assertFalse(table.matched(query));
+        query.eq(HugeKeys.LABEL, IdGenerator.of(3));
+        Assert.assertFalse(table.matched(query));
     }
 
     @Test

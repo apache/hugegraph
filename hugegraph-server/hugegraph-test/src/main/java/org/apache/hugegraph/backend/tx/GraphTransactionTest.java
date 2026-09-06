@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.backend.tx;
 
+import java.util.Arrays;
 import java.util.Collections;
 
 import org.apache.hugegraph.backend.id.Id;
@@ -32,6 +33,21 @@ import org.apache.hugegraph.type.define.HugeKeys;
 import org.junit.Test;
 
 public class GraphTransactionTest {
+
+    @Test
+    public void testMultiLabelIndexNeedsPostFilter() {
+        Id first = IdGenerator.of(1);
+        Id second = IdGenerator.of(2);
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.optimized(OptimizedType.INDEX);
+        query.query(Condition.in(HugeKeys.LABEL, Arrays.asList(first, second)));
+        Assert.assertTrue(GraphTransaction.queryNeedsPostFilter(query));
+        Assert.assertTrue(GraphTransaction.queryNeedsPostFilter(new IdQuery(query, first)));
+        query.query(Condition.eq(HugeKeys.LABEL, first));
+        Assert.assertFalse(GraphTransaction.queryNeedsPostFilter(query));
+        query.query(Condition.eq(HugeKeys.LABEL, second));
+        Assert.assertTrue(GraphTransaction.queryNeedsPostFilter(query));
+    }
 
     @Test
     public void testQueryNeedsPostFilter() {

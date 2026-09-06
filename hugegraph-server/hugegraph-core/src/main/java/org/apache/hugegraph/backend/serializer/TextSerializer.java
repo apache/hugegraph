@@ -457,7 +457,7 @@ public class TextSerializer extends AbstractSerializer {
         if (direction == null) {
             direction = Directions.OUT;
         }
-        Object label = cq.condition(HugeKeys.LABEL);
+        Object label = this.edgeIdConditionValue(cq, HugeKeys.LABEL);
 
         List<String> start = new ArrayList<>(cq.conditionsSize());
         start.add(writeEntryId((Id) vertex));
@@ -491,7 +491,7 @@ public class TextSerializer extends AbstractSerializer {
         List<String> condParts = new ArrayList<>(cq.conditionsSize());
 
         for (HugeKeys key : EdgeId.KEYS) {
-            Object value = cq.condition(key);
+            Object value = this.edgeIdConditionValue(cq, key);
             if (value == null) {
                 break;
             }

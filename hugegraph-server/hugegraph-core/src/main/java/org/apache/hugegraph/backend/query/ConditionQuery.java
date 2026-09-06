@@ -256,24 +256,32 @@ public class ConditionQuery extends IdQuery {
         return false;
     }
 
+    /**
+     * Returns the legacy condition value of the specified key.
+     *
+     * This method keeps the historical behavior for existing callers:
+     * <ul>
+     * <li>returns {@code null} if no top-level EQ/IN relation exists</li>
+     * <li>returns the single EQ value if there is exactly one top-level EQ
+     * relation and no top-level IN relation</li>
+     * <li>returns the raw IN list, including an empty list, if there is exactly
+     * one top-level IN relation and no top-level EQ relation</li>
+     * <li>returns {@code null} if several top-level EQ/IN relations resolve to
+     * an empty set</li>
+     * <li>returns the single value if several relations resolve to one value</li>
+     * <li>throws if multiple values remain after resolving several relations</li>
+     * </ul>
+     *
+     * Prefer {@link #conditionValues(Object)},
+     * {@link #singleConditionValueOrNull(Object)} or
+     * {@link #conditionValue(Object)} for new code that needs explicit
+     * semantics.
+     */
     @Watched
     public <T> T condition(Object key) {
         List<Object> valuesEQ = InsertionOrderUtil.newList();
         List<Object> valuesIN = InsertionOrderUtil.newList();
-        for (Condition c : this.conditions) {
-            if (c.isRelation()) {
-                Condition.Relation r = (Condition.Relation) c;
-                if (r.key().equals(key)) {
-                    if (r.relation() == RelationType.EQ) {
-                        valuesEQ.add(r.value());
-                    } else if (r.relation() == RelationType.IN) {
-                        Object value = r.value();
-                        assert value instanceof List;
-                        valuesIN.add(value);
-                    }
-                }
-            }
-        }
+        this.collectConditionValues(key, valuesEQ, valuesIN);
         if (valuesEQ.isEmpty() && valuesIN.isEmpty()) {
             return null;
         }
@@ -288,6 +296,141 @@ public class ConditionQuery extends IdQuery {
             return value;
         }
 
+        Set<Object> intersectValues = this.resolveConditionValues(valuesEQ,
+                                                                  valuesIN);
+
+        if (intersectValues.isEmpty()) {
+            return null;
+        }
+        E.checkState(intersectValues.size() == 1,
+                     "Illegal key '%s' with more than one value: %s",
+                     key, intersectValues);
+        @SuppressWarnings("unchecked")
+        T value = (T) intersectValues.iterator().next();
+        return value;
+    }
+
+    /**
+     * Returns whether there is any top-level relation for the specified key.
+     */
+    public boolean containsCondition(Object key) {
+        for (Condition c : this.conditions) {
+            if (c.isRelation()) {
+                Condition.Relation r = (Condition.Relation) c;
+                if (r.key().equals(key)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns the resolved candidate values of the specified key from
+     * top-level EQ/IN relations.
+     *
+     * Use {@link #containsConditionValues(Object)} to distinguish "no EQ/IN
+     * condition" from "EQ/IN conditions exist but resolve to an empty
+     * intersection".
+     */
+    public Set<Object> conditionValues(Object key) {
+        List<Object> valuesEQ = InsertionOrderUtil.newList();
+        List<Object> valuesIN = InsertionOrderUtil.newList();
+        this.collectConditionValues(key, valuesEQ, valuesIN);
+        if (valuesEQ.isEmpty() && valuesIN.isEmpty()) {
+            return InsertionOrderUtil.newSet();
+        }
+        return this.resolveConditionValues(valuesEQ, valuesIN);
+    }
+
+    /**
+     * Returns whether there is any top-level EQ/IN relation for the specified
+     * key.
+     */
+    public boolean containsConditionValues(Object key) {
+        for (Condition c : this.conditions) {
+            if (c.isRelation()) {
+                Condition.Relation r = (Condition.Relation) c;
+                if (r.key().equals(key) &&
+                    (r.relation() == RelationType.EQ ||
+                     r.relation() == RelationType.IN)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns the unique resolved value of the specified key from top-level
+     * EQ/IN relations.
+     *
+     * Returns {@code null} when the resolved candidate set is empty. Throws
+     * if multiple values remain after resolution.
+     */
+    public <T> T conditionValue(Object key) {
+        Set<Object> values = this.conditionValues(key);
+        if (values.isEmpty()) {
+            return null;
+        }
+        E.checkState(values.size() == 1,
+                     "Illegal key '%s' with more than one value: %s",
+                     key, values);
+        @SuppressWarnings("unchecked")
+        T value = (T) values.iterator().next();
+        return value;
+    }
+
+    /**
+     * Returns the unique resolved value of the specified key from top-level
+     * EQ/IN relations, or {@code null} if the resolved candidate set doesn't
+     * contain exactly one value.
+     *
+     * Use this method when callers want "single-or-null" semantics instead of
+     * treating multiple remaining values as an error.
+     */
+    public <T> T singleConditionValueOrNull(Object key) {
+        Set<Object> values = this.conditionValues(key);
+        if (values.size() != 1) {
+            return null;
+        }
+        @SuppressWarnings("unchecked")
+        T value = (T) values.iterator().next();
+        return value;
+    }
+
+    public void unsetCondition(Object key) {
+        this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
+    }
+
+    public boolean containsCondition(HugeKeys key) {
+        return this.containsCondition((Object) key);
+    }
+
+    public boolean containsConditionValues(HugeKeys key) {
+        return this.containsConditionValues((Object) key);
+    }
+
+    private void collectConditionValues(Object key, List<Object> valuesEQ,
+                                        List<Object> valuesIN) {
+        for (Condition c : this.conditions) {
+            if (c.isRelation()) {
+                Condition.Relation r = (Condition.Relation) c;
+                if (r.key().equals(key)) {
+                    if (r.relation() == RelationType.EQ) {
+                        valuesEQ.add(r.value());
+                    } else if (r.relation() == RelationType.IN) {
+                        Object value = r.value();
+                        assert value instanceof List;
+                        valuesIN.add(value);
+                    }
+                }
+            }
+        }
+    }
+
+    private Set<Object> resolveConditionValues(List<Object> valuesEQ,
+                                               List<Object> valuesIN) {
         boolean initialized = false;
         Set<Object> intersectValues = InsertionOrderUtil.newSet();
         for (Object value : valuesEQ) {
@@ -311,32 +454,7 @@ public class ConditionQuery extends IdQuery {
                                                    valueAsList);
             }
         }
-
-        if (intersectValues.isEmpty()) {
-            return null;
-        }
-        E.checkState(intersectValues.size() == 1,
-                     "Illegal key '%s' with more than one value: %s",
-                     key, intersectValues);
-        @SuppressWarnings("unchecked")
-        T value = (T) intersectValues.iterator().next();
-        return value;
-    }
-
-    public void unsetCondition(Object key) {
-        this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
-    }
-
-    public boolean containsCondition(HugeKeys key) {
-        for (Condition c : this.conditions) {
-            if (c.isRelation()) {
-                Condition.Relation r = (Condition.Relation) c;
-                if (r.key().equals(key)) {
-                    return true;
-                }
-            }
-        }
-        return false;
+        return intersectValues;
     }
 
     public boolean containsCondition(Condition.RelationType type) {
