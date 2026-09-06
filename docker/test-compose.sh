@@ -335,7 +335,8 @@ run_render() {
 }
 
 compose_active() {
-    env HUGEGRAPH_VERSION="${HUGEGRAPH_VERSION:-latest}" \
+    env -u HG_SERVER_STARTUP_TIMEOUT_S \
+        HUGEGRAPH_VERSION="${HUGEGRAPH_VERSION:-latest}" \
         HUBBLE_IMAGE="${HUBBLE_IMAGE:-hugegraph/hubble:latest}" \
         HUGEGRAPH_ADMIN_PASSWORD="${PASSWORD}" \
         HUGEGRAPH_AUTH_TOKEN_SECRET="${SECRET}" \
