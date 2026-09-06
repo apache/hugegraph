@@ -59,9 +59,25 @@ public class RaftStateMachine extends StateMachineAdapter {
     private final AtomicLong leaderTerm = new AtomicLong(-1);
     // Kept for the readiness probe and the raft gauges, which must answer without
     // touching the raft node: during an election jraft holds the node lock while it
-    // reconnects to peers, and a reader stalls for the connect timeout.
-    private volatile State probeState = State.STATE_UNINITIALIZED;
-    private volatile boolean seesLeader = false;
+    // reconnects to peers, and a reader stalls for the connect timeout. One volatile
+    // immutable pair, swapped in whole per callback, so a reader can never see the
+    // state of one announcement with the leader visibility of another.
+    private volatile ProbeView probeView = new ProbeView(State.STATE_UNINITIALIZED, false);
+
+    /**
+     * Immutable pair of the last announced node state and leader visibility. Written only
+     * from the FSM callback thread; both fields always come from the same announcement.
+     */
+    static final class ProbeView {
+
+        final State state;
+        final boolean seesLeader;
+
+        ProbeView(State state, boolean seesLeader) {
+            this.state = state;
+            this.seesLeader = seesLeader;
+        }
+    }
     private List<RaftTaskHandler> taskHandlers;
     private List<RaftStateListener> stateListeners;
 
@@ -83,18 +99,12 @@ public class RaftStateMachine extends StateMachineAdapter {
     }
 
     /**
-     * The last node state a raft callback announced. jraft emits no callback for candidacy
-     * or leadership transfer, so a candidate reads as a follower that sees no leader.
+     * The last state and leader visibility a raft callback announced, as one immutable
+     * view. jraft emits no callback for candidacy or leadership transfer, so a candidate
+     * reads as a follower that sees no leader.
      */
-    public State getProbeState() {
-        return this.probeState;
-    }
-
-    /**
-     * Whether the last raft callback left this node with a visible leader.
-     */
-    public boolean seesLeader() {
-        return this.seesLeader;
+    ProbeView getProbeView() {
+        return this.probeView;
     }
 
     @Override
@@ -126,23 +136,20 @@ public class RaftStateMachine extends StateMachineAdapter {
 
     @Override
     public void onError(final RaftException e) {
-        this.probeState = State.STATE_ERROR;
-        this.seesLeader = false;
+        this.probeView = new ProbeView(State.STATE_ERROR, false);
         log.error("Raft StateMachine on error {}", e);
     }
 
     @Override
     public void onShutdown() {
-        this.probeState = State.STATE_SHUTDOWN;
-        this.seesLeader = false;
+        this.probeView = new ProbeView(State.STATE_SHUTDOWN, false);
         super.onShutdown();
     }
 
     @Override
     public void onLeaderStart(final long term) {
         this.leaderTerm.set(term);
-        this.probeState = State.STATE_LEADER;
-        this.seesLeader = true;
+        this.probeView = new ProbeView(State.STATE_LEADER, true);
         super.onLeaderStart(term);
 
         log.info("Raft becomes leader");
@@ -156,16 +163,14 @@ public class RaftStateMachine extends StateMachineAdapter {
     @Override
     public void onLeaderStop(final Status status) {
         this.leaderTerm.set(-1);
-        this.probeState = State.STATE_FOLLOWER;
-        this.seesLeader = false;
+        this.probeView = new ProbeView(State.STATE_FOLLOWER, false);
         super.onLeaderStop(status);
         log.info("Raft  lost leader ");
     }
 
     @Override
     public void onStartFollowing(final LeaderChangeContext ctx) {
-        this.probeState = State.STATE_FOLLOWER;
-        this.seesLeader = true;
+        this.probeView = new ProbeView(State.STATE_FOLLOWER, true);
         super.onStartFollowing(ctx);
         Utils.runInThread(() -> {
             if (!CollectionUtils.isEmpty(stateListeners)) {
@@ -176,7 +181,8 @@ public class RaftStateMachine extends StateMachineAdapter {
 
     @Override
     public void onStopFollowing(final LeaderChangeContext ctx) {
-        this.seesLeader = false;
+        // Callbacks run on the single FSM thread, so reading our own field is safe
+        this.probeView = new ProbeView(this.probeView.state, false);
         super.onStopFollowing(ctx);
     }
 

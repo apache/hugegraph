@@ -803,9 +803,11 @@ body carries no cluster addresses; the leader's address stays on `/v1/members`.
 
 The answer is served from state the raft callbacks maintain rather than from
 the raft node, so it stays prompt while an election is running and never waits
-on the node lock. `state` is therefore the last change raft announced: jraft
-emits no callback for candidacy or leadership transfer, so a candidate reports
-`STATE_FOLLOWER` with `"ready": false`.
+on the node lock. `state` is therefore the last change raft announced. A PD
+reports `STATE_UNINITIALIZED` with `"ready": false` from process start until
+its first raft callback, which is the ordinary startup window before a quorum
+first forms, and jraft emits no callback for candidacy or leadership transfer,
+so a candidate reports `STATE_FOLLOWER` with `"ready": false`.
 
 Point Kubernetes readiness probes, `depends_on` healthchecks and any
 "wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health`

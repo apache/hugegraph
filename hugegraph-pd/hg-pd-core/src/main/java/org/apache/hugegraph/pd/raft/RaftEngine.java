@@ -218,27 +218,30 @@ public class RaftEngine {
      * raft node, so it never waits on the node lock.
      */
     public boolean hasLeader() {
-        return this.raftNode != null && this.stateMachine.seesLeader();
+        return this.raftNode != null && this.stateMachine.getProbeView().seesLeader;
     }
 
     /**
      * Take a view of the local raft state from the volatile copies the state machine
      * callbacks maintain, never from the raft node itself. During an election jraft holds
      * the node lock while it reconnects to peers, so a probe that read the node stalled for
-     * the connect timeout instead of answering its 503 promptly. All fields derive from the
-     * same callback-written values, so they cannot contradict each other.
+     * the connect timeout instead of answering its 503 promptly. All fields derive from one
+     * read of one immutable view, swapped in whole per callback, so they cannot contradict
+     * each other.
      * <p>
      * The state reported is the last one a callback announced: leader, follower, error or
      * shutdown. jraft emits no callback for candidacy or leadership transfer, so a candidate
-     * reads as a follower that sees no leader, which yields the same not-ready answer.
+     * reads as a follower that sees no leader, which yields the same not-ready answer. The
+     * view trails the node by whatever sits in the FSM queue ahead of the announcement,
+     * which is the price of never waiting on the node lock.
      */
     public RaftStatus getRaftStatus() {
         if (this.raftNode == null) {
             return new RaftStatus(false, State.STATE_UNINITIALIZED.name(), false);
         }
-        State state = this.stateMachine.getProbeState();
-        return new RaftStatus(state.isActive() && this.stateMachine.seesLeader(),
-                              state.name(), State.STATE_LEADER == state);
+        RaftStateMachine.ProbeView view = this.stateMachine.getProbeView();
+        return new RaftStatus(view.state.isActive() && view.seesLeader,
+                              view.state.name(), State.STATE_LEADER == view.state);
     }
 
     /**
