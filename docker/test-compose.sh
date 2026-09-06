@@ -29,8 +29,15 @@ ACTIVE_PROJECT=""
 ACTIVE_FILES=()
 RENDER_DIR=""
 
+# How the render sees HG_SERVER_STARTUP_TIMEOUT_S. Stripped by default, so a
+# baseline render shows the Compose default whatever the developer exported;
+# render_with_timeout swaps in a value. Kept as one array rather than a second
+# copy of the environment below, so a variable added there reaches both renders.
+STARTUP_TIMEOUT_ENV=(-u HG_SERVER_STARTUP_TIMEOUT_S)
+
 compose_auth() {
-    env HUGEGRAPH_VERSION="${VERSION}" \
+    env "${STARTUP_TIMEOUT_ENV[@]}" \
+        HUGEGRAPH_VERSION="${VERSION}" \
         HUBBLE_IMAGE="${RENDER_HUBBLE_IMAGE}" \
         HUGEGRAPH_ADMIN_PASSWORD="${PASSWORD}" \
         HUGEGRAPH_AUTH_TOKEN_SECRET="${SECRET}" \
@@ -41,6 +48,33 @@ render() {
     local output="$1"
     shift
     compose_auth "$@" config --format json > "${output}"
+}
+
+# Same render with an explicit host value, to prove the variable reaches the
+# Server environment rather than only defaulting there. An empty value is a
+# set value and must survive to the container, which is what separates the
+# Compose files' "-" from ":-".
+render_with_timeout() {
+    local output="$1" timeout="$2"
+    shift 2
+    (
+        STARTUP_TIMEOUT_ENV=(HG_SERVER_STARTUP_TIMEOUT_S="${timeout}")
+        compose_auth "$@" config --format json
+    ) > "${output}"
+}
+
+assert_startup_timeout() {
+    local rendered="$1" expected="$2" service
+    shift 2
+    for service in "$@"; do
+        jq -e --arg s "${service}" --arg v "${expected}" \
+           '.services[$s].environment.HG_SERVER_STARTUP_TIMEOUT_S == $v' \
+           "${rendered}" >/dev/null || {
+            echo "expected ${service} HG_SERVER_STARTUP_TIMEOUT_S=${expected}" \
+                 "in ${rendered}" >&2
+            return 1
+        }
+    done
 }
 
 assert_file_property() {
@@ -263,11 +297,46 @@ run_render() {
     assert_ha "${RENDER_DIR}/ha.json"
     assert_dev_override "${RENDER_DIR}/dev.json" \
                         "${RENDER_DIR}/override.json"
+
+    # An absent host value renders the entrypoint default in every topology and
+    # a host value overrides it, so the container budget can be lowered to meet
+    # the healthcheck budget without editing the Compose files. Raising it past
+    # that budget still needs a file edit: the healthcheck literals give every
+    # Server about 360 seconds, and the documented "up -d --wait" gives up
+    # there, so this knob aligns the two downward only.
+    assert_startup_timeout "${RENDER_DIR}/standalone.json" 120 server
+    assert_startup_timeout "${RENDER_DIR}/hstore.json" 120 server
+    assert_startup_timeout "${RENDER_DIR}/ha.json" 120 server0 server1 server2
+    render_with_timeout "${RENDER_DIR}/standalone-timeout.json" 450 \
+                        -f "${DOCKER_DIR}/docker-compose.yml"
+    render_with_timeout "${RENDER_DIR}/hstore-timeout.json" 450 \
+                        -f "${DOCKER_DIR}/docker-compose-hstore.yml"
+    render_with_timeout "${RENDER_DIR}/ha-timeout.json" 450 \
+                        -f "${DOCKER_DIR}/docker-compose-3pd-3store-3server.yml"
+    assert_startup_timeout "${RENDER_DIR}/standalone-timeout.json" 450 server
+    assert_startup_timeout "${RENDER_DIR}/hstore-timeout.json" 450 server
+    assert_startup_timeout "${RENDER_DIR}/ha-timeout.json" 450 \
+                           server0 server1 server2
+
+    # The unset and override cases above hold under ":-" too. Only an empty
+    # host value separates the spellings, and it has to reach the container so
+    # the entrypoint can reject it, as README section 7 promises.
+    render_with_timeout "${RENDER_DIR}/standalone-empty.json" "" \
+                        -f "${DOCKER_DIR}/docker-compose.yml"
+    render_with_timeout "${RENDER_DIR}/hstore-empty.json" "" \
+                        -f "${DOCKER_DIR}/docker-compose-hstore.yml"
+    render_with_timeout "${RENDER_DIR}/ha-empty.json" "" \
+                        -f "${DOCKER_DIR}/docker-compose-3pd-3store-3server.yml"
+    assert_startup_timeout "${RENDER_DIR}/standalone-empty.json" "" server
+    assert_startup_timeout "${RENDER_DIR}/hstore-empty.json" "" server
+    assert_startup_timeout "${RENDER_DIR}/ha-empty.json" "" \
+                           server0 server1 server2
     echo "Compose render contracts passed"
 }
 
 compose_active() {
-    env HUGEGRAPH_VERSION="${HUGEGRAPH_VERSION:-latest}" \
+    env -u HG_SERVER_STARTUP_TIMEOUT_S \
+        HUGEGRAPH_VERSION="${HUGEGRAPH_VERSION:-latest}" \
         HUBBLE_IMAGE="${HUBBLE_IMAGE:-hugegraph/hubble:latest}" \
         HUGEGRAPH_ADMIN_PASSWORD="${PASSWORD}" \
         HUGEGRAPH_AUTH_TOKEN_SECRET="${SECRET}" \

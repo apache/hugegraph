@@ -34,6 +34,10 @@ services:
       PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:-}
       HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
       HG_SERVER_MIN_FREE_MEMORY: "0"
+      # Unset-only default: a host value overrides it, an absent one
+      # renders the entrypoint default. ":-" would turn an empty host
+      # value into 120 silently, which the entrypoint rejects on purpose.
+      HG_SERVER_STARTUP_TIMEOUT_S: ${HG_SERVER_STARTUP_TIMEOUT_S-120}
     ports:
       - "8080:8080"
     volumes:

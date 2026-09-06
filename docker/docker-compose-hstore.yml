@@ -92,6 +92,9 @@ services:
       HG_SERVER_REST_URL: http://server:8080
       HG_SERVER_MIN_FREE_MEMORY: "0"
       HG_SERVER_INIT_STORE_ENABLED: "false"
+      # Unset-only default: ":-" would turn an empty host value into 120
+      # silently, which the entrypoint rejects on purpose.
+      HG_SERVER_STARTUP_TIMEOUT_S: ${HG_SERVER_STARTUP_TIMEOUT_S-120}
       HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
       PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:-}
     ports:
