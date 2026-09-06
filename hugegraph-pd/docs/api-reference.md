@@ -861,6 +861,11 @@ A cluster has lost its quorum when `sum(hg_raft_leader) == 0` or when
 normal election, so alert on them with a `for:` clause longer than the
 election timeout rather than on the instantaneous value.
 
+Do not aggregate `hg_raft_alive_peers` across instances: it is `NaN` on every
+node but the leader, and one `NaN` sample turns the result of `sum()` or
+`avg()` into `NaN` as well. Select the leader's series instead, for example
+`hg_raft_alive_peers and on(instance) (hg_raft_leader == 1)`.
+
 ### Partition API
 
 #### List Partitions
