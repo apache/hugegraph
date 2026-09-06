@@ -157,7 +157,7 @@ docker run -itd --name=graph -p 8080:8080 -e HG_SERVER_STARTUP_TIMEOUT_S=450 hug
 ```
 
 The Compose topologies under `docker/` pass the variable through to every
-Server with an unset-only default, so `HG_SERVER_STARTUP_TIMEOUT_S=450 docker
+Server with an unset-only default, so `HG_SERVER_STARTUP_TIMEOUT_S=300 docker
 compose up -d` raises the budget without editing a Compose file, while leaving
 it unset renders the same 120.
 
