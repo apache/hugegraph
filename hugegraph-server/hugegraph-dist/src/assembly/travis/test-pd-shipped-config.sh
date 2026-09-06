@@ -28,11 +28,14 @@ PUBLISHED_SECRET='FXQXbJtbCLxODc6tGci732pkH1cyf8Qg'
 FAIL=0
 
 check() {
-    local file="$1" rel="${1#"${ROOT}/"}"
+    local file="$1" rel="${1#"${ROOT}/"}" before="$FAIL"
     [[ -f "$file" ]] || { echo "  FAIL ${rel}: missing"; FAIL=1; return; }
 
+    # The actuator exposure specifically: a config that grows an unrelated
+    # include: above this block must not satisfy the check by accident.
     local exposure
-    exposure=$(sed -n 's/^[[:space:]]*include:[[:space:]]*//p' "$file" | head -1)
+    exposure=$(awk '/^[[:space:]]*exposure:/ {found = 1; next}
+                    found && /^[[:space:]]*include:/ {sub(/^[[:space:]]*include:[[:space:]]*/, ""); print; exit}' "$file")
     if [[ "$exposure" == *'*'* ]]; then
         echo "  FAIL ${rel}: actuator exposure is a wildcard (${exposure})"; FAIL=1
     fi
@@ -42,7 +45,10 @@ check() {
     if grep -q "${PUBLISHED_SECRET}" "$file"; then
         echo "  FAIL ${rel}: contains the published secret"; FAIL=1
     fi
-    echo "  ok   ${rel}"
+    # Only when nothing above raised FAIL, or the file contradicts its own report
+    if [[ "$FAIL" == "$before" ]]; then
+        echo "  ok   ${rel}"
+    fi
 }
 
 echo "PD shipped configuration hardening"

@@ -305,9 +305,9 @@ docker/docker-compose-3pd-3store-3server.yml
   `HG_PD_AUTH_SECRET_KEY`, which the Docker image requires. Give every REST
   client the same value: the Server's `bin/wait-storage.sh` reads
   `PD_AUTH_PASSWORD` (and `PD_AUTH_USER`, default `store`), and Hubble reads
-  `operations.pd.password`. A client left on a stale secret gets 401, and for
-  `wait-storage.sh` that means Server startup aborts after
-  `WAIT_STORAGE_TIMEOUT_S`.
+  `operations.pd.password`. A client left on a stale secret gets 401, and
+  `wait-storage.sh` aborts the Server's startup on the first one rather than
+  waiting out `WAIT_STORAGE_TIMEOUT_S`.
 - An existing `conf/application.yml` carried over from an earlier release has
   no `auth` block. PD then starts with an empty secret and refuses every
   authenticated REST request, logging an error that names `auth.secret-key`.

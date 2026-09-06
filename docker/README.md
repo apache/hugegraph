@@ -95,9 +95,10 @@ fails:
 - The Server, whose `bin/wait-storage.sh` polls `/v1/stores` before the
   Server starts. Both Compose files pass `PD_AUTH_PASSWORD` to it from the
   same variable, so setting `HG_PD_AUTH_SECRET_KEY` in `.env` covers it. If
-  the Server sends the wrong secret it retries until
-  `WAIT_STORAGE_TIMEOUT_S` (300s) expires and the container exits with
-  `ERROR: Timeout waiting for storage backend`.
+  the Server sends the wrong secret `wait-storage.sh` aborts on the first
+  401 rather than waiting out `WAIT_STORAGE_TIMEOUT_S`, and the container
+  exits with `ERROR: storage wait aborted, see the message above` after
+  logging `ERROR: PD at <peer> refused the credential (401)`.
 - Hubble, through `operations.pd.password` in
   `conf/hubble/hstore.local.properties` (Minimal HStore) or
   `conf/hubble/hstore-ha.local.properties` (HA). Compose mounts those files
