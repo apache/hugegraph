@@ -29,8 +29,9 @@ management:
   endpoints:
     web:
       exposure:
-        # Allowlist, not "*": /actuator/** is excluded from the REST auth
-        # interceptor, so anything exposed here is anonymous on this port.
+        # Allowlist, not "*": actuator has its own handler mapping, which
+        # the REST auth interceptor is not attached to, so anything exposed
+        # here is anonymous on this port. This list is what bounds it.
         include: "health,metrics,prometheus"
 
 grpc:

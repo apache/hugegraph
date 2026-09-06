@@ -35,8 +35,8 @@ public class AuthenticationConfigurer implements WebMvcConfigurer {
                 // /actuator/** states the intent for nested probe paths such as
                 // /actuator/metrics/{name}, but it is not what keeps them open.
                 // Actuator is served by WebMvcEndpointHandlerMapping, which only
-                // picks up MappedInterceptor beans; an interceptor added through
-                // this registry is not one, so it is attached to the MVC handler
+                // picks up MappedInterceptor beans; one added through this
+                // registry is never a bean, so it is attached to the MVC handler
                 // mappings alone and never sees an actuator request either way.
                 // What is reachable there is bounded by
                 // management.endpoints.web.exposure.include.
