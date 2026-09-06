@@ -39,6 +39,7 @@ services:
       HG_PD_RAFT_PEERS_LIST: pd:8610
       HG_PD_INITIAL_STORE_LIST: store:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
     ports:
       - "8620:8620"
     volumes:
@@ -94,6 +95,8 @@ services:
       HG_SERVER_INIT_STORE_ENABLED: "false"
       HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
       PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:-}
+      # bin/wait-storage.sh polls the PD REST API, so it needs the same secret
+      PD_AUTH_PASSWORD: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
     ports:
       - "8080:8080"
     healthcheck:
@@ -117,7 +120,7 @@ services:
       - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
     volumes:
       - hubble-data:/hubble/data
-      - ./conf/hubble/hstore.properties:/hubble/conf/hugegraph-hubble.properties:ro
+      - ./conf/hubble/hstore.local.properties:/hubble/conf/hugegraph-hubble.properties:ro
     healthcheck:
       test:
         - CMD-SHELL

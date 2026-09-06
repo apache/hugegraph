@@ -678,6 +678,13 @@ For a production-like 3-node distributed deployment, use the compose file at `do
 
 ```bash
 cd docker
+# The PD REST secret is required; the Compose file refuses to start without
+# it. Generate it once and keep it, every PD node and PD client needs the
+# same value (docker/README.md has the full .env recipe).
+export HG_PD_AUTH_SECRET_KEY="$(openssl rand -hex 24)"
+# Hubble reads the secret from a generated, untracked properties file that the
+# Compose file mounts; create it before `up` or Hubble starts unconfigured.
+./set-hubble-pd-password.sh hstore-ha
 HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 ```
 
@@ -695,6 +702,7 @@ environment:
   HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500  # maps to pd.initial-store-list
   HG_PD_DATA_PATH: /hugegraph-pd/pd_data              # maps to pd.data-path
   HG_PD_INITIAL_STORE_COUNT: 3                         # maps to pd.initial-store-count
+  HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?}    # maps to auth.secret-key; required
 ```
 
 **Store environment variables** (per node):

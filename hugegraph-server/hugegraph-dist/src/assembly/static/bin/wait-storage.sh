@@ -39,7 +39,33 @@ log() {
   echo "[wait-storage] $1"
 }
 
-PD_AUTH_ARGS="-u ${PD_AUTH_USER:-store}:${PD_AUTH_PASSWORD:-admin}"
+# PD REST credential. PD checks the password against its auth.secret-key and
+# ships no default, so this has to be provided by the deployment.
+# The value is deliberately kept out of the inner script's source text and out
+# of curl's argv: the inner shell reads it from the environment and hands it to
+# curl on stdin as a config file.
+PD_AUTH_USER="${PD_AUTH_USER:-store}"
+PD_AUTH_PASSWORD="${PD_AUTH_PASSWORD:-}"
+if [ -z "${PD_AUTH_PASSWORD}" ]; then
+  log "WARN: PD_AUTH_PASSWORD is empty; PD will answer 401 unless it runs without auth"
+fi
+# curl -K reads one option per line and takes the value as a quoted string
+# whose only escapes are \\ \" \t \n \r \v. Backslash first, then the rest;
+# an unescaped line break would end the option early and send a truncated
+# credential (curl then warns that the remainder is an unknown option).
+escape_curlrc() {
+  local v=$1
+  v=${v//\\/\\\\}
+  v=${v//\"/\\\"}
+  v=${v//$'\n'/\\n}
+  v=${v//$'\r'/\\r}
+  v=${v//$'\t'/\\t}
+  v=${v//$'\v'/\\v}
+  printf '%s' "$v"
+}
+PD_AUTH_CURL_USER=$(escape_curlrc "${PD_AUTH_USER}")
+PD_AUTH_CURL_PASSWORD=$(escape_curlrc "${PD_AUTH_PASSWORD}")
+export PD_AUTH_CURL_USER PD_AUTH_CURL_PASSWORD
 
 function key_exists {
     local key=$1
@@ -99,13 +125,23 @@ if env | grep '^hugegraph\.' > /dev/null; then
 
               log() { echo '[wait-storage] '\"\$1\"; }
 
+              # curl stays out of the grep pipeline so its status code is
+              # readable: a 401 is a wrong secret, not a storage problem, and
+              # retrying it for 300s only hides that.
               check_any_pd_stores() {
                 for peer in \$(echo \"\$PD_REST_LIST\" | tr ',' ' '); do
-                  if curl ${PD_AUTH_ARGS} -f -s \
-                     --connect-timeout ${WAIT_STORAGE_PD_CONNECT_TIMEOUT_S} \
-                     --max-time ${WAIT_STORAGE_PD_MAX_TIMEOUT_S} \
-                     http://\${peer}/v1/stores 2>/dev/null | \
-                     grep -qi '\"state\"[[:space:]]*:[[:space:]]*\"Up\"'; then
+                  body=\$(printf 'user = \"%s:%s\"\n' \
+                           \"\$PD_AUTH_CURL_USER\" \"\$PD_AUTH_CURL_PASSWORD\" | \
+                         curl -K - -s -w '\n%{http_code}' \
+                         --connect-timeout ${WAIT_STORAGE_PD_CONNECT_TIMEOUT_S} \
+                         --max-time ${WAIT_STORAGE_PD_MAX_TIMEOUT_S} \
+                         \"http://\${peer}/v1/stores\" 2>/dev/null)
+                  code=\${body##*\$'\n'}
+                  if [ \"\$code\" = 401 ]; then
+                    log \"ERROR: PD at \${peer} refused the credential (401): PD_AUTH_PASSWORD must match PD's auth.secret-key\" >&2
+                    return 2
+                  fi
+                  if printf '%s' \"\$body\" | grep -qi '\"state\"[[:space:]]*:[[:space:]]*\"Up\"'; then
                     echo \"\$peer\"
                     return 0
                   fi
@@ -114,12 +150,21 @@ if env | grep '^hugegraph\.' > /dev/null; then
               }
 
               until PD_REST=\$(check_any_pd_stores); do
+                if [ \$? -eq 2 ]; then exit 2; fi
                 log 'No Up store yet, retrying in 5s'
                 sleep 5
               done
               log \"Store registration check PASSED via \$PD_REST\"
               log 'Storage backend is VIABLE'
-            " || { echo "[wait-storage] ERROR: Timeout waiting for storage backend"; exit 1; }
+            " || {
+                rc=$?
+                if [ "$rc" -eq 124 ]; then
+                    echo "[wait-storage] ERROR: Timeout waiting for storage backend"
+                else
+                    echo "[wait-storage] ERROR: storage wait aborted, see the message above"
+                fi
+                exit 1
+            }
 
         else
             log "No pd.peers configured, skipping storage wait"

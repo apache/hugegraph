@@ -27,7 +27,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: "*"
+        # Allowlist, not "*": actuator has its own handler mapping, which
+        # the REST auth interceptor is not attached to, so anything exposed
+        # here is anonymous on this port. This list is what bounds it.
+        include: "health,metrics,prometheus"
 
 grpc:
   port: 8686
@@ -42,6 +45,14 @@ license:
 
 server:
   port: 8620
+
+auth:
+  # Shared secret checked against the password of the Basic credential on every
+  # authenticated REST request. Required and deliberately empty: a secret in
+  # the source tree is published to everyone. Set a deployment-specific value
+  # here (or via HG_PD_AUTH_SECRET_KEY) and give every REST client the same
+  # value. While empty, PD refuses every authenticated REST request.
+  secret-key:
 
 pd:
   # Periodically check whether the cluster is healthy at intervals, in seconds

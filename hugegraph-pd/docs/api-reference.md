@@ -760,6 +760,22 @@ for (Map.Entry<String, byte[]> entry : results.entrySet()) {
 
 PD exposes a REST API for management and monitoring (default port: 8620).
 
+### Authentication
+
+Every endpoint below except the probes needs HTTP Basic auth: one of the
+internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user, and
+the `auth.secret-key` value from PD's `conf/application.yml` as the password.
+A missing or wrong credential gets HTTP 401. The `curl` examples that follow
+omit `-u` for readability; add it to every call except `/v1/health`,
+`/actuator/**` and `/v1/prom/targets/*`, which stay unauthenticated for probes.
+
+```bash
+curl -u hg:<secret> http://localhost:8620/v1/stores
+```
+
+Endpoints under `/v1` mutate the cluster (peer list changes, store removal,
+partition balancing), so keep port 8620 on a trusted network regardless.
+
 ### Health Check
 
 ```bash

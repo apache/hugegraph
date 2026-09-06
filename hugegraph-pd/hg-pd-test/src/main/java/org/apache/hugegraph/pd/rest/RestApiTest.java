@@ -35,7 +35,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -54,7 +54,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/cluster";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -68,7 +68,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/members";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -82,7 +82,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/stores";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -96,7 +96,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/graphs";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -110,7 +110,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/highLevelPartitions";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -124,7 +124,7 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/partitions";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
@@ -137,11 +137,89 @@ public class RestApiTest extends BaseServerTest {
         String url = pdRestAddr + "/v1/shards";
         HttpRequest request = HttpRequest.newBuilder()
                                          .uri(new URI(url))
-                                         .header("Authorization", "Basic c3RvcmU6MTIz")
+                                         .header(AUTH_HEADER, VALID_AUTH)
                                          .GET()
                                          .build();
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
         JSONObject obj = new JSONObject(response.body());
         assert obj.getInt("status") == 0;
+    }
+
+    @Test
+    public void testMissingCredentialGets401() throws URISyntaxException, IOException,
+                                                      InterruptedException {
+        String url = pdRestAddr + "/v1/members";
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(new URI(url))
+                                         .GET()
+                                         .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assert response.statusCode() == 401;
+    }
+
+    @Test
+    public void testWrongPasswordGets401() throws URISyntaxException, IOException,
+                                                  InterruptedException {
+        String url = pdRestAddr + "/v1/members";
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(new URI(url))
+                                         .header(AUTH_HEADER, basicAuth("store", "wrong-password"))
+                                         .GET()
+                                         .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assert response.statusCode() == 401;
+    }
+
+    @Test
+    public void testEmptyPasswordGets401() throws URISyntaxException, IOException,
+                                                  InterruptedException {
+        String url = pdRestAddr + "/v1/members";
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(new URI(url))
+                                         .header(AUTH_HEADER, basicAuth("hg", ""))
+                                         .GET()
+                                         .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assert response.statusCode() == 401;
+    }
+
+    private int statusWithoutCredential(String path) throws URISyntaxException, IOException,
+                                                            InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(new URI(pdRestAddr + path))
+                                         .GET()
+                                         .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString()).statusCode();
+    }
+
+    @Test
+    public void testProbePathsNeedNoCredential() throws URISyntaxException, IOException,
+                                                        InterruptedException {
+        assert statusWithoutCredential("/v1/health") == 200;
+        assert statusWithoutCredential("/actuator/health") == 200;
+        // Nested actuator paths are probe surface too. They stay open because
+        // actuator has its own handler mapping that the auth interceptor is not
+        // attached to, not because of the /actuator/** exclusion pattern.
+        assert statusWithoutCredential("/actuator/metrics/jvm.memory.used") == 200;
+    }
+
+    @Test
+    public void testUnexposedActuatorEndpointIsClosed() throws URISyntaxException, IOException,
+                                                               InterruptedException {
+        // not in management.endpoints.web.exposure.include, so it must never serve data
+        assert statusWithoutCredential("/actuator/env") != 200;
+    }
+
+    @Test
+    public void testUnknownServiceNameGets401() throws URISyntaxException, IOException,
+                                                       InterruptedException {
+        String url = pdRestAddr + "/v1/members";
+        HttpRequest request = HttpRequest.newBuilder()
+                                         .uri(new URI(url))
+                                         .header(AUTH_HEADER, basicAuth("nobody", SECRET))
+                                         .GET()
+                                         .build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assert response.statusCode() == 401;
     }
 }

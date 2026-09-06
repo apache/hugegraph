@@ -31,6 +31,11 @@ fi
 
 PD_DIR=$HOME_DIR/hugegraph-pd/apache-hugegraph-pd-$VersionInBash
 
+# conf/application.yml ships auth.secret-key empty on purpose, so PD would
+# refuse every authenticated REST request. Supply a test-only secret; it must
+# match the value the PD test suites send.
+export SPRING_APPLICATION_JSON='{"auth":{"secret-key":"pd-ci-test-secret-not-for-production"}}'
+
 pushd $PD_DIR
 . bin/start-hugegraph-pd.sh
 sleep 10
