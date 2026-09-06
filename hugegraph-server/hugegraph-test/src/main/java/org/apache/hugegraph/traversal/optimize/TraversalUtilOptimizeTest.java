@@ -46,6 +46,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.Inli
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -535,6 +536,60 @@ public class TraversalUtilOptimizeTest {
         Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, IdGenerator.of(13L), "v"));
         Assert.assertFalse(filter.test(vertex));
         Assert.assertFalse(filter.clone().test(vertex));
+    }
+
+    @Test
+    public void testUnsafeLabelKeepsPointLookupPlan() {
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().hasId(1).limit(10).hasLabel(P.neq("other")),
+                EmptyGraph.instance().traversal().E().hasId(1).limit(10).hasLabel(P.neq("other")),
+                __.V().hasId(P.within(1, 2)).hasLabel(P.neq("other"))}) {
+            Traversal.Admin<?, ?> admin = query.asAdmin();
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertTrue(source.getIds().length > 0);
+            Assert.assertEquals(1, source.getIds()[0]);
+            Assert.assertFalse(hasStepExists(admin, T.id.getAccessor()));
+        }
+        Traversal.Admin<?, ?> admin = __.V(1, 2).hasId(2)
+                                       .hasLabel(P.neq("other")).asAdmin();
+        HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(source, admin);
+        Assert.assertEquals(2, source.getIds().length);
+        Assert.assertTrue(hasStepExists(admin, T.id.getAccessor()));
+
+        admin = __.V().hasId(P.neq(1)).hasLabel(P.neq("other")).asAdmin();
+        source = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(source, admin);
+        Assert.assertEquals(0, source.getIds().length);
+        Assert.assertTrue(hasStepExists(admin, T.id.getAccessor()));
+    }
+
+    @Test
+    public void testLabelAfterElementChangeKeepsSourceIndexPlan() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").out().where(__.not(__.hasLabel("author"))),
+                __.V().has("city", "Beijing").outE().inV().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").properties().hasLabel(P.neq("author"))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertTrue(hasContainer(source, "city"));
+            Assert.assertFalse(hasStepExists(admin, "city"));
+        }
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").as("a").out().select("a").hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").out().path().unfold().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").out().filter(__.select("a").hasLabel(P.neq("author")))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertFalse(hasContainer(source, "city"));
+            Assert.assertTrue(hasStepExists(admin, "city"));
+        }
     }
 
     @Test

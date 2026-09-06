@@ -2021,7 +2021,7 @@ public class GraphTransaction extends IndexableTransaction {
                 boolean edgeIndexWithLabel =
                         cq.resultType().isEdge() &&
                         cq.optimized() == OptimizedType.INDEX &&
-                        cq.condition(HugeKeys.LABEL) != null;
+                        cq.singleConditionValueOrNull(HugeKeys.LABEL) != null;
                 if (cq.hasSearchCondition() ||
                     (conditionQueryNeedsPostFilter(cq) &&
                      !edgeIndexWithLabel)) {

@@ -65,6 +65,7 @@ import org.apache.hugegraph.testutil.FakeObjects;
 import org.apache.hugegraph.testutil.Utils;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.traversal.optimize.ConditionP;
+import org.apache.hugegraph.traversal.optimize.HugeGraphStep;
 import org.apache.hugegraph.traversal.optimize.Text;
 import org.apache.hugegraph.traversal.optimize.TraversalUtil;
 import org.apache.hugegraph.type.HugeType;
@@ -9328,6 +9329,33 @@ public class VertexCoreTest extends BaseCoreTest {
                                       .toSet());
         Assert.assertEquals(expected, g.inject(1).union(__.V().has("city", "Beijing"))
                                       .not(__.hasLabel("author")).toSet());
+    }
+
+    @Test
+    public void testNegativeLabelAfterElementChange() {
+        HugeGraph graph = graph();
+        graph.schema().propertyKey("city").asText().ifNotExist().create();
+        graph.schema().vertexLabel("indexed").properties("city").useAutomaticId().create();
+        graph.schema().vertexLabel("target").useAutomaticId().create();
+        graph.schema().indexLabel("byCity").onV("indexed").by("city").secondary().create();
+        graph.schema().edgeLabel("link").link("indexed", "target").create();
+        Vertex source = graph.addVertex(T.label, "indexed", "city", "Beijing");
+        Vertex target = graph.addVertex(T.label, "target");
+        source.addEdge("link", target);
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        for (GraphTraversal<Vertex, Vertex> query : ImmutableList.of(
+                g.V().has("city", "Beijing").out().hasLabel(P.neq("indexed")),
+                g.V().has("city", "Beijing").out().where(__.not(__.hasLabel("indexed"))))) {
+            query.asAdmin().applyStrategies();
+            HugeGraphStep<?, ?> step = (HugeGraphStep<?, ?>) query.asAdmin().getStartStep();
+            Assert.assertTrue(step.getHasContainers().stream().anyMatch(h -> h.getKey().equals("city")));
+            Assert.assertEquals(ImmutableList.of(target), query.toList());
+        }
+        Assert.assertEquals(ImmutableList.of(source), g.V().has("city", "Beijing").as("a")
+                            .out().select("a").hasLabel(P.neq("target")).toList());
+        Assert.assertEquals(ImmutableList.of(source), g.V().has("city", "Beijing")
+                            .out().path().unfold().hasLabel(P.neq("target")).toList());
     }
 
     @Test

@@ -67,12 +67,15 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.EdgeVertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MaxGlobalStep;
@@ -82,6 +85,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.NoOpBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ElementValueComparator;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.EmptyStep;
@@ -692,6 +696,13 @@ public final class TraversalUtil {
                         continue;
                     }
                     if (T.id.getAccessor().equals(has.getKey())) {
+                        // ID lookup is complete across labels. Existing source
+                        // IDs and unsupported predicates still filter locally.
+                        if (source instanceof HugeGraphStep &&
+                            GraphStep.processHasContainerIds((HugeGraphStep<?, ?>) source, has)) {
+                            holder.removeHasContainer(has);
+                            continue;
+                        }
                         holder.removeHasContainer(has);
                         holder.addHasContainer(new HasContainer(has.getKey(),
                                 localIdPredicate(has.getPredicate())));
@@ -838,6 +849,9 @@ public final class TraversalUtil {
         // steps don't reliably expose element identity, so stay conservative.
         // FIXME: Restore selective pushdown when every candidate schema label
         // has compatible index coverage for extracted property predicates.
+        // Outside the proven root suffix below, negative labels can disable
+        // property pushdown even across element changes (including ancestors
+        // and unknown extension steps), potentially requiring a full scan.
         List<Step> steps = traversal.getSteps();
         int start = 0;
         while (start < steps.size() && steps.get(start) != sourceStep) {
@@ -846,6 +860,11 @@ public final class TraversalUtil {
         start++;
         for (int i = start; i < steps.size(); i++) {
             Step<?, ?> step = steps.get(i);
+            if (changesCurrentElement(step) &&
+                traversal.getParent() instanceof EmptyStep &&
+                onlyCurrentElementSuffix(steps.subList(i, steps.size()))) {
+                return false;
+            }
             if (step instanceof HasStep) {
                 HasContainerHolder holder = (HasContainerHolder) step;
                 if (hasUnsafeLabelPredicate(holder)) {
@@ -868,6 +887,40 @@ public final class TraversalUtil {
             return hasUnsafeLabelInTraversal(parentStep.getTraversal(), parentStep);
         }
         return false;
+    }
+
+    private static boolean changesCurrentElement(Step<?, ?> step) {
+        return step instanceof VertexStep || step instanceof EdgeVertexStep ||
+               step instanceof PropertiesStep;
+    }
+
+    private static boolean onlyCurrentElementSuffix(List<Step> steps) {
+        for (Step<?, ?> step : steps) {
+            // An allowlist is deliberate: select/path, lambdas, repeat and
+            // extension steps may recover earlier elements. Never infer their
+            // provenance from the output type alone.
+            if (!(changesCurrentElement(step) || step instanceof HasStep ||
+                  step instanceof NoOpBarrierStep || step instanceof RangeGlobalStep ||
+                  step instanceof IdentityStep || step instanceof NotStep ||
+                  step instanceof AndStep || step instanceof OrStep ||
+                  step instanceof TraversalFilterStep)) {
+                return false;
+            }
+            if (step instanceof TraversalParent) {
+                TraversalParent parent = (TraversalParent) step;
+                for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+                    if (!onlyCurrentElementSuffix(child.getSteps())) {
+                        return false;
+                    }
+                }
+                for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
+                    if (!onlyCurrentElementSuffix(child.getSteps())) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     private static boolean hasUnsafeLabelInChildren(Step<?, ?> step) {
