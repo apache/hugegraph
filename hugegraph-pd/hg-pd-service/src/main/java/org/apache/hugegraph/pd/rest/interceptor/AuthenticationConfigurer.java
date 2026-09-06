@@ -32,10 +32,14 @@ public class AuthenticationConfigurer implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(restAuthentication)
                 .addPathPatterns("/**")
-                // /actuator/** rather than /actuator/*: Spring's matcher does not
-                // treat /actuator/metrics/{name} or /actuator/health/{group} as one
-                // segment, and both are legitimate probe paths. What is reachable
-                // there is bounded by management.endpoints.web.exposure.include.
+                // /actuator/** states the intent for nested probe paths such as
+                // /actuator/metrics/{name}, but it is not what keeps them open.
+                // Actuator is served by WebMvcEndpointHandlerMapping, which only
+                // picks up MappedInterceptor beans; an interceptor added through
+                // this registry is not one, so it is attached to the MVC handler
+                // mappings alone and never sees an actuator request either way.
+                // What is reachable there is bounded by
+                // management.endpoints.web.exposure.include.
                 .excludePathPatterns("/actuator/**", "/v1/health", "/v1/prom/targets/*");
     }
 }

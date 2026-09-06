@@ -284,7 +284,7 @@ management:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `management.metrics.export.prometheus.enabled` | Boolean | `true` | Enable Prometheus-compatible metrics at `/actuator/prometheus`. |
-| `management.endpoints.web.exposure.include` | String | `"health,metrics,prometheus"` | Actuator endpoints to expose. `/actuator/**` is excluded from the REST authentication interceptor, so every endpoint listed here is reachable without a credential on port 8620. Prefer an allowlist over `"*"`. |
+| `management.endpoints.web.exposure.include` | String | `"health,metrics,prometheus"` | Actuator endpoints to expose. Actuator is served by its own handler mapping, which the REST authentication interceptor is not attached to, so every endpoint listed here is reachable without a credential on port 8620. This allowlist is what bounds which endpoints exist there, so prefer it over `"*"`. The interceptor's `/actuator/**` exclusion records the same intent but is not what makes these paths anonymous. |
 
 ## Deployment Scenarios
 

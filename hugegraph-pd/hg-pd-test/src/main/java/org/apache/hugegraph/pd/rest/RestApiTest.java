@@ -197,7 +197,9 @@ public class RestApiTest extends BaseServerTest {
                                                         InterruptedException {
         assert statusWithoutCredential("/v1/health") == 200;
         assert statusWithoutCredential("/actuator/health") == 200;
-        // nested actuator paths are probe surface too; /actuator/* would 401 them
+        // Nested actuator paths are probe surface too. They stay open because
+        // actuator has its own handler mapping that the auth interceptor is not
+        // attached to, not because of the /actuator/** exclusion pattern.
         assert statusWithoutCredential("/actuator/metrics/jvm.memory.used") == 200;
     }
 
