@@ -22,6 +22,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -71,6 +73,10 @@ public class RaftEngine {
     private RpcServer rpcServer;
     private Node raftNode;
     private RaftRpcClient raftRpcClient;
+    /** Cached leader gRPC address to avoid repeated Bolt RPC calls */
+    private volatile String cachedLeaderGrpcAddress;
+    /** Static mapping from Raft endpoint to gRPC address, built from config at init */
+    private Map<String, String> peerGrpcAddressMap = new HashMap<>();
 
     public RaftEngine() {
         this.stateMachine = new RaftStateMachine();
@@ -85,6 +91,10 @@ public class RaftEngine {
             return false;
         }
         this.config = config;
+
+        // Build static mapping: Raft endpoint → gRPC address from config
+        // This avoids using the broken BoltRpcClient for address resolution
+        buildPeerGrpcAddressMap();
 
         raftRpcClient = new RaftRpcClient();
         raftRpcClient.init(new RpcOptions());
@@ -131,6 +141,15 @@ public class RaftEngine {
         this.raftGroupService =
                 new RaftGroupService(groupId, serverId, nodeOptions, rpcServer, true);
         this.raftNode = raftGroupService.start(false);
+
+        // Register listener to invalidate cached leader address on leader change
+        this.stateMachine.addStateListener(new RaftStateListener() {
+            @Override
+            public void onRaftLeaderChanged() {
+                cachedLeaderGrpcAddress = null;
+                log.info("Raft leader changed, invalidated cached leader gRPC address");
+            }
+        });
         log.info("RaftEngine start successfully: id = {}, peers list = {}", groupId,
                  nodeOptions.getInitialConf().getPeers());
         return this.raftNode != null;
@@ -228,19 +247,57 @@ public class RaftEngine {
     }
 
     /**
-     * Send a message to the leader to get the grpc address;
+     * Build static mapping from Raft endpoint to gRPC address.
+     * Assumes all PD nodes use the same grpc.port (standard deployment).
+     */
+    private void buildPeerGrpcAddressMap() {
+        String grpcPort = String.valueOf(config.getGrpcPort());
+        String[] peers = config.getPeersList().split(",");
+        for (String peer : peers) {
+            peer = peer.trim();
+            if (peer.isEmpty()) {
+                continue;
+            }
+            Endpoint ep = JRaftUtils.getEndPoint(peer);
+            String grpcAddr = ep.getIp() + ":" + grpcPort;
+            peerGrpcAddressMap.put(ep.toString(), grpcAddr);
+            log.info("Mapped Raft endpoint {} -> gRPC {}", ep, grpcAddr);
+        }
+    }
+
+    /**
+     * Get the leader's gRPC address.
+     * First tries the static config-based mapping (no Bolt RPC needed),
+     * then falls back to cached address, then Bolt RPC as last resort.
      */
     public String getLeaderGrpcAddress() throws ExecutionException, InterruptedException {
         if (isLeader()) {
             return config.getGrpcAddress();
         }
 
+        // Try cached address first
+        String cached = this.cachedLeaderGrpcAddress;
+        if (cached != null) {
+            return cached;
+        }
+
         if (raftNode.getLeaderId() == null) {
             waitingForLeader(10000);
         }
 
-        return raftRpcClient.getGrpcAddress(raftNode.getLeaderId().getEndpoint().toString()).get()
-                            .getGrpcAddress();
+        // Use static config-based mapping (avoids broken Bolt RPC)
+        String leaderEndpoint = raftNode.getLeaderId().getEndpoint().toString();
+        String address = peerGrpcAddressMap.get(leaderEndpoint);
+        if (address != null) {
+            this.cachedLeaderGrpcAddress = address;
+            return address;
+        }
+
+        // Fallback to Bolt RPC (may fail due to BoltRpcClient bug)
+        log.warn("Leader endpoint {} not in static map, falling back to Bolt RPC", leaderEndpoint);
+        address = raftRpcClient.getGrpcAddress(leaderEndpoint).get().getGrpcAddress();
+        this.cachedLeaderGrpcAddress = address;
+        return address;
     }
 
     /**
@@ -269,8 +326,6 @@ public class RaftEngine {
         for (PeerId peerId : peers) {
             Metapb.Member.Builder builder = Metapb.Member.newBuilder();
             builder.setClusterId(config.getClusterId());
-            CompletableFuture<RaftRpcProcessor.GetMemberResponse> future =
-                    raftRpcClient.getGrpcAddress(peerId.getEndpoint().toString());
 
             Metapb.ShardRole role = Metapb.ShardRole.Follower;
             if (PeerUtil.isPeerEquals(peerId, raftNode.getLeaderId())) {
@@ -285,28 +340,44 @@ public class RaftEngine {
 
             builder.setRole(role);
 
-            try {
-                if (future.isCompletedExceptionally()) {
-                    log.error("failed to getGrpcAddress of {}", peerId.getEndpoint().toString());
+            String endpointStr = peerId.getEndpoint().toString();
+
+            // Use static config-based mapping first
+            String grpcAddr = peerGrpcAddressMap.get(endpointStr);
+            if (grpcAddr != null) {
+                builder.setState(Metapb.StoreState.Up);
+                builder.setRaftUrl(endpointStr);
+                builder.setGrpcUrl(grpcAddr);
+                String host = peerId.getIp();
+                builder.setRestUrl(host + ":" + config.getPort());
+                builder.setDataPath(config.getDataPath());
+                members.add(builder.build());
+            } else {
+                // Fallback to Bolt RPC
+                try {
+                    CompletableFuture<RaftRpcProcessor.GetMemberResponse> future =
+                            raftRpcClient.getGrpcAddress(endpointStr);
+                    if (future.isCompletedExceptionally()) {
+                        log.error("failed to getGrpcAddress of {}", endpointStr);
+                        builder.setState(Metapb.StoreState.Offline);
+                        builder.setRaftUrl(endpointStr);
+                        members.add(builder.build());
+                    } else {
+                        RaftRpcProcessor.GetMemberResponse response = future.get();
+                        builder.setState(Metapb.StoreState.Up);
+                        builder.setRaftUrl(response.getRaftAddress());
+                        builder.setDataPath(response.getDatePath());
+                        builder.setGrpcUrl(response.getGrpcAddress());
+                        builder.setRestUrl(response.getRestAddress());
+                        members.add(builder.build());
+                    }
+                } catch (Exception e) {
+                    log.error("failed to getGrpcAddress of {}.", endpointStr, e);
                     builder.setState(Metapb.StoreState.Offline);
-                    builder.setRaftUrl(peerId.getEndpoint().toString());
-                    members.add(builder.build());
-                } else {
-                    RaftRpcProcessor.GetMemberResponse response = future.get();
-                    builder.setState(Metapb.StoreState.Up);
-                    builder.setRaftUrl(response.getRaftAddress());
-                    builder.setDataPath(response.getDatePath());
-                    builder.setGrpcUrl(response.getGrpcAddress());
-                    builder.setRestUrl(response.getRestAddress());
+                    builder.setRaftUrl(endpointStr);
                     members.add(builder.build());
                 }
-            } catch (Exception e) {
-                log.error("failed to getGrpcAddress of {}.", peerId.getEndpoint().toString(), e);
-                builder.setState(Metapb.StoreState.Offline);
-                builder.setRaftUrl(peerId.getEndpoint().toString());
-                members.add(builder.build());
             }
-
         }
         return members;
     }
