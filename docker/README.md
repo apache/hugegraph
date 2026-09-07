@@ -243,6 +243,17 @@ The Hubble `latest` image is expected to work with HugeGraph Server 1.7 and
 Server `latest`; compatibility with versions older than 1.7 is not promised.
 Pin immutable image references when reproducibility is required.
 
+### Server startup timeout
+
+Every topology gives each Server 120 seconds to answer on its REST port before the container gives up. Raise it on a slow or contended host with `HG_SERVER_STARTUP_TIMEOUT_S=300 docker compose -f docker-compose-hstore.yml up -d`. Leaving it unset keeps 120; an empty value is rejected rather than treated as a silent default, so a missing value in your own script is not mistaken for a deliberate one.
+
+<details>
+<summary>Keeping it inside the health check budget</summary>
+
+The Server health check keeps a separate budget of roughly 360 seconds that this variable does not move. `up -d --wait` gives up there, and so does a plain `up -d`, because Hubble waits on the Server with `depends_on: condition: service_healthy` in every topology. Keep the startup timeout inside that budget, or raise the Server health check in the Compose file alongside it. [The Server docker README](../hugegraph-server/hugegraph-dist/docker/README.md#6-process-supervision--health-checks) has the accepted range and the `docker run` equivalents.
+
+</details>
+
 ### Data persistence
 
 Each topology creates its own normal Compose network and named volumes. No
