@@ -32,6 +32,7 @@ import io.grpc.CallOptions;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
+import io.grpc.Status;
 
 public interface ServiceGrpc extends RaftStateListener {
 
@@ -90,6 +91,10 @@ public interface ServiceGrpc extends RaftStateListener {
                                                     observer);
         } catch (Exception e) {
             log.warn("redirect to leader with error:", e);
+            // Properly complete the observer to avoid hanging client requests
+            observer.onError(Status.UNAVAILABLE
+                    .withDescription("Failed to redirect to leader: " + e.getMessage())
+                    .asRuntimeException());
         }
     }
 
