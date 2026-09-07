@@ -320,7 +320,7 @@ run_render() {
 
     # The unset and override cases above hold under ":-" too. Only an empty
     # host value separates the spellings, and it has to reach the container so
-    # the entrypoint can reject it, as README section 7 promises.
+    # the entrypoint can reject it, as README section 6 promises.
     render_with_timeout "${RENDER_DIR}/standalone-empty.json" "" \
                         -f "${DOCKER_DIR}/docker-compose.yml"
     render_with_timeout "${RENDER_DIR}/hstore-empty.json" "" \
