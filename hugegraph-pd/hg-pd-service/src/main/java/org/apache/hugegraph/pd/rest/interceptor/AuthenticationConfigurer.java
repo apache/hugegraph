@@ -32,6 +32,7 @@ public class AuthenticationConfigurer implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(restAuthentication)
                 .addPathPatterns("/**")
-                .excludePathPatterns("/actuator/*", "/v1/health", "/v1/prom/targets/*");
+                .excludePathPatterns("/actuator/*", "/v1/health", "/v1/ready",
+                                     "/v1/prom/targets/*");
     }
 }
