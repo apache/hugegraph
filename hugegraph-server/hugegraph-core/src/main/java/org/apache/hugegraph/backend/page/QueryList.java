@@ -197,7 +197,7 @@ public final class QueryList<R> implements AutoCloseable {
             QueryResults<R> fetched = results.toList();
             PageState pageState = PageInfo.pageState(results.iterator());
 
-            return new PageResults<>(fetched, query, pageState);
+            return new PageResults<>(fetched, pageState);
         }
 
         @Override
@@ -294,7 +294,7 @@ public final class QueryList<R> implements AutoCloseable {
 
             IdQuery query = this.indexIdQuery(bindQuery, pageIds.ids(), holder.keepOrder());
             QueryResults<R> results = fetcher().apply(query);
-            return new PageResults<>(results, query, pageIds.pageState());
+            return new PageResults<>(results, pageIds.pageState());
         }
 
         @Override
@@ -336,25 +336,15 @@ public final class QueryList<R> implements AutoCloseable {
 
         private final QueryResults<R> results;
         private final PageState pageState;
-        private final Query query;
 
-        public PageResults(QueryResults<R> results, Query query, PageState pageState) {
+        public PageResults(QueryResults<R> results, PageState pageState) {
             this.results = results;
-            this.query = query;
             this.pageState = pageState;
-        }
-
-        public Iterator<R> get() {
-            return this.results.iterator();
         }
 
         public boolean hasNextPage() {
             return !Bytes.equals(this.pageState.position(),
                                  PageState.EMPTY_BYTES);
-        }
-
-        public Query query() {
-            return this.query;
         }
 
         public QueryResults<R> results() {
@@ -371,7 +361,7 @@ public final class QueryList<R> implements AutoCloseable {
 
         public static <R> PageResults<R> emptyIterator() {
             // Batch cursors are single-use, including those for empty pages.
-            return new PageResults<>(QueryResults.empty(), null, PageState.EMPTY);
+            return new PageResults<>(QueryResults.empty(), PageState.EMPTY);
         }
     }
 }

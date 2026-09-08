@@ -48,6 +48,8 @@ public final class QueryResultContext {
         ResultsFilter filter = null;
         OptimizedType optimized = OptimizedType.NONE;
         Query visibility = query;
+        // The nearest filter and optimization describe how this batch was fetched;
+        // the outermost graph condition retains the complete request to match.
         for (Query current = query; current != null; current = current.originQuery()) {
             chain.add(current);
             visibility = current;
