@@ -182,6 +182,7 @@
                             <exclude>scripts/dev/reviewers</exclude>
                             <exclude>**/*.md</exclude>
                             <exclude>docs/rust-test-traceability.csv</exclude>
+                            <exclude>**/Cargo.lock</exclude>
                             <exclude>**/dependency-reduced-pom.xml</exclude>
                             <exclude>**/logs/*.log</exclude>
                             <exclude>**/META-INF/**/*</exclude>
