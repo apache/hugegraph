@@ -1,6 +1,6 @@
 # HugeGraph Rust 工程规范
 
-状态：设计草案；Rust 子项目建立后应转为仓库级强制规范。
+状态：审核版；Rust 子项目建立后应转为仓库级强制规范。
 
 本规范参考 TiKV、raft-rs 和 Tokio 的公开实践。TiKV 将格式化、Clippy、静态检查和多配置测试集中到开发门禁，并维护工具链、格式、Clippy 和依赖审计配置；raft-rs 对共识代码采用更严格的评审并要求 Clippy/rustfmt【https://github.com/tikv/tikv/blob/master/Makefile】【https://github.com/tikv/raft-rs/blob/master/CONTRIBUTING.md】。Tokio 明确 MSRV、语义化版本和长期支持策略，并使用 Loom 做并发排列测试、Miri 做未定义行为检查【https://github.com/tokio-rs/tokio/blob/master/CONTRIBUTING.md】【https://github.com/tokio-rs/tokio/blob/master/docs/contributing/pull-requests.md】。
 
