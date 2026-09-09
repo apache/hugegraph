@@ -145,6 +145,13 @@ pub fn replay(
     Ok(state)
 }
 
+pub fn cache_read(cache: Option<Partition>, source: &Partition) -> Result<Partition, &'static str> {
+    match cache {
+        Some(value) if value.version >= source.version => Ok(value),
+        _ => Err("cache-stale"),
+    }
+}
+
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
@@ -199,5 +206,24 @@ mod recovery_tests {
             },
         ];
         assert_eq!(replay(base(), &events, 20), Err("stale-heartbeat"));
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn invalidation_requires_latest_value() {
+        let source = Partition { start: 0, end: 10, version: 2 };
+        let cached = Partition { start: 0, end: 10, version: 1 };
+        assert_eq!(cache_read(Some(cached), &source), Err("cache-stale"));
+        assert_eq!(cache_read(None, &source), Err("cache-stale"));
+    }
+
+    #[test]
+    fn latest_cache_value_is_equivalent_to_source() {
+        let source = Partition { start: 0, end: 10, version: 2 };
+        assert_eq!(cache_read(Some(source.clone()), &source), Ok(source));
     }
 }
