@@ -497,7 +497,7 @@
         "readinessPath": {
           "type": "string",
           "pattern": "^/",
-          "description": "HTTP path for the PD readinessProbe; /v1/health (default) or /v1/ready on PD images that have it"
+          "description": "HTTP path for the PD readinessProbe; /v1/ready (default) on PD images that serve it, /v1/health on older ones"
         }
       }
     },
@@ -626,7 +626,7 @@
         "waitPath": {
           "type": "string",
           "pattern": "^/",
-          "description": "HTTP path the Store init container polls on each PD peer; /v1/health (default) or /v1/ready on PD images that have it"
+          "description": "HTTP path the Store init container polls on each PD peer; /v1/ready (default) on PD images that serve it, /v1/health on older ones"
         }
       }
     },

@@ -472,6 +472,22 @@ values remain accepted, but their rendered threshold is raised to this floor.
 {{- end }}
 
 {{/*
+Seconds the chart gives the Server image to finish starting, passed as
+HG_SERVER_STARTUP_TIMEOUT_S. The image defaults that to 120 seconds, which is
+shorter than the storage wait alone, so a Server still coming up kills itself
+before Kubernetes has given up on it. The value therefore tracks the startup
+probe: the effective failureThreshold above, already floored at 450 seconds,
+times periodSeconds. Raising the probe budget raises this with it. The
+entrypoint rejects anything over 86400, so the product is capped there rather
+than rendered into a Pod that refuses to start.
+*/}}
+{{- define "hugegraph.server.startupTimeoutSeconds" -}}
+{{- $period := int .Values.server.probes.startup.periodSeconds -}}
+{{- $threshold := include "hugegraph.server.startupFailureThreshold" . | int -}}
+{{- min 86400 (mul $threshold $period) -}}
+{{- end }}
+
+{{/*
 Optional probe tunables, emitted only when explicitly set. Kubernetes defaults
 timeoutSeconds to 1 second, which a garbage-collection pause can exceed on a
 loaded Server; operators need a supported way to raise it without forking the
@@ -613,7 +629,7 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- $reservedEnv := dict
       "pd" (list "HG_PD_GRPC_HOST" "HG_PD_GRPC_PORT" "HG_PD_REST_PORT" "HG_PD_RAFT_ADDRESS" "HG_PD_RAFT_PEERS_LIST" "HG_PD_INITIAL_STORE_LIST" "HG_PD_INITIAL_STORE_COUNT" "HG_PD_DATA_PATH" "HG_PD_AUTH_SECRET_KEY" "JAVA_OPTS" "JAVA_OPTIONS")
       "store" (list "HG_STORE_PD_ADDRESS" "HG_STORE_GRPC_HOST" "HG_STORE_GRPC_PORT" "HG_STORE_REST_PORT" "HG_STORE_RAFT_ADDRESS" "HG_STORE_DATA_PATH" "JAVA_OPTS" "JAVA_OPTIONS")
-      "server" (list "POD_IP" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
+      "server" (list "POD_IP" "HG_SERVER_BACKEND" "HG_SERVER_PD_PEERS" "HG_SERVER_PD_REST_ENDPOINT" "STORE_REST" "HG_SERVER_INIT_STORE_ENABLED" "HG_SERVER_URLS_TO_PD" "HG_SERVER_STARTUP_TIMEOUT_S" "PD_AUTH_PASSWORD" "PASSWORD" "HG_SERVER_AUTH_TOKEN_SECRET" "JAVA_OPTS" "JAVA_OPTIONS")
       "hubble" (list "HG_HUBBLE_PD_PEERS" "HG_HUBBLE_PD_SERVER" "HG_HUBBLE_PD_PASSWORD" "HG_HUBBLE_STORE_TARGETS" "HG_HUBBLE_SERVER_URL" "SPRING_DATASOURCE_URL") -}}
 {{- range $component, $reserved := $reservedEnv -}}
 {{- $componentValues := get $.Values $component | default dict -}}

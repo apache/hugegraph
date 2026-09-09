@@ -17,23 +17,8 @@
 
 suite: PD readiness path and Store wait path
 tests:
-  - it: keeps every PD probe on /v1/health by default
+  - it: reads PD readiness from /v1/ready by default, startup and liveness from /v1/health
     template: pd-statefulset.yaml
-    asserts:
-      - equal:
-          path: spec.template.spec.containers[0].startupProbe.httpGet.path
-          value: /v1/health
-      - equal:
-          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
-          value: /v1/health
-      - equal:
-          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
-          value: /v1/health
-
-  - it: moves only the PD readiness probe when pd.readinessPath is set
-    template: pd-statefulset.yaml
-    set:
-      pd.readinessPath: /v1/ready
     asserts:
       - equal:
           path: spec.template.spec.containers[0].readinessProbe.httpGet.path
@@ -45,29 +30,44 @@ tests:
           path: spec.template.spec.containers[0].livenessProbe.httpGet.path
           value: /v1/health
 
-  - it: polls /v1/health on each PD peer in the Store wait by default
-    template: store-statefulset.yaml
-    asserts:
-      - matchRegex:
-          path: spec.template.spec.initContainers[0].command[2]
-          pattern: 'WAIT_PATH="/v1/health"'
-      - matchRegex:
-          path: spec.template.spec.initContainers[0].command[2]
-          pattern: 'curl -fsS "http://\${peer}\${WAIT_PATH}"'
-
-  - it: polls store.waitPath on each PD peer when set
-    template: store-statefulset.yaml
+  - it: moves only the PD readiness probe when pd.readinessPath is set back for an older image
+    template: pd-statefulset.yaml
     set:
-      store.waitPath: /v1/ready
+      pd.readinessPath: /v1/health
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /v1/health
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /v1/health
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /v1/health
+
+  - it: polls /v1/ready on each PD peer in the Store wait by default
+    template: store-statefulset.yaml
     asserts:
       - matchRegex:
           path: spec.template.spec.initContainers[0].command[2]
           pattern: 'WAIT_PATH="/v1/ready"'
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'curl -fsS "http://\${peer}\${WAIT_PATH}"'
+
+  - it: polls store.waitPath on each PD peer when set back for an older image
+    template: store-statefulset.yaml
+    set:
+      store.waitPath: /v1/health
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: 'WAIT_PATH="/v1/health"'
       - notMatchRegex:
           path: spec.template.spec.initContainers[0].command[2]
-          pattern: 'v1/health'
+          pattern: 'v1/ready'
 
-  - it: leaves the Store's own probes on /v1/health when store.waitPath is set
+  - it: leaves the Store's own probes on /v1/health whatever store.waitPath is
     template: store-statefulset.yaml
     set:
       store.waitPath: /v1/ready

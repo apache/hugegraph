@@ -279,6 +279,11 @@ spec:
               value: {{ include "hugegraph.store.restPrimary" . | quote }}
             - name: HG_SERVER_INIT_STORE_ENABLED
               value: {{ .Values.server.initStoreEnabled | quote }}
+            # The image would otherwise give the start command 120 seconds,
+            # less than the storage wait, and kill a Server that is still
+            # coming up. Track the startup probe's own budget instead.
+            - name: HG_SERVER_STARTUP_TIMEOUT_S
+              value: {{ include "hugegraph.server.startupTimeoutSeconds" . | quote }}
             {{- if $pdMeta }}
             - name: HG_SERVER_URLS_TO_PD
               value: {{ include "hugegraph.server.urlsToPd" . | quote }}

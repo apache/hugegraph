@@ -45,9 +45,10 @@ so operators do not have to:
   required for distributed HStore and does not make a local RocksDB backend
   shared across replicas.
 - **Store waits for PD** in an init container before starting: a majority of
-  the PD peers must answer `store.waitPath`. The default `/v1/health` proves
-  each PD's listener is up, not that a raft quorum exists; see Limitations for
-  the `/v1/ready` switch.
+  the PD peers must answer `store.waitPath`. The default `/v1/ready` stays 503
+  until a raft leader exists, so that majority is a quorum and not merely a set
+  of live listeners. PD images that predate the endpoint need the value set
+  back to `/v1/health`; see Limitations.
 - **One PD REST secret, three readers.** PD images from 1.8.0
   ([#3189](https://github.com/apache/hugegraph/pull/3189)) check the Basic-auth
   password of every management call against `auth.secret-key` and refuse to
@@ -57,10 +58,16 @@ so operators do not have to:
   `operations.pd.password`; a `checksum/pd-auth` annotation rolls all three
   when the Secret changes. Older images ignore the password, so the wiring is
   harmless on them.
-- **The Server startup probe allows at least 450 seconds.** The image may spend
-  300 seconds waiting for storage and a further 120 seconds in the start
-  command. A lower configured `failureThreshold` is raised to this floor rather
-  than being rejected.
+- **The Server startup probe allows at least 450 seconds, and the image gets
+  the same budget.** The container may spend 300 seconds waiting for storage
+  and the rest in the start command, so the chart sets
+  `HG_SERVER_STARTUP_TIMEOUT_S` to the startup probe's own budget
+  (`failureThreshold` * `periodSeconds`, 450 seconds by default) rather than
+  leaving the image's 120-second default, which would self-kill a Server that
+  was still starting. A lower configured `failureThreshold` is raised to the
+  450-second floor rather than being rejected, and raising the probe budget
+  raises the timeout with it. The variable is chart-managed, so
+  `server.extraEnv` may not set it; change the probe instead.
 - **The wrapper writes `auth.admin_pa` from the auth Secret.** With
   `init_store.enabled=false` the admin credential is created on the PD startup
   path from `auth.admin_pa`, not from the Docker `PASSWORD` stdin path. When
@@ -904,34 +911,35 @@ independently of the release name.
   exposed to those failure modes; use images built from a source tree that
   includes the switch.
 - The PD management REST endpoints (`/v1/members`, `/v1/stores`,
-  `/v1/task/*`) authenticate on service name only on PD images up to 1.7.0.
-  Those images compare the Basic-auth username against a fixed internal set
-  (`hg`, `store`, `hubble`, `vermeer`) and do not validate the password at
-  all, so any password, including an empty one, is accepted for those names
-  while every other name is refused, and all three outcomes, success,
-  refusal, and a missing credential, return HTTP 200 with the result in the
-  body. Treat these endpoints as unauthenticated on such images: keep the PD
-  client Service on ClusterIP and do not expose it, and do not key a health
-  check on the status code. PD images from 1.8.0
-  ([#3189](https://github.com/apache/hugegraph/pull/3189)) check the password
-  against `auth.secret-key` and answer 401 on refusal; the chart supplies that
-  secret through `pd.auth` (see Chart Details), and the Disaster Recovery
-  calls above need it.
+  `/v1/task/*`) check the Basic-auth password against `auth.secret-key` and
+  answer 401 on refusal since
+  [#3189](https://github.com/apache/hugegraph/pull/3189), which is merged
+  upstream and due in 1.8.0. The chart supplies that secret through `pd.auth`
+  (see Chart Details), and the Disaster Recovery calls above need it. The
+  limitation is the older behaviour: PD images before that fix authenticate on
+  service name only. They compare the username against a fixed internal set
+  (`hg`, `store`, `hubble`, `vermeer`) and never look at the password, so any
+  password, including an empty one, is accepted for those names while every
+  other name is refused, and all three outcomes (success, refusal, and a
+  missing credential) return HTTP 200 with the result in the body. Treat these
+  endpoints as unauthenticated on such an image: keep the PD client Service on
+  ClusterIP and do not expose it, and do not key a health check on the status
+  code.
 - PD's `/v1/health` is liveness only: it answers 200 as soon as the REST
   listener is up and never consults raft. Measured on a 3-PD install with two
   PDs deleted, the survivor logged `Raft lost leader` within a second and kept
-  answering 200 while quorum-dependent calls failed. Every PD and Store probe
-  in this chart, and the Store init container's PD wait, key on that endpoint,
-  so a listening-but-leaderless PD passes readiness and the wait counts
-  listeners rather than quorum members. Tracked upstream as
-  [#3183](https://github.com/apache/hugegraph/issues/3183); the fix,
-  [#3185](https://github.com/apache/hugegraph/pull/3185), adds an
-  unauthenticated `/v1/ready` that answers 503 without a raft leader, plus
-  raft gauges, from 1.8.0. On such an image set `pd.readinessPath=/v1/ready`
-  and `store.waitPath=/v1/ready`; keep startup and liveness on `/v1/health`
-  so a PD that merely lost its leader is not restarted. Do not set either
-  path on an older image: it does not exist there, the PD never turns Ready
-  and Stores never leave Init.
+  answering 200 while quorum-dependent calls failed
+  ([#3183](https://github.com/apache/hugegraph/issues/3183)). The fix,
+  [#3185](https://github.com/apache/hugegraph/pull/3185), is merged upstream
+  and due in 1.8.0: an unauthenticated `/v1/ready` that answers 503 without a
+  raft leader, plus raft gauges. The chart defaults `pd.readinessPath` and
+  `store.waitPath` to `/v1/ready` accordingly, and keeps PD startup and
+  liveness on `/v1/health` so a PD that merely lost its leader is not
+  restarted. The limitation is what happens on a PD image that predates the
+  fix: `/v1/ready` does not exist there, so the PD never turns Ready and
+  Stores never leave Init. Set both values back to `/v1/health` on such an
+  image, and accept that readiness then passes for a leaderless PD and the
+  Store wait counts listeners rather than quorum members.
 - Server discovery is a lease. Each Server re-registers its Pod IP with PD
   every 15 seconds and PD drops an entry after three missed heartbeats, so a
   replaced or evicted Server can stay in PD's list for up to 45 seconds after
