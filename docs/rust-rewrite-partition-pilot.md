@@ -45,3 +45,7 @@
 - 产出包含输入、seed、配置、日志、差异和结论的报告。
 
 试点通过后，复制模板到 Store Snapshot、事务和 Raft 成员变更；试点未通过时，暂停生产路径迁移。
+
+## 6. POC execution evidence (2026-09-10)
+
+A standalone invariant oracle was implemented at `tools/rust-partition-poc`. It has no dependency on Java output or production PD code. Running `cargo test --manifest-path tools/rust-partition-poc/Cargo.toml` produced **6 passed, 0 failed**. The suite detects dropped ranges, overlaps, version regression, stale heartbeats, and verifies heartbeat idempotence. This is a model-level POC only; cache invalidation, crash replay, restart recovery, Java differential replay, and two-person review remain open gates.
