@@ -51,3 +51,5 @@
 A standalone invariant oracle was implemented at `tools/rust-partition-poc`. It has no dependency on Java output or production PD code. Running `cargo test --manifest-path tools/rust-partition-poc/Cargo.toml` produced **6 passed, 0 failed**. The suite detects dropped ranges, overlaps, version regression, stale heartbeats, and verifies heartbeat idempotence. This is a model-level POC only; cache invalidation, crash replay, restart recovery, Java differential replay, and two-person review remain open gates.
 
 补充执行结果：Oracle 已加入确定性日志重放、损坏重启状态和重复过期事件测试，当前共 **9 passed, 0 failed**。这完成了模型层的恢复/重放闭环；服务级缓存通知丢失和 PD 进程崩溃编排仍必须在 `hg-pd-test` 集成环境执行，不能由模型测试替代。
+
+真实集成执行记录（2026-09-10）：RAT 已通过，但 Maven 在解析 `maven-surefire-plugin:2.20` 时因当前环境无法写入 `/home/zy/.m2` 且缺少缓存而停止，未进入测试阶段。该结果标记为环境阻塞，不能计作通过；重试需提供可写 Maven 本地仓库并保存 Surefire 报告。

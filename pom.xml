@@ -181,6 +181,7 @@
                             <exclude>**/swagger-ui/**/*</exclude>
                             <exclude>scripts/dev/reviewers</exclude>
                             <exclude>**/*.md</exclude>
+                            <exclude>docs/rust-test-traceability.csv</exclude>
                             <exclude>**/dependency-reduced-pom.xml</exclude>
                             <exclude>**/logs/*.log</exclude>
                             <exclude>**/META-INF/**/*</exclude>
