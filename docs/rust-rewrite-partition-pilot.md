@@ -55,3 +55,5 @@ A standalone invariant oracle was implemented at `tools/rust-partition-poc`. It 
 真实集成执行记录（2026-09-10）：RAT 已通过，但 Maven 在解析 `maven-surefire-plugin:2.20` 时因当前环境无法写入 `/home/zy/.m2` 且缺少缓存而停止，未进入测试阶段。该结果标记为环境阻塞，不能计作通过；重试需提供可写 Maven 本地仓库并保存 Surefire 报告。
 
 重试记录：改用 `-Dmaven.repo.local=/tmp/hugegraph-m2` 后，构建因 DNS 无法解析 `repo.maven.apache.org`，缺少 `org.apache:apache:23` 父 POM而停止。该环境阻塞仍未计作测试通过。
+
+Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -- -D warnings` 和 `cargo test` 均通过；测试仍为 9 项通过。
