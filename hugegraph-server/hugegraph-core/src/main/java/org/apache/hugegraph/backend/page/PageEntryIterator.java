@@ -20,8 +20,8 @@ package org.apache.hugegraph.backend.page;
 import java.util.Iterator;
 
 import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
 import org.apache.hugegraph.backend.query.QueryBatch;
+import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
 import org.apache.hugegraph.exception.NotSupportException;
 import org.apache.hugegraph.util.E;
 
@@ -39,8 +39,8 @@ public class PageEntryIterator<R> extends BatchIterator<QueryBatch<R>> {
         this.pageSize = pageSize;
         this.pageInfo = PageInfo.fromString(queries.parent().pageWithoutCheck());
         E.checkState(this.pageInfo.offset() < queries.total(),
-                     "Invalid page offset '%s' exceeds the size of IdHolderList",
-                     this.pageInfo.offset());
+                     "Invalid page '%s' with an offset '%s' exceeds the size of IdHolderList",
+                     queries.parent().pageWithoutCheck(), this.pageInfo.offset());
         this.remaining = queries.parent().limit();
     }
 

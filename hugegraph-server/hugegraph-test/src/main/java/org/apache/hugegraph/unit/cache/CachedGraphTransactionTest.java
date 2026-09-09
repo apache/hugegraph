@@ -33,6 +33,7 @@ import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.Cache;
+import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.cache.OffheapCache;
 import org.apache.hugegraph.backend.id.EdgeId;
@@ -684,6 +685,33 @@ public class CachedGraphTransactionTest extends BaseUnitTest {
             transaction.close();
             AutoCloseable nativeCache = Whitebox.getInternalState(offheap, "cache");
             nativeCache.close();
+        }
+    }
+
+    @Test
+    public void testRootEdgeBatchUsesCompactLabelAndCopyOnWrite() {
+        List<Id> ids = this.persistEdges(2);
+        IdQuery root = new IdQuery(HugeType.EDGE, new LinkedHashSet<>(ids.subList(0, 1)));
+        BackendStore store = Mockito.spy(this.params.loadGraphStore());
+        CachedGraphTransaction transaction = new CachedGraphTransaction(this.params, store);
+        try {
+            transaction.clearCache(null, false);
+            this.assertEdgeIds(ids.subList(0, 1), this.fetchEdgeIds(transaction, root));
+            Cache<Id, Object> cache = Whitebox.getInternalState(transaction, "edgesCache");
+            Id key = new QueryId(root);
+            List<?> original = (List<?>) cache.get(key);
+            Assert.assertEquals("", original.get(0));
+            Assert.assertEquals(2, original.size());
+            IdQuery sibling = new IdQuery(root, new LinkedHashSet<>(ids.subList(1, 2)));
+            this.assertEdgeIds(ids.subList(1, 2), this.fetchEdgeIds(transaction, sibling));
+            Assert.assertEquals(2, original.size());
+            Assert.assertEquals(4, ((List<?>) cache.get(key)).size());
+            Mockito.clearInvocations(store);
+            this.assertEdgeIds(ids.subList(0, 1), this.fetchEdgeIds(transaction, root));
+            this.assertEdgeIds(ids.subList(1, 2), this.fetchEdgeIds(transaction, sibling));
+            Mockito.verify(store, Mockito.never()).query(Mockito.any(Query.class));
+        } finally {
+            transaction.close();
         }
     }
 

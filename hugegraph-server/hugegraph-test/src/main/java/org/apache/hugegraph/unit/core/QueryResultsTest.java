@@ -46,6 +46,34 @@ import com.google.common.collect.ImmutableList;
 public class QueryResultsTest {
 
     @Test
+    public void testLaterBranchFailureClosesEarlierBranch() {
+        CountingIterator source = new CountingIterator(1L);
+        RuntimeException failure = new IllegalArgumentException("later branch");
+        int[] activated = {0};
+        QueryResults<TestIdfiable> results = QueryResults.flatMap(
+                ImmutableList.of(0, 1).iterator(), index -> {
+                    activated[0]++;
+                    if (index == 1) {
+                        throw failure;
+                    }
+                    return new QueryResults<>(source, queryOf(1L));
+                });
+        Assert.assertEquals(0, activated[0]);
+        Iterator<TestIdfiable> values = results.iterator();
+        Assert.assertEquals(IdGenerator.of(1L), values.next().id());
+        Assert.assertEquals(1, activated[0]);
+        try {
+            values.hasNext();
+            Assert.fail("Expected later branch failure");
+        } catch (IllegalArgumentException actual) {
+            Assert.assertSame(failure, actual);
+        }
+        Assert.assertEquals(1, source.closed);
+        Assert.assertEquals(2, activated[0]);
+        Assert.assertFalse(values.hasNext());
+    }
+
+    @Test
     public void testMaterializationKeepsPageMetadataAfterClosingSource() {
         PageState page = new PageState(new byte[]{1, 2}, 0, 2);
         CountingIterator source = new CountingIterator(1L, 2L);

@@ -20,7 +20,6 @@ package org.apache.hugegraph.backend.tx;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -44,11 +43,11 @@ import org.apache.hugegraph.backend.id.SplicingIdGenerator;
 import org.apache.hugegraph.backend.page.IdHolderList;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.QueryList;
-import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
 import org.apache.hugegraph.backend.query.Aggregate;
+import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
 import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQueryFlatten;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
@@ -65,9 +64,7 @@ import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.iterator.BatchMapperIterator;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.iterator.FilterIterator;
-import org.apache.hugegraph.iterator.FlatMapperIterator;
 import org.apache.hugegraph.iterator.LimitIterator;
-import org.apache.hugegraph.iterator.ListIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.job.system.DeleteExpiredJob;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
@@ -102,7 +99,6 @@ import org.apache.tinkerpop.gremlin.structure.util.ElementHelper;
 import org.apache.tinkerpop.gremlin.util.iterator.IteratorUtils;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterators;
 
 import jakarta.ws.rs.ForbiddenException;
 
@@ -1110,6 +1106,8 @@ public class GraphTransaction extends IndexableTransaction {
             if (flattened.size() == 1) {
                 return fetcher.apply(flattened.get(0));
             }
+            // Each branch is validated when activated, so later branches may fail
+            // during iteration after earlier branches have already returned results.
             return QueryResults.flatMap(flattened.iterator(), fetcher);
         }
         return this.queryEdgeBatchesFromBackendInternal(query);
@@ -1982,8 +1980,11 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     protected <T extends HugeElement> QueryResults<T> filterExpiredBatches(QueryResults<T> batches) {
+        if (this.storeFeatures().supportsTtl()) {
+            return batches;
+        }
         return batches.filter((context, elem) -> {
-            if (this.storeFeatures().supportsTtl() || context.showExpired() || !elem.expired()) {
+            if (context.showExpired() || !elem.expired()) {
                 return true;
             }
             DeleteExpiredJob.asyncDeleteExpiredObject(this.graph(), elem);

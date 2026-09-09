@@ -18,7 +18,6 @@
 package org.apache.hugegraph.backend.query;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -68,11 +67,29 @@ public final class QueryBatch<R> implements AutoCloseable {
     }
 
     public <T> QueryBatch<T> map(Function<R, T> mapper) {
-        return this.flatMap(value -> {
-            T mapped = mapper.apply(value);
-            return mapped == null ? Collections.emptyIterator() :
-                   Collections.singleton(mapped).iterator();
-        });
+        Iterator<R> origin = this.results;
+        return new QueryBatch<>(new BatchIterator<T>() {
+            @Override
+            protected T fetch() {
+                while (origin.hasNext()) {
+                    T mapped = mapper.apply(origin.next());
+                    if (mapped != null) {
+                        return mapped;
+                    }
+                }
+                return null;
+            }
+
+            @Override
+            protected void closeResources() throws Exception {
+                closeAll(origin);
+            }
+
+            @Override
+            public Object metadata(String meta, Object... args) {
+                return metadataOf(origin, meta, args);
+            }
+        }, this.context);
     }
 
     public <T> QueryBatch<T> flatMap(Function<R, Iterator<T>> mapper) {

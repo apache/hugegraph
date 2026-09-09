@@ -374,8 +374,10 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
         Id cacheKey = new QueryId(request);
         Id batchKey = new QueryId(query);
+        // An empty label denotes the outer request itself without duplicating its text.
+        String batchLabel = batchKey.equals(cacheKey) ? "" : batchKey.asString();
         CachedEdgeQuery group = new CachedEdgeQuery(this.edgesCache.get(cacheKey));
-        Collection<HugeEdge> cached = group.get(batchKey);
+        Collection<HugeEdge> cached = group.get(batchLabel);
         if (cached != null) {
             for (HugeEdge edge : cached) {
                 if (edge.expired()) {
@@ -390,7 +392,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
         QueryResults<HugeEdge> fetched = super.fetchEdgeBatch(query);
         if (!fetched.batches().hasNext()) {
-            this.cacheEdgeBatch(cacheKey, batchKey, Collections.emptyList());
+            this.cacheEdgeBatch(cacheKey, batchLabel, Collections.emptyList());
             return fetched;
         }
         return fetched.mapBatches(batch -> {
@@ -401,17 +403,17 @@ public final class CachedGraphTransaction extends GraphTransaction {
                 candidates.add(source.next());
             }
             if (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY) {
-                this.cacheEdgeBatch(cacheKey, batchKey, candidates);
+                this.cacheEdgeBatch(cacheKey, batchLabel, candidates);
             }
             return new QueryBatch<>(
                     new ExtendableIterator<>(candidates.iterator(), source), batch.context());
         });
     }
 
-    private void cacheEdgeBatch(Id cacheKey, Id batchKey, List<HugeEdge> candidates) {
+    private void cacheEdgeBatch(Id cacheKey, String batchLabel, List<HugeEdge> candidates) {
         synchronized (this.edgesCache) {
-            CachedEdgeQuery existing = new CachedEdgeQuery(this.edgesCache.get(cacheKey));
-            if (existing.put(batchKey, candidates)) {
+            CachedEdgeQuery existing = new CachedEdgeQuery(this.edgesCache.get(cacheKey)).copy();
+            if (existing.put(batchLabel, candidates)) {
                 this.edgesCache.update(cacheKey, existing.values);
             }
         }
@@ -426,20 +428,24 @@ public final class CachedGraphTransaction extends GraphTransaction {
         @SuppressWarnings("unchecked")
         private CachedEdgeQuery(Object cached) {
             this.values = cached == null ? new ArrayList<>() :
-                          new ArrayList<>((List<Object>) cached);
+                          (List<Object>) cached;
+        }
+
+        private CachedEdgeQuery copy() {
+            return new CachedEdgeQuery(new ArrayList<>(this.values));
         }
 
         @SuppressWarnings("unchecked")
-        public Collection<HugeEdge> get(Id batch) {
+        public Collection<HugeEdge> get(String batch) {
             for (int i = 0; i < this.values.size(); i += 2) {
-                if (this.values.get(i).equals(batch.asString())) {
+                if (this.values.get(i).equals(batch)) {
                     return (List<HugeEdge>) this.values.get(i + 1);
                 }
             }
             return null;
         }
 
-        public boolean put(Id batch, List<HugeEdge> candidates) {
+        public boolean put(String batch, List<HugeEdge> candidates) {
             if (this.get(batch) != null) {
                 return false;
             }
@@ -451,7 +457,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
                 this.values.size() / 2 >= MAX_CACHE_EDGES_PER_QUERY) {
                 return false;
             }
-            this.values.add(batch.asString());
+            this.values.add(batch);
             this.values.add(new ArrayList<>(candidates));
             return true;
         }
