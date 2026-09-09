@@ -28,14 +28,14 @@ ARG MAVEN_ARGS
 ARG SOURCE_REVISION=local
 
 RUN --mount=type=cache,id=hugegraph-maven-${SOURCE_REVISION},target=/root/.m2,sharing=locked \
-    mvn install $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
+    mvn install -pl hugegraph-server/hugegraph-dist,hugegraph-pd/hg-pd-dist,hugegraph-store/hg-store-dist \
+        -am $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
     && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
 FROM eclipse-temurin:11-jre-jammy
 
-COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default
@@ -46,7 +46,7 @@ ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:Max
 
 WORKDIR /hugegraph-server/
 
-# 1. Install runtime dependencies and configure server
+# 1. Install runtime dependencies
 # Note: iproute2 provides `ss`, which the bin/util.sh port preflight needs.  The
 # jammy base image ships neither ss nor netstat, so without it the preflight is
 # permanently inconclusive and a duplicate start is no longer caught.  It
@@ -59,8 +59,10 @@ RUN apt-get -q update \
        iproute2 \
        vim \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/rest-server.properties
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
+RUN sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/rest-server.properties
 
 # 2. Init docker script
 COPY hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
