@@ -33,3 +33,31 @@ mod tests {
     #[test] fn rejects_stale_heartbeat() { let mut c=Partition{start:0,end:10,version:2}; assert_eq!(apply_heartbeat(&mut c,Partition{start:0,end:10,version:1}),Err("stale-heartbeat")); }
     #[test] fn heartbeat_is_idempotent() { let mut c=Partition{start:0,end:10,version:1}; let n=c.clone(); apply_heartbeat(&mut c,n.clone()).unwrap(); apply_heartbeat(&mut c,n).unwrap(); assert_eq!(c.version,1); }
 }
+
+pub fn replay(mut state: Vec<Partition>, events: &[Partition], max: u64) -> Result<Vec<Partition>, &'static str> {
+    for event in events {
+        if let Some(current) = state.iter_mut().find(|p| p.start == event.start) {
+            apply_heartbeat(current, event.clone())?;
+        } else { return Err("unknown-partition"); }
+    }
+    validate(&state, max)?;
+    Ok(state)
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    fn base() -> Vec<Partition> { vec![Partition{start:0,end:10,version:1}, Partition{start:10,end:20,version:1}] }
+    #[test] fn replay_is_deterministic() {
+        let events = vec![Partition{start:0,end:10,version:2}, Partition{start:10,end:20,version:2}];
+        assert_eq!(replay(base(), &events, 20), replay(base(), &events, 20));
+    }
+    #[test] fn replay_rejects_corrupt_restart_state() {
+        let mut state = base(); state[1].start = 11;
+        assert_eq!(replay(state, &[], 20), Err("gap-or-overlap"));
+    }
+    #[test] fn replay_rejects_duplicate_stale_event() {
+        let events = vec![Partition{start:0,end:10,version:2}, Partition{start:0,end:10,version:1}];
+        assert_eq!(replay(base(), &events, 20), Err("stale-heartbeat"));
+    }
+}
