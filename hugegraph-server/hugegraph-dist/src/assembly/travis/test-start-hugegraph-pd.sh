@@ -111,6 +111,27 @@ wait_for_pd() {
     return 1
 }
 
+# Wait until PD readiness answers, or timeout. Same gate the docs recommend:
+# -f rejects the 503, the body match rejects a 200 that is an auth envelope rather
+# than a readiness answer. No credentials, and a single-node group elects itself.
+# Captured rather than piped: under pipefail a grep -q SIGPIPE could misread a
+# ready PD, and wait_for_pd() above uses the same shape. The curl timeouts bound
+# each attempt and the loop bounds itself on the wall clock, so a PD that accepts
+# the connection and then stops answering cannot park this loop past STARTUP_WAIT.
+# A per-round counter could not: an attempt costs up to --max-time plus the sleep,
+# which is more than the counter would add.
+wait_for_pd_ready() {
+    local deadline=$((SECONDS + STARTUP_WAIT))
+    while (( SECONDS < deadline )); do
+        local body
+        body=$(curl --connect-timeout 2 --max-time 5 -fsS \
+            "$PD_URL/v1/ready" 2>/dev/null || true)
+        grep -Eq '"ready"[[:space:]]*:[[:space:]]*true' <<<"$body" && return 0
+        sleep 2
+    done
+    return 1
+}
+
 # Wait until bin/pid is non-empty or timeout
 wait_for_pid_file() {
     local elapsed=0
@@ -197,6 +218,13 @@ if wait_for_pd; then
     pass "PD health endpoint responding at $PD_URL/v1/health"
 else
     fail "PD health endpoint not responding after ${STARTUP_WAIT}s"
+fi
+
+info "Waiting up to ${STARTUP_WAIT}s for PD readiness endpoint..."
+if wait_for_pd_ready; then
+    pass "PD readiness endpoint reports a raft leader at $PD_URL/v1/ready"
+else
+    fail "PD readiness endpoint did not report ready=true after ${STARTUP_WAIT}s"
 fi
 
 cleanup

@@ -39,7 +39,30 @@ log() {
   echo "[wait-storage] $1"
 }
 
-PD_AUTH_ARGS="-u ${PD_AUTH_USER:-store}:${PD_AUTH_PASSWORD:-admin}"
+# PD REST credential. PD checks the password against its auth.secret-key and
+# ships no default, so this has to be provided by the deployment.
+# The value is deliberately kept out of the inner script's source text and out
+# of curl's argv: the inner shell reads it from the environment and hands it to
+# curl on stdin as a config file.
+PD_AUTH_USER="${PD_AUTH_USER:-store}"
+PD_AUTH_PASSWORD="${PD_AUTH_PASSWORD:-}"
+# curl -K reads one option per line and takes the value as a quoted string
+# whose only escapes are \\ \" \t \n \r \v. Backslash first, then the rest;
+# an unescaped line break would end the option early and send a truncated
+# credential (curl then warns that the remainder is an unknown option).
+escape_curlrc() {
+  local v=$1
+  v=${v//\\/\\\\}
+  v=${v//\"/\\\"}
+  v=${v//$'\n'/\\n}
+  v=${v//$'\r'/\\r}
+  v=${v//$'\t'/\\t}
+  v=${v//$'\v'/\\v}
+  printf '%s' "$v"
+}
+PD_AUTH_CURL_USER=$(escape_curlrc "${PD_AUTH_USER}")
+PD_AUTH_CURL_PASSWORD=$(escape_curlrc "${PD_AUTH_PASSWORD}")
+export PD_AUTH_CURL_USER PD_AUTH_CURL_PASSWORD
 
 function key_exists {
     local key=$1
@@ -93,33 +116,77 @@ if env | grep '^hugegraph\.' > /dev/null; then
 
             export PD_REST_LIST
             log "PD REST peers = $PD_REST_LIST"
+            # Only worth saying where PD is actually polled: topologies without
+            # pd.peers never send this credential anywhere.
+            if [ -z "${PD_AUTH_PASSWORD}" ]; then
+              log "WARN: PD_AUTH_PASSWORD is empty; PD will answer 401 unless it runs without auth"
+            fi
             log "Timeout = ${WAIT_STORAGE_TIMEOUT_S}s"
 
             timeout "${WAIT_STORAGE_TIMEOUT_S}s" bash -c "
 
               log() { echo '[wait-storage] '\"\$1\"; }
 
+              # curl stays out of the grep pipeline so its status code is
+              # readable: a 401 is a wrong secret, not a storage problem, and
+              # retrying it for 300s only hides that.
+              #
+              # 401s are counted, not flagged, so the abort is for the fleet
+              # and never for one peer. That distinction is real: PD serves
+              # /v1/stores well before stores finish registering, so the first
+              # pass of a rolling secret rotation can find one stale peer
+              # refusing while the healthy peers are merely storeless. A flag
+              # turned that into a dead Server. Returning 2 only when every
+              # peer polled refused keeps the fail-fast for a fleet-wide wrong
+              # secret, which still aborts on pass one instead of retrying for
+              # the full 300s.
               check_any_pd_stores() {
+                refused=0
+                peers=0
                 for peer in \$(echo \"\$PD_REST_LIST\" | tr ',' ' '); do
-                  if curl ${PD_AUTH_ARGS} -f -s \
-                     --connect-timeout ${WAIT_STORAGE_PD_CONNECT_TIMEOUT_S} \
-                     --max-time ${WAIT_STORAGE_PD_MAX_TIMEOUT_S} \
-                     http://\${peer}/v1/stores 2>/dev/null | \
-                     grep -qi '\"state\"[[:space:]]*:[[:space:]]*\"Up\"'; then
+                  peers=\$((peers + 1))
+                  body=\$(printf 'user = \"%s:%s\"\n' \
+                           \"\$PD_AUTH_CURL_USER\" \"\$PD_AUTH_CURL_PASSWORD\" | \
+                         curl -K - -s -w '\n%{http_code}' \
+                         --connect-timeout ${WAIT_STORAGE_PD_CONNECT_TIMEOUT_S} \
+                         --max-time ${WAIT_STORAGE_PD_MAX_TIMEOUT_S} \
+                         \"http://\${peer}/v1/stores\" 2>/dev/null)
+                  code=\${body##*\$'\n'}
+                  if [ \"\$code\" = 401 ]; then
+                    log \"ERROR: PD at \${peer} refused the credential (401):\" >&2
+                    log '       PD_AUTH_PASSWORD must match PD auth.secret-key' >&2
+                    refused=\$((refused + 1))
+                    continue
+                  fi
+                  if printf '%s' \"\$body\" | grep -qi '\"state\"[[:space:]]*:[[:space:]]*\"Up\"'; then
                     echo \"\$peer\"
                     return 0
                   fi
                 done
+                [ \"\$peers\" -gt 0 ] && [ \"\$refused\" -eq \"\$peers\" ] && return 2
                 return 1
               }
 
               until PD_REST=\$(check_any_pd_stores); do
+                # Must stay the first statement in the loop: any command in
+                # front of it would overwrite \$? and turn the 401 abort back
+                # into a 300s retry.
+                rc=\$?
+                if [ \"\$rc\" -eq 2 ]; then exit 2; fi
                 log 'No Up store yet, retrying in 5s'
                 sleep 5
               done
               log \"Store registration check PASSED via \$PD_REST\"
               log 'Storage backend is VIABLE'
-            " || { echo "[wait-storage] ERROR: Timeout waiting for storage backend"; exit 1; }
+            " || {
+                rc=$?
+                if [ "$rc" -eq 124 ]; then
+                    echo "[wait-storage] ERROR: Timeout waiting for storage backend"
+                else
+                    echo "[wait-storage] ERROR: storage wait aborted, see the message above"
+                fi
+                exit 1
+            }
 
         else
             log "No pd.peers configured, skipping storage wait"

@@ -844,8 +844,8 @@ public class GraphTransaction extends IndexableTransaction {
 
         query.resetActualOffset();
 
-        Iterator<HugeVertex> results = this.queryVerticesFromBackend(query);
-        results = this.filterUnmatchedRecords(results, query);
+        Iterator<HugeVertex> results =
+                this.queryValidVerticesFromBackend(query);
 
         @SuppressWarnings("unchecked")
         Iterator<Vertex> r = (Iterator<Vertex>) joinTxVertices(query, results);
@@ -861,12 +861,18 @@ public class GraphTransaction extends IndexableTransaction {
         Iterator<HugeVertex> vertices = new MapperIterator<>(entries,
                                                              this::parseEntry);
         vertices = this.filterExpiredResultFromBackend(query, vertices);
+        vertices = this.filterUnmatchedRecords(vertices, query);
 
         if (!this.store().features().supportsQuerySortByInputIds()) {
             // There is no id in BackendEntry, so sort after deserialization
             vertices = results.keepInputOrderIfNeeded(vertices);
         }
         return vertices;
+    }
+
+    private Iterator<HugeVertex> queryValidVerticesFromBackend(Query query) {
+        Iterator<HugeVertex> results = this.queryVerticesFromBackend(query);
+        return this.filterInvalidRecords(results, query);
     }
 
     @Watched(prefix = "graph")
@@ -1010,8 +1016,8 @@ public class GraphTransaction extends IndexableTransaction {
 
         query.resetActualOffset();
 
-        Iterator<HugeEdge> results = this.queryEdgesFromBackend(query);
-        results = this.filterUnmatchedRecords(results, query);
+        Iterator<HugeEdge> results =
+                this.queryValidEdgesFromBackend(query);
 
         /*
          * Without repeated edges if not querying by BOTH all edges
@@ -1079,6 +1085,11 @@ public class GraphTransaction extends IndexableTransaction {
         return queryEdgesFromBackendInternal(query);
     }
 
+    private Iterator<HugeEdge> queryValidEdgesFromBackend(Query query) {
+        Iterator<HugeEdge> results = this.queryEdgesFromBackend(query);
+        return this.filterInvalidRecords(results, query);
+    }
+
     private Iterator<HugeEdge> queryEdgesFromBackendInternal(Query query) {
         assert query.resultType().isEdge();
 
@@ -1100,6 +1111,7 @@ public class GraphTransaction extends IndexableTransaction {
         });
 
         edges = this.filterExpiredResultFromBackend(query, edges);
+        edges = this.filterUnmatchedRecords(edges, query);
 
         if (!this.store().features().supportsQuerySortByInputIds()) {
             // There is no id in BackendEntry, so sort after deserialization
@@ -1870,31 +1882,65 @@ public class GraphTransaction extends IndexableTransaction {
         }
     }
 
+    private <T extends HugeElement> Iterator<T> filterInvalidRecords(
+            Iterator<T> results,
+            Query query) {
+        // Filter unused records
+        return new FilterIterator<>(results, elem -> {
+            warnLeftRecord(elem);
+            return !invalidRecord(elem, query);
+        });
+    }
+
     private <T extends HugeElement> Iterator<T> filterUnmatchedRecords(
             Iterator<T> results,
             Query query) {
-        // Filter unused or incorrect records
+        /*
+         * Filter against the current index sub-query before restoring input
+         * order, since the order iterator may prefetch the next sub-query and
+         * update the results filter of the origin query.
+         * FilterIterator tests and buffers each element before its upstream
+         * iterator is advanced again, so the element is always tested with
+         * the results filter of the sub-query that produced it.
+         */
         return new FilterIterator<>(results, elem -> {
-            // TODO: Left vertex/edge should to be auto removed via async task
-            if (elem.schemaLabel().undefined()) {
-                LOG.warn("Left record is found: id={}, label={}, properties={}",
-                         elem.id(), elem.schemaLabel().id(),
-                         elem.getPropertiesMap());
-            }
-            // Filter hidden results
-            if (!query.showHidden() && Graph.Hidden.isHidden(elem.label())) {
-                return false;
-            }
-            // Filter vertices/edges of deleting label
-            if (elem.schemaLabel().status().deleting() &&
-                !query.showDeleting()) {
-                return false;
+            /*
+             * Preserve the original predicate order: hidden records and
+             * records of deleting labels must be handled by the downstream
+             * invalid-record filter without triggering left-index cleanup.
+             */
+            if (invalidRecord(elem, query)) {
+                return true;
             }
             // Process results that query from left index or primary-key
             // Only index query will come here
-            return query.resultType().isVertex() != elem.type().isVertex() ||
-                   rightResultFromIndexQuery(query, elem);
+            boolean matched =
+                    query.resultType().isVertex() != elem.type().isVertex() ||
+                    rightResultFromIndexQuery(query, elem);
+            if (!matched) {
+                warnLeftRecord(elem);
+            }
+            return matched;
         });
+    }
+
+    private static boolean invalidRecord(HugeElement elem, Query query) {
+        // Filter hidden results
+        if (!query.showHidden() && Graph.Hidden.isHidden(elem.label())) {
+            return true;
+        }
+        // Filter vertices/edges of deleting label
+        return elem.schemaLabel().status().deleting() &&
+               !query.showDeleting();
+    }
+
+    private static void warnLeftRecord(HugeElement elem) {
+        // TODO: Left vertex/edge should to be auto removed via async task
+        if (elem.schemaLabel().undefined()) {
+            LOG.warn("Left record is found: id={}, label={}, properties={}",
+                     elem.id(), elem.schemaLabel().id(),
+                     elem.getPropertiesMap());
+        }
     }
 
     private boolean rightResultFromIndexQuery(Query query, HugeElement elem) {
@@ -1930,7 +1976,7 @@ public class GraphTransaction extends IndexableTransaction {
             }
         }
 
-        if (cq.optimized() == OptimizedType.NONE || cq.test(elem)) {
+        if (!conditionQueryNeedsPostFilter(cq) || cq.test(elem)) {
             if (cq.existLeftIndex(elem.id())) {
                 /*
                  * Both have correct and left index, wo should return true
@@ -1961,6 +2007,33 @@ public class GraphTransaction extends IndexableTransaction {
             }
         }
         return false;
+    }
+
+    protected static boolean queryNeedsPostFilter(Query query) {
+        while (query != null) {
+            if (query instanceof ConditionQuery) {
+                ConditionQuery cq = (ConditionQuery) query;
+                /*
+                 * Search conditions need post-filtering even before query
+                 * optimization marks the query with an optimized type.
+                 */
+                boolean edgeIndexWithLabel =
+                        cq.resultType().isEdge() &&
+                        cq.optimized() == OptimizedType.INDEX &&
+                        cq.condition(HugeKeys.LABEL) != null;
+                if (cq.hasSearchCondition() ||
+                    (conditionQueryNeedsPostFilter(cq) &&
+                     !edgeIndexWithLabel)) {
+                    return true;
+                }
+            }
+            query = query.originQuery();
+        }
+        return false;
+    }
+
+    private static boolean conditionQueryNeedsPostFilter(ConditionQuery query) {
+        return query.optimized() != OptimizedType.NONE;
     }
 
     private <T extends HugeElement> Iterator<T> filterExpiredResultFromBackend(

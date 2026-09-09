@@ -35,6 +35,10 @@ backend=rocksdb
 EOF
 cat > "${TEST_HOME}/bin/start-hugegraph.sh" <<'EOF'
 #!/usr/bin/env bash
+# One argument per line, so an assertion can read the exact -t value rather
+# than substring-matching a flattened "$*", where -t 1200 contains -t 120.
+printf '%s\n' "$@" > ./docker/start-hugegraph-argv
+printf 'called\n' >> ./docker/start-hugegraph-calls
 exit 0
 EOF
 cat > "${TEST_HOME}/bin/init-store.sh" <<'EOF'
@@ -231,5 +235,93 @@ rm -f "${TEST_HOME}/docker/init_complete"
     PASSWORD=-n bash ./docker-entrypoint.sh
 )
 grep -Fqx -- '-n' "${TEST_HOME}/docker/init-store-password"
+
+# The value start-hugegraph.sh actually received for -t, read from the
+# recorded argument vector so that -t 1200 can never satisfy an assertion
+# that wants 120.
+last_start_timeout() {
+    local previous="" argument
+    while IFS= read -r argument; do
+        if [[ "${previous}" == "-t" ]]; then
+            printf '%s\n' "${argument}"
+            return 0
+        fi
+        previous="${argument}"
+    done < "${TEST_HOME}/docker/start-hugegraph-argv"
+    return 1
+}
+
+# Spelled with an explicit exit rather than a bare [[ ]]: bash 3.2, still the
+# /bin/bash of macOS, does not apply set -e to a failing [[ ]], so a bare
+# assertion reports PASS there while CI catches the regression.
+assert_start_timeout() {
+    local expected="$1" actual
+    if ! actual=$(last_start_timeout); then
+        echo "start-hugegraph.sh received no -t argument" >&2
+        exit 1
+    fi
+    if [[ "${actual}" != "${expected}" ]]; then
+        echo "expected start-hugegraph.sh -t ${expected}, got -t ${actual}" >&2
+        exit 1
+    fi
+}
+
+# An absent variable keeps the historical default. env -u rather than a bare
+# subshell: a child shell inherits an exported HG_SERVER_STARTUP_TIMEOUT_S, so
+# without it this case would silently exercise whatever the developer exported.
+(
+    cd "${TEST_HOME}"
+    env -u HG_SERVER_STARTUP_TIMEOUT_S bash ./docker-entrypoint.sh
+)
+assert_start_timeout 120
+
+(
+    cd "${TEST_HOME}"
+    HG_SERVER_STARTUP_TIMEOUT_S=450 bash ./docker-entrypoint.sh
+)
+assert_start_timeout 450
+
+(
+    cd "${TEST_HOME}"
+    HG_SERVER_STARTUP_TIMEOUT_S=86400 bash ./docker-entrypoint.sh
+)
+assert_start_timeout 86400
+
+# An empty value is a set value, not an absent one: Compose writes it whenever
+# an interpolated host variable is missing. 2m is the shape of a typo, and the
+# two large values bracket the point where the deadline arithmetic in
+# wait_for_startup would wrap negative and end the wait before its first probe.
+for invalid_timeout in "" " " 0 +5 2m 86401 9223372036854775807; do
+    start_calls_before_invalid=$(wc -l < "${TEST_HOME}/docker/start-hugegraph-calls")
+    init_calls_before_invalid=$(wc -l < "${TEST_HOME}/docker/init-store-calls")
+    if (
+        cd "${TEST_HOME}"
+        HG_SERVER_STARTUP_TIMEOUT_S="${invalid_timeout}" \
+            bash ./docker-entrypoint.sh
+    ); then
+        echo "startup timeout '${invalid_timeout}' unexpectedly succeeded" >&2
+        exit 1
+    fi
+    # The server must not have started, and the guard must have run ahead of
+    # init-store, as the comment above it in the entrypoint claims.
+    if [[ "$(wc -l < "${TEST_HOME}/docker/start-hugegraph-calls")" -ne \
+          "${start_calls_before_invalid}" ]]; then
+        echo "startup timeout '${invalid_timeout}' started the server" >&2
+        exit 1
+    fi
+    if [[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -ne \
+          "${init_calls_before_invalid}" ]]; then
+        echo "startup timeout '${invalid_timeout}' was rejected only after" \
+             "init-store ran" >&2
+        exit 1
+    fi
+done
+
+# Still the default once the rejected values are out of the way.
+(
+    cd "${TEST_HOME}"
+    env -u HG_SERVER_STARTUP_TIMEOUT_S bash ./docker-entrypoint.sh
+)
+assert_start_timeout 120
 
 echo "PASS: Docker entrypoint configures HStore discovery and authentication"

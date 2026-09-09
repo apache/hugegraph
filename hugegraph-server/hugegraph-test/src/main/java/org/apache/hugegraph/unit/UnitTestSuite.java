@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
+import org.apache.hugegraph.backend.tx.GraphTransactionTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
@@ -152,6 +153,7 @@ import org.junit.runners.Suite;
         StandardHugeGraphClearBackendTest.class,
         ConditionQueryFlattenTest.class,
         GraphIndexTransactionTest.class,
+        GraphTransactionTest.class,
         QueryTest.class,
         QueryResultsTest.class,
         RangeTest.class,

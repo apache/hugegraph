@@ -79,6 +79,32 @@ server:
 - Metrics: `http://<host>:8620/actuator/metrics`
 - Prometheus: `http://<host>:8620/actuator/prometheus`
 
+### REST Authentication Settings
+
+Every REST request except the probes below must carry HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user, and the shared secret as the password. A missing or wrong credential gets HTTP 401. Unauthenticated paths: `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`.
+
+```yaml
+auth:
+  secret-key: <a value you generate, e.g. `openssl rand -hex 24`>
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `auth.secret-key` | String | none (required) | Password checked against the Basic credential. There is no default: a secret shipped in the source tree would be published to everyone. While it is empty PD refuses every authenticated REST request and logs an error naming this parameter, and PD refuses to start at all if it is set to the value that earlier revisions carried as a placeholder. |
+
+Every REST client needs the same value: the Server's `bin/wait-storage.sh` reads it from `PD_AUTH_PASSWORD`, Hubble from `operations.pd.password`, and the Docker image takes `HG_PD_AUTH_SECRET_KEY`.
+
+```bash
+curl -u hg:<secret> http://<host>:8620/v1/stores
+```
+
+`-u` puts the secret in curl's process arguments, where any local account can read it while the call runs, and PD REST is plain HTTP. On a shared host, or across a network you do not control, keep the secret out of `argv` by reading it from a file mode 0600:
+
+```bash
+printf 'user = "hg:%s"\n' "${PD_SECRET}" > pd.curlrc && chmod 600 pd.curlrc
+curl -K pd.curlrc http://<host>:8620/v1/stores
+```
+
 ### Raft Consensus Settings
 
 Controls Raft consensus for PD cluster coordination.
@@ -253,13 +279,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: "*"     # Expose all actuator endpoints
+        include: "health,metrics,prometheus"   # Allowlist; see note below
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `management.metrics.export.prometheus.enabled` | Boolean | `true` | Enable Prometheus-compatible metrics at `/actuator/prometheus`. |
-| `management.endpoints.web.exposure.include` | String | `"*"` | Actuator endpoints to expose. `"*"` = all, or specify comma-separated list (e.g., `"health,metrics"`). |
+| `management.endpoints.web.exposure.include` | String | `"health,metrics,prometheus"` | Actuator endpoints to expose. Actuator is served by its own handler mapping, which the REST authentication interceptor is not attached to, so every endpoint listed here is reachable without a credential on port 8620. This allowlist is what bounds which endpoints exist there, so prefer it over `"*"`. The interceptor's `/actuator/**` exclusion records the same intent but is not what makes these paths anonymous. In the PD Docker image the entrypoint emits this key in `SPRING_APPLICATION_JSON`, which outranks a mounted `conf/application.yml`, so editing it there has no effect; set `HG_PD_ACTUATOR_EXPOSURE` on the container instead. That variable defaults to the same allowlist and refuses a value containing `*`, because `/actuator/env` returns the `SPRING_APPLICATION_JSON` entry verbatim, PD's REST secret included. |
 
 ## Deployment Scenarios
 

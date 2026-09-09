@@ -27,6 +27,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -46,6 +48,7 @@ import com.alipay.sofa.jraft.RaftGroupService;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.Replicator;
+import com.alipay.sofa.jraft.core.State;
 import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.entity.Task;
 import com.alipay.sofa.jraft.error.RaftError;
@@ -63,14 +66,24 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RaftEngine {
 
+    /**
+     * Refresh period of the alive peer count behind {@code hg_raft_alive_peers}. jraft's own
+     * step-down timer walks the same peer set every half election timeout, so a one second
+     * poll adds nothing next to the work the node already does, and it keeps the gauge fresh
+     * well inside any scrape interval.
+     */
+    private static final long ALIVE_PEERS_REFRESH_MS = 1000L;
+
     private volatile static RaftEngine instance = new RaftEngine();
     private RaftStateMachine stateMachine;
     private String groupId = "pd_raft";
     private PDConfig.Raft config;
     private RaftGroupService raftGroupService;
     private RpcServer rpcServer;
-    private Node raftNode;
+    private volatile Node raftNode;
     private RaftRpcClient raftRpcClient;
+    private volatile int alivePeerCount = -1;
+    private ScheduledExecutorService alivePeersRefresher;
 
     public RaftEngine() {
         this.stateMachine = new RaftStateMachine();
@@ -133,6 +146,7 @@ public class RaftEngine {
         this.raftGroupService =
                 new RaftGroupService(groupId, serverId, nodeOptions, rpcServer, true);
         this.raftNode = raftGroupService.start(false);
+        startAlivePeersRefresher();
         log.info("RaftEngine start successfully: id = {}, peers list = {}", groupId,
                  nodeOptions.getInitialConf().getPeers());
         return this.raftNode != null;
@@ -182,6 +196,24 @@ public class RaftEngine {
     }
 
     public void shutDown() {
+        if (this.alivePeersRefresher != null) {
+            this.alivePeersRefresher.shutdownNow();
+            try {
+                // Best effort: shutdownNow only interrupts, and a refresh parked in
+                // listAlivePeers waits on a lock acquire the interrupt does not break,
+                // for up to the raft rpc connect timeout per unreachable peer. A refresh
+                // that outlives this wait may publish one stale count over the reset
+                // below; acceptable while shutDown has no production caller.
+                if (!this.alivePeersRefresher.awaitTermination(1, TimeUnit.SECONDS)) {
+                    log.warn("Raft alive-peers refresher still running after shutdown; " +
+                             "hg_raft_alive_peers may briefly report a stale value");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            this.alivePeersRefresher = null;
+        }
+        this.alivePeerCount = -1;
         if (this.raftGroupService != null) {
             this.raftGroupService.shutdown();
             try {
@@ -203,7 +235,139 @@ public class RaftEngine {
     }
 
     public boolean isLeader() {
-        return this.raftNode.isLeader(true);
+        Node node = this.raftNode;
+        return node != null && node.isLeader(true);
+    }
+
+    /**
+     * Whether this PD is ready in the sense {@code GET /v1/ready} answers: the raft node
+     * is active and sees a leader.
+     * <p>
+     * A follower only keeps its leader while heartbeats keep arriving inside the election
+     * timeout, and a leader only keeps its role while it can reach a quorum. Seeing a leader
+     * therefore means this node is part of a quorum from its own point of view, which is the
+     * signal a readiness probe needs. Served from the state machine callbacks, not from the
+     * raft node, so it never waits on the node lock.
+     * <p>
+     * Derived from {@link #getRaftStatus()} so {@code hg_raft_has_leader} cannot drift from
+     * the endpoint it is documented to mirror.
+     */
+    public boolean hasLeader() {
+        return getRaftStatus().isReady();
+    }
+
+    /**
+     * Take a view of the local raft state from the volatile copies the state machine
+     * callbacks maintain, never from the raft node itself. During an election jraft holds
+     * the node lock while it reconnects to peers, so a probe that read the node stalled for
+     * the connect timeout instead of answering its 503 promptly. All fields derive from one
+     * read of one immutable view, swapped in whole per callback, so they cannot contradict
+     * each other.
+     * <p>
+     * The state reported is the last one a callback announced: leader, follower, error or
+     * shutdown, and {@code STATE_UNINITIALIZED} until the first callback runs. jraft emits
+     * no callback for candidacy or leadership transfer, so a candidate reads as a follower
+     * that sees no leader, which yields the same not-ready answer. The view trails the node
+     * by whatever sits in the FSM queue ahead of the announcement, which is the price of
+     * never waiting on the node lock.
+     * <p>
+     * A missing raft node needs no separate branch: before {@link #init} the view still
+     * holds its initial {@code STATE_UNINITIALIZED}, and {@code shutDown()} drops the node
+     * only after {@code join()} has let the shutdown callback announce
+     * {@code STATE_SHUTDOWN}. Neither state is active, so neither reads as ready, and a
+     * branch on the node would report an uninitialized PD where the callback said error or
+     * shutdown.
+     */
+    public RaftStatus getRaftStatus() {
+        RaftStateMachine.ProbeView view = this.stateMachine.getProbeView();
+        return new RaftStatus(view.state.isActive() && view.seesLeader,
+                              view.state.name(), State.STATE_LEADER == view.state);
+    }
+
+    /**
+     * Immutable view of the raft state behind {@code GET /v1/ready}. It carries no cluster
+     * addresses: the endpoint is unauthenticated, and the leader's address stays on the
+     * authenticated {@code /v1/members}.
+     */
+    public static final class RaftStatus {
+
+        private final boolean ready;
+        private final String state;
+        private final boolean localLeader;
+
+        RaftStatus(boolean ready, String state, boolean localLeader) {
+            this.ready = ready;
+            this.state = state;
+            this.localLeader = localLeader;
+        }
+
+        public boolean isReady() {
+            return this.ready;
+        }
+
+        /**
+         * @return the jraft node state name, never null
+         */
+        public String getState() {
+            return this.state;
+        }
+
+        public boolean isLocalLeader() {
+            return this.localLeader;
+        }
+    }
+
+    /**
+     * Number of raft peers, this node included, that the leader has heard from within the
+     * leader lease timeout, which jraft derives as 90% of the election timeout by default.
+     * Only the leader tracks replication state, so any other node reports -1.
+     * <p>
+     * This is the value the refresher last published, at most one refresh period old, and -1
+     * until the first refresh runs. The count cannot be read here: {@code listAlivePeers}
+     * takes the node read lock before it checks for leadership, so a caller that read the
+     * node would wait out whoever holds the write lock, which during an election is a
+     * per-peer reconnect bounded only by the rpc connect timeout.
+     */
+    public int getAlivePeerCount() {
+        return this.alivePeerCount;
+    }
+
+    private void startAlivePeersRefresher() {
+        ScheduledExecutorService refresher =
+                Executors.newSingleThreadScheduledExecutor(runnable -> {
+                    Thread thread = new Thread(runnable, "pd-raft-alive-peers");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        refresher.scheduleWithFixedDelay(this::refreshAlivePeerCount, 0,
+                                         ALIVE_PEERS_REFRESH_MS, TimeUnit.MILLISECONDS);
+        this.alivePeersRefresher = refresher;
+    }
+
+    /**
+     * Read the alive peer count from the raft node and publish it for the gauge. Runs on the
+     * refresher thread, never on a request thread, because the read can block for as long as
+     * an election holds the node write lock. A fixed delay schedule means a blocked refresh
+     * only delays the next one, and the gauge keeps reporting the last value meanwhile.
+     */
+    void refreshAlivePeerCount() {
+        Node node = this.raftNode;
+        if (node == null || !this.stateMachine.isLeader()) {
+            this.alivePeerCount = -1;
+            return;
+        }
+        try {
+            this.alivePeerCount = node.listAlivePeers().size();
+        } catch (IllegalStateException e) {
+            // Lost leadership between the check and the call
+            this.alivePeerCount = -1;
+        } catch (Throwable e) {
+            // scheduleWithFixedDelay cancels every later run if the task throws,
+            // and an Error escaping here would leave the gauge serving its last
+            // value forever, so this catch has to be wider than Exception.
+            log.warn("Failed to refresh the raft alive peer count", e);
+            this.alivePeerCount = -1;
+        }
     }
 
     /**
@@ -232,7 +396,8 @@ public class RaftEngine {
     }
 
     public PeerId getLeader() {
-        return raftNode.getLeaderId();
+        Node node = this.raftNode;
+        return node == null ? null : node.getLeaderId();
     }
 
     /**
