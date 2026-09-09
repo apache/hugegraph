@@ -1,3 +1,4 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more contributor license agreements.
 module,test_file,test_method_or_suite,inferred_domain,execution_profile,oracle_status
 hugegraph-server,hugegraph-server/hugegraph-dist/src/test/java/org/apache/hugegraph/bootstrap/HugeGraphServerBootstrapTest.java,testValidateDnsCacheTtlAcceptsFinitePositiveValue,other,server: unit/core/api (confirm),待补：独立Oracle/执行确认
 hugegraph-server,hugegraph-server/hugegraph-dist/src/test/java/org/apache/hugegraph/bootstrap/HugeGraphServerBootstrapTest.java,testValidateDnsCacheTtlRejectsInvalidValues,other,server: unit/core/api (confirm),待补：独立Oracle/执行确认
