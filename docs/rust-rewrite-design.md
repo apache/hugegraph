@@ -8,6 +8,8 @@ HugeGraph 当前由 Java 服务、核心图引擎、RocksDB/HStore 后端以及 
 
 测试资产盘点和迁移门禁见 [Rust 重构验收矩阵](rust-rewrite-acceptance-matrix.md)；该矩阵是本设计的执行入口，不满足其中的进入/退出条件就不能扩大替换范围。
 
+正式开工的充要条件和当前 Go/No-Go 状态见 [Rust 重构正式开工清单](rust-rewrite-go-no-go-checklist.md)。
+
 目标是降低运行时资源开销，改善并发和故障恢复能力，统一分布式组件的实现语言，并保留 Gremlin、REST、Schema、索引和现有部署方式的兼容性。目标不是一次性重写，也不是重新设计图数据库语义。
 
 ## 2. 设计原则
