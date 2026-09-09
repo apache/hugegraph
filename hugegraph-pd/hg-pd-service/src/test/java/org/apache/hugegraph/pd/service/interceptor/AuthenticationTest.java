@@ -179,15 +179,17 @@ public class AuthenticationTest {
     @Test
     public void testRestAuthenticationAcceptsCaseInsensitiveBasicScheme() throws Exception {
         RestAuthentication auth = restAuthWithSecret(SECRET);
-        String cred = credential("hg", SECRET);
-        Assert.assertTrue("Basic with uppercase B should be accepted",
-                          acceptsRest(auth, "Basic " + cred));
-        Assert.assertTrue("basic with all lowercase should be accepted",
-                          acceptsRest(auth, "basic " + cred));
-        Assert.assertTrue("BASIC with all uppercase should be accepted",
-                          acceptsRest(auth, "BASIC " + cred));
-        Assert.assertTrue("BaSiC with mixed case should be accepted",
-                          acceptsRest(auth, "BaSiC " + cred));
+        for (String name : new String[]{"hg", "store", "hubble", "vermeer"}) {
+            String cred = credential(name, SECRET);
+            Assert.assertTrue("Basic with uppercase B should be accepted for " + name,
+                              acceptsRest(auth, "Basic " + cred));
+            Assert.assertTrue("basic with all lowercase should be accepted for " + name,
+                              acceptsRest(auth, "basic " + cred));
+            Assert.assertTrue("BASIC with all uppercase should be accepted for " + name,
+                              acceptsRest(auth, "BASIC " + cred));
+            Assert.assertTrue("BaSiC with mixed case should be accepted for " + name,
+                              acceptsRest(auth, "BaSiC " + cred));
+        }
     }
 
     @Test
@@ -198,6 +200,10 @@ public class AuthenticationTest {
                            acceptsRest(auth, null));
         Assert.assertFalse("empty Authorization header must be refused",
                            acceptsRest(auth, ""));
+        Assert.assertFalse("Basic with empty credentials must be refused",
+                           acceptsRest(auth, "Basic "));
+        Assert.assertFalse("basic with empty credentials must be refused",
+                           acceptsRest(auth, "basic "));
         Assert.assertFalse("Bearer scheme must be refused",
                            acceptsRest(auth, "Bearer " + cred));
         Assert.assertFalse("Digest scheme must be refused",
@@ -206,5 +212,9 @@ public class AuthenticationTest {
                            acceptsRest(auth, "Basic" + cred));
         Assert.assertFalse("invalid credential with basic prefix must be refused",
                            acceptsRest(auth, "basic " + credential("hg", "wrong-secret")));
+        Assert.assertFalse("unknown service name with basic prefix must be refused",
+                           acceptsRest(auth, "basic " + credential("unknown", SECRET)));
+        Assert.assertFalse("non-base64 token with basic prefix must be refused",
+                           acceptsRest(auth, "basic ???"));
     }
 }

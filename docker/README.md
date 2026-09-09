@@ -50,16 +50,9 @@ contains a single quote or newline.
 
 Do not commit `.env` or `conf/hubble/*.local.properties`; both are in `.gitignore`. Keeping the same JWT secret preserves authentication tokens when containers are recreated. For authenticated topologies with multiple Server replicas, all replicas receive this same secret. The HA topology fails fast if authentication is enabled without this shared secret.
 
-A non-empty `HUGEGRAPH_ADMIN_PASSWORD` enables Server authentication, and
-Hubble detects that mode automatically. Omitting the variable or setting it to
-an empty value disables authentication. Auth-off is only suitable for a
-trusted local environment; never expose it to a public or untrusted network.
-Hubble listens on host loopback by default. Set `HUBBLE_PUBLISH_HOST` only
-behind an HTTPS reverse proxy and trusted network controls.
+A non-empty `HUGEGRAPH_ADMIN_PASSWORD` enables Server authentication, and Hubble detects that mode automatically. Omitting the variable or setting it to an empty value disables authentication. Auth-off is only suitable for a trusted local environment; never expose it to a public or untrusted network. Hubble listens on host loopback by default. Set `HUBBLE_PUBLISH_HOST` only behind an HTTPS reverse proxy and trusted network controls.
 
-`HUGEGRAPH_ADMIN_PASSWORD` initializes the built-in `admin` account on its
-first authenticated startup. Changing `.env` does not rotate an existing
-administrator password; use the HugeGraph user API for credential changes.
+`HUGEGRAPH_ADMIN_PASSWORD` initializes the built-in `admin` account on its first authenticated startup. Changing `.env` does not rotate an existing administrator password; use the HugeGraph user API for credential changes.
 
 For the verification commands below, load `.env` into your current shell and set the password:
 
@@ -197,8 +190,7 @@ Status:
 docker compose -f docker-compose-3pd-3store-3server.yml ps
 ```
 
-Verify all published PD, Store, and Server endpoints, Server authentication,
-and Hubble:
+Verify all published PD, Store, and Server endpoints, Server authentication, and Hubble:
 
 ```bash
 for port in 8620 8621 8622; do
@@ -218,34 +210,11 @@ done
 curl -fsS http://localhost:8088/about
 ```
 
-PD answers two unauthenticated probe endpoints. `/v1/health` is liveness only:
-it returns `200` as soon as the REST listener is up, even when the PD has no
-raft leader. `/v1/ready` returns `200` only while the PD sees a raft leader,
-and `503` otherwise. Each PD answers for itself: a single PD elects itself, and
-in a three-PD group the two that can reach each other elect a leader and turn
-ready, while a partitioned third keeps answering `503` until it sees that
-leader.
+PD answers two unauthenticated probe endpoints: `/v1/health` for liveness (returns 200 once the REST listener is up, regardless of raft state), and `/v1/ready` for readiness (returns 200 only when PD sees a raft leader, 503 otherwise).
 
-The healthchecks in these files still gate on `/v1/health`, because
-`/v1/ready` ships from the next release onwards while the files run published
-images. Two things to know before pointing them at readiness:
+Compose healthchecks currently gate on `/v1/health` for compatibility with published images. When targeting readiness on newer releases or source builds (`docker-compose.dev.yml`), match on the response body (`curl -fsS http://localhost:8620/v1/ready | grep -q '"ready":true'`).
 
-- Match on the body, not the status code. As of 1.7.0 PD answers `200` with
-  `{"status":-1,"error":"Unauthorized!"}` on every path its auth interceptor
-  does not exclude, a path that does not exist included, so a status-only
-  probe reads a PD too old to have `/v1/ready` as ready. The body match holds
-  whichever status a refusal carries. Gate with
-  `curl -fsS http://localhost:8620/v1/ready | grep -q '"ready":true'` instead.
-- Pin `HUGEGRAPH_VERSION` to a release that carries the endpoint, or build the
-  images from source with `docker-compose.dev.yml`.
-
-The `HEALTHCHECK` baked into `hugegraph-pd/Dockerfile` is `/v1/health` as well.
-Both compose files override it, so it governs `docker run` and anything else
-inheriting the image probe, and those keep reading a PD without a quorum as
-healthy.
-
-Open `http://localhost:8088` and sign in as `admin` with the password from
-`.env`.
+Open `http://localhost:8088` and sign in as `admin` with the password from `.env`.
 
 Stop containers while keeping them:
 
@@ -281,9 +250,7 @@ HUBBLE_IMAGE=hugegraph/hubble:latest \
 docker compose -f docker-compose.yml up -d
 ```
 
-The Hubble `latest` image is expected to work with HugeGraph Server 1.7 and
-Server `latest`; compatibility with versions older than 1.7 is not promised.
-Pin immutable image references when reproducibility is required.
+The Hubble `latest` image is expected to work with HugeGraph Server 1.7 and Server `latest`; compatibility with versions older than 1.7 is not promised. Pin immutable image references when reproducibility is required.
 
 ### Server startup timeout
 
@@ -372,8 +339,7 @@ The three small files under `conf/hubble/` contain only topology-specific discov
 
 The two HStore topologies mount the generated `*.local.properties` next to these examples (see `set-hubble-pd-password.sh`), never the examples themselves, so the PD secret stays out of tracked files.
 
-Hubble detects Server authentication through the Server API. Do not add an
-`auth.enabled` property or duplicate auth-on/auth-off configurations.
+Hubble detects Server authentication through the Server API. Do not add an `auth.enabled` property or duplicate auth-on/auth-off configurations.
 
 ### Render and smoke checks
 
@@ -383,12 +349,9 @@ Render every topology with auth-on inputs before submitting a change:
 bash test-compose.sh render
 ```
 
-The HA render is mandatory even when local resources are insufficient to start
-its ten containers.
+The HA render is mandatory even when local resources are insufficient to start its ten containers.
 
-Run focused auth-on smoke checks for standalone and minimal HStore with the
-corresponding `up -d --wait`, status, authentication, Hubble `/about`, and
-`down -v` commands from the Users section:
+Run focused auth-on smoke checks for standalone and minimal HStore with the corresponding `up -d --wait`, status, authentication, Hubble `/about`, and `down -v` commands from the Users section:
 
 ```bash
 bash test-compose.sh smoke
@@ -400,6 +363,4 @@ Run the required local auth-off checks separately:
 bash test-compose.sh smoke-auth-off
 ```
 
-The auth-off mode is intentionally excluded from the default CI matrix and must
-remain on a trusted local machine. Both smoke modes remove only the isolated
-Compose projects and volumes that they create.
+The auth-off mode is intentionally excluded from the default CI matrix and must remain on a trusted local machine. Both smoke modes remove only the isolated Compose projects and volumes that they create.

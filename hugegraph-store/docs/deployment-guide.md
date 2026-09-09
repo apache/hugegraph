@@ -740,10 +740,7 @@ environment:
 2. Store nodes start after all PD nodes are healthy
 3. Server nodes start after all Store nodes are healthy
 
-`/v1/health` answers `200` as soon as the PD REST listener is up, so step 1 does
-not wait for a raft quorum to form. PD also serves `/v1/ready`, which answers
-`200` only while the PD sees a raft leader; `docker/README.md` covers what
-pointing the healthchecks at it requires.
+`/v1/health` answers `200` as soon as the PD REST listener is up, so step 1 does not wait for a raft quorum to form. PD also serves `/v1/ready`, which answers `200` only while the PD sees a raft leader; `docker/README.md` covers what pointing the healthchecks at it requires.
 
 > **Note**: The deprecated env var names (`GRPC_HOST`, `RAFT_ADDRESS`, `RAFT_PEERS`, `PD_ADDRESS`, `BACKEND`, `PD_PEERS`) still work but log a warning. Use the `HG_*` prefixed names for new deployments.
 
@@ -887,13 +884,7 @@ curl -i http://192.168.1.10:8620/v1/ready
 curl http://192.168.1.20:8520/v1/health
 ```
 
-> **Note**: `/v1/ready` ships from the release after `1.7.0`, so the Docker
-> examples above, which pin `HUGEGRAPH_VERSION=1.7.0`, need a newer tag or
-> images built from source before this check means anything. On `1.7.0` the PD
-> answers `200` with `{"status":-1,"error":"Unauthorized!"}` on any path its
-> auth interceptor does not exclude, `/v1/ready` included, so match on the body
-> rather than the status code. See
-> [docker/README.md](../../docker/README.md) for the details.
+> **Note**: `/v1/ready` ships from the release after `1.7.0`, so the Docker examples above, which pin `HUGEGRAPH_VERSION=1.7.0`, need a newer tag or images built from source before this check means anything. On `1.7.0` the PD answers `200` with `{"status":-1,"error":"Unauthorized!"}` on any path its auth interceptor does not exclude, `/v1/ready` included, so match on the body rather than the status code. See [docker/README.md](../../docker/README.md) for the details.
 
 ### Cluster Status
 
