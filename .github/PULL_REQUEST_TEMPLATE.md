@@ -62,6 +62,6 @@ For example:
 
 <!-- DO NOT REMOVE THIS SECTION. CHECK THE PROPER BOX ONLY. -->
 
-- [ ]  `Doc - TODO` <!-- Your PR changes impact docs and you will update later -->
+- [ ]  `Doc - TODO` <!-- Your PR changes impact docs. Link the hugegraph-doc PR or a tracking issue here, docs are not merged later from memory -->
 - [ ]  `Doc - Done` <!-- Related docs have been already added or updated -->
 - [ ]  `Doc - No Need` <!-- Your PR changes don't impact/need docs -->
