@@ -65,3 +65,5 @@ For example:
 - [ ]  `Doc - TODO` <!-- Your PR changes impact docs and you will update later -->
 - [ ]  `Doc - Done` <!-- Related docs have been already added or updated -->
 - [ ]  `Doc - No Need` <!-- Your PR changes don't impact/need docs -->
+
+Related hugegraph-doc PR or issue: <!-- required for Doc - TODO and Doc - Done -->

@@ -125,6 +125,12 @@ Note that since GitHub requires submitting code through `username + token` (inst
 
 Go to the web page of GitHub fork repo, there would be a chance to create a Pull Request after pushing to a new branch, click the button "Compare & pull request" to do it. Then edit the description for proposed changes, which can just be copied from the commit message.
 
+If the change touches a feature, a configuration item or a `Dockerfile`, open the matching
+documentation PR in [hugegraph-doc](https://github.com/apache/hugegraph-doc) at the same time
+and link the two together. Both should merge together. Documentation that trails the code
+goes stale quietly, and the gap is only found when a user or a search tool reads the wrong
+thing.
+
 Note: please make sure the email address you used to submit the code is bound to the GitHub account. For how to bind the email address, please refer to https://github.com/settings/emails:
 <img width="1280" alt="image" src="https://user-images.githubusercontent.com/9625821/163522445-2a50a72a-dea2-434f-9868-3a0d40d0d037.png">
 

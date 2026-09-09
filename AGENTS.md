@@ -83,6 +83,18 @@ mvn test -pl hugegraph-store/hg-store-test -am
 
 Before writing new tests, check existing suites under `hugegraph-server/hugegraph-test/`.
 
+## Design philosophy
+
+Match the codebase, do not improve on it.
+
+- Extend existing code before introducing a new abstraction. A new interface, factory
+  or base class needs a reason beyond symmetry.
+- Keep the change minimal: the smallest edit that fully solves the issue. Adjacent
+  cleanups belong in their own PR.
+- One concern per PR. Do not bundle an unrelated fix because you were already in the file.
+- Comments stay short. When something needs real context to explain, link the GitHub
+  issue instead of writing a paragraph in the source.
+
 ## Style & Pre-commit
 
 - Line 120, 4-space indent, LF, UTF-8, **no star imports**
@@ -101,6 +113,10 @@ Before writing new tests, check existing suites under `hugegraph-server/hugegrap
   and `install-dist/scripts/dependency/known-dependencies.txt`.
 - `hugegraph-commons` is shared by every module; `hugegraph-struct` must precede PD/Store;
   server backends depend on `hugegraph-core`.
+- Feature, config and `Dockerfile` changes ship a paired PR in `apache/hugegraph-doc`.
+  Land both together; docs that trail the code go stale without anyone noticing.
+- README: wrap at 120, keep it thin, push detail to hugegraph-doc, and fold the
+  non-urgent parts into `<details>`.
 
 ## Additional context files
 
