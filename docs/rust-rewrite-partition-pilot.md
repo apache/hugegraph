@@ -59,3 +59,5 @@ A standalone invariant oracle was implemented at `tools/rust-partition-poc`. It 
 Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -- -D warnings` 和 `cargo test` 均通过；测试仍为 9 项通过。
 
 缓存 Oracle 补充：新增缓存版本等价与失效拒绝测试；`verify.sh` 运行结果为 **11 passed, 0 failed**。这仍是模型层证据，真实 watch 通知丢失场景待 PD 集成环境恢复后执行。
+
+仓库级校验记录（2026-09-10）：`mvn -B -o -DskipTests validate` 全模块通过（`BUILD SUCCESS`），RAT、Checkstyle 与 POM 校验均通过；该结果不替代需要外部依赖的真实集成测试。
