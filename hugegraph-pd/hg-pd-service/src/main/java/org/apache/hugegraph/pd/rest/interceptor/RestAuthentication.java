@@ -26,6 +26,7 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.apache.hugegraph.pd.service.interceptor.Authentication;
 import org.springframework.lang.Nullable;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.ModelAndView;
@@ -49,14 +50,17 @@ public class RestAuthentication extends Authentication implements HandlerInterce
             String authority = request.getHeader("Authorization");
 
             if (authority == null) {
-                throw new Exception("Unauthorized!");
+                throw new BadCredentialsException("Unauthorized!");
+            }
+            if (!authority.regionMatches(true, 0, "Basic ", 0, 6)) {
+                throw new BadCredentialsException("invalid basic authentication info");
             }
 
             Function<String, Boolean> tokenCall = t -> {
                 response.addHeader(TOKEN_KEY, t);
                 return true;
             };
-            authority = authority.replace("Basic ", "");
+            authority = authority.substring(6);
             return authenticate(authority, token, tokenCall, DEFAULT_HANDLE);
         } catch (Exception e) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

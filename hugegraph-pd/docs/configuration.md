@@ -81,11 +81,7 @@ server:
 
 ### REST Authentication Settings
 
-Every REST request except the probes below must carry HTTP Basic auth: one of
-the internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user,
-and the shared secret as the password. A missing or wrong credential gets
-HTTP 401. Unauthenticated paths: `/v1/health`, `/actuator/**` and
-`/v1/prom/targets/*`.
+Every REST request except the probes below must carry HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user, and the shared secret as the password. A missing or wrong credential gets HTTP 401. Unauthenticated paths: `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`.
 
 ```yaml
 auth:
@@ -96,18 +92,13 @@ auth:
 |-----------|------|---------|-------------|
 | `auth.secret-key` | String | none (required) | Password checked against the Basic credential. There is no default: a secret shipped in the source tree would be published to everyone. While it is empty PD refuses every authenticated REST request and logs an error naming this parameter, and PD refuses to start at all if it is set to the value that earlier revisions carried as a placeholder. |
 
-Every REST client needs the same value: the Server's `bin/wait-storage.sh`
-reads it from `PD_AUTH_PASSWORD`, Hubble from `operations.pd.password`, and
-the Docker image takes `HG_PD_AUTH_SECRET_KEY`.
+Every REST client needs the same value: the Server's `bin/wait-storage.sh` reads it from `PD_AUTH_PASSWORD`, Hubble from `operations.pd.password`, and the Docker image takes `HG_PD_AUTH_SECRET_KEY`.
 
 ```bash
 curl -u hg:<secret> http://<host>:8620/v1/stores
 ```
 
-`-u` puts the secret in curl's process arguments, where any local account can
-read it while the call runs, and PD REST is plain HTTP. On a shared host, or
-across a network you do not control, keep the secret out of `argv` by reading
-it from a file mode 0600:
+`-u` puts the secret in curl's process arguments, where any local account can read it while the call runs, and PD REST is plain HTTP. On a shared host, or across a network you do not control, keep the secret out of `argv` by reading it from a file mode 0600:
 
 ```bash
 printf 'user = "hg:%s"\n' "${PD_SECRET}" > pd.curlrc && chmod 600 pd.curlrc

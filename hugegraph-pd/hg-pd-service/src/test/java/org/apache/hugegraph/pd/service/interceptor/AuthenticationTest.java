@@ -17,11 +17,18 @@
 
 package org.apache.hugegraph.pd.service.interceptor;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.hugegraph.pd.config.PDConfig;
+import org.apache.hugegraph.pd.rest.interceptor.RestAuthentication;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -41,6 +48,50 @@ public class AuthenticationTest {
         field.setAccessible(true);
         field.set(auth, config);
         return auth;
+    }
+
+    private static RestAuthentication restAuthWithSecret(String secret) throws Exception {
+        RestAuthentication auth = new RestAuthentication();
+        PDConfig config = new PDConfig();
+        config.setSecretKey(secret);
+        Field field = Authentication.class.getDeclaredField("pdConfig");
+        field.setAccessible(true);
+        field.set(auth, config);
+        return auth;
+    }
+
+    private static boolean acceptsRest(RestAuthentication auth, String authHeader) {
+        try {
+            HttpServletRequest req = (HttpServletRequest) Proxy.newProxyInstance(
+                    HttpServletRequest.class.getClassLoader(),
+                    new Class<?>[]{HttpServletRequest.class},
+                    (proxy, method, args) -> {
+                        if ("getHeader".equals(method.getName())) {
+                            return "Authorization".equalsIgnoreCase((String) args[0]) ? authHeader : null;
+                        }
+                        if ("getMethod".equals(method.getName())) {
+                            return "GET";
+                        }
+                        if ("getRequestURI".equals(method.getName())) {
+                            return "/v1/stores";
+                        }
+                        return null;
+                    });
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            HttpServletResponse resp = (HttpServletResponse) Proxy.newProxyInstance(
+                    HttpServletResponse.class.getClassLoader(),
+                    new Class<?>[]{HttpServletResponse.class},
+                    (proxy, method, args) -> {
+                        if ("getWriter".equals(method.getName())) {
+                            return pw;
+                        }
+                        return null;
+                    });
+            return auth.preHandle(req, resp, null);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static String credential(String name, String pwd) {
@@ -123,5 +174,37 @@ public class AuthenticationTest {
         PDConfig config = new PDConfig();
         config.setSecretKey(SECRET);
         config.afterPropertiesSet();
+    }
+
+    @Test
+    public void testRestAuthenticationAcceptsCaseInsensitiveBasicScheme() throws Exception {
+        RestAuthentication auth = restAuthWithSecret(SECRET);
+        String cred = credential("hg", SECRET);
+        Assert.assertTrue("Basic with uppercase B should be accepted",
+                          acceptsRest(auth, "Basic " + cred));
+        Assert.assertTrue("basic with all lowercase should be accepted",
+                          acceptsRest(auth, "basic " + cred));
+        Assert.assertTrue("BASIC with all uppercase should be accepted",
+                          acceptsRest(auth, "BASIC " + cred));
+        Assert.assertTrue("BaSiC with mixed case should be accepted",
+                          acceptsRest(auth, "BaSiC " + cred));
+    }
+
+    @Test
+    public void testRestAuthenticationRefusesNonBasicOrMalformedSchemes() throws Exception {
+        RestAuthentication auth = restAuthWithSecret(SECRET);
+        String cred = credential("hg", SECRET);
+        Assert.assertFalse("null Authorization header must be refused",
+                           acceptsRest(auth, null));
+        Assert.assertFalse("empty Authorization header must be refused",
+                           acceptsRest(auth, ""));
+        Assert.assertFalse("Bearer scheme must be refused",
+                           acceptsRest(auth, "Bearer " + cred));
+        Assert.assertFalse("Digest scheme must be refused",
+                           acceptsRest(auth, "Digest " + cred));
+        Assert.assertFalse("Basic without trailing space must be refused",
+                           acceptsRest(auth, "Basic" + cred));
+        Assert.assertFalse("invalid credential with basic prefix must be refused",
+                           acceptsRest(auth, "basic " + credential("hg", "wrong-secret")));
     }
 }

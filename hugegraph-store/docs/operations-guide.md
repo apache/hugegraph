@@ -2,20 +2,13 @@
 
 This guide covers monitoring, troubleshooting, backup & recovery, and operational procedures for HugeGraph Store in production.
 
-> **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than
-> `/v1/health`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth:
-> one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and
-> PD's `auth.secret-key` value as the password. A call without it gets HTTP
-> 401, which for a mutating step such as `balanceLeaders` means the step did
-> nothing. Export the secret before following a procedure that uses
-> `${PD_SECRET}`:
+> **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and PD's `auth.secret-key` value as the password. A call without it gets HTTP 401, which for a mutating step such as `balanceLeaders` means the step did nothing. Export the secret before following a procedure that uses `${PD_SECRET}`:
 >
 > ```bash
 > read -rs PD_SECRET && export PD_SECRET
 > ```
 >
-> Store endpoints on port 8520 are unaffected. Some PD examples in this guide
-> still omit the credential; add `-u hg:"${PD_SECRET}"` when a call returns 401.
+> Store endpoints on port 8520 are unaffected. Some PD examples in this guide still omit the credential; add `-u hg:"${PD_SECRET}"` when a call returns 401.
 
 ## Table of Contents
 
@@ -631,8 +624,7 @@ curl http://192.168.1.10:8620/v1/partitionsAndStatus
 4. **Monitor Rebalancing**:
    ```bash
    # Watch partition distribution
-   watch -n 10 'curl -u hg:"${PD_SECRET}" \
-     http://192.168.1.10:8620/v1/partitionsAndStatus'
+   watch -n 10 'curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/partitionsAndStatus'
    ```
 
 5. **Verify**: Wait for even distribution (may take hours)

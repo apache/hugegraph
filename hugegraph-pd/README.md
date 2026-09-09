@@ -292,31 +292,10 @@ docker/docker-compose-3pd-3store-3server.yml
 
 ### Security
 
-- Keep all three ports on a trusted network. The REST API on `8620` includes
-  management endpoints that mutate the cluster (peer changes, store removal,
-  data movement), and the gRPC and Raft ports carry no authentication.
-- REST requests need HTTP Basic auth: one of the internal service names
-  (`hg`, `store`, `hubble`, `vermeer`) with the `auth.secret-key` value as
-  the password. Health probes (`/v1/health`, `/actuator/**`,
-  `/v1/prom/targets/*`) stay unauthenticated.
-- `auth.secret-key` has no shipped default, because a secret in the source
-  tree is published to everyone. Generate one per deployment (`openssl rand
-  -hex 24`) and set it in the config file, or through
-  `HG_PD_AUTH_SECRET_KEY`, which the Docker image requires. Give every REST
-  client the same value: the Server's `bin/wait-storage.sh` reads
-  `PD_AUTH_PASSWORD` (and `PD_AUTH_USER`, default `store`), and Hubble reads
-  `operations.pd.password`. A client left on a stale secret gets 401, and
-  `wait-storage.sh` aborts the Server's startup on the first one rather than
-  waiting out `WAIT_STORAGE_TIMEOUT_S`.
-- An existing `conf/application.yml` carried over from an earlier release has
-  no `auth` block, and still carries
-  `management.endpoints.web.exposure.include: "*"`. PD then starts with an
-  empty secret and refuses every authenticated REST request, logging an error
-  that names `auth.secret-key`, while `/actuator/env`, `/actuator/configprops`
-  and `/actuator/beans` stay anonymously readable on `8620`. Before upgrading,
-  add `auth.secret-key` and narrow that exposure to
-  `health,metrics,prometheus`. PD refuses to start if the key is set to the
-  placeholder value that earlier revisions of this repository carried.
+- Keep all three ports on a trusted network. The REST API on `8620` includes management endpoints that mutate the cluster (peer changes, store removal, data movement), and the gRPC and Raft ports carry no authentication.
+- REST requests need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) with the `auth.secret-key` value as the password. Health probes (`/v1/health`, `/v1/ready`, `/actuator/**`, `/v1/prom/targets/*`) stay unauthenticated.
+- `auth.secret-key` has no shipped default, because a secret in the source tree is published to everyone. Generate one per deployment (`openssl rand -hex 24`) and set it in the config file, or through `HG_PD_AUTH_SECRET_KEY`, which the Docker image requires. Give every REST client the same value: the Server's `bin/wait-storage.sh` reads `PD_AUTH_PASSWORD` (and `PD_AUTH_USER`, default `store`), and Hubble reads `operations.pd.password`. A client left on a stale secret gets 401, and `wait-storage.sh` aborts the Server's startup on the first one rather than waiting out `WAIT_STORAGE_TIMEOUT_S`.
+- An existing `conf/application.yml` carried over from an earlier release has no `auth` block, and still carries `management.endpoints.web.exposure.include: "*"`. PD then starts with an empty secret and refuses every authenticated REST request, logging an error that names `auth.secret-key`, while `/actuator/env`, `/actuator/configprops` and `/actuator/beans` stay anonymously readable on `8620`. Before upgrading, add `auth.secret-key` and narrow that exposure to `health,metrics,prometheus`. PD refuses to start if the key is set to the placeholder value that earlier revisions of this repository carried.
 
 ### Monitoring
 

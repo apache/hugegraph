@@ -2,20 +2,13 @@
 
 This guide provides comprehensive instructions for deploying HugeGraph Store in various environments, from development to production clusters.
 
-> **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than
-> `/v1/health`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth:
-> one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and
-> PD's `auth.secret-key` value as the password. A call without it gets HTTP 401
-> and a `{"status":-1,"error":"Unauthorized"}` body, not the payloads shown
-> below. Export the secret before following a step that uses `${PD_SECRET}`:
+> **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and PD's `auth.secret-key` value as the password. A call without it gets HTTP 401 and a `{"status":-1,"error":"Unauthorized"}` body, not the payloads shown below. Export the secret before following a step that uses `${PD_SECRET}`:
 >
 > ```bash
 > read -rs PD_SECRET && export PD_SECRET
 > ```
 >
-> Store endpoints on port 8520 are unaffected. `-u` puts the secret in curl's
-> process arguments; on a shared host pass it in a `curl -K` file mode 0600
-> instead, as `hugegraph-pd/docs/configuration.md` shows.
+> Store endpoints on port 8520 are unaffected. `-u` puts the secret in curl's process arguments; on a shared host pass it in a `curl -K` file mode 0600 instead, as `hugegraph-pd/docs/configuration.md` shows.
 
 ## Table of Contents
 
@@ -693,12 +686,9 @@ For a production-like 3-node distributed deployment, use the compose file at `do
 
 ```bash
 cd docker
-# The PD REST secret is required; the Compose file refuses to start without
-# it. Generate it once and keep it, every PD node and PD client needs the
-# same value (docker/README.md has the full .env recipe).
+# The PD REST secret is required; the Compose file refuses to start without it. Generate it once and keep it, every PD node and PD client needs the same value (docker/README.md has the full .env recipe).
 export HG_PD_AUTH_SECRET_KEY="$(openssl rand -hex 24)"
-# Hubble reads the secret from a generated, untracked properties file that the
-# Compose file mounts; create it before `up` or Hubble starts unconfigured.
+# Hubble reads the secret from a generated, untracked properties file that the Compose file mounts; create it before `up` or Hubble starts unconfigured.
 ./set-hubble-pd-password.sh hstore-ha
 HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 ```
@@ -722,12 +712,7 @@ environment:
   HG_PD_ACTUATOR_EXPOSURE: health,metrics,prometheus
 ```
 
-`HG_PD_ACTUATOR_EXPOSURE` is the only way to change the actuator allowlist in
-this image: the entrypoint emits it in `SPRING_APPLICATION_JSON`, which outranks
-a mounted `conf/application.yml`. Add an endpoint here to expose it, for example
-`health,metrics,prometheus,loggers`. A value containing `*` is refused, because
-every actuator endpoint is anonymous on port 8620 and `/actuator/env` returns the
-`SPRING_APPLICATION_JSON` entry verbatim, PD's REST secret included.
+`HG_PD_ACTUATOR_EXPOSURE` is the only way to change the actuator allowlist in this image: the entrypoint emits it in `SPRING_APPLICATION_JSON`, which outranks a mounted `conf/application.yml`. Add an endpoint here to expose it, for example `health,metrics,prometheus,loggers`. A value containing `*` is refused, because every actuator endpoint is anonymous on port 8620 and `/actuator/env` returns the `SPRING_APPLICATION_JSON` entry verbatim, PD's REST secret included.
 
 **Store environment variables** (per node):
 

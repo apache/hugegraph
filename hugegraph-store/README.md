@@ -259,9 +259,7 @@ curl http://localhost:8520/v1/health
 # Check logs
 tail -f logs/hugegraph-store.log
 
-# Verify registration with PD (from PD node). PD REST needs HTTP Basic auth:
-# an internal service name (hg, store, hubble, vermeer) and PD's
-# auth.secret-key value. Without it this returns 401, not the store list.
+# Verify registration with PD (from PD node). PD REST needs HTTP Basic auth: an internal service name (hg, store, hubble, vermeer) and PD's auth.secret-key value. Without it this returns 401, not the store list.
 curl -u hg:"${PD_SECRET}" http://localhost:8620/v1/stores
 ```
 
