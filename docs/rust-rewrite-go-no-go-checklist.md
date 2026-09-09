@@ -49,3 +49,20 @@
 ```
 
 “正式开工”只表示一个已批准边界可以实现，不表示整个 HugeGraph 可以跳过后续边界门禁。
+
+## 5. 证据索引与责任闭环
+
+清单中的复选框只在证据已经产生、可复现并由责任人签核后勾选。当前仓库内已经形成的证据如下；它们证明“准备工作完成”，不等同于生产 GO：
+
+| 条件 | 证据 | 当前结论 | 下一责任人/产物 |
+|---|---|---|---|
+| 目标、边界、不变量 | `rust-rewrite-design.md`、`rust-rewrite-principles.md` | 待维护者确认 | 维护者；评审结论 |
+| 测试资产与执行入口 | `rust-rewrite-test-inventory.md`、`rust-rewrite-server-test-audit.md`、`rust-rewrite-pd-store-test-audit.md` | 已盘点，语义映射仍需逐项复核 | 测试负责人；追踪矩阵 |
+| 验收与阈值 | `rust-rewrite-acceptance-matrix.md` | 已定义，待批准 | 维护者；阈值签核 |
+| Rust 工程规范 | `rust-engineering-standard.md` | 已定义，待 CI 落地 | Rust 负责人；CI 配置与检查日志 |
+| Oracle 与差分策略 | `rust-rewrite-oracle-finalization.md` | 方案已闭环，代码未实现 | 测试负责人；独立 Oracle 与报告 |
+| POC 范围与退出条件 | `rust-rewrite-partition-pilot.md` | 已定义，未执行 | POC 负责人；可复现实验包 |
+| 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`rust-rewrite-go-no-go-checklist.md` | 入口已定义，未执行 | 测试负责人；失败注入报告 |
+| 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两名 reviewer；签核记录 |
+
+因此本次文档阶段的交付已经闭环；在外部签核、POC 和验证报告进入仓库前，清单必须保持 **NO-GO**，不得用“计划存在”替代“证据存在”。
