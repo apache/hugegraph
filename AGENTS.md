@@ -104,5 +104,7 @@ Before writing new tests, check existing suites under `hugegraph-server/hugegrap
 
 ## Additional context files
 
+Rust 重构必须遵守 [`docs/rust-rewrite-principles.md`](docs/rust-rewrite-principles.md)：这是架构重构而非逐行翻译，必须在保持不变量的前提下重新设计并用性能和故障证据证明收益。
+
 `.serena/memories/` — notably `suggested_commands.md` and `task_completion_checklist.md`
 when a task needs depth beyond this file.
