@@ -215,15 +215,27 @@ mod cache_tests {
 
     #[test]
     fn invalidation_requires_latest_value() {
-        let source = Partition { start: 0, end: 10, version: 2 };
-        let cached = Partition { start: 0, end: 10, version: 1 };
+        let source = Partition {
+            start: 0,
+            end: 10,
+            version: 2,
+        };
+        let cached = Partition {
+            start: 0,
+            end: 10,
+            version: 1,
+        };
         assert_eq!(cache_read(Some(cached), &source), Err("cache-stale"));
         assert_eq!(cache_read(None, &source), Err("cache-stale"));
     }
 
     #[test]
     fn latest_cache_value_is_equivalent_to_source() {
-        let source = Partition { start: 0, end: 10, version: 2 };
+        let source = Partition {
+            start: 0,
+            end: 10,
+            version: 2,
+        };
         assert_eq!(cache_read(Some(source.clone()), &source), Ok(source));
     }
 }

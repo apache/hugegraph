@@ -57,3 +57,5 @@ A standalone invariant oracle was implemented at `tools/rust-partition-poc`. It 
 重试记录：改用 `-Dmaven.repo.local=/tmp/hugegraph-m2` 后，构建因 DNS 无法解析 `repo.maven.apache.org`，缺少 `org.apache:apache:23` 父 POM而停止。该环境阻塞仍未计作测试通过。
 
 Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -- -D warnings` 和 `cargo test` 均通过；测试仍为 9 项通过。
+
+缓存 Oracle 补充：新增缓存版本等价与失效拒绝测试；`verify.sh` 运行结果为 **11 passed, 0 failed**。这仍是模型层证据，真实 watch 通知丢失场景待 PD 集成环境恢复后执行。
