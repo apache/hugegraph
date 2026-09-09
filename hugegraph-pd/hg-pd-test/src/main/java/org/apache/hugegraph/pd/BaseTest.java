@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.pd;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import org.apache.hugegraph.pd.client.PDConfig;
 
 public class BaseTest {
@@ -24,9 +27,12 @@ public class BaseTest {
     protected static String pdGrpcAddr = "127.0.0.1:8686";
     protected static String pdRestAddr = "http://127.0.0.1:8620";
     protected static String user = "store";
-    protected static String pwd = "";
+    // Must match the auth.secret-key that travis/start-pd.sh gives the PD
+    // under test; the shipped config carries no secret by design
+    protected static String pwd = "pd-ci-test-secret-not-for-production";
     protected static String key = "Authorization";
-    protected static String value = "Basic c3RvcmU6YWRtaW4=";
+    protected static String value = "Basic " + Base64.getEncoder().encodeToString(
+            (user + ":" + pwd).getBytes(StandardCharsets.UTF_8));
 
     protected PDConfig getPdConfig() {
         return PDConfig.of(pdGrpcAddr).setAuthority(user, pwd);

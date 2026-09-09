@@ -2,6 +2,14 @@
 
 This guide explains how to integrate HugeGraph Store with HugeGraph Server, use the client library, and migrate from other storage backends.
 
+> **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and PD's `auth.secret-key` value as the password. A call without it gets HTTP 401. Export the secret before following a procedure that uses `${PD_SECRET}`:
+>
+> ```bash
+> read -rs PD_SECRET && export PD_SECRET
+> ```
+>
+> Store endpoints on port 8520 are unaffected.
+
 ## Table of Contents
 
 - [Backend Configuration](#backend-configuration)
@@ -706,7 +714,7 @@ tail -f logs/hugegraph-server.log | grep PD
 curl http://192.168.1.20:8520/v1/health
 
 # Check partition distribution
-curl http://192.168.1.10:8620/v1/partitions
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/partitions
 
 # Check if queries are using indexes
 # (Enable query logging in Server)
@@ -733,10 +741,10 @@ ERROR o.a.h.b.s.h.HstoreSession - Write operation failed: Raft leader not found
 tail -f logs/hugegraph-store.log | grep Raft
 
 # Check partition leaders
-curl http://192.168.1.10:8620/v1/partitions | grep leader
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/partitions | grep leader
 
 # Check Store node states
-curl http://192.168.1.10:8620/v1/stores
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/stores
 ```
 
 **Solutions**:

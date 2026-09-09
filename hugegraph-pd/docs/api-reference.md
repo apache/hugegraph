@@ -760,6 +760,16 @@ for (Map.Entry<String, byte[]> entry : results.entrySet()) {
 
 PD exposes a REST API for management and monitoring (default port: 8620).
 
+### Authentication
+
+Every endpoint below except the probes needs HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) as the user, and the `auth.secret-key` value from PD's `conf/application.yml` as the password. A missing or wrong credential gets HTTP 401. The `curl` examples that follow omit `-u` for readability; add it to every call except `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, which stay unauthenticated for probes.
+
+```bash
+curl -u hg:<secret> http://localhost:8620/v1/stores
+```
+
+Endpoints under `/v1` mutate the cluster (peer list changes, store removal, partition balancing), so keep port 8620 on a trusted network regardless.
+
 ### Health Check
 
 ```bash
@@ -796,33 +806,13 @@ curl -i http://localhost:8620/v1/ready
 }
 ```
 
-A follower reports `"state": "STATE_FOLLOWER"` with `"isLeader": false`. When
-the quorum is lost the PD keeps answering `/v1/health` with `200` but
-`/v1/ready` turns into `503` with `"ready": false`. Being unauthenticated, the
-body carries no cluster addresses; the leader's address stays on `/v1/members`.
+A follower reports `"state": "STATE_FOLLOWER"` with `"isLeader": false`. When the quorum is lost the PD keeps answering `/v1/health` with `200` but `/v1/ready` turns into `503` with `"ready": false`. Being unauthenticated, the body carries no cluster addresses; the leader's address stays on `/v1/members`.
 
-The answer is served from state the raft callbacks maintain rather than from
-the raft node, so it stays prompt while an election is running and never waits
-on the node lock. `state` is therefore the last change raft announced. A PD
-reports `STATE_UNINITIALIZED` with `"ready": false` from process start until
-its first raft callback, which is the ordinary startup window before a quorum
-first forms, and jraft emits no callback for candidacy or leadership transfer,
-so a candidate reports `STATE_FOLLOWER` with `"ready": false`.
+The answer is served from state the raft callbacks maintain rather than from the raft node, so it stays prompt while an election is running and never waits on the node lock. `state` is therefore the last change raft announced. A PD reports `STATE_UNINITIALIZED` with `"ready": false` from process start until its first raft callback, which is the ordinary startup window before a quorum first forms, and jraft emits no callback for candidacy or leadership transfer, so a candidate reports `STATE_FOLLOWER` with `"ready": false`.
 
-Point Kubernetes readiness probes, `depends_on` healthchecks and any
-"wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health`
-so a PD that merely lost its leader is not restarted.
+Point Kubernetes readiness probes, `depends_on` healthchecks and any "wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health` so a PD that merely lost its leader is not restarted.
 
-Match on the body rather than on the status code alone. A PD that predates this
-endpoint does not reliably answer `404` for it: `RestAuthentication` refuses a
-request it does not exclude by writing an error envelope, and as of 1.7.0 it
-does so without setting a status, so an unknown path answers `200` with
-`{"status":-1,"error":"Unauthorized!"}`. A status-only probe therefore reads
-such a PD as ready. The body match holds whichever status a refusal carries: a
-shell gate should use
-`curl -fsS http://<pd-host>:8620/v1/ready | grep -q '"ready":true'`, and a
-Kubernetes `httpGet` probe should be paired with a PD image that carries the
-endpoint.
+Match on the body rather than on the status code alone. A PD that predates this endpoint does not reliably answer `404` for it: `RestAuthentication` refuses a request it does not exclude by writing an error envelope, and as of 1.7.0 it does so without setting a status, so an unknown path answers `200` with `{"status":-1,"error":"Unauthorized!"}`. A status-only probe therefore reads such a PD as ready. The body match holds whichever status a refusal carries: a shell gate should use `curl -fsS http://<pd-host>:8620/v1/ready | grep -q '"ready":true'`, and a Kubernetes `httpGet` probe should be paired with a PD image that carries the endpoint.
 
 ### Metrics
 
@@ -856,19 +846,11 @@ Exported on `/actuator/prometheus` for alerting on quorum loss:
 | `hg_raft_has_leader` | `1` while this PD sees a leader (is inside a quorum), `0` otherwise |
 | `hg_raft_alive_peers` | Number of alive peers on the leader, itself included; `NaN` elsewhere |
 
-`hg_raft_alive_peers` counts the peers the leader has heard from within the
-leader lease timeout, which jraft derives as 90% of the election timeout by
-default.
+`hg_raft_alive_peers` counts the peers the leader has heard from within the leader lease timeout, which jraft derives as 90% of the election timeout by default.
 
-A cluster has lost its quorum when `sum(hg_raft_leader) == 0` or when
-`hg_raft_has_leader == 0` on every member. Both are briefly true during a
-normal election, so alert on them with a `for:` clause longer than the
-election timeout rather than on the instantaneous value.
+A cluster has lost its quorum when `sum(hg_raft_leader) == 0` or when `hg_raft_has_leader == 0` on every member. Both are briefly true during a normal election, so alert on them with a `for:` clause longer than the election timeout rather than on the instantaneous value.
 
-Do not aggregate `hg_raft_alive_peers` across instances: it is `NaN` on every
-node but the leader, and one `NaN` sample turns the result of `sum()` or
-`avg()` into `NaN` as well. Select the leader's series instead, for example
-`hg_raft_alive_peers and on(instance) (hg_raft_leader == 1)`.
+Do not aggregate `hg_raft_alive_peers` across instances: it is `NaN` on every node but the leader, and one `NaN` sample turns the result of `sum()` or `avg()` into `NaN` as well. Select the leader's series instead, for example `hg_raft_alive_peers and on(instance) (hg_raft_leader == 1)`.
 
 ### Partition API
 

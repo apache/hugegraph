@@ -18,14 +18,28 @@
 package org.apache.hugegraph.pd.rest;
 
 import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 import org.junit.After;
 import org.junit.BeforeClass;
 
 public class BaseServerTest {
 
+    // Must match the auth.secret-key that travis/start-pd.sh gives the PD
+    // under test; the shipped config carries no secret by design
+    protected static final String SECRET = "pd-ci-test-secret-not-for-production";
+    protected static final String AUTH_HEADER = "Authorization";
+    protected static final String VALID_AUTH = basicAuth("store", SECRET);
+
     protected static HttpClient client;
     protected static String pdRestAddr;
+
+    protected static String basicAuth(String name, String pwd) {
+        String credential = name + ":" + pwd;
+        return "Basic " + Base64.getEncoder()
+                                .encodeToString(credential.getBytes(StandardCharsets.UTF_8));
+    }
 
     @BeforeClass
     public static void init() {

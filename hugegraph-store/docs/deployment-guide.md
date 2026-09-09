@@ -2,6 +2,14 @@
 
 This guide provides comprehensive instructions for deploying HugeGraph Store in various environments, from development to production clusters.
 
+> **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and PD's `auth.secret-key` value as the password. A call without it gets HTTP 401 and a `{"status":-1,"error":"Unauthorized"}` body, not the payloads shown below. Export the secret before following a step that uses `${PD_SECRET}`:
+>
+> ```bash
+> read -rs PD_SECRET && export PD_SECRET
+> ```
+>
+> Store endpoints on port 8520 are unaffected. `-u` puts the secret in curl's process arguments; on a shared host pass it in a `curl -K` file mode 0600 instead, as `hugegraph-pd/docs/configuration.md` shows.
+
 ## Table of Contents
 
 - [Deployment Topologies](#deployment-topologies)
@@ -472,7 +480,7 @@ curl http://localhost:8620/actuator/health
 
 ```bash
 # Check cluster members
-curl http://192.168.1.10:8620/v1/members
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/members
 
 # Expected output:
 {
@@ -586,7 +594,7 @@ curl http://localhost:8520/v1/health
 
 ```bash
 # Query PD for registered stores
-curl http://192.168.1.10:8620/v1/stores
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/stores
 
 # Expected output:
 {
@@ -678,6 +686,10 @@ For a production-like 3-node distributed deployment, use the compose file at `do
 
 ```bash
 cd docker
+# The PD REST secret is required; the Compose file refuses to start without it. Generate it once and keep it, every PD node and PD client needs the same value (docker/README.md has the full .env recipe).
+export HG_PD_AUTH_SECRET_KEY="$(openssl rand -hex 24)"
+# Hubble reads the secret from a generated, untracked properties file that the Compose file mounts; create it before `up` or Hubble starts unconfigured.
+./set-hubble-pd-password.sh hstore-ha
 HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml up -d
 ```
 
@@ -695,7 +707,12 @@ environment:
   HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500  # maps to pd.initial-store-list
   HG_PD_DATA_PATH: /hugegraph-pd/pd_data              # maps to pd.data-path
   HG_PD_INITIAL_STORE_COUNT: 3                         # maps to pd.initial-store-count
+  HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?}    # maps to auth.secret-key; required
+  # optional; maps to management.endpoints.web.exposure.include
+  HG_PD_ACTUATOR_EXPOSURE: health,metrics,prometheus
 ```
+
+`HG_PD_ACTUATOR_EXPOSURE` is the only way to change the actuator allowlist in this image: the entrypoint emits it in `SPRING_APPLICATION_JSON`, which outranks a mounted `conf/application.yml`. Add an endpoint here to expose it, for example `health,metrics,prometheus,loggers`. A value containing `*` is refused, because every actuator endpoint is anonymous on port 8620 and `/actuator/env` returns the `SPRING_APPLICATION_JSON` entry verbatim, PD's REST secret included.
 
 **Store environment variables** (per node):
 
@@ -723,10 +740,7 @@ environment:
 2. Store nodes start after all PD nodes are healthy
 3. Server nodes start after all Store nodes are healthy
 
-`/v1/health` answers `200` as soon as the PD REST listener is up, so step 1 does
-not wait for a raft quorum to form. PD also serves `/v1/ready`, which answers
-`200` only while the PD sees a raft leader; `docker/README.md` covers what
-pointing the healthchecks at it requires.
+`/v1/health` answers `200` as soon as the PD REST listener is up, so step 1 does not wait for a raft quorum to form. PD also serves `/v1/ready`, which answers `200` only while the PD sees a raft leader; `docker/README.md` covers what pointing the healthchecks at it requires.
 
 > **Note**: The deprecated env var names (`GRPC_HOST`, `RAFT_ADDRESS`, `RAFT_PEERS`, `PD_ADDRESS`, `BACKEND`, `PD_PEERS`) still work but log a warning. Use the `HG_*` prefixed names for new deployments.
 
@@ -870,28 +884,22 @@ curl -i http://192.168.1.10:8620/v1/ready
 curl http://192.168.1.20:8520/v1/health
 ```
 
-> **Note**: `/v1/ready` ships from the release after `1.7.0`, so the Docker
-> examples above, which pin `HUGEGRAPH_VERSION=1.7.0`, need a newer tag or
-> images built from source before this check means anything. On `1.7.0` the PD
-> answers `200` with `{"status":-1,"error":"Unauthorized!"}` on any path its
-> auth interceptor does not exclude, `/v1/ready` included, so match on the body
-> rather than the status code. See
-> [docker/README.md](../../docker/README.md) for the details.
+> **Note**: `/v1/ready` ships from the release after `1.7.0`, so the Docker examples above, which pin `HUGEGRAPH_VERSION=1.7.0`, need a newer tag or images built from source before this check means anything. On `1.7.0` the PD answers `200` with `{"status":-1,"error":"Unauthorized!"}` on any path its auth interceptor does not exclude, `/v1/ready` included, so match on the body rather than the status code. See [docker/README.md](../../docker/README.md) for the details.
 
 ### Cluster Status
 
 ```bash
 # PD cluster members
-curl http://192.168.1.10:8620/v1/members
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/members
 
 # Registered stores
-curl http://192.168.1.10:8620/v1/stores
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/stores
 
 # Partitions
-curl http://192.168.1.10:8620/v1/partitions
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/partitions
 
 # Graph list
-curl http://192.168.1.10:8620/v1/graphs
+curl -u hg:"${PD_SECRET}" http://192.168.1.10:8620/v1/graphs
 ```
 
 ### Basic Operations Test
