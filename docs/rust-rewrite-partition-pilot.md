@@ -63,3 +63,5 @@ Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -
 仓库级校验记录（2026-09-10）：`mvn -B -o -DskipTests validate` 全模块通过（`BUILD SUCCESS`），RAT、Checkstyle 与 POM 校验均通过；该结果不替代需要外部依赖的真实集成测试。
 
 真实集成结果（2026-09-10，修复初始化边界后）：`hg-pd-test` Partition 过滤测试共 32 项，30 通过、0 错误、2 失败。`PartitionServiceTest.testCombinePartition` 与 `testCombinePartition2` 均在合并后范围断言失败：期望 `endKey=5462`，实际 `16386`。该差异尚未解释，不得标记契约兼容或 GO；Surefire 原始报告位于 `hugegraph-pd/hg-pd-test/target/surefire-reports`，完整日志为 `/tmp/pd-partition-test-2.log`。
+
+真实集成修复与复验（2026-09-10）：发现测试类共享 `graph0` 元数据导致分区配置污染；将 core PartitionServiceTest 改为专属 graph 名称后，真实 Maven 执行 `PartitionServiceTest` **4/4 通过，0 失败，BUILD SUCCESS**。该修复已提交 `202650f71`。
