@@ -67,3 +67,5 @@ Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -
 真实集成修复与复验（2026-09-10）：发现测试类共享 `graph0` 元数据导致分区配置污染；将 core PartitionServiceTest 改为专属 graph 名称后，真实 Maven 执行 `PartitionServiceTest` **4/4 通过，0 失败，BUILD SUCCESS**。该修复已提交 `202650f71`。
 
 完整 Partition 集成复验（2026-09-10）：清理隔离数据后执行 `-Dtest='*Partition*Test'`，core 4、service 3、cache 23、utils 2，共 **32/32 通过，0 失败，BUILD SUCCESS**。完整日志：`/tmp/pd-partition-all.log`。
+
+跨模块回归复验（2026-09-10）：完整 `pd-core-test,pd-common-test` 通过；Common 83 项，Core 104 项（跳过 2 项），失败/错误均为 0，`BUILD SUCCESS`。完整日志：`/tmp/pd-core-common-all.log`。
