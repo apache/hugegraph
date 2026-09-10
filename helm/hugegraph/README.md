@@ -303,7 +303,7 @@ default values.
 | `pd.serviceAccount.automountServiceAccountToken` | Mount an API token. The chart makes no API calls | `false` |
 | `pd.pdb.enabled` | Create a PodDisruptionBudget for PD | `true` |
 | `pd.pdb.minAvailable` | Must be strictly less than `pd.replicas`. No PDB is rendered when `pd.replicas` is 1 | `2` |
-| `pd.readinessPath` | Path the PD readinessProbe hits. `/v1/health` is liveness only; set `/v1/ready` on PD images from 1.8.0 that carry it, never on older images | `/v1/health` |
+| `pd.readinessPath` | Path the PD readinessProbe hits. `/v1/ready` is quorum-aware and returns 503 without a raft leader. Set `/v1/health` on PD images that predate apache/hugegraph#3189: there every unmapped `/v1/` path answers 200, so `/v1/ready` passes unconditionally and readiness means nothing | `/v1/ready` |
 | `pd.auth.value` | Plaintext PD REST secret (`auth.secret-key`). Prefer `existingSecret` in shared clusters. No newlines, carriage returns, or backslashes | `""` |
 | `pd.auth.existingSecret` | Pre-created Secret holding the PD REST secret under `pd.auth.key`. Wins over `value` and `autoGenerate`; the chart does not manage it | `""` |
 | `pd.auth.key` | Key inside the PD REST Secret | `secret-key` |
@@ -333,7 +333,7 @@ default values.
 | `store.resources` | Store container resources. Set these for production | `{}` |
 | `store.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
 | `store.securityContext` | Container-level securityContext; also applied to the PD wait init container. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
-| `store.waitPath` | Path the init container polls on each PD peer; a majority must answer 2xx. `/v1/health` counts listeners; `/v1/ready` counts quorum members but exists only on PD images from 1.8.0 | `/v1/health` |
+| `store.waitPath` | Path the init container polls on each PD peer; a majority must answer 2xx. `/v1/ready` counts quorum members. Set `/v1/health`, which counts listeners only, on PD images that predate apache/hugegraph#3189, for the reason given under `pd.readinessPath` | `/v1/ready` |
 | `store.waitTimeoutSeconds` | Bound on the PD wait before the init container fails | `900` |
 | `store.antiAffinity` | One of `required`, `preferred`, `disabled`. `preferred` schedules on clusters with fewer nodes than replicas; production should use `required` so one node failure cannot co-locate shard replicas | `preferred` |
 | `store.nodeSelector` | Node selector for store Pods | `{}` |
