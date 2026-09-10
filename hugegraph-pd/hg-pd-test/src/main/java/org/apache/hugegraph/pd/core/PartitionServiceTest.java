@@ -52,11 +52,11 @@ public class PartitionServiceTest extends PDCoreTestBase {
         // 9, 10, 11 -> 3
         this.service.combinePartition(4);
 
-        var partition = this.service.getPartitionById("graph0", 0);
+        var partition = this.service.getPartitionById("graph_partition_core", 0);
         assertEquals(0, partition.getStartKey());
         assertEquals(5462, partition.getEndKey());
 
-        var tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph0");
+        var tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph_partition_core");
         assertEquals(11, tasks.size());
 
         for (MetaTask.Task task : tasks) {
@@ -64,7 +64,7 @@ public class PartitionServiceTest extends PDCoreTestBase {
             getTaskService().reportTask(newTask);
         }
 
-        tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph0");
+        tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph_partition_core");
         assertEquals(0, tasks.size());
     }
 
@@ -78,11 +78,11 @@ public class PartitionServiceTest extends PDCoreTestBase {
         // 9, 10, 11 -> 3
         this.service.combinePartition(4);
 
-        var partition = this.service.getPartitionById("graph0", 0);
+        var partition = this.service.getPartitionById("graph_partition_core", 0);
         assertEquals(0, partition.getStartKey());
         assertEquals(5462, partition.getEndKey());
 
-        var tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph0");
+        var tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph_partition_core");
         assertEquals(11, tasks.size());
 
         for (MetaTask.Task task : tasks) {
@@ -90,7 +90,7 @@ public class PartitionServiceTest extends PDCoreTestBase {
             getTaskService().reportTask(newTask);
         }
 
-        tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph0");
+        tasks = getStoreNodeService().getTaskInfoMeta().scanMoveTask("graph_partition_core");
         assertEquals(0, tasks.size());
     }
 
@@ -137,7 +137,7 @@ public class PartitionServiceTest extends PDCoreTestBase {
             if (lastId >= PartitionUtils.MAX_VALUE) {
                 break;
             }
-            var partitionShard = this.service.getPartitionByCode("graph0", lastId);
+            var partitionShard = this.service.getPartitionByCode("graph_partition_core", lastId);
             if (partitionShard != null) {
                 lastId = partitionShard.getPartition().getEndKey();
             }
