@@ -61,3 +61,5 @@ Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -
 缓存 Oracle 补充：新增缓存版本等价与失效拒绝测试；`verify.sh` 运行结果为 **11 passed, 0 failed**。这仍是模型层证据，真实 watch 通知丢失场景待 PD 集成环境恢复后执行。
 
 仓库级校验记录（2026-09-10）：`mvn -B -o -DskipTests validate` 全模块通过（`BUILD SUCCESS`），RAT、Checkstyle 与 POM 校验均通过；该结果不替代需要外部依赖的真实集成测试。
+
+真实集成结果（2026-09-10，修复初始化边界后）：`hg-pd-test` Partition 过滤测试共 32 项，30 通过、0 错误、2 失败。`PartitionServiceTest.testCombinePartition` 与 `testCombinePartition2` 均在合并后范围断言失败：期望 `endKey=5462`，实际 `16386`。该差异尚未解释，不得标记契约兼容或 GO；Surefire 原始报告位于 `hugegraph-pd/hg-pd-test/target/surefire-reports`，完整日志为 `/tmp/pd-partition-test-2.log`。

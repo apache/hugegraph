@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.hugegraph.pd.PartitionService;
+import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
@@ -133,6 +134,9 @@ public class PartitionServiceTest extends PDCoreTestBase {
                                                             .build();
             storeInfoMeta.updateShardGroup(shardGroup);
 
+            if (lastId >= PartitionUtils.MAX_VALUE) {
+                break;
+            }
             var partitionShard = this.service.getPartitionByCode("graph0", lastId);
             if (partitionShard != null) {
                 lastId = partitionShard.getPartition().getEndKey();
