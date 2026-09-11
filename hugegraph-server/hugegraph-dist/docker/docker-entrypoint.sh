@@ -80,24 +80,69 @@ get_prop_encoded() {
 }
 
 # First uncommented `authenticator:` inside the gremlin-server.yaml
-# authentication block.  snakeyaml resolves duplicate top-level keys to the
-# last one, but a mounted file carrying two authentication blocks is
-# pathological; report the first and let the mismatch WARN handle it.
+# authentication block, or on the `authentication:` line itself (a flow
+# mapping).  snakeyaml resolves duplicate top-level keys to the last one,
+# but a mounted file carrying two authentication blocks is pathological;
+# report the first and let the mismatch WARN handle it.  The scalar is
+# cleaned the way snakeyaml reads it — an inline comment (a '#' preceded
+# by whitespace), surrounding quotes and padding are stripped — because
+# java.util.Properties keeps all of those in the class name.
 get_yaml_authenticator() {
     local yaml="./conf/gremlin-server.yaml"
 
     [[ -f "${yaml}" ]] || return 0
     awk '
+        function scalar(s,    out, i, n, c, q) {
+            out = ""
+            q = ""
+            n = length(s)
+            for (i = 1; i <= n; i++) {
+                c = substr(s, i, 1)
+                if (q != "") {
+                    if (c == q) q = ""
+                    else out = out c
+                    continue
+                }
+                if (c == "\"" || c == "\047") { q = c; continue }
+                if (c == "#" &&
+                    (out == "" || substr(out, length(out), 1) ~ /[ \t]/))
+                    break
+                if (c == "," || c == "}" || c == "]") break
+                out = out c
+            }
+            sub(/^[ \t\r]+/, "", out)
+            sub(/[ \t\r]+$/, "", out)
+            return out
+        }
         /^[ \t]*#/ { next }
-        /^[ \t]*authentication[ \t]*:/ { inblk = 1; next }
+        /^[ \t]*authentication[ \t]*:/ {
+            inblk = 1
+            line = $0
+            sub(/^[ \t]*authentication[ \t]*:[ \t]*/, "", line)
+            if (match(line, /authenticator[ \t]*:/)) {
+                print scalar(substr(line, RSTART + RLENGTH))
+                exit
+            }
+            next
+        }
         inblk && /^[ \t]+authenticator[ \t]*:/ {
             line = $0
             sub(/^[ \t]*authenticator[ \t]*:[ \t]*/, "", line)
-            sub(/[,:].*$/, "", line)
-            print line
+            print scalar(line)
             exit
         }
-    ' "./conf/gremlin-server.yaml"
+    ' "${yaml}"
+}
+
+# A mounted yaml can carry an authentication block whose authenticator
+# cannot be read (an empty or unparseable one).  That is not the
+# both-empty case: exporting the default would override an explicit
+# choice that snakeyaml does resolve, so callers treat it as a mismatch.
+has_yaml_authentication_block() {
+    local yaml="./conf/gremlin-server.yaml"
+
+    [[ -f "${yaml}" ]] || return 1
+    grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' "${yaml}"
 }
 
 # enable-auth.sh appends definitions to files it did not write.  On a
@@ -112,6 +157,11 @@ align_auth_config() {
 
     rest_auth=$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}")
     yaml_auth=$(get_yaml_authenticator)
+    if [[ -z "${yaml_auth}" ]] && has_yaml_authentication_block; then
+        log "WARN: gremlin-server.yaml carries an authentication block" \
+            "without a readable authenticator; leaving both sides untouched"
+        return
+    fi
     if [[ -n "${rest_auth}" && -n "${yaml_auth}" && "${rest_auth}" != "${yaml_auth}" ]]; then
         log "WARN: REST and Gremlin name different authenticators" \
             "('${rest_auth}' vs '${yaml_auth}'); leaving both untouched"

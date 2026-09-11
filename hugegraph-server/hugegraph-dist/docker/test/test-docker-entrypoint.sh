@@ -23,17 +23,21 @@ entrypoint="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/docker-entrypoint.s
 test_dir="$(mktemp -d)"
 trap 'rm -rf "${test_dir}"' EXIT
 
-# Eval the property helpers plus the PROPS_AWK location block they depend
-# on.  The entrypoint's top-level code hard-exits when props.awk is
-# missing, so it cannot be sourced directly; anchor to the marker comment
-# above the assignment instead.
+# Eval the property and yaml helpers one by one.  The entrypoint's
+# top-level code hard-exits when props.awk is missing, so it cannot be
+# sourced directly; extracting by function name keeps this independent of
+# helper order.  PROPS_AWK is recomputed below.
+for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded \
+          get_yaml_authenticator has_yaml_authentication_block align_auth_config; do
+    eval "$(awk -v fn="${fn}" '
+        index($0, fn "() {") == 1 { capture = 1 }
+        capture { print }
+        capture && /^}$/ { exit }
+    ' "${entrypoint}")"
+done
+log() { echo "[hugegraph-server-entrypoint] $*"; }
 PROPS_AWK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/props.awk"
 export PROPS_AWK
-eval "$(awk '
-    /^encode_prop_value\(\) \{/ { capture = 1 }
-    capture { print }
-    capture && /^\}$/ && ++function_ends == 4 { exit }
-' "${entrypoint}")"
 
 assert_replaced() {
     local separator="$1"
@@ -121,3 +125,58 @@ printf '%s\n' \
 set_prop "init_store.enabled" "true" "${append_file}"
 assert_line_count 1 '^init_store\.enabled=true$' "${append_file}"
 assert_line_count 1 '^#init_store\.enabled=false$' "${append_file}"
+
+# A key indented with leading whitespace is still one definition of the
+# key: java.util.Properties ignores whitespace before a key, so an
+# indented key must be read and rewritten in place rather than duplicated.
+indented_file="${test_dir}/config-indented-key"
+printf '%s\n' \
+    '  auth.token_secret: old-secret' \
+    'unrelated=true' > "${indented_file}"
+[[ "$(get_prop_encoded 'auth.token_secret' "${indented_file}")" == "old-secret" ]]
+set_prop_encoded 'auth.token_secret' 'new-secret' "${indented_file}"
+assert_line_count 1 'auth\.token_secret' "${indented_file}"
+assert_line_count 1 '^unrelated=true$' "${indented_file}"
+
+# get_yaml_authenticator must agree with snakeyaml on what a mounted
+# gremlin-server.yaml says: the authenticator inside the authentication
+# block — quoted scalars and inline comments cleaned the way snakeyaml
+# strips them — and a flow mapping on the authentication line itself.
+# align_auth_config must not read an authentication block without a
+# readable authenticator as "no yaml side": exporting the default there
+# would override an explicit choice, so both sides stay untouched.
+yaml_dir="${test_dir}/yaml"
+mkdir -p "${yaml_dir}/conf"
+(
+    cd "${yaml_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
+    : > "${REST_SERVER_CONF}"
+
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: "com.example.MyAuth"  # custom' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+        > conf/gremlin-server.yaml
+    [[ "$(get_yaml_authenticator)" == "com.example.MyAuth" ]]
+
+    printf '%s\n' \
+        'authentication: {authenticator: com.example.FlowAuth, authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler, config: {tokens: conf/rest-server.properties}}' \
+        > conf/gremlin-server.yaml
+    [[ "$(get_yaml_authenticator)" == "com.example.FlowAuth" ]]
+
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+        > conf/gremlin-server.yaml
+    unset AUTHENTICATOR_CLASS
+    align_auth_config
+    [[ -z "${AUTHENTICATOR_CLASS:-}" ]]
+    [[ ! -s "${REST_SERVER_CONF}" ]]
+
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: com.example.YamlAuth' \
+        > conf/gremlin-server.yaml
+    align_auth_config
+    grep -q '^auth\.authenticator=com\.example\.YamlAuth$' "${REST_SERVER_CONF}"
+)

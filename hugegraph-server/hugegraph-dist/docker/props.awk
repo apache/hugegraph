@@ -20,14 +20,14 @@
 # lines and duplicate definitions differently, which is how a mounted
 # config ends up with two definitions of one key.
 #
-# One invocation, selected with the `mode` environment variable:
+# One invocation, selected with the `PROPS_MODE` environment variable:
 #
-#   mode=get  key=K file=F
+#   PROPS_MODE=get  PROPS_KEY=K PROPS_FILE=F
 #       print the value of K's first logical definition
-#   mode=set  key=K file=F
+#   PROPS_MODE=set  PROPS_KEY=K PROPS_FILE=F
 #       replace K's first definition in place, drop every other
 #       definition of K, append one when the file has none.  The new
-#       value arrives pre-encoded in PROP_VALUE_ENCODED (an environment
+#       value arrives pre-encoded in PROPS_VALUE_ENCODED (an environment
 #       variable, so secrets never appear in `ps` output or in awk's
 #       argv), and -v is not used for it so awk cannot mangle its
 #       backslash escapes.
@@ -164,6 +164,11 @@ function props_load(file,    raw, nl, next_raw, start, logical) {
             sub(/^[ \t]+/, "", next_raw)
             logical = logical next_raw
         }
+        # java.util.Properties ignores whitespace before the key; strip it
+        # so split_kv's separator scan agrees (an indented key used to be
+        # read as a key whose name started with a space, and a set then
+        # appended a second definition of the real key).
+        sub(/^[ \t]+/, "", logical)
         split_kv(logical)
         NBLOCK++
         BTYPE[NBLOCK] = "entry"
