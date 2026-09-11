@@ -18,7 +18,6 @@
 package org.apache.hugegraph.store.core.snapshot;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertThrows;
 
 import java.io.File;
 import java.io.IOException;
@@ -35,7 +34,6 @@ import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
-import org.apache.hugegraph.store.util.HgStoreException;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -197,10 +195,12 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
     }
 
     /**
-     * Test that onSnapshotLoad validates corruption when should_not_load is present but data/ missing.
+     * Test that onSnapshotLoad skips loading (rather than throwing) when should_not_load is
+     * present but data/ is missing: a locally-saved snapshot deliberately has no data/ dir
+     * since nothing was meant to load, and should_not_load is checked before the data/ dir.
      */
     @Test
-    public void testOnSnapshotLoadThrowsWhenShouldNotLoadPresentButDataMissing()
+    public void testOnSnapshotLoadSkipsWhenShouldNotLoadPresentButDataMissing()
             throws Exception {
         // Arrange: snapshot dir has should_not_load but NO data/ subdirectory.
         File snapDir = tmpDir.newFolder("snapshot-corrupt");
@@ -211,12 +211,8 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
         SnapshotHandler handler = new SnapshotHandler(createPartitionEngine(1));
         SnapshotReader stubReader = stubReader(snapDir.getAbsolutePath());
 
-        // The missing data/ dir is checked before should_not_load, so this throws
-        // immediately rather than falling through to businessHandler.loadSnapshot.
-        assertThrows(
-                "onSnapshotLoad must throw when should_not_load present but data/ missing",
-                HgStoreException.class,
-                () -> handler.onSnapshotLoad(stubReader, 0L));
+        // Must not throw; should return early at the should_not_load check.
+        handler.onSnapshotLoad(stubReader, 0L);
     }
 
     /**

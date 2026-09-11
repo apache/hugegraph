@@ -176,18 +176,18 @@ public class SnapshotHandler {
         final String snapshotDir = reader.getPath();
         final String graphSnapshotDir = snapshotDir + File.separator + SNAPSHOT_DATA_PATH;
 
+        // No need to load locally saved snapshots
+        if (shouldNotLoad(reader)) {
+            log.info("skip to load snapshot because of should_not_load flag");
+            return;
+        }
+
         if (!new File(graphSnapshotDir).isDirectory()) {
             throw new HgStoreException(HgStoreException.EC_RKDB_IMPORT_SNAPSHOT_FAIL,
                                         String.format(
                                                 "Raft %d snapshot is corrupt, data dir %s is " +
                                                 "missing", partitionEngine.getGroupId(),
                                                 graphSnapshotDir));
-        }
-
-        // No need to load locally saved snapshots
-        if (shouldNotLoad(reader)) {
-            log.info("skip to load snapshot because of should_not_load flag");
-            return;
         }
 
         // Use snapshot directly
