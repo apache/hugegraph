@@ -44,6 +44,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RaftRocksdbOptions {
 
     private static RocksdbConfig rocksdbConfig = null;
+    private static boolean raftRocksdbConfigRegistered = false;
 
     private static RocksdbConfig getRocksdbConfig(HugeConfig options) {
         if (rocksdbConfig == null) {
@@ -55,42 +56,55 @@ public class RaftRocksdbOptions {
     }
 
     private static void registerRaftRocksdbConfig(HugeConfig options) {
-        Cache blockCache = new LRUCache(SizeUnit.GB);
-        BlockBasedTableConfig tableConfig = new BlockBasedTableConfig()
-                .setIndexType(IndexType.kTwoLevelIndexSearch)
-                .setPartitionFilters(true) //
-                .setMetadataBlockSize(8 * SizeUnit.KB) //
-                .setCacheIndexAndFilterBlocks(
-                        options.get(RocksDBOptions.PUT_FILTER_AND_INDEX_IN_CACHE))
-                .setCacheIndexAndFilterBlocksWithHighPriority(true)
-                .setPinL0FilterAndIndexBlocksInCache(
-                        options.get(RocksDBOptions.PIN_L0_FILTER_AND_INDEX_IN_CACHE))
-                .setBlockSize(4 * SizeUnit.KB)
-                .setBlockCache(blockCache);
+        // StorageOptionsFactory.releaseAllOptions() (called by test setup between runs)
+        // does not clear its table-format-config table, so registering RocksDBLogStorage's
+        // config more than once per JVM throws IllegalStateException. Register only once.
+        // The guard flag is held across the whole registration so a failure partway through
+        // doesn't leave the flag set to true while some options were never registered.
+        synchronized (RaftRocksdbOptions.class) {
+            if (raftRocksdbConfigRegistered) {
+                return;
+            }
 
-        StorageOptionsFactory.registerRocksDBTableFormatConfig(RocksDBLogStorage.class,
-                                                               tableConfig);
+            Cache blockCache = new LRUCache(SizeUnit.GB);
+            BlockBasedTableConfig tableConfig = new BlockBasedTableConfig()
+                    .setIndexType(IndexType.kTwoLevelIndexSearch)
+                    .setPartitionFilters(true) //
+                    .setMetadataBlockSize(8 * SizeUnit.KB) //
+                    .setCacheIndexAndFilterBlocks(
+                            options.get(RocksDBOptions.PUT_FILTER_AND_INDEX_IN_CACHE))
+                    .setCacheIndexAndFilterBlocksWithHighPriority(true)
+                    .setPinL0FilterAndIndexBlocksInCache(
+                            options.get(RocksDBOptions.PIN_L0_FILTER_AND_INDEX_IN_CACHE))
+                    .setBlockSize(4 * SizeUnit.KB)
+                    .setBlockCache(blockCache);
 
-        DBOptions dbOptions = StorageOptionsFactory.getDefaultRocksDBOptions();
-        dbOptions.setEnv(rocksdbConfig.getEnv());
+            StorageOptionsFactory.registerRocksDBTableFormatConfig(RocksDBLogStorage.class,
+                                                                   tableConfig);
 
-        // raft rocksdb number is fixed, can be controlled by max_write_buffer_number
-        //dbOptions.setWriteBufferManager(rocksdbConfig.getBufferManager());
-        dbOptions.setUnorderedWrite(true);
-        StorageOptionsFactory.registerRocksDBOptions(RocksDBLogStorage.class,
-                                                     dbOptions);
+            DBOptions dbOptions = StorageOptionsFactory.getDefaultRocksDBOptions();
+            dbOptions.setEnv(rocksdbConfig.getEnv());
 
-        ColumnFamilyOptions cfOptions =
-                StorageOptionsFactory.getDefaultRocksDBColumnFamilyOptions();
-        cfOptions.setTargetFileSizeBase(256 * SizeUnit.MB);
-        cfOptions.setWriteBufferSize(8 * SizeUnit.MB);
-        cfOptions.setNumLevels(3);
-        cfOptions.setMaxWriteBufferNumber(3);
-        cfOptions.setCompressionType(CompressionType.NO_COMPRESSION);
-        cfOptions.setMaxBytesForLevelBase(2048 * SizeUnit.GB);
+            // raft rocksdb number is fixed, can be controlled by max_write_buffer_number
+            //dbOptions.setWriteBufferManager(rocksdbConfig.getBufferManager());
+            dbOptions.setUnorderedWrite(true);
+            StorageOptionsFactory.registerRocksDBOptions(RocksDBLogStorage.class,
+                                                         dbOptions);
 
-        StorageOptionsFactory.registerRocksDBColumnFamilyOptions(RocksDBLogStorage.class,
-                                                                 cfOptions);
+            ColumnFamilyOptions cfOptions =
+                    StorageOptionsFactory.getDefaultRocksDBColumnFamilyOptions();
+            cfOptions.setTargetFileSizeBase(256 * SizeUnit.MB);
+            cfOptions.setWriteBufferSize(8 * SizeUnit.MB);
+            cfOptions.setNumLevels(3);
+            cfOptions.setMaxWriteBufferNumber(3);
+            cfOptions.setCompressionType(CompressionType.NO_COMPRESSION);
+            cfOptions.setMaxBytesForLevelBase(2048 * SizeUnit.GB);
+
+            StorageOptionsFactory.registerRocksDBColumnFamilyOptions(RocksDBLogStorage.class,
+                                                                     cfOptions);
+
+            raftRocksdbConfigRegistered = true;
+        }
     }
 
     public static void initRocksdbGlobalConfig(Map<String, Object> config) {

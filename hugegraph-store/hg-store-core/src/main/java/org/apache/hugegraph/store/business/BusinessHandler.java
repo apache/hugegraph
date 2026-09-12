@@ -230,6 +230,14 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     void unlock(String path);
 
+    /**
+     * Non-blocking attempt to reserve the compactRange() window for partition {@code id}.
+     * Returns false if a compaction is actively running for that partition right now.
+     */
+    boolean tryLockCompactionRange(int id);
+
+    void unlockCompactionRange(int id);
+
     void awaitAndSetLock(int id, int expectedValue, int value) throws InterruptedException,
                                                                       TimeoutException;
 

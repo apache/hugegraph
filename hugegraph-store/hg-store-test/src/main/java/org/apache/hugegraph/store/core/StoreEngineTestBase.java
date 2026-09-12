@@ -28,12 +28,11 @@ import org.apache.hugegraph.store.business.DataManagerImpl;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.ShardGroup;
 import org.apache.hugegraph.store.options.HgStoreEngineOptions;
+import org.apache.hugegraph.store.options.JobOptions;
 import org.apache.hugegraph.store.options.RaftRocksdbOptions;
 import org.apache.hugegraph.store.pd.FakePdServiceProvider;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
-
-import com.alipay.sofa.jraft.util.StorageOptionsFactory;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -61,6 +60,11 @@ public class StoreEngineTestBase {
         options.setGrpcAddress("127.0.0.1:6511");
         options.setRaftAddress("127.0.0.1:6510");
         options.setDataTransfer(new DataManagerImpl());
+        JobOptions jobOptions = new JobOptions();
+        jobOptions.setUninterruptibleCore(2);
+        jobOptions.setUninterruptibleMax(8);
+        jobOptions.setUninterruptibleQueueSize(1024);
+        options.setJobConfig(jobOptions);
 
         options.setFakePdOptions(new HgStoreEngineOptions.FakePdOptions() {{
             setStoreList("127.0.0.1");
@@ -70,7 +74,6 @@ public class StoreEngineTestBase {
         }});
 
         if (initCount == 0) {
-            StorageOptionsFactory.releaseAllOptions();
             RaftRocksdbOptions.initRocksdbGlobalConfig(options.getRocksdbConfig());
             initCount++;
         }
