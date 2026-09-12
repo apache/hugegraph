@@ -27,7 +27,7 @@ trap 'rm -rf "${test_dir}"' EXIT
 # top-level code hard-exits when props.awk is missing, so it cannot be
 # sourced directly; extracting by function name keeps this independent of
 # helper order.  PROPS_AWK is recomputed below.
-for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded \
+for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded get_prop \
           get_yaml_authenticator has_yaml_authentication_block align_auth_config; do
     eval "$(awk -v fn="${fn}" '
         index($0, fn "() {") == 1 { capture = 1 }
@@ -179,4 +179,48 @@ mkdir -p "${yaml_dir}/conf"
         > conf/gremlin-server.yaml
     align_auth_config
     grep -q '^auth\.authenticator=com\.example\.YamlAuth$' "${REST_SERVER_CONF}"
+)
+
+# CRLF (Windows-saved) configs parse the way java.util.Properties reads
+# them: one trailing CR is a line terminator, not part of the value, and
+# a backslash before CRLF still continues the value onto the next line.
+# Untouched lines keep their CR bytes on rewrite.
+crlf_file="${test_dir}/config-crlf"
+printf 'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator\r\n' > "${crlf_file}"
+printf 'pd.peers=a,\\\r\n  b\r\n' >> "${crlf_file}"
+printf 'unrelated=true\r\n' >> "${crlf_file}"
+[[ "$(get_prop_encoded 'auth.authenticator' "${crlf_file}")" == \
+    "org.apache.hugegraph.auth.StandardAuthenticator" ]]
+[[ "$(get_prop_encoded 'pd.peers' "${crlf_file}")" == "a,b" ]]
+[[ "$(get_prop 'auth.authenticator' "${crlf_file}")" == \
+    "org.apache.hugegraph.auth.StandardAuthenticator" ]]
+set_prop 'auth.authenticator' 'com.example.NewAuth' "${crlf_file}"
+grep -q '^auth\.authenticator=com\.example\.NewAuth$' "${crlf_file}"
+[[ "$(get_prop_encoded 'pd.peers' "${crlf_file}")" == "a,b" ]]
+if ! grep -q $'^unrelated=true\r$' "${crlf_file}"; then
+    echo "CRLF bytes of untouched lines must be preserved" >&2
+    exit 1
+fi
+
+# An escaped authenticator and a plain yaml scalar name the same class:
+# the comparison unescapes first, so no spurious WARN and no skipped
+# alignment.
+escaped_auth_dir="${test_dir}/yaml-escaped-auth"
+mkdir -p "${escaped_auth_dir}/conf"
+(
+    cd "${escaped_auth_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
+    printf '%s\n' \
+        'auth.authenticator=org.apache.hugegraph.auth\.StandardAuthenticator' \
+        > "${REST_SERVER_CONF}"
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
+        > conf/gremlin-server.yaml
+    unset AUTHENTICATOR_CLASS
+    align_out=$(align_auth_config 2>&1)
+    [[ -z "${AUTHENTICATOR_CLASS:-}" ]]
+    [[ "${align_out}" != *"different authenticators"* ]]
+    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+        "${REST_SERVER_CONF}"
 )

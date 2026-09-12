@@ -78,6 +78,6 @@ fi
 # misses a mounted CRLF config and the factory is never wrapped for auth
 # although both servers already believe authentication is on.
 CR=$'\r'
-if grep -Eq "^gremlin\\.graph[[:blank:]]*=org\\.apache\\.hugegraph\\.HugeFactory[[:blank:]]*${CR}?\$" "${CONF}/graphs/${GRAPH_CONF}"; then
-    sed -i 's/^\(gremlin\.graph[[:blank:]]*=[[:blank:]]*\)org\.apache\.hugegraph\.HugeFactory/\1org.apache.hugegraph.auth.HugeFactoryAuthProxy/' "${CONF}/graphs/${GRAPH_CONF}"
+if grep -Eq "^[[:blank:]]*gremlin[\\\\]?\\.graph[[:blank:]]*([:=]|[[:blank:]])[[:blank:]]*org\\.apache\\.hugegraph\\.HugeFactory[[:blank:]]*${CR}?$" "${CONF}/graphs/${GRAPH_CONF}"; then
+    sed -i -E "s#^([[:blank:]]*gremlin[\\\\]?\\.graph[[:blank:]]*([:=]|[[:blank:]])[[:blank:]]*)org\\.apache\\.hugegraph\\.HugeFactory#\\1org.apache.hugegraph.auth.HugeFactoryAuthProxy#" "${CONF}/graphs/${GRAPH_CONF}"
 fi

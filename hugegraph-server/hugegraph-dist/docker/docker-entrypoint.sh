@@ -79,6 +79,17 @@ get_prop_encoded() {
         awk -f "${PROPS_AWK}" /dev/null
 }
 
+# Decoded read: unescapes the on-disk value the way java.util.Properties
+# does, so it compares equal with the snakeyaml-decoded scalar from
+# get_yaml_authenticator.  The raw get_prop_encoded mode stays for the
+# secret round trip, which must replay backslashes byte-for-byte.
+get_prop() {
+    local key="$1" file="$2"
+
+    PROPS_MODE=get-decoded PROPS_KEY="${key}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
+}
+
 # First uncommented `authenticator:` inside the gremlin-server.yaml
 # authentication block, or on the `authentication:` line itself (a flow
 # mapping).  snakeyaml resolves duplicate top-level keys to the last one,
@@ -155,7 +166,7 @@ has_yaml_authentication_block() {
 align_auth_config() {
     local rest_auth yaml_auth
 
-    rest_auth=$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}")
+    rest_auth=$(get_prop "auth.authenticator" "${REST_SERVER_CONF}")
     yaml_auth=$(get_yaml_authenticator)
     if [[ -z "${yaml_auth}" ]] && has_yaml_authentication_block; then
         log "WARN: gremlin-server.yaml carries an authentication block" \
@@ -170,7 +181,7 @@ align_auth_config() {
     if [[ -z "${rest_auth}" && -z "${yaml_auth}" ]]; then
         export AUTHENTICATOR_CLASS="org.apache.hugegraph.auth.StandardAuthenticator"
     elif [[ -n "${yaml_auth}" ]]; then
-        set_prop_encoded "auth.authenticator" "${yaml_auth}" "${REST_SERVER_CONF}"
+        set_prop "auth.authenticator" "${yaml_auth}" "${REST_SERVER_CONF}"
     else
         export AUTHENTICATOR_CLASS="${rest_auth}"
     fi
