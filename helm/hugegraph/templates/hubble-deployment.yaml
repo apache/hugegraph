@@ -189,7 +189,7 @@ spec:
               if [[ "${FOUND_PD_SERVER}" == false ]]; then
                 printf 'pd.server=%s\n' "${HG_HUBBLE_PD_SERVER}" >>"${TMP}"
               fi
-              # PD REST credential (PD images from 1.8.0 check the password).
+              # PD REST credential for the operations API.
               if [[ "${FOUND_PD_USERNAME}" == false ]]; then
                 printf 'operations.pd.username=hubble\n' >>"${TMP}"
               fi

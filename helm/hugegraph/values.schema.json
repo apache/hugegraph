@@ -342,7 +342,7 @@
             "key",
             "autoGenerate"
           ],
-          "description": "PD REST Basic-auth secret (auth.secret-key). Required by PD images from 1.8.0; shared with the Server storage wait and Hubble.",
+          "description": "PD REST Basic-auth secret (auth.secret-key), shared with the Server storage wait and Hubble.",
           "properties": {
             "value": {
               "type": "string",

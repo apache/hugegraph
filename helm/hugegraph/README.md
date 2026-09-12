@@ -47,17 +47,14 @@ so operators do not have to:
 - **Store waits for PD** in an init container before starting: a majority of
   the PD peers must answer `store.waitPath`. The default `/v1/ready` stays 503
   until a raft leader exists, so that majority is a quorum and not merely a set
-  of live listeners. PD images that predate the endpoint need the value set
-  back to `/v1/health`; see Limitations.
-- **One PD REST secret, three readers.** PD images from 1.8.0
-  ([#3189](https://github.com/apache/hugegraph/pull/3189)) check the Basic-auth
-  password of every management call against `auth.secret-key` and refuse to
-  start without one. The chart keeps that value in a release-pd-auth Secret
+  of live listeners.
+- **One PD REST secret, three readers.** PD checks the Basic-auth password of
+  every management call against `auth.secret-key` and refuses to start
+  without one. The chart keeps that value in a release-pd-auth Secret
   (or `pd.auth.existingSecret`) and hands it to PD as `HG_PD_AUTH_SECRET_KEY`,
   to the Server storage wait as `PD_AUTH_PASSWORD`, and to Hubble as
   `operations.pd.password`; a `checksum/pd-auth` annotation rolls all three
-  when the Secret changes. Older images ignore the password, so the wiring is
-  harmless on them.
+  when the Secret changes.
 - **The Server startup probe allows at least 450 seconds, and the image gets
   the same budget.** The container may spend 300 seconds waiting for storage
   and the rest in the start command, so the chart sets
@@ -148,12 +145,9 @@ A fresh install seeds PD with a partition shard count of 3 when
 default of 1. The seed applies at first bootstrap only; see Partition
 Sharding below.
 
-This chart is at an early 0.1.x version. While the contribution is a draft, its
-component image tags and `appVersion` track `latest` with pull policy `Always`.
-Before stable publication, pin all four component tags (PD, Store, Server and
-Hubble) and `appVersion` to the
-next HugeGraph release and switch the component pull policies to
-`IfNotPresent`.
+The component image tags and `appVersion` track `latest` until the next
+HugeGraph release tag is published. For production, pin the image tags (or
+digests) and switch the component pull policies to `IfNotPresent`.
 
 Verify the release:
 
@@ -184,12 +178,7 @@ are worth knowing about in advance:
 
 - **PD** restarts one pod at a time whenever its Pod template changes, which
   includes adopting the `-Draft.ip-whitelist.enabled=false` setting described
-  under Limitations. With a PD image that carries the upstream whitelist
-  switch this roll is uneventful. On an older image the whitelist stays
-  active, and a restarted PD returning on a new Pod IP may be rejected by
-  peers holding stale allowlists; if PDs log `Blocked connection` after a
-  roll, delete all PD pods at once so they cold-start together and
-  re-resolve. For a maintenance-window upgrade, set
+  under Limitations. For a maintenance-window upgrade, set
   `pd.updateStrategy.type=OnDelete` and restart the pods yourself.
 - **Server** rolls once on the first `helm upgrade` after a fresh install,
   when the `checksum/auth` annotation first observes the install-created
@@ -271,7 +260,7 @@ default values.
 |---|---|---|
 | `pd.replicas` | PD StatefulSet replicas. Maximum `99` | `3` |
 | `pd.image.repository` | PD image repository | `hugegraph/pd` |
-| `pd.image.tag` | PD image tag. Tracks the development image until the next release is pinned | `latest` |
+| `pd.image.tag` | PD image tag; pin it (or a digest) for production | `latest` |
 | `pd.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `pd.image.pullPolicy` | PD image pull policy | `Always` |
 | `pd.javaOpts` | Extra JVM flags, rendered after the chart-derived `-D` properties below so an explicit duplicate here wins. The image's automatic heap sizing is preserved unless heap flags are set | `""` |
@@ -303,7 +292,7 @@ default values.
 | `pd.serviceAccount.automountServiceAccountToken` | Mount an API token. The chart makes no API calls | `false` |
 | `pd.pdb.enabled` | Create a PodDisruptionBudget for PD | `true` |
 | `pd.pdb.minAvailable` | Must be strictly less than `pd.replicas`. No PDB is rendered when `pd.replicas` is 1 | `2` |
-| `pd.readinessPath` | Path the PD readinessProbe hits. `/v1/ready` is quorum-aware and returns 503 without a raft leader. Set `/v1/health` on PD images that predate apache/hugegraph#3189: there every unmapped `/v1/` path answers 200, so `/v1/ready` passes unconditionally and readiness means nothing | `/v1/ready` |
+| `pd.readinessPath` | Path the PD readinessProbe hits. `/v1/ready` is quorum-aware and returns 503 without a raft leader | `/v1/ready` |
 | `pd.auth.value` | Plaintext PD REST secret (`auth.secret-key`). Prefer `existingSecret` in shared clusters. No newlines, carriage returns, or backslashes | `""` |
 | `pd.auth.existingSecret` | Pre-created Secret holding the PD REST secret under `pd.auth.key`. Wins over `value` and `autoGenerate`; the chart does not manage it | `""` |
 | `pd.auth.key` | Key inside the PD REST Secret | `secret-key` |
@@ -320,7 +309,7 @@ default values.
 |---|---|---|
 | `store.replicas` | Store StatefulSet replicas. Maximum `99` | `3` |
 | `store.image.repository` | Store image repository | `hugegraph/store` |
-| `store.image.tag` | Store image tag. Tracks the development image until the next release is pinned | `latest` |
+| `store.image.tag` | Store image tag; pin it (or a digest) for production | `latest` |
 | `store.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `store.image.pullPolicy` | Store image pull policy | `Always` |
 | `store.javaOpts` | Empty preserves the image's automatic JVM sizing | `""` |
@@ -333,7 +322,7 @@ default values.
 | `store.resources` | Store container resources. Set these for production | `{}` |
 | `store.podSecurityContext` | Pod-level securityContext, rendered only when set | `{}` |
 | `store.securityContext` | Container-level securityContext; also applied to the PD wait init container. Hardened by default; `runAsNonRoot` is not set because the published images run as root | `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault` |
-| `store.waitPath` | Path the init container polls on each PD peer; a majority must answer 2xx. `/v1/ready` counts quorum members. Set `/v1/health`, which counts listeners only, on PD images that predate apache/hugegraph#3189, for the reason given under `pd.readinessPath` | `/v1/ready` |
+| `store.waitPath` | Path the init container polls on each PD peer; a majority must answer 2xx. `/v1/ready` counts quorum members, not merely live listeners | `/v1/ready` |
 | `store.waitTimeoutSeconds` | Bound on the PD wait before the init container fails | `900` |
 | `store.antiAffinity` | One of `required`, `preferred`, `disabled`. `preferred` schedules on clusters with fewer nodes than replicas; production should use `required` so one node failure cannot co-locate shard replicas | `preferred` |
 | `store.nodeSelector` | Node selector for store Pods | `{}` |
@@ -361,7 +350,7 @@ default values.
 |---|---|---|
 | `server.replicas` | Server Deployment replicas. Ignored when `server.hpa.enabled` | `3` |
 | `server.image.repository` | Server image repository | `hugegraph/server` |
-| `server.image.tag` | Server image tag. Tracks the development image until the next release is pinned | `latest` |
+| `server.image.tag` | Server image tag; pin it (or a digest) for production | `latest` |
 | `server.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `server.image.pullPolicy` | Server image pull policy | `Always` |
 | `server.javaOpts` | Empty preserves the image's automatic JVM sizing | `""` |
@@ -573,7 +562,7 @@ trusted network.
 | `hubble.mode` | `pd` discovers the cluster through PD and enables the operations view; `direct` talks to the Server client Service only | `pd` |
 | `hubble.allowWithoutServerAuth` | Renders Hubble without `server.auth`, for future images whose login does not require cluster authentication | `false` |
 | `hubble.image.repository` | Hubble image repository | `hugegraph/hubble` |
-| `hubble.image.tag` | Hubble image tag. Tracks the development image until the next release is pinned | `latest` |
+| `hubble.image.tag` | Hubble image tag; pin it (or a digest) for production | `latest` |
 | `hubble.image.digest` | Optional immutable digest such as `sha256:...`; when set it takes priority over the tag | `""` |
 | `hubble.image.pullPolicy` | Hubble image pull policy | `Always` |
 | `hubble.port` | Hubble HTTP port, container port, and Service port | `8088` |
@@ -767,12 +756,9 @@ curl -u "hg:${PD_SECRET}" http://127.0.0.1:8620/v1/task/balanceLeaders     # spr
 curl -u "hg:${PD_SECRET}" http://127.0.0.1:8620/v1/task/balancePartitions  # spread partition data
 ```
 
-The credential is required. PD images from 1.8.0 answer 401 without it; older
-images answer HTTP 200 with an `Unauthorized` body and the task does not run,
-so a recovery attempt looks successful while doing nothing. On those older
-images the password is not checked, so `-u hg:` alone also works. The Secret
-name follows the release (`<release>-pd-auth`) unless `pd.auth.existingSecret`
-is set. See Limitations.
+The credential is required; PD answers 401 without it. The Secret name
+follows the release (`<release>-pd-auth`) unless `pd.auth.existingSecret`
+is set.
 
 Run `patrolPartitions` after replacing a Store that is not coming back,
 `balancePartitions` once the cluster is stable again, and `balanceLeaders`
@@ -836,12 +822,10 @@ curl -s --user "admin:${PASSWORD}" http://127.0.0.1:8080/graphs
 
 ### Queries Fail with "Could not rebind" Right After Creating a Graph
 
-**Update (2026-08-12):** [#3138](https://github.com/apache/hugegraph/pull/3138)
-merged on `master` and closes Phase 1 of
-[#3137](https://github.com/apache/hugegraph/issues/3137). The Server that
-handles `CreateGraph` now waits for its own Gremlin binding before returning
-HTTP 200, so create-then-query on the **same** Server (or sticky routing to
-that Pod) is reliable.
+The Server that handles `CreateGraph` waits for its own Gremlin binding
+before returning HTTP 200
+([#3138](https://github.com/apache/hugegraph/pull/3138)), so create-then-query
+on the **same** Server (or sticky routing to that Pod) is reliable.
 
 Other Server replicas still converge independently through a PD metadata
 watch plus a local graph open. Until they finish, a Gremlin query routed
@@ -906,40 +890,12 @@ independently of the release name.
   peer authentication to Kubernetes-level controls. Setting
   `pd.raftIpWhitelistEnabled=true` restores the image default along with
   its one-shot resolution semantics (bring-up races and pod-IP-change
-  rejections included) at the operator's own risk. PD images that predate
-  the switch ignore the flag and keep the whitelist active, so they remain
-  exposed to those failure modes; use images built from a source tree that
-  includes the switch.
-- The PD management REST endpoints (`/v1/members`, `/v1/stores`,
-  `/v1/task/*`) check the Basic-auth password against `auth.secret-key` and
-  answer 401 on refusal since
-  [#3189](https://github.com/apache/hugegraph/pull/3189), which is merged
-  upstream and due in 1.8.0. The chart supplies that secret through `pd.auth`
-  (see Chart Details), and the Disaster Recovery calls above need it. The
-  limitation is the older behaviour: PD images before that fix authenticate on
-  service name only. They compare the username against a fixed internal set
-  (`hg`, `store`, `hubble`, `vermeer`) and never look at the password, so any
-  password, including an empty one, is accepted for those names while every
-  other name is refused, and all three outcomes (success, refusal, and a
-  missing credential) return HTTP 200 with the result in the body. Treat these
-  endpoints as unauthenticated on such an image: keep the PD client Service on
-  ClusterIP and do not expose it, and do not key a health check on the status
-  code.
-- PD's `/v1/health` is liveness only: it answers 200 as soon as the REST
-  listener is up and never consults raft. Measured on a 3-PD install with two
-  PDs deleted, the survivor logged `Raft lost leader` within a second and kept
-  answering 200 while quorum-dependent calls failed
-  ([#3183](https://github.com/apache/hugegraph/issues/3183)). The fix,
-  [#3185](https://github.com/apache/hugegraph/pull/3185), is merged upstream
-  and due in 1.8.0: an unauthenticated `/v1/ready` that answers 503 without a
-  raft leader, plus raft gauges. The chart defaults `pd.readinessPath` and
-  `store.waitPath` to `/v1/ready` accordingly, and keeps PD startup and
-  liveness on `/v1/health` so a PD that merely lost its leader is not
-  restarted. The limitation is what happens on a PD image that predates the
-  fix: `/v1/ready` does not exist there, so the PD never turns Ready and
-  Stores never leave Init. Set both values back to `/v1/health` on such an
-  image, and accept that readiness then passes for a leaderless PD and the
-  Store wait counts listeners rather than quorum members.
+  rejections included) at the operator's own risk.
+- PD's `/v1/health` answers 200 as soon as the REST listener is up and never
+  consults raft, so it cannot see a lost quorum. The chart therefore uses it
+  only for PD startup and liveness (a PD that merely lost its leader is not
+  restarted) and puts readiness and the Store wait on `/v1/ready`, which
+  answers 503 without a raft leader.
 - Server discovery is a lease. Each Server re-registers its Pod IP with PD
   every 15 seconds and PD drops an entry after three missed heartbeats, so a
   replaced or evicted Server can stay in PD's list for up to 45 seconds after

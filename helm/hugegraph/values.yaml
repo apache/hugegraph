@@ -27,8 +27,8 @@ pd:
   replicas: 3
   image:
     repository: hugegraph/pd
-    # The draft tracks latest until the next HugeGraph release tag is available.
-    # Pin the release tag and switch to IfNotPresent before stable publication.
+    # Tracks latest until the next HugeGraph release tag is published. Pin the
+    # tag (or digest) and switch to IfNotPresent for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should
@@ -66,17 +66,14 @@ pd:
     rest: 8620
     raft: 8610
   dataPath: /hugegraph-pd/pd_data
-  # PD REST Basic-auth credential. PD images from 1.8.0
-  # (apache/hugegraph#3189) compare the password of every /v1 request
-  # against auth.secret-key and refuse to start without one
+  # PD REST Basic-auth credential. PD compares the password of every /v1
+  # request against auth.secret-key and refuses to start without one
   # (HG_PD_AUTH_SECRET_KEY). The chart hands the same value to the Server
   # storage wait (PD_AUTH_PASSWORD, user store) and to Hubble
-  # (operations.pd.password, user hubble). Older images accept the variable
-  # and ignore the password, so the wiring is harmless there. The Secret is
-  # kept on uninstall like the Server auth Secrets. The value must not
-  # contain newlines, carriage returns, or backslashes: it is written into
-  # Hubble's Java properties file. Priority: existingSecret > value >
-  # autoGenerate.
+  # (operations.pd.password, user hubble). The Secret is kept on uninstall
+  # like the Server auth Secrets. The value must not contain newlines,
+  # carriage returns, or backslashes: it is written into Hubble's Java
+  # properties file. Priority: existingSecret > value > autoGenerate.
   auth:
     # Optional plaintext secret (prefer existingSecret in shared clusters).
     value: ""
@@ -136,8 +133,7 @@ pd:
   # Kubernetes blocks peers whose pod IPs were not yet published or change
   # later. Off by default in-cluster (upstream switch
   # raft.ip-whitelist.enabled); k8s network policy/auth owns that layer.
-  # Ignored by images that predate the switch. Set true to restore the
-  # image default.
+  # Set true to restore the image default.
   raftIpWhitelistEnabled: false
   # Explicit rollout strategy instead of the implicit StatefulSet default.
   updateStrategy:
@@ -150,12 +146,10 @@ pd:
     whenDeleted: Retain
     whenScaled: Retain
   # Startup can take a while during Raft bootstrap
-  # HTTP path the PD readinessProbe hits. /v1/ready (apache/hugegraph#3185,
-  # merged upstream, due in 1.8.0) answers 503 while there is no raft leader,
-  # so a PD outside the quorum stops passing readiness. Images that predate
-  # the fix do not serve that path and never turn Ready on it: set this back
-  # to /v1/health on one of those. Startup and liveness stay on /v1/health
-  # regardless, so a PD that merely lost its leader is not restarted.
+  # HTTP path the PD readinessProbe hits. /v1/ready answers 503 while there
+  # is no raft leader, so a PD outside the quorum stops passing readiness.
+  # Startup and liveness stay on /v1/health so a PD that merely lost its
+  # leader is not restarted.
   readinessPath: /v1/ready
   probes:
     startup:
@@ -175,8 +169,8 @@ store:
   replicas: 3
   image:
     repository: hugegraph/store
-    # The draft tracks latest until the next HugeGraph release tag is available.
-    # Pin the release tag and switch to IfNotPresent before stable publication.
+    # Tracks latest until the next HugeGraph release tag is published. Pin the
+    # tag (or digest) and switch to IfNotPresent for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should
@@ -228,11 +222,8 @@ store:
     minAvailable: 2
   waitImage: curlimages/curl:8.5.0
   # HTTP path the init container polls on every PD peer; a majority must
-  # answer 2xx before the Store starts. /v1/ready (apache/hugegraph#3185,
-  # merged upstream, due in 1.8.0) makes that majority a raft quorum instead
-  # of a set of live listeners. Images that predate the fix do not serve the
-  # path and their Stores never leave Init: set this back to /v1/health on
-  # one of those.
+  # answer 2xx before the Store starts. /v1/ready makes that majority a
+  # raft quorum instead of a set of live listeners.
   waitPath: /v1/ready
   # Bound the PD wait so a cluster whose PDs never come up fails visibly
   # instead of sitting in Init:0/1 forever.
@@ -265,8 +256,8 @@ server:
   replicas: 3
   image:
     repository: hugegraph/server
-    # The draft tracks latest until the next HugeGraph release tag is available.
-    # Pin the release tag and switch to IfNotPresent before stable publication.
+    # Tracks latest until the next HugeGraph release tag is published. Pin the
+    # tag (or digest) and switch to IfNotPresent for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should
@@ -413,8 +404,8 @@ hubble:
   allowWithoutServerAuth: false
   image:
     repository: hugegraph/hubble
-    # The draft tracks latest until the next HugeGraph release tag is available.
-    # Pin the release tag and switch to IfNotPresent before stable publication.
+    # Tracks latest until the next HugeGraph release tag is published. Pin the
+    # tag (or digest) and switch to IfNotPresent for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should

@@ -269,7 +269,7 @@ spec:
             - name: HG_SERVER_PD_REST_ENDPOINT
               value: {{ include "hugegraph.pd.restPeersList" . | quote }}
             # wait-storage.sh authenticates its PD readiness checks as the
-            # store service user with this password (PD images from 1.8.0).
+            # store service user with this password.
             - name: PD_AUTH_PASSWORD
               valueFrom:
                 secretKeyRef:
