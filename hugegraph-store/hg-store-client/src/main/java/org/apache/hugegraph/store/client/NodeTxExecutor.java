@@ -22,13 +22,17 @@ import static org.apache.hugegraph.store.client.util.HgStoreClientConst.NODE_MAX
 import static org.apache.hugegraph.store.client.util.HgStoreClientConst.TX_SESSIONS_MAP_CAPACITY;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.Queue;
+import java.util.Set;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collector;
@@ -46,6 +50,8 @@ import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.term.HgPair;
 import org.apache.hugegraph.store.term.HgTriple;
 
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -58,8 +64,6 @@ final class NodeTxExecutor {
     private static final String maxTryMsg =
             "the number of retries reached the upper limit : " + NODE_MAX_RETRYING_TIMES +
             ",caused by:";
-    private static final String msg =
-            "Not all tx-data delivered to real-node-session successfully.";
 
     static {
         System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism",
@@ -121,43 +125,11 @@ final class NodeTxExecutor {
                 if (this.entries.isEmpty()) {
                     return true;
                 }
-                AtomicBoolean allSuccess = new AtomicBoolean(true);
                 for (HgPair<HgTriple<String, HgOwnerKey, Object>, Function<NodeTkv, Boolean>> e :
                         this.entries) {
                     doAction(e.getKey(), e.getValue());
                 }
-                if (!allSuccess.get()) {
-                    throw HgStoreClientException.of(msg);
-                }
-                AtomicReference<Throwable> throwable = new AtomicReference<>();
-                Collection<HgStoreSession> sessions = this.sessions.values();
-                sessions.parallelStream().forEach(e -> {
-                    if (e.isTx()) {
-                        try {
-                            e.commit();
-                        } catch (Throwable t) {
-                            throwable.compareAndSet(null, t);
-                            allSuccess.set(false);
-                        }
-                    }
-                });
-                if (!allSuccess.get()) {
-                    if (isTx) {
-                        try {
-                            sessions.stream().forEach(HgStoreSession::rollback);
-                        } catch (Exception e) {
-
-                        }
-                    }
-                    Throwable cause = throwable.get();
-                    if (cause.getCause() != null) {
-                        cause = cause.getCause();
-                    }
-                    if (cause instanceof HgStoreClientException) {
-                        throw (HgStoreClientException) cause;
-                    }
-                    throw HgStoreClientException.of(cause);
-                }
+                this.commitSessions(this.sessions.values());
                 return true;
             });
 
@@ -231,6 +203,52 @@ final class NodeTxExecutor {
     //        }
     //    }
     // };
+
+    /**
+     * Commit every tx session in parallel. When at least one commit fails, roll back (in tx
+     * mode) and throw one exception that carries ALL failures: the first one as the cause, the
+     * others as suppressed. The retry loop looks at all of them, so whether a commit is retried
+     * no longer depends on which partition happened to fail first.
+     */
+    void commitSessions(Collection<HgStoreSession> sessions) {
+        Queue<Throwable> failures = new ConcurrentLinkedQueue<>();
+        sessions.parallelStream().forEach(e -> {
+            if (e.isTx()) {
+                try {
+                    e.commit();
+                } catch (Throwable t) {
+                    failures.add(t);
+                }
+            }
+        });
+        if (failures.isEmpty()) {
+            return;
+        }
+        if (isTx) {
+            try {
+                sessions.stream().forEach(HgStoreSession::rollback);
+            } catch (Exception e) {
+                // keep the commit failure as the reported one
+            }
+        }
+        throw aggregate(failures);
+    }
+
+    static HgStoreClientException aggregate(Collection<Throwable> failures) {
+        Iterator<Throwable> it = failures.iterator();
+        Throwable first = it.next();
+        Throwable cause = first.getCause() != null ? first.getCause() : first;
+        HgStoreClientException result = cause instanceof HgStoreClientException ?
+                                        (HgStoreClientException) cause :
+                                        HgStoreClientException.of(cause);
+        while (it.hasNext()) {
+            Throwable other = it.next();
+            if (other != result && other != cause) {
+                result.addSuppressed(other);
+            }
+        }
+        return result;
+    }
 
     private boolean doAction(HgTriple<String, HgOwnerKey, Object> nodeParams,
                              Function<NodeTkv, Boolean> action) {
@@ -373,34 +391,74 @@ final class NodeTxExecutor {
     }
 
     <T> Optional<T> retryingInvoke(Supplier<T> supplier) {
+        boolean[] deadlineRetried = {false};
         return IntStream.rangeClosed(0, NODE_MAX_RETRYING_TIMES).boxed()
                         .map(
                                 i -> {
+                                    if (Thread.currentThread().isInterrupted()) {
+                                        // The caller (e.g. a REST worker hitting
+                                        // restserver.request_timeout) gave up: stop
+                                        // retrying instead of holding its thread.
+                                        // InterruptedException as the root cause: the
+                                        // server's task cancel path recognises it
+                                        // (HugeException.isInterrupted()).
+                                        throw HgStoreClientException.of(
+                                                "Interrupted before retry " + i,
+                                                new InterruptedException());
+                                    }
                                     T buffer = null;
                                     try {
                                         buffer = supplier.get();
                                     } catch (Throwable t) {
-                                        if (i + 1 <= NODE_MAX_RETRYING_TIMES) {
-                                            try {
-                                                int sleepTime;
-                                                // The first three times try once every second
-                                                if (i < 3) {
-                                                    sleepTime = 1;
-                                                } else {
-                                                    // Subsequent incremental
-                                                    sleepTime = i - 1;
-                                                }
-                                                log.info("Waiting {} seconds " +
-                                                         "for the next try.",
-                                                         sleepTime);
-                                                Thread.sleep(sleepTime * 1000L);
-                                            } catch (InterruptedException e) {
-                                                log.error("Failed to sleep", e);
+                                        Failure failure = classify(t);
+                                        if (failure != Failure.DEADLINE) {
+                                            // a different failure in between means the
+                                            // next deadline is not "in a row" again
+                                            deadlineRetried[0] = false;
+                                        }
+                                        if (failure == Failure.FATAL) {
+                                            // The caller's thread was interrupted or the
+                                            // call was cancelled: fail fast.
+                                            log.warn("Not retrying after: {}",
+                                                     t.getMessage(), t);
+                                            throw HgStoreClientException.of(
+                                                    t.getMessage(), t);
+                                        }
+                                        if (failure == Failure.DEADLINE) {
+                                            // One retry: the NOT_WORK notice sent for the
+                                            // failed RPC reloads the partition leaders, so
+                                            // the next attempt can reach a new leader. A
+                                            // second deadline in a row would only wait the
+                                            // full deadline again on the same stalled store.
+                                            if (deadlineRetried[0]) {
+                                                log.warn("Not retrying a second deadline: {}",
+                                                         t.getMessage(), t);
+                                                throw HgStoreClientException.of(
+                                                        t.getMessage(), t);
                                             }
-                                        } else {
+                                            deadlineRetried[0] = true;
+                                            log.warn("Deadline exceeded, retrying once in " +
+                                                     "case the partition leader moved: {}",
+                                                     t.getMessage());
+                                        }
+                                        if (i + 1 > NODE_MAX_RETRYING_TIMES) {
                                             log.error(maxTryMsg, t);
                                             throw HgStoreClientException.of(
                                                     t.getMessage(), t);
+                                        }
+                                        // The first three times try once every second,
+                                        // subsequent incremental
+                                        int sleepTime = i < 3 ? 1 : i - 1;
+                                        log.info("Waiting {} seconds for the next try.",
+                                                 sleepTime);
+                                        try {
+                                            Thread.sleep(sleepTime * 1000L);
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                            e.addSuppressed(t);
+                                            throw HgStoreClientException.of(
+                                                    "Interrupted while waiting to retry: " +
+                                                    t.getMessage(), e);
                                         }
                                     }
                                     return buffer;
@@ -409,6 +467,54 @@ final class NodeTxExecutor {
                         .filter(e -> e != null)
                         .findFirst();
 
+    }
+
+    /**
+     * How a failed attempt is treated by {@link #retryingInvoke}: FATAL is never retried (the
+     * caller's thread was interrupted, or the call was cancelled), DEADLINE is retried exactly
+     * once (the partition leader may have moved after the failed RPC invalidated the partition
+     * cache; a second deadline in a row would only wait the full deadline again on the same
+     * stalled store), everything else (transport errors, NOT_LEADER, store replacement) is
+     * retried up to NODE_MAX_RETRYING_TIMES as before. For a parallel commit the failures of
+     * the other partitions arrive as suppressed exceptions and are classified too; the most
+     * severe class wins.
+     */
+    enum Failure {
+        RETRYABLE, DEADLINE, FATAL
+    }
+
+    static Failure classify(Throwable t) {
+        return classify(t, Collections.newSetFromMap(new IdentityHashMap<>()));
+    }
+
+    private static Failure classify(Throwable t, Set<Throwable> seen) {
+        Failure worst = Failure.RETRYABLE;
+        Throwable c = t;
+        while (c != null && seen.add(c)) {
+            if (c instanceof InterruptedException) {
+                return Failure.FATAL;
+            }
+            if (c instanceof StatusRuntimeException) {
+                Status.Code code = ((StatusRuntimeException) c).getStatus().getCode();
+                if (code == Status.Code.CANCELLED) {
+                    return Failure.FATAL;
+                }
+                if (code == Status.Code.DEADLINE_EXCEEDED) {
+                    worst = Failure.DEADLINE;
+                }
+            }
+            for (Throwable suppressed : c.getSuppressed()) {
+                Failure f = classify(suppressed, seen);
+                if (f == Failure.FATAL) {
+                    return f;
+                }
+                if (f.compareTo(worst) > 0) {
+                    worst = f;
+                }
+            }
+            c = c.getCause();
+        }
+        return worst;
     }
 
     private boolean isValid(Object obj) {
