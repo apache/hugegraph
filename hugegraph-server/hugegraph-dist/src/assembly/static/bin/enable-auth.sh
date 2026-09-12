@@ -41,16 +41,43 @@ if [ ! -d "$BAK_CONF" ]; then
     cp "${CONF}/${GREMLIN_SERVER_CONF}" "${BAK_CONF}/${GREMLIN_SERVER_CONF}.bak"
     cp "${CONF}/${REST_SERVER_CONF}" "${BAK_CONF}/${REST_SERVER_CONF}.bak"
     cp "${CONF}/graphs/${GRAPH_CONF}" "${BAK_CONF}/${GRAPH_CONF}.bak"
+fi
 
+# The appends below are guarded per file and match only an absent or still
+# commented-out definition, so they are no-ops on any config that already
+# carries authentication (e.g. a mounted one, or a re-run of this script).
+# The guards accept every spelling java.util.Properties reads as the key —
+# '=' or ':' or bare-whitespace separators, leading whitespace and
+# backslash-escaped dots — and the gremlin.graph flip tolerates CRLF
+# endings, which a mounted config saved on Windows carries.  Appending
+# unconditionally used to create duplicate definitions that the
+# properties parser (first definition wins) and the yaml parser (last wins)
+# resolved in opposite directions, leaving Gremlin and REST on different
+# authenticators.
 
+AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
+
+if ! grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' "${CONF}/${GREMLIN_SERVER_CONF}"; then
     sed -i -e '$a\authentication: {' \
-        -e '$a\  authenticator: org.apache.hugegraph.auth.StandardAuthenticator,' \
+        -e "\$a\\  authenticator: ${AUTHENTICATOR_CLASS}," \
         -e '$a\  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler,' \
         -e '$a\  config: {tokens: conf/rest-server.properties}' \
         -e '$a\}' ${CONF}/${GREMLIN_SERVER_CONF}
+fi
 
-    sed -i -e '$a\auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
-        -e '$a\auth.graph_store=hugegraph' ${CONF}/${REST_SERVER_CONF}
+if ! grep -Eq '^[[:blank:]]*auth[\\]?\.authenticator[[:blank:]]*([:=]|[[:blank:]])' "${CONF}/${REST_SERVER_CONF}"; then
+    sed -i -e "\$a\\auth.authenticator=${AUTHENTICATOR_CLASS}" ${CONF}/${REST_SERVER_CONF}
+fi
 
-    sed -i 's/gremlin.graph=org.apache.hugegraph.HugeFactory/gremlin.graph=org.apache.hugegraph.auth.HugeFactoryAuthProxy/g' ${CONF}/graphs/${GRAPH_CONF}
+if ! grep -Eq '^[[:blank:]]*auth[\\]?\.graph_store[[:blank:]]*([:=]|[[:blank:]])' "${CONF}/${REST_SERVER_CONF}"; then
+    sed -i -e '$a\auth.graph_store=hugegraph' ${CONF}/${REST_SERVER_CONF}
+fi
+
+# GNU grep reads \r in a pattern as the letter r, so the carriage return a
+# CRLF line ends with is embedded as a byte: without it the anchored guard
+# misses a mounted CRLF config and the factory is never wrapped for auth
+# although both servers already believe authentication is on.
+CR=$'\r'
+if grep -Eq "^[[:blank:]]*gremlin[\\\\]?\\.graph[[:blank:]]*([:=]|[[:blank:]])[[:blank:]]*org\\.apache\\.hugegraph\\.HugeFactory[[:blank:]]*${CR}?$" "${CONF}/graphs/${GRAPH_CONF}"; then
+    sed -i -E "s#^([[:blank:]]*gremlin[\\\\]?\\.graph[[:blank:]]*([:=]|[[:blank:]])[[:blank:]]*)org\\.apache\\.hugegraph\\.HugeFactory#\\1org.apache.hugegraph.auth.HugeFactoryAuthProxy#" "${CONF}/graphs/${GRAPH_CONF}"
 fi
