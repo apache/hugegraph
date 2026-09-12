@@ -1,0 +1,76 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Server startup timeout tracks the startup probe budget
+templates:
+  - server-deployment.yaml
+tests:
+  - it: passes the default 450 second budget to the image
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HG_SERVER_STARTUP_TIMEOUT_S
+            value: "450"
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.failureThreshold
+          value: 90
+      - equal:
+          path: spec.template.spec.containers[0].startupProbe.periodSeconds
+          value: 5
+
+  - it: follows a raised startup probe budget
+    set:
+      server.probes.startup.failureThreshold: 200
+      server.probes.startup.periodSeconds: 10
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HG_SERVER_STARTUP_TIMEOUT_S
+            value: "2000"
+
+  - it: follows the 450 second floor when a lower failureThreshold is configured
+    set:
+      server.probes.startup.failureThreshold: 1
+      server.probes.startup.periodSeconds: 5
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HG_SERVER_STARTUP_TIMEOUT_S
+            value: "450"
+
+  - it: caps at the entrypoint's 86400 second maximum
+    set:
+      server.probes.startup.failureThreshold: 100000
+      server.probes.startup.periodSeconds: 10
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HG_SERVER_STARTUP_TIMEOUT_S
+            value: "86400"
+
+  - it: refuses an extraEnv override that would silently diverge from the probe
+    set:
+      server.extraEnv:
+        - name: HG_SERVER_STARTUP_TIMEOUT_S
+          value: "60"
+    asserts:
+      - failedTemplate:
+          errorMessage: server.extraEnv must not set the chart-managed variable HG_SERVER_STARTUP_TIMEOUT_S

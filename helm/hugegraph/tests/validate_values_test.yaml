@@ -1,0 +1,88 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: validateValues guard rails
+templates:
+  - server-deployment.yaml
+tests:
+  - it: rejects a PDB that would let PD drop below raft majority
+    set:
+      pd.pdb.minAvailable: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "pd.pdb.minAvailable must be at least the PD Raft majority"
+
+  - it: rejects a PDB that would permanently block drains
+    set:
+      pd.pdb.minAvailable: 3
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be less than pd.replicas"
+
+  - it: rejects an even shard count
+    set:
+      pd.partition.defaultShardCount: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be odd"
+
+  - it: rejects a shard count above store.replicas
+    set:
+      pd.partition.defaultShardCount: 5
+    asserts:
+      - failedTemplate:
+          errorPattern: "greater than store.replicas"
+
+  - it: rejects operator overrides of the chart-managed JAVA_OPTIONS
+    set:
+      server.extraEnv:
+        - name: JAVA_OPTIONS
+          value: "-Xmx1g"
+    asserts:
+      - failedTemplate:
+          errorPattern: "must not set the chart-managed variable JAVA_OPTIONS"
+
+  - it: rejects networkPolicy.enabled because the chart ships no policies
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "does not implement NetworkPolicy resources"
+
+  - it: rejects Hubble without Server auth
+    set:
+      server.auth.enabled: false
+      hubble.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "hubble.enabled requires server.auth"
+
+  - it: rejects a plain-HTTP Hubble Ingress
+    set:
+      hubble.ingress.enabled: true
+      hubble.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "publishes the plain-HTTP, unauthenticated Hubble UI"
+
+  - it: rejects an empty Hubble image tag
+    set:
+      hubble.image.tag: ""
+      hubble.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "hubble.image.tag must not be empty"

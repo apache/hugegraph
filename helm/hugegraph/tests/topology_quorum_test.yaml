@@ -1,0 +1,95 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: PD topology, quorum math and PDB gating
+tests:
+  - it: points the PD StatefulSet at its own headless Service
+    template: pd-statefulset.yaml
+    asserts:
+      - matchRegex:
+          path: spec.serviceName
+          pattern: "-hugegraph-pd$"
+
+  - it: builds a DNS-based raft peer list that tracks pd.replicas
+    template: pd-statefulset.yaml
+    set:
+      pd.replicas: 3
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_PD_RAFT_PEERS_LIST")].value
+          pattern: "pd-0\\..*svc.*pd-1\\..*svc.*pd-2\\..*svc"
+
+  - it: shrinks the raft peer list for a single-node install
+    template: pd-statefulset.yaml
+    set:
+      pd.replicas: 1
+      pd.partition.defaultShardCount: 1
+      store.replicas: 1
+    asserts:
+      - notMatchRegex:
+          path: spec.template.spec.containers[0].env[?(@.name=="HG_PD_RAFT_PEERS_LIST")].value
+          pattern: "pd-1\\."
+
+  - it: waits for a majority of 2 when PD has 3 replicas
+    template: store-statefulset.yaml
+    set:
+      pd.replicas: 3
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "REQUIRED=2"
+
+  - it: waits for a majority of 3 when PD has 5 replicas
+    template: store-statefulset.yaml
+    set:
+      pd.replicas: 5
+      pd.pdb.minAvailable: 3
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "REQUIRED=3"
+
+  - it: waits for a majority of 1 when PD is single-node
+    template: store-statefulset.yaml
+    set:
+      pd.replicas: 1
+      pd.partition.defaultShardCount: 1
+      store.replicas: 1
+    asserts:
+      - matchRegex:
+          path: spec.template.spec.initContainers[0].command[2]
+          pattern: "REQUIRED=1"
+
+  - it: emits no PodDisruptionBudget for a single-replica PD
+    template: pd-pdb.yaml
+    set:
+      pd.replicas: 1
+      pd.partition.defaultShardCount: 1
+      store.replicas: 1
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: publishes not-ready addresses so peer DNS resolves before readiness
+    template: pd-service-headless.yaml
+    asserts:
+      - equal:
+          path: spec.publishNotReadyAddresses
+          value: true
+      - equal:
+          path: spec.clusterIP
+          value: None
