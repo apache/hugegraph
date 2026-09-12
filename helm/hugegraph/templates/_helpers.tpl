@@ -658,8 +658,13 @@ start-hugegraph-pd.sh, start-hugegraph-store.sh, and hugegraph-server.sh).
 {{- end -}}
 {{- end -}}
 {{- $pdAuth := get .Values.pd "auth" | default dict -}}
-{{- if and (not (get $pdAuth "existingSecret" | default "")) (not (get $pdAuth "value" | default "")) (not (get $pdAuth "autoGenerate" | default false)) -}}
-{{- fail "pd.auth requires existingSecret, value, or autoGenerate=true: PD images from 1.8.0 refuse to start without a REST secret" -}}
+{{/* A values set with no pd.auth block at all (a release stored before the
+     field existed, replayed by --reuse-values) gets the chart default,
+     autoGenerate; only an explicit autoGenerate=false with nothing else set
+     is an error. */}}
+{{- $pdAutoGen := ternary (get $pdAuth "autoGenerate") true (hasKey $pdAuth "autoGenerate") -}}
+{{- if and (not (get $pdAuth "existingSecret" | default "")) (not (get $pdAuth "value" | default "")) (not $pdAutoGen) -}}
+{{- fail "pd.auth requires existingSecret, value, or autoGenerate=true: PD refuses to start without a REST secret" -}}
 {{- end -}}
 {{- $auth := get .Values.server "auth" | default dict -}}
 {{- $admin := get $auth "admin" | default dict -}}

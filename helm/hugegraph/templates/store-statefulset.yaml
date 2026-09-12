@@ -104,7 +104,7 @@ spec:
               until [ "$(
                 ok=0
                 for peer in ${HEALTH_PEERS}; do
-                  if curl -fsS "http://${peer}${WAIT_PATH}" >/dev/null 2>&1; then
+                  if curl -fsS --connect-timeout 2 --max-time 5 "http://${peer}${WAIT_PATH}" >/dev/null 2>&1; then
                     ok=$((ok+1))
                   fi
                 done

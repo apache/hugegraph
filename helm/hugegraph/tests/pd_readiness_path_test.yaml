@@ -53,7 +53,7 @@ tests:
           pattern: 'WAIT_PATH="/v1/ready"'
       - matchRegex:
           path: spec.template.spec.initContainers[0].command[2]
-          pattern: 'curl -fsS "http://\${peer}\${WAIT_PATH}"'
+          pattern: 'curl -fsS --connect-timeout 2 --max-time 5 "http://\${peer}\${WAIT_PATH}"'
 
   - it: polls store.waitPath on each PD peer when set back for an older image
     template: store-statefulset.yaml
