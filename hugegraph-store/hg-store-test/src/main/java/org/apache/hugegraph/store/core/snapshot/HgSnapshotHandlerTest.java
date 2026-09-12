@@ -18,6 +18,8 @@
 package org.apache.hugegraph.store.core.snapshot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.store.business.BusinessHandler;
+import org.apache.hugegraph.store.business.BusinessHandlerImpl;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
@@ -263,6 +266,49 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
         assertEquals("reservation must succeed again once released", true,
                      businessHandler.tryLockCompactionRange(partitionId));
         businessHandler.unlockCompactionRange(partitionId);
+    }
+
+    /**
+     * Test that dbCompaction() gives up and skips its pass, rather than blocking forever, when
+     * a snapshot save is still holding compactionRangeLock after the configured wait. Shortens
+     * compactionRangeLockWaitMillis for the duration of the test so it does not have to wait out
+     * the real production timeout, and restores it afterward so other tests are unaffected.
+     */
+    @Test
+    public void testDbCompactionSkipsWhenRangeLockStillHeldAfterWait() throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 4;
+        createPartitionEngine(partitionId);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(200);
+        try {
+            // Simulate a snapshot save that is still in progress.
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.dbCompaction("graph0", partitionId);
+
+            // dbCompaction() runs on compactionPool asynchronously; give it time to hit the
+            // shortened wait and skip, then confirm it never reached the compacting state
+            // (doing = -1, set right after the range lock would have been acquired).
+            Thread.sleep(1000);
+            assertEquals("dbCompaction must never reach the compacting state while the range " +
+                         "lock is held by the snapshot save", 0,
+                         businessHandler.getState(partitionId).get());
+
+            // The range lock must still belong to the snapshot save - dbCompaction skipping
+            // must not have released a lock it never acquired. Check from another thread since
+            // the lock is a ReentrantLock and the owning (main) thread could always re-acquire it.
+            AtomicBoolean concurrentResult = new AtomicBoolean();
+            Thread other = new Thread(() -> concurrentResult.set(
+                    businessHandler.tryLockCompactionRange(partitionId)));
+            other.start();
+            other.join();
+            assertFalse("a concurrent reservation attempt must still fail", concurrentResult.get());
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+        }
     }
 
     private static SnapshotReader stubReader(String path) {
