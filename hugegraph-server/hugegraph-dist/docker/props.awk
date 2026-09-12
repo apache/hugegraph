@@ -135,20 +135,32 @@ function split_kv(s,    n, i, c, esc, sep_at, rest) {
     V_RAW = rest
 }
 
+function shquote(s) {
+    gsub(/'/, "'\\''", s)
+    return "'" s "'"
+}
+
 # Load `file` into per-block arrays: one block per comment/blank line or
 # logical entry, spanning exactly the physical lines it occupies.
-function props_load(file,    raw, nl, next_raw, start, logical) {
+function props_load(file,    raw, rc, nl, stripped, next_raw, start, logical) {
     NLINES = 0
-    while ((getline raw < file) > 0) {
+    while ((rc = (getline raw < file)) > 0) {
         NLINES++
         RAW[NLINES] = raw
     }
+    if (rc == -1)
+        die("cannot read " file)
     close(file)
 
     NBLOCK = 0
     for (nl = 1; nl <= NLINES; nl++) {
         raw = RAW[nl]
-        if (is_skipped(raw)) {
+        # CRLF: java.util.Properties drops the line terminator, so one
+        # trailing CR is stripped for parsing only.  RAW[] keeps the byte
+        # so props_set replays untouched lines byte-for-byte.
+        stripped = raw
+        sub(/\r$/, "", stripped)
+        if (is_skipped(stripped)) {
             NBLOCK++
             BTYPE[NBLOCK] = "skip"
             BFIRST[NBLOCK] = nl
@@ -156,11 +168,12 @@ function props_load(file,    raw, nl, next_raw, start, logical) {
             continue
         }
         start = nl
-        logical = raw
+        logical = stripped
         while (trailing_backslashes(logical) % 2 == 1 && nl < NLINES) {
             logical = substr(logical, 1, length(logical) - 1)
             nl++
             next_raw = RAW[nl]
+            sub(/\r$/, "", next_raw)
             sub(/^[ \t]+/, "", next_raw)
             logical = logical next_raw
         }
@@ -183,7 +196,7 @@ function props_load(file,    raw, nl, next_raw, start, logical) {
     }
 }
 
-function props_set(file, key, enc_val,    b, first, ln) {
+function props_set(file, key, enc_val,    tmp, cmd, b, first, ln) {
     props_load(file)
     first = 0
     for (b = 1; b <= NBLOCK; b++) {
@@ -192,18 +205,24 @@ function props_set(file, key, enc_val,    b, first, ln) {
             else BDROP[b] = 1
         }
     }
+    # Atomic rewrite: the original is never truncated.  Everything lands
+    # in a sibling temp file that is closed and renamed over the original.
+    tmp = file ".tmp"
     for (b = 1; b <= NBLOCK; b++) {
         if (BDROP[b]) continue
         if (b == first) {
-            printf "%s=%s\n", key, enc_val > file
+            printf "%s=%s\n", key, enc_val > tmp
         } else {
             for (ln = BFIRST[b]; ln <= BLAST[b]; ln++)
-                print RAW[ln] > file
+                print RAW[ln] > tmp
         }
     }
     if (first == 0)
-        printf "%s=%s\n", key, enc_val > file
-    close(file)
+        printf "%s=%s\n", key, enc_val > tmp
+    close(tmp)
+    cmd = "mv -- " shquote(tmp) " " shquote(file)
+    if (system(cmd) != 0)
+        die("cannot rename " tmp " over " file)
 }
 
 function props_get(file, key,    b) {
@@ -211,6 +230,16 @@ function props_get(file, key,    b) {
     for (b = 1; b <= NBLOCK; b++) {
         if (BTYPE[b] == "entry" && BKEY[b] == key) {
             print BVAL[b]
+            return
+        }
+    }
+}
+
+function props_get_decoded(file, key,    b) {
+    props_load(file)
+    for (b = 1; b <= NBLOCK; b++) {
+        if (BTYPE[b] == "entry" && BKEY[b] == key) {
+            print unescape(BVAL[b])
             return
         }
     }
@@ -224,9 +253,11 @@ BEGIN {
         die("PROPS_FILE and PROPS_KEY must be set")
     if (mode == "get") {
         props_get(file, key)
+    } else if (mode == "get-decoded") {
+        props_get_decoded(file, key)
     } else if (mode == "set") {
         props_set(file, key, ENVIRON["PROPS_VALUE_ENCODED"])
     } else {
-        die("PROPS_MODE must be get or set")
+        die("PROPS_MODE must be get, get-decoded or set")
     }
 }
