@@ -1,0 +1,30 @@
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling typenum v1.20.1
+   Compiling cpufeatures v0.2.17
+   Compiling hex v0.4.3
+   Compiling anyhow v1.0.104
+   Compiling libloading v0.8.9
+   Compiling generic-array v0.14.7
+   Compiling jobserver v0.1.35
+   Compiling clang-sys v1.9.1
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling cc v1.4.6
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling zstd-sys v2.1.0+zstd.1.5.7
+   Compiling bzip2-sys v0.1.13+1.0.8
+   Compiling libz-sys v1.1.29
+   Compiling lz4-sys v1.11.1+lz4-1.10.0
+   Compiling bindgen v0.69.5
+   Compiling librocksdb-sys v0.16.0+8.10.0
+   Compiling rocksdb v0.22.0
+   Compiling hugegraph-store-reader v0.1.0 (/home/zy/code/hugegraph/tools/rust-store-reader)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 37s
+     Running unittests src/main.rs (tools/rust-store-reader/target/debug/deps/hugegraph_store_reader-1e29e7b3e7784156)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
