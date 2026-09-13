@@ -1277,7 +1277,13 @@ impl Catalog {
 impl Catalog {
     pub fn snapshot(&self) -> Vec<u8> {
         let mut v = Vec::new();
-        for n in self.tables.iter().chain(self.graphs.iter()) {
+        for n in &self.tables {
+            v.push(b'T');
+            v.extend_from_slice(n.as_bytes());
+            v.push(0);
+        }
+        for n in &self.graphs {
+            v.push(b'G');
             v.extend_from_slice(n.as_bytes());
             v.push(0);
         }
