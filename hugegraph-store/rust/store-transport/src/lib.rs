@@ -114,20 +114,7 @@ pub fn serve_once(
     stream.read_exact(&mut buf)?;
     let env = RpcEnvelope::decode(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    validate_dispatch(&env.method, &env.payload)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let response = match env.method.as_str() {
-        "HgStoreSession.Get2" => service.call(StoreRequest::Get { key: env.payload })?,
-        "HgStoreSession.Batch" => service.call(StoreRequest::Put {
-            key: b"batch".to_vec(),
-            value: env.payload,
-        })?,
-        _ => StoreResponse::Ack,
-    };
-    let payload = match response {
-        StoreResponse::Value(Some(v)) => v,
-        StoreResponse::Value(None) | StoreResponse::Ack => Vec::new(),
-    };
+    let payload = dispatch_payload(&mut service, &env.method, env.payload)?;
     stream.write_all(&(payload.len() as u32).to_le_bytes())?;
     stream.write_all(&payload)
 }
