@@ -166,6 +166,30 @@ mod tests {
             run(BackendSelector::java_fallback())
         );
     }
+
+    #[test]
+    fn independent_oracle_deterministic_trace() {
+        let ops = [(0u8, 1u8), (1, 2), (0, 3), (2, 0), (1, 4), (2, 0), (0, 5)];
+        let keys = [b"a".as_slice(), b"b".as_slice()];
+        let mut actual = InMemoryStore::default();
+        let mut oracle = std::collections::BTreeMap::new();
+        for (i, (kind, value)) in ops.into_iter().enumerate() {
+            let key = keys[i % keys.len()].to_vec();
+            match kind {
+                0 => {
+                    let expected = oracle.insert(key.clone(), vec![value]);
+                    assert_eq!(actual.put(key, vec![value]), expected);
+                }
+                1 => assert_eq!(actual.get(&key), oracle.get(&key).cloned()),
+                2 => {
+                    actual.rollback(&key);
+                    oracle.remove(&key);
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(actual.snapshot(), InMemoryStore(oracle.clone()).snapshot());
+        }
+    }
 }
 
 /// Durable append-only store boundary used by production adapters.
