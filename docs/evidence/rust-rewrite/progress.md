@@ -69,3 +69,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Mutation validation passed: 19 Rust partition/recovery/cache tests, including negative counterexamples, detected injected defects. All contract, core, independent Oracle, and mutation gates are complete.
 
 2026-09-13: Created initial independent hugegraph-store Rust workspace with selectable StoreBackend boundary and in-memory commit/rollback slice; cargo test passed. Next action: add WAL/snapshot and Java fallback adapters with differential evidence.
+
+2026-09-13: Added deterministic snapshot/restore framing to Rust store core and round-trip test; 2 tests passed. Java fallback remains a caller-selected implementation boundary. Next action: differential replay and fault recovery evidence.

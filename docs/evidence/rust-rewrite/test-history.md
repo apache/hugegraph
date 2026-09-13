@@ -35,3 +35,4 @@
 | `bash -n tools/rust-rewrite-cluster/smoke.sh; timeout 360s bash tools/rust-rewrite-cluster/smoke.sh` | `working-tree` | PASS (cluster smoke passed after restart readiness polling) | `raft-001-three-node-smoke-20260913-rerun.log` |
 | `cargo test --manifest-path tools/rust-partition-poc/Cargo.toml` | `4d514ac05` | PASS (19 tests; mutation counterexamples detected) | `mutation-validation-20260913.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml` | `working-tree` | PASS (Rust store boundary workspace, 1 test) | `store-rust-core-20260913.log` |
+| `cargo test --manifest-path hugegraph-store/rust/Cargo.toml` (WAL/snapshot slice) | `working-tree` | PASS (2 tests) | `store-rust-wal-snapshot-20260913.log` |
