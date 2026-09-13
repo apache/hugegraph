@@ -227,6 +227,13 @@ impl DurableStore {
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.inner.get(key)
     }
+    pub fn entries(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        self.inner
+            .0
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
     pub fn snapshot(&self) -> Vec<u8> {
         self.inner.snapshot()
     }
@@ -252,6 +259,23 @@ mod durable_tests {
         let s = DurableStore::open(&path).unwrap();
         assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn entries_are_sorted_and_owned() {
+        let p = std::env::temp_dir().join(format!("hg-entries-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let mut s = DurableStore::open(&p).unwrap();
+        s.commit_put(b"b".to_vec(), b"2".to_vec()).unwrap();
+        s.commit_put(b"a".to_vec(), b"1".to_vec()).unwrap();
+        assert_eq!(
+            s.entries(),
+            vec![
+                (b"a".to_vec(), b"1".to_vec()),
+                (b"b".to_vec(), b"2".to_vec())
+            ]
+        );
+        let _ = std::fs::remove_file(p);
     }
 
     #[test]
