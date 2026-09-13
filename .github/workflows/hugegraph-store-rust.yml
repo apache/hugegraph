@@ -1,0 +1,22 @@
+name: HugeGraph Store Rust Production Gates
+
+on:
+  pull_request:
+  push:
+    branches: [ master ]
+
+jobs:
+  store-rust-production:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hugegraph-store/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo test --workspace --release --locked
