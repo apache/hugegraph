@@ -26,3 +26,12 @@ For HugeGraph capture, map a committed vertex mutation to `write` and a vertex
 lookup to `read`, using the canonical vertex identifier as the register key.
 Record HTTP send/receive monotonic times plus status and body hash in metadata;
 the checker evaluates ordering and values only.
+
+## Java/Rust contract replay
+
+`compare_traces.py` is a dependency-free differential oracle. Give it Java and Rust replay traces (arrays or `{ "operations": [...] }`). It compares only `op`, `key`, `value`, and `result`, ignoring timestamps and implementation metadata.
+
+```bash
+python3 tools/raft-linearizability/compare_traces.py java.json rust.json
+```
+Exit 0 means normalized traces are identical; exit 1 reports divergence.
