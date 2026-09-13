@@ -485,3 +485,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Full workspace regression after live GraphStore byte assertions passed (64 tests: core 14, node 5, transport 40, docs 0). Evidence `workspace-live-differential-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Release-mode full workspace tests passed (64 tests) with optimized artifacts; no release-only failures observed. Evidence `release-workspace-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
