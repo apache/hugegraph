@@ -539,6 +539,22 @@ mod response_tests {
 pub struct QueryServiceImpl;
 
 pub struct StateService;
+pub struct GraphService;
+
+#[tonic::async_trait]
+impl generated::graph_store_server::GraphStore for GraphService {
+    type ScanPartitionStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<generated::ScanResponse, tonic::Status>> + Send>,
+    >;
+    async fn scan_partition(
+        &self,
+        _: tonic::Request<tonic::Streaming<generated::ScanPartitionRequest>>,
+    ) -> Result<tonic::Response<Self::ScanPartitionStream>, tonic::Status> {
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(
+            std::iter::empty(),
+        ))))
+    }
+}
 
 #[tonic::async_trait]
 impl generated::hg_store_state_server::HgStoreState for StateService {
