@@ -752,6 +752,20 @@ mod graph_frame_tests {
         assert_eq!(frame.vertex.len(), 1);
         let _ = std::fs::remove_file(p);
     }
+    #[test]
+    fn graph_service_selects_edge_frame_branch() {
+        let p = std::env::temp_dir().join(format!("hg-graph-edge-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        {
+            let mut s = hugegraph_store_core::DurableStore::open(&p).unwrap();
+            s.commit_put(b"src".to_vec(), b"dst".to_vec()).unwrap();
+        }
+        let service = super::GraphService::open(&p).unwrap();
+        let frame = service.scan_range(b"a", b"z", true).unwrap();
+        assert!(frame.vertex.is_empty());
+        assert_eq!(frame.edge.len(), 1);
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 #[tonic::async_trait]
