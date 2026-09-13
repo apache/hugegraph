@@ -1025,6 +1025,7 @@ mod batch_get_tests {
     fn decode_keys() {
         let r = generated::BatchGetReq {
             header: None,
+            partition: 0,
             table: "t".into(),
             key: vec![generated::Key {
                 key: b"a".to_vec(),
@@ -1092,6 +1093,7 @@ mod batch_get_trait_tests {
         let s = SessionService::open(&p).unwrap();
         let r = generated::BatchGetReq {
             header: None,
+            partition: 0,
             table: "t".into(),
             key: vec![generated::Key {
                 key: b"k".to_vec(),
@@ -1160,6 +1162,7 @@ mod mixed_tests {
         s.commit_put(b"a".to_vec(), b"1".to_vec()).unwrap();
         let r = generated::BatchGetReq {
             header: None,
+            partition: 0,
             table: "t".into(),
             key: vec![
                 generated::Key {
@@ -1265,6 +1268,22 @@ impl Catalog {
     }
 }
 
+#[cfg(test)]
+mod catalog_restore_tests {
+    use super::Catalog;
+
+    #[test]
+    fn snapshot_restore_preserves_table_and_graph_names() {
+        let mut catalog = Catalog::default();
+        catalog.tables.insert("users".into());
+        catalog.graphs.insert("social".into());
+        let restored = Catalog::restore(&catalog.snapshot());
+        assert!(restored.contains_table("users"));
+        assert!(restored.contains_graph("social"));
+        assert!(!restored.contains_table("social"));
+    }
+}
+
 impl Catalog {
     pub fn contains_table(&self, n: &str) -> bool {
         self.tables.contains(n)
@@ -1297,8 +1316,17 @@ impl Catalog {
 impl Catalog {
     pub fn restore(bytes: &[u8]) -> Self {
         let mut c = Self::default();
-        for n in bytes.split(|b| *b == 0).filter(|n| !n.is_empty()) {
-            c.tables.insert(String::from_utf8_lossy(n).into_owned());
+        for entry in bytes.split(|b| *b == 0).filter(|n| n.len() > 1) {
+            let name = String::from_utf8_lossy(&entry[1..]).into_owned();
+            match entry[0] {
+                b'T' => {
+                    c.tables.insert(name);
+                }
+                b'G' => {
+                    c.graphs.insert(name);
+                }
+                _ => {}
+            }
         }
         c
     }
