@@ -42,6 +42,12 @@ PID_FILE="$BIN/pid"
 arch=$(uname -m)
 echo "Current arch: $arch"
 
+# Offline/test environments may provide a compatible allocator or prefer the
+# JVM allocator.  Avoid an unconditional GitHub download in that case.
+if [[ "${HUGEGRAPH_SKIP_JEMALLOC:-false}" == "true" ]]; then
+    echo "Skipping jemalloc download (HUGEGRAPH_SKIP_JEMALLOC=true)"
+else
+
 if [[ $arch == "aarch64" || $arch == "arm64" ]]; then
     lib_file="$TOP/bin/libjemalloc_aarch64.so"
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc_aarch64.so"
@@ -62,6 +68,7 @@ elif [[ $arch == "x86_64" ]]; then
     fi
 else
     echo "Unsupported architecture: $arch"
+fi
 fi
 
 ##pd/store max user processes, ulimit -u
