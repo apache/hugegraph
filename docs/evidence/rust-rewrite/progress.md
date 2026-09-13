@@ -467,3 +467,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Added node put/get differential test against an independent BTreeMap oracle over 16 deterministic keys; node tests passed (5). Evidence `store-node-oracle-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Full Rust workspace regression after shared-backend and node Oracle changes passed (59 tests: core 14, node 5, transport 40). Evidence `workspace-node-oracle-regression-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
