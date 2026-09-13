@@ -88,4 +88,6 @@ next_action: production integration and maintainer/reviewer sign-offs remain ope
 2026-09-13: Promoted hugegraph-store/rust gates into dedicated production workflow `.github/workflows/hugegraph-store-rust.yml`; integration audit archived in `production-integration-audit-20260913.md`, commit `d3bed8b43`. Maintainer and reviewer sign-offs remain pending; NO-GO retained.
 next_action: obtain maintainer and reviewer sign-offs, then perform final audit and create completion sentinel only after every gate is accepted.
 
+2026-09-13: Final audit rerun inventory archived in `final-audit-rerun-20260913.md`; all executable gates are evidenced and unchanged tests were not repeated. NO-GO remains solely due to missing maintainer/reviewer sign-offs.
+
 2026-09-13: Integrated the switch/rollback trace into the Rust differential replay coverage. The same put/get/rollback sequence produced identical observations under Rust and JavaFallback selectors (5 locked workspace tests passed). Evidence `differential-switch-rollback-20260913.log`; production integration and maintainer/reviewer sign-offs remain open.
