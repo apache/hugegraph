@@ -1,0 +1,5 @@
+Date: 2026-09-13
+Compose: docker/docker-compose-3pd-3store-3server.yml
+Scenario: stop store0; wait 8s; check store1/store2 and all PD /v1/health; start store0; wait 15s; check all Store /v1/health.
+Result: store1/store2 and pd0/pd1/pd2 healthy during store0 outage; store0/store1/store2 healthy after recovery.
+Note: curl used --noproxy '*' to avoid localhost proxy interception.
