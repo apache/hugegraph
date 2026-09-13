@@ -23,7 +23,7 @@ import lombok.extern.slf4j.Slf4j;
 //@RunWith(Suite.class)
 //@Suite.SuiteClasses({
 //        HgCmdClientTest.class,
-//        HgSnapshotHandlerTest.class,
+//        SnapshotHandlerTest.class,
 //        RaftUtilsTest.class,
 //        RaftOperationTest.class,
 //        UnsafeUtilTest.class,
