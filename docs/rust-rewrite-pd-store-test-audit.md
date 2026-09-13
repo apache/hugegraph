@@ -65,3 +65,5 @@ Profile 隔离修复（2026-09-13）：为 `store-core-test` 设置 `forkCount=1
 Store 核心 profile 在线复验完成（2026-09-13）：`store-core-test` 构建成功，SnapshotHandler 5/5、BatchGraphIsolation 6/6，profile 汇总 11/11 通过、0 失败；完整日志归档于 `docs/evidence/rust-rewrite/store-core-profile-20260913.log`，SHA-256 `084a53c5204c89ba65657414cf1de9714c2b7f55c5733a17465c12037c0b6f95`。
 
 Store 全量离线回归复验完成（2026-09-13）：`hg-store-test` 构建成功；Client 34、Snapshot 5、Batch 6、Common 2、RocksDB 3、Service 6、Raft 3 等已启用 suite 均为 0 失败。日志归档于 `docs/evidence/rust-rewrite/store-full-regression-20260913.log`。
+
+启动脚本阻塞修复（2026-09-13）：`download_and_verify` 的 jemalloc 下载增加 `--connect-timeout 10 --max-time 60`，并通过 `bash -n` 校验启动脚本与工具脚本；无代理时失败将按既有逻辑降级，不再无限阻塞容器启动。提交：`c36a58921`。
