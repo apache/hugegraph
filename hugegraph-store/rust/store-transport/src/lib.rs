@@ -889,6 +889,21 @@ mod graph_frame_tests {
             .scan_partition(tokio_stream::iter(vec![malformed]))
             .await
             .is_err());
+        let oversized = super::generated::ScanPartitionRequest {
+            header: None,
+            request: Some(
+                super::generated::scan_partition_request::RequestOneOf::ScanRequest(
+                    super::generated::scan_partition_request::Request {
+                        limit: 100_001,
+                        ..Default::default()
+                    },
+                ),
+            ),
+        };
+        assert!(client
+            .scan_partition(tokio_stream::iter(vec![oversized]))
+            .await
+            .is_err());
         task.abort();
         let _ = std::fs::remove_file(path);
     }
