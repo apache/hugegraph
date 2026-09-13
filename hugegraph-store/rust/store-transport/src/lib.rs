@@ -576,14 +576,27 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
     }
 }
 
-pub struct SessionService;
+pub struct SessionService {
+    pub shared: SharedSession,
+}
+impl SessionService {
+    pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
+        Ok(Self {
+            shared: SharedSession::open(path)?,
+        })
+    }
+}
 #[tonic::async_trait]
 impl generated::hg_store_session_server::HgStoreSession for SessionService {
     async fn get2(
         &self,
-        _: tonic::Request<generated::GetReq>,
+        request: tonic::Request<generated::GetReq>,
     ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
-        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+        let bytes = prost::Message::encode_to_vec(&request.into_inner());
+        self.shared
+            .handle_get2(&bytes)
+            .map(tonic::Response::new)
+            .map_err(tonic::Status::internal)
     }
     async fn batch_get2(
         &self,
