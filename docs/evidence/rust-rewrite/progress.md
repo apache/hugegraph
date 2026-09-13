@@ -323,3 +323,6 @@ next_action: enforce oversized request/resource limits and add corresponding liv
 
 2026-09-14: Enforced MAX_SCAN_LIMIT resource bound (100000), returning resource_exhausted for oversized scan requests; workspace passed (54 tests). Evidence `scan-resource-limit-20260914.log`.
 next_action: add live oversized-limit rejection assertion and audit remaining resource bounds.
+
+2026-09-14: Live tonic scan test asserts oversized limit requests are rejected with resource exhaustion; workspace passed (55 tests). Evidence `tonic-live-oversized-limit-20260914.log`.
+next_action: audit remaining request size/resource limits and add malformed payload coverage.
