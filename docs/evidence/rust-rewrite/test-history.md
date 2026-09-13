@@ -18,3 +18,4 @@
 | `set +e; date -u; JAVA_HOME/JDK_HOME; command -v java; java -version; find $HOME/.m2 /usr/share/maven -iname '*toolchain*' -o -iname 'toolchains.xml'; ls -la /usr/lib/jvm` | `working-tree` | PASS (only OpenJDK 21; no configured Java 11/17 toolchain) | `java-toolchain-gate-20260913.log` |
 | `bash -n tools/run-codex-loop.sh; bash -n tools/codex-session-poc.sh; bash -n tools/verify-local-java-e2e.sh` | `working-tree` | PASS | `tooling-syntax-20260913.log` |
 | `apt-get download openjdk-17-jdk-headless` (twice, resumed) | `working-tree` | INCOMPLETE (network transfer stalled; 22MB/71.6MB package, no runtime extracted) | `java17-apt-download-20260913.log` |
+| `dpkg-deb -x openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb /tmp/hugegraph-java17-20260913-1789304968` | `working-tree` | FAIL (incomplete archive; unexpected EOF, no runtime extracted) | `java17-runtime-extract-20260913.log` |

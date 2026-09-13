@@ -1,0 +1,9 @@
+Sun Sep 13 13:09:28 UTC 2026
+COMMAND=dpkg-deb -x openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb /tmp/hugegraph-java17-20260913-1789304968
+dpkg-deb (subprocess): cannot copy archive member from 'openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb' to decompressor pipe: unexpected end of file or stream
+dpkg-deb (subprocess): decompressing archive 'openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb' (size=51247781) member 'data.tar': zstd error: Operation made no progress over multiple calls, due to input being empty
+tar: Unexpected EOF in archive
+tar: Unexpected EOF in archive
+tar: Error is not recoverable: exiting now
+dpkg-deb: error: tar subprocess returned error exit status 2
+RESULT_EXIT_CODE=2
