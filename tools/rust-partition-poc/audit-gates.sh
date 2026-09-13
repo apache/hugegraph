@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements. See the NOTICE file
+# distributed with this work for additional information.
+# The ASF licenses this file to you under the Apache License, Version 2.0.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 workflow="$root/.github/workflows/rust-partition-poc.yml"
