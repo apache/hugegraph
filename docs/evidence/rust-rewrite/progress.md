@@ -49,3 +49,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: API-REST-001 `VertexApiTest` passed with Java 11 Docker host networking: 4 tests, 0 failures, BUILD SUCCESS, exit 0. Evidence `api-rest-001-vertex-java11-hostnet-20260913.log`. Next action: archive its independent schema/error Oracle and then continue the matrix.
 
 2026-09-13: Archived API-REST-001 independent schema/error Oracle and marked the matrix row complete (2/6). Next action: continue with SCHEMA-001.
+
+2026-09-13: SCHEMA-001 unique-index core entry passed under Java 11 Docker: 1 test, 0 failures, BUILD SUCCESS, exit 0. Evidence `schema-001-unique-index-java11-20260913.log`. Next action: archive the invariant Oracle and continue TXN-001.
