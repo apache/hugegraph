@@ -16,3 +16,5 @@
 
 | `java17 runtime availability check (find/java -version)` | `working-tree` | PASS (no Java 17 present) | `java17-runtime-check-20260913.log` |
 | `set +e; date -u; JAVA_HOME/JDK_HOME; command -v java; java -version; find $HOME/.m2 /usr/share/maven -iname '*toolchain*' -o -iname 'toolchains.xml'; ls -la /usr/lib/jvm` | `working-tree` | PASS (only OpenJDK 21; no configured Java 11/17 toolchain) | `java-toolchain-gate-20260913.log` |
+| `bash -n tools/run-codex-loop.sh; bash -n tools/codex-session-poc.sh; bash -n tools/verify-local-java-e2e.sh` | `working-tree` | PASS | `tooling-syntax-20260913.log` |
+| `apt-get download openjdk-17-jdk-headless` (twice, resumed) | `working-tree` | INCOMPLETE (network transfer stalled; 22MB/71.6MB package, no runtime extracted) | `java17-apt-download-20260913.log` |

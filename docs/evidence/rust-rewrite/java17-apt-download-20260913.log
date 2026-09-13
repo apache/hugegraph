@@ -1,0 +1,11 @@
+Sun Sep 13 13:03:02 UTC 2026
+total 33M
+-rw-r--r-- 1 zy zy 33M Sep 13 21:03 openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb
+openjdk-17-jdk-headless:
+  Installed: (none)
+  Candidate: 17.0.20+8-1~24.04
+  Version table:
+     17.0.20+8-1~24.04 500
+        500 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages
+        500 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages
+     17.0.11+9-1 500
