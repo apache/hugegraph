@@ -170,3 +170,6 @@ next_action: map generated protobuf messages and service methods for query/sessi
 
 2026-09-14: Added tonic and tonic-prost-build dependencies; build configuration now supports service generation, and online workspace tests pass after dependency resolution. Offline mode requires newly fetched crates. Evidence `tonic-generation-20260914.log`.
 next_action: configure tonic service generation for each proto service and expose generated client/server traits in Rust transport.
+
+2026-09-14: Audited tonic generation output. Build succeeds, but generated files contain messages only and no Client/Server/trait service modules; real service generation remains unresolved and must be fixed before claiming gRPC coverage.
+next_action: correct tonic build configuration/proto package handling so all service traits are generated, then implement servers against them.

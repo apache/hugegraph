@@ -1,0 +1,2 @@
+command: cargo build --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-transport; rg generated output for Client/Server/trait
+result: PASS build, but NO service traits generated (proto files lack package/service generator output)
