@@ -29,3 +29,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 故障期间读取复验（2026-09-13）：store0 停止期间，server1/server2 均读取到已提交 fixture；store0 恢复后 server0 仍读取到相同值。证据归档于 `compose-store0-outage-read-consistency-20260913.log`；不替代线性一致性历史检查。
 
 可重复集群 smoke runner（2026-09-13）：`tools/rust-rewrite-cluster/smoke.sh` 退出码 0，自动完成三 PD/三 Store/三 Server 健康检查、pd0 停止恢复、store0 停止恢复及故障期间跨 Server fixture 读取；fixture `rust-gate-20260913114719`。原始日志归档于 `compose-cluster-smoke-20260913.log`。
+
+2026-09-13 rerun passed after bounded store-read retries; fixture rust-gate-20260913151059. Evidence: compose-cluster-smoke-20260913-rerun.log.
