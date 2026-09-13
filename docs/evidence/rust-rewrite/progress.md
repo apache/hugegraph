@@ -437,3 +437,6 @@ next_action: continue production command coverage and add end-to-end node server
 
 2026-09-14: Added unified StoreNode tonic serving composition for all production services; aligned tonic dependency versions and cargo check passed. Evidence `store-node-grpc-orchestration-20260914.log`.
 next_action: add live node orchestration test and continue production command coverage.
+
+2026-09-14: Added node service inventory assertion covering all five production gRPC services in the unified server composition; node tests passed (3). Evidence `store-node-service-inventory-20260914.log`.
+next_action: add live node orchestration test and continue production command coverage.
