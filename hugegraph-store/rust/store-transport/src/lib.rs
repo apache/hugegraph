@@ -512,7 +512,7 @@ impl generated::healthy_server::Healthy for HealthyService {
         _: tonic::Request<()>,
     ) -> Result<tonic::Response<generated::StringReply>, tonic::Status> {
         Ok(tonic::Response::new(generated::StringReply {
-            msg: "ok".into(),
+            message: "ok".into(),
         }))
     }
 }
