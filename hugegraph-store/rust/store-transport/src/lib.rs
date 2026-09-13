@@ -3,6 +3,18 @@ use hugegraph_store_core::{StoreRequest, StoreResponse, StoreService};
 use prost::Message;
 use tokio_stream::StreamExt;
 const MAX_SCAN_LIMIT: i64 = 100_000;
+pub fn classify_failure(message: &str) -> tonic::Code {
+    if message.contains("too large") {
+        tonic::Code::ResourceExhausted
+    } else if message.contains("missing")
+        || message.contains("invalid")
+        || message.contains("negative")
+    {
+        tonic::Code::InvalidArgument
+    } else {
+        tonic::Code::Internal
+    }
+}
 pub struct RpcServer {
     service: StoreService,
 }
@@ -414,6 +426,15 @@ mod dispatch_tests {
         assert!(validate_dispatch("QueryService.count", b"\xff").is_err());
         assert!(validate_dispatch("HgStoreState.SubState", b"\x01").is_err());
         assert!(validate_dispatch("HgStoreSession.Batch", b"\xff").is_err());
+        assert_eq!(
+            classify_failure("negative limit"),
+            tonic::Code::InvalidArgument
+        );
+        assert_eq!(
+            classify_failure("scan limit too large"),
+            tonic::Code::ResourceExhausted
+        );
+        assert_eq!(classify_failure("disk failure"), tonic::Code::Internal);
     }
 }
 
