@@ -254,3 +254,6 @@ next_action: decode ScanPartition request envelopes into scan_range and run full
 
 2026-09-14: Added ScanPartition oneof decoder extracting position/end range for GraphService filtering; transport check passed. Evidence `scan-request-range-20260914.log`.
 next_action: connect decoded request ranges to GraphService streaming and run full E2E stream tests.
+
+2026-09-14: Connected GraphService streaming to decoded ScanPartition ranges and filtered DurableStore entries; transport check passed. Evidence `scan-stream-filter-20260914.log`.
+next_action: add streaming client E2E test with encoded ScanPartition request and verify filtered vertices.
