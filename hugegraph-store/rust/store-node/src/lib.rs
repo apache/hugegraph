@@ -235,6 +235,31 @@ mod tests {
                 .message,
             "ok"
         );
+        let mut query = hugegraph_store_transport::generated::query_service_client::QueryServiceClient::connect(format!("http://{}", addr)).await.unwrap();
+        assert!(
+            query
+                .query0(tonic::Request::new(
+                    hugegraph_store_transport::generated::QueryRequest {
+                        query_id: "live".into(),
+                        ..Default::default()
+                    }
+                ))
+                .await
+                .unwrap()
+                .into_inner()
+                .is_ok
+        );
+        let mut state = hugegraph_store_transport::generated::hg_store_state_client::HgStoreStateClient::connect(format!("http://{}", addr)).await.unwrap();
+        assert_eq!(
+            state
+                .get_scan_state(tonic::Request::new(
+                    hugegraph_store_transport::generated::SubStateReq::default()
+                ))
+                .await
+                .unwrap()
+                .into_inner(),
+            hugegraph_store_transport::generated::ScanState::default()
+        );
         task.abort();
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
