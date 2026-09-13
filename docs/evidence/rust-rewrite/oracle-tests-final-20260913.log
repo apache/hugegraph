@@ -1,0 +1,2 @@
+capture history tests passed
+{"linearizable": false, "detail": "invalid history: history must be a JSON array"}
