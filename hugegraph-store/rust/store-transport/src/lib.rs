@@ -1179,7 +1179,7 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
         self.shared
             .handle_get2(&bytes)
             .map(tonic::Response::new)
-            .map_err(tonic::Status::internal)
+            .map_err(|e| tonic::Status::new(classify_failure(&e), e))
     }
     async fn batch_get2(
         &self,
@@ -1192,7 +1192,7 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
             .lock()
             .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
         let response = feedback_values_with_missing(&store, &bytes)
-            .map_err(tonic::Status::invalid_argument)?;
+            .map_err(|e| tonic::Status::new(classify_failure(&e), e))?;
         Ok(tonic::Response::new(response))
     }
     async fn batch(

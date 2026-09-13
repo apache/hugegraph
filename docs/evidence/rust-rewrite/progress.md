@@ -374,3 +374,6 @@ next_action: apply classified mappings to Session/Query/State handlers and build
 
 2026-09-14: Applied shared failure classification to Session batch backend errors; workspace passed (70 tests). Evidence `session-error-mapping-20260914.log`.
 next_action: apply classified mappings to Query and State handlers and complete cross-family failure matrix.
+
+2026-09-14: Applied shared failure classification to Session get2 and batch_get2 backend/decode errors; workspace passed (70 tests). Evidence `session-error-mapping-20260914b.log`.
+next_action: add cross-family live status assertions for Query/State and complete failure-path matrix.
