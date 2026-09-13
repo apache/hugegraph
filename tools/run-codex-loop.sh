@@ -13,9 +13,10 @@ exec 9>"$lock_file"
 flock -n 9 || { echo "another Codex loop is already running: $lock_file" >&2; exit 2; }
 while [[ ! -e "$sentinel" ]]; do
     date -u +"%Y-%m-%dT%H:%M:%SZ loop-start" | tee -a "$log_file"
-    # `resume` starts the interactive TUI and requires a terminal.  `exec resume`
-    # is its non-interactive counterpart and is suitable for nohup/CI runners.
-    codex exec resume --last \
+    # A live interactive session owns the latest thread, so resuming it from a
+    # second process causes a thread-store conflict. Start an independent,
+    # non-interactive worker for each iteration instead.
+    codex exec \
         --dangerously-bypass-approvals-and-sandbox \
         "$prompt" 2>&1 | tee -a "$log_file"
     status=$?
