@@ -344,3 +344,6 @@ next_action: add live oversized filter rejection and audit remaining request fie
 
 2026-09-14: Live tonic scan test asserts oversized graph_name filter is rejected by resource bound; workspace passed (59 tests). Evidence `tonic-live-filter-limit-20260914.log`.
 next_action: audit remaining request fields (properties, batch size, boundary) and add contract validation.
+
+2026-09-14: Added ScanPartition validation for nonnegative boundary, bounded batch_size, and property count resource limits; workspace passed (59 tests). Evidence `scan-field-validation-20260914.log`.
+next_action: add live invalid boundary/batch/property rejection tests and continue resource audit.
