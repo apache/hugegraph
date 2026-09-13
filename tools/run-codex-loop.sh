@@ -32,10 +32,12 @@ while [[ ! -e "$sentinel" ]]; do
     # A live interactive session owns the latest thread, so resuming it from a
     # second process causes a thread-store conflict. Start an independent,
     # non-interactive worker for each iteration instead.
+    set +e
     codex exec \
         --dangerously-bypass-approvals-and-sandbox \
         "$prompt" 2>&1 | tee -a "$log_file"
-    status=$?
+    status=${PIPESTATUS[0]}
+    set -e
     [[ -e "$sentinel" ]] && break
     echo "codex session exited with status $status; resuming in 2s" >&2
     sleep 2
