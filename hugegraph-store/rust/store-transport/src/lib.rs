@@ -878,3 +878,22 @@ mod session_txn_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+pub fn apply_session_batch(
+    id: &str,
+    bytes: &[u8],
+    txns: &mut SessionTransactions,
+    store: &mut hugegraph_store_core::DurableStore,
+) -> Result<(), String> {
+    match decode_batch_action(bytes)? {
+        BatchAction::Write { key, value } => {
+            txns.stage(id.to_string(), key, value);
+            Ok(())
+        }
+        BatchAction::Commit => txns.commit(id, store),
+        BatchAction::Rollback => {
+            txns.rollback(id);
+            Ok(())
+        }
+    }
+}
