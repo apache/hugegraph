@@ -1057,6 +1057,14 @@ mod graph_frame_tests {
             .await
             .unwrap();
         assert!(response.into_inner().is_ok);
+        let response = query
+            .count(super::generated::QueryRequest {
+                query_id: "c".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(response.into_inner().data.is_empty());
         let mut state =
             super::generated::hg_store_state_client::HgStoreStateClient::connect(endpoint)
                 .await
