@@ -1,0 +1,5 @@
+Date: 2026-09-13
+Compose: docker/docker-compose-3pd-3store-3server.yml
+Scenario: disconnect hg-pd0 from hugegraph-3x3_hg-net; wait 10s; check pd1/pd2; reconnect hg-pd0; wait 15s; check all PD.
+Result: pd1/pd2 healthy during pd0 network partition; all PD healthy after reconnection.
+Note: reversible Docker network disconnect/connect; curl used --noproxy '*'.

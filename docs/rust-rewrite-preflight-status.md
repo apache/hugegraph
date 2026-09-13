@@ -15,3 +15,5 @@
 多节点镜像复核（2026-09-13）：daemon 访问 Docker Hub 的 IPv4/IPv6 均超时；本地构建也无法开始，`hugegraph-pd/Dockerfile` 的 legacy builder 未提供自动 `BUILDPLATFORM` 参数，且基础镜像尚未缓存。该环境无法继续生成容器级证据，不能将 compose 配置解析成功当作集群通过。
 
 镜像源复核（2026-09-13）：USTC Docker Hub mirror TLS 失败，DaoCloud mirror 对 `hugegraph/pd:latest` 返回 403，阿里云公共地址需要账户专属 ACR 加速器；已恢复 daemon 默认配置，避免把不可验证的第三方镜像源固化进开发环境。
+
+多节点故障复验（2026-09-13）：完成 store0 停止/恢复和 pd0 网络断开/重接；剩余节点在故障期间健康，恢复后全节点健康。证据分别归档于 `compose-store0-fault-recovery-20260913.log`、`compose-pd0-network-partition-20260913.log`；这仍不等价于线性一致性、数据无损或成员变更证明。
