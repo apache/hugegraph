@@ -164,3 +164,6 @@ next_action: add prost/prost-build generation configuration and generate Rust bi
 
 2026-09-14: Added prost/prost-build dependencies and build.rs generation for hg-store-grpc proto sources; generated graph_pb bindings compile and workspace tests pass. Evidence `prost-generation-20260914.log`.
 next_action: expose all generated proto modules and map generated messages into typed RPC handlers.
+
+2026-09-14: Verified generated output currently consists of common (`_.rs`) and graph (`graph_pb.rs`) modules; generated messages are exposed and StringReply codec compiles. Full proto service/message mapping remains incomplete.
+next_action: map generated protobuf messages and service methods for query/session/state/healthy RPCs, then run end-to-end dispatch tests.
