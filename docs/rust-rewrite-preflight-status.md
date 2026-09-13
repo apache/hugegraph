@@ -31,5 +31,6 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 可重复集群 smoke runner（2026-09-13）：`tools/rust-rewrite-cluster/smoke.sh` 退出码 0，自动完成三 PD/三 Store/三 Server 健康检查、pd0 停止恢复、store0 停止恢复及故障期间跨 Server fixture 读取；fixture `rust-gate-20260913114719`。原始日志归档于 `compose-cluster-smoke-20260913.log`。
 
 2026-09-13 rerun passed after bounded store-read retries; fixture rust-gate-20260913151059. Evidence: compose-cluster-smoke-20260913-rerun.log.
+2026-09-13 offline Maven validate passed (RAT unapproved 0, unknown 0, BUILD SUCCESS); log SHA-256 d2a127ee7c52df74b6fe0686accdff2f810f0f88e5096ee7e7995c0ff33d7328.
 
 2026-09-13 Partition POC rerun: fmt, clippy, and 14 tests passed; evidence partition-poc-verify-20260913-rerun.log.
