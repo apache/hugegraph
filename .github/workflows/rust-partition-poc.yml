@@ -1,0 +1,22 @@
+name: Rust Partition POC
+
+on:
+  pull_request:
+    paths:
+      - "tools/rust-partition-poc/**"
+      - ".github/workflows/rust-partition-poc.yml"
+  push:
+    branches: [master, "refactor/**"]
+    paths:
+      - "tools/rust-partition-poc/**"
+      - ".github/workflows/rust-partition-poc.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: tools/rust-partition-poc/verify.sh
