@@ -419,3 +419,6 @@ next_action: port node command dispatch/state persistence behavior beyond lifecy
 
 2026-09-14: Node startup now rejects malformed lifecycle sidecars instead of silently defaulting; recovery test covers corruption failure. Node tests passed. Evidence `store-node-corruption-20260914.log`.
 next_action: port node command dispatch/state persistence behavior beyond lifecycle and add failure/recovery scenarios.
+
+2026-09-14: Node lifecycle persistence now propagates filesystem write/rename failures instead of ignoring them; node tests passed. Evidence `store-node-persistence-errors-20260914.log`.
+next_action: add fault-injection coverage for node state persistence and continue command/recovery behavior.

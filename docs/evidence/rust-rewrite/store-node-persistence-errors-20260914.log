@@ -1,0 +1,1 @@
+PASS: state persistence write and rename errors are propagated; node test passed.
