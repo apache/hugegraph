@@ -60,7 +60,7 @@
 | 测试资产与执行入口 | `rust-rewrite-test-inventory.md`、`rust-rewrite-server-test-audit.md`、`rust-rewrite-pd-store-test-audit.md` | 已盘点，语义映射仍需逐项复核 | 测试负责人；追踪矩阵 |
 | 验收与阈值 | `rust-rewrite-acceptance-matrix.md` | 已定义，待批准 | 维护者；阈值签核 |
 | Rust 工程规范 | `rust-engineering-standard.md` | 已定义，待 CI 落地 | Rust 负责人；CI 配置与检查日志 |
-| Oracle 与差分策略 | `rust-rewrite-oracle-finalization.md` | 方案已闭环，代码未实现 | 测试负责人；独立 Oracle 与报告 |
+| Oracle 与差分策略 | `rust-rewrite-oracle-finalization.md`、`tools/raft-linearizability/`、`evidence/rust-rewrite/raft-linearizability-oracle-20260913-concurrent.log` | 已有独立单寄存器顺序/重叠历史 Oracle 和输入校验回归；尚未接入真实三节点历史 | 测试负责人；三节点历史采集、差分报告 |
 | POC 范围与退出条件 | `rust-rewrite-partition-pilot.md`、`evidence/rust-rewrite/partition-poc-verify.log` | POC 已执行通过 | 测试负责人；扩大故障矩阵 |
 | 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`evidence/rust-rewrite/compose-*-recovery-20260913.log` | 已完成部分故障/恢复证据，仍缺快照损坏和线性一致性 | 测试负责人；补齐负向与并发报告 |
 | 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两名 reviewer；签核记录 |
