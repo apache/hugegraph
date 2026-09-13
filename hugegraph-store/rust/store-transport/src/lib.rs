@@ -657,6 +657,14 @@ pub fn filter_entries(
         .cloned()
         .collect()
 }
+pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8>, Vec<u8>)> {
+    match r.request.as_ref()? {
+        generated::scan_partition_request::RequestOneOf::ScanRequest(v) => {
+            Some((v.position.clone(), v.end_code.to_be_bytes().to_vec()))
+        }
+        generated::scan_partition_request::RequestOneOf::ReplyRequest(_) => None,
+    }
+}
 #[cfg(test)]
 mod graph_frame_tests {
     use super::empty_scan_frame;
