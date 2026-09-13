@@ -28,7 +28,7 @@ health() { curl_local -fsS --max-time 10 "$1/v1/health" >/dev/null; }
 
 "${compose[@]}" up -d pd0 pd1 pd2 store0 store1 store2 server0 server1 server2
 "${compose[@]}" restart server0 server1 server2 >/dev/null
-sleep 10
+sleep 30
 for port in 8620 8621 8622; do health "http://127.0.0.1:$port"; done
 for port in 8520 8521 8522; do health "http://127.0.0.1:$port"; done
 for port in 8080 8081 8082; do curl_local -fsS --max-time 10 "http://127.0.0.1:$port/versions" >/dev/null; done
