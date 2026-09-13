@@ -230,3 +230,6 @@ next_action: add E2E stream assertions and map persisted vertex/edge records int
 
 2026-09-14: Added E2E-level assertion for GraphStore scan response framing (initial sequence and empty record sets); workspace passed (40 tests). Evidence `graph-stream-e2e-20260914.log`.
 next_action: map persisted vertex/edge records into scan frames and expand full transport E2E coverage.
+
+2026-09-14: Exposed ordered owned DurableStore entries and verified deterministic ordering for scan mapping; workspace passed (41 tests). Evidence `durable-entries-20260914.log`.
+next_action: map entries into GraphStore vertex/edge protobuf records and add end-to-end scan assertions.
