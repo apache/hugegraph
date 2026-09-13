@@ -96,3 +96,8 @@ next_action: complete the automated Rust store closure gates and create the comp
 current_stage: complete
 status: complete
 next_action: none
+
+2026-09-14: Previous automated closure sentinel was premature: the current Rust workspace covers store-core slices but not the complete hugegraph-store production surface and full end-to-end Rust integration. Reopened the goal and removed the completion sentinel.
+current_stage: rust_rewrite
+status: active
+next_action: inventory every hugegraph-store production module and map each public contract to a Rust implementation and executable end-to-end/oracle/differential/fault-recovery test; begin with the first uncovered production boundary.
