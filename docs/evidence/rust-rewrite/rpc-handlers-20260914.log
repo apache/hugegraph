@@ -1,0 +1,2 @@
+command: cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline
+result: PASS (16 tests; RPC family dispatch handlers)

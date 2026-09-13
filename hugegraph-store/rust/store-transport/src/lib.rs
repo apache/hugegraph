@@ -423,3 +423,27 @@ mod dispatch_tests {
         assert!(validate_dispatch("QueryService.count", b"").is_err());
     }
 }
+
+pub fn dispatch_payload(
+    service: &mut StoreService,
+    method: &str,
+    payload: Vec<u8>,
+) -> std::io::Result<Vec<u8>> {
+    validate_dispatch(method, &payload)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    match method {
+        "HgStoreSession.Get2" => match service.call(StoreRequest::Get { key: payload })? {
+            StoreResponse::Value(v) => Ok(v.unwrap_or_default()),
+            _ => Ok(vec![]),
+        },
+        "HgStoreSession.Batch" => {
+            BatchRequest::decode(&payload).unwrap();
+            Ok(payload)
+        }
+        "QueryService.query0" | "QueryService.count" => {
+            Ok(QueryRequest::decode(&payload).unwrap().query.into_bytes())
+        }
+        "GraphStore.ScanPartition" => Ok(ScanRequest::decode(&payload).unwrap().end),
+        _ => Ok(payload),
+    }
+}

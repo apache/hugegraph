@@ -149,3 +149,6 @@ next_action: wire validated dispatch into serve_once and add end-to-end coverage
 
 2026-09-14: Wired validate_dispatch into serve_once so typed payload validation executes on the network path; workspace tests pass 16/16. Evidence `dispatch-wired-20260914.log`.
 next_action: implement method-specific service handlers and network integration tests for each RPC family.
+
+2026-09-14: Added dispatch_payload handlers for Get2, Batch, query/count, and ScanPartition RPC families with typed validation; workspace tests pass 16/16. Evidence `rpc-handlers-20260914.log`.
+next_action: route serve_once through dispatch_payload and add handler-level integration matrix for all RPC families.
