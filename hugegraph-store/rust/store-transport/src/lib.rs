@@ -824,3 +824,17 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
         None => Err("missing operation".into()),
     }
 }
+
+pub fn apply_batch_action(
+    store: &mut hugegraph_store_core::DurableStore,
+    action: BatchAction,
+) -> Result<(), String> {
+    match action {
+        BatchAction::Write { key, value } => store
+            .commit_put(key, value)
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        BatchAction::Rollback => Ok(()),
+        BatchAction::Commit => Ok(()),
+    }
+}
