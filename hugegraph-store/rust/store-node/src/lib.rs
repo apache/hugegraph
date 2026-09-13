@@ -114,6 +114,20 @@ impl StoreNode {
     pub fn state_service(&self) -> StateService {
         StateService
     }
+
+    pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), tonic::transport::Error> {
+        let healthy = self.health_service();
+        let query = self.query_service();
+        let state = self.state_service();
+        tonic::transport::Server::builder()
+            .add_service(hugegraph_store_transport::generated::healthy_server::HealthyServer::new(healthy))
+            .add_service(hugegraph_store_transport::generated::query_service_server::QueryServiceServer::new(query))
+            .add_service(hugegraph_store_transport::generated::hg_store_state_server::HgStoreStateServer::new(state))
+            .add_service(hugegraph_store_transport::generated::graph_store_server::GraphStoreServer::new(self.graph))
+            .add_service(hugegraph_store_transport::generated::hg_store_session_server::HgStoreSessionServer::new(self.session))
+            .serve(addr)
+            .await
+    }
 }
 
 #[cfg(test)]

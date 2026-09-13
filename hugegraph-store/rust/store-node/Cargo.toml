@@ -5,5 +5,4 @@ edition = "2021"
 
 [dependencies]
 hugegraph-store-transport = { path = "../store-transport" }
-tonic = "0.12"
-
+tonic = "0.14"
