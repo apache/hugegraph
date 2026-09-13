@@ -425,3 +425,6 @@ next_action: add fault-injection coverage for node state persistence and continu
 
 2026-09-14: Added fault injection for node state sidecar write failure; state transition now remains Starting when persistence fails. Node test passed. Evidence `store-node-fault-injection-20260914.log`.
 next_action: extend node recovery tests to data/state consistency and continue production command coverage.
+
+2026-09-14: Added node request-admission predicate tied to Online lifecycle and verified transitions in node test; node tests passed. Evidence `store-node-admission-20260914.log`.
+next_action: extend node recovery tests to data/state consistency and continue production command coverage.
