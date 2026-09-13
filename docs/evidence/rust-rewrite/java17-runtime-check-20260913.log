@@ -1,0 +1,8 @@
+command: find /opt /usr/local /home/zy -maxdepth 4 -type f -name java
+result: PASS (no Java 17 executable found)
+command: java -version
+result: OpenJDK 21.0.10 only; Java 17 unavailable
+command: wget -c https://api.adoptium.net/v3/binary/latest/17/ga/linux/x64/jdk/hotspot/normal/eclipse (attempted local /tmp/hg-jdk17)
+result: INCOMPLETE (proxy transfer too slow; no runtime produced)
+commit: working-tree
+conclusion: API-GREMLIN-001 cannot be rerun without Java 11/17 or dependency upgrade; existing failure evidence remains authoritative.
