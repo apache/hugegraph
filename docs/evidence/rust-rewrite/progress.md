@@ -311,3 +311,6 @@ next_action: add malformed ScanPartition request error tests and enforce request
 
 2026-09-14: GraphService now rejects ScanPartition messages missing a scan oneof with invalid_argument; workspace passed (53 tests). Evidence `scan-request-validation-20260914.log`.
 next_action: add live malformed request assertion and enforce scan limit/error boundaries.
+
+2026-09-14: Live tonic client malformed ScanPartition request now asserts server invalid_argument error; workspace passed (54 tests). Evidence `tonic-live-malformed-20260914.log`.
+next_action: enforce negative limit and oversized request semantics, then continue contract gates.
