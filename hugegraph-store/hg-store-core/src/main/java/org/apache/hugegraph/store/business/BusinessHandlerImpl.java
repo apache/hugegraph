@@ -1445,8 +1445,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
                                                    TimeUnit.MILLISECONDS)) {
                                 // A snapshot save is still reserving this partition's range lock
                                 // after the wait. Skip this compaction pass rather than block -
-                                // callers of dbCompaction(). This is a transient condition, and the next
-                                // compaction pass will succeed.
+                                // callers of dbCompaction().
                                 log.warn("Partition {} skip dbCompaction, snapshot save " +
                                          "still in progress after {}ms wait", id,
                                          compactionRangeLockWaitMillis);
