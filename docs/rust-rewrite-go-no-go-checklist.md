@@ -17,7 +17,7 @@
 - [ ] Rust toolchain、MSRV、依赖许可证、`unsafe`/FFI 政策和 CI 门禁已确定；
 - [ ] 数据格式、升级、降级、灰度和回滚方案已评审；
 - [ ] 性能、资源、稳定性和恢复阈值已预先定义；
-- [ ] 社区 review 的反馈已分类并有处理结论。
+- [ ] 独立子 agent review 的反馈已分类并有处理结论。
 
 ## 2. 充分条件
 
@@ -31,7 +31,7 @@
 - [ ] POC 未发现无法解释的协议、数据或一致性差异；
 - [ ] 已有双读/灰度实现和一键回滚开关；
 - [ ] 性能与资源结果达到预先批准的阈值；
-- [ ] 至少两名 reviewer 完成签核，其中一人不参与主要实现；
+- [ ] 至少两个相互独立的子 agent 分别完成上下文隔离的 review；其中一个子 agent 不参与主要实现，并分别记录 review 结论；
 - [ ] Go/No-Go 记录包含提交版本、配置、数据集、seed、日志、报告链接和未解决风险。
 
 ## 3. 当前状态
@@ -65,6 +65,6 @@
 | Oracle 与差分策略 | `rust-rewrite-oracle-finalization.md`、`tools/raft-linearizability/`、`evidence/rust-rewrite/raft-linearizability-oracle-20260913-concurrent.log` | 已有独立单寄存器顺序/重叠历史 Oracle 和输入校验回归；尚未接入真实三节点历史 | 测试负责人；三节点历史采集、差分报告 |
 | POC 范围与退出条件 | `rust-rewrite-partition-pilot.md`、`evidence/rust-rewrite/partition-poc-verify.log` | POC 已执行通过 | 测试负责人；扩大故障矩阵 |
 | 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`evidence/rust-rewrite/compose-*-recovery-20260913.log` | 已完成部分故障/恢复证据，仍缺快照损坏和线性一致性 | 测试负责人；补齐负向与并发报告 |
-| 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两名 reviewer；签核记录 |
+| 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两个独立子 agent；分别记录 review 结论 |
 
 因此文档与部分验证阶段已闭环；在独立 Oracle、负向/并发验证和外部签核进入仓库前，清单必须保持 **NO-GO**，不得用“计划存在”替代“证据存在”。
