@@ -559,7 +559,18 @@ mod response_tests {
 pub struct QueryServiceImpl;
 
 pub struct StateService;
-pub struct GraphService;
+pub struct GraphService {
+    store: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+}
+impl GraphService {
+    pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
+        Ok(Self {
+            store: std::sync::Arc::new(std::sync::Mutex::new(
+                hugegraph_store_core::DurableStore::open(path)?,
+            )),
+        })
+    }
+}
 pub fn empty_scan_frame() -> generated::ScanResponse {
     generated::ScanResponse {
         header: None,
@@ -613,7 +624,11 @@ impl generated::graph_store_server::GraphStore for GraphService {
         &self,
         _: tonic::Request<tonic::Streaming<generated::ScanPartitionRequest>>,
     ) -> Result<tonic::Response<Self::ScanPartitionStream>, tonic::Status> {
-        let frame = empty_scan_frame();
+        let frame = self
+            .store
+            .lock()
+            .map(|s| entries_to_scan_frame(&s.entries()))
+            .unwrap_or_else(|_| empty_scan_frame());
         Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(
             frame,
         )]))))
