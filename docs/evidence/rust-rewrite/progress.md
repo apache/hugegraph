@@ -302,3 +302,6 @@ next_action: add live encoded edge scan request and assert edge frames, then imp
 
 2026-09-14: Added encoded edge ScanPartition request routing assertion; workspace passed (52 tests). Evidence `edge-scan-routing-20260914.log`.
 next_action: add live encoded edge scan stream and implement limit/error semantics.
+
+2026-09-14: Live tonic client now sends edge ScanPartition type and receives edge frame with vertex set empty; workspace passed (52 tests). Evidence `tonic-live-edge-e2e-20260914.log`.
+next_action: implement scan limit semantics and malformed request errors over live stream.
