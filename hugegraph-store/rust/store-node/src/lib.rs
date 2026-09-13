@@ -93,8 +93,21 @@ impl StoreNode {
         &self,
         entries: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
     ) -> Result<(), String> {
+        if !self.can_accept_requests() {
+            return Err("node is not online".into());
+        }
+        let mut store = self
+            .session
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| "backend lock poisoned".to_string())?;
+        let snapshot = store.snapshot();
         for (key, value) in entries {
-            self.put(key, value)?;
+            if let Err(error) = store.commit_put(key, value) {
+                let _ = store.restore_image(&snapshot);
+                return Err(error.to_string());
+            }
         }
         Ok(())
     }
