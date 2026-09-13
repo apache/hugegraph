@@ -404,3 +404,6 @@ next_action: audit production data-plane modules and identify the next uncovered
 
 2026-09-14: Production module inventory found 362 Java source files across hg-store-core/node/rocksdb/client/common/cli, while Rust rewrite currently contains only store-core and store-transport crates. Full module parity is therefore incomplete. Evidence `production-module-inventory-20260914.log`.
 next_action: scaffold Rust store-node module boundaries and port the first production command/state contract from hg-store-core.
+
+2026-09-14: Added Rust `store-node` crate as the production node composition boundary, wiring Graph, Session, Query, State, and Healthy services over shared durable state; workspace passed (54 tests). Evidence `store-node-scaffold-20260914.log`.
+next_action: port first node command/state behavior from hg-store-core and add node-level integration coverage.
