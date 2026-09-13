@@ -170,3 +170,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `dcb756d62` | PASS (6 tests; node/core BatchPut response differential) | `store-node-core-batch-differential-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `fa939e7a3` | PASS (7 tests; node rollback command) | `store-node-rollback-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `b8489bb8a` | PASS (8 tests; node scan command) | `store-node-scan-command-20260914.log` |
+| `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (64 tests; rollback/scan workspace regression) | `workspace-scan-regression-20260914.log` |

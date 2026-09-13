@@ -539,3 +539,6 @@ next_action: continue production command coverage and implement the next uncover
 
 2026-09-14: Added online-gated node range scan command boundary with lifecycle rejection and cardinality verification; node tests passed (8). Evidence `store-node-scan-command-20260914.log`.
 next_action: continue production command coverage and implement the next uncovered store contract.
+
+2026-09-14: Full workspace regression after node rollback and scan command boundaries passed (64 tests: core 16, node 8, transport 40). Evidence `workspace-scan-regression-20260914.log`.
+next_action: continue production command coverage and implement the next uncovered store contract.
