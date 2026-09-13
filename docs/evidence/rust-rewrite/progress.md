@@ -275,3 +275,6 @@ next_action: build a live tonic client/server streaming test and verify filtered
 
 2026-09-14: Enabled tokio-stream net feature required for live tonic incoming stream tests; transport check passed.
 next_action: implement live tonic client/server streaming test over TcpListener.
+
+2026-09-14: Enabled tokio net/time features for live tonic loopback integration prerequisites; workspace passed (48 tests). Evidence `tonic-live-prep-20260914.log`.
+next_action: implement live tonic client/server streaming test over TcpListener and assert filtered frames.
