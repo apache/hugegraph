@@ -245,3 +245,6 @@ next_action: implement GraphService request filtering and edge mapping, then con
 
 2026-09-14: Added deterministic durable entry to GraphStore Edge endpoint mapping with assertions; workspace passed (43 tests). Evidence `edge-mapping-20260914.log`.
 next_action: implement GraphService request filtering and integrate vertex/edge frame selection in streaming E2E.
+
+2026-09-14: Added half-open byte range filtering for persisted scan entries with boundary assertion; workspace passed (44 tests). Evidence `scan-filter-20260914.log`.
+next_action: wire request range decoding into GraphService streaming and validate filtered vertex/edge frames end to end.
