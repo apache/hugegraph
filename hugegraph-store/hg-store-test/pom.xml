@@ -238,6 +238,8 @@
                     <execution>
                         <id>store-core-test</id>
                         <configuration>
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -245,6 +247,7 @@
                             <includes>
                                 <include>**/CoreSuiteTest.java</include>
                                 <include>**/BatchGraphIsolationTest.java</include>
+                                <include>**/snapshot/SnapshotHandlerTest.java</include>
                             </includes>
                         </configuration>
                     </execution>

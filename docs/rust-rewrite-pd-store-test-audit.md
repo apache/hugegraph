@@ -55,3 +55,5 @@ Snapshot 本地保存标记测试（2026-09-13）：新增 `SnapshotHandlerTest.
 Store 全量回归（2026-09-13）：活动 SnapshotHandler 测试纳入后，执行完整 `hg-store-test`（`-Djacoco.skip=true`），所有已启用 suite 均通过，`BUILD SUCCESS`；日志：`/tmp/store-regression-final.log`。该回归仍不包含真实跨进程崩溃恢复和损坏快照注入。
 
 Profile 隔离复验（2026-09-13）：尝试将活动 SnapshotHandlerTest 加入 `store-core-test` 后，Snapshot 5/5 通过，但随后 BatchGraphIsolationTest 因 JRaft `TableFormatConfig` 静态重复注册失败。已撤销该 profile 合并，保留独立 Snapshot 执行入口；Store 测试 profile 需要 fork/JVM 隔离设计后才能宣称 CI 覆盖闭环。
+
+Profile 隔离修复（2026-09-13）：为 `store-core-test` 设置 `forkCount=1`、`reuseForks=false` 并纳入活动 `SnapshotHandlerTest`；Snapshot 5/5、BatchGraphIsolation 6/6 均通过，profile 总计 11 项通过，`BUILD SUCCESS`。日志：`/tmp/store-core-fork.log`。该配置消除了 JRaft 静态注册跨 suite 污染。
