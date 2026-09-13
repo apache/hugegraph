@@ -101,3 +101,6 @@ next_action: none
 current_stage: rust_rewrite
 status: active
 next_action: inventory every hugegraph-store production module and map each public contract to a Rust implementation and executable end-to-end/oracle/differential/fault-recovery test; begin with the first uncovered production boundary.
+
+2026-09-14: Completed production surface inventory in `production-surface-inventory-20260914.md`. The Rust workspace has one in-memory crate; hg-store-core/node/grpc/client/common/rocksdb/cli/dist production surfaces remain uncovered. First boundary selected: durable transaction/WAL storage integration with a production-facing end-to-end test.
+next_action: implement the durable transaction/WAL storage boundary and executable end-to-end request path; then add independent Oracle and differential/fault evidence.
