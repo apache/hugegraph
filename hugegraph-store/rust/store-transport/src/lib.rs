@@ -560,6 +560,24 @@ pub struct QueryServiceImpl;
 
 pub struct StateService;
 pub struct GraphService;
+pub fn empty_scan_frame() -> generated::ScanResponse {
+    generated::ScanResponse {
+        header: None,
+        seq_no: 0,
+        vertex: vec![],
+        edge: vec![],
+    }
+}
+#[cfg(test)]
+mod graph_frame_tests {
+    use super::empty_scan_frame;
+    #[test]
+    fn scan_frame_has_initial_sequence_and_no_records() {
+        let f = empty_scan_frame();
+        assert_eq!(f.seq_no, 0);
+        assert!(f.vertex.is_empty() && f.edge.is_empty());
+    }
+}
 
 #[tonic::async_trait]
 impl generated::graph_store_server::GraphStore for GraphService {
@@ -570,12 +588,7 @@ impl generated::graph_store_server::GraphStore for GraphService {
         &self,
         _: tonic::Request<tonic::Streaming<generated::ScanPartitionRequest>>,
     ) -> Result<tonic::Response<Self::ScanPartitionStream>, tonic::Status> {
-        let frame = generated::ScanResponse {
-            header: None,
-            seq_no: 0,
-            vertex: vec![],
-            edge: vec![],
-        };
+        let frame = empty_scan_frame();
         Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(
             frame,
         )]))))
