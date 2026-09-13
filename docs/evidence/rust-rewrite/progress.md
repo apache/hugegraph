@@ -446,3 +446,6 @@ next_action: add live node orchestration test and continue production command co
 
 2026-09-14: Added live unified StoreNode gRPC orchestration test; server starts on a bound socket and Healthy.IsOk succeeds. Node tests passed (4). Evidence `store-node-live-orchestration-20260914.log`.
 next_action: expand live node orchestration assertions to data and state services, then continue production command coverage.
+
+2026-09-14: Added explicit StoreNode start/stop command helpers over validated lifecycle dispatch; full workspace passed (58 tests). Evidence `store-node-command-helpers-20260914.log`.
+next_action: expand live node orchestration assertions to data and state services, then continue production command coverage.
