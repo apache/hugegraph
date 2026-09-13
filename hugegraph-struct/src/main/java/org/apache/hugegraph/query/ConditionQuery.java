@@ -44,6 +44,9 @@ import java.util.*;
 
 public class ConditionQuery extends IdQuery {
 
+    // Semantic counterpart: server's org.apache.hugegraph.backend.query.ConditionQuery.
+    // Keep resolution changes coordinated; parity follow-up: #3200.
+
     public static final char INDEX_SYM_MIN = '\u0000';
     public static final String INDEX_SYM_ENDING = "\u0000";
     public static final String INDEX_SYM_NULL = "\u0001";

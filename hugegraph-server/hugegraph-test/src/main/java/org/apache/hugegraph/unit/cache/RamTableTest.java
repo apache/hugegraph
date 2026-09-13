@@ -17,12 +17,17 @@
 
 package org.apache.hugegraph.unit.cache;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.store.ram.RamTable;
 import org.apache.hugegraph.schema.EdgeLabel;
 import org.apache.hugegraph.schema.SchemaManager;
@@ -30,11 +35,15 @@ import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableList;
 
 public class RamTableTest {
 
@@ -79,6 +88,85 @@ public class RamTableTest {
 
     private HugeGraph graph() {
         return this.graph;
+    }
+
+    @Test
+    public void testMatchedLabelCandidateContract() {
+        RamTable table = new RamTable(this.graph(), 10, 20);
+        table.addEdge(true, 1, 2, Directions.OUT, 1);
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+        query.query(Condition.in(HugeKeys.LABEL, ImmutableList.of(IdGenerator.of(1))));
+        Assert.assertTrue(table.matched(query));
+
+        query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(IdGenerator.of(1), IdGenerator.of(2))));
+        Assert.assertTrue(table.matched(query));
+        query.eq(HugeKeys.LABEL, IdGenerator.of(3));
+        Assert.assertFalse(table.matched(query));
+    }
+
+    @Test
+    public void testQueryByMultipleLabels() {
+        HugeGraph graph = this.graph();
+        int el1 = (int) graph.edgeLabel("el1").id().asLong();
+        int el2 = (int) graph.edgeLabel("el2").id().asLong();
+        int other = (int) graph.schema().edgeLabel("other")
+                              .sourceLabel("vl1").targetLabel("vl1").create().id().asLong();
+        RamTable table = new RamTable(graph, 10, 20);
+        table.addEdge(true, 1, 2, Directions.OUT, el1);
+        table.addEdge(false, 1, 3, Directions.IN, el2);
+        table.addEdge(false, 1, 4, Directions.OUT, other);
+        for (Directions direction : Directions.values()) {
+            ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+            query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            if (direction == Directions.BOTH) {
+                query.query(Condition.or(Condition.eq(HugeKeys.DIRECTION, Directions.OUT),
+                                         Condition.eq(HugeKeys.DIRECTION, Directions.IN)));
+            } else {
+                query.eq(HugeKeys.DIRECTION, direction);
+            }
+            query.query(Condition.in(HugeKeys.LABEL, ImmutableList.of(
+                    IdGenerator.of(el1), IdGenerator.of(el2), IdGenerator.of(el1))));
+            Assert.assertTrue(table.matched(query));
+            List<Long> targets = new ArrayList<>();
+            table.query(query).forEachRemaining(edge -> {
+                Assert.assertEquals(1L, edge.id().ownerVertexId().asLong());
+                Assert.assertEquals(edge.direction() == Directions.OUT ? "el1" : "el2",
+                                    edge.label());
+                targets.add(edge.id().otherVertexId().asLong());
+            });
+            Collections.sort(targets);
+            Assert.assertEquals(direction == Directions.BOTH ? ImmutableList.of(2L, 3L) :
+                                ImmutableList.of(direction == Directions.OUT ? 2L : 3L), targets);
+        }
+    }
+
+    @Test
+    public void testMatchedRejectsUnsafeLabelCandidates() {
+        RamTable table = new RamTable(this.graph(), 10, 20);
+        table.addEdge(true, 1, 2, Directions.OUT, 1);
+        for (Condition label : new Condition[]{
+                Condition.in(HugeKeys.LABEL, ImmutableList.of()),
+                Condition.neq(HugeKeys.LABEL, IdGenerator.of(1)),
+                Condition.in(HugeKeys.LABEL, ImmutableList.of("el1", "el2")),
+                Condition.eq(HugeKeys.LABEL, IdGenerator.ZERO),
+                Condition.eq(HugeKeys.LABEL, IdGenerator.of(-1)),
+                Condition.eq(HugeKeys.LABEL, IdGenerator.of(1L << 32))}) {
+            ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+            query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            query.query(label);
+            Assert.assertFalse(table.matched(query));
+        }
+        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+        query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+        Assert.assertTrue(table.matched(query));
+        query.query(Condition.in(HugeKeys.LABEL,
+                                 ImmutableList.of(IdGenerator.of(1), IdGenerator.of(2))));
+        query.query(Condition.neq(HugeKeys.LABEL, IdGenerator.of(1)));
+        Assert.assertFalse(table.matched(query));
     }
 
     @Test

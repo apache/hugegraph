@@ -31,6 +31,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
@@ -269,7 +270,18 @@ public final class RamTable {
         int conditionsSize = cq.conditionsSize();
         Object owner = cq.condition(HugeKeys.OWNER_VERTEX);
         Directions direction = cq.condition(HugeKeys.DIRECTION);
-        Id label = cq.condition(HugeKeys.LABEL);
+        // query() expands one nonempty LABEL IN relation into EQ branches.
+        // Do not mistake an empty/conflicting set for the wildcard label zero.
+        Set<Object> labels = cq.conditionValues(HugeKeys.LABEL);
+        for (Object value : labels) {
+            if (!(value instanceof Id)) {
+                return false;
+            }
+            Id label = (Id) value;
+            if (!label.number() || label.asLong() <= 0L || label.asLong() > Integer.MAX_VALUE) {
+                return false;
+            }
+        }
 
         if (direction == null && conditionsSize > 1) {
             for (Condition cond : cq.conditions()) {
@@ -289,7 +301,7 @@ public final class RamTable {
         if (direction != null) {
             matchedConds++;
         }
-        if (label != null) {
+        if (!labels.isEmpty()) {
             matchedConds++;
         }
         return matchedConds == cq.conditionsSize();
@@ -316,7 +328,7 @@ public final class RamTable {
         if (dir == null) {
             dir = Directions.BOTH;
         }
-        Id label = query.condition(HugeKeys.LABEL);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
         if (label == null) {
             label = IdGenerator.ZERO;
         }
