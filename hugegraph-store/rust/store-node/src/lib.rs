@@ -122,6 +122,22 @@ impl StoreNode {
         Ok(store.get(key))
     }
 
+    pub fn rollback(&self, key: Vec<u8>) -> Result<(), String> {
+        if !self.can_accept_requests() {
+            return Err("node is not online".into());
+        }
+        let mut store = self
+            .session
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| "backend lock poisoned".to_string())?;
+        store
+            .rollback_key(&key)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn execute(&self, command: NodeCommand) -> Result<NodeState, &'static str> {
         if command == NodeCommand::CleanData {
             return Err("use clean_data for data command");
@@ -276,6 +292,20 @@ mod tests {
             .is_err());
         assert_eq!(node.get(b"stable").unwrap(), Some(b"value".to_vec()));
         std::fs::remove_dir(&path).unwrap();
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
+
+    #[test]
+    fn rollback_command_removes_value_when_online() {
+        let path =
+            std::env::temp_dir().join(format!("hg-node-rollback-{}.img", std::process::id()));
+        let node = StoreNode::open(&path).unwrap();
+        assert!(node.rollback(b"k".to_vec()).is_err());
+        node.start().unwrap();
+        node.put(b"k".to_vec(), b"v".to_vec()).unwrap();
+        node.rollback(b"k".to_vec()).unwrap();
+        assert_eq!(node.get(b"k").unwrap(), None);
+        let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
     }
 
