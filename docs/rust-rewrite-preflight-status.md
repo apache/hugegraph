@@ -7,3 +7,5 @@
 尚未具备证据：活动 `SnapshotHandler` 的真实文件 round-trip、损坏快照与重启恢复；Store Raft 故障注入；事务并发 Oracle；Java/Rust 差分回放；实现级负向变异；性能/资源/长稳基线；双读灰度回滚；维护者和社区签核。
 
 结论：可继续非生产 POC，整体保持 NO-GO。任何一项“未具备证据”完成后，必须保存提交版本、配置、数据集、seed、命令、日志和报告，再更新门禁。
+
+环境复核（2026-09-13）：仓库已有 `docker/docker-compose-3pd-3store-3server.yml`，但当前 WSL 发行版未启用 Docker CLI/WSL integration（`docker: command not found`）。因此三节点故障、分区和跨进程恢复无法在本环境产生有效执行证据；待 Docker Desktop WSL integration 或等价 CI runner 可用后，按矩阵执行。
