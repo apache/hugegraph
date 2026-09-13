@@ -139,10 +139,16 @@ mod tests {
         let mut current = base()[0].clone();
         let mut incoming = current.clone();
         incoming.start = 1;
-        assert_eq!(apply_heartbeat(&mut current, incoming), Err("range-mismatch"));
+        assert_eq!(
+            apply_heartbeat(&mut current, incoming),
+            Err("range-mismatch")
+        );
         let mut incoming = current.clone();
         incoming.end = 11;
-        assert_eq!(apply_heartbeat(&mut current, incoming), Err("range-mismatch"));
+        assert_eq!(
+            apply_heartbeat(&mut current, incoming),
+            Err("range-mismatch")
+        );
     }
     #[test]
     fn heartbeat_is_idempotent() {
