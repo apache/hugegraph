@@ -19,6 +19,14 @@ variable "MAVEN_ARGS" {
   default = ""
 }
 
+variable "MAVEN_PROJECTS" {
+  default = "hugegraph-server/hugegraph-dist,hugegraph-pd/hg-pd-dist,hugegraph-store/hg-store-dist"
+}
+
+variable "RUNTIME_DEPS_EPOCH" {
+  default = "1"
+}
+
 variable "SOURCE_REVISION" {
   default = "local"
 }
@@ -38,8 +46,10 @@ variable "EXPORT_CACHE" {
 target "_common" {
   context = "."
   args = {
-    MAVEN_ARGS     = MAVEN_ARGS
-    SOURCE_REVISION = SOURCE_REVISION
+    MAVEN_ARGS         = MAVEN_ARGS
+    MAVEN_PROJECTS     = MAVEN_PROJECTS
+    RUNTIME_DEPS_EPOCH = RUNTIME_DEPS_EPOCH
+    SOURCE_REVISION    = SOURCE_REVISION
   }
   platforms = [
     "linux/amd64",

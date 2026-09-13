@@ -329,6 +329,56 @@ HUBBLE_PULL_POLICY=never \
 docker compose -f docker-compose-hstore.yml up -d --wait
 ```
 
+### Image build arguments and cache refresh
+
+The four Dockerfiles share an identical Maven build stage. `MAVEN_PROJECTS`
+selects the Server, PD, and Store distribution modules by default; `-am`
+includes their reactor dependencies. Override `MAVEN_PROJECTS` to replace the
+selection, and use `MAVEN_ARGS` for other Maven options. Custom selections must
+still produce all three distributions used by the shared build and archive
+cleanup.
+
+For example, include the PD CLI in addition to the three distributions. Run
+these build commands from the repository root, rather than the `docker/`
+directory used by the Compose commands above:
+
+```bash
+MAVEN_PROJECTS=':hugegraph-dist,:hg-pd-dist,:hg-store-dist,:hg-pd-cli' \
+docker buildx bake -f docker/bake.hcl
+```
+
+Runtime packages are installed before application artifacts are copied, so
+source changes reuse the package layer with either local or imported registry
+caches. Cached `apt-get update` and installation steps do not check for newer
+packages on each build. To refresh them, change `RUNTIME_DEPS_EPOCH` (default
+`1`) to a new value when package updates are required:
+
+```bash
+RUNTIME_DEPS_EPOCH=2 docker buildx bake -f docker/bake.hcl
+```
+
+Keep that value for subsequent builds to reuse the refreshed layer, and choose
+a new value for the next refresh. The argument is declared only in the runtime
+stage, immediately before the package installation step; overriding it does not
+invalidate the Maven build stage. Changes to the base image digest or package
+installation instructions also invalidate the package layer. Bake registry
+cache export remains opt-in through `EXPORT_CACHE=true`.
+
+Both arguments also work with direct Dockerfile builds, for example:
+
+```bash
+docker build -f hugegraph-server/Dockerfile \
+  --build-arg RUNTIME_DEPS_EPOCH=2 \
+  --build-arg MAVEN_PROJECTS=':hugegraph-dist,:hg-pd-dist,:hg-store-dist,:hg-pd-cli' \
+  -t hugegraph-standalone:local .
+```
+
+Build-context narrowing remains a follow-up: sources outside the default
+reactor selection still participate in `COPY . .` and can invalidate the Maven
+layer. Any future exclusions must preserve the `pom.xml` files referenced by
+the reactor and account for custom `MAVEN_PROJECTS` selections and assembly
+inputs; excluding entire module directories is not safe.
+
 ### Hubble configuration
 
 The three small files under `conf/hubble/` contain only topology-specific discovery settings, the PD REST credential (`operations.pd.username` and `operations.pd.password`, which must match PD's `auth.secret-key`), and container paths:
