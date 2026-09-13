@@ -300,6 +300,8 @@ mod tests {
         for (k, v) in oracle {
             assert_eq!(node.get(&k).unwrap(), Some(v));
         }
+        node.put_batch([(vec![0], vec![0xff])]).unwrap();
+        assert_eq!(node.get(&[0]).unwrap(), Some(vec![0xff]));
         let frame = node.graph.scan_range(&[0], &[16], false).unwrap();
         assert_eq!(frame.vertex.len(), 16);
         node.clean_data().unwrap();
