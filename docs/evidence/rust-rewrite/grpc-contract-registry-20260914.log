@@ -1,0 +1,2 @@
+command: cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline
+result: PASS (9 tests; 15 hg-store-grpc RPC names registered)

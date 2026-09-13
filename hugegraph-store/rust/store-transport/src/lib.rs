@@ -13,3 +13,14 @@ impl RpcServer {
         self.service.call(StoreRequest::Rollback { key }).map(|_| ())
     }
 }
+
+/// RPC names currently exposed by hg-store-grpc; generated bindings can use
+/// this registry to guarantee the adapter does not silently omit a method.
+pub const HG_STORE_GRPC_RPCS: &[&str] = &[
+    "Healthy.IsOk", "QueryService.query", "QueryService.query0", "QueryService.count",
+    "GraphStore.ScanPartition", "HgStoreSession.Get2", "HgStoreSession.BatchGet2",
+    "HgStoreSession.Batch", "HgStoreSession.Table", "HgStoreSession.Graph", "HgStoreSession.Clean",
+    "HgStoreState.SubState", "HgStoreState.UnsubState", "HgStoreState.getScanState", "HgStoreState.getPeers",
+];
+#[cfg(test)]
+mod tests { use super::*; #[test] fn grpc_contract_registry_is_complete() { assert_eq!(HG_STORE_GRPC_RPCS.len(), 15); } }

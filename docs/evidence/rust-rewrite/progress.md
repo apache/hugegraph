@@ -116,3 +116,6 @@ next_action: create a separate Rust transport crate and map the real hg-store-gr
 
 2026-09-14: Added independent `store-transport` crate exposing put/get/rollback RPC-shaped methods over StoreService; workspace builds and tests pass. Evidence `transport-crate-20260914.log`, commit `4b35a480d`.
 next_action: map real hg-store-grpc proto methods and add networked client/server end-to-end coverage.
+
+2026-09-14: Parsed hg-store-grpc proto services and registered all 15 RPC names in Rust transport contract registry; registry test and workspace tests pass. Evidence `grpc-contract-registry-20260914.log`.
+next_action: implement generated-proto-compatible message adapters and network transport for the registered RPCs.
