@@ -761,8 +761,8 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
         Some(generated::batch_req::Requests::WriteReq(w)) => {
             let e = w.entry.into_iter().next().ok_or("empty write")?;
             Ok(hugegraph_store_core::StoreRequest::Put {
-                key: e.tkv.map(|x| x.key).unwrap_or_default(),
-                value: e.tkv.map(|x| x.value).unwrap_or_default(),
+                key: e.start_key.map(|x| x.key).unwrap_or_default(),
+                value: e.value,
             })
         }
         Some(generated::batch_req::Requests::RollbackReq(_)) => {
