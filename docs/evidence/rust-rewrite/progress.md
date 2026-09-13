@@ -242,3 +242,6 @@ next_action: add GraphService end-to-end scan test with persisted entries, then 
 
 2026-09-14: Added E2E assertion verifying persisted key/value bytes populate GraphStore vertex ID and property fields; workspace passed (42 tests). Evidence `graph-scan-mapping-e2e-20260914.log`.
 next_action: implement GraphService request filtering and edge mapping, then continue full contract gates.
+
+2026-09-14: Added deterministic durable entry to GraphStore Edge endpoint mapping with assertions; workspace passed (43 tests). Evidence `edge-mapping-20260914.log`.
+next_action: implement GraphService request filtering and integrate vertex/edge frame selection in streaming E2E.
