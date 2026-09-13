@@ -392,3 +392,6 @@ next_action: audit remaining public RPC methods and continue production-contract
 
 2026-09-14: Added Session table/graph/clean lifecycle contract test; workspace passed (53 tests). Evidence `session-lifecycle-contract-20260914.log`.
 next_action: audit remaining public RPC methods and continue production-contract coverage.
+
+2026-09-14: Added Healthy.IsOk protocol contract test; workspace passed (54 tests). Evidence `healthy-contract-20260914.log`.
+next_action: audit remaining public RPC methods and continue production-contract coverage.
