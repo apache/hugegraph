@@ -377,3 +377,6 @@ next_action: apply classified mappings to Query and State handlers and complete 
 
 2026-09-14: Applied shared failure classification to Session get2 and batch_get2 backend/decode errors; workspace passed (70 tests). Evidence `session-error-mapping-20260914b.log`.
 next_action: add cross-family live status assertions for Query/State and complete failure-path matrix.
+
+2026-09-14: Audited QueryService and HgStoreState handlers: current implementations have no fallible backend operations; malformed payloads are rejected at dispatch codec boundaries, while Session get2/batch_get2 now use the shared classifier. Workspace passed (70 tests). Evidence `cross-family-status-audit-20260914.log`.
+next_action: add live Query/State RPC contract tests, then continue remaining production-contract coverage.
