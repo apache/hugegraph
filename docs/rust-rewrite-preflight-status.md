@@ -13,3 +13,5 @@
 环境复核更新（2026-09-13）：已在 WSL2 Ubuntu 24.04 安装原生 Docker Engine 29.1.3 与 Compose 2.40.3，daemon active；`docker compose -f docker/docker-compose-3pd-3store-3server.yml config --services` 成功解析 `pd0..pd2`、`store0..store2`、`server0..server2`、`hubble`。此前 Docker 不可用的阻断已解除，下一步进入容器启动与多节点健康检查。
 
 多节点镜像复核（2026-09-13）：daemon 访问 Docker Hub 的 IPv4/IPv6 均超时；本地构建也无法开始，`hugegraph-pd/Dockerfile` 的 legacy builder 未提供自动 `BUILDPLATFORM` 参数，且基础镜像尚未缓存。该环境无法继续生成容器级证据，不能将 compose 配置解析成功当作集群通过。
+
+镜像源复核（2026-09-13）：USTC Docker Hub mirror TLS 失败，DaoCloud mirror 对 `hugegraph/pd:latest` 返回 403，阿里云公共地址需要账户专属 ACR 加速器；已恢复 daemon 默认配置，避免把不可验证的第三方镜像源固化进开发环境。
