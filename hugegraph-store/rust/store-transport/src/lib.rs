@@ -1036,3 +1036,13 @@ pub fn batch_get_values(
 ) -> Result<Vec<Option<Vec<u8>>>, String> {
     decode_batch_get_keys(bytes).map(|ks| ks.iter().map(|k| store.get(k)).collect())
 }
+
+pub fn feedback_ok() -> generated::FeedbackRes {
+    generated::FeedbackRes {
+        status: Some(generated::ResStatus {
+            code: 0,
+            msg: "ok".into(),
+        }),
+        responses: None,
+    }
+}
