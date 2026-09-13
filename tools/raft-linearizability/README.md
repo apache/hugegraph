@@ -35,3 +35,7 @@ the checker evaluates ordering and values only.
 python3 tools/raft-linearizability/compare_traces.py java.json rust.json
 ```
 Exit 0 means normalized traces are identical; exit 1 reports divergence.
+
+## Reproducible local test entrypoint
+
+From the repository root, run `./tools/raft-linearizability/run-tests.sh`. This invokes both Python regression suites directly; the hyphenated directory name prevents relying on `unittest discover` from the repository root.
