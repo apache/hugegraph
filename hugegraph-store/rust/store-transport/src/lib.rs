@@ -169,3 +169,51 @@ mod socket_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Get2Request {
+    pub key: Vec<u8>,
+}
+impl Get2Request {
+    pub fn encode(&self) -> Vec<u8> {
+        self.key.clone()
+    }
+    pub fn decode(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.is_empty() {
+            return Err("empty Get2 key".into());
+        }
+        Ok(Self {
+            key: bytes.to_vec(),
+        })
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Get2Response {
+    pub value: Option<Vec<u8>>,
+}
+impl Get2Response {
+    pub fn encode(&self) -> Vec<u8> {
+        self.value.clone().unwrap_or_default()
+    }
+    pub fn decode(bytes: &[u8]) -> Self {
+        Self {
+            value: (!bytes.is_empty()).then(|| bytes.to_vec()),
+        }
+    }
+}
+#[cfg(test)]
+mod codec_tests {
+    use super::*;
+    #[test]
+    fn get2_codec_round_trip() {
+        let r = Get2Request {
+            key: b"vertex/1".to_vec(),
+        };
+        assert_eq!(Get2Request::decode(&r.encode()).unwrap(), r);
+        assert!(Get2Request::decode(&[]).is_err());
+        let x = Get2Response {
+            value: Some(b"alice".to_vec()),
+        };
+        assert_eq!(Get2Response::decode(&x.encode()), x);
+    }
+}

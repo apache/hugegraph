@@ -51,3 +51,4 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (10 tests; TCP framed transport compiles) | `network-transport-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (10 tests; loopback client API) | `network-client-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (11 tests; TCP loopback round-trip) | `socket-e2e-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (12 tests; Get2 codec) | `get2-codec-20260914.log` |

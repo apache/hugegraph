@@ -131,3 +131,6 @@ next_action: add real loopback socket integration test and generated proto-compa
 
 2026-09-14: Added real TCP loopback client/server integration test over RpcEnvelope and DurableStore; 11 workspace tests pass. Evidence `socket-e2e-20260914.log`.
 next_action: replace provisional envelope payload with generated proto-compatible codecs and implement all registered RPC dispatch paths.
+
+2026-09-14: Added typed Get2 request/response codec with malformed request rejection; workspace tests pass 12/12. Evidence `get2-codec-20260914.log`.
+next_action: implement codecs for remaining session/query/state RPC messages and dispatch them through network transport.
