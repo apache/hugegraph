@@ -19,3 +19,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重跑 API-GREMLIN-001；随后归档独立 Oracle。
 
 2026-09-13: Java/toolchain gate confirmed only OpenJDK 21 is installed; JAVA_HOME/JDK_HOME unset and no Java 11/17 toolchain configured. Evidence `java-toolchain-gate-20260913.log`. API-GREMLIN-001 remains pending external runtime/toolchain availability.
+
+2026-09-13: Validated syntax of the three orchestration/runtime helper scripts without rerunning unchanged Gremlin tests. Evidence `tooling-syntax-20260913.log`. API-GREMLIN-001 remains pending external Java 11/17 availability.
