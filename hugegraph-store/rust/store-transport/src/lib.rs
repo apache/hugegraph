@@ -754,6 +754,21 @@ mod graph_frame_tests {
         assert_eq!(end, vec![122]);
     }
     #[test]
+    fn encoded_edge_scan_request_selects_edge_mode() {
+        let r = generated::ScanPartitionRequest {
+            header: None,
+            request: Some(
+                generated::scan_partition_request::RequestOneOf::ScanRequest(
+                    generated::scan_partition_request::Request {
+                        scan_type: 2,
+                        ..Default::default()
+                    },
+                ),
+            ),
+        };
+        assert!(super::scan_request_is_edge(&r));
+    }
+    #[test]
     fn graph_service_scan_range_reads_durable_entries() {
         let p = std::env::temp_dir().join(format!("hg-graph-e2e-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&p);
