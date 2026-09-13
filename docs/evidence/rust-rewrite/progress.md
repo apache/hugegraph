@@ -41,3 +41,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Archived API-GREMLIN-001 independent Oracle evidence. The oracle records the public result assertions and persisted task reload check, backed by the two Java 11 execution logs. Next action: continue with the remaining contract matrix gates; mutation validation is still required before final stop sentinel.
 
 2026-09-13: Updated the contract matrix to mark API-GREMLIN-001 complete (1/6). Remaining executable gates are API-REST-001, SCHEMA-001, TXN-001, RAFT-001, and SNAP-001; mutation validation remains required.
+
+2026-09-13: Pinned API-REST-001 to `VertexApiTest` and executed it under Java 11 Docker. It failed at initialization because no API server was listening (`Connection refused`). Evidence `api-rest-001-vertex-java11-20260913.log`. Next action: start the test server and rerun this entry.
