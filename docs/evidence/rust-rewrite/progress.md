@@ -128,3 +128,6 @@ next_action: add a network client and socket integration test, then replace prov
 
 2026-09-14: Added length-framed TCP `call_once` client API for RPC envelopes; transport workspace remains green (10 tests). Evidence `network-client-20260914.log`.
 next_action: add real loopback socket integration test and generated proto-compatible codecs.
+
+2026-09-14: Added real TCP loopback client/server integration test over RpcEnvelope and DurableStore; 11 workspace tests pass. Evidence `socket-e2e-20260914.log`.
+next_action: replace provisional envelope payload with generated proto-compatible codecs and implement all registered RPC dispatch paths.

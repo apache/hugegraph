@@ -142,3 +142,30 @@ pub fn call_once(addr: std::net::SocketAddr, envelope: RpcEnvelope) -> std::io::
     s.read_exact(&mut out)?;
     Ok(out)
 }
+
+#[cfg(test)]
+mod socket_tests {
+    use super::*;
+    use hugegraph_store_core::DurableStore;
+    #[test]
+    fn loopback_get_round_trip() {
+        let path = std::env::temp_dir().join(format!("hg-net-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut seed = DurableStore::open(&path).unwrap();
+        seed.commit_put(b"k".to_vec(), b"v".to_vec()).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let t = std::thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            serve_once(s, StoreService::new(seed)).unwrap();
+        });
+        let out = call_once(
+            addr,
+            RpcEnvelope::new("HgStoreSession.Get2", b"k".to_vec()).unwrap(),
+        )
+        .unwrap();
+        t.join().unwrap();
+        assert_eq!(out, b"v");
+        let _ = std::fs::remove_file(path);
+    }
+}
