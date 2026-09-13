@@ -665,3 +665,30 @@ mod mapping_tests {
         );
     }
 }
+
+pub struct SharedSession {
+    backend: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+}
+impl SharedSession {
+    pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
+        Ok(Self {
+            backend: std::sync::Arc::new(std::sync::Mutex::new(
+                hugegraph_store_core::DurableStore::open(path)?,
+            )),
+        })
+    }
+    pub fn backend(&self) -> std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>> {
+        self.backend.clone()
+    }
+}
+#[cfg(test)]
+mod shared_tests {
+    use super::*;
+    #[test]
+    fn shared_session_opens() {
+        let p = std::env::temp_dir().join(format!("hg-shared-{}.img", std::process::id()));
+        let s = SharedSession::open(&p).unwrap();
+        assert!(s.backend().lock().is_ok());
+        let _ = std::fs::remove_file(p);
+    }
+}
