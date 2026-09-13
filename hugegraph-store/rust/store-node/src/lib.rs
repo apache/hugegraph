@@ -194,6 +194,7 @@ mod tests {
         let reopened = StoreNode::open(&path).unwrap();
         assert_eq!(reopened.state(), NodeState::Stopped);
         assert_eq!(reopened.get(b"k").unwrap(), Some(b"v".to_vec()));
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
         std::fs::write(path.with_extension("node-state"), [9]).unwrap();
         assert!(StoreNode::open(&path).is_err());
         let _ = std::fs::remove_file(&path);
@@ -255,6 +256,11 @@ mod tests {
         }
         let frame = node.graph.scan_range(&[0], &[16], false).unwrap();
         assert_eq!(frame.vertex.len(), 16);
+        node.clean_data().unwrap();
+        assert!(node.get(&[0]).unwrap().is_none());
+        drop(node);
+        let reopened = StoreNode::open(&path).unwrap();
+        assert!(reopened.get(&[0]).unwrap().is_none());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
     }
