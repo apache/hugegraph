@@ -156,6 +156,7 @@ services:
     container_name: hg-store0
     hostname: store0
     environment:
+      HUGEGRAPH_SKIP_JEMALLOC: "${HUGEGRAPH_SKIP_JEMALLOC:-false}"
       HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
       HG_STORE_GRPC_HOST: store0
       HG_STORE_GRPC_PORT: "8500"
@@ -171,6 +172,7 @@ services:
     container_name: hg-store1
     hostname: store1
     environment:
+      HUGEGRAPH_SKIP_JEMALLOC: "${HUGEGRAPH_SKIP_JEMALLOC:-false}"
       HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
       HG_STORE_GRPC_HOST: store1
       HG_STORE_GRPC_PORT: "8500"
@@ -186,6 +188,7 @@ services:
     container_name: hg-store2
     hostname: store2
     environment:
+      HUGEGRAPH_SKIP_JEMALLOC: "${HUGEGRAPH_SKIP_JEMALLOC:-false}"
       HG_STORE_PD_ADDRESS: pd0:8686,pd1:8686,pd2:8686
       HG_STORE_GRPC_HOST: store2
       HG_STORE_GRPC_PORT: "8500"
