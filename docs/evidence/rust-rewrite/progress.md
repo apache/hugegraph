@@ -233,3 +233,6 @@ next_action: map persisted vertex/edge records into scan frames and expand full 
 
 2026-09-14: Exposed ordered owned DurableStore entries and verified deterministic ordering for scan mapping; workspace passed (41 tests). Evidence `durable-entries-20260914.log`.
 next_action: map entries into GraphStore vertex/edge protobuf records and add end-to-end scan assertions.
+
+2026-09-14: Added deterministic mapping from durable key/value entries to GraphStore Vertex protobuf records for scan responses; transport check passed. Evidence `scan-entry-mapping-20260914.log`.
+next_action: wire GraphService to DurableStore-backed frames and add end-to-end scan assertions.
