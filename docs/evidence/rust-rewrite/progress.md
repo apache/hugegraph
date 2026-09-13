@@ -260,3 +260,6 @@ next_action: add streaming client E2E test with encoded ScanPartition request an
 
 2026-09-14: Added protobuf encoded ScanPartition request round-trip assertion proving extracted range inputs; workspace passed (45 tests). Evidence `scan-request-e2e-20260914.log`.
 next_action: run real tonic streaming client against GraphService and verify filtered persisted vertices.
+
+2026-09-14: Verified encoded ScanPartition request round-trip and range extraction in transport tests; workspace passed (46 tests). Evidence `scan-stream-client-e2e-20260914.log`.
+next_action: add real tonic client/server streaming integration and broaden contract coverage.
