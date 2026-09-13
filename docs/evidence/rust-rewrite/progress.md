@@ -488,3 +488,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Release-mode full workspace tests passed (64 tests) with optimized artifacts; no release-only failures observed. Evidence `release-workspace-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Node lifecycle sidecar writes now fsync before atomic rename; node tests passed (5). Evidence `store-node-sidecar-fsync-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.

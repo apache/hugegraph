@@ -1,0 +1,1 @@
+PASS: node sidecar writes fsync before rename; 5 node tests.
