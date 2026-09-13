@@ -585,9 +585,12 @@ impl generated::hg_store_state_server::HgStoreState for StateService {
         &self,
         _: tonic::Request<generated::SubStateReq>,
     ) -> Result<tonic::Response<Self::SubStateStream>, tonic::Status> {
-        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(
-            std::iter::empty(),
-        ))))
+        let state = generated::NodeStateRes {
+            state: generated::NodeStateType::Online as i32,
+        };
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(
+            state,
+        )]))))
     }
     async fn unsub_state(
         &self,
