@@ -512,7 +512,7 @@ impl generated::healthy_server::Healthy for HealthyService {
         _: tonic::Request<()>,
     ) -> Result<tonic::Response<generated::StringReply>, tonic::Status> {
         Ok(tonic::Response::new(generated::StringReply {
-            message: "ok".into(),
+            msg: "ok".into(),
         }))
     }
 }
@@ -703,7 +703,7 @@ impl SharedSession {
             .get(&key);
         let status = generated::ResStatus {
             code: 0,
-            message: "ok".into(),
+            msg: "ok".into(),
         };
         let _ = value;
         Ok(generated::FeedbackRes {
