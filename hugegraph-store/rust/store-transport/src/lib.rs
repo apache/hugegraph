@@ -1046,3 +1046,32 @@ pub fn feedback_ok() -> generated::FeedbackRes {
         responses: None,
     }
 }
+
+pub fn feedback_values(values: Vec<(Vec<u8>, Vec<u8>)>) -> generated::FeedbackRes {
+    let kv = values
+        .into_iter()
+        .map(|(key, value)| generated::Kv {
+            key,
+            value,
+            code: 0,
+        })
+        .collect();
+    generated::FeedbackRes {
+        status: Some(generated::ResStatus {
+            code: 0,
+            msg: "ok".into(),
+        }),
+        responses: Some(generated::feedback_res::Responses::KeyValueResponse(
+            generated::KeyValueResponse { kv },
+        )),
+    }
+}
+#[cfg(test)]
+mod feedback_tests {
+    use super::*;
+    #[test]
+    fn values_response() {
+        let r = feedback_values(vec![(b"k".to_vec(), b"v".to_vec())]);
+        assert!(r.responses.is_some());
+    }
+}
