@@ -1,0 +1,38 @@
+commit=4538ebeae8d0203a71e8e4e50421be0aa2130760
+host=x86_64-unknown-linux-gnu
+rustc 1.94.1 (e408947bf 2026-03-25)
+cargo 1.94.1 (29ea6fb6a 2026-03-24)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.05s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running unittests src/lib.rs (tools/rust-partition-poc/target/debug/deps/hugegraph_partition_poc-374d4748908bc5d1)
+
+running 14 tests
+test cache_counterexamples::rejects_equal_version_with_different_range ... ok
+test cache_tests::latest_cache_value_is_equivalent_to_source ... ok
+test cache_counterexamples::rejects_future_version_against_fixed_reference ... ok
+test recovery_tests::replay_is_deterministic ... ok
+test cache_tests::invalidation_requires_latest_value ... ok
+test recovery_tests::replay_rejects_duplicate_stale_event ... ok
+test recovery_tests::replay_rejects_unknown_partition_event ... ok
+test recovery_tests::replay_rejects_corrupt_restart_state ... ok
+test tests::catches_dropped_right_partition ... ok
+test tests::catches_overlap ... ok
+test tests::range_coverage_does_not_order_unrelated_versions ... ok
+test tests::baseline_is_valid ... ok
+test tests::heartbeat_is_idempotent ... ok
+test tests::rejects_stale_heartbeat ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (tools/rust-partition-poc/target/debug/deps/hugegraph_partition_poc-10322c3acbb98d33)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests hugegraph_partition_poc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
