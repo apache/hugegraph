@@ -145,4 +145,22 @@ mod tests {
         let r = InMemoryStore::restore(&s.snapshot()).unwrap();
         assert_eq!(r.get(b"k"), Some(b"v".to_vec()));
     }
+
+    #[test]
+    fn differential_switch_rollback_trace() {
+        fn run(mut b: BackendSelector) -> Vec<Option<Vec<u8>>> {
+            let mut out = Vec::new();
+            out.push(b.put(b"a".to_vec(), b"1".to_vec()));
+            out.push(b.get(b"a"));
+            b = b.switch_to_java();
+            out.push(b.put(b"b".to_vec(), b"2".to_vec()));
+            out.push(b.get(b"a"));
+            b.rollback(b"a");
+            b = b.switch_to_rust();
+            out.push(b.get(b"a"));
+            out.push(b.get(b"b"));
+            out
+        }
+        assert_eq!(run(BackendSelector::rust()), run(BackendSelector::java_fallback()));
+    }
 }

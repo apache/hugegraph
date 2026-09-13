@@ -1,0 +1,19 @@
+   Compiling hugegraph-store-core v0.1.0 (/home/zy/code/hugegraph/hugegraph-store/rust/store-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running unittests src/lib.rs (hugegraph-store/rust/target/debug/deps/hugegraph_store_core-c20008da505b4e83)
+
+running 5 tests
+test tests::commit_and_rollback_visibility ... ok
+test tests::differential_switch_rollback_trace ... ok
+test tests::restart_recovery_and_corruption_rejection ... ok
+test tests::selectable_java_fallback_rollback ... ok
+test tests::snapshot_round_trip ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests hugegraph_store_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

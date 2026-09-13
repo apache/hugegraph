@@ -83,4 +83,6 @@ next_action: finalize audit record and CI wiring for production Rust gates; keep
 next_action: implement an explicit Java fallback adapter and selectable rollback boundary, then capture differential switch/rollback evidence.
 
 2026-09-13: Added selectable `BackendSelector` with Rust and JavaFallback modes sharing the StoreBackend contract; switch and rollback visibility test passed. Evidence `switch-rollback-20260913.log`, commit `439ffeefa`.
-next_action: integrate switch/rollback trace into differential replay and update final audit; retain NO-GO pending production integration and sign-offs.
+next_action: production integration and maintainer/reviewer sign-offs remain open; retain NO-GO.
+
+2026-09-13: Integrated the switch/rollback trace into the Rust differential replay coverage. The same put/get/rollback sequence produced identical observations under Rust and JavaFallback selectors (5 locked workspace tests passed). Evidence `differential-switch-rollback-20260913.log`; production integration and maintainer/reviewer sign-offs remain open.
