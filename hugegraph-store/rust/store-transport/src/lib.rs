@@ -1268,6 +1268,36 @@ impl Catalog {
     }
 }
 
+/// Atomic image containing both data and catalog metadata for recovery.
+pub struct UnifiedState {
+    pub data: Vec<u8>,
+    pub catalog: Catalog,
+}
+
+impl UnifiedState {
+    pub fn snapshot(data: Vec<u8>, catalog: &Catalog) -> Vec<u8> {
+        let meta = catalog.snapshot();
+        let mut out = (data.len() as u64).to_le_bytes().to_vec();
+        out.extend_from_slice(&data);
+        out.extend_from_slice(&meta);
+        out
+    }
+
+    pub fn restore(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() < 8 {
+            return Err("snapshot header truncated".into());
+        }
+        let n = u64::from_le_bytes(bytes[..8].try_into().unwrap()) as usize;
+        if n > bytes.len() - 8 {
+            return Err("snapshot data truncated".into());
+        }
+        Ok(Self {
+            data: bytes[8..8 + n].to_vec(),
+            catalog: Catalog::restore(&bytes[8 + n..]),
+        })
+    }
+}
+
 #[cfg(test)]
 mod catalog_restore_tests {
     use super::Catalog;
