@@ -239,3 +239,6 @@ next_action: wire GraphService to DurableStore-backed frames and add end-to-end 
 
 2026-09-14: Connected GraphService to a shared DurableStore and scan frame mapping, with transport check passing. Evidence `graph-durable-e2e-20260914.log`.
 next_action: add GraphService end-to-end scan test with persisted entries, then continue remaining contract gates.
+
+2026-09-14: Added E2E assertion verifying persisted key/value bytes populate GraphStore vertex ID and property fields; workspace passed (42 tests). Evidence `graph-scan-mapping-e2e-20260914.log`.
+next_action: implement GraphService request filtering and edge mapping, then continue full contract gates.
