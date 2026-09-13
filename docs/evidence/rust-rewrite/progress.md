@@ -386,3 +386,6 @@ next_action: expand live Query/State method coverage and continue remaining prod
 
 2026-09-14: Extended live State contract test to validate sub_state streaming and Online state; workspace passed (52 tests). Evidence `tonic-live-state-stream-20260914.log`.
 next_action: cover remaining State lifecycle methods and continue production-contract coverage.
+
+2026-09-14: Covered live State unsub_state and get_peers RPC contracts; workspace passed (52 tests). Evidence `tonic-live-state-lifecycle-20260914.log`.
+next_action: audit remaining public RPC methods and continue production-contract coverage.
