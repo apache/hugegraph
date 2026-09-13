@@ -155,3 +155,4 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --release` | `working-tree` | PASS (64 tests; optimized release workspace) | `release-workspace-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `working-tree` | PASS (5 tests; fsynced node sidecar persistence) | `store-node-sidecar-fsync-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (64 tests; post-fsync/live-data regression) | `workspace-final-regression-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (64 tests; CleanData command and durable clear) | `store-node-clean-data-20260914.log` |

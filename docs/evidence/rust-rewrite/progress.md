@@ -494,3 +494,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Full workspace regression after sidecar fsync and live data-plane changes passed (64 tests: core 14, node 5, transport 40). Evidence `workspace-final-regression-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Ported CleanData command semantics with Online gating and durable clear operation; full workspace passed (64 tests). Evidence `store-node-clean-data-20260914.log`.
+next_action: add clean-data fault/recovery and command differential coverage.
