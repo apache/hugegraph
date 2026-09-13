@@ -479,6 +479,7 @@ mod matrix_tests {
 
 /// Generated protobuf bindings (enabled when the transport crate is built).
 pub mod generated {
+    include!(concat!(env!("OUT_DIR"), "/_.rs"));
     include!(concat!(env!("OUT_DIR"), "/graph_pb.rs"));
 }
 
