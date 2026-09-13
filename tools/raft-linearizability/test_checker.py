@@ -51,3 +51,12 @@ def test_invalid_operation_is_rejected():
                                 "start": 0, "end": 1}])
     assert not ok
     assert detail == "invalid operation"
+
+
+def test_duplicate_operation_id_is_rejected():
+    ok, detail = checker.check([
+        {"id": 1, "op": "write", "value": 1, "start": 0, "end": 1},
+        {"id": 1, "op": "read", "value": 1, "start": 1, "end": 2},
+    ])
+    assert not ok
+    assert detail == "duplicate operation id"
