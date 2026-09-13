@@ -220,6 +220,23 @@ mod tests {
         assert!(StoreNode::service_names().contains(&"HgStoreSession"));
     }
 
+    #[test]
+    fn node_put_get_matches_independent_oracle() {
+        let path = std::env::temp_dir().join(format!("hg-node-oracle-{}.img", std::process::id()));
+        let node = StoreNode::open(&path).unwrap();
+        node.start().unwrap();
+        let mut oracle = std::collections::BTreeMap::new();
+        for i in 0..16u8 {
+            node.put(vec![i], vec![i ^ 0x5a]).unwrap();
+            oracle.insert(vec![i], vec![i ^ 0x5a]);
+        }
+        for (k, v) in oracle {
+            assert_eq!(node.get(&k).unwrap(), Some(v));
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
+
     #[tokio::test]
     async fn live_unified_server_answers_health() {
         let path = std::env::temp_dir().join(format!("hg-node-live-{}.img", std::process::id()));

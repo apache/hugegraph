@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 hugegraph-store-transport = { path = "../store-transport" }
+hugegraph-store-core = { path = "../store-core" }
 tonic = "0.14"
 
 [dev-dependencies]
