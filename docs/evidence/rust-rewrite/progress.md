@@ -461,3 +461,6 @@ next_action: add live node GraphStore scan assertion using a shared backend, the
 
 2026-09-14: Unified Graph/Session backend ownership and verified concurrent Session writes are visible through GraphStore scan; node tests passed (4). Evidence `store-node-shared-scan-20260914.log`.
 next_action: add live node GraphStore scan assertion and continue production command coverage.
+
+2026-09-14: Added live unified StoreNode GraphStore.ScanPartition assertion using shared backend; node tests passed (4). Evidence `store-node-live-graph-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
