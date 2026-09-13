@@ -21,3 +21,8 @@ For collected three-node histories, keep a stable report envelope containing
 `history`, and the checker output in `checker`. A ready-to-copy example is
 `examples/three-node-sample.json`; the checker itself remains independent of
 any service or cluster.
+
+For HugeGraph capture, map a committed vertex mutation to `write` and a vertex
+lookup to `read`, using the canonical vertex identifier as the register key.
+Record HTTP send/receive monotonic times plus status and body hash in metadata;
+the checker evaluates ordering and values only.
