@@ -39,3 +39,4 @@
 | `bash tools/raft-linearizability/run-tests.sh` | `7e2a9df71` | PASS (differential replay/checker suite) | `differential-replay-20260913.log` |
 | `/usr/bin/time -f 'elapsed=%e maxrss=%MKB' cargo test --manifest-path hugegraph-store/rust/Cargo.toml --release` | `40beafb56` | PASS (release tests; resource timing captured) | `store-performance-resource-20260913.log` |
 | `/usr/bin/time -f 'elapsed=%e maxrss=%MKB' cargo test --manifest-path hugegraph-store/rust/Cargo.toml --release` | `working-tree` | PASS (3 tests; restart recovery and corrupted snapshot rejection; elapsed/maxrss captured) | `fault-recovery-20260913.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml -- --check; cargo clippy --manifest-path hugegraph-store/rust/Cargo.toml --workspace --all-targets -- -D warnings; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `6e8369eaa` | PASS (format, clippy, 3 tests) | `production-ci-gates-20260913.log` |
