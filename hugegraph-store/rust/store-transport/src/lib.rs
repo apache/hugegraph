@@ -481,3 +481,24 @@ mod matrix_tests {
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/graph_pb.rs"));
 }
+
+pub fn encode_string_reply(message: &str) -> Vec<u8> {
+    let v = generated::StringReply {
+        message: message.into(),
+    };
+    prost::Message::encode_to_vec(&v)
+}
+pub fn decode_string_reply(bytes: &[u8]) -> Result<String, String> {
+    prost::Message::decode(bytes)
+        .map(|v: generated::StringReply| v.message)
+        .map_err(|e| e.to_string())
+}
+#[cfg(test)]
+mod generated_tests {
+    use super::*;
+    #[test]
+    fn string_reply_round_trip() {
+        let b = encode_string_reply("ok");
+        assert_eq!(decode_string_reply(&b).unwrap(), "ok");
+    }
+}
