@@ -221,3 +221,6 @@ next_action: add cross-layer transport/storage oracle harness and replace placeh
 
 2026-09-14: Added cross-layer oracle proving transport StoreService writes survive DurableStore reopen; workspace passed (39 tests). Evidence `cross-layer-oracle-20260914.log`.
 next_action: replace placeholder state/graph stream responses with contract-backed records and begin full E2E harness.
+
+2026-09-14: Replaced empty state subscription stream with a contract-defined Online NodeStateRes record; transport check passed. Evidence `state-stream-record-20260914.log`.
+next_action: replace GraphStore empty scan stream with persisted record mapping and add E2E stream assertions.
