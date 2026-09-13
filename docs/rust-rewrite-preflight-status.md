@@ -61,3 +61,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 cargo-mutants on Partition POC: 30 mutants, 27 caught, 3 missed (90% overall; two missed validate mutations require stronger tests, main() mutant is non-contract code); evidence cargo-mutants-partition-20260913.log.
 
 2026-09-13 latest rerun: standalone Raft Oracle tests and Partition POC fmt/clippy/all-features tests passed; evidence `docs/evidence/rust-rewrite/raft-oracle-rerun-20260913-latest.log` and `partition-gate-rerun-20260913-latest.log`, commit `dcf5a19b0`.
+
+2026-09-13 fresh rerun at commit `7021fe9b2`: `tools/raft-linearizability/run-tests.sh` passed capture-history tests and Partition gate inventory completed; evidence `oracle-partition-rerun-20260913185819.log`. This adds reproducibility evidence but does not change NO-GO because real three-node history, Java/Rust differential replay, implementation mutation, performance baseline, rollback, and independent reviews remain open.
