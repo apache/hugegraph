@@ -616,3 +616,27 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
         Ok(tonic::Response::new(generated::FeedbackRes::default()))
     }
 }
+
+pub fn decode_get_key(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let r: generated::GetReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    r.tk.map(|t| t.key)
+        .filter(|k| !k.is_empty())
+        .ok_or_else(|| "GetReq missing key".into())
+}
+#[cfg(test)]
+mod get_decode_tests {
+    use super::*;
+    #[test]
+    fn decode_get_req_key() {
+        let r = generated::GetReq {
+            header: None,
+            tk: Some(generated::Tk {
+                table: "t".into(),
+                key: b"k".to_vec(),
+                code: 0,
+            }),
+        };
+        let b = prost::Message::encode_to_vec(&r);
+        assert_eq!(decode_get_key(&b).unwrap(), b"k");
+    }
+}
