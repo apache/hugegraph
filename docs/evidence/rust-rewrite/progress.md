@@ -296,3 +296,6 @@ next_action: test bounded range filtering over live stream, then continue remain
 
 2026-09-14: Live tonic scan now sends bounded m..z range over TCP with out-of-range data seeded, asserting only the filtered vertex is returned; workspace passed (50 tests). Evidence `tonic-live-bounded-e2e-20260914.log`.
 next_action: add live edge scan selection and error/limit semantics, then continue contract gates.
+
+2026-09-14: GraphService now selects vertex versus edge frames from ScanPartition scan_type; workspace passed (51 tests). Evidence `scan-type-selection-20260914.log`.
+next_action: add live encoded edge scan request and assert edge frames, then implement limit/error semantics.
