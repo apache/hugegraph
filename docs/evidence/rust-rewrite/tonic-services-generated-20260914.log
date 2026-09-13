@@ -1,0 +1,2 @@
+command: cargo build --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-transport; rg generated Client/Server/trait
+result: PASS (tonic generated GraphStore client/server traits)

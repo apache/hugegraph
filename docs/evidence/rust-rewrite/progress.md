@@ -173,3 +173,6 @@ next_action: configure tonic service generation for each proto service and expos
 
 2026-09-14: Audited tonic generation output. Build succeeds, but generated files contain messages only and no Client/Server/trait service modules; real service generation remains unresolved and must be fixed before claiming gRPC coverage.
 next_action: correct tonic build configuration/proto package handling so all service traits are generated, then implement servers against them.
+
+2026-09-14: Corrected build.rs to use canonical proto paths and explicitly enable tonic client/server generation; generated GraphStore client/server traits are now present and compile. Evidence `tonic-services-generated-20260914.log`.
+next_action: expose all generated service modules and implement Rust service traits backed by StoreService.
