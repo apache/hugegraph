@@ -201,4 +201,34 @@ mod tests {
         assert!(StoreNode::service_names().contains(&"GraphStore"));
         assert!(StoreNode::service_names().contains(&"HgStoreSession"));
     }
+
+    #[tokio::test]
+    async fn live_unified_server_answers_health() {
+        let path = std::env::temp_dir().join(format!("hg-node-live-{}.img", std::process::id()));
+        let node = StoreNode::open(&path).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let task = tokio::spawn(node.serve(addr));
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let mut client =
+            hugegraph_store_transport::generated::healthy_client::HealthyClient::connect(format!(
+                "http://{}",
+                addr
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .is_ok(tonic::Request::new(()))
+                .await
+                .unwrap()
+                .into_inner()
+                .message,
+            "ok"
+        );
+        task.abort();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
 }
