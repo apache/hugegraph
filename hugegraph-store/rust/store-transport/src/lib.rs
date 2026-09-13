@@ -838,3 +838,43 @@ pub fn apply_batch_action(
         BatchAction::Commit => Ok(()),
     }
 }
+
+#[derive(Default)]
+pub struct SessionTransactions {
+    pending: std::collections::HashMap<String, Vec<(Vec<u8>, Vec<u8>)>>,
+}
+impl SessionTransactions {
+    pub fn stage(&mut self, id: String, k: Vec<u8>, v: Vec<u8>) {
+        self.pending.entry(id).or_default().push((k, v));
+    }
+    pub fn commit(
+        &mut self,
+        id: &str,
+        store: &mut hugegraph_store_core::DurableStore,
+    ) -> Result<(), String> {
+        for (k, v) in self.pending.remove(id).unwrap_or_default() {
+            store.commit_put(k, v).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    pub fn rollback(&mut self, id: &str) {
+        self.pending.remove(id);
+    }
+}
+#[cfg(test)]
+mod session_txn_tests {
+    use super::*;
+    #[test]
+    fn stage_commit_rollback() {
+        let p = std::env::temp_dir().join(format!("hg-stxn-{}.img", std::process::id()));
+        let mut s = hugegraph_store_core::DurableStore::open(&p).unwrap();
+        let mut t = SessionTransactions::default();
+        t.stage("a".into(), b"k".to_vec(), b"v".to_vec());
+        t.commit("a", &mut s).unwrap();
+        assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
+        t.stage("b".into(), b"x".to_vec(), b"y".to_vec());
+        t.rollback("b");
+        assert_eq!(s.get(b"x"), None);
+        let _ = std::fs::remove_file(p);
+    }
+}
