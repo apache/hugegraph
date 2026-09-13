@@ -1,0 +1,32 @@
+Sun Sep 13 13:01:54 UTC 2026
+JAVA_HOME=
+JDK_HOME=
+/usr/bin/java
+openjdk version "21.0.10" 2026-01-20
+OpenJDK Runtime Environment (build 21.0.10+7-Ubuntu-124.04)
+OpenJDK 64-Bit Server VM (build 21.0.10+7-Ubuntu-124.04, mixed mode, sharing)
+--- maven toolchains ---
+/home/zy/.m2/repository/org/apache/hugegraph/hugegraph-toolchain
+/home/zy/.m2/repository/org/apache/hugegraph/hugegraph-toolchain/1.5.0/hugegraph-toolchain-1.5.0.pom
+/home/zy/.m2/repository/org/apache/hugegraph/hugegraph-toolchain/1.5.0/hugegraph-toolchain-1.5.0.pom.sha1
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.2.1/maven-toolchain-2.2.1.jar
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.2.1/maven-toolchain-2.2.1.pom.sha1
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.2.1/maven-toolchain-2.2.1.jar.sha1
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.2.1/maven-toolchain-2.2.1.pom
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/1.0/maven-toolchain-1.0.jar.sha1
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/1.0/maven-toolchain-1.0.jar
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/1.0/maven-toolchain-1.0.pom.sha1
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/1.0/maven-toolchain-1.0.pom
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.0.9/maven-toolchain-2.0.9.jar
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.0.9/maven-toolchain-2.0.9.jar.sha1
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.0.9/maven-toolchain-2.0.9.pom
+/home/zy/.m2/repository/org/apache/maven/maven-toolchain/2.0.9/maven-toolchain-2.0.9.pom.sha1
+--- jvm dirs ---
+total 16
+drwxr-xr-x  3 root root 4096 Feb 10  2026 .
+drwxr-xr-x 68 root root 4096 Sep 13 10:51 ..
+-rw-r--r--  1 root root 1840 Jan 23  2026 .java-1.21.0-openjdk-amd64.jinfo
+lrwxrwxrwx  1 root root   25 Oct  5  2023 default-java -> java-1.21.0-openjdk-amd64
+lrwxrwxrwx  1 root root   21 Jul 17  2025 java-1.21.0-openjdk-amd64 -> java-21-openjdk-amd64
+drwxr-xr-x  7 root root 4096 Feb 10  2026 java-21-openjdk-amd64

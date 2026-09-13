@@ -15,3 +15,4 @@
 | `java -version; find /usr/lib/jvm -maxdepth 1 -type d` | `working-tree` | PASS (environment gate: only OpenJDK 21 present; no Gremlin suite rerun) | `gremlin-runtime-gate-20260913.log` |
 
 | `java17 runtime availability check (find/java -version)` | `working-tree` | PASS (no Java 17 present) | `java17-runtime-check-20260913.log` |
+| `set +e; date -u; JAVA_HOME/JDK_HOME; command -v java; java -version; find $HOME/.m2 /usr/share/maven -iname '*toolchain*' -o -iname 'toolchains.xml'; ls -la /usr/lib/jvm` | `working-tree` | PASS (only OpenJDK 21; no configured Java 11/17 toolchain) | `java-toolchain-gate-20260913.log` |
