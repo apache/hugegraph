@@ -54,3 +54,4 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Partition POC verification rerun: fmt, clippy, and 14 tests passed; evidence partition-poc-verify-rerun-20260913.log.
 2026-09-13 Partition POC release-mode regression: 14 tests passed; evidence partition-poc-release-latest-20260913.log.
 2026-09-13 Independent linearizability Oracle and HTTP capture regression rerun passed; evidence linear-oracle-rerun-20260913.log.
+2026-09-13 cargo-mutants on Partition POC: 30 mutants, 27 caught, 3 missed (90% overall; two missed validate mutations require stronger tests, main() mutant is non-contract code); evidence cargo-mutants-partition-20260913.log.

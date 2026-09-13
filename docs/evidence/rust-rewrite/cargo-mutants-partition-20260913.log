@@ -1,0 +1,6 @@
+Found 30 mutants to test
+ok       Unmutated baseline in 0s build + 0s test
+MISSED   src/lib.rs:26:25: replace || with && in validate in 0s build + 0s test
+MISSED   src/lib.rs:30:29: replace || with && in validate in 0s build + 0s test
+MISSED   src/main.rs:20:5: replace main with () in 0s build + 0s test
+30 mutants tested in 3s: 3 missed, 27 caught
