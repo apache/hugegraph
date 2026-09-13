@@ -49,3 +49,5 @@ Rust 迁移单元只有在：相关测试方法已映射契约编号；Oracle �
 2026-09-13 活动实现复验：将测试切换为 `SnapshotHandler` 并更名文件后，离线执行未能进入编译；`hugegraph-core` 仍缺少多项缓存依赖（如 jackson/kubernetes/gremlin），日志 `/tmp/snapshot-active-offline.log`。该测试目前没有结果证据，Snapshot 门禁继续保持未满足。
 
 活动实现复验通过（2026-09-13）：将测试切换为 `SnapshotHandler`，并修复 `StoreEngineTestBase` 未设置 `JobOptions`（线程参数为 0）导致引擎启动失败的问题；使用 `-Djacoco.skip=true`（当前 JaCoCo 不支持 JDK class 65）执行，`SnapshotHandlerTest` **4/4 通过，0 失败，BUILD SUCCESS**。日志：`/tmp/snapshot-active-final4.log`。测试仍未覆盖真实损坏快照和跨进程重启恢复。
+
+Snapshot 本地保存标记测试（2026-09-13）：新增 `SnapshotHandlerTest.testSnapshotLoadSkipsLocallySavedSnapshot`，活动 `SnapshotHandler` 测试共 **5/5 通过**（`-Djacoco.skip=true`，因 JaCoCo/JDK class 65 不兼容）。该测试覆盖跳过路径，真实损坏文件和跨进程恢复仍未覆盖。

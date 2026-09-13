@@ -184,4 +184,28 @@ public class SnapshotHandlerTest extends StoreEngineTestBase {
 
         // Verify the results
     }
+
+    @Test
+    public void testSnapshotLoadSkipsLocallySavedSnapshot() throws IOException {
+        File snapshotDir = new File("/tmp/snapshot/skip-local");
+        FileUtils.forceMkdir(snapshotDir);
+        FileUtils.writeStringToFile(new File(snapshotDir, "should_not_load"),
+                                    "saved snapshot", "UTF-8");
+        SnapshotReader reader = new SnapshotReader() {
+            @Override
+            public String getPath() {
+                return snapshotDir.getPath();
+            }
+
+            @Override public RaftOutter.SnapshotMeta load() { return null; }
+            @Override public String generateURIForCopy() { return null; }
+            @Override public boolean init(Void opts) { return false; }
+            @Override public void shutdown() { }
+            @Override public Set<String> listFiles() { return null; }
+            @Override public Message getFileMeta(String fileName) { return null; }
+            @Override public void close() throws IOException { }
+        };
+        hgSnapshotHandlerUnderTest.onSnapshotLoad(reader, 0L);
+        assertEquals(true, new File(snapshotDir, "should_not_load").exists());
+    }
 }
