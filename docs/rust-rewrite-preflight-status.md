@@ -52,4 +52,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 
 2026-09-13 snapshot suite (*Snapshot*Test): SnapshotHandlerTest 6/6 passed, no failures; evidence snapshot-suite-20260913.log.
 2026-09-13 Partition POC verification rerun: fmt, clippy, and 14 tests passed; evidence partition-poc-verify-rerun-20260913.log.
+2026-09-13 Partition POC release-mode regression: 14 tests passed; evidence partition-poc-release-latest-20260913.log.
 2026-09-13 Independent linearizability Oracle and HTTP capture regression rerun passed; evidence linear-oracle-rerun-20260913.log.
