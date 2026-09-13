@@ -1,0 +1,1 @@
+PASS: injected sidecar write failure leaves in-memory node state unchanged.

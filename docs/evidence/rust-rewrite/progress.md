@@ -422,3 +422,6 @@ next_action: port node command dispatch/state persistence behavior beyond lifecy
 
 2026-09-14: Node lifecycle persistence now propagates filesystem write/rename failures instead of ignoring them; node tests passed. Evidence `store-node-persistence-errors-20260914.log`.
 next_action: add fault-injection coverage for node state persistence and continue command/recovery behavior.
+
+2026-09-14: Added fault injection for node state sidecar write failure; state transition now remains Starting when persistence fails. Node test passed. Evidence `store-node-fault-injection-20260914.log`.
+next_action: extend node recovery tests to data/state consistency and continue production command coverage.
