@@ -5,6 +5,7 @@
 # The ASF licenses this file to you under the Apache License, Version 2.0.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# http://www.apache.org/licenses/LICENSE-2.0
 #!/usr/bin/env python3
 """Capture a small register history from an HTTP endpoint."""
 import argparse, json, time, urllib.request

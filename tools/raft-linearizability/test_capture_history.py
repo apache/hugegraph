@@ -5,6 +5,7 @@
 # The ASF licenses this file to you under the Apache License, Version 2.0.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+# http://www.apache.org/licenses/LICENSE-2.0
 import importlib.util
 import json
 from pathlib import Path
