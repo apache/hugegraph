@@ -143,3 +143,6 @@ next_action: implement state and graph RPC schemas and dispatch paths.
 
 2026-09-14: Added typed StateRequest and ScanRequest codecs for state and graph RPC boundaries with malformed input rejection; workspace tests pass 15/15. Evidence `state-graph-codec-20260914.log`.
 next_action: dispatch typed query/batch/state/graph messages through network service and add RPC integration matrix.
+
+2026-09-14: Added typed dispatch validation for query, batch, state, graph, and Get2 RPC routes; malformed payloads are rejected before service execution. Workspace tests pass 16/16; evidence `typed-dispatch-20260914.log`.
+next_action: wire validated dispatch into serve_once and add end-to-end coverage for each RPC family.

@@ -388,3 +388,36 @@ mod state_graph_tests {
         assert!(StateRequest::decode(&[]).is_err());
     }
 }
+
+pub fn validate_dispatch(method: &str, payload: &[u8]) -> Result<(), String> {
+    match method {
+        "QueryService.query0" | "QueryService.count" => QueryRequest::decode(payload).map(|_| ()),
+        "HgStoreSession.Batch" => BatchRequest::decode(payload).map(|_| ()),
+        "HgStoreState.SubState"
+        | "HgStoreState.UnsubState"
+        | "HgStoreState.getScanState"
+        | "HgStoreState.getPeers" => StateRequest::decode(payload).map(|_| ()),
+        "GraphStore.ScanPartition" => ScanRequest::decode(payload).map(|_| ()),
+        "HgStoreSession.Get2" => Get2Request::decode(payload).map(|_| ()),
+        _ => Ok(()),
+    }
+}
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+    #[test]
+    fn typed_dispatch_validates_routes() {
+        assert!(validate_dispatch("QueryService.count", b"g.V()").is_ok());
+        assert!(validate_dispatch("HgStoreState.SubState", &7u64.to_le_bytes()).is_ok());
+        assert!(validate_dispatch(
+            "GraphStore.ScanPartition",
+            &ScanRequest {
+                start: b"a".to_vec(),
+                end: b"z".to_vec()
+            }
+            .encode()
+        )
+        .is_ok());
+        assert!(validate_dispatch("QueryService.count", b"").is_err());
+    }
+}
