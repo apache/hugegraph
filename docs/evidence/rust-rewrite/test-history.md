@@ -45,3 +45,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (6 tests; durable restart round-trip) | `durable-boundary-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (7 tests; request adapter persistence path) | `request-adapter-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (8 tests; client/server transport mapping) | `transport-service-20260914.log` |
+| `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `4b35a480d` | PASS (8 core tests; transport crate builds) | `transport-crate-20260914.log` |

@@ -113,3 +113,6 @@ next_action: add a Rust transport crate/service and map hg-store-grpc public RPC
 
 2026-09-14: Added StoreService transport-neutral server wrapper and client/server request mapping test over DurableStore. Workspace tests pass 8/8; evidence `transport-service-20260914.log`.
 next_action: create a separate Rust transport crate and map the real hg-store-grpc RPC schema; add networked client/server end-to-end coverage.
+
+2026-09-14: Added independent `store-transport` crate exposing put/get/rollback RPC-shaped methods over StoreService; workspace builds and tests pass. Evidence `transport-crate-20260914.log`, commit `4b35a480d`.
+next_action: map real hg-store-grpc proto methods and add networked client/server end-to-end coverage.
