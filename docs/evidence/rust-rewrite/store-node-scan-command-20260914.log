@@ -1,0 +1,3 @@
+command: cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node
+commit: b8489bb8a
+result: PASS (8 tests; online-gated range scan command)

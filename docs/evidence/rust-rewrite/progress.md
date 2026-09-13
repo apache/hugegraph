@@ -536,3 +536,6 @@ next_action: continue production command coverage and implement the next uncover
 
 2026-09-14: Added online-gated node rollback command with lifecycle rejection and removal verification; node tests passed (7). Evidence `store-node-rollback-20260914.log`.
 next_action: continue production command coverage and implement the next uncovered store contract.
+
+2026-09-14: Added online-gated node range scan command boundary with lifecycle rejection and cardinality verification; node tests passed (8). Evidence `store-node-scan-command-20260914.log`.
+next_action: continue production command coverage and implement the next uncovered store contract.
