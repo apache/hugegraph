@@ -257,3 +257,6 @@ next_action: connect decoded request ranges to GraphService streaming and run fu
 
 2026-09-14: Connected GraphService streaming to decoded ScanPartition ranges and filtered DurableStore entries; transport check passed. Evidence `scan-stream-filter-20260914.log`.
 next_action: add streaming client E2E test with encoded ScanPartition request and verify filtered vertices.
+
+2026-09-14: Added protobuf encoded ScanPartition request round-trip assertion proving extracted range inputs; workspace passed (45 tests). Evidence `scan-request-e2e-20260914.log`.
+next_action: run real tonic streaming client against GraphService and verify filtered persisted vertices.
