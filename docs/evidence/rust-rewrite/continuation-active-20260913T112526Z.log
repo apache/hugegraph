@@ -1,0 +1,3 @@
+3e05ca5b98f9185955252c1a248fa3c589222568
+capture history tests passed
+SNAP-001 PASS: corrupted snapshot rejected by digest mismatch
