@@ -107,3 +107,6 @@ next_action: implement the durable transaction/WAL storage boundary and executab
 
 2026-09-14: Added a durable file-backed Rust store boundary with atomic image replacement, corruption rejection, restart recovery, and commit/rollback persistence. Workspace tests pass 6/6; evidence `durable-boundary-20260914.log`.
 next_action: expose the durable boundary through a production-facing Rust request service and integrate it with hg-store-grpc/node contracts.
+
+2026-09-14: Added a production-facing StoreRequest/StoreResponse adapter over DurableStore, covering put/get/rollback persistence through a transport-neutral command surface. Workspace tests pass 7/7; evidence `request-adapter-20260914.log`.
+next_action: add a Rust transport crate/service and map hg-store-grpc public RPC methods to StoreRequest, with an end-to-end client/server test.

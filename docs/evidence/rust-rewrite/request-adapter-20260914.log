@@ -1,0 +1,2 @@
+command: cargo fmt + cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked
+result: PASS (7 tests; production request adapter path)

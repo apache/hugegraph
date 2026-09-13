@@ -43,3 +43,4 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `439ffeefa` | PASS (4 tests; Java fallback switch and rollback) | `switch-rollback-20260913.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (5 tests; differential Rust/JavaFallback switch/rollback trace) | `differential-switch-rollback-20260913.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (6 tests; durable restart round-trip) | `durable-boundary-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (7 tests; request adapter persistence path) | `request-adapter-20260914.log` |

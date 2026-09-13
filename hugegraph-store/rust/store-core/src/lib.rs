@@ -221,3 +221,62 @@ mod durable_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+/// Production-facing request adapter. Transport layers (gRPC/HTTP) can map
+/// their requests to this stable command surface.
+pub enum StoreRequest {
+    Put { key: Vec<u8>, value: Vec<u8> },
+    Get { key: Vec<u8> },
+    Rollback { key: Vec<u8> },
+}
+
+pub enum StoreResponse {
+    Value(Option<Vec<u8>>),
+    Ack,
+}
+
+impl DurableStore {
+    pub fn handle(&mut self, request: StoreRequest) -> std::io::Result<StoreResponse> {
+        match request {
+            StoreRequest::Put { key, value } => {
+                self.commit_put(key, value).map(StoreResponse::Value)
+            }
+            StoreRequest::Get { key } => Ok(StoreResponse::Value(self.get(&key))),
+            StoreRequest::Rollback { key } => self.rollback_key(&key).map(|_| StoreResponse::Ack),
+        }
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+    #[test]
+    fn request_path_persists_and_reads() {
+        let path = std::env::temp_dir().join(format!("hg-request-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut s = DurableStore::open(&path).unwrap();
+        assert!(matches!(
+            s.handle(StoreRequest::Put {
+                key: b"id".to_vec(),
+                value: b"v".to_vec()
+            })
+            .unwrap(),
+            StoreResponse::Value(None)
+        ));
+        assert!(
+            matches!(s.handle(StoreRequest::Get { key: b"id".to_vec() }).unwrap(), StoreResponse::Value(Some(v)) if v == b"v")
+        );
+        s.handle(StoreRequest::Rollback {
+            key: b"id".to_vec(),
+        })
+        .unwrap();
+        assert!(matches!(
+            s.handle(StoreRequest::Get {
+                key: b"id".to_vec()
+            })
+            .unwrap(),
+            StoreResponse::Value(None)
+        ));
+        let _ = std::fs::remove_file(path);
+    }
+}
