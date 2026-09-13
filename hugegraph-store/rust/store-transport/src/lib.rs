@@ -947,3 +947,28 @@ mod apply_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+#[cfg(test)]
+mod tonic_session_tests {
+    use super::*;
+    #[tokio::test]
+    async fn get2_trait_round_trip() {
+        let p = std::env::temp_dir().join(format!("hg-ts-{}.img", std::process::id()));
+        let s = SessionService::open(&p).unwrap();
+        let r = generated::GetReq {
+            header: None,
+            tk: Some(generated::Tk {
+                table: "t".into(),
+                key: b"k".to_vec(),
+                code: 0,
+            }),
+        };
+        let out = <SessionService as generated::hg_store_session_server::HgStoreSession>::get2(
+            &s,
+            tonic::Request::new(r),
+        )
+        .await
+        .unwrap();
+        assert!(out.into_inner().status.is_some());
+        let _ = std::fs::remove_file(p);
+    }
+}
