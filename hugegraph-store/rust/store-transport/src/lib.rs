@@ -575,3 +575,44 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
         Ok(tonic::Response::new(query_response(&q.query_id, "0", true)))
     }
 }
+
+pub struct SessionService;
+#[tonic::async_trait]
+impl generated::hg_store_session_server::HgStoreSession for SessionService {
+    async fn get2(
+        &self,
+        _: tonic::Request<generated::GetReq>,
+    ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+    }
+    async fn batch_get2(
+        &self,
+        _: tonic::Request<generated::BatchGetReq>,
+    ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+    }
+    async fn batch(
+        &self,
+        _: tonic::Request<generated::BatchReq>,
+    ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+    }
+    async fn table(
+        &self,
+        _: tonic::Request<generated::TableReq>,
+    ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+    }
+    async fn graph(
+        &self,
+        _: tonic::Request<generated::GraphReq>,
+    ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+    }
+    async fn clean(
+        &self,
+        _: tonic::Request<generated::CleanReq>,
+    ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+    }
+}
