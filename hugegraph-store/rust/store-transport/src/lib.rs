@@ -1084,6 +1084,18 @@ mod graph_frame_tests {
             .into_inner();
         let node = stream.message().await.unwrap().unwrap();
         assert_eq!(node.state, super::generated::NodeStateType::Online as i32);
+        state
+            .unsub_state(super::generated::SubStateReq::default())
+            .await
+            .unwrap();
+        let peers = state
+            .get_peers(super::generated::PartitionRequest::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            peers.into_inner(),
+            super::generated::PeersResponse::default()
+        );
     }
 }
 
