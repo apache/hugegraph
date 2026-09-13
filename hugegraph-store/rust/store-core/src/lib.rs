@@ -320,6 +320,7 @@ pub enum StoreRequest {
     Put { key: Vec<u8>, value: Vec<u8> },
     Get { key: Vec<u8> },
     Rollback { key: Vec<u8> },
+    BatchPut { entries: Vec<(Vec<u8>, Vec<u8>)> },
 }
 
 pub enum StoreResponse {
@@ -335,6 +336,16 @@ impl DurableStore {
             }
             StoreRequest::Get { key } => Ok(StoreResponse::Value(self.get(&key))),
             StoreRequest::Rollback { key } => self.rollback_key(&key).map(|_| StoreResponse::Ack),
+            StoreRequest::BatchPut { entries } => {
+                let snapshot = self.snapshot();
+                for (key, value) in entries {
+                    if let Err(error) = self.commit_put(key, value) {
+                        let _ = self.restore_image(&snapshot);
+                        return Err(error);
+                    }
+                }
+                Ok(StoreResponse::Ack)
+            }
         }
     }
 }
