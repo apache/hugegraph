@@ -970,6 +970,16 @@ impl generated::graph_store_server::GraphStore for GraphService {
                 .ok_or_else(|| tonic::Status::invalid_argument("missing scan request"))?;
             let limit = match r.request.as_ref() {
                 Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => {
+                    if v.boundary < 0 || v.batch_size < 0 || v.batch_size > 1_000_000 {
+                        return Err(tonic::Status::invalid_argument(
+                            "invalid scan boundary or batch size",
+                        ));
+                    }
+                    if v.properties.len() > 100_000 {
+                        return Err(tonic::Status::resource_exhausted(
+                            "too many scan properties",
+                        ));
+                    }
                     if v.graph_name.len() + v.table.len() + v.condition.len() > 1_048_576 {
                         return Err(tonic::Status::resource_exhausted("scan filters too large"));
                     }
