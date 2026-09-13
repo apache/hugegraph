@@ -899,7 +899,12 @@ impl generated::graph_store_server::GraphStore for GraphService {
             let (start, end) = scan_request_range(&r)
                 .ok_or_else(|| tonic::Status::invalid_argument("missing scan request"))?;
             let limit = match r.request.as_ref() {
-                Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => v.limit,
+                Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => {
+                    if v.limit < 0 {
+                        return Err(tonic::Status::invalid_argument("negative limit"));
+                    }
+                    v.limit
+                }
                 _ => 0,
             };
             self.scan_range_limited(&start, &end, scan_request_is_edge(&r), limit)
