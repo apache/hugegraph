@@ -1,0 +1,1 @@
+PASS: full Rust workspace regression, 57 tests (core 14, node 3, transport 40).

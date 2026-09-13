@@ -440,3 +440,6 @@ next_action: add live node orchestration test and continue production command co
 
 2026-09-14: Added node service inventory assertion covering all five production gRPC services in the unified server composition; node tests passed (3). Evidence `store-node-service-inventory-20260914.log`.
 next_action: add live node orchestration test and continue production command coverage.
+
+2026-09-14: Full Rust workspace regression after node orchestration/data changes passed (57 tests: core 14, node 3, transport 40). Evidence `workspace-node-regression-20260914.log`.
+next_action: add live node orchestration test and continue production command coverage.
