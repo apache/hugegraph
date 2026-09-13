@@ -570,6 +570,23 @@ impl GraphService {
             )),
         })
     }
+    pub fn scan_range(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        edges: bool,
+    ) -> Result<generated::ScanResponse, String> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| "store lock poisoned".to_string())?;
+        let entries = filter_entries(&store.entries(), start, end);
+        Ok(if edges {
+            entries_to_edge_frame(&entries)
+        } else {
+            entries_to_scan_frame(&entries)
+        })
+    }
 }
 pub fn empty_scan_frame() -> generated::ScanResponse {
     generated::ScanResponse {
