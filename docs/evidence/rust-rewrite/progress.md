@@ -458,3 +458,6 @@ next_action: add live node GraphStore scan assertion and continue production com
 
 2026-09-14: Validated node data-plane ownership boundary; removed an invalid split-backend scan delegation and retained Session-backed data operations. Node tests passed (4). Evidence `store-node-data-plane-boundary-20260914.log`.
 next_action: add live node GraphStore scan assertion using a shared backend, then continue production command coverage.
+
+2026-09-14: Unified Graph/Session backend ownership and verified concurrent Session writes are visible through GraphStore scan; node tests passed (4). Evidence `store-node-shared-scan-20260914.log`.
+next_action: add live node GraphStore scan assertion and continue production command coverage.
