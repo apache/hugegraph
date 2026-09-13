@@ -281,3 +281,6 @@ next_action: implement live tonic client/server streaming test over TcpListener 
 
 2026-09-14: Added live TcpListener tonic GraphStore client/server streaming E2E; generated client receives a ScanResponse frame and workspace passed (49 tests). Evidence `tonic-live-stream-e2e-20260914.log`.
 next_action: assert filtered persisted vertices through live tonic stream, then continue remaining contract gates.
+
+2026-09-14: Live tonic GraphStore E2E now seeds DurableStore and asserts client receives one persisted vertex frame; workspace passed (50 tests). Evidence `tonic-live-persisted-e2e-20260914.log`.
+next_action: send encoded range request through live stream and assert filtered vertex count.
