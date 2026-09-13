@@ -537,6 +537,41 @@ mod response_tests {
 }
 
 pub struct QueryServiceImpl;
+
+pub struct StateService;
+
+#[tonic::async_trait]
+impl generated::hg_store_state_server::HgStoreState for StateService {
+    type SubStateStream = std::pin::Pin<
+        Box<dyn tokio_stream::Stream<Item = Result<generated::NodeStateRes, tonic::Status>> + Send>,
+    >;
+    async fn sub_state(
+        &self,
+        _: tonic::Request<generated::SubStateReq>,
+    ) -> Result<tonic::Response<Self::SubStateStream>, tonic::Status> {
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(
+            std::iter::empty(),
+        ))))
+    }
+    async fn unsub_state(
+        &self,
+        _: tonic::Request<generated::SubStateReq>,
+    ) -> Result<tonic::Response<()>, tonic::Status> {
+        Ok(tonic::Response::new(()))
+    }
+    async fn get_scan_state(
+        &self,
+        _: tonic::Request<generated::SubStateReq>,
+    ) -> Result<tonic::Response<generated::ScanState>, tonic::Status> {
+        Ok(tonic::Response::new(generated::ScanState::default()))
+    }
+    async fn get_peers(
+        &self,
+        _: tonic::Request<generated::PartitionRequest>,
+    ) -> Result<tonic::Response<generated::PeersResponse>, tonic::Status> {
+        Ok(tonic::Response::new(generated::PeersResponse::default()))
+    }
+}
 #[tonic::async_trait]
 impl generated::query_service_server::QueryService for QueryServiceImpl {
     type queryStream = std::pin::Pin<
