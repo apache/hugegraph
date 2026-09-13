@@ -56,3 +56,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (14 tests; query/batch codecs) | `query-batch-codec-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (15 tests; state/graph codecs) | `state-graph-codec-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (16 tests; typed RPC dispatch) | `typed-dispatch-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (16 tests; network dispatch validation wired) | `dispatch-wired-20260914.log` |

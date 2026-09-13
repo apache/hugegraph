@@ -114,6 +114,8 @@ pub fn serve_once(
     stream.read_exact(&mut buf)?;
     let env = RpcEnvelope::decode(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    validate_dispatch(&env.method, &env.payload)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let response = match env.method.as_str() {
         "HgStoreSession.Get2" => service.call(StoreRequest::Get { key: env.payload })?,
         "HgStoreSession.Batch" => service.call(StoreRequest::Put {

@@ -146,3 +146,6 @@ next_action: dispatch typed query/batch/state/graph messages through network ser
 
 2026-09-14: Added typed dispatch validation for query, batch, state, graph, and Get2 RPC routes; malformed payloads are rejected before service execution. Workspace tests pass 16/16; evidence `typed-dispatch-20260914.log`.
 next_action: wire validated dispatch into serve_once and add end-to-end coverage for each RPC family.
+
+2026-09-14: Wired validate_dispatch into serve_once so typed payload validation executes on the network path; workspace tests pass 16/16. Evidence `dispatch-wired-20260914.log`.
+next_action: implement method-specific service handlers and network integration tests for each RPC family.
