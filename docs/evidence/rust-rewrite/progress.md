@@ -152,3 +152,6 @@ next_action: implement method-specific service handlers and network integration 
 
 2026-09-14: Added dispatch_payload handlers for Get2, Batch, query/count, and ScanPartition RPC families with typed validation; workspace tests pass 16/16. Evidence `rpc-handlers-20260914.log`.
 next_action: route serve_once through dispatch_payload and add handler-level integration matrix for all RPC families.
+
+2026-09-14: Added RPC family dispatch matrix covering query, batch, state, graph, and Get2 handlers; 17 tests pass. Evidence `rpc-family-matrix-20260914.log`.
+next_action: implement real proto-generated codecs and replace provisional transport protocol.
