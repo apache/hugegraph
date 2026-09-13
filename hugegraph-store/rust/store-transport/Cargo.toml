@@ -5,7 +5,7 @@ edition = "2021"
 [dependencies]
 hugegraph-store-core = { path = "../store-core" }
 prost = "0.14.4"
-tokio-stream = "0.1.19"
+tokio-stream = { version = "0.1.19", features = ["net"] }
 tonic = "0.14.6"
 tonic-prost = "0.14.6"
 
