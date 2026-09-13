@@ -897,3 +897,36 @@ pub fn apply_session_batch(
         }
     }
 }
+#[cfg(test)]
+mod apply_tests {
+    use super::*;
+    #[test]
+    fn batch_lifecycle() {
+        let p = std::env::temp_dir().join(format!("hg-ab-{}.img", std::process::id()));
+        let mut s = hugegraph_store_core::DurableStore::open(&p).unwrap();
+        let mut tx = SessionTransactions::default();
+        let e = generated::BatchEntry {
+            op_type: 0,
+            table: 0,
+            start_key: Some(generated::Key {
+                key: b"k".to_vec(),
+                code: 0,
+            }),
+            end_key: None,
+            value: b"v".to_vec(),
+        };
+        let w = generated::BatchReq {
+            header: None,
+            batch_id: "b".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq { entry: vec![e] },
+            )),
+        };
+        let b = prost::Message::encode_to_vec(&w);
+        apply_session_batch("b", &b, &mut tx, &mut s).unwrap();
+        assert_eq!(s.get(b"k"), None);
+        tx.commit("b", &mut s).unwrap();
+        assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
+        let _ = std::fs::remove_file(p);
+    }
+}
