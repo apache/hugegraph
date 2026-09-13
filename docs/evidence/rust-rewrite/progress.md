@@ -326,3 +326,6 @@ next_action: add live oversized-limit rejection assertion and audit remaining re
 
 2026-09-14: Live tonic scan test asserts oversized limit requests are rejected with resource exhaustion; workspace passed (55 tests). Evidence `tonic-live-oversized-limit-20260914.log`.
 next_action: audit remaining request size/resource limits and add malformed payload coverage.
+
+2026-09-14: Added ScanPartition payload decoder with 1 MiB size bound and required oneof validation; workspace passed (56 tests). Evidence `scan-payload-validation-20260914.log`.
+next_action: route validate_scan_payload through dispatch and live server, then audit remaining contract/resource gates.
