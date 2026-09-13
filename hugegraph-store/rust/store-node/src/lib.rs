@@ -138,6 +138,16 @@ impl StoreNode {
             .map_err(|e| e.to_string())
     }
 
+    pub fn scan(&self, start: &[u8], end: &[u8], inclusive_end: bool) -> Result<usize, String> {
+        if !self.can_accept_requests() {
+            return Err("node is not online".into());
+        }
+        self.graph
+            .scan_range(start, end, inclusive_end)
+            .map(|frame| frame.vertex.len())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn execute(&self, command: NodeCommand) -> Result<NodeState, &'static str> {
         if command == NodeCommand::CleanData {
             return Err("use clean_data for data command");
@@ -305,6 +315,22 @@ mod tests {
         node.put(b"k".to_vec(), b"v".to_vec()).unwrap();
         node.rollback(b"k".to_vec()).unwrap();
         assert_eq!(node.get(b"k").unwrap(), None);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
+
+    #[test]
+    fn scan_command_is_online_gated_and_counts_range() {
+        let path = std::env::temp_dir().join(format!("hg-node-scan-{}.img", std::process::id()));
+        let node = StoreNode::open(&path).unwrap();
+        assert!(node.scan(b"a", b"z", false).is_err());
+        node.start().unwrap();
+        node.put_batch([
+            (b"a".to_vec(), b"1".to_vec()),
+            (b"m".to_vec(), b"2".to_vec()),
+        ])
+        .unwrap();
+        assert_eq!(node.scan(b"a", b"z", false).unwrap(), 2);
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
     }
