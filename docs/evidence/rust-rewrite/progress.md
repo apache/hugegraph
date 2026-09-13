@@ -482,3 +482,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Strengthened live GraphStore differential verification to assert exact key/value Variant byte encoding for pre-seeded data; node tests passed (5). Evidence `store-node-live-graph-bytes-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Full workspace regression after live GraphStore byte assertions passed (64 tests: core 14, node 5, transport 40, docs 0). Evidence `workspace-live-differential-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
