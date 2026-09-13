@@ -171,3 +171,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `fa939e7a3` | PASS (7 tests; node rollback command) | `store-node-rollback-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `b8489bb8a` | PASS (8 tests; node scan command) | `store-node-scan-command-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (64 tests; rollback/scan workspace regression) | `workspace-scan-regression-20260914.log` |
+| `find hugegraph-store -path '*/src/main/java/*' -type f; find hugegraph-store/rust -maxdepth 2 -name Cargo.toml` | `working-tree` | AUDIT (477 Java production sources vs 3 Rust crates; incomplete) | `production-module-audit-20260914.log` |

@@ -542,3 +542,6 @@ next_action: continue production command coverage and implement the next uncover
 
 2026-09-14: Full workspace regression after node rollback and scan command boundaries passed (64 tests: core 16, node 8, transport 40). Evidence `workspace-scan-regression-20260914.log`.
 next_action: continue production command coverage and implement the next uncovered store contract.
+
+2026-09-14: Production surface audit counted 477 Java production sources across seven store modules versus three small Rust crates; completion remains unproven and substantial contracts remain. Evidence `production-module-audit-20260914.log`.
+next_action: continue production command coverage and implement the next uncovered store contract.

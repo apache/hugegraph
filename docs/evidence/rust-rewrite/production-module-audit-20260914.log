@@ -1,0 +1,12 @@
+command: find hugegraph-store -path '*/src/main/java/*' -type f; find hugegraph-store/rust -maxdepth 2 -name Cargo.toml
+java production source counts:
+hg-store-cli 10
+hg-store-client 90
+hg-store-common 23
+hg-store-core 130
+hg-store-grpc 115
+hg-store-node 97
+hg-store-rocksdb 12
+total production Java sources: 477
+Rust crates: store-core, store-transport, store-node (3)
+result: INCOMPLETE audit; substantial production surface remains to be independently rewritten.
