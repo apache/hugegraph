@@ -1,0 +1,4 @@
+Date: 2026-09-13
+Scenario: disconnect hg-store0 from hugegraph-3x3_hg-net; wait 10s; check store1/store2 and all PD; reconnect hg-store0; wait 15s; check all Store.
+Result: store1/store2 and pd0/pd1/pd2 healthy during store0 network partition; all Store healthy after reconnection.
+Note: reversible Docker network disconnect/connect; curl used --noproxy '*'.

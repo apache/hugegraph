@@ -19,3 +19,5 @@
 多节点故障复验（2026-09-13）：完成 store0 停止/恢复和 pd0 网络断开/重接；剩余节点在故障期间健康，恢复后全节点健康。证据分别归档于 `compose-store0-fault-recovery-20260913.log`、`compose-pd0-network-partition-20260913.log`；这仍不等价于线性一致性、数据无损或成员变更证明。
 
 服务层复验（2026-09-13）：PD/Store 故障恢复后，三 Server 的 `/versions` 与 `/graphs` 共 6 次请求全部 HTTP 200，图列表包含 `hugegraph`；证据归档于 `compose-server-smoke-20260913.log`。这仍是健康/可达性证据，不替代事务、数据校验和线性一致性 Oracle。
+
+Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接；store1/store2 与三 PD 在分区期间健康，恢复后三 Store 健康。证据归档于 `compose-store0-network-partition-20260913.log`；尚未证明写入线性一致性和数据无损。
