@@ -1234,3 +1234,33 @@ pub fn graph_action(bytes: &[u8]) -> Result<(String, generated::GraphMethod), St
         Ok((r.graph_name, m))
     }
 }
+
+#[derive(Default)]
+pub struct Catalog {
+    tables: std::collections::HashSet<String>,
+    graphs: std::collections::HashSet<String>,
+}
+impl Catalog {
+    pub fn table(&mut self, name: String, m: generated::TableMethod) -> Result<(), String> {
+        match m {
+            generated::TableMethod::Create => {
+                self.tables.insert(name);
+                Ok(())
+            }
+            generated::TableMethod::Delete | generated::TableMethod::Drop => {
+                self.tables.remove(&name);
+                Ok(())
+            }
+            generated::TableMethod::Exists => Ok(()),
+            _ => Ok(()),
+        }
+    }
+    pub fn graph(&mut self, name: String, m: generated::GraphMethod) -> Result<(), String> {
+        if matches!(m, generated::GraphMethod::Delete) {
+            self.graphs.remove(&name);
+        } else {
+            self.graphs.insert(name);
+        }
+        Ok(())
+    }
+}
