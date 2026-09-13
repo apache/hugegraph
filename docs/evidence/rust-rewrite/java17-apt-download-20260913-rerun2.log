@@ -1,0 +1,3 @@
+Sun Sep 13 13:10:14 UTC 2026
+COMMAND=timeout 90s apt-get download openjdk-17-jdk-headless
+Get:1 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 openjdk-17-jdk-headless amd64 17.0.20+8-1~24.04 [71.6 MB]
