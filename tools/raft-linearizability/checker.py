@@ -39,8 +39,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("history", help="JSON file containing an array of operations")
     args = ap.parse_args()
-    with open(args.history, encoding="utf-8") as f:
-        ok, detail = check(json.load(f))
+    try:
+        with open(args.history, encoding="utf-8") as f:
+            payload = json.load(f)
+        if not isinstance(payload, list):
+            raise ValueError("history must be a JSON array")
+        ok, detail = check(payload)
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+        print(json.dumps({"linearizable": False, "detail": f"invalid history: {exc}"}))
+        return 2
     print(json.dumps({"linearizable": ok, "detail": detail}))
     return 0 if ok else 1
 
