@@ -776,6 +776,11 @@ mod graph_frame_tests {
     #[tokio::test]
     async fn live_tonic_graph_server_accepts_client() {
         let path = std::env::temp_dir().join(format!("hg-live-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.commit_put(b"m".to_vec(), b"v".to_vec()).unwrap();
+        }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let service = super::GraphService::open(&path).unwrap();
@@ -798,7 +803,7 @@ mod graph_frame_tests {
         let stream = tokio_stream::iter(vec![super::generated::ScanPartitionRequest::default()]);
         let response = client.scan_partition(stream).await.unwrap();
         let mut frames = response.into_inner();
-        assert!(frames.message().await.unwrap().is_some());
+        assert_eq!(frames.message().await.unwrap().unwrap().vertex.len(), 1);
         task.abort();
         let _ = std::fs::remove_file(path);
     }
