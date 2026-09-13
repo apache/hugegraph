@@ -568,6 +568,31 @@ pub fn empty_scan_frame() -> generated::ScanResponse {
         edge: vec![],
     }
 }
+pub fn entries_to_scan_frame(entries: &[(Vec<u8>, Vec<u8>)]) -> generated::ScanResponse {
+    let vertex = entries
+        .iter()
+        .map(|(k, v)| generated::Vertex {
+            label: 0,
+            id: Some(generated::Variant {
+                value_bytes: Some(k.clone()),
+                ..Default::default()
+            }),
+            properties: vec![generated::Property {
+                label: 0,
+                value: Some(generated::Variant {
+                    value_bytes: Some(v.clone()),
+                    ..Default::default()
+                }),
+            }],
+        })
+        .collect();
+    generated::ScanResponse {
+        header: None,
+        seq_no: 0,
+        vertex,
+        edge: vec![],
+    }
+}
 #[cfg(test)]
 mod graph_frame_tests {
     use super::empty_scan_frame;
