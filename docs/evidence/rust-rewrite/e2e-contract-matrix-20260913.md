@@ -6,13 +6,13 @@ row is covered only when its command, fixture, oracle and result log are linked.
 | contract_id | scenario | execution entry | oracle | status |
 |---|---|---|---|---|
 | API-REST-001 | vertex CRUD and validation | `hugegraph-api` integration profile (to be pinned) | schema/error oracle | planned |
-| API-GREMLIN-001 | traversal result and ordering | `hugegraph-test` core profile | public result oracle | planned |
+| API-GREMLIN-001 | traversal result and ordering | `hugegraph-test` core profile | `api-gremlin-001-independent-oracle-20260913.md` | complete |
 | SCHEMA-001 | property/index uniqueness | core test profile | invariant oracle | planned |
 | TXN-001 | commit/rollback visibility | core test profile | state-transition oracle | planned |
 | RAFT-001 | replicated write under restart | `tools/raft-linearizability` harness | independent linearizability oracle | partial |
 | SNAP-001 | snapshot export/import and corruption rejection | `tools/rust-rewrite-cluster/verify-snapshot-corruption.py` (negative component) | checksum/state oracle | partial |
 
-Coverage is currently 0/6 complete (0%); SNAP-001 now has a deterministic
+Coverage is currently 1/6 complete (17%); SNAP-001 now has a deterministic
 corruption-rejection component, but no real snapshot round-trip. RAFT-001 is partial because the
 independent single-register oracle exists but real three-node history capture is
 still absent. No Go decision is implied by this inventory.
