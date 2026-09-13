@@ -2,21 +2,22 @@ name: Rust Partition POC
 
 on:
   pull_request:
-    paths:
-      - "tools/rust-partition-poc/**"
-      - ".github/workflows/rust-partition-poc.yml"
   push:
-    branches: [master, "refactor/**"]
-    paths:
-      - "tools/rust-partition-poc/**"
-      - ".github/workflows/rust-partition-poc.yml"
+    branches: [ master ]
 
 jobs:
-  verify:
+  contract-gates:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/rust-partition-poc
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-      - run: tools/rust-partition-poc/verify.sh
+          components: clippy, rustfmt
+      - run: cargo fmt -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo mutants --version || cargo install cargo-mutants --locked
+      - run: cargo mutants --exclude src/main.rs --timeout 30 --jobs 2
