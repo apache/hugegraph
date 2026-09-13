@@ -47,7 +47,7 @@ post_checked "$base_server/graphs/hugegraph/schema/propertykeys" "{\"name\":\"$p
 sleep 10
 post_checked "$base_server/graphs/hugegraph/schema/vertexlabels" "{\"name\":\"$vertex_label\",\"id_strategy\":\"CUSTOMIZE_STRING\",\"properties\":[\"$property_key\"],\"primary_keys\":[],\"nullable_keys\":[]}" >/dev/null
 sleep 10
-post_checked "$base_server/graphs/hugegraph/graph/vertices" "{\"id\":\"$fixture_id\",\"label\":\"$vertex_label\",\"properties\":{\"$property_key\":\"committed\"}}" >/dev/null
+post_checked "$base_server/graphs/hugegraph/graph/vertices" "{\"id\":\"$fixture_id\",\"label\":\"$vertex_label\",\"properties\":{\"$property_key\":\"committed\"}}"
 
 "${compose[@]}" stop pd0 >/dev/null
 sleep 8
