@@ -604,6 +604,31 @@ pub fn entries_to_scan_frame(entries: &[(Vec<u8>, Vec<u8>)]) -> generated::ScanR
         edge: vec![],
     }
 }
+pub fn entries_to_edge_frame(entries: &[(Vec<u8>, Vec<u8>)]) -> generated::ScanResponse {
+    let edge = entries
+        .iter()
+        .map(|(k, v)| generated::Edge {
+            label: 0,
+            source_label: 0,
+            target_label: 0,
+            source_id: Some(generated::Variant {
+                value_bytes: Some(k.clone()),
+                ..Default::default()
+            }),
+            target_id: Some(generated::Variant {
+                value_bytes: Some(v.clone()),
+                ..Default::default()
+            }),
+            properties: vec![],
+        })
+        .collect();
+    generated::ScanResponse {
+        header: None,
+        seq_no: 0,
+        vertex: vec![],
+        edge,
+    }
+}
 #[cfg(test)]
 mod graph_frame_tests {
     use super::empty_scan_frame;
@@ -630,6 +655,18 @@ mod graph_frame_tests {
                 .value_bytes
                 .as_deref(),
             Some(&b"value"[..])
+        );
+    }
+    #[test]
+    fn edge_frame_maps_endpoints() {
+        let f = super::entries_to_edge_frame(&[(b"src".to_vec(), b"dst".to_vec())]);
+        assert_eq!(
+            f.edge[0].source_id.as_ref().unwrap().value_bytes.as_deref(),
+            Some(&b"src"[..])
+        );
+        assert_eq!(
+            f.edge[0].target_id.as_ref().unwrap().value_bytes.as_deref(),
+            Some(&b"dst"[..])
         );
     }
 }
