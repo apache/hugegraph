@@ -71,7 +71,20 @@ for attempt in {1..12}; do
 done
 sleep 30
 "${compose[@]}" restart server0 server1 server2 >/dev/null
-sleep 30
+# Wait for every restarted server to become responsive before asserting the
+# recovered value.  A fixed delay allowed transient connection resets to make
+# an otherwise healthy raft recovery look like a failure.
+for attempt in {1..24}; do
+  ready=1
+  for port in 8080 8081 8082; do
+    if ! curl_local -fsS --max-time 10 "http://127.0.0.1:$port/versions" >/dev/null; then
+      ready=0
+    fi
+  done
+  [[ "$ready" -eq 1 ]] && break
+  sleep 5
+done
+[[ "$ready" -eq 1 ]]
 recovered=0
 for attempt in {1..18}; do
   for port in 8080 8081 8082; do
