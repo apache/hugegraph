@@ -115,6 +115,16 @@ impl StoreNode {
         StateService
     }
 
+    pub fn service_names() -> [&'static str; 5] {
+        [
+            "Healthy",
+            "QueryService",
+            "HgStoreState",
+            "GraphStore",
+            "HgStoreSession",
+        ]
+    }
+
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), tonic::transport::Error> {
         let healthy = self.health_service();
         let query = self.query_service();
@@ -183,5 +193,12 @@ mod tests {
         node.execute(NodeCommand::Stop).unwrap();
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
+
+    #[test]
+    fn unified_server_lists_all_production_services() {
+        assert_eq!(StoreNode::service_names().len(), 5);
+        assert!(StoreNode::service_names().contains(&"GraphStore"));
+        assert!(StoreNode::service_names().contains(&"HgStoreSession"));
     }
 }
