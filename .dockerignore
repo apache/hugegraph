@@ -42,6 +42,8 @@ apache-hugegraph-*/
 **/upload-files/
 **/build/
 **/node_modules/
+**/__pycache__/
+**/*.pyc
 
 # Env files
 .env.local
