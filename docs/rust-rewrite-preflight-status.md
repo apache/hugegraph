@@ -9,3 +9,5 @@
 结论：可继续非生产 POC，整体保持 NO-GO。任何一项“未具备证据”完成后，必须保存提交版本、配置、数据集、seed、命令、日志和报告，再更新门禁。
 
 环境复核（2026-09-13）：仓库已有 `docker/docker-compose-3pd-3store-3server.yml`，但当前 WSL 发行版未启用 Docker CLI/WSL integration（`docker: command not found`）。因此三节点故障、分区和跨进程恢复无法在本环境产生有效执行证据；待 Docker Desktop WSL integration 或等价 CI runner 可用后，按矩阵执行。
+
+环境复核更新（2026-09-13）：已在 WSL2 Ubuntu 24.04 安装原生 Docker Engine 29.1.3 与 Compose 2.40.3，daemon active；`docker compose -f docker/docker-compose-3pd-3store-3server.yml config --services` 成功解析 `pd0..pd2`、`store0..store2`、`server0..server2`、`hubble`。此前 Docker 不可用的阻断已解除，下一步进入容器启动与多节点健康检查。
