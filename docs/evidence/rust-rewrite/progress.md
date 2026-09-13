@@ -308,3 +308,6 @@ next_action: implement scan limit semantics and malformed request errors over li
 
 2026-09-14: Added scan limit semantics and wired request limit into GraphService streaming; workspace passed (53 tests). Evidence `scan-limit-20260914.log`.
 next_action: add malformed ScanPartition request error tests and enforce request validation over live stream.
+
+2026-09-14: GraphService now rejects ScanPartition messages missing a scan oneof with invalid_argument; workspace passed (53 tests). Evidence `scan-request-validation-20260914.log`.
+next_action: add live malformed request assertion and enforce scan limit/error boundaries.
