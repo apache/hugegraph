@@ -739,6 +739,19 @@ mod graph_frame_tests {
         assert_eq!(start, b"m");
         assert_eq!(end, 122i32.to_be_bytes());
     }
+    #[test]
+    fn graph_service_scan_range_reads_durable_entries() {
+        let p = std::env::temp_dir().join(format!("hg-graph-e2e-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        {
+            let mut s = hugegraph_store_core::DurableStore::open(&p).unwrap();
+            s.commit_put(b"m".to_vec(), b"v".to_vec()).unwrap();
+        }
+        let service = super::GraphService::open(&p).unwrap();
+        let frame = service.scan_range(b"a", b"z", false).unwrap();
+        assert_eq!(frame.vertex.len(), 1);
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 #[tonic::async_trait]
