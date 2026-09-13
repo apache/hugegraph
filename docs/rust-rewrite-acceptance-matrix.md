@@ -82,6 +82,16 @@ Java 版本只作为参考实现，不能单独作为 Oracle。每条关键契�
 
 ## 5. 当前阻断项
 
+## 5.1 已执行证据（2026-09-13）
+
+| 边界 | 执行证据 | 结果 | 仍未证明 |
+| --- | --- | --- | --- |
+| PD Partition | `pd-core-test,pd-common-test`；`*Partition*Test`；日志 `/tmp/pd-partition-all.log` | Partition 32/32；PD Core/Common 187 项执行、2 项跳过、0 失败 | 三节点故障、差分回放 |
+| Store 基线 | `hg-store-test`；日志 `/tmp/store-regression-final.log` | 已启用 suite 通过，`BUILD SUCCESS` | 活动快照损坏、跨进程恢复、Raft 故障 |
+| Store Snapshot | `SnapshotHandlerTest`；日志 `/tmp/snapshot-active-final5.log` | 5/5 通过 | 真实文件 round-trip、损坏快照、重启恢复 |
+
+上述结果只更新对应边界的证据状态，不改变全局 NO-GO 结论。
+
 在完成以下工作前，不应迁移 Store 写路径或核心图执行引擎：
 
 1. 补齐快照/恢复、升级/回滚和分布式故障测试；
