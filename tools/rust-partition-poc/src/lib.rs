@@ -35,9 +35,6 @@ pub fn validate(parts: &[Partition], max: u64) -> Result<(), &'static str> {
             if prev.end != p.start {
                 return Err("gap-or-overlap");
             }
-            if p.version < prev.version {
-                return Err("version-regression");
-            }
         }
     }
     if parts.last().unwrap().end != max {
@@ -91,10 +88,10 @@ mod tests {
         assert_eq!(validate(&x, 20), Err("gap-or-overlap"));
     }
     #[test]
-    fn catches_version_regression() {
+    fn range_coverage_does_not_order_unrelated_versions() {
         let mut x = base();
         x[1].version = 0;
-        assert_eq!(validate(&x, 20), Err("version-regression"));
+        assert_eq!(validate(&x, 20), Ok(()));
     }
     #[test]
     fn rejects_stale_heartbeat() {
@@ -147,7 +144,7 @@ pub fn replay(
 
 pub fn cache_read(cache: Option<Partition>, source: &Partition) -> Result<Partition, &'static str> {
     match cache {
-        Some(value) if value.version >= source.version => Ok(value),
+        Some(value) if value == *source => Ok(value),
         _ => Err("cache-stale"),
     }
 }
@@ -237,5 +234,38 @@ mod cache_tests {
             version: 2,
         };
         assert_eq!(cache_read(Some(source.clone()), &source), Ok(source));
+    }
+}
+
+#[cfg(test)]
+mod cache_counterexamples {
+    use super::{cache_read, Partition};
+
+    #[test]
+    fn rejects_equal_version_with_different_range() {
+        let source = Partition {
+            start: 0,
+            end: 10,
+            version: 2,
+        };
+        let wrong = Partition {
+            end: 11,
+            ..source.clone()
+        };
+        assert!(cache_read(Some(wrong), &source).is_err());
+    }
+
+    #[test]
+    fn rejects_future_version_against_fixed_reference() {
+        let source = Partition {
+            start: 0,
+            end: 10,
+            version: 2,
+        };
+        let wrong = Partition {
+            version: 3,
+            ..source.clone()
+        };
+        assert!(cache_read(Some(wrong), &source).is_err());
     }
 }

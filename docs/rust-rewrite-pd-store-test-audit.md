@@ -43,3 +43,5 @@ Rust 迁移单元只有在：相关测试方法已映射契约编号；Oracle �
 本文件是基于源码和构建配置的资产审计，不声称现有测试完备。方法级契约映射、实际 Surefire 执行结果和补测报告需在 POC 阶段提交后，才能将条目标记为 `covered`。
 
 2026-09-13 复核：完整 `hg-store-test` 构建曾成功，现有报告显示 61 项无失败；但 Snapshot 测试类 `HgSnapshotHandlerTest` 未纳入 `CoreSuiteTest`（该 suite 当前整体注释），且用假的 SnapshotReader/Writer，不能证明真实快照持久化恢复。Store Snapshot 仍保持迁移硬门禁，需新增可执行 suite、真实文件 round-trip、损坏快照和重启恢复测试。
+
+进一步复核：`HgSnapshotHandlerTest` 针对的是已标记 `@Deprecated` 的 `HgSnapshotHandler`，而运行时状态机使用 `SnapshotHandler`。因此现有 4 个 Snapshot 测试不能作为生产 Snapshot 契约证据；必须迁移到活动实现并执行真实文件 round-trip。

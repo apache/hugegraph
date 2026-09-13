@@ -1,0 +1,406 @@
+{
+  "status": "historical reports observed; original build exit and source revision unverified",
+  "reports": [
+    {
+      "source": "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.node.grpc.ScanUtilTest.xml",
+      "sha256": "13a35a0ce3355e20d9f56676dd8651cc5fa24df0c38aab2dd1fa68bcdb1be34d",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.node.grpc.ScanUtilTest",
+          "name": "testOrderedStreamCloseAcknowledgesCapabilityBeforeFirstPage",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.node.grpc.ScanUtilTest",
+          "name": "testUnorderedAllPartitionRangeUsesLegacyScan",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.node.grpc.ScanUtilTest",
+          "name": "testOneShotOrderedRangeUsesOrderedScanAndAcknowledgesIt",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.node.grpc.ScanUtilTest",
+          "name": "testOrderedAllPartitionRangeUsesOrderedScan",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.node.grpc.ScanUtilTest",
+          "name": "testOrderedScanRejectsOpaquePositionBeforeOpeningIterator",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.node.grpc.ScanUtilTest",
+          "name": "testBatchScanRejectsOrderByKey",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.node.metrics.JraftMetricsTest.xml",
+      "sha256": "a51405451c0945bd0a2c8cdc362f64b6452872e1bbad8b1f7c86765f19304fe7",
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.node.metrics.JraftMetricsTest",
+          "name": "testRefineLabel",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-test/target/surefire-reports/TEST-org.apache.hugegraph.store.client.ClientSuiteTest.xml",
+      "sha256": "afae5cfd8a6dd92c572004f5fc5b0c08ac38b21f3e20cb33d58a59dbd26e69d2",
+      "counts": {
+        "tests": 34,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testBlockingStubPoolCoversEveryChannel",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testStaleNoticePreservesSameAddressReplacement",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testCancelledRpcDoesNotEvictCurrentNode",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testAsyncStubPoolCoversEveryChannel",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testClosedTargetRebindsStubPools",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testUnavailableRpcEvictsExpectedNodeAndTarget",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.AbstractGrpcClientTest",
+          "name": "testCloseDuringStubBuildDoesNotPublishRetiredChannel",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxExecutorTest",
+          "name": "testParallelReplacementUsesOneCurrentSession",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxExecutorTest",
+          "name": "testRetryReplacesSessionFromEvictedNode",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.KvPageScannerTest",
+          "name": "testRejectsOrderedScanWithoutCapabilityAck",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.KvPageScannerTest",
+          "name": "testAcceptsOrderedScanWithCapabilityAck",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.grpc.KvPageScannerTest",
+          "name": "testKeepsExplicitPageSizeAndRequestsNextPageOnDemand",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testOrderedScanHandlesEmptyStoreAndEarlyClose",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testScanIteratorOrderedUsesOneStreamPerStoreLazily",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testNodeTkvDoesNotMutateSharedOwnerKeys",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testOrderedScanRejectsMixedStoreVersionsAndClosesAll",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testBatchQueryRejectsOrderByKey",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testOrderedScanMergesPagedStoresWithLimitAndCursor",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testScanIteratorOrderedClosesOpenedIteratorsOnOpenFailure",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.NodeTxSessionProxyTest",
+          "name": "testOrderedScanClosesOtherStoreOnPagedFailure",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergeInterleavedSourcesByUnsignedKey",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergePrimesSourcesConcurrently",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testConcurrentInitializeFailsWithoutWaitingForSlowSource",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testSlowQueriesUseBoundedWorkersAndDoNotBlockIndependentQuery",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergeIsLazyAndStopsAtRawLimit",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergeClosesAllSourcesWhenConcurrentInitializeFails",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergeClosesAllSourcesWhenAdvanceFails",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testSingleSourceInitializationDoesNotUseExecutor",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergeComparesKeysAsUnsignedBytes",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testMergeUsesStableSourceOrderForEqualKeys",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testInitializeDrainsInFlightTaskBeforeRetryingRejectedSource",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testSingleSourceInitializationPreservesInterrupt",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testInitializeDrainsFailureBeforeSubmittingNinthSource",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.client.OrderedKvIteratorTest",
+          "name": "testInitializeDrainsCompletedFailureBeforeRefillingWindow",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-test/target/surefire-reports/TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml",
+      "sha256": "21d05bd9a07e71f7357b3e53ac640c2f4d61cb830ceb04b2484c9762b03214fd",
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.common.ByteBufferAllocatorTest",
+          "name": "getAndReleaseTest",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.common.KVByteBufferTest",
+          "name": "testOps",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-test/target/surefire-reports/TEST-org.apache.hugegraph.store.core.BatchGraphIsolationTest.xml",
+      "sha256": "a2441bd4713b554e6f95e73212b9ec7dcfa7c2b682f23e101b9b794cc1deb60c",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.core.BatchGraphIsolationTest",
+          "name": "testBatchPutKeepsGraphsIsolated",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.core.BatchGraphIsolationTest",
+          "name": "testBatchMergeKeepsGraphsIsolated",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.core.BatchGraphIsolationTest",
+          "name": "testDataManagerRollsBackFailedBatch",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.core.BatchGraphIsolationTest",
+          "name": "testDefaultDataMoverRollsBackFailedBatch",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.core.BatchGraphIsolationTest",
+          "name": "testTruncateWaitsForInFlightBatch",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.core.BatchGraphIsolationTest",
+          "name": "testFirstBatchOnEmptyPartitionCompletes",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-test/target/surefire-reports/TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml",
+      "sha256": "ab08935c300249885c33e35b9584945e81666ff38228c283948d4ffa9a8add8c",
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.raftcore.BytesCarrierTest",
+          "name": "testWrite",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.raftcore.ZeroByteStringHelperTest",
+          "name": "testWrap",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.raftcore.ZeroByteStringHelperTest",
+          "name": "testConcatenate",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-test/target/surefire-reports/TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml",
+      "sha256": "12e3e65e3f242af3947bd5945ce4f3b047fb1b55b16c9639f9ae674f23d04071",
+      "counts": {
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.rocksdb.RocksDBFactoryTest",
+          "name": "testTotalKeys",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.rocksdb.RocksDBFactoryTest",
+          "name": "releaseAllGraphDB",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.rocksdb.RocksDBFactoryTest",
+          "name": "testCreateSession",
+          "result": "passed"
+        }
+      ]
+    },
+    {
+      "source": "hugegraph-store/hg-store-test/target/surefire-reports/TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml",
+      "sha256": "7a2598a4fdf04d4359c926a9a41875f5636bda4f613e5c066d826c821956757c",
+      "counts": {
+        "tests": 6,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "cases": [
+        {
+          "classname": "org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest",
+          "name": "testInitializationFailureClosesOpenedIterators",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest",
+          "name": "testMergeByUnsignedKeyAndTrackPartitionPosition",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest",
+          "name": "testCountConsumesAllRemainingEntries",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest",
+          "name": "testCloseBeforeInitializationDoesNotOpenSources",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest",
+          "name": "testMergeComparesKeysAsUnsignedBytes",
+          "result": "passed"
+        },
+        {
+          "classname": "org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest",
+          "name": "testOrderedScanIsBackwardCompatibleDefaultMethod",
+          "result": "passed"
+        }
+      ]
+    }
+  ]
+}
