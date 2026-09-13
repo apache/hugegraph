@@ -354,6 +354,24 @@ impl DurableStore {
 mod request_tests {
     use super::*;
     #[test]
+    fn batch_put_command_applies_all_entries() {
+        let path = std::env::temp_dir().join(format!("hg-batch-cmd-{}.img", std::process::id()));
+        let mut s = DurableStore::open(&path).unwrap();
+        assert!(matches!(
+            s.handle(StoreRequest::BatchPut {
+                entries: vec![
+                    (b"a".to_vec(), b"1".to_vec()),
+                    (b"b".to_vec(), b"2".to_vec())
+                ]
+            })
+            .unwrap(),
+            StoreResponse::Ack
+        ));
+        assert_eq!(s.get(b"a"), Some(b"1".to_vec()));
+        assert_eq!(s.get(b"b"), Some(b"2".to_vec()));
+        let _ = std::fs::remove_file(path);
+    }
+    #[test]
     fn request_path_persists_and_reads() {
         let path = std::env::temp_dir().join(format!("hg-request-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&path);
