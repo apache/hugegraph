@@ -137,3 +137,6 @@ next_action: implement codecs for remaining session/query/state RPC messages and
 
 2026-09-14: Added generic RpcMessage codec exercised across all 15 registered hg-store-grpc methods; workspace tests pass 13/13. Evidence `rpc-message-codec-20260914.log`.
 next_action: implement method-specific payload schemas and dispatch for query, batch, state, and graph RPCs.
+
+2026-09-14: Added validated QueryRequest and BatchRequest codecs with empty/truncated input rejection; workspace tests pass 14/14. Evidence `query-batch-codec-20260914.log`.
+next_action: implement state and graph RPC schemas and dispatch paths.

@@ -250,3 +250,75 @@ mod message_tests {
         }
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryRequest {
+    pub query: String,
+}
+impl QueryRequest {
+    pub fn encode(&self) -> Vec<u8> {
+        self.query.as_bytes().to_vec()
+    }
+    pub fn decode(b: &[u8]) -> Result<Self, String> {
+        let q = String::from_utf8(b.to_vec()).map_err(|_| "invalid utf8")?;
+        if q.trim().is_empty() {
+            Err("empty query".into())
+        } else {
+            Ok(Self { query: q })
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchRequest {
+    pub operations: Vec<Vec<u8>>,
+}
+impl BatchRequest {
+    pub fn encode(&self) -> Vec<u8> {
+        self.operations
+            .iter()
+            .flat_map(|o| {
+                let mut x = (o.len() as u32).to_le_bytes().to_vec();
+                x.extend(o);
+                x
+            })
+            .collect()
+    }
+    pub fn decode(b: &[u8]) -> Result<Self, String> {
+        let mut p = 0;
+        let mut out = Vec::new();
+        while p < b.len() {
+            if p + 4 > b.len() {
+                return Err("truncated batch".into());
+            }
+            let n = u32::from_le_bytes(b[p..p + 4].try_into().unwrap()) as usize;
+            p += 4;
+            if n == 0 || p + n > b.len() {
+                return Err("invalid batch item".into());
+            }
+            out.push(b[p..p + n].to_vec());
+            p += n
+        }
+        if out.is_empty() {
+            Err("empty batch".into())
+        } else {
+            Ok(Self { operations: out })
+        }
+    }
+}
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    #[test]
+    fn query_batch_codecs() {
+        let q = QueryRequest {
+            query: "g.V()".into(),
+        };
+        assert_eq!(QueryRequest::decode(&q.encode()).unwrap(), q);
+        assert!(QueryRequest::decode(b" ").is_err());
+        let b = BatchRequest {
+            operations: vec![b"put".to_vec(), b"del".to_vec()],
+        };
+        assert_eq!(BatchRequest::decode(&b.encode()).unwrap(), b);
+        assert!(BatchRequest::decode(&[]).is_err());
+    }
+}
