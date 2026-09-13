@@ -218,3 +218,6 @@ next_action: implement GraphStore and remaining generated service traits, then a
 
 2026-09-14: Implemented GraphStore scan streaming service boundary; transport check passed. Evidence `graph-service-boundary-20260914.log`.
 next_action: add cross-layer transport/storage oracle harness and replace placeholder stream responses with contract-backed behavior.
+
+2026-09-14: Added cross-layer oracle proving transport StoreService writes survive DurableStore reopen; workspace passed (39 tests). Evidence `cross-layer-oracle-20260914.log`.
+next_action: replace placeholder state/graph stream responses with contract-backed records and begin full E2E harness.
