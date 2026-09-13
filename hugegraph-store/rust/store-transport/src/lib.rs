@@ -570,9 +570,15 @@ impl generated::graph_store_server::GraphStore for GraphService {
         &self,
         _: tonic::Request<tonic::Streaming<generated::ScanPartitionRequest>>,
     ) -> Result<tonic::Response<Self::ScanPartitionStream>, tonic::Status> {
-        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(
-            std::iter::empty(),
-        ))))
+        let frame = generated::ScanResponse {
+            header: None,
+            seq_no: 0,
+            vertex: vec![],
+            edge: vec![],
+        };
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(
+            frame,
+        )]))))
     }
 }
 
