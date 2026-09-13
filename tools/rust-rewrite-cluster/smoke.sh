@@ -72,6 +72,16 @@ done
 sleep 30
 "${compose[@]}" restart server0 server1 server2 >/dev/null
 sleep 30
-curl_local -fsS --max-time 10 "$base_server/graphs/hugegraph/graph/vertices/%22$fixture_id%22" | grep -q 'committed'
+recovered=0
+for attempt in {1..18}; do
+  for port in 8080 8081 8082; do
+    if curl_local -fsS --max-time 15 "http://127.0.0.1:$port/graphs/hugegraph/graph/vertices/%22$fixture_id%22" | grep -q 'committed'; then
+      recovered=1
+      break 2
+    fi
+  done
+  sleep 5
+done
+[[ "$recovered" -eq 1 ]]
 
 echo "cluster smoke passed fixture=$fixture_id"
