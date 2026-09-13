@@ -359,3 +359,6 @@ next_action: complete request-field resource audit and begin broader contract mu
 
 2026-09-14: Added contract mutation tests for empty and invalid protobuf ScanPartition payloads; workspace passed (63 tests). Evidence `scan-payload-mutation-20260914.log`.
 next_action: expand mutation matrix across RPC codecs and error mappings.
+
+2026-09-14: Expanded dispatch mutation coverage to malformed Get2 and Batch payloads; workspace passed (65 tests). Evidence `rpc-codec-mutation-20260914.log`.
+next_action: add malformed state/query codec mutations and audit error mapping consistency.
