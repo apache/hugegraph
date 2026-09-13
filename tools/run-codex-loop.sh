@@ -24,13 +24,10 @@ lock_file="${CODEX_LOOP_LOCK:-/tmp/hugegraph-rust-rewrite-codex.lock}"
 log_file="${CODEX_LOOP_LOG:-${repo_dir}/docs/evidence/rust-rewrite/codex-loop.log}"
 max_iterations="${CODEX_LOOP_MAX_ITERATIONS:-20}"
 pause_file="${CODEX_LOOP_PAUSE_FILE:-/tmp/hugegraph-rust-rewrite-codex.pause}"
-codex_home="${CODEX_HOME:-/tmp/hugegraph-codex-home}"
 iteration=0
 
 cd "$repo_dir" || exit 1
 command -v codex >/dev/null || { echo "codex CLI not found" >&2; exit 127; }
-mkdir -p "$codex_home"
-export CODEX_HOME="$codex_home"
 exec 9>"$lock_file"
 flock -n 9 || { echo "another Codex loop is already running: $lock_file" >&2; exit 2; }
 while [[ ! -e "$sentinel" ]]; do
@@ -53,6 +50,10 @@ while [[ ! -e "$sentinel" ]]; do
         "$prompt" 2>&1 | tee -a "$log_file"
     status=${PIPESTATUS[0]}
     set -e
+    if tail -30 "$log_file" 2>/dev/null | grep -q '401 Unauthorized'; then
+        echo "codex loop stopped: background Codex authentication failed (401 Unauthorized)" | tee -a "$log_file" >&2
+        exit 4
+    fi
     [[ -e "$sentinel" ]] && break
     echo "codex session exited with status $status; resuming in 2s" >&2
     sleep 2
