@@ -3611,6 +3611,66 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testPageOutEdgesWithNegativeLabelBeforeLimit() {
+        this.assertOutEdgeNegativeLabelPages(true);
+    }
+
+    @Test
+    public void testPageOutEdgesWithNegativeLabelAfterLimit() {
+        this.assertOutEdgeNegativeLabelPages(false);
+    }
+
+    private void assertOutEdgeNegativeLabelPages(boolean filterBeforeLimit) {
+        Assume.assumeTrue("Not support paging", storeFeatures().supportsQueryByPage());
+        HugeGraph graph = graph();
+        graph.schema().vertexLabel("pageVertex").useCustomizeNumberId().create();
+        graph.schema().edgeLabel("pageExcluded").link("pageVertex", "pageVertex").create();
+        graph.schema().edgeLabel("pageIncluded").link("pageVertex", "pageVertex").create();
+        Vertex source = graph.addVertex(T.label, "pageVertex", T.id, 1);
+        Set<Object> expected = new HashSet<>();
+        for (int i = 0; i < 9; i++) {
+            Vertex target = graph.addVertex(T.label, "pageVertex", T.id, i + 2);
+            Edge edge = source.addEdge(i < 6 ? "pageExcluded" : "pageIncluded", target);
+            if (i >= 6) {
+                expected.add(edge.id());
+            }
+        }
+        this.commitTx();
+
+        Set<Object> actual = new HashSet<>();
+        Set<String> cursors = new HashSet<>();
+        String page = "";
+        int pages = 0;
+        boolean emptyPageWithCursor = false;
+        do {
+            GraphTraversal<Vertex, Edge> traversal = graph.traversal().V(source.id())
+                                                         .outE().has("~page", page);
+            if (filterBeforeLimit) {
+                traversal.hasLabel(P.neq("pageExcluded")).limit(1);
+            } else {
+                traversal.limit(1).hasLabel(P.neq("pageExcluded"));
+            }
+            traversal.asAdmin().applyStrategies();
+            Assert.assertNotNull(TraversalUtil.firstPageStep(traversal));
+            List<Edge> edges = traversal.toList();
+            Assert.assertTrue(edges.size() <= 1);
+            for (Edge edge : edges) {
+                Assert.assertEquals("pageIncluded", edge.label());
+                Assert.assertTrue("Duplicate edge across pages", actual.add(edge.id()));
+            }
+            page = TraversalUtil.page(traversal);
+            if (page != null && !page.isEmpty()) {
+                Assert.assertTrue("Repeated continuation cursor", cursors.add(page));
+                emptyPageWithCursor |= edges.isEmpty();
+            }
+            Assert.assertTrue("Paging did not terminate", ++pages <= 10);
+        } while (page != null && !page.isEmpty());
+        Assert.assertEquals(expected, actual);
+        // An empty filtered page must not terminate iteration prematurely.
+        Assert.assertTrue(emptyPageWithCursor);
+    }
+
+    @Test
     public void testLocalEdgeIdAndLabelRepresentations() {
         HugeGraph graph = graph();
         graph.schema().vertexLabel("localEV").useCustomizeNumberId().create();

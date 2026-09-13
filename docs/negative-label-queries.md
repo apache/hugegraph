@@ -46,8 +46,19 @@ support cannot use this mechanism.
 
 ## SEARCH predicates
 
-Local `Text.contains()` filters use the graph's SEARCH analyzer and exact term
-matcher, including explicit `(word)` and `(word1|word2)` expressions. They retain
-the original predicate tree for traversal inspection and cloning. The runtime
-matcher is rebuilt against the element's graph after serialization or rebinding;
-graph and analyzer objects are not serialized with the filter.
+In this fallback, `Text.contains()` predicates in the filter chain directly
+following the source step use the graph's SEARCH analyzer and exact term matcher,
+including explicit `(word)` and `(word1|word2)` expressions. This chain can
+include `barrier()`, but stops at steps such as `range()`, `limit()` or `order()`.
+A `Text.contains()` placed after those steps keeps plain substring semantics.
+For example, this query looks for the literal substring `(alpha)`, not the
+SEARCH term `alpha`:
+
+```groovy
+g.V().hasLabel(P.neq("author")).limit(10).has("body", Text.contains("(alpha)"))
+```
+
+The adapted filters retain the original predicate tree for traversal inspection
+and cloning. The runtime matcher is rebuilt against the element's graph after
+serialization or rebinding; graph and analyzer objects are not serialized with
+the filter.
