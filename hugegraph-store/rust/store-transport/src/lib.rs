@@ -802,3 +802,25 @@ mod batch_tests {
         );
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BatchAction {
+    Write { key: Vec<u8>, value: Vec<u8> },
+    Commit,
+    Rollback,
+}
+pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
+    let r: generated::BatchReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    match r.requests {
+        Some(generated::batch_req::Requests::WriteReq(w)) => {
+            let e = w.entry.into_iter().next().ok_or("empty write")?;
+            Ok(BatchAction::Write {
+                key: e.start_key.map(|k| k.key).unwrap_or_default(),
+                value: e.value,
+            })
+        }
+        Some(generated::batch_req::Requests::CommitReq(_)) => Ok(BatchAction::Commit),
+        Some(generated::batch_req::Requests::RollbackReq(_)) => Ok(BatchAction::Rollback),
+        None => Err("missing operation".into()),
+    }
+}
