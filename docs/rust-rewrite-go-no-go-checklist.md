@@ -65,4 +65,4 @@
 | 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`evidence/rust-rewrite/compose-*-recovery-20260913.log` | 已完成部分故障/恢复证据，仍缺快照损坏和线性一致性 | 测试负责人；补齐负向与并发报告 |
 | 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两名 reviewer；签核记录 |
 
-因此本次文档阶段的交付已经闭环；在外部签核、POC 和验证报告进入仓库前，清单必须保持 **NO-GO**，不得用“计划存在”替代“证据存在”。
+因此文档与部分验证阶段已闭环；在独立 Oracle、负向/并发验证和外部签核进入仓库前，清单必须保持 **NO-GO**，不得用“计划存在”替代“证据存在”。
