@@ -1150,3 +1150,35 @@ pub fn feedback_values_with_missing(
         )),
     })
 }
+#[cfg(test)]
+mod mixed_tests {
+    use super::*;
+    #[test]
+    fn mixed_missing_codes() {
+        let p = std::env::temp_dir().join(format!("hg-mix-{}.img", std::process::id()));
+        let mut s = hugegraph_store_core::DurableStore::open(&p).unwrap();
+        s.commit_put(b"a".to_vec(), b"1".to_vec()).unwrap();
+        let r = generated::BatchGetReq {
+            header: None,
+            table: "t".into(),
+            key: vec![
+                generated::Key {
+                    key: b"a".to_vec(),
+                    code: 0,
+                },
+                generated::Key {
+                    key: b"b".to_vec(),
+                    code: 0,
+                },
+            ],
+        };
+        let out = feedback_values_with_missing(&s, &prost::Message::encode_to_vec(&r)).unwrap();
+        if let Some(generated::feedback_res::Responses::KeyValueResponse(x)) = out.responses {
+            assert_eq!(x.kv[0].code, 0);
+            assert_eq!(x.kv[1].code, 2);
+        } else {
+            panic!()
+        }
+        let _ = std::fs::remove_file(p);
+    }
+}
