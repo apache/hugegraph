@@ -1,0 +1,1 @@
+PASS: BatchPut snapshots and restores DurableStore on commit failure; node tests 5.
