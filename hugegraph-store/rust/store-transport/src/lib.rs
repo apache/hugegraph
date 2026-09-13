@@ -551,13 +551,10 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
         request: tonic::Request<tonic::Streaming<generated::QueryRequest>>,
     ) -> Result<tonic::Response<Self::queryStream>, tonic::Status> {
         let _ = request;
-        Ok(tonic::Response::new(
-            Vec::new()
-                .into_iter()
-                .map(Ok)
-                .collect::<Vec<_>>()
-                .into_iter(),
-        ))
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(Vec::<
+            Result<generated::QueryResponse, tonic::Status>,
+        >::new(
+        )))))
     }
     async fn query0(
         &self,
