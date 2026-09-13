@@ -640,3 +640,28 @@ mod get_decode_tests {
         assert_eq!(decode_get_key(&b).unwrap(), b"k");
     }
 }
+
+pub fn get_req_to_store_request(
+    bytes: &[u8],
+) -> Result<hugegraph_store_core::StoreRequest, String> {
+    decode_get_key(bytes).map(|key| hugegraph_store_core::StoreRequest::Get { key })
+}
+#[cfg(test)]
+mod mapping_tests {
+    use super::*;
+    #[test]
+    fn get_mapping() {
+        let r = generated::GetReq {
+            header: None,
+            tk: Some(generated::Tk {
+                table: "t".into(),
+                key: b"k".to_vec(),
+                code: 0,
+            }),
+        };
+        let b = prost::Message::encode_to_vec(&r);
+        assert!(
+            matches!(get_req_to_store_request(&b).unwrap(), hugegraph_store_core::StoreRequest::Get{key} if key==b"k")
+        );
+    }
+}
