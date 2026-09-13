@@ -63,6 +63,10 @@ impl StoreNode {
         }
     }
 
+    pub fn can_accept_requests(&self) -> bool {
+        self.state() == NodeState::Online
+    }
+
     pub fn execute(&self, command: NodeCommand) -> Result<NodeState, &'static str> {
         let next = match (self.state(), command) {
             (NodeState::Starting, NodeCommand::Start)
@@ -94,12 +98,14 @@ mod tests {
         let path = std::env::temp_dir().join(format!("hg-node-state-{}.img", std::process::id()));
         let node = StoreNode::open(&path).unwrap();
         assert_eq!(node.state(), NodeState::Starting);
+        assert!(!node.can_accept_requests());
         std::fs::create_dir(path.with_extension("node-state.tmp")).unwrap();
         assert!(node.execute(NodeCommand::Start).is_err());
         assert_eq!(node.state(), NodeState::Starting);
         let _ = std::fs::remove_dir(path.with_extension("node-state.tmp"));
         assert_eq!(node.execute(NodeCommand::Start).unwrap(), NodeState::Online);
         assert_eq!(node.state(), NodeState::Online);
+        assert!(node.can_accept_requests());
         assert_eq!(node.execute(NodeCommand::Stop).unwrap(), NodeState::Stopped);
         assert_eq!(node.state(), NodeState::Stopped);
         drop(node);
