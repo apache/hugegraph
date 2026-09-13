@@ -491,3 +491,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Node lifecycle sidecar writes now fsync before atomic rename; node tests passed (5). Evidence `store-node-sidecar-fsync-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Full workspace regression after sidecar fsync and live data-plane changes passed (64 tests: core 14, node 5, transport 40). Evidence `workspace-final-regression-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
