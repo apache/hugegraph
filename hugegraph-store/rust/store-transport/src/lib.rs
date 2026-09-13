@@ -1287,3 +1287,13 @@ impl Catalog {
         self.tables.is_empty() && self.graphs.is_empty()
     }
 }
+
+impl Catalog {
+    pub fn restore(bytes: &[u8]) -> Self {
+        let mut c = Self::default();
+        for n in bytes.split(|b| *b == 0).filter(|n| !n.is_empty()) {
+            c.tables.insert(String::from_utf8_lossy(n).into_owned());
+        }
+        c
+    }
+}
