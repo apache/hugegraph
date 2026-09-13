@@ -194,3 +194,6 @@ next_action: add tonic-level SessionService integration tests and implement Batc
 
 2026-09-14: Fixed Catalog restore to decode tagged table/graph snapshot entries and added round-trip coverage; Rust workspace tests pass (34 tests). Evidence `catalog-restore-20260914.log`.
 next_action: integrate Catalog snapshot/recovery with unified store state, then expand independent oracle and differential scenarios.
+
+2026-09-14: Added UnifiedState image framing data and tagged Catalog metadata with truncation validation; workspace regression passed (34 tests). Evidence `unified-recovery-20260914.log`.
+next_action: wire UnifiedState into durable restart and failure recovery paths, then execute independent oracle scenarios.
