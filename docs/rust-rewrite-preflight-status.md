@@ -34,3 +34,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 offline Maven validate passed (RAT unapproved 0, unknown 0, BUILD SUCCESS); log SHA-256 d2a127ee7c52df74b6fe0686accdff2f810f0f88e5096ee7e7995c0ff33d7328.
 
 2026-09-13 Partition POC rerun: fmt, clippy, and 14 tests passed; evidence partition-poc-verify-20260913-rerun.log.
+
+2026-09-13 standalone linearizability Oracle positive/negative smoke passed; evidence raft-linearizability-oracle-20260913.log.
