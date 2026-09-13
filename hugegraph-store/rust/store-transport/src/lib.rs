@@ -475,6 +475,26 @@ mod matrix_tests {
         );
         let _ = std::fs::remove_file(p);
     }
+
+    #[test]
+    fn cross_layer_oracle_reopen_preserves_transport_write() {
+        let p = std::env::temp_dir().join(format!("hg-cross-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        {
+            let mut s = StoreService::new(DurableStore::open(&p).unwrap());
+            s.call(StoreRequest::Put {
+                key: b"k".to_vec(),
+                value: b"v".to_vec(),
+            })
+            .unwrap();
+        }
+        let mut reopened = StoreService::new(DurableStore::open(&p).unwrap());
+        let out = reopened
+            .call(StoreRequest::Get { key: b"k".to_vec() })
+            .unwrap();
+        assert!(matches!(out, StoreResponse::Value(Some(v)) if v == b"v"));
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 /// Generated protobuf bindings (enabled when the transport crate is built).
