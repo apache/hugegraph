@@ -119,3 +119,6 @@ next_action: map real hg-store-grpc proto methods and add networked client/serve
 
 2026-09-14: Parsed hg-store-grpc proto services and registered all 15 RPC names in Rust transport contract registry; registry test and workspace tests pass. Evidence `grpc-contract-registry-20260914.log`.
 next_action: implement generated-proto-compatible message adapters and network transport for the registered RPCs.
+
+2026-09-14: Added validated RPC envelope encoding/decoding with method allowlist for all 15 hg-store-grpc methods; malformed and unknown methods are rejected. Workspace tests pass 10/10; evidence `rpc-envelope-20260914.log`.
+next_action: implement network listener/client around RpcEnvelope and connect method dispatch to durable StoreService.

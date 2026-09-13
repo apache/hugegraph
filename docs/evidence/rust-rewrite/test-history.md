@@ -47,3 +47,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --locked` | `working-tree` | PASS (8 tests; client/server transport mapping) | `transport-service-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `4b35a480d` | PASS (8 core tests; transport crate builds) | `transport-crate-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (9 tests; 15 gRPC RPC names registered) | `grpc-contract-registry-20260914.log` |
+| `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (10 tests; RPC envelope round-trip/rejection) | `rpc-envelope-20260914.log` |

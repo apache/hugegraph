@@ -1,0 +1,2 @@
+command: cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline
+result: PASS (10 tests; RPC envelope round-trip and unknown rejection)
