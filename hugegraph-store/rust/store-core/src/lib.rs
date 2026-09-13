@@ -321,3 +321,49 @@ mod transport_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+pub struct Transaction<'a> {
+    store: &'a mut DurableStore,
+    pending: Vec<(Vec<u8>, Vec<u8>)>,
+}
+impl<'a> Transaction<'a> {
+    pub fn new(store: &'a mut DurableStore) -> Self {
+        Self {
+            store,
+            pending: Vec::new(),
+        }
+    }
+    pub fn put(&mut self, k: Vec<u8>, v: Vec<u8>) {
+        self.pending.push((k, v));
+    }
+    pub fn commit(mut self) -> std::io::Result<()> {
+        for (k, v) in self.pending.drain(..) {
+            self.store.commit_put(k, v)?;
+        }
+        Ok(())
+    }
+    pub fn rollback(self) {}
+}
+#[cfg(test)]
+mod txn_tests {
+    use super::*;
+    #[test]
+    fn txn_commit_and_rollback() {
+        let p = std::env::temp_dir().join(format!("hg-txn-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let mut s = DurableStore::open(&p).unwrap();
+        {
+            let mut t = Transaction::new(&mut s);
+            t.put(b"k".to_vec(), b"v".to_vec());
+            t.commit().unwrap();
+        }
+        assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
+        {
+            let mut t = Transaction::new(&mut s);
+            t.put(b"x".to_vec(), b"y".to_vec());
+            t.rollback();
+        }
+        assert_eq!(s.get(b"x"), None);
+        let _ = std::fs::remove_file(p);
+    }
+}
