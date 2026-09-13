@@ -516,3 +516,22 @@ impl generated::healthy_server::Healthy for HealthyService {
         }))
     }
 }
+
+pub fn query_response(query_id: &str, message: &str, finished: bool) -> generated::QueryResponse {
+    generated::QueryResponse {
+        query_id: query_id.into(),
+        is_ok: true,
+        is_finished: finished,
+        message: message.into(),
+        data: Vec::new(),
+    }
+}
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+    #[test]
+    fn query_response_model() {
+        let r = query_response("q1", "ok", true);
+        assert!(r.is_ok && r.is_finished && r.data.is_empty());
+    }
+}
