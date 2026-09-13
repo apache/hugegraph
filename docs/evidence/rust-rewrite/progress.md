@@ -200,3 +200,6 @@ next_action: wire UnifiedState into durable restart and failure recovery paths, 
 
 2026-09-14: Exposed DurableStore snapshot and validated restore_image APIs, with full workspace regression passing (34 tests). Evidence `durable-recovery-image-20260914.log`.
 next_action: add failure injection and restart tests around unified recovery images, then execute independent oracle scenarios.
+
+2026-09-14: Added failure injection coverage proving truncated DurableStore recovery images are rejected without mutating live state; workspace passed (35 tests). Evidence `recovery-failure-20260914.log`.
+next_action: execute independent oracle scenarios over transaction, rollback, and recovery traces.
