@@ -236,3 +236,6 @@ next_action: map entries into GraphStore vertex/edge protobuf records and add en
 
 2026-09-14: Added deterministic mapping from durable key/value entries to GraphStore Vertex protobuf records for scan responses; transport check passed. Evidence `scan-entry-mapping-20260914.log`.
 next_action: wire GraphService to DurableStore-backed frames and add end-to-end scan assertions.
+
+2026-09-14: Connected GraphService to a shared DurableStore and scan frame mapping, with transport check passing. Evidence `graph-durable-e2e-20260914.log`.
+next_action: add GraphService end-to-end scan test with persisted entries, then continue remaining contract gates.
