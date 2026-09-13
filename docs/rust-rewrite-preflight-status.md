@@ -46,6 +46,7 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Partition POC current commit rerun passed; evidence partition-poc-verify-current.log.
 2026-09-13 Partition gate rerun passed (`fmt`, `clippy`, 19 unit/doc tests); evidence `partition-gate-rerun-20260913.log`, SHA-256 `809aa8df2b0f272858aa1961af06b147738d02cbce9ad6f20fb614d0aaab8fc9`.
 2026-09-13 Partition gate audit rerun passed (`fmt`, `clippy`, `test`, mutation gate inventory) and Raft history capture tests passed; evidence `partition-audit-gates-latest.log` and `raft-oracle-run-latest.log`.
+2026-09-13 Partition POC gate evidence was independently archived again at commit `58d6efc76`; evidence `partition-poc-verify-20260913-rerun.log`, SHA-256 `971a2182ab1e21bbe7d52aa8b1526814a172a98e26a336e8c00266eb1ca5a6ac`.
 
 2026-09-13 Maven/RAT rerun after Python license fixes passed; evidence maven-validate-rat-fixed.log.
 
