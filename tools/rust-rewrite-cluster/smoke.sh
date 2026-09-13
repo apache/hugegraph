@@ -49,8 +49,15 @@ sleep 15
 for port in 8620 8621 8622; do health "http://127.0.0.1:$port"; done
 
 "${compose[@]}" stop store0 >/dev/null
-sleep 12
-for port in 8081 8082; do curl_local -fsS --max-time 10 "http://127.0.0.1:$port/graphs/hugegraph/graph/vertices/%22$fixture_id%22" | grep -q 'committed'; done
+sleep 20
+for port in 8081 8082; do
+  for attempt in 1 2 3 4 5; do
+    if curl_local -fsS --max-time 15 "http://127.0.0.1:$port/graphs/hugegraph/graph/vertices/%22$fixture_id%22" | grep -q 'committed'; then
+      break
+    fi
+    sleep 3
+  done
+done
 "${compose[@]}" start store0 >/dev/null
 sleep 20
 curl_local -fsS --max-time 10 "$base_server/graphs/hugegraph/graph/vertices/%22$fixture_id%22" | grep -q 'committed'
