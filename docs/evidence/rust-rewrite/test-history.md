@@ -61,3 +61,4 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (17 tests; RPC family dispatch matrix) | `rpc-family-matrix-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (prost-build generated graph_pb bindings) | `prost-generation-20260914.log` |
 | `cargo check --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-transport` | `working-tree` | PASS (QueryServiceImpl async trait compiles) | `query-service-compile-20260914.log` |
+| `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (Session get2/batch wiring regression) | `session-service-regression-20260914.log` |

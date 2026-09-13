@@ -188,3 +188,6 @@ next_action: implement protobuf Message decode adapters for GetReq and BatchReq,
 
 2026-09-14: Added apply_batch_action entry point to execute decoded BatchAction writes against DurableStore; commit/rollback context integration remains pending.
 next_action: implement SessionService batch transaction context with staged writes and commit/rollback visibility tests.
+
+2026-09-14: Full Rust workspace regression after Session get2 and batch wiring passed. Evidence `session-service-regression-20260914.log`.
+next_action: add tonic-level SessionService integration tests and implement BatchGet2/Table/Graph/Clean semantics.

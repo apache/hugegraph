@@ -1,0 +1,2 @@
+command: cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace
+result: PASS (all workspace tests after Session get2/batch wiring)
