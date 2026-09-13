@@ -972,3 +972,26 @@ mod tonic_session_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+#[cfg(test)]
+mod tonic_batch_tests {
+    use super::*;
+    #[tokio::test]
+    async fn batch_trait_commit() {
+        let p = std::env::temp_dir().join(format!("hg-tb-{}.img", std::process::id()));
+        let s = SessionService::open(&p).unwrap();
+        let req = generated::BatchReq {
+            header: None,
+            batch_id: "b".into(),
+            requests: Some(generated::batch_req::Requests::CommitReq(
+                generated::BatchCommitReq {},
+            )),
+        };
+        let out = <SessionService as generated::hg_store_session_server::HgStoreSession>::batch(
+            &s,
+            tonic::Request::new(req),
+        )
+        .await;
+        assert!(out.is_ok());
+        let _ = std::fs::remove_file(p);
+    }
+}
