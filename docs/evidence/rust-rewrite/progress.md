@@ -182,3 +182,6 @@ next_action: implement concrete tonic service traits for each generated service,
 
 2026-09-14: Implemented QueryServiceImpl against generated tonic trait, including query0/count and empty streaming response; cargo check passes. Evidence `query-service-compile-20260914.log`.
 next_action: implement HgStoreSession generated service trait backed by DurableStore and add Get2/Batch network integration.
+
+2026-09-14: Audited generated Session request schemas (`GetReq`, `BatchReq`, oneof request structure); direct DurableStore mapping requires decoding nested protobuf keys and batch oneofs.
+next_action: implement protobuf Message decode adapters for GetReq and BatchReq, then connect SessionService responses to DurableStore.
