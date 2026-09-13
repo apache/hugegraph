@@ -52,3 +52,5 @@ CI 和模块文档显示，测试并非一个统一套件：Server 至少分为 
 已生成 [`rust-test-traceability.csv`](rust-test-traceability.csv)，扫描五个顶层模块下的 `*Test.java`，提取测试方法/套件、文件、模块，并按路径关键词给出初步能力域和可能的执行 profile。当前清单包含 2,706 条方法/套件记录。
 
 该文件是盘点底稿，不是最终覆盖证明。自动分类可能误判，profile 仍需对照 Maven Surefire 配置和 CI 实际日志确认；每行的 `oracle_status` 初始均标记为待确认。下一步必须逐行补齐真实 profile、契约编号、Oracle 类型、是否集成测试、是否可重放和缺口状态，并将升级/回滚、快照恢复、分区故障等缺口转成具体测试任务。
+
+2026-09-13 复验：`pd-rest-test` 的 `StoreAPIReadyTest` 3 项可在本地通过；`pd-client-test` 需要运行中的外部 PD `127.0.0.1:8686`，当前连接超时并反复重试，无法形成确定性 client 集成结果。该 profile 需在 CI 多服务编排环境执行并保存服务日志。
