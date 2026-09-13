@@ -772,6 +772,36 @@ mod graph_frame_tests {
         assert_eq!(frame.edge.len(), 1);
         let _ = std::fs::remove_file(p);
     }
+
+    #[tokio::test]
+    async fn live_tonic_graph_server_accepts_client() {
+        let path = std::env::temp_dir().join(format!("hg-live-{}.img", std::process::id()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let service = super::GraphService::open(&path).unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let task = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(super::generated::graph_store_server::GraphStoreServer::new(
+                    service,
+                ))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        let mut client = super::generated::graph_store_client::GraphStoreClient::connect(format!(
+            "http://{}",
+            addr
+        ))
+        .await
+        .unwrap();
+        let stream = tokio_stream::iter(vec![super::generated::ScanPartitionRequest::default()]);
+        let response = client.scan_partition(stream).await.unwrap();
+        let mut frames = response.into_inner();
+        assert!(frames.message().await.unwrap().is_some());
+        task.abort();
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[tonic::async_trait]
