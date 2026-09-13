@@ -1,0 +1,3 @@
+Sun Sep 13 08:48:24 UTC 2026
+container=hugegraph-litellm status=Up 2 minutes
+{"status":"healthy","db":"Not connected"}{"data":[{"id":"gpt-6-astra","object":"model","created":1677610602,"owned_by":"openai"}],"object":"list"}
