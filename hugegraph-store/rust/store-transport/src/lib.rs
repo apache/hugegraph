@@ -1191,3 +1191,20 @@ pub fn validate_table_request(bytes: &[u8]) -> Result<String, String> {
         Ok(r.table_name)
     }
 }
+
+pub fn validate_graph_request(bytes: &[u8]) -> Result<String, String> {
+    let r: generated::GraphReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    if r.graph_name.is_empty() {
+        Err("graph name required".into())
+    } else {
+        Ok(r.graph_name)
+    }
+}
+pub fn validate_clean_request(bytes: &[u8]) -> Result<i32, String> {
+    let r: generated::CleanReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    if r.partition < 0 {
+        Err("partition must be non-negative".into())
+    } else {
+        Ok(r.partition)
+    }
+}
