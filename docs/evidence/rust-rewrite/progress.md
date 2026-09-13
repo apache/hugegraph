@@ -266,3 +266,6 @@ next_action: add real tonic client/server streaming integration and broaden cont
 
 2026-09-14: Added GraphService scan_range E2E over a reopened DurableStore and verified filtered vertex output; workspace passed (47 tests). Evidence `graph-service-scan-e2e-20260914.log`.
 next_action: add real tonic client/server streaming integration; then broaden remaining contract gates.
+
+2026-09-14: Added GraphService E2E assertion for edge frame selection over persisted endpoints; workspace passed (48 tests). Evidence `graph-edge-scan-e2e-20260914.log`.
+next_action: add real tonic client/server streaming integration; then broaden remaining contract gates.
