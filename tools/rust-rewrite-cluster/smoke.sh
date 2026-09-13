@@ -31,7 +31,7 @@ for port in 8620 8621 8622; do health "http://127.0.0.1:$port"; done
 for port in 8520 8521 8522; do health "http://127.0.0.1:$port"; done
 for port in 8080 8081 8082; do curl_local -fsS --max-time 10 "http://127.0.0.1:$port/versions" >/dev/null; done
 
-fixture_id="rust-gate-$(date +%Y%m%d%H%M%S)"
+fixture_id="rust-gate-$(date +%Y%m%d%H%M%S%N)"
 property_key="rust_gate_pk_${fixture_id//[^a-zA-Z0-9]/}"
 vertex_label="rust_gate_vl_${fixture_id//[^a-zA-Z0-9]/}"
 json_header='Content-Type: application/json'
