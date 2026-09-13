@@ -17,3 +17,5 @@
 镜像源复核（2026-09-13）：USTC Docker Hub mirror TLS 失败，DaoCloud mirror 对 `hugegraph/pd:latest` 返回 403，阿里云公共地址需要账户专属 ACR 加速器；已恢复 daemon 默认配置，避免把不可验证的第三方镜像源固化进开发环境。
 
 多节点故障复验（2026-09-13）：完成 store0 停止/恢复和 pd0 网络断开/重接；剩余节点在故障期间健康，恢复后全节点健康。证据分别归档于 `compose-store0-fault-recovery-20260913.log`、`compose-pd0-network-partition-20260913.log`；这仍不等价于线性一致性、数据无损或成员变更证明。
+
+服务层复验（2026-09-13）：PD/Store 故障恢复后，三 Server 的 `/versions` 与 `/graphs` 共 6 次请求全部 HTTP 200，图列表包含 `hugegraph`；证据归档于 `compose-server-smoke-20260913.log`。这仍是健康/可达性证据，不替代事务、数据校验和线性一致性 Oracle。
