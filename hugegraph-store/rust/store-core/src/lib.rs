@@ -431,4 +431,20 @@ mod txn_tests {
         assert_eq!(s.get(b"b"), oracle.get(b"b" as &[u8]).cloned());
         let _ = std::fs::remove_file(p);
     }
+
+    #[test]
+    fn restart_oracle_preserves_committed_and_rollback_state() {
+        let p = std::env::temp_dir().join(format!("hg-restart-oracle-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        {
+            let mut s = DurableStore::open(&p).unwrap();
+            s.commit_put(b"keep".to_vec(), b"v1".to_vec()).unwrap();
+            s.commit_put(b"drop".to_vec(), b"v2".to_vec()).unwrap();
+            s.rollback_key(b"drop").unwrap();
+        }
+        let s = DurableStore::open(&p).unwrap();
+        assert_eq!(s.get(b"keep"), Some(b"v1".to_vec()));
+        assert_eq!(s.get(b"drop"), None);
+        let _ = std::fs::remove_file(p);
+    }
 }
