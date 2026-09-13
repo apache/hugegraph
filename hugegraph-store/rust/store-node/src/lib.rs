@@ -200,6 +200,14 @@ mod tests {
         for i in 0..8u8 {
             assert_eq!(node.get(&[i]).unwrap(), Some(vec![i + 1]));
         }
+        assert_eq!(
+            node.graph
+                .scan_range(&[0], &[8], false)
+                .unwrap()
+                .vertex
+                .len(),
+            8
+        );
         node.execute(NodeCommand::Stop).unwrap();
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
