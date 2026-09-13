@@ -49,6 +49,48 @@ impl InMemoryStore {
     }
 }
 
+pub enum BackendSelector {
+    Rust(InMemoryStore),
+    JavaFallback(InMemoryStore),
+}
+
+impl BackendSelector {
+    pub fn rust() -> Self {
+        Self::Rust(InMemoryStore::default())
+    }
+    pub fn java_fallback() -> Self {
+        Self::JavaFallback(InMemoryStore::default())
+    }
+    pub fn switch_to_java(self) -> Self {
+        Self::JavaFallback(match self {
+            Self::Rust(s) | Self::JavaFallback(s) => s,
+        })
+    }
+    pub fn switch_to_rust(self) -> Self {
+        Self::Rust(match self {
+            Self::Rust(s) | Self::JavaFallback(s) => s,
+        })
+    }
+}
+
+impl StoreBackend for BackendSelector {
+    fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Option<Vec<u8>> {
+        match self {
+            Self::Rust(s) | Self::JavaFallback(s) => s.put(key, value),
+        }
+    }
+    fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        match self {
+            Self::Rust(s) | Self::JavaFallback(s) => s.get(key),
+        }
+    }
+    fn rollback(&mut self, key: &[u8]) {
+        match self {
+            Self::Rust(s) | Self::JavaFallback(s) => s.rollback(key),
+        }
+    }
+}
+
 impl StoreBackend for InMemoryStore {
     fn put(&mut self, key: Vec<u8>, value: Vec<u8>) -> Option<Vec<u8>> {
         self.0.insert(key, value)
@@ -72,6 +114,17 @@ mod tests {
         s.rollback(b"k");
         assert_eq!(s.get(b"k"), None);
     }
+    #[test]
+    fn selectable_java_fallback_rollback() {
+        let mut b = BackendSelector::rust();
+        b.put(b"k".to_vec(), b"v".to_vec());
+        b = b.switch_to_java();
+        assert_eq!(b.get(b"k"), Some(b"v".to_vec()));
+        b.rollback(b"k");
+        b = b.switch_to_rust();
+        assert_eq!(b.get(b"k"), None);
+    }
+
     #[test]
     fn restart_recovery_and_corruption_rejection() {
         let mut s = InMemoryStore::default();
