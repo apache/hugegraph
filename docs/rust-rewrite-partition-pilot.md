@@ -8,7 +8,7 @@
 
 此前“模型层闭环”的结论撤回：现有 POC 尚未连接 Java 实现，也没有进程崩溃、持久化恢复或实现级变异执行器。输入反例测试不能替代实现级变异杀伤率，重复调用 replay 不能证明崩溃恢复。下方历史执行记录只证明当时所运行用例的结果。
 
-本次修正两个检查错误：范围覆盖不要求不同分区的版本递增；固定参考状态的缓存一致性要求范围与版本全部相等，不能只比较版本大小。新增同版本错误范围、未来版本两个反例。verify.sh 实际执行 13 项通过，同时 fmt/clippy 通过；这些结果仍不是 Java 兼容或生产恢复证明。
+本次修正两个检查错误：范围覆盖不要求不同分区的版本递增；固定参考状态的缓存一致性要求范围与版本全部相等，不能只比较版本大小。新增同版本错误范围、未来版本两个反例。verify.sh 实际执行 14 项通过，同时 fmt/clippy 通过；这些结果仍不是 Java 兼容或生产恢复证明。
 
 ## 1. 当前实际测试入口
 
@@ -76,6 +76,6 @@ Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -
 
 跨模块回归复验（2026-09-10）：完整 `pd-core-test,pd-common-test` 通过；Common 83 项，Core 104 项（跳过 2 项），失败/错误均为 0，`BUILD SUCCESS`。完整日志：`/tmp/pd-core-common-all.log`。
 
-POC Oracle 复核（2026-09-13）：修正版本比较与缓存等价性错误后，`verify.sh` 为 13 项通过。该结果仅证明独立模型自身的反例检测，不能替代服务实现级变异和 Java/Rust 差分。
+POC Oracle 复核（2026-09-13）：修正版本比较与缓存等价性错误后，`verify.sh` 为 14 项通过。该结果仅证明独立模型自身的反例检测，不能替代服务实现级变异和 Java/Rust 差分。
 
-Release 基线（2026-09-13）：`cargo test --release` 13/13 通过；本机一次运行 `elapsed_seconds=0.64`、`max_rss_kb=124420`（仅模型 POC，不能代表生产性能）。完整输出：`/tmp/rust-partition-release.log`。
+Release 基线（2026-09-13）：`cargo test --release` 14/14 通过；本机一次运行 `elapsed_seconds=0.64`、`max_rss_kb=124420`（仅模型 POC，不能代表生产性能）。完整输出：`/tmp/rust-partition-release.log`。
