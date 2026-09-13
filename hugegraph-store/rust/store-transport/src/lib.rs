@@ -322,3 +322,69 @@ mod schema_tests {
         assert!(BatchRequest::decode(&[]).is_err());
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateRequest {
+    pub partition: u64,
+}
+impl StateRequest {
+    pub fn encode(&self) -> Vec<u8> {
+        self.partition.to_le_bytes().to_vec()
+    }
+    pub fn decode(b: &[u8]) -> Result<Self, String> {
+        if b.len() != 8 {
+            Err("invalid state request".into())
+        } else {
+            Ok(Self {
+                partition: u64::from_le_bytes(b.try_into().unwrap()),
+            })
+        }
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanRequest {
+    pub start: Vec<u8>,
+    pub end: Vec<u8>,
+}
+impl ScanRequest {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut o = (self.start.len() as u32).to_le_bytes().to_vec();
+        o.extend(&self.start);
+        o.extend(&(self.end.len() as u32).to_le_bytes());
+        o.extend(&self.end);
+        o
+    }
+    pub fn decode(b: &[u8]) -> Result<Self, String> {
+        if b.len() < 8 {
+            return Err("truncated scan".into());
+        }
+        let n = u32::from_le_bytes(b[..4].try_into().unwrap()) as usize;
+        if 4 + n + 4 > b.len() {
+            return Err("invalid scan".into());
+        }
+        let p = 4 + n;
+        let m = u32::from_le_bytes(b[p..p + 4].try_into().unwrap()) as usize;
+        if p + 4 + m != b.len() {
+            return Err("invalid scan end".into());
+        }
+        Ok(Self {
+            start: b[4..4 + n].to_vec(),
+            end: b[p + 4..].to_vec(),
+        })
+    }
+}
+#[cfg(test)]
+mod state_graph_tests {
+    use super::*;
+    #[test]
+    fn codecs() {
+        let s = StateRequest { partition: 7 };
+        assert_eq!(StateRequest::decode(&s.encode()).unwrap(), s);
+        let x = ScanRequest {
+            start: b"a".to_vec(),
+            end: b"z".to_vec(),
+        };
+        assert_eq!(ScanRequest::decode(&x.encode()).unwrap(), x);
+        assert!(StateRequest::decode(&[]).is_err());
+    }
+}

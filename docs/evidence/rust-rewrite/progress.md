@@ -140,3 +140,6 @@ next_action: implement method-specific payload schemas and dispatch for query, b
 
 2026-09-14: Added validated QueryRequest and BatchRequest codecs with empty/truncated input rejection; workspace tests pass 14/14. Evidence `query-batch-codec-20260914.log`.
 next_action: implement state and graph RPC schemas and dispatch paths.
+
+2026-09-14: Added typed StateRequest and ScanRequest codecs for state and graph RPC boundaries with malformed input rejection; workspace tests pass 15/15. Evidence `state-graph-codec-20260914.log`.
+next_action: dispatch typed query/batch/state/graph messages through network service and add RPC integration matrix.
