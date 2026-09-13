@@ -88,3 +88,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (48 tests; GraphService edge frame branch) | `graph-edge-scan-e2e-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo check --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-transport` | `working-tree` | PASS (tonic GraphStore server entrypoint) | `tonic-graph-server-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (48 tests; tokio network/time integration prerequisites) | `tonic-live-prep-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (49 tests; live tonic GraphStore client/server stream) | `tonic-live-stream-e2e-20260914.log` |

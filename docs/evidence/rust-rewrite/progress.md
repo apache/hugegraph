@@ -278,3 +278,6 @@ next_action: implement live tonic client/server streaming test over TcpListener.
 
 2026-09-14: Enabled tokio net/time features for live tonic loopback integration prerequisites; workspace passed (48 tests). Evidence `tonic-live-prep-20260914.log`.
 next_action: implement live tonic client/server streaming test over TcpListener and assert filtered frames.
+
+2026-09-14: Added live TcpListener tonic GraphStore client/server streaming E2E; generated client receives a ScanResponse frame and workspace passed (49 tests). Evidence `tonic-live-stream-e2e-20260914.log`.
+next_action: assert filtered persisted vertices through live tonic stream, then continue remaining contract gates.
