@@ -264,7 +264,10 @@ mod tests {
         let feedback = session
             .get2(tonic::Request::new(
                 hugegraph_store_transport::generated::GetReq {
-                    tk: Some(hugegraph_store_transport::generated::Tk { key: b"missing".to_vec(), ..Default::default() }),
+                    tk: Some(hugegraph_store_transport::generated::Tk {
+                        key: b"missing".to_vec(),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
             ))
