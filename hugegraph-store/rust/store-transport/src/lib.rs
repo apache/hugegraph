@@ -671,7 +671,7 @@ pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8
             if v.end_code == 0 {
                 vec![]
             } else {
-                v.end_code.to_be_bytes().to_vec()
+                vec![v.end_code as u8]
             },
         )),
         generated::scan_partition_request::RequestOneOf::ReplyRequest(_) => None,
@@ -748,7 +748,7 @@ mod graph_frame_tests {
                 .unwrap();
         let (start, end) = super::scan_request_range(&decoded).unwrap();
         assert_eq!(start, b"m");
-        assert_eq!(end, 122i32.to_be_bytes());
+        assert_eq!(end, vec![122]);
     }
     #[test]
     fn graph_service_scan_range_reads_durable_entries() {
@@ -784,6 +784,7 @@ mod graph_frame_tests {
         let _ = std::fs::remove_file(&path);
         {
             let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.commit_put(b"a".to_vec(), b"low".to_vec()).unwrap();
             seed.commit_put(b"m".to_vec(), b"v".to_vec()).unwrap();
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -811,7 +812,7 @@ mod graph_frame_tests {
                 super::generated::scan_partition_request::RequestOneOf::ScanRequest(
                     super::generated::scan_partition_request::Request {
                         position: b"m".to_vec(),
-                        end_code: 0,
+                        end_code: b'z' as u32,
                         ..Default::default()
                     },
                 ),
