@@ -89,6 +89,7 @@ Java 版本只作为参考实现，不能单独作为 Oracle。每条关键契�
 | PD Partition | `pd-core-test,pd-common-test`；`*Partition*Test`；日志 `/tmp/pd-partition-all.log` | Partition 32/32；PD Core/Common 187 项执行、2 项跳过、0 失败 | 三节点故障、差分回放 |
 | Store 基线 | `hg-store-test`；日志 `/tmp/store-regression-final.log` | 已启用 suite 通过，`BUILD SUCCESS` | 活动快照损坏、跨进程恢复、Raft 故障 |
 | Store Snapshot | `SnapshotHandlerTest`；日志 `/tmp/snapshot-active-final5.log` | 5/5 通过 | 真实文件 round-trip、损坏快照、重启恢复 |
+| PD client/rest | `pd-client-test,pd-rest-test`；日志 `/tmp/pd-client-rest.log` | REST readiness 3 项通过；client 因未启动 `127.0.0.1:8686` 超时 | CI 必须编排 PD 服务并上传服务日志，超时不得计为通过 |
 
 上述结果只更新对应边界的证据状态，不改变全局 NO-GO 结论。
 
