@@ -271,6 +271,19 @@ mod durable_tests {
     }
 
     #[test]
+    fn durable_clear_matches_empty_oracle_after_restart() {
+        let path = std::env::temp_dir().join(format!("hg-clear-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut store = DurableStore::open(&path).unwrap();
+        store.commit_put(b"a".to_vec(), b"b".to_vec()).unwrap();
+        store.clear().unwrap();
+        assert!(store.entries().is_empty());
+        drop(store);
+        assert!(DurableStore::open(&path).unwrap().entries().is_empty());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn entries_are_sorted_and_owned() {
         let p = std::env::temp_dir().join(format!("hg-entries-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&p);
