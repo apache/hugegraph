@@ -23,3 +23,5 @@
 Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接；store1/store2 与三 PD 在分区期间健康，恢复后三 Store 健康。证据归档于 `compose-store0-network-partition-20260913.log`；尚未证明写入线性一致性和数据无损。
 
 本机代理修复（2026-09-13）：将 shell 与 Docker daemon 的 `NO_PROXY/no_proxy` 固化为 `localhost,127.0.0.1,::1`，避免 `127.*` 通配写法导致本地健康请求被代理拦截；Docker 重启后集群可恢复，直接请求 PD `/v1/health` 返回 HTTP 200。
+
+跨 Server 数据可见性复验（2026-09-13）：通过 server0 创建唯一 schema 与 vertex，从 server0/server1/server2 读取均返回相同 id、label 和 property；证据归档于 `compose-cross-server-visibility-20260913.log`。该结果证明基本复制可见性，不替代并发事务、线性一致性或故障期间写入验证。

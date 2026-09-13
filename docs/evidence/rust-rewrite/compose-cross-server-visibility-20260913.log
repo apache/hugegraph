@@ -1,0 +1,4 @@
+Date: 2026-09-13
+Scenario: POST unique property key, vertex label, and vertex through server0; GET the committed vertex through server0/server1/server2.
+Result: all three reads returned id=rust-gate-20260913, label=rust_gate_vl_20260913, property rust_gate_pk_20260913=committed.
+Note: test data uses unique names and is retained as an auditable fixture in the running volume.
