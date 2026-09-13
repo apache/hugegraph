@@ -1,5 +1,6 @@
 //! Transport adapter boundary for hg-store-grpc.
 use hugegraph_store_core::{StoreRequest, StoreResponse, StoreService};
+use prost::Message;
 use tokio_stream::StreamExt;
 const MAX_SCAN_LIMIT: i64 = 100_000;
 pub struct RpcServer {
@@ -704,6 +705,16 @@ pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8
 }
 pub fn scan_request_is_edge(r: &generated::ScanPartitionRequest) -> bool {
     matches!(r.request.as_ref(), Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) if v.scan_type == 2)
+}
+pub fn validate_scan_payload(bytes: &[u8]) -> Result<generated::ScanPartitionRequest, String> {
+    if bytes.len() > 1_048_576 {
+        return Err("scan payload too large".into());
+    }
+    let r = generated::ScanPartitionRequest::decode(bytes).map_err(|e| e.to_string())?;
+    if r.request.is_none() {
+        return Err("missing scan request".into());
+    }
+    Ok(r)
 }
 #[cfg(test)]
 mod graph_frame_tests {
