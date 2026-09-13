@@ -329,3 +329,6 @@ next_action: audit remaining request size/resource limits and add malformed payl
 
 2026-09-14: Added ScanPartition payload decoder with 1 MiB size bound and required oneof validation; workspace passed (56 tests). Evidence `scan-payload-validation-20260914.log`.
 next_action: route validate_scan_payload through dispatch and live server, then audit remaining contract/resource gates.
+
+2026-09-14: Routed GraphStore.ScanPartition dispatch validation through bounded oneof-aware payload decoder; workspace passed (56 tests). Evidence `dispatch-payload-validation-20260914.log`.
+next_action: route live server through same validator and add malformed/oversized payload integration tests.
