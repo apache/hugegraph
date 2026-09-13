@@ -161,3 +161,6 @@ next_action: add prost/prost-build generation configuration once dependencies ar
 
 2026-09-14: Generated a complete hg-store-grpc protobuf descriptor set with protoc from all 8 proto files; descriptor is ready as deterministic input for Rust binding generation. Evidence `proto-descriptor-20260914.log`.
 next_action: add prost/prost-build generation configuration and generate Rust bindings from the descriptor-compatible proto sources when dependency resolution is available.
+
+2026-09-14: Added prost/prost-build dependencies and build.rs generation for hg-store-grpc proto sources; generated graph_pb bindings compile and workspace tests pass. Evidence `prost-generation-20260914.log`.
+next_action: expose all generated proto modules and map generated messages into typed RPC handlers.

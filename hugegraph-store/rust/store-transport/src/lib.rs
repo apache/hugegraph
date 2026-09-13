@@ -476,3 +476,6 @@ mod matrix_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+/// Generated protobuf bindings (enabled when the transport crate is built).
+pub mod generated { include!(concat!(env!("OUT_DIR"), "/graph_pb.rs")); }
