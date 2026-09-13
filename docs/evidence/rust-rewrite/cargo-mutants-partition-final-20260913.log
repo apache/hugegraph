@@ -1,0 +1,4 @@
+Found 30 mutants to test
+ok       Unmutated baseline in 0s build + 0s test
+MISSED   src/main.rs:20:5: replace main with () in 0s build + 0s test
+30 mutants tested in 4s: 1 missed, 27 caught, 2 unviable

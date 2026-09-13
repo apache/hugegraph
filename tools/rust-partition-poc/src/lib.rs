@@ -76,6 +76,28 @@ mod tests {
         assert!(validate(&base(), 20).is_ok());
     }
     #[test]
+    fn rejects_empty_partitions() {
+        assert_eq!(validate(&[], 20), Err("gap-at-start"));
+    }
+    #[test]
+    fn rejects_nonzero_first_start() {
+        let mut x = base();
+        x[0].start = 1;
+        assert_eq!(validate(&x, 20), Err("gap-at-start"));
+    }
+    #[test]
+    fn rejects_end_beyond_max() {
+        let mut x = base();
+        x[1].end = 21;
+        assert_eq!(validate(&x, 20), Err("invalid-range"));
+    }
+    #[test]
+    fn rejects_zero_length_range() {
+        let mut x = base();
+        x[0].end = 0;
+        assert_eq!(validate(&x, 20), Err("invalid-range"));
+    }
+    #[test]
     fn catches_dropped_right_partition() {
         let mut x = base();
         x.pop();
@@ -111,6 +133,16 @@ mod tests {
             ),
             Err("stale-heartbeat")
         );
+    }
+    #[test]
+    fn rejects_heartbeat_with_either_range_field_mismatch() {
+        let mut current = base()[0].clone();
+        let mut incoming = current.clone();
+        incoming.start = 1;
+        assert_eq!(apply_heartbeat(&mut current, incoming), Err("range-mismatch"));
+        let mut incoming = current.clone();
+        incoming.end = 11;
+        assert_eq!(apply_heartbeat(&mut current, incoming), Err("range-mismatch"));
     }
     #[test]
     fn heartbeat_is_idempotent() {
