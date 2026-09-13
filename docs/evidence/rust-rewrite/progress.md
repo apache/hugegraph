@@ -533,3 +533,6 @@ next_action: add node/core BatchPut response differential assertions and continu
 
 2026-09-14: Added node/core BatchPut response differential assertions against independent stores; node tests passed (6). Evidence `store-node-core-batch-differential-20260914.log`.
 next_action: continue production command coverage and implement the next uncovered store contract.
+
+2026-09-14: Added online-gated node rollback command with lifecycle rejection and removal verification; node tests passed (7). Evidence `store-node-rollback-20260914.log`.
+next_action: continue production command coverage and implement the next uncovered store contract.

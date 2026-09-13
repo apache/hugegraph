@@ -1,0 +1,3 @@
+command: cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node
+commit: fa939e7a3
+result: PASS (7 tests; online-gated rollback removes persisted value)
