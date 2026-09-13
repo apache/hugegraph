@@ -227,6 +227,10 @@ impl DurableStore {
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.inner.get(key)
     }
+    pub fn clear(&mut self) -> std::io::Result<()> {
+        self.inner = InMemoryStore::default();
+        self.persist()
+    }
     pub fn entries(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         self.inner
             .0

@@ -21,6 +21,7 @@ pub enum NodeState {
 pub enum NodeCommand {
     Start,
     Stop,
+    CleanData,
 }
 
 impl StoreNode {
@@ -99,6 +100,9 @@ impl StoreNode {
     }
 
     pub fn execute(&self, command: NodeCommand) -> Result<NodeState, &'static str> {
+        if command == NodeCommand::CleanData {
+            return Err("use clean_data for data command");
+        }
         let next = match (self.state(), command) {
             (NodeState::Starting, NodeCommand::Start)
             | (NodeState::Stopped, NodeCommand::Start) => NodeState::Online,
@@ -116,6 +120,19 @@ impl StoreNode {
 
     pub fn stop(&self) -> Result<(), &'static str> {
         self.execute(NodeCommand::Stop).map(|_| ())
+    }
+
+    pub fn clean_data(&self) -> Result<(), String> {
+        if !self.can_accept_requests() {
+            return Err("node is not online".into());
+        }
+        let mut store = self
+            .session
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| "backend lock poisoned".to_string())?;
+        store.clear().map(|_| ()).map_err(|e| e.to_string())
     }
 
     pub fn health_service(&self) -> HealthyService {
