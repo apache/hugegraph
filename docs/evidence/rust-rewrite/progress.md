@@ -401,3 +401,6 @@ next_action: determine production status of HgStoreStream and either add its gen
 
 2026-09-14: Confirmed HgStoreStream is under `src/main/dev/...` and absent from the production proto inventory documented in `hugegraph-store/AGENTS.md`, which lists only main proto contracts. It is therefore excluded from production Rust rewrite scope with source-backed evidence. Evidence `rpc-inventory-exclusion-20260914.log`.
 next_action: audit production data-plane modules and identify the next uncovered behavior contract.
+
+2026-09-14: Production module inventory found 362 Java source files across hg-store-core/node/rocksdb/client/common/cli, while Rust rewrite currently contains only store-core and store-transport crates. Full module parity is therefore incomplete. Evidence `production-module-inventory-20260914.log`.
+next_action: scaffold Rust store-node module boundaries and port the first production command/state contract from hg-store-core.
