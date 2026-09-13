@@ -353,3 +353,6 @@ next_action: add live invalid batch_size and property-count rejection tests, the
 
 2026-09-14: Live tonic scan test asserts batch_size above 1,000,000 is rejected; workspace passed (61 tests). Evidence `tonic-live-batch-limit-20260914.log`.
 next_action: add live excessive properties rejection and complete request resource audit.
+
+2026-09-14: Live tonic scan test asserts property lists above 100,000 are rejected as resource exhaustion; workspace passed (62 tests). Evidence `tonic-live-properties-limit-20260914.log`.
+next_action: complete request-field resource audit and begin broader contract mutation testing.
