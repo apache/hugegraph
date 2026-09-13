@@ -44,3 +44,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Oracle regression including duplicate-id rejection passed; evidence raft-linearizability-oracle-20260913-regression.log.
 
 2026-09-13 Partition POC current commit rerun passed; evidence partition-poc-verify-current.log.
+
+2026-09-13 Maven/RAT rerun after Python license fixes passed; evidence maven-validate-rat-fixed.log.
