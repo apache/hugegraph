@@ -206,3 +206,6 @@ next_action: execute independent oracle scenarios over transaction, rollback, an
 
 2026-09-14: Added deterministic independent reference-model oracle covering put/get/rollback and serialized state equivalence; workspace passed (36 tests). Evidence `independent-oracle-20260914.log`.
 next_action: broaden oracle traces to transaction commit/rollback and durable restart boundaries.
+
+2026-09-14: Added independent transaction oracle covering staged invisibility and post-commit model equivalence; workspace passed (37 tests). Evidence `transaction-oracle-20260914.log`.
+next_action: extend oracle across durable restart and rollback recovery traces.
