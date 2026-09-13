@@ -315,8 +315,29 @@ mod tests {
             hugegraph_store_core::StoreResponse::Value(_)
         ));
         assert_eq!(node.get(&[0]).unwrap(), Some(vec![0x5a]));
+        let core_batch_path = path.with_extension("core-batch");
+        let mut core_batch = hugegraph_store_core::StoreService::new(
+            hugegraph_store_core::DurableStore::open(&core_batch_path).unwrap(),
+        );
+        let differential_batch = vec![(vec![0], vec![0xff]), (vec![16], vec![0x16])];
+        assert!(matches!(
+            core_batch
+                .call(hugegraph_store_core::StoreRequest::BatchPut {
+                    entries: differential_batch.clone(),
+                })
+                .unwrap(),
+            hugegraph_store_core::StoreResponse::Ack
+        ));
+        node.put_batch(differential_batch).unwrap();
+        assert_eq!(node.get(&[16]).unwrap(), Some(vec![0x16]));
+        assert!(
+            matches!(core_batch.call(hugegraph_store_core::StoreRequest::Get { key: vec![0] }).unwrap(), hugegraph_store_core::StoreResponse::Value(Some(v)) if v == vec![0xff])
+        );
+        assert!(
+            matches!(core_batch.call(hugegraph_store_core::StoreRequest::Get { key: vec![16] }).unwrap(), hugegraph_store_core::StoreResponse::Value(Some(v)) if v == vec![0x16])
+        );
+        let _ = std::fs::remove_file(core_batch_path);
         let _ = std::fs::remove_file(core_path);
-        node.put_batch([(vec![0], vec![0xff])]).unwrap();
         assert_eq!(node.get(&[0]).unwrap(), Some(vec![0xff]));
         let frame = node.graph.scan_range(&[0], &[16], false).unwrap();
         assert_eq!(frame.vertex.len(), 16);
