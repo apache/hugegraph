@@ -305,3 +305,6 @@ next_action: add live encoded edge scan stream and implement limit/error semanti
 
 2026-09-14: Live tonic client now sends edge ScanPartition type and receives edge frame with vertex set empty; workspace passed (52 tests). Evidence `tonic-live-edge-e2e-20260914.log`.
 next_action: implement scan limit semantics and malformed request errors over live stream.
+
+2026-09-14: Added scan limit semantics and wired request limit into GraphService streaming; workspace passed (53 tests). Evidence `scan-limit-20260914.log`.
+next_action: add malformed ScanPartition request error tests and enforce request validation over live stream.
