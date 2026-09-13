@@ -299,3 +299,6 @@ next_action: add live edge scan selection and error/limit semantics, then contin
 
 2026-09-14: GraphService now selects vertex versus edge frames from ScanPartition scan_type; workspace passed (51 tests). Evidence `scan-type-selection-20260914.log`.
 next_action: add live encoded edge scan request and assert edge frames, then implement limit/error semantics.
+
+2026-09-14: Added encoded edge ScanPartition request routing assertion; workspace passed (52 tests). Evidence `edge-scan-routing-20260914.log`.
+next_action: add live encoded edge scan stream and implement limit/error semantics.
