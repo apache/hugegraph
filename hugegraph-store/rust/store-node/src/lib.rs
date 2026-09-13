@@ -242,6 +242,11 @@ mod tests {
     #[tokio::test]
     async fn live_unified_server_answers_health() {
         let path = std::env::temp_dir().join(format!("hg-node-live-{}.img", std::process::id()));
+        {
+            let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.commit_put(b"live-key".to_vec(), b"live-value".to_vec())
+                .unwrap();
+        }
         let node = StoreNode::open(&path).unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -301,7 +306,7 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        assert!(frames.message().await.unwrap().is_some());
+        assert_eq!(frames.message().await.unwrap().unwrap().vertex.len(), 1);
         let mut session = hugegraph_store_transport::generated::hg_store_session_client::HgStoreSessionClient::connect(format!("http://{}", addr)).await.unwrap();
         let feedback = session
             .get2(tonic::Request::new(
