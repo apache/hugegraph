@@ -1182,3 +1182,12 @@ mod mixed_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+pub fn validate_table_request(bytes: &[u8]) -> Result<String, String> {
+    let r: generated::TableReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    if r.table_name.is_empty() {
+        Err("table name required".into())
+    } else {
+        Ok(r.table_name)
+    }
+}
