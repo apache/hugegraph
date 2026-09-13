@@ -36,3 +36,4 @@
 | `cargo test --manifest-path tools/rust-partition-poc/Cargo.toml` | `4d514ac05` | PASS (19 tests; mutation counterexamples detected) | `mutation-validation-20260913.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml` | `working-tree` | PASS (Rust store boundary workspace, 1 test) | `store-rust-core-20260913.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml` (WAL/snapshot slice) | `working-tree` | PASS (2 tests) | `store-rust-wal-snapshot-20260913.log` |
+| `bash tools/raft-linearizability/run-tests.sh` | `7e2a9df71` | PASS (differential replay/checker suite) | `differential-replay-20260913.log` |
