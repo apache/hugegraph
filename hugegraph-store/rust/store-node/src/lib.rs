@@ -7,6 +7,7 @@ pub struct StoreNode {
     pub graph: GraphService,
     pub session: SessionService,
     state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    state_path: std::path::PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,16 +26,25 @@ pub enum NodeCommand {
 impl StoreNode {
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
+        let state_path = path.with_extension("node-state");
+        let persisted = std::fs::read(&state_path)
+            .ok()
+            .and_then(|v| v.first().copied())
+            .unwrap_or(0);
         Ok(Self {
             graph: GraphService::open(path.clone())?,
             session: SessionService::open(path)?,
-            state: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(NodeState::Starting as u8)),
+            state: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(persisted)),
+            state_path,
         })
     }
 
     pub fn set_state(&self, state: NodeState) {
         self.state
             .store(state as u8, std::sync::atomic::Ordering::Release);
+        let tmp = self.state_path.with_extension("node-state.tmp");
+        let _ = std::fs::write(&tmp, [state as u8]);
+        let _ = std::fs::rename(tmp, &self.state_path);
     }
 
     pub fn state(&self) -> NodeState {
@@ -79,6 +89,10 @@ mod tests {
         assert_eq!(node.state(), NodeState::Online);
         assert_eq!(node.execute(NodeCommand::Stop).unwrap(), NodeState::Stopped);
         assert_eq!(node.state(), NodeState::Stopped);
-        let _ = std::fs::remove_file(path);
+        drop(node);
+        let reopened = StoreNode::open(&path).unwrap();
+        assert_eq!(reopened.state(), NodeState::Stopped);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
     }
 }
