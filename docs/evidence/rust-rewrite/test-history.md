@@ -21,3 +21,4 @@
 | `dpkg-deb -x openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb /tmp/hugegraph-java17-20260913-1789304968` | `working-tree` | FAIL (incomplete archive; unexpected EOF, no runtime extracted) | `java17-runtime-extract-20260913.log` |
 | `timeout 90s apt-get download openjdk-17-jdk-headless` | `working-tree` | INCOMPLETE (network transfer stalled; package remained truncated at 10 MB; no runtime extracted) | `java17-apt-download-20260913-rerun2.log` |
 | `find / -type f -name java -perm -111 ...; dpkg-deb --contents openjdk-17-jdk-headless_17.0.20+8-1~24.04_amd64.deb` | `working-tree` | FAIL (only Java 21/JBR candidates; partial package cannot be listed) | `java17-runtime-source-scan-20260913.log` |
+| `for j in /home/zy/.cache/JetBrains/RemoteDev/dist/*/jbr/bin/java; do "$j" -version; done` | `working-tree` | PASS (all JBR candidates are Java 21.0.7; no compatible runtime) | `java17-jbr-version-20260913.log` |
