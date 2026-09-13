@@ -38,9 +38,11 @@ impl StoreNode {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => NodeState::Starting as u8,
             Err(e) => return Err(e),
         };
+        let session = SessionService::open(path)?;
+        let graph = GraphService::from_backend(session.shared.backend());
         Ok(Self {
-            graph: GraphService::open(path.clone())?,
-            session: SessionService::open(path)?,
+            graph,
+            session,
             state: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(persisted)),
             state_path,
         })

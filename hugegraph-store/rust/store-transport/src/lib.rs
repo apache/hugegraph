@@ -606,6 +606,11 @@ pub struct GraphService {
     store: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
 }
 impl GraphService {
+    pub fn from_backend(
+        store: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+    ) -> Self {
+        Self { store }
+    }
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         Ok(Self {
             store: std::sync::Arc::new(std::sync::Mutex::new(
@@ -1267,6 +1272,16 @@ pub struct SessionService {
     pub transactions: std::sync::Arc<std::sync::Mutex<SessionTransactions>>,
 }
 impl SessionService {
+    pub fn from_backend(
+        backend: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+    ) -> Self {
+        Self {
+            shared: SharedSession { backend },
+            transactions: std::sync::Arc::new(
+                std::sync::Mutex::new(SessionTransactions::default()),
+            ),
+        }
+    }
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         Ok(Self {
             shared: SharedSession::open(path)?,
