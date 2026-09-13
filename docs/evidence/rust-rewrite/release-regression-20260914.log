@@ -1,0 +1,3 @@
+command: cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --release
+result: PASS (64 unit tests: core 16, node 8, transport 40)
+warning: generated tonic queryStream naming warning remains

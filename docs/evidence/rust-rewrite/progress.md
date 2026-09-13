@@ -545,3 +545,6 @@ next_action: continue production command coverage and implement the next uncover
 
 2026-09-14: Production surface audit counted 477 Java production sources across seven store modules versus three small Rust crates; completion remains unproven and substantial contracts remain. Evidence `production-module-audit-20260914.log`.
 next_action: continue production command coverage and implement the next uncovered store contract.
+
+2026-09-14: Release-mode workspace regression passed all 64 tests after scan/rollback changes; generated tonic naming warning remains documented. Evidence `release-regression-20260914.log`.
+next_action: continue production command coverage and implement the next uncovered store contract.
