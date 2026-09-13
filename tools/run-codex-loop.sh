@@ -19,9 +19,10 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 sentinel="${CODEX_LOOP_SENTINEL:-/tmp/hugegraph-rust-rewrite-go}"
-prompt="继续原目标。先读取 git status、最近提交和 docs/evidence 中的进度记录；不要覆盖或撤销已有未提交修改。不要询问是否继续，不要只汇报状态。只要还有可执行工作，就立刻修改、测试、归档证据、提交或推送。不要调用 blocked。只有本地契约覆盖、核心场景覆盖、独立 Oracle 和变异验证全部完成后，创建 ${sentinel} 并停止。"
+prompt="继续原目标。先读取 ${progress_file}、git status、最近提交和 docs/evidence 中的进度记录；本轮只处理 progress.md 指定的 current_stage/next_action，不重复已完成阶段；不要覆盖或撤销已有未提交修改。不要询问是否继续，不要只汇报状态。只要还有可执行工作，就立刻修改、测试、归档证据、提交或推送。不要调用 blocked。只有本地契约覆盖、核心场景覆盖、独立 Oracle 和变异验证全部完成后，创建 ${sentinel} 并停止。"
 lock_file="${CODEX_LOOP_LOCK:-/tmp/hugegraph-rust-rewrite-codex.lock}"
 log_file="${CODEX_LOOP_LOG:-${repo_dir}/docs/evidence/rust-rewrite/codex-loop.log}"
+progress_file="${CODEX_LOOP_PROGRESS_FILE:-${repo_dir}/docs/evidence/rust-rewrite/progress.md}"
 max_iterations="${CODEX_LOOP_MAX_ITERATIONS:-20}"
 max_failures="${CODEX_LOOP_MAX_FAILURES:-3}"
 pause_file="${CODEX_LOOP_PAUSE_FILE:-/tmp/hugegraph-rust-rewrite-codex.pause}"
