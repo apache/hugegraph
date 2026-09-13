@@ -209,3 +209,6 @@ next_action: broaden oracle traces to transaction commit/rollback and durable re
 
 2026-09-14: Added independent transaction oracle covering staged invisibility and post-commit model equivalence; workspace passed (37 tests). Evidence `transaction-oracle-20260914.log`.
 next_action: extend oracle across durable restart and rollback recovery traces.
+
+2026-09-14: Added independent restart oracle proving committed data survives while rolled-back keys remain absent after reopen; workspace passed (38 tests). Evidence `restart-oracle-20260914.log`.
+next_action: map remaining production RPC/state modules and build an end-to-end oracle harness across transport and storage.
