@@ -335,3 +335,6 @@ next_action: route live server through same validator and add malformed/oversize
 
 2026-09-14: Added 1 MiB bound for live ScanPartition position payloads with resource_exhausted handling; workspace passed (56 tests). Evidence `scan-position-limit-20260914.log`.
 next_action: add live oversized position rejection assertion and audit remaining resource limits.
+
+2026-09-14: Live tonic scan test asserts oversized position payloads are rejected with resource exhaustion; workspace passed (57 tests). Evidence `tonic-live-position-limit-20260914.log`.
+next_action: audit remaining request fields and add bounded malformed payload coverage.
