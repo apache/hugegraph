@@ -145,4 +145,29 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
     }
+
+    #[test]
+    fn concurrent_puts_preserve_data_and_online_state() {
+        let path =
+            std::env::temp_dir().join(format!("hg-node-concurrent-{}.img", std::process::id()));
+        let node = std::sync::Arc::new(StoreNode::open(&path).unwrap());
+        node.execute(NodeCommand::Start).unwrap();
+        let mut workers = Vec::new();
+        for i in 0..8u8 {
+            let n = node.clone();
+            workers.push(std::thread::spawn(move || {
+                n.put(vec![i], vec![i + 1]).unwrap();
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert!(node.can_accept_requests());
+        for i in 0..8u8 {
+            assert_eq!(node.get(&[i]).unwrap(), Some(vec![i + 1]));
+        }
+        node.execute(NodeCommand::Stop).unwrap();
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
 }
