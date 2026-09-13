@@ -1,0 +1,3 @@
+[workspace]
+members = ["store-core"]
+resolver = "2"

@@ -7,6 +7,10 @@ tests: "matrix schema reviewed; no execution claimed"
 evidence: docs/evidence/rust-rewrite/e2e-contract-matrix-20260913.md
 next_action: 为 SNAP-001 增加真实快照 round-trip；随后固化 API-GREMLIN-001 的可执行入口。
 
+2026-09-13: Contract inventory prerequisites complete: 6/6 contracts, independent oracles, core scenarios, and mutation validation are archived. The work now advances to the production Rust rewrite stage.
+current_stage: rust_rewrite
+next_action: 以“hugegraph-store Rust 重写闭环完成”为最终目标推进；先建立生产 Rust workspace 与 Java 可切换边界，再按 Store/Raft/WAL/snapshot/backend 切片实现。契约、独立 Oracle、差分回放、故障恢复、性能/资源和审计均作为质量门槛随切片完成；全部闭环通过前保持 NO-GO。
+
 2026-09-13: SNAP-001 deterministic snapshot export/import round-trip passed; evidence `snapshot-roundtrip-20260913.log`. State and SHA-256 framing were restored exactly.
 next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重跑 API-GREMLIN-001；当前已完成入口固化与失败根因证据归档。
 
@@ -63,3 +67,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Archived independent RAFT-001 and SNAP-001 oracles; contract matrix now 6/6 complete. Next action: run mutation validation and archive defect-detection evidence.
 
 2026-09-13: Mutation validation passed: 19 Rust partition/recovery/cache tests, including negative counterexamples, detected injected defects. All contract, core, independent Oracle, and mutation gates are complete.
+
+2026-09-13: Created initial independent hugegraph-store Rust workspace with selectable StoreBackend boundary and in-memory commit/rollback slice; cargo test passed. Next action: add WAL/snapshot and Java fallback adapters with differential evidence.
