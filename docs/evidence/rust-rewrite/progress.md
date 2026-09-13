@@ -413,3 +413,6 @@ next_action: port node command dispatch/state persistence behavior from hg-store
 
 2026-09-14: Ported node Start/Stop command dispatch with explicit state-transition validation; node integration test exercises command path and rejects invalid transitions. Workspace passed (55 tests). Evidence `store-node-command-20260914.log`.
 next_action: persist node lifecycle state across restart and add recovery evidence.
+
+2026-09-14: Persisted store-node lifecycle state in an atomic sidecar and verified Stopped survives node reopen; node test passed. Evidence `store-node-recovery-20260914.log`.
+next_action: port node command dispatch/state persistence behavior beyond lifecycle and add failure/recovery scenarios.

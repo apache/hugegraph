@@ -1,0 +1,1 @@
+PASS: node Stopped state persisted in sidecar and recovered after reopen.
