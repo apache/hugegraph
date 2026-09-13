@@ -332,3 +332,6 @@ next_action: route validate_scan_payload through dispatch and live server, then 
 
 2026-09-14: Routed GraphStore.ScanPartition dispatch validation through bounded oneof-aware payload decoder; workspace passed (56 tests). Evidence `dispatch-payload-validation-20260914.log`.
 next_action: route live server through same validator and add malformed/oversized payload integration tests.
+
+2026-09-14: Added 1 MiB bound for live ScanPartition position payloads with resource_exhausted handling; workspace passed (56 tests). Evidence `scan-position-limit-20260914.log`.
+next_action: add live oversized position rejection assertion and audit remaining resource limits.
