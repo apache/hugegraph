@@ -18,12 +18,14 @@
 package org.apache.hugegraph.store.core.snapshot;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.lang.reflect.Method;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
@@ -207,5 +209,17 @@ public class SnapshotHandlerTest extends StoreEngineTestBase {
         };
         hgSnapshotHandlerUnderTest.onSnapshotLoad(reader, 0L);
         assertEquals(true, new File(snapshotDir, "should_not_load").exists());
+    }
+
+    @Test
+    public void testChecksumChangesWhenSnapshotFileIsModified() throws Exception {
+        File file = new File("/tmp/snapshot/checksum.sst");
+        FileUtils.writeByteArrayToFile(file, "before".getBytes("UTF-8"));
+        Method method = SnapshotHandler.class.getDeclaredMethod("calculateChecksum", String.class);
+        method.setAccessible(true);
+        String before = (String) method.invoke(hgSnapshotHandlerUnderTest, file.getPath());
+        FileUtils.writeByteArrayToFile(file, "after".getBytes("UTF-8"));
+        String after = (String) method.invoke(hgSnapshotHandlerUnderTest, file.getPath());
+        assertNotEquals(before, after);
     }
 }
