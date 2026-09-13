@@ -509,3 +509,6 @@ next_action: add clean-data command differential coverage and continue productio
 
 2026-09-14: Added DurableStore clear differential Oracle test, verifying empty entries both before and after restart; workspace passed (65 tests). Evidence `durable-clear-oracle-20260914.log`.
 next_action: add clean-data command differential coverage and continue production command implementation.
+
+2026-09-14: Added node BatchPut command helper and switched the 16-key differential test to batch execution; node tests passed (5). Evidence `store-node-batchput-oracle-20260914.log`.
+next_action: add batch-put failure atomicity and command differential coverage.
