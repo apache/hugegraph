@@ -248,3 +248,6 @@ next_action: implement GraphService request filtering and integrate vertex/edge 
 
 2026-09-14: Added half-open byte range filtering for persisted scan entries with boundary assertion; workspace passed (44 tests). Evidence `scan-filter-20260914.log`.
 next_action: wire request range decoding into GraphService streaming and validate filtered vertex/edge frames end to end.
+
+2026-09-14: Added GraphService scan_range API applying half-open request ranges before vertex/edge frame mapping; transport check passed. Evidence `graph-range-api-20260914.log`.
+next_action: decode ScanPartition request envelopes into scan_range and run full streaming E2E tests.
