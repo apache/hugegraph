@@ -59,3 +59,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Partition POC mutation rerun after adding boundary and heartbeat mismatch cases: 27/30 mutants caught, 2 unviable, only non-contract main() mutant missed; evidence cargo-mutants-partition-final-20260913.log.
 2026-09-13 Independent linearizability Oracle and HTTP capture regression rerun passed; evidence linear-oracle-rerun-20260913.log.
 2026-09-13 cargo-mutants on Partition POC: 30 mutants, 27 caught, 3 missed (90% overall; two missed validate mutations require stronger tests, main() mutant is non-contract code); evidence cargo-mutants-partition-20260913.log.
+
+2026-09-13 latest rerun: standalone Raft Oracle tests and Partition POC fmt/clippy/all-features tests passed; evidence `docs/evidence/rust-rewrite/raft-oracle-rerun-20260913-latest.log` and `partition-gate-rerun-20260913-latest.log`, commit `dcf5a19b0`.
