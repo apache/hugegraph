@@ -521,3 +521,6 @@ next_action: add batch-put command differential coverage and continue production
 
 2026-09-14: Extended BatchPut differential coverage to duplicate-key overwrite semantics; node tests passed (6). Evidence `store-node-batch-overwrite-20260914.log`.
 next_action: add batch-put command differential coverage and continue production command implementation.
+
+2026-09-14: Full workspace regression after BatchPut atomicity/overwrite changes passed (66 tests: core 15, node 6, transport 40). Evidence `workspace-batchput-regression-20260914.log`.
+next_action: add batch-put command differential coverage and continue production command implementation.
