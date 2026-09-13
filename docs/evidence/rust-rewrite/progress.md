@@ -45,3 +45,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Pinned API-REST-001 to `VertexApiTest` and executed it under Java 11 Docker. It failed at initialization because no API server was listening (`Connection refused`). Evidence `api-rest-001-vertex-java11-20260913.log`. Next action: start the test server and rerun this entry.
 
 2026-09-13: Started the repository three-node server smoke entry. Initial REST schema and vertex writes returned HTTP 202/201, but recovery timed out with connection resets before completion. Evidence `api-rest-001-server-start-20260913.log`. Next action remains rerun the API REST entry against a stable server.
+
+2026-09-13: API-REST-001 `VertexApiTest` passed with Java 11 Docker host networking: 4 tests, 0 failures, BUILD SUCCESS, exit 0. Evidence `api-rest-001-vertex-java11-hostnet-20260913.log`. Next action: archive its independent schema/error Oracle and then continue the matrix.
