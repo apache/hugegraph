@@ -212,3 +212,6 @@ next_action: extend oracle across durable restart and rollback recovery traces.
 
 2026-09-14: Added independent restart oracle proving committed data survives while rolled-back keys remain absent after reopen; workspace passed (38 tests). Evidence `restart-oracle-20260914.log`.
 next_action: map remaining production RPC/state modules and build an end-to-end oracle harness across transport and storage.
+
+2026-09-14: Implemented concrete HgStoreState tonic service boundary with streaming and state/peer handlers; transport crate check passed. Evidence `state-service-boundary-20260914.log`.
+next_action: implement GraphStore and remaining generated service traits, then add cross-layer oracle harness.
