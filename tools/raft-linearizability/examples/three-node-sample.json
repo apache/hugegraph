@@ -1,0 +1,12 @@
+{
+  "metadata": {
+    "commit": "deadbeef",
+    "config": "three-node-local",
+    "seed": 42
+  },
+  "history": [
+    {"id": "w1", "op": "write", "value": 7, "start": 0, "end": 4},
+    {"id": "r1", "op": "read", "value": 7, "start": 2, "end": 5}
+  ],
+  "checker": {"linearizable": true, "detail": ["w1", "r1"]}
+}

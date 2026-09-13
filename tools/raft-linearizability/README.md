@@ -15,3 +15,9 @@ python3 tools/raft-linearizability/checker.py history.json
 
 Exit status is zero when linearizable and one otherwise. The JSON output
 contains a witness operation order or an explanation.
+
+For collected three-node histories, keep a stable report envelope containing
+`metadata.commit`, `metadata.config`, `metadata.seed`, the operation array in
+`history`, and the checker output in `checker`. A ready-to-copy example is
+`examples/three-node-sample.json`; the checker itself remains independent of
+any service or cluster.

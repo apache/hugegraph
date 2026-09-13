@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("checker", Path(__file__).with_name("checker.py"))
@@ -34,6 +35,15 @@ def test_overlapping_writes_and_reads_are_not_linearizable():
          {"id": 3, "op": "read", "value": 1, "start": 4, "end": 5},
          {"id": 4, "op": "read", "value": 2, "start": 6, "end": 7}]
     assert not checker.check(h)[0]
+
+
+def test_three_node_report_example_has_metadata_and_result():
+    path = Path(__file__).parent / "examples" / "three-node-sample.json"
+    report = json.loads(path.read_text())
+    assert {"commit", "config", "seed"} <= report["metadata"].keys()
+    ok, detail = checker.check(report["history"])
+    assert report["checker"]["linearizable"] == ok
+    assert report["checker"]["detail"] == list(detail)
 
 
 def test_invalid_operation_is_rejected():
