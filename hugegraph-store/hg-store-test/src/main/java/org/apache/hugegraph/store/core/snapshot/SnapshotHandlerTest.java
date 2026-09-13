@@ -28,7 +28,7 @@ import java.util.Set;
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
-import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
+import org.apache.hugegraph.store.snapshot.SnapshotHandler;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -38,13 +38,13 @@ import com.alipay.sofa.jraft.storage.snapshot.SnapshotWriter;
 import com.google.protobuf.Message;
 
 
-public class HgSnapshotHandlerTest extends StoreEngineTestBase {
+public class SnapshotHandlerTest extends StoreEngineTestBase {
 
-    private static HgSnapshotHandler hgSnapshotHandlerUnderTest;
+    private static SnapshotHandler hgSnapshotHandlerUnderTest;
 
     @Before
     public void setUp() throws IOException {
-        hgSnapshotHandlerUnderTest = new HgSnapshotHandler(createPartitionEngine(0));
+        hgSnapshotHandlerUnderTest = new SnapshotHandler(createPartitionEngine(0));
         FileUtils.forceMkdir(new File("/tmp/snapshot"));
         FileUtils.forceMkdir(new File("/tmp/snapshot/data"));
     }
@@ -170,7 +170,7 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
 
     @Test
     public void testTrimStartPath() {
-        assertEquals("str", HgSnapshotHandler.trimStartPath("str", "prefix"));
+        assertEquals("str", SnapshotHandler.trimStartPath("str", "prefix"));
     }
 
     @Test
@@ -180,7 +180,7 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
         final File rootDir = new File("filename.txt");
 
         // Run the test
-        HgSnapshotHandler.findFileList(dir, rootDir, List.of("value"));
+        SnapshotHandler.findFileList(dir, rootDir, List.of("value"));
 
         // Verify the results
     }
