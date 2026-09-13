@@ -1,5 +1,6 @@
 //! Transport adapter boundary for hg-store-grpc.
 use hugegraph_store_core::{StoreRequest, StoreResponse, StoreService};
+use tokio_stream::StreamExt;
 pub struct RpcServer {
     service: StoreService,
 }
@@ -724,13 +725,21 @@ impl generated::graph_store_server::GraphStore for GraphService {
     >;
     async fn scan_partition(
         &self,
-        _: tonic::Request<tonic::Streaming<generated::ScanPartitionRequest>>,
+        request: tonic::Request<tonic::Streaming<generated::ScanPartitionRequest>>,
     ) -> Result<tonic::Response<Self::ScanPartitionStream>, tonic::Status> {
-        let frame = self
-            .store
-            .lock()
-            .map(|s| entries_to_scan_frame(&s.entries()))
-            .unwrap_or_else(|_| empty_scan_frame());
+        let mut input = request.into_inner();
+        let frame = if let Some(r) = input
+            .next()
+            .await
+            .transpose()
+            .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?
+        {
+            let (start, end) = scan_request_range(&r).unwrap_or_default();
+            self.scan_range(&start, &end, false)
+                .map_err(tonic::Status::internal)?
+        } else {
+            empty_scan_frame()
+        };
         Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(
             frame,
         )]))))
