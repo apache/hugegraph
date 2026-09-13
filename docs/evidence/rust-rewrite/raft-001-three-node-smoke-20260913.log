@@ -69,3 +69,10 @@ curl: (28) Connection timed out after 10000 milliseconds
  Container hg-store0  Started
 curl: (56) Recv failure: Connection reset by peer
 curl: (56) Recv failure: Connection reset by peer
+ Container hg-server0  Restarting
+ Container hg-server2  Restarting
+ Container hg-server1  Restarting
+ Container hg-server0  Started
+ Container hg-server2  Started
+ Container hg-server1  Started
+tools/rust-rewrite-cluster/smoke.sh: line 75: r: command not found

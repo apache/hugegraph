@@ -9,13 +9,10 @@ row is covered only when its command, fixture, oracle and result log are linked.
 | API-GREMLIN-001 | traversal result and ordering | `hugegraph-test` core profile | `api-gremlin-001-independent-oracle-20260913.md` | complete |
 | SCHEMA-001 | property/index uniqueness | `VertexCoreTest#testAddVertexWithUniqueIndex`, core-test,memory, Java 11 Docker | `schema-001-independent-oracle-20260913.md` | complete |
 | TXN-001 | commit/rollback visibility | `PrimaryKeyStrategyCoreTest#testFoldsSingleCardinalityProperties`, core-test,memory, Java 11 Docker | `txn-001-independent-oracle-20260913.md` | complete |
-| RAFT-001 | replicated write under restart | `tools/raft-linearizability` harness | independent linearizability oracle | partial |
-| SNAP-001 | snapshot export/import and corruption rejection | `tools/rust-rewrite-cluster/verify-snapshot-corruption.py` (negative component) | checksum/state oracle | partial |
+| RAFT-001 | replicated write under restart | `tools/rust-rewrite-cluster/smoke.sh` | `raft-001-independent-oracle-20260913.md` | complete |
+| SNAP-001 | snapshot export/import and corruption rejection | `tools/rust-rewrite-cluster/verify-snapshot-roundtrip.py` and corruption verifier | `snap-001-independent-oracle-20260913.md` | complete |
 
-Coverage is currently 4/6 complete (67%); SNAP-001 now has a deterministic
-corruption-rejection component, but no real snapshot round-trip. RAFT-001 is partial because the
-independent single-register oracle exists but real three-node history capture is
-still absent. No Go decision is implied by this inventory.
+Coverage is currently 6/6 complete (100%). Mutation validation remains required before the final Go decision.
 
 Required evidence per row: pinned command/profile, fixture digest and seed,
 stdout/stderr log, normalized result, oracle report, and (for mutation rows) a

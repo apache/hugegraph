@@ -59,3 +59,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: RAFT-001 three-node smoke retried with the repository cluster; initial startup and mutation progressed, but recovery after `store0` restart ended with connection resets. Evidence `raft-001-three-node-smoke-20260913.log`. Independent three-node Oracle remains pending; next action is diagnose cluster recovery before another changed-input run.
 
 2026-09-13: RAFT-001 passed after adding readiness polling for all restarted API servers before recovery assertion. Evidence `raft-001-three-node-smoke-20260913-rerun.log`. Next action: archive independent RAFT Oracle and continue mutation validation.
+
+2026-09-13: Archived independent RAFT-001 and SNAP-001 oracles; contract matrix now 6/6 complete. Next action: run mutation validation and archive defect-detection evidence.
