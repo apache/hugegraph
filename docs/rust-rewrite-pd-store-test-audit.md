@@ -53,3 +53,5 @@ Rust 迁移单元只有在：相关测试方法已映射契约编号；Oracle �
 Snapshot 本地保存标记测试（2026-09-13）：新增 `SnapshotHandlerTest.testSnapshotLoadSkipsLocallySavedSnapshot`，活动 `SnapshotHandler` 测试共 **5/5 通过**（`-Djacoco.skip=true`，因 JaCoCo/JDK class 65 不兼容）。该测试覆盖跳过路径，真实损坏文件和跨进程恢复仍未覆盖。
 
 Store 全量回归（2026-09-13）：活动 SnapshotHandler 测试纳入后，执行完整 `hg-store-test`（`-Djacoco.skip=true`），所有已启用 suite 均通过，`BUILD SUCCESS`；日志：`/tmp/store-regression-final.log`。该回归仍不包含真实跨进程崩溃恢复和损坏快照注入。
+
+Profile 隔离复验（2026-09-13）：尝试将活动 SnapshotHandlerTest 加入 `store-core-test` 后，Snapshot 5/5 通过，但随后 BatchGraphIsolationTest 因 JRaft `TableFormatConfig` 静态重复注册失败。已撤销该 profile 合并，保留独立 Snapshot 执行入口；Store 测试 profile 需要 fork/JVM 隔离设计后才能宣称 CI 覆盖闭环。
