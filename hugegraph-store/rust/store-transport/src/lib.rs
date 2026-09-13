@@ -1071,7 +1071,7 @@ impl generated::graph_store_server::GraphStore for GraphService {
                 _ => 0,
             };
             self.scan_range_limited(&start, &end, scan_request_is_edge(&r), limit)
-                .map_err(tonic::Status::internal)?
+                .map_err(|e| tonic::Status::new(classify_failure(&e), e))?
         } else {
             empty_scan_frame()
         };
