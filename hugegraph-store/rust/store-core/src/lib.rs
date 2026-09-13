@@ -229,6 +229,19 @@ mod durable_tests {
         assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
         let _ = std::fs::remove_file(path);
     }
+
+    #[test]
+    fn restore_image_rejects_truncation_without_mutating_store() {
+        let path = std::env::temp_dir().join(format!("hg-recover-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut s = DurableStore::open(&path).unwrap();
+        s.commit_put(b"safe".to_vec(), b"value".to_vec()).unwrap();
+        let mut image = s.snapshot();
+        image.pop();
+        assert!(s.restore_image(&image).is_err());
+        assert_eq!(s.get(b"safe"), Some(b"value".to_vec()));
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Production-facing request adapter. Transport layers (gRPC/HTTP) can map
