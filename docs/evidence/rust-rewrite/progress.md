@@ -341,3 +341,6 @@ next_action: audit remaining request fields and add bounded malformed payload co
 
 2026-09-14: Added aggregate 1 MiB bound across ScanPartition graph/table/condition filter strings; workspace passed (58 tests). Evidence `scan-filter-resource-20260914.log`.
 next_action: add live oversized filter rejection and audit remaining request fields.
+
+2026-09-14: Live tonic scan test asserts oversized graph_name filter is rejected by resource bound; workspace passed (59 tests). Evidence `tonic-live-filter-limit-20260914.log`.
+next_action: audit remaining request fields (properties, batch size, boundary) and add contract validation.
