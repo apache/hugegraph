@@ -263,6 +263,23 @@ mod tests {
     }
 
     #[test]
+    fn batch_put_failure_preserves_existing_data() {
+        let path =
+            std::env::temp_dir().join(format!("hg-node-batch-fault-{}.img", std::process::id()));
+        let node = StoreNode::open(&path).unwrap();
+        node.start().unwrap();
+        node.put(b"stable".to_vec(), b"value".to_vec()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(node
+            .put_batch([(b"new".to_vec(), b"value".to_vec())])
+            .is_err());
+        assert_eq!(node.get(b"stable").unwrap(), Some(b"value".to_vec()));
+        std::fs::remove_dir(&path).unwrap();
+        let _ = std::fs::remove_file(path.with_extension("node-state"));
+    }
+
+    #[test]
     fn unified_server_lists_all_production_services() {
         assert_eq!(StoreNode::service_names().len(), 5);
         assert!(StoreNode::service_names().contains(&"GraphStore"));
