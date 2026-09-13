@@ -1,0 +1,6 @@
+{"linearizable": true, "detail": ["w", "r"]}
+ok_exit=0
+{"linearizable": false, "detail": "no legal sequential ordering"}
+bad_exit=1
+{"linearizable": false, "detail": "invalid history: history must be a JSON array"}
+invalid_exit=2
