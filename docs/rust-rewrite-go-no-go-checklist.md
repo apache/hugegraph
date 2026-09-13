@@ -2,9 +2,9 @@
 
 本文是从设计阶段进入正式实现阶段的唯一门禁。本轮仅要求本地可复现的端到端集成测试和完备 Oracle；不依赖生产流量、生产数据、外部凭证或社区签核。
 
-本轮验收范围限定为本地固定数据下的数据不回退、重构前后 Rust 契约一致，以及 Java/Rust 本地端到端集成结果一致。生产流量、生产数据、生产性能、外部凭证和社区签核属于后续发布工作，不阻塞本轮。
+本轮验收范围限定为本地固定数据下的数据不回退、重构前后 Rust 契约一致，以及 Java/Rust 本地端到端集成结果一致。生产发布相关条件不属于本轮验收范围。
 
-## 1. 必要条件
+## 1. 本地必要条件
 
 以下任一项未满足，正式重构不得开始：
 
@@ -36,21 +36,21 @@
 
 ## 3. 当前状态
 
-当前已补齐 Partition POC、三节点故障/网络分区恢复、跨服务器可见性、构建/RAT 证据和独立单寄存器线性一致性 Oracle；负向快照/损坏恢复、真实三节点历史线性一致性、变异测试、性能基线及社区签核仍未完成，因此当前结论为 **NO-GO（允许继续做非生产 POC）**。
+当前已补齐 Partition POC、三节点故障/网络分区恢复、跨服务器可见性、构建/RAT 证据和独立单寄存器线性一致性 Oracle；负向快照/损坏恢复、真实三节点历史线性一致性、变异测试、本地端到端集成和 Oracle 仍未完成，因此当前结论为 **NO-GO（允许继续本地重构）**。
 
-## 4. 正式开工顺序
+## 4. 本地重构顺序
 
 ```text
-社区 review 文档
+独立子 agent review 文档
 → 修订并签核 Go/No-Go 清单
 → 完成一个边界 POC
 → 执行契约/集成/故障/负向验证
 → 记录报告并确认 GO
-→ 进入该边界的正式 Rust 实现
+→ 进入该边界的 Rust 实现
 → 每个小步重复同一门禁
 ```
 
-“正式开工”只表示一个已批准边界可以实现，不表示整个 HugeGraph 可以跳过后续边界门禁。
+每个边界都必须重复本地契约、集成和 Oracle 验证。
 
 ## 5. 证据索引与责任闭环
 
@@ -65,6 +65,6 @@
 | Oracle 与差分策略 | `rust-rewrite-oracle-finalization.md`、`tools/raft-linearizability/`、`evidence/rust-rewrite/raft-linearizability-oracle-20260913-concurrent.log` | 已有独立单寄存器顺序/重叠历史 Oracle 和输入校验回归；尚未接入真实三节点历史 | 测试负责人；三节点历史采集、差分报告 |
 | POC 范围与退出条件 | `rust-rewrite-partition-pilot.md`、`evidence/rust-rewrite/partition-poc-verify.log` | POC 已执行通过 | 测试负责人；扩大故障矩阵 |
 | 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`evidence/rust-rewrite/compose-*-recovery-20260913.log` | 已完成部分故障/恢复证据，仍缺快照损坏和线性一致性 | 测试负责人；补齐负向与并发报告 |
-| 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两个独立子 agent；分别记录 review 结论 |
+| 独立子 agent review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两个独立子 agent；分别记录 review 结论 |
 
 因此文档与部分验证阶段已闭环；在独立 Oracle、负向/并发验证和外部签核进入仓库前，清单必须保持 **NO-GO**，不得用“计划存在”替代“证据存在”。

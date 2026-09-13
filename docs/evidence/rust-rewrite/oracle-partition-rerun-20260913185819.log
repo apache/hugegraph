@@ -1,0 +1,6 @@
+commit=ca4193eb28b6fc3ce217ebed741fc7d6e86920dd
+== oracle ==
+capture history tests passed
+== partition audit ==
+workflow=/home/zy/code/hugegraph/.github/workflows/rust-partition-poc.yml
+gates=fmt,clippy,test,mutation
