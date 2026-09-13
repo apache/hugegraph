@@ -62,6 +62,8 @@
 
 ## 完成条件
 
+已落地一个独立的单寄存器历史 checker：`tools/raft-linearizability/checker.py`。它仅依赖历史输入，通过回溯搜索验证实时顺序和读写语义；测试位于 `tools/raft-linearizability/test_checker.py`。该工具只覆盖 Raft 线性一致性 Oracle 的最小切片，不能替代多分区、多副本和快照恢复验证。
+
 只有同时满足以下条件，测试盘点才可称为最终版并允许 Rust 单元替换：
 
 - 所有 CI 实际执行方法均达到 `reviewed` 或明确标记为 `irrelevant`；
