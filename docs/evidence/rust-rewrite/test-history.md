@@ -38,3 +38,4 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml` (WAL/snapshot slice) | `working-tree` | PASS (2 tests) | `store-rust-wal-snapshot-20260913.log` |
 | `bash tools/raft-linearizability/run-tests.sh` | `7e2a9df71` | PASS (differential replay/checker suite) | `differential-replay-20260913.log` |
 | `/usr/bin/time -f 'elapsed=%e maxrss=%MKB' cargo test --manifest-path hugegraph-store/rust/Cargo.toml --release` | `40beafb56` | PASS (release tests; resource timing captured) | `store-performance-resource-20260913.log` |
+| `/usr/bin/time -f 'elapsed=%e maxrss=%MKB' cargo test --manifest-path hugegraph-store/rust/Cargo.toml --release` | `working-tree` | PASS (3 tests; restart recovery and corrupted snapshot rejection; elapsed/maxrss captured) | `fault-recovery-20260913.log` |

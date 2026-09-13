@@ -75,3 +75,6 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Differential replay checker suite passed against deterministic traces; evidence `differential-replay-20260913.log`. Next action: add fault recovery and performance/resource evidence, then audit.
 
 2026-09-13: Release-mode Rust store tests passed with elapsed time and max RSS captured; evidence `store-performance-resource-20260913.log`. Differential and resource gates now have local evidence; full production audit remains pending.
+
+2026-09-13: Added production Rust store restart recovery and corrupted snapshot rejection coverage; release test passed 3/3 with resource capture. Evidence `fault-recovery-20260913.log`. Differential, fault recovery, snapshot, and performance gates now have executable store-core evidence; remaining work is final audit/CI and Java fallback integration.
+next_action: finalize audit record and CI wiring for production Rust gates; keep NO-GO until dual-read/rollback and review sign-offs are evidenced.
