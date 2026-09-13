@@ -455,3 +455,6 @@ next_action: add live node data-plane RPC assertion and continue production comm
 
 2026-09-14: Extended live StoreNode orchestration to Session.Get2 with a valid Tk request; node tests passed (4). Evidence `store-node-live-session-20260914.log`.
 next_action: add live node GraphStore scan assertion and continue production command coverage.
+
+2026-09-14: Validated node data-plane ownership boundary; removed an invalid split-backend scan delegation and retained Session-backed data operations. Node tests passed (4). Evidence `store-node-data-plane-boundary-20260914.log`.
+next_action: add live node GraphStore scan assertion using a shared backend, then continue production command coverage.
