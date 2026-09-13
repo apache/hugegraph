@@ -59,3 +59,5 @@ Profile 隔离复验（2026-09-13）：尝试将活动 SnapshotHandlerTest 加�
 Profile 隔离修复（2026-09-13）：为 `store-core-test` 设置 `forkCount=1`、`reuseForks=false` 并纳入活动 `SnapshotHandlerTest`；Snapshot 5/5、BatchGraphIsolation 6/6 均通过，profile 总计 11 项通过，`BUILD SUCCESS`。日志：`/tmp/store-core-fork.log`。该配置消除了 JRaft 静态注册跨 suite 污染。
 
 补充复验记录（2026-09-13）：使用独立 Maven 仓库重跑 `store-core-test` 时，进程在约 15 分钟内持续补齐 reactor 依赖，未到达最终测试汇总，随后终止；该次运行不计入通过证据。既有 `store-core-fork.log` 的 11 项通过结果仍是当前 profile 证据。
+
+离线复验（2026-09-13）：依赖缓存不完整，`hugegraph-core` 在 `build-helper-maven-plugin` 阶段因缺少 `commons-cli:1.0`、`plexus-utils:1.5.8` 失败；这是环境准备失败，不计入 Store 测试失败或通过。日志：`/tmp/store-core-offline-final.log`。
