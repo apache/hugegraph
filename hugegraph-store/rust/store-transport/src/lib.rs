@@ -692,3 +692,42 @@ mod shared_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+impl SharedSession {
+    pub fn handle_get2(&self, bytes: &[u8]) -> Result<generated::FeedbackRes, String> {
+        let key = decode_get_key(bytes)?;
+        let value = self
+            .backend
+            .lock()
+            .map_err(|_| "backend lock poisoned")?
+            .get(&key);
+        let status = generated::ResStatus {
+            code: 0,
+            message: "ok".into(),
+        };
+        let _ = value;
+        Ok(generated::FeedbackRes {
+            status: Some(status),
+            responses: None,
+        })
+    }
+}
+#[cfg(test)]
+mod shared_get_tests {
+    use super::*;
+    #[test]
+    fn get2_handler_decodes() {
+        let p = std::env::temp_dir().join(format!("hg-sget-{}.img", std::process::id()));
+        let s = SharedSession::open(&p).unwrap();
+        let r = generated::GetReq {
+            header: None,
+            tk: Some(generated::Tk {
+                table: "t".into(),
+                key: b"k".to_vec(),
+                code: 0,
+            }),
+        };
+        assert!(s.handle_get2(&prost::Message::encode_to_vec(&r)).is_ok());
+        let _ = std::fs::remove_file(p);
+    }
+}
