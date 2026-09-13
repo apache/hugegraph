@@ -479,3 +479,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Strengthened live GraphStore frame differential assertion with protocol sequence number and cardinality checks; node tests passed (5). Evidence `store-node-live-frame-oracle-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Strengthened live GraphStore differential verification to assert exact key/value Variant byte encoding for pre-seeded data; node tests passed (5). Evidence `store-node-live-graph-bytes-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
