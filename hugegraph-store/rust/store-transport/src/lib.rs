@@ -1113,3 +1113,14 @@ mod batch_get_trait_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+pub fn batch_get_pairs(
+    store: &hugegraph_store_core::DurableStore,
+    bytes: &[u8],
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    let keys = decode_batch_get_keys(bytes)?;
+    Ok(keys
+        .into_iter()
+        .filter_map(|k| store.get(&k).map(|v| (k, v)))
+        .collect())
+}
