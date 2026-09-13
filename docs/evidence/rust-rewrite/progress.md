@@ -350,3 +350,6 @@ next_action: add live invalid boundary/batch/property rejection tests and contin
 
 2026-09-14: Live tonic scan test asserts negative boundary requests are rejected; workspace passed (60 tests). Evidence `tonic-live-boundary-validation-20260914.log`.
 next_action: add live invalid batch_size and property-count rejection tests, then continue resource audit.
+
+2026-09-14: Live tonic scan test asserts batch_size above 1,000,000 is rejected; workspace passed (61 tests). Evidence `tonic-live-batch-limit-20260914.log`.
+next_action: add live excessive properties rejection and complete request resource audit.
