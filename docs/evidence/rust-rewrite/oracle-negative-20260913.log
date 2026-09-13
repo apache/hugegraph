@@ -1,0 +1,2 @@
+exit=1
+{"equal": false, "first_difference": {"index": 0, "java": {"key": "k", "op": "read", "result": "ok", "value": 1}, "rust": {"key": "k", "op": "read", "result": "ok", "value": 2}}, "java_count": 1, "rust_count": 1}
