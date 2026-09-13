@@ -300,6 +300,22 @@ mod tests {
         for (k, v) in oracle {
             assert_eq!(node.get(&k).unwrap(), Some(v));
         }
+        let core_path = path.with_extension("core");
+        let mut core = hugegraph_store_core::StoreService::new(
+            hugegraph_store_core::DurableStore::open(&core_path).unwrap(),
+        );
+        let core_result = core
+            .call(hugegraph_store_core::StoreRequest::Put {
+                key: vec![0],
+                value: vec![0xff],
+            })
+            .unwrap();
+        assert!(matches!(
+            core_result,
+            hugegraph_store_core::StoreResponse::Value(_)
+        ));
+        assert_eq!(node.get(&[0]).unwrap(), Some(vec![0x5a]));
+        let _ = std::fs::remove_file(core_path);
         node.put_batch([(vec![0], vec![0xff])]).unwrap();
         assert_eq!(node.get(&[0]).unwrap(), Some(vec![0xff]));
         let frame = node.graph.scan_range(&[0], &[16], false).unwrap();
