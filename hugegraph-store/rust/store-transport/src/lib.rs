@@ -1,6 +1,7 @@
 //! Transport adapter boundary for hg-store-grpc.
 use hugegraph_store_core::{StoreRequest, StoreResponse, StoreService};
 use tokio_stream::StreamExt;
+const MAX_SCAN_LIMIT: i64 = 100_000;
 pub struct RpcServer {
     service: StoreService,
 }
@@ -915,6 +916,9 @@ impl generated::graph_store_server::GraphStore for GraphService {
                 Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => {
                     if v.limit < 0 {
                         return Err(tonic::Status::invalid_argument("negative limit"));
+                    }
+                    if v.limit > MAX_SCAN_LIMIT {
+                        return Err(tonic::Status::resource_exhausted("scan limit too large"));
                     }
                     v.limit
                 }
