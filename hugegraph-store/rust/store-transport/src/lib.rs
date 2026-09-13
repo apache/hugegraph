@@ -1215,3 +1215,22 @@ pub fn validate_session_control(table: &[u8], graph: &[u8], clean: &[u8]) -> Res
     validate_clean_request(clean)?;
     Ok(())
 }
+
+pub fn table_action(bytes: &[u8]) -> Result<(String, generated::TableMethod), String> {
+    let r: generated::TableReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    let m = generated::TableMethod::try_from(r.method).map_err(|_| "invalid table method")?;
+    if r.table_name.is_empty() {
+        Err("table name required".into())
+    } else {
+        Ok((r.table_name, m))
+    }
+}
+pub fn graph_action(bytes: &[u8]) -> Result<(String, generated::GraphMethod), String> {
+    let r: generated::GraphReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    let m = generated::GraphMethod::try_from(r.method).map_err(|_| "invalid graph method")?;
+    if r.graph_name.is_empty() {
+        Err("graph name required".into())
+    } else {
+        Ok((r.graph_name, m))
+    }
+}
