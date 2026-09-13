@@ -80,4 +80,4 @@ POC Oracle 复核（2026-09-13）：修正版本比较与缓存等价性错误�
 
 Release 基线（2026-09-13）：`cargo test --release` 14/14 通过；本机一次运行 `elapsed_seconds=0.64`、`max_rss_kb=124420`（仅模型 POC，不能代表生产性能）。完整输出：`/tmp/rust-partition-release.log`。
 
-最新复验归档（2026-09-13）：`tools/rust-partition-poc/verify.sh` 在提交 `100834d5ab318f6285f0d177f47d26017e600cae` 上完成 14 项测试；原始输出已归档至 `docs/evidence/rust-rewrite/partition-poc-verify.log`，SHA-256 为 `e96e1c0767dd1995d1a7e9e7ae3c71118115e3ab1f902f291ec7d4d1b9f54ec0`。
+最新复验归档（2026-09-13）：`tools/rust-partition-poc/verify.sh` 在提交 `4538ebeae8d0203a71e8e4e50421be0aa2130760` 上完成 14 项测试；原始输出已归档至 `docs/evidence/rust-rewrite/partition-poc-verify.log`，SHA-256 为 `e96e1c0767dd1995d1a7e9e7ae3c71118115e3ab1f902f291ec7d4d1b9f54ec0`。
