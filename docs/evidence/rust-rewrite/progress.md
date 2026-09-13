@@ -287,3 +287,6 @@ next_action: send encoded range request through live stream and assert filtered 
 
 2026-09-14: Live tonic E2E seeds a DurableStore record and asserts the received ScanResponse contains one vertex; workspace passed (50 tests). Evidence `tonic-live-persisted-e2e-20260914.log`.
 next_action: send encoded range request through live stream and assert filtered vertex count.
+
+2026-09-14: Live tonic client now sends encoded ScanPartition range and asserts filtered persisted vertex count; workspace passed (50 tests). Evidence `tonic-live-range-e2e-20260914.log`.
+next_action: broaden live streaming to edge scan and error/limit semantics, then continue contract gates.
