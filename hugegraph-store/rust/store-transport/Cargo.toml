@@ -1,0 +1,6 @@
+[package]
+name = "hugegraph-store-transport"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+hugegraph-store-core = { path = "../store-core" }

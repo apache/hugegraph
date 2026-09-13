@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "hugegraph-store-core"
 version = "0.1.0"
+
+[[package]]
+name = "hugegraph-store-transport"
+version = "0.1.0"
+dependencies = [
+ "hugegraph-store-core",
+]
