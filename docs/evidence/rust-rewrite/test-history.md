@@ -159,3 +159,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `working-tree` | PASS (5 tests; CleanData persists cleared state across reopen) | `store-node-clean-recovery-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (64 tests; CleanData recovery regression) | `workspace-clean-recovery-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `working-tree` | PASS (5 tests; CleanData fault rollback) | `store-node-clean-fault-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (65 tests; DurableStore clear Oracle) | `durable-clear-oracle-20260914.log` |
