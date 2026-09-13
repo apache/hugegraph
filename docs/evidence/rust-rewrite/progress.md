@@ -317,3 +317,6 @@ next_action: enforce negative limit and oversized request semantics, then contin
 
 2026-09-14: GraphService rejects negative ScanPartition limits with invalid_argument while preserving zero as unlimited; workspace passed (54 tests). Evidence `scan-negative-limit-20260914.log`.
 next_action: add live negative-limit assertion and enforce oversized request/resource limits.
+
+2026-09-14: Live tonic scan test asserts negative limit requests fail with invalid_argument; workspace passed (54 tests). Evidence `tonic-live-negative-limit-20260914.log`.
+next_action: enforce oversized request/resource limits and add corresponding live rejection tests.
