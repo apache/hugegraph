@@ -21,3 +21,5 @@
 服务层复验（2026-09-13）：PD/Store 故障恢复后，三 Server 的 `/versions` 与 `/graphs` 共 6 次请求全部 HTTP 200，图列表包含 `hugegraph`；证据归档于 `compose-server-smoke-20260913.log`。这仍是健康/可达性证据，不替代事务、数据校验和线性一致性 Oracle。
 
 Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接；store1/store2 与三 PD 在分区期间健康，恢复后三 Store 健康。证据归档于 `compose-store0-network-partition-20260913.log`；尚未证明写入线性一致性和数据无损。
+
+本机代理修复（2026-09-13）：将 shell 与 Docker daemon 的 `NO_PROXY/no_proxy` 固化为 `localhost,127.0.0.1,::1`，避免 `127.*` 通配写法导致本地健康请求被代理拦截；Docker 重启后集群可恢复，直接请求 PD `/v1/health` 返回 HTTP 200。
