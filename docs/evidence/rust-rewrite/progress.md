@@ -185,3 +185,6 @@ next_action: implement HgStoreSession generated service trait backed by DurableS
 
 2026-09-14: Audited generated Session request schemas (`GetReq`, `BatchReq`, oneof request structure); direct DurableStore mapping requires decoding nested protobuf keys and batch oneofs.
 next_action: implement protobuf Message decode adapters for GetReq and BatchReq, then connect SessionService responses to DurableStore.
+
+2026-09-14: Added apply_batch_action entry point to execute decoded BatchAction writes against DurableStore; commit/rollback context integration remains pending.
+next_action: implement SessionService batch transaction context with staged writes and commit/rollback visibility tests.
