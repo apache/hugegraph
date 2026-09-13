@@ -1,0 +1,2 @@
+{"linearizable": true, "detail": ["w", "r"]}
+{"linearizable": false, "detail": "no legal sequential ordering"}
