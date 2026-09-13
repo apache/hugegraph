@@ -530,3 +530,6 @@ next_action: add batch-put command differential coverage and continue production
 
 2026-09-14: Added core StoreRequest::BatchPut command with snapshot rollback semantics; full workspace passed (67 tests). Evidence `core-batchput-command-20260914.log`.
 next_action: add node/core BatchPut response differential assertions and continue production command implementation.
+
+2026-09-14: Added node/core BatchPut response differential assertions against independent stores; node tests passed (6). Evidence `store-node-core-batch-differential-20260914.log`.
+next_action: continue production command coverage and implement the next uncovered store contract.

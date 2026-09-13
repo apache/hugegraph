@@ -167,3 +167,4 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (66 tests; BatchPut regression) | `workspace-batchput-regression-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `working-tree` | PASS (6 tests; node/core command differential) | `store-node-core-differential-20260914.log` |
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (67 tests; core BatchPut command) | `core-batchput-command-20260914.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node` | `dcb756d62` | PASS (6 tests; node/core BatchPut response differential) | `store-node-core-batch-differential-20260914.log` |

@@ -1,0 +1,5 @@
+command: cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-node
+commit: dcb756d62
+test: node_put_get_matches_independent_oracle
+result: PASS (6 tests)
+assertions: node BatchPut and independent core StoreRequest::BatchPut agree on overwrite and inserted values
