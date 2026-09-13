@@ -497,3 +497,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Ported CleanData command semantics with Online gating and durable clear operation; full workspace passed (64 tests). Evidence `store-node-clean-data-20260914.log`.
 next_action: add clean-data fault/recovery and command differential coverage.
+
+2026-09-14: Added CleanData recovery assertions: data is absent immediately and after node reopen; node tests passed (5). Evidence `store-node-clean-recovery-20260914.log`.
+next_action: add clean-data fault/recovery and command differential coverage.
