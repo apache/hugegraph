@@ -115,3 +115,14 @@ Java 版本只作为参考实现，不能单独作为 Oracle。每条关键契�
 5. 为随机图操作和事务历史保存 seed，并增加最小化失败历史的回归格式；
 6. 建立测试结果报告，强制记录 profile、提交版本、配置、数据集、Oracle 版本和差异；
 7. 对每个缺口指定“补测后才允许迁移”的门禁，禁止以提高覆盖率数字替代语义验证。
+
+### 契约变异测试复现命令
+
+在 `tools/rust-partition-poc` 目录执行：
+
+```bash
+cargo test
+cargo mutants --exclude src/main.rs --timeout 30 --jobs 2
+```
+
+验收判定：契约 mutation score 必须为 100%；`unviable` 变异需保留在报告中并说明原因，非契约 CLI 入口不纳入分数。
