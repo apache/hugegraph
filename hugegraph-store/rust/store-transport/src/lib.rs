@@ -629,6 +629,17 @@ pub fn entries_to_edge_frame(entries: &[(Vec<u8>, Vec<u8>)]) -> generated::ScanR
         edge,
     }
 }
+pub fn filter_entries(
+    entries: &[(Vec<u8>, Vec<u8>)],
+    start: &[u8],
+    end: &[u8],
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    entries
+        .iter()
+        .filter(|(k, _)| k.as_slice() >= start && (end.is_empty() || k.as_slice() < end))
+        .cloned()
+        .collect()
+}
 #[cfg(test)]
 mod graph_frame_tests {
     use super::empty_scan_frame;
@@ -668,6 +679,16 @@ mod graph_frame_tests {
             f.edge[0].target_id.as_ref().unwrap().value_bytes.as_deref(),
             Some(&b"dst"[..])
         );
+    }
+    #[test]
+    fn entry_filter_observes_half_open_range() {
+        let e = vec![
+            (b"a".to_vec(), vec![]),
+            (b"m".to_vec(), vec![]),
+            (b"z".to_vec(), vec![]),
+        ];
+        let f = super::filter_entries(&e, b"b", b"z");
+        assert_eq!(f, vec![(b"m".to_vec(), vec![])]);
     }
 }
 
