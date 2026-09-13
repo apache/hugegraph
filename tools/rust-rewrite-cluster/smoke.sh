@@ -70,6 +70,8 @@ for attempt in {1..12}; do
   sleep 5
 done
 sleep 30
+"${compose[@]}" restart server0 server1 server2 >/dev/null
+sleep 30
 curl_local -fsS --max-time 10 "$base_server/graphs/hugegraph/graph/vertices/%22$fixture_id%22" | grep -q 'committed'
 
 echo "cluster smoke passed fixture=$fixture_id"
