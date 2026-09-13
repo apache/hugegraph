@@ -31,3 +31,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Verified all discovered JetBrains JBR candidates are Java 21.0.7. Evidence `java17-jbr-version-20260913.log`; API-GREMLIN-001 remains pending Java 11/17 and was not rerun.
 
 2026-09-13: Found Maven Temurin 11 Docker image and started the pinned API-GREMLIN-001 entry. Maven dependency resolution exceeded the execution window before the test ran; evidence `api-gremlin-001-java11-docker-20260913.log`. Java 11 execution path is now available; next run should resume this exact command after dependencies finish downloading.
+
+2026-09-13: Resumed the exact Java 11 Docker command; dependency resolution again exceeded the execution window before tests began. Evidence `api-gremlin-001-java11-docker-rerun-20260913.log`. Continue the same command only after the container Maven cache is sufficiently populated.
