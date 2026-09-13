@@ -34,7 +34,7 @@
 
 ## 3. 当前状态
 
-截至本文件生成时，设计文档、测试资产文件级/入口级盘点、方法级追踪底稿、验收矩阵、Rust 工程规范和 Partition POC 计划已具备。方法级语义归类、独立 Oracle 实现、负向测试执行、POC 结果和社区签核尚未完成，因此当前结论为 **NO-GO（允许继续做非生产 POC）**。
+当前已补齐 Partition POC、三节点故障/网络分区恢复、跨服务器可见性和构建/RAT 证据；独立 Oracle、负向快照/损坏恢复、线性一致性、变异测试、性能基线及社区签核仍未完成，因此当前结论为 **NO-GO（允许继续做非生产 POC）**。
 
 ## 4. 正式开工顺序
 
@@ -61,8 +61,8 @@
 | 验收与阈值 | `rust-rewrite-acceptance-matrix.md` | 已定义，待批准 | 维护者；阈值签核 |
 | Rust 工程规范 | `rust-engineering-standard.md` | 已定义，待 CI 落地 | Rust 负责人；CI 配置与检查日志 |
 | Oracle 与差分策略 | `rust-rewrite-oracle-finalization.md` | 方案已闭环，代码未实现 | 测试负责人；独立 Oracle 与报告 |
-| POC 范围与退出条件 | `rust-rewrite-partition-pilot.md` | 已定义，未执行 | POC 负责人；可复现实验包 |
-| 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`rust-rewrite-go-no-go-checklist.md` | 入口已定义，未执行 | 测试负责人；失败注入报告 |
+| POC 范围与退出条件 | `rust-rewrite-partition-pilot.md`、`evidence/rust-rewrite/partition-poc-verify.log` | POC 已执行通过 | 测试负责人；扩大故障矩阵 |
+| 变异、故障、恢复验证 | `rust-rewrite-acceptance-matrix.md`、`evidence/rust-rewrite/compose-*-recovery-20260913.log` | 已完成部分故障/恢复证据，仍缺快照损坏和线性一致性 | 测试负责人；补齐负向与并发报告 |
 | 社区 review | PR 分支 `refactor/rust-rewrite-design` | 尚未签核 | 至少两名 reviewer；签核记录 |
 
 因此本次文档阶段的交付已经闭环；在外部签核、POC 和验证报告进入仓库前，清单必须保持 **NO-GO**，不得用“计划存在”替代“证据存在”。
