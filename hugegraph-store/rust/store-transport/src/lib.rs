@@ -612,8 +612,9 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
             .backend
             .lock()
             .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
-        let pairs = batch_get_pairs(&store, &bytes).map_err(tonic::Status::invalid_argument)?;
-        Ok(tonic::Response::new(feedback_values(pairs)))
+        let response = feedback_values_with_missing(&store, &bytes)
+            .map_err(tonic::Status::invalid_argument)?;
+        Ok(tonic::Response::new(response))
     }
     async fn batch(
         &self,
