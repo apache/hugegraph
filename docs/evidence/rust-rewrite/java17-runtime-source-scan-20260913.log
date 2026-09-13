@@ -1,0 +1,6 @@
+Sun Sep 13 13:11:27 UTC 2026
+COMMAND=find / -type f -name java (excluding proc/sys)
+/home/zy/.cache/JetBrains/RemoteDev/dist/dd14f6f94bd7f_CLion-2025.1.3/jbr/bin/java
+/home/zy/.cache/JetBrains/RemoteDev/dist/4301d48e0f61a_CLion-252.23309.24/jbr/bin/java
+/home/zy/.cache/JetBrains/RemoteDev/dist/8e7411e47a023_CLion-252.23892.173/jbr/bin/java
+/usr/lib/jvm/java-21-openjdk-amd64/bin/java

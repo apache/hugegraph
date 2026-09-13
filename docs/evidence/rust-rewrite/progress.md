@@ -25,3 +25,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Attempted to extract the partially downloaded Java 17 package; `dpkg-deb` failed with unexpected EOF and no runtime was produced. Evidence `java17-runtime-extract-20260913.log`. API-GREMLIN-001 remains pending external Java 11/17 availability; unchanged Gremlin tests were not rerun.
 
 2026-09-13: Retried Java 17 package download; network transfer stalled and left a truncated 10 MB archive. Evidence `java17-apt-download-20260913-rerun2.log`. No runtime available; API-GREMLIN-001 was not rerun.
+
+2026-09-13: Scanned all local executable Java candidates; only OpenJDK 21 and JetBrains JBR candidates were found. The partial Java 17 package remains unusable. Evidence `java17-runtime-source-scan-20260913.log`; API-GREMLIN-001 remains pending Java 11/17.
