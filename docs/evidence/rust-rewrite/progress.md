@@ -356,3 +356,6 @@ next_action: add live excessive properties rejection and complete request resour
 
 2026-09-14: Live tonic scan test asserts property lists above 100,000 are rejected as resource exhaustion; workspace passed (62 tests). Evidence `tonic-live-properties-limit-20260914.log`.
 next_action: complete request-field resource audit and begin broader contract mutation testing.
+
+2026-09-14: Added contract mutation tests for empty and invalid protobuf ScanPartition payloads; workspace passed (63 tests). Evidence `scan-payload-mutation-20260914.log`.
+next_action: expand mutation matrix across RPC codecs and error mappings.
