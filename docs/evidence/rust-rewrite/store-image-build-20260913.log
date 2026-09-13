@@ -1,0 +1,4 @@
+commit=a29b817a8
+command=docker build -f hugegraph-store/Dockerfile -t hugegraph/store:latest .
+result=terminated after 5m22s with Maven process idle/no output (exit 130); base image pulled successfully, dependency/build resolution did not complete in offline-constrained environment.
+BuildKit retry failed: buildx component missing (exit 1).
