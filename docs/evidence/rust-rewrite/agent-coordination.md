@@ -27,3 +27,14 @@ apt-get download -o Acquire::http::Proxy=http://127.0.0.1:10809 -o Acquire::http
 ## 协作安全
 
 后台循环读取本文件、`progress.md` 和 `test-history.md`。只处理 `progress.md` 的 `current_stage/next_action`，不得覆盖他人未提交修改。交互式 agent 工作时使用暂停文件 `/tmp/hugegraph-rust-rewrite-codex.pause`。认证、只读文件系统、网络不可达或连续无进展时停止，不创建无状态的新会话。
+
+## 当前会话情报（2026-09-13）
+
+- 仓库路径：`/home/zy/code/hugegraph`，用户终端的 `~/code/hugegraph` 与其等价。
+- 主会话编排改动已提交：`77b655d38 chore(rust-rewrite): persist agent orchestration`。
+- Codex session resume POC 已通过；session ID 文件为 `/tmp/hugegraph-rust-rewrite-session.id`，不要把 POC session 与重构 session 混用。
+- 用户终端已验证 `codex doctor`：认证、WebSocket 和 HTTP reachability 正常；代理为 `http://127.0.0.1:10809`。
+- `wget` 已验证可通过代理访问 Adoptium；APT 下载必须显式传入 HTTP/HTTPS Proxy。
+- Java 11 Docker + `/home/zy/.m2` 缓存可运行 Gremlin E2E；本机 Java 21 与 Groovy 2.5 ASM 不兼容。
+- 后台 agent 与主会话共享工作树。主会话写文件前必须创建 `/tmp/hugegraph-rust-rewrite-codex.pause`；主会话只读观察时允许子 agent继续。
+- 恢复后台 agent：删除 pause 和 lock 后，在用户已登录终端从仓库目录运行 `nohup ./tools/run-codex-loop.sh >/tmp/hugegraph-codex-loop.out 2>&1 &`。
