@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.Id.IdType;
 import org.apache.hugegraph.backend.id.IdGenerator;
@@ -3346,6 +3347,43 @@ public class VertexCoreTest extends BaseCoreTest {
         vertices = graph.traversal().V().hasLabel("author")
                         .has("id", 1).has("name", "fake-name").toList();
         Assert.assertEquals(0, vertices.size());
+    }
+
+    @Test
+    public void testQueryByPrimaryValuesInPageWithVertexCache() {
+        Assume.assumeTrue("Not support paging", storeFeatures().supportsQueryByPage());
+        HugeGraph graph = graph();
+        Vertex vertex = graph.addVertex(T.label, "person", "name", "marko",
+                                        "age", 29, "city", "Beijing");
+        this.commitTx();
+        CachedGraphTransaction cache = (CachedGraphTransaction) this.params().graphTransaction();
+        cache.clearCache(HugeType.VERTEX, false);
+
+        for (int i = 0; i < 2; i++) {
+            if (i == 1) {
+                Assert.assertEquals(vertex.id(), graph.vertices(vertex.id()).next().id());
+            }
+            GraphTraversal<Vertex, Vertex> results = graph.traversal().V()
+                    .hasLabel("person").has("name", "marko").has("~page", "").limit(2);
+            List<Vertex> vertices = results.toList();
+            Assert.assertEquals(1, vertices.size());
+            Assert.assertEquals(vertex.id(), vertices.get(0).id());
+            Assert.assertNull(TraversalUtil.page(results));
+            CloseableIterator.closeIterator(results);
+        }
+
+        GraphTraversal<Vertex, Vertex> filtered = graph.traversal().V()
+                .hasLabel("person").has("name", "marko").has("age", 30)
+                .has("~page", "").limit(2);
+        Assert.assertFalse(filtered.hasNext());
+        Assert.assertNull(TraversalUtil.page(filtered));
+        CloseableIterator.closeIterator(filtered);
+
+        GraphTraversal<Vertex, Vertex> missing = graph.traversal().V()
+                .hasLabel("person").has("name", "missing").has("~page", "").limit(2);
+        Assert.assertFalse(missing.hasNext());
+        Assert.assertNull(TraversalUtil.page(missing));
+        CloseableIterator.closeIterator(missing);
     }
 
     @Test
