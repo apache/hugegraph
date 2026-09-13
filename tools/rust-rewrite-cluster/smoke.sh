@@ -36,9 +36,9 @@ property_key="rust_gate_pk_${fixture_id//[^a-zA-Z0-9]/}"
 vertex_label="rust_gate_vl_${fixture_id//[^a-zA-Z0-9]/}"
 json_header='Content-Type: application/json'
 curl_local -fsS -X POST "$base_server/graphs/hugegraph/schema/propertykeys" -H "$json_header" -d "{\"name\":\"$property_key\",\"data_type\":\"TEXT\",\"cardinality\":\"SINGLE\",\"properties\":[]}" >/dev/null
-sleep 2
+sleep 10
 curl_local -fsS -X POST "$base_server/graphs/hugegraph/schema/vertexlabels" -H "$json_header" -d "{\"name\":\"$vertex_label\",\"id_strategy\":\"CUSTOMIZE_STRING\",\"properties\":[\"$property_key\"],\"primary_keys\":[],\"nullable_keys\":[]}" >/dev/null
-sleep 2
+sleep 10
 curl_local -fsS -X POST "$base_server/graphs/hugegraph/graph/vertices" -H "$json_header" -d "{\"id\":\"$fixture_id\",\"label\":\"$vertex_label\",\"properties\":{\"$property_key\":\"committed\"}}" >/dev/null
 
 "${compose[@]}" stop pd0 >/dev/null
