@@ -539,8 +539,12 @@ mod response_tests {
 pub struct QueryServiceImpl;
 #[tonic::async_trait]
 impl generated::query_service_server::QueryService for QueryServiceImpl {
-    type queryStream = tokio_stream::iter::Iter<
-        std::vec::IntoIter<Result<generated::QueryResponse, tonic::Status>>,
+    type queryStream = std::pin::Pin<
+        Box<
+            dyn tonic::codegen::tokio_stream::Stream<
+                    Item = Result<generated::QueryResponse, tonic::Status>,
+                > + Send,
+        >,
     >;
     async fn query(
         &self,
