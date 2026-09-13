@@ -829,6 +829,7 @@ mod graph_frame_tests {
             request: Some(
                 super::generated::scan_partition_request::RequestOneOf::ScanRequest(
                     super::generated::scan_partition_request::Request {
+                        scan_type: 2,
                         position: b"m".to_vec(),
                         end_code: b'z' as u32,
                         ..Default::default()
@@ -839,7 +840,9 @@ mod graph_frame_tests {
         let stream = tokio_stream::iter(vec![request]);
         let response = client.scan_partition(stream).await.unwrap();
         let mut frames = response.into_inner();
-        assert_eq!(frames.message().await.unwrap().unwrap().vertex.len(), 1);
+        let frame = frames.message().await.unwrap().unwrap();
+        assert!(frame.vertex.is_empty());
+        assert_eq!(frame.edge.len(), 1);
         task.abort();
         let _ = std::fs::remove_file(path);
     }
