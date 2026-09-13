@@ -260,6 +260,18 @@ mod tests {
                 .into_inner(),
             hugegraph_store_transport::generated::ScanState::default()
         );
+        let mut session = hugegraph_store_transport::generated::hg_store_session_client::HgStoreSessionClient::connect(format!("http://{}", addr)).await.unwrap();
+        let feedback = session
+            .get2(tonic::Request::new(
+                hugegraph_store_transport::generated::GetReq {
+                    tk: Some(hugegraph_store_transport::generated::Tk { key: b"missing".to_vec(), ..Default::default() }),
+                    ..Default::default()
+                },
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(feedback.status.is_some() || feedback.responses.is_some());
         task.abort();
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
