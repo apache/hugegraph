@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with this
+# work for additional information regarding copyright ownership.
+# The ASF licenses this file to you under the Apache License, Version 2.0.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#!/usr/bin/env python3
 """Capture a small register history from an HTTP endpoint."""
 import argparse, json, time, urllib.request
 
