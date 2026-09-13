@@ -894,7 +894,8 @@ impl generated::graph_store_server::GraphStore for GraphService {
             .transpose()
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?
         {
-            let (start, end) = scan_request_range(&r).unwrap_or_default();
+            let (start, end) = scan_request_range(&r)
+                .ok_or_else(|| tonic::Status::invalid_argument("missing scan request"))?;
             let limit = match r.request.as_ref() {
                 Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => v.limit,
                 _ => 0,
