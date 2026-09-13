@@ -669,6 +669,8 @@ pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8
 #[cfg(test)]
 mod graph_frame_tests {
     use super::empty_scan_frame;
+    use crate::generated;
+    use prost::Message;
     #[test]
     fn scan_frame_has_initial_sequence_and_no_records() {
         let f = empty_scan_frame();
@@ -715,6 +717,27 @@ mod graph_frame_tests {
         ];
         let f = super::filter_entries(&e, b"b", b"z");
         assert_eq!(f, vec![(b"m".to_vec(), vec![])]);
+    }
+    #[test]
+    fn encoded_scan_request_yields_range() {
+        let r = generated::ScanPartitionRequest {
+            header: None,
+            request: Some(
+                generated::scan_partition_request::RequestOneOf::ScanRequest(
+                    generated::scan_partition_request::Request {
+                        position: b"m".to_vec(),
+                        end_code: 122,
+                        ..Default::default()
+                    },
+                ),
+            ),
+        };
+        let decoded =
+            generated::ScanPartitionRequest::decode(prost::Message::encode_to_vec(&r).as_slice())
+                .unwrap();
+        let (start, end) = super::scan_request_range(&decoded).unwrap();
+        assert_eq!(start, b"m");
+        assert_eq!(end, 122i32.to_be_bytes());
     }
 }
 
