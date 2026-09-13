@@ -1029,3 +1029,10 @@ mod batch_get_tests {
         );
     }
 }
+
+pub fn batch_get_values(
+    store: &hugegraph_store_core::DurableStore,
+    bytes: &[u8],
+) -> Result<Vec<Option<Vec<u8>>>, String> {
+    decode_batch_get_keys(bytes).map(|ks| ks.iter().map(|k| store.get(k)).collect())
+}
