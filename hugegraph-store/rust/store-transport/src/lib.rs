@@ -677,6 +677,9 @@ pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8
         generated::scan_partition_request::RequestOneOf::ReplyRequest(_) => None,
     }
 }
+pub fn scan_request_is_edge(r: &generated::ScanPartitionRequest) -> bool {
+    matches!(r.request.as_ref(), Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) if v.scan_type == 2)
+}
 #[cfg(test)]
 mod graph_frame_tests {
     use super::empty_scan_frame;
@@ -844,7 +847,7 @@ impl generated::graph_store_server::GraphStore for GraphService {
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?
         {
             let (start, end) = scan_request_range(&r).unwrap_or_default();
-            self.scan_range(&start, &end, false)
+            self.scan_range(&start, &end, scan_request_is_edge(&r))
                 .map_err(tonic::Status::internal)?
         } else {
             empty_scan_frame()
