@@ -105,6 +105,14 @@ impl StoreNode {
         Ok(next)
     }
 
+    pub fn start(&self) -> Result<(), &'static str> {
+        self.execute(NodeCommand::Start).map(|_| ())
+    }
+
+    pub fn stop(&self) -> Result<(), &'static str> {
+        self.execute(NodeCommand::Stop).map(|_| ())
+    }
+
     pub fn health_service(&self) -> HealthyService {
         HealthyService
     }
