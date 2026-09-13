@@ -272,3 +272,6 @@ next_action: add real tonic client/server streaming integration; then broaden re
 
 2026-09-14: Added tonic transport server entrypoint for GraphStoreServer, compiling the generated service for external clients. Evidence `tonic-graph-server-20260914.log`.
 next_action: build a live tonic client/server streaming test and verify filtered scan frames over TCP.
+
+2026-09-14: Enabled tokio-stream net feature required for live tonic incoming stream tests; transport check passed.
+next_action: implement live tonic client/server streaming test over TcpListener.
