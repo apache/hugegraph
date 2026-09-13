@@ -613,6 +613,25 @@ mod graph_frame_tests {
         assert_eq!(f.seq_no, 0);
         assert!(f.vertex.is_empty() && f.edge.is_empty());
     }
+
+    #[test]
+    fn scan_frame_maps_persisted_key_and_value() {
+        let f = super::entries_to_scan_frame(&[(b"id".to_vec(), b"value".to_vec())]);
+        assert_eq!(f.vertex.len(), 1);
+        assert_eq!(
+            f.vertex[0].id.as_ref().unwrap().value_bytes.as_deref(),
+            Some(&b"id"[..])
+        );
+        assert_eq!(
+            f.vertex[0].properties[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .value_bytes
+                .as_deref(),
+            Some(&b"value"[..])
+        );
+    }
 }
 
 #[tonic::async_trait]
