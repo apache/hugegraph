@@ -518,3 +518,6 @@ next_action: add batch-put fault injection and command differential coverage.
 
 2026-09-14: Added BatchPut path fault injection; failed batch preserved pre-existing data and node remained usable. Node tests passed (6). Evidence `store-node-batch-fault-20260914.log`.
 next_action: add batch-put command differential coverage and continue production command implementation.
+
+2026-09-14: Extended BatchPut differential coverage to duplicate-key overwrite semantics; node tests passed (6). Evidence `store-node-batch-overwrite-20260914.log`.
+next_action: add batch-put command differential coverage and continue production command implementation.
