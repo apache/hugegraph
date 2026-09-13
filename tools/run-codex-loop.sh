@@ -23,8 +23,10 @@ prompt="继续原目标。先读取 git status、最近提交和 docs/evidence �
 lock_file="${CODEX_LOOP_LOCK:-/tmp/hugegraph-rust-rewrite-codex.lock}"
 log_file="${CODEX_LOOP_LOG:-${repo_dir}/docs/evidence/rust-rewrite/codex-loop.log}"
 max_iterations="${CODEX_LOOP_MAX_ITERATIONS:-20}"
+max_failures="${CODEX_LOOP_MAX_FAILURES:-3}"
 pause_file="${CODEX_LOOP_PAUSE_FILE:-/tmp/hugegraph-rust-rewrite-codex.pause}"
 iteration=0
+failures=0
 
 cd "$repo_dir" || exit 1
 command -v codex >/dev/null || { echo "codex CLI not found" >&2; exit 127; }
@@ -54,9 +56,18 @@ while [[ ! -e "$sentinel" ]]; do
         echo "codex loop stopped: background Codex authentication failed (401 Unauthorized)" | tee -a "$log_file" >&2
         exit 4
     fi
+    if (( status == 0 )); then
+        failures=0
+    else
+        ((++failures))
+        if (( failures >= max_failures )); then
+            echo "codex loop stopped after $failures consecutive failures" | tee -a "$log_file" >&2
+            exit 5
+        fi
+    fi
     [[ -e "$sentinel" ]] && break
     echo "codex session exited with status $status; resuming in 2s" >&2
-    sleep 2
+    sleep $((2 ** failures))
 done
 
 echo "codex loop finished: $sentinel exists"
