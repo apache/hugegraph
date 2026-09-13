@@ -227,3 +227,6 @@ next_action: replace GraphStore empty scan stream with persisted record mapping 
 
 2026-09-14: Replaced empty GraphStore scan stream with a contract-defined ScanResponse frame (sequence 0); transport check passed. Evidence `graph-stream-record-20260914.log`.
 next_action: add E2E stream assertions and map persisted vertex/edge records into scan frames.
+
+2026-09-14: Added E2E-level assertion for GraphStore scan response framing (initial sequence and empty record sets); workspace passed (40 tests). Evidence `graph-stream-e2e-20260914.log`.
+next_action: map persisted vertex/edge records into scan frames and expand full transport E2E coverage.
