@@ -203,6 +203,15 @@ impl DurableStore {
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.inner.get(key)
     }
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.inner.snapshot()
+    }
+    pub fn restore_image(&mut self, image: &[u8]) -> std::io::Result<()> {
+        self.inner = InMemoryStore::restore(image).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupt store image")
+        })?;
+        self.persist()
+    }
 }
 
 #[cfg(test)]
