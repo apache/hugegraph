@@ -1,27 +1,32 @@
-commit=2b9eed984591b25fb5bddd0ed4456e3da5073624
+Sun Sep 13 10:54:14 UTC 2026
+$ tools/rust-partition-poc/audit-gates.sh
+workflow=/home/zy/code/hugegraph/.github/workflows/rust-partition-poc.yml
+gates=fmt,clippy,test,mutation
+$ tools/rust-partition-poc/verify.sh
+commit=1291fc26d1adac2cb0eb38c22c96816a527b0eee
 host=x86_64-unknown-linux-gnu
 rustc 1.94.1 (e408947bf 2026-03-25)
 cargo 1.94.1 (29ea6fb6a 2026-03-24)
 
 running 19 tests
 test cache_counterexamples::rejects_equal_version_with_different_range ... ok
+test cache_tests::latest_cache_value_is_equivalent_to_source ... ok
+test recovery_tests::replay_rejects_corrupt_restart_state ... ok
 test cache_counterexamples::rejects_future_version_against_fixed_reference ... ok
 test cache_tests::invalidation_requires_latest_value ... ok
-test cache_tests::latest_cache_value_is_equivalent_to_source ... ok
 test recovery_tests::replay_is_deterministic ... ok
-test recovery_tests::replay_rejects_corrupt_restart_state ... ok
 test recovery_tests::replay_rejects_duplicate_stale_event ... ok
 test recovery_tests::replay_rejects_unknown_partition_event ... ok
-test tests::catches_dropped_right_partition ... ok
 test tests::baseline_is_valid ... ok
+test tests::catches_dropped_right_partition ... ok
+test tests::range_coverage_does_not_order_unrelated_versions ... ok
 test tests::catches_overlap ... ok
 test tests::heartbeat_is_idempotent ... ok
-test tests::range_coverage_does_not_order_unrelated_versions ... ok
-test tests::rejects_end_beyond_max ... ok
 test tests::rejects_empty_partitions ... ok
-test tests::rejects_heartbeat_with_either_range_field_mismatch ... ok
-test tests::rejects_zero_length_range ... ok
 test tests::rejects_stale_heartbeat ... ok
+test tests::rejects_end_beyond_max ... ok
+test tests::rejects_zero_length_range ... ok
+test tests::rejects_heartbeat_with_either_range_field_mismatch ... ok
 test tests::rejects_nonzero_first_start ... ok
 
 test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
