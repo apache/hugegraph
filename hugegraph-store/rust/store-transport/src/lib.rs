@@ -873,6 +873,8 @@ mod graph_frame_tests {
         let frame = frames.message().await.unwrap().unwrap();
         assert!(frame.vertex.is_empty());
         assert_eq!(frame.edge.len(), 1);
+        let malformed = tokio_stream::iter(vec![super::generated::ScanPartitionRequest::default()]);
+        assert!(client.scan_partition(malformed).await.is_err());
         task.abort();
         let _ = std::fs::remove_file(path);
     }
