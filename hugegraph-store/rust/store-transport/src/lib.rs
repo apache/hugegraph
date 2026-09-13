@@ -1273,3 +1273,17 @@ impl Catalog {
         self.graphs.contains(n)
     }
 }
+
+impl Catalog {
+    pub fn snapshot(&self) -> Vec<u8> {
+        let mut v = Vec::new();
+        for n in self.tables.iter().chain(self.graphs.iter()) {
+            v.extend_from_slice(n.as_bytes());
+            v.push(0);
+        }
+        v
+    }
+    pub fn is_empty(&self) -> bool {
+        self.tables.is_empty() && self.graphs.is_empty()
+    }
+}
