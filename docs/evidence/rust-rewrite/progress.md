@@ -407,3 +407,6 @@ next_action: scaffold Rust store-node module boundaries and port the first produ
 
 2026-09-14: Added Rust `store-node` crate as the production node composition boundary, wiring Graph, Session, Query, State, and Healthy services over shared durable state; workspace passed (54 tests). Evidence `store-node-scaffold-20260914.log`.
 next_action: port first node command/state behavior from hg-store-core and add node-level integration coverage.
+
+2026-09-14: Ported first node state contract as explicit Starting/Online/Stopped lifecycle with atomic transitions and unit coverage; workspace passed (55 tests). Evidence `store-node-state-20260914.log`.
+next_action: port node command dispatch/state persistence behavior from hg-store-core.
