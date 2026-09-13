@@ -270,6 +270,19 @@ mod tests {
                 .into_inner(),
             hugegraph_store_transport::generated::ScanState::default()
         );
+        let mut graph =
+            hugegraph_store_transport::generated::graph_store_client::GraphStoreClient::connect(
+                format!("http://{}", addr),
+            )
+            .await
+            .unwrap();
+        let request = hugegraph_store_transport::generated::ScanPartitionRequest { header: None, request: Some(hugegraph_store_transport::generated::scan_partition_request::RequestOneOf::ScanRequest(hugegraph_store_transport::generated::scan_partition_request::Request { position: vec![], end_code: b'z' as u32, ..Default::default() })) };
+        let mut frames = graph
+            .scan_partition(tonic::Request::new(tokio_stream::iter([request])))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(frames.message().await.unwrap().is_some());
         let mut session = hugegraph_store_transport::generated::hg_store_session_client::HgStoreSessionClient::connect(format!("http://{}", addr)).await.unwrap();
         let feedback = session
             .get2(tonic::Request::new(
