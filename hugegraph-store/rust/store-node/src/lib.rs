@@ -46,12 +46,13 @@ impl StoreNode {
         })
     }
 
-    pub fn set_state(&self, state: NodeState) {
+    pub fn set_state(&self, state: NodeState) -> std::io::Result<()> {
         self.state
             .store(state as u8, std::sync::atomic::Ordering::Release);
         let tmp = self.state_path.with_extension("node-state.tmp");
-        let _ = std::fs::write(&tmp, [state as u8]);
-        let _ = std::fs::rename(tmp, &self.state_path);
+        std::fs::write(&tmp, [state as u8])?;
+        std::fs::rename(tmp, &self.state_path)?;
+        Ok(())
     }
 
     pub fn state(&self) -> NodeState {
@@ -69,7 +70,8 @@ impl StoreNode {
             (NodeState::Online, NodeCommand::Stop) => NodeState::Stopped,
             _ => return Err("invalid node command for current state"),
         };
-        self.set_state(next);
+        self.set_state(next)
+            .map_err(|_| "failed to persist node state")?;
         Ok(next)
     }
 
