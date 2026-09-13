@@ -1,0 +1,2 @@
+command: cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace
+result: PASS (tonic-prost-build dependency resolved; workspace tests pass)

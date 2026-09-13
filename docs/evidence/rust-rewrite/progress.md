@@ -167,3 +167,6 @@ next_action: expose all generated proto modules and map generated messages into 
 
 2026-09-14: Verified generated output currently consists of common (`_.rs`) and graph (`graph_pb.rs`) modules; generated messages are exposed and StringReply codec compiles. Full proto service/message mapping remains incomplete.
 next_action: map generated protobuf messages and service methods for query/session/state/healthy RPCs, then run end-to-end dispatch tests.
+
+2026-09-14: Added tonic and tonic-prost-build dependencies; build configuration now supports service generation, and online workspace tests pass after dependency resolution. Offline mode requires newly fetched crates. Evidence `tonic-generation-20260914.log`.
+next_action: configure tonic service generation for each proto service and expose generated client/server traits in Rust transport.
