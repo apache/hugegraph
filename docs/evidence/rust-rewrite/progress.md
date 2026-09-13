@@ -410,3 +410,6 @@ next_action: port first node command/state behavior from hg-store-core and add n
 
 2026-09-14: Ported first node state contract as explicit Starting/Online/Stopped lifecycle with atomic transitions and unit coverage; workspace passed (55 tests). Evidence `store-node-state-20260914.log`.
 next_action: port node command dispatch/state persistence behavior from hg-store-core.
+
+2026-09-14: Ported node Start/Stop command dispatch with explicit state-transition validation; node integration test exercises command path and rejects invalid transitions. Workspace passed (55 tests). Evidence `store-node-command-20260914.log`.
+next_action: persist node lifecycle state across restart and add recovery evidence.
