@@ -205,8 +205,9 @@ function props_set(file, key, enc_val,    tmp, cmd, b, first, ln) {
             else BDROP[b] = 1
         }
     }
-    # Atomic rewrite: the original is never truncated.  Everything lands
-    # in a sibling temp file that is closed and renamed over the original.
+    # Staged rewrite: everything lands in a sibling temp file first, so a
+    # failure before the copy-back leaves the original untouched.  The temp
+    # file can hold secrets, so it is created 0600 regardless of the umask.
     tmp = file ".tmp"
     for (b = 1; b <= NBLOCK; b++) {
         if (BDROP[b]) continue
@@ -220,9 +221,19 @@ function props_set(file, key, enc_val,    tmp, cmd, b, first, ln) {
     if (first == 0)
         printf "%s=%s\n", key, enc_val > tmp
     close(tmp)
-    cmd = "mv -- " shquote(tmp) " " shquote(file)
+    # Copy the completed temp file back onto the original instead of
+    # renaming it: a rename replaces the inode, which would lose the
+    # file's permissions (a 0600 config holding secrets would come back
+    # umask-world-readable), turn a symlinked config into a regular file,
+    # and fail with EBUSY on a config bind-mounted as a single file — the
+    # mounted case this path exists for.  The copy keeps the inode, mode,
+    # symlink and mount point, and since the temp file is fully written
+    # before the original is truncated, a failed copy still leaves the
+    # previous content on disk.
+    system("chmod 600 -- " shquote(tmp))
+    cmd = "cat -- " shquote(tmp) " > " shquote(file) " && rm -f -- " shquote(tmp)
     if (system(cmd) != 0)
-        die("cannot rename " tmp " over " file)
+        die("cannot copy " tmp " back over " file)
 }
 
 function props_get(file, key,    b) {

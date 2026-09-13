@@ -224,3 +224,24 @@ mkdir -p "${escaped_auth_dir}/conf"
     grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
         "${REST_SERVER_CONF}"
 )
+
+# A set must keep the config's inode: a copy-back preserves the file's
+# permissions (a 0600 config holding secrets must not come back
+# umask-readable) and leaves a symlinked config pointing at its target
+# instead of replacing it with a regular file.
+mode_file="${test_dir}/config-mode"
+printf '%s\n' 'unrelated=true' > "${mode_file}"
+chmod 600 "${mode_file}"
+set_prop "init_store.enabled" "true" "${mode_file}"
+[[ "$(stat -c '%a' "${mode_file}")" == "600" ]]
+grep -q '^init_store\.enabled=true$' "${mode_file}"
+grep -q '^unrelated=true$' "${mode_file}"
+[[ ! -e "${mode_file}.tmp" ]]
+
+target_file="${test_dir}/config-target"
+link_file="${test_dir}/config-link"
+printf '%s\n' 'unrelated=true' > "${target_file}"
+ln -s "${target_file}" "${link_file}"
+set_prop "init_store.enabled" "true" "${link_file}"
+[[ -L "${link_file}" ]]
+grep -q '^init_store\.enabled=true$' "${target_file}"
