@@ -90,6 +90,7 @@ Java 版本只作为参考实现，不能单独作为 Oracle。每条关键契�
 | Store 基线 | `hg-store-test`；store0 故障证据 `docs/evidence/rust-rewrite/compose-store0-fault-recovery-20260913.log`、网络分区证据 `docs/evidence/rust-rewrite/compose-store0-network-partition-20260913.log`、跨 Server 可见性证据 `docs/evidence/rust-rewrite/compose-cross-server-visibility-20260913.log`、故障期间读取证据 `docs/evidence/rust-rewrite/compose-store0-outage-read-consistency-20260913.log`、可重复 smoke `tools/rust-rewrite-cluster/smoke.sh`、最新成功归档 `docs/evidence/rust-rewrite/compose-cluster-smoke-20260913-rerun.log`、`docs/evidence/rust-rewrite/compose-cluster-smoke-latest-20260913.log`；归档 `docs/evidence/rust-rewrite/store-full-regression-20260913.log`（SHA-256 `b8c52fa475e3ec93bb0154b72c0709b0339ea16cc486e3e9533fc6dbacfb784c`） | 已启用 suite 通过，`BUILD SUCCESS`；最新 smoke 通过 | 活动快照损坏、跨进程恢复、完整 Raft 故障矩阵 |
 | Store Snapshot | `SnapshotHandlerTest`；归档 `docs/evidence/rust-rewrite/store-core-profile-20260913.log`（SHA-256 `084a53c5204c89ba65657414cf1de9714c2b7f55c5733a17465c12037c0b6f95`）、最新套件 `docs/evidence/rust-rewrite/snapshot-suite-20260913.log` | 7/7 通过，包含当前及废弃处理器的文件篡改后 checksum 变化断言 | 真实文件 round-trip、损坏快照加载失败语义、重启恢复 |
 | PD client/rest | `pd-client-test,pd-rest-test`；日志 `/tmp/pd-client-rest.log` | REST readiness 3 项通过；client 因未启动 `127.0.0.1:8686` 超时 | CI 必须编排 PD 服务并上传服务日志，超时不得计为通过 |
+| Rust Partition POC | `tools/rust-partition-poc`；`cargo test`、`cargo test --release`、`cargo-mutants` | 18 项测试通过；关键契约变异 27/27 捕获，2 项不可变异，唯一未捕获为非契约 `main()` | 生产实现的 Java/Rust 差分回放与真实集群验证 |
 
 上述结果只更新对应边界的证据状态，不改变全局 NO-GO 结论。
 
