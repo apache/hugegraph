@@ -314,3 +314,6 @@ next_action: add live malformed request assertion and enforce scan limit/error b
 
 2026-09-14: Live tonic client malformed ScanPartition request now asserts server invalid_argument error; workspace passed (54 tests). Evidence `tonic-live-malformed-20260914.log`.
 next_action: enforce negative limit and oversized request semantics, then continue contract gates.
+
+2026-09-14: GraphService rejects negative ScanPartition limits with invalid_argument while preserving zero as unlimited; workspace passed (54 tests). Evidence `scan-negative-limit-20260914.log`.
+next_action: add live negative-limit assertion and enforce oversized request/resource limits.
