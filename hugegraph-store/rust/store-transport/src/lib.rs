@@ -1208,3 +1208,10 @@ pub fn validate_clean_request(bytes: &[u8]) -> Result<i32, String> {
         Ok(r.partition)
     }
 }
+
+pub fn validate_session_control(table: &[u8], graph: &[u8], clean: &[u8]) -> Result<(), String> {
+    validate_table_request(table)?;
+    validate_graph_request(graph)?;
+    validate_clean_request(clean)?;
+    Ok(())
+}
