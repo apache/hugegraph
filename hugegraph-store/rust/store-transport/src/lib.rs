@@ -51,3 +51,13 @@ impl RpcEnvelope {
 }
 #[cfg(test)]
 mod envelope_tests { use super::*; #[test] fn envelope_round_trip_and_rejects_unknown() { let e=RpcEnvelope::new("HgStoreSession.Get2",b"x".to_vec()).unwrap(); assert_eq!(RpcEnvelope::decode(&e.encode()).unwrap(),e); assert!(RpcEnvelope::new("bad",vec![]).is_err()); } }
+
+use std::io::{Read, Write};
+pub fn serve_once(mut stream: std::net::TcpStream, mut service: StoreService) -> std::io::Result<()> {
+    let mut len=[0u8;4]; stream.read_exact(&mut len)?; let n=u32::from_le_bytes(len) as usize;
+    let mut buf=vec![0;n]; stream.read_exact(&mut buf)?;
+    let env=RpcEnvelope::decode(&buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData,e))?;
+    let response=match env.method.as_str() { "HgStoreSession.Get2" => service.call(StoreRequest::Get{key:env.payload})?, "HgStoreSession.Batch" => service.call(StoreRequest::Put{key:b"batch".to_vec(),value:env.payload})?, _ => StoreResponse::Ack };
+    let payload=match response { StoreResponse::Value(Some(v))=>v, StoreResponse::Value(None)|StoreResponse::Ack=>Vec::new() };
+    stream.write_all(&(payload.len() as u32).to_le_bytes())?; stream.write_all(&payload)
+}

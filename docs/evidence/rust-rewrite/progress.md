@@ -122,3 +122,6 @@ next_action: implement generated-proto-compatible message adapters and network t
 
 2026-09-14: Added validated RPC envelope encoding/decoding with method allowlist for all 15 hg-store-grpc methods; malformed and unknown methods are rejected. Workspace tests pass 10/10; evidence `rpc-envelope-20260914.log`.
 next_action: implement network listener/client around RpcEnvelope and connect method dispatch to durable StoreService.
+
+2026-09-14: Added TCP length-framed `serve_once` transport dispatching Get2/Batch envelopes into DurableStore service. Workspace tests pass 10/10; evidence `network-transport-20260914.log`.
+next_action: add a network client and socket integration test, then replace provisional payload mapping with generated proto-compatible codecs.
