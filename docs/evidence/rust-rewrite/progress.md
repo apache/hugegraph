@@ -443,3 +443,6 @@ next_action: add live node orchestration test and continue production command co
 
 2026-09-14: Full Rust workspace regression after node orchestration/data changes passed (57 tests: core 14, node 3, transport 40). Evidence `workspace-node-regression-20260914.log`.
 next_action: add live node orchestration test and continue production command coverage.
+
+2026-09-14: Added live unified StoreNode gRPC orchestration test; server starts on a bound socket and Healthy.IsOk succeeds. Node tests passed (4). Evidence `store-node-live-orchestration-20260914.log`.
+next_action: expand live node orchestration assertions to data and state services, then continue production command coverage.
