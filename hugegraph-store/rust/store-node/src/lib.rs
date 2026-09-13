@@ -89,6 +89,16 @@ impl StoreNode {
             .map_err(|e| e.to_string())
     }
 
+    pub fn put_batch(
+        &self,
+        entries: impl IntoIterator<Item = (Vec<u8>, Vec<u8>)>,
+    ) -> Result<(), String> {
+        for (key, value) in entries {
+            self.put(key, value)?;
+        }
+        Ok(())
+    }
+
     pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
         let store = self
             .session
@@ -252,9 +262,10 @@ mod tests {
         let node = StoreNode::open(&path).unwrap();
         node.start().unwrap();
         let mut oracle = std::collections::BTreeMap::new();
-        for i in 0..16u8 {
-            node.put(vec![i], vec![i ^ 0x5a]).unwrap();
-            oracle.insert(vec![i], vec![i ^ 0x5a]);
+        let batch: Vec<_> = (0..16u8).map(|i| (vec![i], vec![i ^ 0x5a])).collect();
+        node.put_batch(batch.clone()).unwrap();
+        for (k, v) in batch {
+            oracle.insert(k, v);
         }
         for (k, v) in oracle {
             assert_eq!(node.get(&k).unwrap(), Some(v));
