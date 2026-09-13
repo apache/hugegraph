@@ -197,3 +197,6 @@ next_action: integrate Catalog snapshot/recovery with unified store state, then 
 
 2026-09-14: Added UnifiedState image framing data and tagged Catalog metadata with truncation validation; workspace regression passed (34 tests). Evidence `unified-recovery-20260914.log`.
 next_action: wire UnifiedState into durable restart and failure recovery paths, then execute independent oracle scenarios.
+
+2026-09-14: Exposed DurableStore snapshot and validated restore_image APIs, with full workspace regression passing (34 tests). Evidence `durable-recovery-image-20260914.log`.
+next_action: add failure injection and restart tests around unified recovery images, then execute independent oracle scenarios.
