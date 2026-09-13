@@ -476,3 +476,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Live node GraphStore scan now uses pre-seeded DurableStore data and asserts one returned vertex frame; node tests passed (5). Evidence `store-node-live-graph-data-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Strengthened live GraphStore frame differential assertion with protocol sequence number and cardinality checks; node tests passed (5). Evidence `store-node-live-frame-oracle-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
