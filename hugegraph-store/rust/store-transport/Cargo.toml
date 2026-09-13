@@ -12,3 +12,6 @@ tonic-prost = "0.14.6"
 [build-dependencies]
 prost-build = "0.14.4"
 tonic-prost-build = "0.14.6"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
