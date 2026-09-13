@@ -1211,7 +1211,8 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
             .backend
             .lock()
             .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
-        apply_session_batch(&id, &bytes, &mut tx, &mut store).map_err(tonic::Status::internal)?;
+        apply_session_batch(&id, &bytes, &mut tx, &mut store)
+            .map_err(|e| tonic::Status::new(classify_failure(&e), e))?;
         Ok(tonic::Response::new(generated::FeedbackRes::default()))
     }
     async fn table(
