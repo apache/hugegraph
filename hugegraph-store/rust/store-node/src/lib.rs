@@ -16,6 +16,12 @@ pub enum NodeState {
     Stopped = 2,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NodeCommand {
+    Start,
+    Stop,
+}
+
 impl StoreNode {
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
@@ -39,6 +45,17 @@ impl StoreNode {
         }
     }
 
+    pub fn execute(&self, command: NodeCommand) -> Result<NodeState, &'static str> {
+        let next = match (self.state(), command) {
+            (NodeState::Starting, NodeCommand::Start)
+            | (NodeState::Stopped, NodeCommand::Start) => NodeState::Online,
+            (NodeState::Online, NodeCommand::Stop) => NodeState::Stopped,
+            _ => return Err("invalid node command for current state"),
+        };
+        self.set_state(next);
+        Ok(next)
+    }
+
     pub fn health_service(&self) -> HealthyService {
         HealthyService
     }
@@ -58,9 +75,9 @@ mod tests {
         let path = std::env::temp_dir().join(format!("hg-node-state-{}.img", std::process::id()));
         let node = StoreNode::open(&path).unwrap();
         assert_eq!(node.state(), NodeState::Starting);
-        node.set_state(NodeState::Online);
+        assert_eq!(node.execute(NodeCommand::Start).unwrap(), NodeState::Online);
         assert_eq!(node.state(), NodeState::Online);
-        node.set_state(NodeState::Stopped);
+        assert_eq!(node.execute(NodeCommand::Stop).unwrap(), NodeState::Stopped);
         assert_eq!(node.state(), NodeState::Stopped);
         let _ = std::fs::remove_file(path);
     }
