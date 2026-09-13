@@ -383,3 +383,6 @@ next_action: add live Query/State RPC contract tests, then continue remaining pr
 
 2026-09-14: Added live tonic QueryService.query0 and HgStoreState.get_scan_state contract test; workspace passed (71? core 14 + transport 38 = 52 tests). Evidence `tonic-live-query-state-20260914.log`.
 next_action: expand live Query/State method coverage and continue remaining production-contract coverage.
+
+2026-09-14: Extended live State contract test to validate sub_state streaming and Online state; workspace passed (52 tests). Evidence `tonic-live-state-stream-20260914.log`.
+next_action: cover remaining State lifecycle methods and continue production-contract coverage.

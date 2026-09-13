@@ -1077,6 +1077,13 @@ mod graph_frame_tests {
             response.into_inner(),
             super::generated::ScanState::default()
         );
+        let mut stream = state
+            .sub_state(super::generated::SubStateReq::default())
+            .await
+            .unwrap()
+            .into_inner();
+        let node = stream.message().await.unwrap().unwrap();
+        assert_eq!(node.state, super::generated::NodeStateType::Online as i32);
     }
 }
 
