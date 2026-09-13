@@ -31,6 +31,7 @@ import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.exception.LimitExceedException;
@@ -154,16 +155,21 @@ public class QueryResultsTest {
     }
 
     @Test
-    public void testQueryDiagnosticsDoNotDuplicateAndClearOnClose() throws Exception {
+    public void testBatchContextAndSourceClose() throws Exception {
         IdQuery query = queryOf(1L, 2L);
-        QueryResults<TestIdfiable> results = new QueryResults<>(
-                new CountingIterator(1L, 2L), query);
-        Assert.assertEquals(Collections.singletonList(query), results.queries());
-        Iterator<TestIdfiable> iterator = results.iterator();
-        Assert.assertTrue(iterator.hasNext());
-        Assert.assertEquals(Collections.singletonList(query), results.queries());
-        ((AutoCloseable) iterator).close();
-        Assert.assertTrue(results.queries().isEmpty());
+        CountingIterator source = new CountingIterator(1L, 2L);
+        QueryResults<TestIdfiable> results = new QueryResults<>(source, query);
+        Iterator<QueryBatch<TestIdfiable>> batches = results.batches();
+        Assert.assertTrue(batches.hasNext());
+        Assert.assertTrue(batches.hasNext());
+        QueryBatch<TestIdfiable> batch = batches.next();
+        Assert.assertSame(query, batch.context().queries().get(0));
+        Assert.assertEquals(2, batch.context().inputIds().size());
+        Assert.assertTrue(batch.results().hasNext());
+        ((AutoCloseable) batches).close();
+        Assert.assertEquals(1, source.closed);
+        Assert.assertFalse(batch.results().hasNext());
+        Assert.assertFalse(batches.hasNext());
     }
 
     @Test

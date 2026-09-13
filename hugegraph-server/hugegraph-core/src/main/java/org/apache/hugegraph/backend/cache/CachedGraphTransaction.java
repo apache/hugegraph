@@ -319,6 +319,8 @@ public final class CachedGraphTransaction extends GraphTransaction {
     @Override
     @Watched(prefix = "graphcache")
     protected QueryResults<HugeVertex> fetchVertexBatch(Query query) {
+        // Test the leaf: direct paging needs backend metadata, while index paging
+        // takes its cursor from the IdHolder and can cache the ID lookup.
         if (!this.enableCacheVertex() || query.paging() ||
             query.idsSize() == 0 || query.conditionsSize() != 0) {
             return super.fetchVertexBatch(query);

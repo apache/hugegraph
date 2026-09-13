@@ -18,7 +18,6 @@
 package org.apache.hugegraph.backend.query;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +37,6 @@ import org.apache.hugegraph.type.Idfiable;
 public class QueryResults<R> {
 
     private final BatchIterator<QueryBatch<R>> batches;
-    private final List<Query> queries;
     private final Object metadata;
     private Iterator<R> results;
 
@@ -48,7 +46,6 @@ public class QueryResults<R> {
 
     public QueryResults(Iterator<R> results, QueryResultContext context) {
         QueryBatch<R> batch = new QueryBatch<>(results, context);
-        this.queries = new ArrayList<>(Collections.singletonList(context.queries().get(0)));
         this.batches = this.trackBatches(new BatchIterator<QueryBatch<R>>() {
             private boolean fetched;
 
@@ -70,7 +67,6 @@ public class QueryResults<R> {
     }
 
     private QueryResults(Iterator<QueryBatch<R>> batches, Object metadata) {
-        this.queries = new ArrayList<>();
         this.batches = this.trackBatches(batches);
         this.metadata = metadata;
     }
@@ -88,8 +84,6 @@ public class QueryResults<R> {
                     return null;
                 }
                 this.active = origin.next();
-                queries.clear();
-                queries.add(this.active.context().queries().get(0));
                 return this.active;
             }
 
@@ -97,7 +91,6 @@ public class QueryResults<R> {
             protected void closeResources() throws Exception {
                 QueryBatch<R> previous = this.active;
                 this.active = null;
-                queries.clear();
                 QueryBatch.closeAll(previous, origin);
             }
 
@@ -218,14 +211,6 @@ public class QueryResults<R> {
         return one(this.iterator());
     }
 
-    /**
-     * Source query of the current batch. A known single source is available before
-     * activation; composed streams start empty. Closing clears the diagnostics.
-     */
-    public List<Query> queries() {
-        return Collections.unmodifiableList(this.queries);
-    }
-
     public QueryResults<R> toList() {
         List<QueryBatch<R>> fetched = new ArrayList<>();
         long count = 0L;
@@ -245,11 +230,7 @@ public class QueryResults<R> {
         } finally {
             close(this.batches, failure);
         }
-        QueryResults<R> result = new QueryResults<>(fetched.iterator(), this.metadata);
-        if (!fetched.isEmpty()) {
-            result.queries.add(fetched.get(0).context().queries().get(0));
-        }
-        return result;
+        return new QueryResults<>(fetched.iterator(), this.metadata);
     }
 
     public static <T, R> QueryResults<R> flatMap(

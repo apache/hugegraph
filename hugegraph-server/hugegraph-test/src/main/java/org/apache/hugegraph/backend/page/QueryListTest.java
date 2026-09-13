@@ -108,7 +108,7 @@ public class QueryListTest {
     }
 
     @Test
-    public void testPagingRetainsOnlyCurrentQuery() throws Exception {
+    public void testPagingKeepsEachBatchContext() throws Exception {
         ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
         query.page("");
         query.limit(10000L);
@@ -123,16 +123,18 @@ public class QueryListTest {
                 batch));
         list.add(holders, 1L);
         QueryResults<Item> results = list.fetch(1);
-        Iterator<Item> iterator = results.iterator();
+        Iterator<QueryBatch<Item>> batches = results.batches();
         for (long id = 1L; id <= 10000L; id++) {
-            Assert.assertEquals(IdGenerator.of(id), iterator.next().id());
-            Assert.assertEquals(1, results.queries().size());
+            QueryBatch<Item> batch = batches.next();
             Assert.assertEquals(Collections.singletonList(IdGenerator.of(id)),
-                                results.queries().get(0).ids());
+                                batch.context().inputIds());
+            Assert.assertEquals(IdGenerator.of(id), batch.results().next().id());
+            Assert.assertFalse(batch.results().hasNext());
+            Assert.assertEquals(id, (long) pages[0]);
         }
         Assert.assertEquals(10000, pages[0]);
-        ((AutoCloseable) iterator).close();
-        Assert.assertTrue(results.queries().isEmpty());
+        ((AutoCloseable) batches).close();
+        Assert.assertFalse(batches.hasNext());
     }
 
     @Test
