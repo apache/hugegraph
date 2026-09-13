@@ -8,11 +8,11 @@ row is covered only when its command, fixture, oracle and result log are linked.
 | API-REST-001 | vertex CRUD and validation | `VertexApiTest`, `api-test,memory`, Java 11 host network | `api-rest-001-independent-oracle-20260913.md` | complete |
 | API-GREMLIN-001 | traversal result and ordering | `hugegraph-test` core profile | `api-gremlin-001-independent-oracle-20260913.md` | complete |
 | SCHEMA-001 | property/index uniqueness | `VertexCoreTest#testAddVertexWithUniqueIndex`, core-test,memory, Java 11 Docker | `schema-001-independent-oracle-20260913.md` | complete |
-| TXN-001 | commit/rollback visibility | core test profile | state-transition oracle | planned |
+| TXN-001 | commit/rollback visibility | `PrimaryKeyStrategyCoreTest#testFoldsSingleCardinalityProperties`, core-test,memory, Java 11 Docker | `txn-001-independent-oracle-20260913.md` | complete |
 | RAFT-001 | replicated write under restart | `tools/raft-linearizability` harness | independent linearizability oracle | partial |
 | SNAP-001 | snapshot export/import and corruption rejection | `tools/rust-rewrite-cluster/verify-snapshot-corruption.py` (negative component) | checksum/state oracle | partial |
 
-Coverage is currently 3/6 complete (50%); SNAP-001 now has a deterministic
+Coverage is currently 4/6 complete (67%); SNAP-001 now has a deterministic
 corruption-rejection component, but no real snapshot round-trip. RAFT-001 is partial because the
 independent single-register oracle exists but real three-node history capture is
 still absent. No Go decision is implied by this inventory.

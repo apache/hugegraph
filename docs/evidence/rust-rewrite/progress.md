@@ -53,3 +53,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: SCHEMA-001 unique-index core entry passed under Java 11 Docker: 1 test, 0 failures, BUILD SUCCESS, exit 0. Evidence `schema-001-unique-index-java11-20260913.log`. Next action: archive the invariant Oracle and continue TXN-001.
 
 2026-09-13: Archived SCHEMA-001 independent invariant Oracle from `VertexCoreTest#testAddVertexWithUniqueIndex`; first indexed value succeeds and duplicate uniqueness violation is asserted. Matrix coverage is now 3/6. Next action: execute TXN-001 commit/rollback visibility entry and archive its state-transition Oracle.
+
+2026-09-13: TXN-001 commit/rollback visibility passed under Java 11 Docker using `PrimaryKeyStrategyCoreTest#testFoldsSingleCardinalityProperties`; archived state-transition Oracle. Matrix coverage is now 4/6. Next action: complete RAFT-001 real three-node history capture and independent Oracle.

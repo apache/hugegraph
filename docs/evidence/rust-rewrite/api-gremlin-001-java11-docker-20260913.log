@@ -242,3 +242,78 @@ Progress (3): 93/191 kB | 28/52 kB | 24/46 kBProgress (3): 110/191 kB | 28/52 k
 Progress (2): 110/191 kB | 44/52 kBProgress (3): 110/191 kB | 44/52 kB | 7.7/285 kBProgress (3): 110/191 kB | 44/52 kB | 16/285 kB Progress (3): 110/191 kB | 44/52 kB | 32/285 kBProgress (3): 110/191 kB | 44/52 kB | 49/285 kBProgress (3): 110/191 kB | 44/52 kB | 57/285 kBProgress (3): 110/191 kB | 44/52 kB | 73/285 kBProgress (4): 110/191 kB | 44/52 kB | 73/285 kB | 7.7/53 kBProgress (4): 110/191 kB | 44/52 kB | 73/285 kB | 16/53 kB Progress (4): 110/191 kB | 44/52 kB | 73/285 kB | 32/53 kBProgress (4): 110/191 kB | 44/52 kB | 73/285 kB | 49/53 kBProgress (4): 110/191 kB | 44/52 kB | 73/285 kB | 53 kB                                                          Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/wagon/wagon-provider-api/1.0-beta-6/wagon-provider-api-1.0-beta-6.jar (53 kB at 7.9 kB/s)
 Progress (3): 110/191 kB | 44/52 kB | 90/285 kBProgress (3): 126/191 kB | 44/52 kB | 90/285 kBProgress (3): 126/191 kB | 52 kB | 90/285 kB                                               Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/maven-artifact/3.0/maven-artifact-3.0.jar (52 kB at 7.4 kB/s)
 Progress (2): 126/191 kB | 106/285 kBProgress (2): 126/191 kB | 122/285 kBProgress (2): 126/191 kB | 139/285 kBProgress (2): 126/191 kB | 155/285 kBProgress (2): 142/191 kB | 155/285 kBProgress (2): 142/191 kB | 172/285 kBProgress (2): 142/191 kB | 188/285 kBProgress (2): 142/191 kB | 204/285 kBProgress (2): 142/191 kB | 221/285 kBProgress (2): 159/191 kB | 221/285 kBProgress (2): 159/191 kB | 237/285 kBProgress (2): 159/191 kB | 253/285 kBProgress (2): 159/191 kB | 270/285 kBProgress (2): 159/191 kB | 285 kB                                     Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/maven-compat/3.0/maven-compat-3.0.jar (285 kB at 32 kB/s)
+Progress (1): 175/191 kBProgress (1): 191 kB                        Downloaded from central: https://repo.maven.apache.org/maven2/org/xolstice/maven/plugins/protobuf-maven-plugin/0.6.1/protobuf-maven-plugin-0.6.1.jar (191 kB at 20 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/kr/motd/maven/os-maven-plugin/1.6.2/os-maven-plugin-1.6.2.pom
+Progress (1): 1.1 kBProgress (1): 3.5 kBProgress (1): 6.1 kBProgress (1): 6.3 kB                    Downloaded from central: https://repo.maven.apache.org/maven2/kr/motd/maven/os-maven-plugin/1.6.2/os-maven-plugin-1.6.2.pom (6.3 kB at 26 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/kr/motd/maven/os-maven-plugin/1.6.2/os-maven-plugin-1.6.2.jar
+Progress (1): 7.7/30 kBProgress (1): 15/30 kB Progress (1): 30 kB                      Downloaded from central: https://repo.maven.apache.org/maven2/kr/motd/maven/os-maven-plugin/1.6.2/os-maven-plugin-1.6.2.jar (30 kB at 25 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp-bom/4.10.0/okhttp-bom-4.10.0.pom
+Progress (1): 931 BProgress (1): 3.1 kB                    Downloaded from central: https://repo.maven.apache.org/maven2/com/squareup/okhttp3/okhttp-bom/4.10.0/okhttp-bom-4.10.0.pom (3.1 kB at 15 kB/s)
+[INFO] ------------------------------------------------------------------------
+[INFO] Detecting the operating system and CPU architecture
+[INFO] ------------------------------------------------------------------------
+[INFO] os.detected.name: linux
+[INFO] os.detected.arch: x86_64
+[INFO] os.detected.bitness: 64
+[INFO] os.detected.version: 6.6
+[INFO] os.detected.version.major: 6
+[INFO] os.detected.version.minor: 6
+[INFO] os.detected.release: ubuntu
+[INFO] os.detected.release.version: 22.04
+[INFO] os.detected.release.like.ubuntu: true
+[INFO] os.detected.release.like.debian: true
+[INFO] os.detected.classifier: linux-x86_64
+[INFO] ------------------------------------------------------------------------
+[INFO] Detecting the operating system and CPU architecture
+[INFO] ------------------------------------------------------------------------
+[INFO] os.detected.name: linux
+[INFO] os.detected.arch: x86_64
+[INFO] os.detected.version: 6.6
+[INFO] os.detected.version.major: 6
+[INFO] os.detected.version.minor: 6
+[INFO] os.detected.release: ubuntu
+[INFO] os.detected.release.version: 22.04
+[INFO] os.detected.release.like.ubuntu: true
+[INFO] os.detected.release.like.debian: true
+[INFO] os.detected.classifier: linux-x86_64
+[INFO] ------------------------------------------------------------------------
+[INFO] Reactor Build Order:
+[INFO] 
+[INFO] hugegraph                                                          [pom]
+[INFO] hugegraph-commons                                                  [pom]
+[INFO] hugegraph-common                                                   [jar]
+[INFO] hugegraph-pd                                                       [pom]
+[INFO] hg-pd-grpc                                                         [jar]
+[INFO] hg-pd-common                                                       [jar]
+[INFO] hg-pd-client                                                       [jar]
+[INFO] hugegraph-struct                                                   [jar]
+[INFO] hugegraph-store                                                    [pom]
+[INFO] hg-store-common                                                    [jar]
+[INFO] hugegraph-server                                                   [pom]
+[INFO] hugegraph-core                                                     [jar]
+[INFO] hugegraph-rpc                                                      [jar]
+[INFO] hugegraph-api                                                      [jar]
+[INFO] hugegraph-rocksdb                                                  [jar]
+[INFO] hugegraph-hbase                                                    [jar]
+[INFO] hg-store-grpc                                                      [jar]
+[INFO] hg-store-client                                                    [jar]
+[INFO] hugegraph-hstore                                                   [jar]
+[INFO] hugegraph-dist                                                     [jar]
+[INFO] hugegraph-test                                                     [jar]
+[INFO] 
+[INFO] -------------------< org.apache.hugegraph:hugegraph >-------------------
+[INFO] Building hugegraph 1.7.0                                          [1/21]
+[INFO]   from pom.xml
+[INFO] --------------------------------[ pom ]---------------------------------
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-remote-resources-plugin/3.3.0/maven-remote-resources-plugin-3.3.0.pom
+Progress (1): 756 BProgress (1): 2.0 kBProgress (1): 3.7 kBProgress (1): 8.7 kBProgress (1): 13 kB Progress (1): 15 kB                   Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-remote-resources-plugin/3.3.0/maven-remote-resources-plugin-3.3.0.pom (15 kB at 35 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-plugins/43/maven-plugins-43.pom
+Progress (1): 773 BProgress (1): 2.3 kBProgress (1): 5.1 kBProgress (1): 7.5 kB                    Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-plugins/43/maven-plugins-43.pom (7.5 kB at 30 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/maven-parent/43/maven-parent-43.pom
+Progress (1): 720 BProgress (1): 1.9 kBProgress (1): 5.5 kBProgress (1): 9.9 kBProgress (1): 14 kB Progress (1): 19 kBProgress (1): 23 kBProgress (1): 26 kBProgress (1): 28 kBProgress (1): 31 kBProgress (1): 34 kBProgress (1): 38 kBProgress (1): 41 kBProgress (1): 43 kBProgress (1): 48 kBProgress (1): 48 kBProgress (1): 50 kB                   Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/maven/maven-parent/43/maven-parent-43.pom (50 kB at 50 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/apache/33/apache-33.pom
+Progress (1): 741 BProgress (1): 2.1 kBProgress (1): 4.0 kBProgress (1): 6.0 kBProgress (1): 10 kB Progress (1): 16 kBProgress (1): 19 kBProgress (1): 22 kBProgress (1): 24 kB                   Downloaded from central: https://repo.maven.apache.org/maven2/org/apache/apache/33/apache-33.pom (24 kB at 60 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.3/junit-bom-5.10.3.pom
+Progress (1): 908 BProgress (1): 4.1 kBProgress (1): 5.6 kB                    Downloaded from central: https://repo.maven.apache.org/maven2/org/junit/junit-bom/5.10.3/junit-bom-5.10.3.pom (5.6 kB at 26 kB/s)
+Downloading from central: https://repo.maven.apache.org/maven2/org/apache/maven/plugins/maven-remote-resources-plugin/3.3.0/maven-remote-resources-plugin-3.3.0.jar
+Progress (1): 7.7/83 kBProgress (1): 8.2/83 kBProgress (1): 16/83 kB 

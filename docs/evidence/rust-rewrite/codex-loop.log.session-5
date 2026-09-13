@@ -1,0 +1,3 @@
+2026-09-13T13:38:49.661441Z ERROR codex_core::session::session: failed to initialize thread persistence: thread-store conflict: thread 01a09ade-c308-7a52-81c3-f5cff751ee84 already has an active writer
+2026-09-13T13:38:49.661847Z ERROR codex_core::session: Failed to create session: thread-store conflict: thread 01a09ade-c308-7a52-81c3-f5cff751ee84 already has an active writer
+Error: thread/resume: thread/resume failed: thread 01a09ade-c308-7a52-81c3-f5cff751ee84 already has an active writer (code -32600)
