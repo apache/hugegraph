@@ -612,12 +612,7 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
             .backend
             .lock()
             .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
-        let values = batch_get_values(&store, &bytes).map_err(tonic::Status::invalid_argument)?;
-        let pairs = values
-            .into_iter()
-            .enumerate()
-            .map(|(i, v)| (i.to_le_bytes().to_vec(), v.unwrap_or_default()))
-            .collect();
+        let pairs = batch_get_pairs(&store, &bytes).map_err(tonic::Status::invalid_argument)?;
         Ok(tonic::Response::new(feedback_values(pairs)))
     }
     async fn batch(
