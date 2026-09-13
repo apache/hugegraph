@@ -1,0 +1,6 @@
+Date: 2026-09-13
+Compose: docker/docker-compose-3pd-3store-3server.yml
+Images: hugegraph/pd:latest, hugegraph/store:latest, hugegraph/server:latest
+Scenario: stop pd0; wait 8s; check pd1/pd2 /v1/health; start pd0; wait 12s; check all PD /v1/health.
+Result: pd1 healthy during pd0 outage; pd2 healthy during pd0 outage; pd0/pd1/pd2 healthy after recovery.
+Note: curl used --noproxy '*' to avoid host HTTP proxy intercepting localhost.
