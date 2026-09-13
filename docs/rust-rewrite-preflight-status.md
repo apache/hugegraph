@@ -36,3 +36,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Partition POC rerun: fmt, clippy, and 14 tests passed; evidence partition-poc-verify-20260913-rerun.log.
 
 2026-09-13 standalone linearizability Oracle positive/negative smoke passed; evidence raft-linearizability-oracle-20260913.log.
+
+2026-09-13 Oracle concurrent overlap suite passed; evidence raft-linearizability-oracle-20260913-concurrent.log.
