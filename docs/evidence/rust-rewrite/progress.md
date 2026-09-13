@@ -500,3 +500,6 @@ next_action: add clean-data fault/recovery and command differential coverage.
 
 2026-09-14: Added CleanData recovery assertions: data is absent immediately and after node reopen; node tests passed (5). Evidence `store-node-clean-recovery-20260914.log`.
 next_action: add clean-data fault/recovery and command differential coverage.
+
+2026-09-14: Full workspace regression after CleanData recovery coverage passed (64 tests: core 14, node 5, transport 40). Evidence `workspace-clean-recovery-20260914.log`.
+next_action: add clean-data fault injection and command differential coverage.
