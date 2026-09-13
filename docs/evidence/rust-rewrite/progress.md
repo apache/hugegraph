@@ -473,3 +473,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Extended node differential Oracle to compare GraphStore scan cardinality with the independent ordered model (16 entries); node tests passed (5). Evidence `store-node-scan-oracle-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Live node GraphStore scan now uses pre-seeded DurableStore data and asserts one returned vertex frame; node tests passed (5). Evidence `store-node-live-graph-data-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
