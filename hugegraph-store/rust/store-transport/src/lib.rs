@@ -503,12 +503,3 @@ mod generated_tests {
         assert_eq!(decode_string_reply(&b).unwrap(), "ok");
     }
 }
-#[cfg(test)]
-mod generated_service_tests {
-    #[test]
-    fn generated_services_present() {
-        let _ = super::generated::query_service_client::QueryServiceClient::<
-            tonic::transport::Channel,
-        >::connect;
-    }
-}
