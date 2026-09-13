@@ -666,9 +666,14 @@ pub fn filter_entries(
 }
 pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8>, Vec<u8>)> {
     match r.request.as_ref()? {
-        generated::scan_partition_request::RequestOneOf::ScanRequest(v) => {
-            Some((v.position.clone(), v.end_code.to_be_bytes().to_vec()))
-        }
+        generated::scan_partition_request::RequestOneOf::ScanRequest(v) => Some((
+            v.position.clone(),
+            if v.end_code == 0 {
+                vec![]
+            } else {
+                v.end_code.to_be_bytes().to_vec()
+            },
+        )),
         generated::scan_partition_request::RequestOneOf::ReplyRequest(_) => None,
     }
 }
@@ -800,7 +805,19 @@ mod graph_frame_tests {
         ))
         .await
         .unwrap();
-        let stream = tokio_stream::iter(vec![super::generated::ScanPartitionRequest::default()]);
+        let request = super::generated::ScanPartitionRequest {
+            header: None,
+            request: Some(
+                super::generated::scan_partition_request::RequestOneOf::ScanRequest(
+                    super::generated::scan_partition_request::Request {
+                        position: b"m".to_vec(),
+                        end_code: 0,
+                        ..Default::default()
+                    },
+                ),
+            ),
+        };
+        let stream = tokio_stream::iter(vec![request]);
         let response = client.scan_partition(stream).await.unwrap();
         let mut frames = response.into_inner();
         assert_eq!(frames.message().await.unwrap().unwrap().vertex.len(), 1);
