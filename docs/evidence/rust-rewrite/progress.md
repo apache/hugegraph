@@ -515,3 +515,6 @@ next_action: add batch-put failure atomicity and command differential coverage.
 
 2026-09-14: BatchPut now snapshots DurableStore and restores on any commit failure, providing atomic rollback semantics; node tests passed (5). Evidence `store-node-batch-atomicity-20260914.log`.
 next_action: add batch-put fault injection and command differential coverage.
+
+2026-09-14: Added BatchPut path fault injection; failed batch preserved pre-existing data and node remained usable. Node tests passed (6). Evidence `store-node-batch-fault-20260914.log`.
+next_action: add batch-put command differential coverage and continue production command implementation.

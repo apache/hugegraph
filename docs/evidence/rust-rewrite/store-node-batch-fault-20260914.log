@@ -1,0 +1,1 @@
+PASS: injected BatchPut persistence failure preserved existing data; 6 node tests.
