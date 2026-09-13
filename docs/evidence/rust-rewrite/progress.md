@@ -191,3 +191,6 @@ next_action: implement SessionService batch transaction context with staged writ
 
 2026-09-14: Full Rust workspace regression after Session get2 and batch wiring passed. Evidence `session-service-regression-20260914.log`.
 next_action: add tonic-level SessionService integration tests and implement BatchGet2/Table/Graph/Clean semantics.
+
+2026-09-14: Fixed Catalog restore to decode tagged table/graph snapshot entries and added round-trip coverage; Rust workspace tests pass (34 tests). Evidence `catalog-restore-20260914.log`.
+next_action: integrate Catalog snapshot/recovery with unified store state, then expand independent oracle and differential scenarios.
