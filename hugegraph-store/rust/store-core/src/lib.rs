@@ -412,4 +412,23 @@ mod txn_tests {
         assert_eq!(s.get(b"x"), None);
         let _ = std::fs::remove_file(p);
     }
+
+    #[test]
+    fn txn_oracle_commit_is_atomic_observable_boundary() {
+        let p = std::env::temp_dir().join(format!("hg-txn-oracle-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let mut s = DurableStore::open(&p).unwrap();
+        let mut oracle = std::collections::BTreeMap::new();
+        {
+            let mut tx = Transaction::new(&mut s);
+            tx.put(b"a".to_vec(), b"1".to_vec());
+            tx.put(b"b".to_vec(), b"2".to_vec());
+            tx.commit().unwrap();
+        }
+        oracle.insert(b"a".to_vec(), b"1".to_vec());
+        oracle.insert(b"b".to_vec(), b"2".to_vec());
+        assert_eq!(s.get(b"a"), oracle.get(b"a" as &[u8]).cloned());
+        assert_eq!(s.get(b"b"), oracle.get(b"b" as &[u8]).cloned());
+        let _ = std::fs::remove_file(p);
+    }
 }
