@@ -1,0 +1,4 @@
+Sun Sep 13 11:05:07 UTC 2026
+capture history tests passed
+workflow=/home/zy/code/hugegraph/.github/workflows/rust-partition-poc.yml
+gates=fmt,clippy,test,mutation
