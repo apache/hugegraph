@@ -50,7 +50,10 @@ impl StoreNode {
 
     pub fn set_state(&self, state: NodeState) -> std::io::Result<()> {
         let tmp = self.state_path.with_extension("node-state.tmp");
-        std::fs::write(&tmp, [state as u8])?;
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(&[state as u8])?;
+        file.sync_all()?;
         std::fs::rename(tmp, &self.state_path)?;
         self.state
             .store(state as u8, std::sync::atomic::Ordering::Release);
