@@ -411,6 +411,7 @@ mod dispatch_tests {
         )
         .is_ok());
         assert!(validate_dispatch("QueryService.count", b"").is_err());
+        assert!(validate_dispatch("HgStoreSession.Batch", b"\xff").is_err());
     }
 }
 
