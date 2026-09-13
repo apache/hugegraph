@@ -161,6 +161,63 @@ mod tests {
             out.push(b.get(b"b"));
             out
         }
-        assert_eq!(run(BackendSelector::rust()), run(BackendSelector::java_fallback()));
+        assert_eq!(
+            run(BackendSelector::rust()),
+            run(BackendSelector::java_fallback())
+        );
+    }
+}
+
+/// Durable append-only store boundary used by production adapters.
+pub struct DurableStore {
+    path: std::path::PathBuf,
+    inner: InMemoryStore,
+}
+
+impl DurableStore {
+    pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
+        let path = path.into();
+        let inner = match std::fs::read(&path) {
+            Ok(bytes) => InMemoryStore::restore(&bytes).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "corrupt store image")
+            })?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => InMemoryStore::default(),
+            Err(e) => return Err(e),
+        };
+        Ok(Self { path, inner })
+    }
+    fn persist(&self) -> std::io::Result<()> {
+        let tmp = self.path.with_extension("tmp");
+        std::fs::write(&tmp, self.inner.snapshot())?;
+        std::fs::rename(tmp, &self.path)
+    }
+    pub fn commit_put(&mut self, key: Vec<u8>, value: Vec<u8>) -> std::io::Result<Option<Vec<u8>>> {
+        let old = self.inner.put(key, value);
+        self.persist()?;
+        Ok(old)
+    }
+    pub fn rollback_key(&mut self, key: &[u8]) -> std::io::Result<()> {
+        self.inner.rollback(key);
+        self.persist()
+    }
+    pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
+        self.inner.get(key)
+    }
+}
+
+#[cfg(test)]
+mod durable_tests {
+    use super::DurableStore;
+    #[test]
+    fn durable_restart_round_trip() {
+        let path = std::env::temp_dir().join(format!("hg-store-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut s = DurableStore::open(&path).unwrap();
+            s.commit_put(b"k".to_vec(), b"v".to_vec()).unwrap();
+        }
+        let s = DurableStore::open(&path).unwrap();
+        assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
+        let _ = std::fs::remove_file(path);
     }
 }

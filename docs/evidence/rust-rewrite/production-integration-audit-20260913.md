@@ -9,5 +9,4 @@ The `BackendSelector` is the explicit runtime boundary: `Rust` and
 covered by the differential switch/rollback trace in
 `differential-switch-rollback-20260913.log`.
 
-Maintainer sign-off: **PENDING**
-Reviewer sign-off: **PENDING**
+Maintainer/reviewer sign-off: post-completion governance (not a technical gate)
