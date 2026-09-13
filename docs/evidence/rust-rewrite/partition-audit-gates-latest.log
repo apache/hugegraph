@@ -1,0 +1,2 @@
+workflow=/home/zy/code/hugegraph/.github/workflows/rust-partition-poc.yml
+gates=fmt,clippy,test,mutation
