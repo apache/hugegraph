@@ -6,6 +6,7 @@ edition = "2021"
 hugegraph-store-core = { path = "../store-core" }
 prost = "0.14.4"
 tonic = "0.14.6"
+tonic-prost = "0.14.6"
 
 [build-dependencies]
 prost-build = "0.14.4"
