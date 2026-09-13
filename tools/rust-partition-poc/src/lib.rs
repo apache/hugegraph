@@ -204,6 +204,16 @@ mod recovery_tests {
         ];
         assert_eq!(replay(base(), &events, 20), Err("stale-heartbeat"));
     }
+
+    #[test]
+    fn replay_rejects_unknown_partition_event() {
+        let events = vec![Partition {
+            start: 20,
+            end: 30,
+            version: 1,
+        }];
+        assert_eq!(replay(base(), &events, 20), Err("unknown-partition"));
+    }
 }
 
 #[cfg(test)]
