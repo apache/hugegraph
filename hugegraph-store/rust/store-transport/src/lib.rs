@@ -1524,12 +1524,26 @@ mod batch_tests {
             header: None,
             batch_id: "b".into(),
             requests: Some(generated::batch_req::Requests::WriteReq(
-                generated::BatchWriteReq { entry: vec![e] },
+                generated::BatchWriteReq {
+                    entry: vec![
+                        e,
+                        generated::BatchEntry {
+                            op_type: 0,
+                            table: 0,
+                            start_key: Some(generated::Key {
+                                key: b"k2".to_vec(),
+                                code: 0,
+                            }),
+                            end_key: None,
+                            value: b"v2".to_vec(),
+                        },
+                    ],
+                },
             )),
         };
         let c = batch_command(&prost::Message::encode_to_vec(&r)).unwrap();
         assert!(
-            matches!(c, hugegraph_store_core::StoreRequest::BatchPut { entries } if entries == vec![(b"k".to_vec(), b"v".to_vec())])
+            matches!(c, hugegraph_store_core::StoreRequest::BatchPut { entries } if entries == vec![(b"k".to_vec(), b"v".to_vec()), (b"k2".to_vec(), b"v2".to_vec())])
         );
     }
 }
