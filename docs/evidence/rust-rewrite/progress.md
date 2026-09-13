@@ -224,3 +224,6 @@ next_action: replace placeholder state/graph stream responses with contract-back
 
 2026-09-14: Replaced empty state subscription stream with a contract-defined Online NodeStateRes record; transport check passed. Evidence `state-stream-record-20260914.log`.
 next_action: replace GraphStore empty scan stream with persisted record mapping and add E2E stream assertions.
+
+2026-09-14: Replaced empty GraphStore scan stream with a contract-defined ScanResponse frame (sequence 0); transport check passed. Evidence `graph-stream-record-20260914.log`.
+next_action: add E2E stream assertions and map persisted vertex/edge records into scan frames.
