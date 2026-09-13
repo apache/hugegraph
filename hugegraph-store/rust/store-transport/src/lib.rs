@@ -1119,3 +1119,33 @@ pub fn batch_get_pairs(
         .filter_map(|k| store.get(&k).map(|v| (k, v)))
         .collect())
 }
+
+pub fn feedback_values_with_missing(
+    store: &hugegraph_store_core::DurableStore,
+    bytes: &[u8],
+) -> Result<generated::FeedbackRes, String> {
+    let keys = decode_batch_get_keys(bytes)?;
+    let kv = keys
+        .into_iter()
+        .map(|k| {
+            let (value, code) = match store.get(&k) {
+                Some(v) => (v, 0),
+                None => (Vec::new(), 2),
+            };
+            generated::Kv {
+                key: k,
+                value,
+                code,
+            }
+        })
+        .collect();
+    Ok(generated::FeedbackRes {
+        status: Some(generated::ResStatus {
+            code: 0,
+            msg: "ok".into(),
+        }),
+        responses: Some(generated::feedback_res::Responses::KeyValueResponse(
+            generated::KeyValueResponse { kv },
+        )),
+    })
+}
