@@ -503,3 +503,16 @@ mod generated_tests {
         assert_eq!(decode_string_reply(&b).unwrap(), "ok");
     }
 }
+
+pub struct HealthyService;
+#[tonic::async_trait]
+impl generated::healthy_server::Healthy for HealthyService {
+    async fn is_ok(
+        &self,
+        _: tonic::Request<()>,
+    ) -> Result<tonic::Response<generated::StringReply>, tonic::Status> {
+        Ok(tonic::Response::new(generated::StringReply {
+            message: "ok".into(),
+        }))
+    }
+}
