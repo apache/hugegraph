@@ -67,6 +67,32 @@ impl StoreNode {
         self.state() == NodeState::Online
     }
 
+    pub fn put(&self, key: Vec<u8>, value: Vec<u8>) -> Result<(), String> {
+        if !self.can_accept_requests() {
+            return Err("node is not online".into());
+        }
+        let mut store = self
+            .session
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| "backend lock poisoned".to_string())?;
+        store
+            .commit_put(key, value)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        let store = self
+            .session
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| "backend lock poisoned".to_string())?;
+        Ok(store.get(key))
+    }
+
     pub fn execute(&self, command: NodeCommand) -> Result<NodeState, &'static str> {
         let next = match (self.state(), command) {
             (NodeState::Starting, NodeCommand::Start)
@@ -98,6 +124,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("hg-node-state-{}.img", std::process::id()));
         let node = StoreNode::open(&path).unwrap();
         assert_eq!(node.state(), NodeState::Starting);
+        assert!(node.put(b"k".to_vec(), b"v".to_vec()).is_err());
         assert!(!node.can_accept_requests());
         std::fs::create_dir(path.with_extension("node-state.tmp")).unwrap();
         assert!(node.execute(NodeCommand::Start).is_err());
@@ -106,11 +133,13 @@ mod tests {
         assert_eq!(node.execute(NodeCommand::Start).unwrap(), NodeState::Online);
         assert_eq!(node.state(), NodeState::Online);
         assert!(node.can_accept_requests());
+        node.put(b"k".to_vec(), b"v".to_vec()).unwrap();
         assert_eq!(node.execute(NodeCommand::Stop).unwrap(), NodeState::Stopped);
         assert_eq!(node.state(), NodeState::Stopped);
         drop(node);
         let reopened = StoreNode::open(&path).unwrap();
         assert_eq!(reopened.state(), NodeState::Stopped);
+        assert_eq!(reopened.get(b"k").unwrap(), Some(b"v".to_vec()));
         std::fs::write(path.with_extension("node-state"), [9]).unwrap();
         assert!(StoreNode::open(&path).is_err());
         let _ = std::fs::remove_file(&path);

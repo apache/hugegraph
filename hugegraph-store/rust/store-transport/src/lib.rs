@@ -1392,7 +1392,7 @@ mod mapping_tests {
 }
 
 pub struct SharedSession {
-    backend: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+    pub backend: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
 }
 impl SharedSession {
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
