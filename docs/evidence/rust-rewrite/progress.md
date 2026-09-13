@@ -176,3 +176,6 @@ next_action: correct tonic build configuration/proto package handling so all ser
 
 2026-09-14: Corrected build.rs to use canonical proto paths and explicitly enable tonic client/server generation; generated GraphStore client/server traits are now present and compile. Evidence `tonic-services-generated-20260914.log`.
 next_action: expose all generated service modules and implement Rust service traits backed by StoreService.
+
+2026-09-14: Generated service inventory confirms 15 client/server/service symbols across Healthy, QueryService, GraphStore, HgStoreSession and HgStoreState. Evidence `generated-service-inventory-20260914.log`.
+next_action: implement concrete tonic service traits for each generated service, beginning with Healthy and QueryService.
