@@ -42,3 +42,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Oracle CLI regression (valid/invalid/malformed) passed with exit codes 0/1/2; evidence raft-linearizability-oracle-20260913-cli.log.
 
 2026-09-13 Oracle regression including duplicate-id rejection passed; evidence raft-linearizability-oracle-20260913-regression.log.
+
+2026-09-13 Partition POC current commit rerun passed; evidence partition-poc-verify-current.log.
