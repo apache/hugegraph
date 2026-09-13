@@ -269,3 +269,6 @@ next_action: add real tonic client/server streaming integration; then broaden re
 
 2026-09-14: Added GraphService E2E assertion for edge frame selection over persisted endpoints; workspace passed (48 tests). Evidence `graph-edge-scan-e2e-20260914.log`.
 next_action: add real tonic client/server streaming integration; then broaden remaining contract gates.
+
+2026-09-14: Added tonic transport server entrypoint for GraphStoreServer, compiling the generated service for external clients. Evidence `tonic-graph-server-20260914.log`.
+next_action: build a live tonic client/server streaming test and verify filtered scan frames over TCP.
