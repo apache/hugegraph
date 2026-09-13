@@ -320,3 +320,6 @@ next_action: add live negative-limit assertion and enforce oversized request/res
 
 2026-09-14: Live tonic scan test asserts negative limit requests fail with invalid_argument; workspace passed (54 tests). Evidence `tonic-live-negative-limit-20260914.log`.
 next_action: enforce oversized request/resource limits and add corresponding live rejection tests.
+
+2026-09-14: Enforced MAX_SCAN_LIMIT resource bound (100000), returning resource_exhausted for oversized scan requests; workspace passed (54 tests). Evidence `scan-resource-limit-20260914.log`.
+next_action: add live oversized-limit rejection assertion and audit remaining resource bounds.
