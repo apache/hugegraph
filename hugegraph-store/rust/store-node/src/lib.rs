@@ -188,12 +188,17 @@ mod tests {
         assert_eq!(node.state(), NodeState::Online);
         assert!(node.can_accept_requests());
         node.put(b"k".to_vec(), b"v".to_vec()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(node.clean_data().is_err());
+        assert_eq!(node.get(b"k").unwrap(), Some(b"v".to_vec()));
+        std::fs::remove_dir(&path).unwrap();
         assert_eq!(node.execute(NodeCommand::Stop).unwrap(), NodeState::Stopped);
         assert_eq!(node.state(), NodeState::Stopped);
         drop(node);
         let reopened = StoreNode::open(&path).unwrap();
         assert_eq!(reopened.state(), NodeState::Stopped);
-        assert_eq!(reopened.get(b"k").unwrap(), Some(b"v".to_vec()));
+        assert!(reopened.get(b"k").unwrap().is_none());
         let _ = std::fs::remove_file(path.with_extension("node-state"));
         std::fs::write(path.with_extension("node-state"), [9]).unwrap();
         assert!(StoreNode::open(&path).is_err());

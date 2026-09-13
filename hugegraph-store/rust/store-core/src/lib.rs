@@ -228,8 +228,13 @@ impl DurableStore {
         self.inner.get(key)
     }
     pub fn clear(&mut self) -> std::io::Result<()> {
+        let previous = self.inner.snapshot();
         self.inner = InMemoryStore::default();
-        self.persist()
+        if let Err(error) = self.persist() {
+            self.inner = InMemoryStore::restore(&previous).expect("snapshot must restore");
+            return Err(error);
+        }
+        Ok(())
     }
     pub fn entries(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         self.inner
