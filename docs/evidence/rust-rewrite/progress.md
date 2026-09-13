@@ -371,3 +371,6 @@ next_action: apply shared failure classification to all service handlers and aud
 
 2026-09-14: Applied shared failure classifier to GraphService scan range failures, preserving consistent tonic status mapping; workspace passed (70 tests). Evidence `error-mapping-consistency-20260914.log`.
 next_action: apply classified mappings to Session/Query/State handlers and build cross-family failure matrix.
+
+2026-09-14: Applied shared failure classification to Session batch backend errors; workspace passed (70 tests). Evidence `session-error-mapping-20260914.log`.
+next_action: apply classified mappings to Query and State handlers and complete cross-family failure matrix.
