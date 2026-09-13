@@ -389,3 +389,6 @@ next_action: cover remaining State lifecycle methods and continue production-con
 
 2026-09-14: Covered live State unsub_state and get_peers RPC contracts; workspace passed (52 tests). Evidence `tonic-live-state-lifecycle-20260914.log`.
 next_action: audit remaining public RPC methods and continue production-contract coverage.
+
+2026-09-14: Added Session table/graph/clean lifecycle contract test; workspace passed (53 tests). Evidence `session-lifecycle-contract-20260914.log`.
+next_action: audit remaining public RPC methods and continue production-contract coverage.

@@ -1097,6 +1097,22 @@ mod graph_frame_tests {
             super::generated::PeersResponse::default()
         );
     }
+
+    #[tokio::test]
+    async fn session_lifecycle_methods_return_contract_responses() {
+        let path = std::env::temp_dir().join(format!("hg-session-live-{}.img", std::process::id()));
+        let service = super::SessionService::open(&path).unwrap();
+        let table = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, tonic::Request::new(super::generated::TableReq::default())).await.unwrap();
+        assert!(table.into_inner().responses.is_none());
+        let graph = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::graph(
+            &service, tonic::Request::new(super::generated::GraphReq::default())).await.unwrap();
+        assert!(graph.into_inner().responses.is_none());
+        let clean = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::clean(
+            &service, tonic::Request::new(super::generated::CleanReq::default())).await.unwrap();
+        assert!(clean.into_inner().responses.is_none());
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[tonic::async_trait]
