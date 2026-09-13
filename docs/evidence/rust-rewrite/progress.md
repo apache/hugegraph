@@ -416,3 +416,6 @@ next_action: persist node lifecycle state across restart and add recovery eviden
 
 2026-09-14: Persisted store-node lifecycle state in an atomic sidecar and verified Stopped survives node reopen; node test passed. Evidence `store-node-recovery-20260914.log`.
 next_action: port node command dispatch/state persistence behavior beyond lifecycle and add failure/recovery scenarios.
+
+2026-09-14: Node startup now rejects malformed lifecycle sidecars instead of silently defaulting; recovery test covers corruption failure. Node tests passed. Evidence `store-node-corruption-20260914.log`.
+next_action: port node command dispatch/state persistence behavior beyond lifecycle and add failure/recovery scenarios.
