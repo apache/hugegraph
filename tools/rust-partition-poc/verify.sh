@@ -6,6 +6,10 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 manifest="$root/tools/rust-partition-poc/Cargo.toml"
+echo "commit=$(git -C \"$root\" rev-parse HEAD)"
+echo "host=$(rustc -vV | sed -n 's/^host: //p')"
+rustc --version
+cargo --version
 cargo fmt --manifest-path "$manifest" -- --check
 cargo clippy --manifest-path "$manifest" --all-targets -- -D warnings
 cargo test --manifest-path "$manifest"
