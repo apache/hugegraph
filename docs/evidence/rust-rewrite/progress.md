@@ -293,3 +293,6 @@ next_action: broaden live streaming to edge scan and error/limit semantics, then
 
 2026-09-14: Live tonic scan test now sends an encoded open-ended range and receives the persisted vertex; workspace passed (50 tests). Evidence `tonic-live-range-e2e-20260914.log`.
 next_action: test bounded range filtering over live stream, then continue remaining contract gates.
+
+2026-09-14: Live tonic scan now sends bounded m..z range over TCP with out-of-range data seeded, asserting only the filtered vertex is returned; workspace passed (50 tests). Evidence `tonic-live-bounded-e2e-20260914.log`.
+next_action: add live edge scan selection and error/limit semantics, then continue contract gates.
