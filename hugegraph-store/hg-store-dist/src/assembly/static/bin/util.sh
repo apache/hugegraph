@@ -330,7 +330,7 @@ download_and_verify() {
     local tmp
     # mktemp, not $$: a PID is shared by concurrent background subshells.
     tmp=$(mktemp -- "${filepath}.XXXXXX") || return 1
-    if curl -fL -o "$tmp" -- "$url"; then
+    if curl --connect-timeout 10 --max-time 60 -fL -o "$tmp" -- "$url"; then
         actual_md5=$(md5sum -- "$tmp" | awk '{ print $1 }')
         if [[ "$actual_md5" != "$expected_md5" ]]; then
             echo "MD5 checksum verification failed for $filepath after download. Expected: $expected_md5, but got: $actual_md5"
