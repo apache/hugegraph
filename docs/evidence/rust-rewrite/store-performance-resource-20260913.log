@@ -1,0 +1,17 @@
+   Compiling hugegraph-store-core v0.1.0 (/home/zy/code/hugegraph/hugegraph-store/rust/store-core)
+    Finished `release` profile [optimized] target(s) in 0.35s
+     Running unittests src/lib.rs (hugegraph-store/rust/target/release/deps/hugegraph_store_core-1eb18a6121e1642a)
+
+running 2 tests
+test tests::snapshot_round_trip ... ok
+test tests::commit_and_rollback_visibility ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests hugegraph_store_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+elapsed=0.39 maxrss=141240KB
