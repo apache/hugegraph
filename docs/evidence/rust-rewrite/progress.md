@@ -55,3 +55,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Archived SCHEMA-001 independent invariant Oracle from `VertexCoreTest#testAddVertexWithUniqueIndex`; first indexed value succeeds and duplicate uniqueness violation is asserted. Matrix coverage is now 3/6. Next action: execute TXN-001 commit/rollback visibility entry and archive its state-transition Oracle.
 
 2026-09-13: TXN-001 commit/rollback visibility passed under Java 11 Docker using `PrimaryKeyStrategyCoreTest#testFoldsSingleCardinalityProperties`; archived state-transition Oracle. Matrix coverage is now 4/6. Next action: complete RAFT-001 real three-node history capture and independent Oracle.
+
+2026-09-13: RAFT-001 three-node smoke retried with the repository cluster; initial startup and mutation progressed, but recovery after `store0` restart ended with connection resets. Evidence `raft-001-three-node-smoke-20260913.log`. Independent three-node Oracle remains pending; next action is diagnose cluster recovery before another changed-input run.
