@@ -134,3 +134,6 @@ next_action: replace provisional envelope payload with generated proto-compatibl
 
 2026-09-14: Added typed Get2 request/response codec with malformed request rejection; workspace tests pass 12/12. Evidence `get2-codec-20260914.log`.
 next_action: implement codecs for remaining session/query/state RPC messages and dispatch them through network transport.
+
+2026-09-14: Added generic RpcMessage codec exercised across all 15 registered hg-store-grpc methods; workspace tests pass 13/13. Evidence `rpc-message-codec-20260914.log`.
+next_action: implement method-specific payload schemas and dispatch for query, batch, state, and graph RPCs.

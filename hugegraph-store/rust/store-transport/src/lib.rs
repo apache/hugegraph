@@ -217,3 +217,36 @@ mod codec_tests {
         assert_eq!(Get2Response::decode(&x.encode()), x);
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RpcMessage {
+    pub method: &'static str,
+    pub payload: Vec<u8>,
+}
+impl RpcMessage {
+    pub fn encode(&self) -> Vec<u8> {
+        RpcEnvelope::new(self.method, self.payload.clone())
+            .unwrap()
+            .encode()
+    }
+    pub fn decode(bytes: &[u8]) -> Result<(String, Vec<u8>), String> {
+        let e = RpcEnvelope::decode(bytes)?;
+        Ok((e.method, e.payload))
+    }
+}
+#[cfg(test)]
+mod message_tests {
+    use super::*;
+    #[test]
+    fn all_registered_methods_encode() {
+        for &m in HG_STORE_GRPC_RPCS {
+            let x = RpcMessage {
+                method: m,
+                payload: vec![1, 2],
+            };
+            let (name, p) = RpcMessage::decode(&x.encode()).unwrap();
+            assert_eq!(name, m);
+            assert_eq!(p, vec![1, 2]);
+        }
+    }
+}
