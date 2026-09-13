@@ -960,6 +960,21 @@ mod graph_frame_tests {
             .scan_partition(tokio_stream::iter(vec![bad_boundary]))
             .await
             .is_err());
+        let bad_batch = super::generated::ScanPartitionRequest {
+            header: None,
+            request: Some(
+                super::generated::scan_partition_request::RequestOneOf::ScanRequest(
+                    super::generated::scan_partition_request::Request {
+                        batch_size: 1_000_001,
+                        ..Default::default()
+                    },
+                ),
+            ),
+        };
+        assert!(client
+            .scan_partition(tokio_stream::iter(vec![bad_batch]))
+            .await
+            .is_err());
         task.abort();
         let _ = std::fs::remove_file(path);
     }
