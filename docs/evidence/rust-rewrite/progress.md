@@ -365,3 +365,6 @@ next_action: add malformed state/query codec mutations and audit error mapping c
 
 2026-09-14: Expanded mutation tests to invalid QueryService and HgStoreState payloads; workspace passed (67 tests). Evidence `state-query-mutation-20260914.log`.
 next_action: audit error mapping consistency across RPC families and add failure-path matrix.
+
+2026-09-14: Added shared RPC failure classification matrix for invalid, resource, and internal errors; workspace passed (70 tests). Evidence `failure-path-matrix-20260914.log`.
+next_action: apply shared failure classification to all service handlers and audit status-code consistency.
