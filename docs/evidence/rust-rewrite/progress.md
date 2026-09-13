@@ -263,3 +263,6 @@ next_action: run real tonic streaming client against GraphService and verify fil
 
 2026-09-14: Verified encoded ScanPartition request round-trip and range extraction in transport tests; workspace passed (46 tests). Evidence `scan-stream-client-e2e-20260914.log`.
 next_action: add real tonic client/server streaming integration and broaden contract coverage.
+
+2026-09-14: Added GraphService scan_range E2E over a reopened DurableStore and verified filtered vertex output; workspace passed (47 tests). Evidence `graph-service-scan-e2e-20260914.log`.
+next_action: add real tonic client/server streaming integration; then broaden remaining contract gates.
