@@ -1087,3 +1087,29 @@ mod feedback_tests {
         assert!(r.responses.is_some());
     }
 }
+#[cfg(test)]
+mod batch_get_trait_tests {
+    use super::*;
+    #[tokio::test]
+    async fn batch_get_trait_returns_feedback() {
+        let p = std::env::temp_dir().join(format!("hg-bgt-{}.img", std::process::id()));
+        let s = SessionService::open(&p).unwrap();
+        let r = generated::BatchGetReq {
+            header: None,
+            table: "t".into(),
+            key: vec![generated::Key {
+                key: b"k".to_vec(),
+                code: 0,
+            }],
+        };
+        let out =
+            <SessionService as generated::hg_store_session_server::HgStoreSession>::batch_get2(
+                &s,
+                tonic::Request::new(r),
+            )
+            .await
+            .unwrap();
+        assert!(out.into_inner().responses.is_some());
+        let _ = std::fs::remove_file(p);
+    }
+}
