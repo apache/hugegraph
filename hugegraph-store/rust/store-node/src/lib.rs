@@ -27,10 +27,17 @@ impl StoreNode {
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
         let state_path = path.with_extension("node-state");
-        let persisted = std::fs::read(&state_path)
-            .ok()
-            .and_then(|v| v.first().copied())
-            .unwrap_or(0);
+        let persisted = match std::fs::read(&state_path) {
+            Ok(v) if v.len() == 1 && v[0] <= NodeState::Stopped as u8 => v[0],
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "invalid node state",
+                ))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => NodeState::Starting as u8,
+            Err(e) => return Err(e),
+        };
         Ok(Self {
             graph: GraphService::open(path.clone())?,
             session: SessionService::open(path)?,
@@ -92,6 +99,8 @@ mod tests {
         drop(node);
         let reopened = StoreNode::open(&path).unwrap();
         assert_eq!(reopened.state(), NodeState::Stopped);
+        std::fs::write(path.with_extension("node-state"), [9]).unwrap();
+        assert!(StoreNode::open(&path).is_err());
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("node-state"));
     }
