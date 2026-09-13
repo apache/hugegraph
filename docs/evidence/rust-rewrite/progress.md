@@ -179,3 +179,6 @@ next_action: expose all generated service modules and implement Rust service tra
 
 2026-09-14: Generated service inventory confirms 15 client/server/service symbols across Healthy, QueryService, GraphStore, HgStoreSession and HgStoreState. Evidence `generated-service-inventory-20260914.log`.
 next_action: implement concrete tonic service traits for each generated service, beginning with Healthy and QueryService.
+
+2026-09-14: Implemented QueryServiceImpl against generated tonic trait, including query0/count and empty streaming response; cargo check passes. Evidence `query-service-compile-20260914.log`.
+next_action: implement HgStoreSession generated service trait backed by DurableStore and add Get2/Batch network integration.

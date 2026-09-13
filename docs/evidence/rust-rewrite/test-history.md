@@ -60,3 +60,4 @@
 | `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all; cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (16 tests; RPC family dispatch handlers) | `rpc-handlers-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (17 tests; RPC family dispatch matrix) | `rpc-family-matrix-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --offline` | `working-tree` | PASS (prost-build generated graph_pb bindings) | `prost-generation-20260914.log` |
+| `cargo check --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-transport` | `working-tree` | PASS (QueryServiceImpl async trait compiles) | `query-service-compile-20260914.log` |
