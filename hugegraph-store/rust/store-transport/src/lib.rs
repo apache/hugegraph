@@ -564,6 +564,22 @@ impl generated::healthy_server::Healthy for HealthyService {
     }
 }
 
+#[cfg(test)]
+mod healthy_contract_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn healthy_is_ok_returns_protocol_message() {
+        let response = <HealthyService as generated::healthy_server::Healthy>::is_ok(
+            &HealthyService,
+            tonic::Request::new(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.into_inner().message, "ok");
+    }
+}
+
 pub fn query_response(query_id: &str, message: &str, finished: bool) -> generated::QueryResponse {
     generated::QueryResponse {
         query_id: query_id.into(),
