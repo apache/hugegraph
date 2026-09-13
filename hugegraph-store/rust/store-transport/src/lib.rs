@@ -744,3 +744,13 @@ mod shared_get_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+pub fn batch_operation_kind(bytes: &[u8]) -> Result<&'static str, String> {
+    let r: generated::BatchReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    match r.requests {
+        Some(generated::batch_req::Requests::WriteReq(_)) => Ok("write"),
+        Some(generated::batch_req::Requests::CommitReq(_)) => Ok("commit"),
+        Some(generated::batch_req::Requests::RollbackReq(_)) => Ok("rollback"),
+        None => Err("BatchReq missing operation".into()),
+    }
+}
