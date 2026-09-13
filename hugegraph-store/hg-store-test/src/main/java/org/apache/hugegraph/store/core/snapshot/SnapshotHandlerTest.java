@@ -22,10 +22,10 @@ import static org.junit.Assert.assertNotEquals;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.lang.reflect.Method;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
