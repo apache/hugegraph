@@ -940,6 +940,9 @@ impl generated::graph_store_server::GraphStore for GraphService {
                 .ok_or_else(|| tonic::Status::invalid_argument("missing scan request"))?;
             let limit = match r.request.as_ref() {
                 Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => {
+                    if v.position.len() > 1_048_576 {
+                        return Err(tonic::Status::resource_exhausted("scan position too large"));
+                    }
                     if v.limit < 0 {
                         return Err(tonic::Status::invalid_argument("negative limit"));
                     }
