@@ -571,6 +571,12 @@ impl GraphService {
             )),
         })
     }
+    pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), tonic::transport::Error> {
+        tonic::transport::Server::builder()
+            .add_service(generated::graph_store_server::GraphStoreServer::new(self))
+            .serve(addr)
+            .await
+    }
     pub fn scan_range(
         &self,
         start: &[u8],
