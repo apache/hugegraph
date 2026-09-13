@@ -1486,11 +1486,15 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
     let r: generated::BatchReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
     match r.requests {
         Some(generated::batch_req::Requests::WriteReq(w)) => {
-            let e = w.entry.into_iter().next().ok_or("empty write")?;
-            Ok(hugegraph_store_core::StoreRequest::Put {
-                key: e.start_key.map(|x| x.key).unwrap_or_default(),
-                value: e.value,
-            })
+            let entries = w
+                .entry
+                .into_iter()
+                .map(|e| (e.start_key.map(|x| x.key).unwrap_or_default(), e.value))
+                .collect::<Vec<_>>();
+            if entries.is_empty() {
+                return Err("empty write".into());
+            }
+            Ok(hugegraph_store_core::StoreRequest::BatchPut { entries })
         }
         Some(generated::batch_req::Requests::RollbackReq(_)) => {
             Ok(hugegraph_store_core::StoreRequest::Rollback { key: Vec::new() })
@@ -1525,7 +1529,7 @@ mod batch_tests {
         };
         let c = batch_command(&prost::Message::encode_to_vec(&r)).unwrap();
         assert!(
-            matches!(c,hugegraph_store_core::StoreRequest::Put{key,value} if key==b"k"&&value==b"v")
+            matches!(c, hugegraph_store_core::StoreRequest::BatchPut { entries } if entries == vec![(b"k".to_vec(), b"v".to_vec())])
         );
     }
 }
