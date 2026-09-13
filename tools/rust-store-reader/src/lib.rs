@@ -40,4 +40,17 @@ mod tests {
     fn missing_path_is_error() {
         assert!(digest("/definitely/missing/hugegraph-db").is_err());
     }
+
+    #[test]
+    fn digest_is_stable_for_fixture() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::open_default(dir.path()).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+        drop(db);
+        let first = digest(dir.path()).unwrap();
+        let second = digest(dir.path()).unwrap();
+        assert_eq!(first.entries, 2);
+        assert_eq!(first, second);
+    }
 }
