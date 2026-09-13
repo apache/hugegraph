@@ -578,11 +578,15 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
 
 pub struct SessionService {
     pub shared: SharedSession,
+    pub transactions: std::sync::Arc<std::sync::Mutex<SessionTransactions>>,
 }
 impl SessionService {
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         Ok(Self {
             shared: SharedSession::open(path)?,
+            transactions: std::sync::Arc::new(
+                std::sync::Mutex::new(SessionTransactions::default()),
+            ),
         })
     }
 }
@@ -606,8 +610,21 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
     }
     async fn batch(
         &self,
-        _: tonic::Request<generated::BatchReq>,
+        request: tonic::Request<generated::BatchReq>,
     ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
+        let req = request.into_inner();
+        let id = req.batch_id.clone();
+        let bytes = prost::Message::encode_to_vec(&req);
+        let mut tx = self
+            .transactions
+            .lock()
+            .map_err(|_| tonic::Status::internal("transaction lock poisoned"))?;
+        let mut store = self
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
+        apply_session_batch(&id, &bytes, &mut tx, &mut store).map_err(tonic::Status::internal)?;
         Ok(tonic::Response::new(generated::FeedbackRes::default()))
     }
     async fn table(
