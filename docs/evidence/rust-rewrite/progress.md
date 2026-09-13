@@ -125,3 +125,6 @@ next_action: implement network listener/client around RpcEnvelope and connect me
 
 2026-09-14: Added TCP length-framed `serve_once` transport dispatching Get2/Batch envelopes into DurableStore service. Workspace tests pass 10/10; evidence `network-transport-20260914.log`.
 next_action: add a network client and socket integration test, then replace provisional payload mapping with generated proto-compatible codecs.
+
+2026-09-14: Added length-framed TCP `call_once` client API for RPC envelopes; transport workspace remains green (10 tests). Evidence `network-client-20260914.log`.
+next_action: add real loopback socket integration test and generated proto-compatible codecs.
