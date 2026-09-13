@@ -293,6 +293,7 @@ dependencies = [
  "hugegraph-store-core",
  "prost",
  "prost-build",
+ "tokio-stream",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",

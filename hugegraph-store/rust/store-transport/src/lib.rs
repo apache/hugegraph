@@ -535,3 +535,42 @@ mod response_tests {
         assert!(r.is_ok && r.is_finished && r.data.is_empty());
     }
 }
+
+pub struct QueryServiceImpl;
+#[tonic::async_trait]
+impl generated::query_service_server::QueryService for QueryServiceImpl {
+    type queryStream = tokio_stream::iter::Iter<
+        std::vec::IntoIter<Result<generated::QueryResponse, tonic::Status>>,
+    >;
+    async fn query(
+        &self,
+        request: tonic::Request<tonic::Streaming<generated::QueryRequest>>,
+    ) -> Result<tonic::Response<Self::queryStream>, tonic::Status> {
+        let _ = request;
+        Ok(tonic::Response::new(
+            Vec::new()
+                .into_iter()
+                .map(Ok)
+                .collect::<Vec<_>>()
+                .into_iter(),
+        ))
+    }
+    async fn query0(
+        &self,
+        request: tonic::Request<generated::QueryRequest>,
+    ) -> Result<tonic::Response<generated::QueryResponse>, tonic::Status> {
+        let q = request.into_inner();
+        Ok(tonic::Response::new(query_response(
+            &q.query_id,
+            "ok",
+            true,
+        )))
+    }
+    async fn count(
+        &self,
+        request: tonic::Request<generated::QueryRequest>,
+    ) -> Result<tonic::Response<generated::QueryResponse>, tonic::Status> {
+        let q = request.into_inner();
+        Ok(tonic::Response::new(query_response(&q.query_id, "0", true)))
+    }
+}
