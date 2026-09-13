@@ -78,3 +78,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 11:05 UTC continuation gate: standalone Raft capture-history tests, Rust Partition gate inventory, and loop-script syntax validation passed; evidence `docs/evidence/rust-rewrite/continuation-gate-20260913T110507.log`. This is reproducibility evidence only; unresolved NO-GO items remain unchanged.
 
 2026-09-13 11:06 UTC continuation gate: `bash -n tools/run-codex-loop.sh`, standalone Raft capture-history tests, and Rust Partition POC verification all passed at commit `1fae2406050cfec2625b27e7beb8b2bf9b92fa1f`; evidence `docs/evidence/rust-rewrite/continuation-active-20260913T110652Z.log`. This is reproducibility evidence only; unresolved NO-GO items remain unchanged.
+
+2026-09-13 11:07 UTC continuation final gate: Partition POC verification (19 tests), CI gate inventory, loop script syntax, and Raft capture-history Oracle all passed at commit ; evidence . This reproducibility evidence does not alter NO-GO; real three-node history, Java/Rust differential replay, implementation mutation, performance baseline, rollback, and independent reviews remain open.
