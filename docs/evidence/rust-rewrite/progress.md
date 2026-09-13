@@ -347,3 +347,6 @@ next_action: audit remaining request fields (properties, batch size, boundary) a
 
 2026-09-14: Added ScanPartition validation for nonnegative boundary, bounded batch_size, and property count resource limits; workspace passed (59 tests). Evidence `scan-field-validation-20260914.log`.
 next_action: add live invalid boundary/batch/property rejection tests and continue resource audit.
+
+2026-09-14: Live tonic scan test asserts negative boundary requests are rejected; workspace passed (60 tests). Evidence `tonic-live-boundary-validation-20260914.log`.
+next_action: add live invalid batch_size and property-count rejection tests, then continue resource audit.
