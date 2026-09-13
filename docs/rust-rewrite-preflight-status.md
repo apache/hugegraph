@@ -73,3 +73,5 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13T11:02:39Z continuation gate rerun at commit 495fbff4b3ad: Raft capture-history tests and Rust Partition POC verification passed (19 tests, 0 failures). Evidence: docs/evidence/rust-rewrite/continuation-oracle-20260913T110232Z.log, docs/evidence/rust-rewrite/continuation-partition-20260913T110232Z.log. This confirms reproducibility only; unresolved NO-GO items remain unchanged.
 
 2026-09-13 continuation gate: standalone Raft capture-history Oracle and Rust Partition POC all-features suite rerun passed (19 tests, 0 failures) at the current commit; evidence `docs/evidence/rust-rewrite/continuation-gate-20260913.log`. This reproducibility evidence does not alter NO-GO because real three-node history, Java/Rust differential replay, implementation mutation, performance baseline, rollback, and independent reviews remain open.
+
+2026-09-13 continuation: run-codex-loop shell syntax and standalone Raft capture-history Oracle passed; evidence `docs/evidence/rust-rewrite/continuation-script-oracle-20260913T110422Z.log`.

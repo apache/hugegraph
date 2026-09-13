@@ -1,0 +1,5 @@
+timestamp=20260913T110422Z
+commit=88a72f9f8034fe08524e1e53ccd8aa4c381d092c
+$ bash -n tools/run-codex-loop.sh
+$ tools/raft-linearizability/run-tests.sh
+capture history tests passed
