@@ -306,7 +306,9 @@ mod tests {
             .await
             .unwrap()
             .into_inner();
-        assert_eq!(frames.message().await.unwrap().unwrap().vertex.len(), 1);
+        let frame = frames.message().await.unwrap().unwrap();
+        assert_eq!(frame.seq_no, 0);
+        assert_eq!(frame.vertex.len(), 1);
         let mut session = hugegraph_store_transport::generated::hg_store_session_client::HgStoreSessionClient::connect(format!("http://{}", addr)).await.unwrap();
         let feedback = session
             .get2(tonic::Request::new(
