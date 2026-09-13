@@ -48,5 +48,6 @@ Store 网络分区复验（2026-09-13）：断开并恢复 store0 网络连接�
 2026-09-13 Maven/RAT rerun after Python license fixes passed; evidence maven-validate-rat-fixed.log.
 
 2026-09-13 SnapshotHandlerTest executed 6/6 passed including checksum mutation negative test; evidence snapshot-handler-test-20260913.log.
+2026-09-13 SnapshotHandlerTest rerun after removing an invalid private-API probe: 7/7 passed, including current and deprecated checksum mutation tests; evidence snapshot-handler-test-20260913-rerun.log.
 
 2026-09-13 snapshot suite (*Snapshot*Test): SnapshotHandlerTest 6/6 passed, no failures; evidence snapshot-suite-20260913.log.
