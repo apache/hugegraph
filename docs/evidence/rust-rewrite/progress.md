@@ -470,3 +470,6 @@ next_action: continue production command coverage and add differential node/serv
 
 2026-09-14: Full Rust workspace regression after shared-backend and node Oracle changes passed (59 tests: core 14, node 5, transport 40). Evidence `workspace-node-oracle-regression-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Extended node differential Oracle to compare GraphStore scan cardinality with the independent ordered model (16 entries); node tests passed (5). Evidence `store-node-scan-oracle-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
