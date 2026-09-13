@@ -754,3 +754,23 @@ pub fn batch_operation_kind(bytes: &[u8]) -> Result<&'static str, String> {
         None => Err("BatchReq missing operation".into()),
     }
 }
+
+pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest, String> {
+    let r: generated::BatchReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    match r.requests {
+        Some(generated::batch_req::Requests::WriteReq(w)) => {
+            let e = w.entry.into_iter().next().ok_or("empty write")?;
+            Ok(hugegraph_store_core::StoreRequest::Put {
+                key: e.tkv.map(|x| x.key).unwrap_or_default(),
+                value: e.tkv.map(|x| x.value).unwrap_or_default(),
+            })
+        }
+        Some(generated::batch_req::Requests::RollbackReq(_)) => {
+            Ok(hugegraph_store_core::StoreRequest::Rollback { key: Vec::new() })
+        }
+        Some(generated::batch_req::Requests::CommitReq(_)) => {
+            Err("commit requires transaction context".into())
+        }
+        None => Err("missing operation".into()),
+    }
+}
