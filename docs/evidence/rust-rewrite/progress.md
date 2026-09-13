@@ -81,3 +81,6 @@ next_action: finalize audit record and CI wiring for production Rust gates; keep
 
 2026-09-13: Added a dedicated production Rust CI job covering fmt, clippy, debug locked tests, and release locked tests. Local fmt/clippy/debug gates passed; evidence `production-ci-gates-20260913.log`, commit `6e8369eaa`. Dual-read/rollback integration and maintainer/reviewer sign-offs remain open; NO-GO retained.
 next_action: implement an explicit Java fallback adapter and selectable rollback boundary, then capture differential switch/rollback evidence.
+
+2026-09-13: Added selectable `BackendSelector` with Rust and JavaFallback modes sharing the StoreBackend contract; switch and rollback visibility test passed. Evidence `switch-rollback-20260913.log`, commit `439ffeefa`.
+next_action: integrate switch/rollback trace into differential replay and update final audit; retain NO-GO pending production integration and sign-offs.
