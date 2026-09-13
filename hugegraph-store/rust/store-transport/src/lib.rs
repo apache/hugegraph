@@ -594,6 +594,24 @@ impl GraphService {
             entries_to_scan_frame(&entries)
         })
     }
+    pub fn scan_range_limited(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        edges: bool,
+        limit: i64,
+    ) -> Result<generated::ScanResponse, String> {
+        let store = self
+            .store
+            .lock()
+            .map_err(|_| "store lock poisoned".to_string())?;
+        let entries = limit_entries(&filter_entries(&store.entries(), start, end), limit);
+        Ok(if edges {
+            entries_to_edge_frame(&entries)
+        } else {
+            entries_to_scan_frame(&entries)
+        })
+    }
 }
 pub fn empty_scan_frame() -> generated::ScanResponse {
     generated::ScanResponse {
@@ -664,6 +682,12 @@ pub fn filter_entries(
         .cloned()
         .collect()
 }
+pub fn limit_entries(entries: &[(Vec<u8>, Vec<u8>)], limit: i64) -> Vec<(Vec<u8>, Vec<u8>)> {
+    if limit <= 0 {
+        return entries.to_vec();
+    }
+    entries.iter().take(limit as usize).cloned().collect()
+}
 pub fn scan_request_range(r: &generated::ScanPartitionRequest) -> Option<(Vec<u8>, Vec<u8>)> {
     match r.request.as_ref()? {
         generated::scan_partition_request::RequestOneOf::ScanRequest(v) => Some((
@@ -731,6 +755,12 @@ mod graph_frame_tests {
         ];
         let f = super::filter_entries(&e, b"b", b"z");
         assert_eq!(f, vec![(b"m".to_vec(), vec![])]);
+    }
+    #[test]
+    fn entry_limit_is_bounded_and_zero_means_unlimited() {
+        let e = vec![(b"a".to_vec(), vec![]), (b"b".to_vec(), vec![])];
+        assert_eq!(super::limit_entries(&e, 1).len(), 1);
+        assert_eq!(super::limit_entries(&e, 0).len(), 2);
     }
     #[test]
     fn encoded_scan_request_yields_range() {
@@ -865,7 +895,11 @@ impl generated::graph_store_server::GraphStore for GraphService {
             .map_err(|e| tonic::Status::invalid_argument(e.to_string()))?
         {
             let (start, end) = scan_request_range(&r).unwrap_or_default();
-            self.scan_range(&start, &end, scan_request_is_edge(&r))
+            let limit = match r.request.as_ref() {
+                Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v)) => v.limit,
+                _ => 0,
+            };
+            self.scan_range_limited(&start, &end, scan_request_is_edge(&r), limit)
                 .map_err(tonic::Status::internal)?
         } else {
             empty_scan_frame()
