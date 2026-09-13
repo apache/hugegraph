@@ -452,3 +452,6 @@ next_action: expand live node orchestration assertions to data and state service
 
 2026-09-14: Expanded live StoreNode orchestration test to QueryService.query0 and HgStoreState.get_scan_state; node tests passed (4). Evidence `store-node-live-multiservice-20260914.log`.
 next_action: add live node data-plane RPC assertion and continue production command coverage.
+
+2026-09-14: Extended live StoreNode orchestration to Session.Get2 with a valid Tk request; node tests passed (4). Evidence `store-node-live-session-20260914.log`.
+next_action: add live node GraphStore scan assertion and continue production command coverage.
