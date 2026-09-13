@@ -995,3 +995,37 @@ mod tonic_batch_tests {
         let _ = std::fs::remove_file(p);
     }
 }
+
+pub fn decode_batch_get_keys(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+    let r: generated::BatchGetReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    let keys: Vec<_> = r
+        .key
+        .into_iter()
+        .map(|k| k.key)
+        .filter(|k| !k.is_empty())
+        .collect();
+    if keys.is_empty() {
+        Err("BatchGetReq has no keys".into())
+    } else {
+        Ok(keys)
+    }
+}
+#[cfg(test)]
+mod batch_get_tests {
+    use super::*;
+    #[test]
+    fn decode_keys() {
+        let r = generated::BatchGetReq {
+            header: None,
+            table: "t".into(),
+            key: vec![generated::Key {
+                key: b"a".to_vec(),
+                code: 0,
+            }],
+        };
+        assert_eq!(
+            decode_batch_get_keys(&prost::Message::encode_to_vec(&r)).unwrap(),
+            vec![b"a".to_vec()]
+        );
+    }
+}
