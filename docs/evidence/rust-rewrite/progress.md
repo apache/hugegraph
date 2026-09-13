@@ -215,3 +215,6 @@ next_action: map remaining production RPC/state modules and build an end-to-end 
 
 2026-09-14: Implemented concrete HgStoreState tonic service boundary with streaming and state/peer handlers; transport crate check passed. Evidence `state-service-boundary-20260914.log`.
 next_action: implement GraphStore and remaining generated service traits, then add cross-layer oracle harness.
+
+2026-09-14: Implemented GraphStore scan streaming service boundary; transport check passed. Evidence `graph-service-boundary-20260914.log`.
+next_action: add cross-layer transport/storage oracle harness and replace placeholder stream responses with contract-backed behavior.
