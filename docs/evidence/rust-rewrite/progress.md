@@ -251,3 +251,6 @@ next_action: wire request range decoding into GraphService streaming and validat
 
 2026-09-14: Added GraphService scan_range API applying half-open request ranges before vertex/edge frame mapping; transport check passed. Evidence `graph-range-api-20260914.log`.
 next_action: decode ScanPartition request envelopes into scan_range and run full streaming E2E tests.
+
+2026-09-14: Added ScanPartition oneof decoder extracting position/end range for GraphService filtering; transport check passed. Evidence `scan-request-range-20260914.log`.
+next_action: connect decoded request ranges to GraphService streaming and run full E2E stream tests.
