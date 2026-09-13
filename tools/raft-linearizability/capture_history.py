@@ -2,12 +2,14 @@
 """Capture a small register history from an HTTP endpoint."""
 import argparse, json, time, urllib.request
 
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 def capture(url, value):
     ops=[]
     def call(op, value=None):
         ident=f'op-{len(ops)+1}'; start=time.monotonic_ns()
         req=urllib.request.Request(url, method='GET' if op=='read' else 'POST', data=None if op=='read' else json.dumps({'value':value}).encode(), headers={'Content-Type':'application/json'})
-        with urllib.request.urlopen(req, timeout=10) as r: body=r.read().decode(); observed=value if op=='write' else json.loads(body).get('value')
+        with OPENER.open(req, timeout=10) as r: body=r.read().decode(); observed=value if op=='write' else json.loads(body).get('value')
         ops.append({'id':ident,'op':op,'value':observed,'start':start,'end':time.monotonic_ns()})
     call('write', value); call('read'); return ops
 
