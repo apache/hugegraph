@@ -1022,6 +1022,54 @@ mod graph_frame_tests {
         task.abort();
         let _ = std::fs::remove_file(path);
     }
+
+    #[tokio::test]
+    async fn live_query_and_state_servers_accept_contract_requests() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(
+                    super::generated::query_service_server::QueryServiceServer::new(
+                        super::QueryServiceImpl,
+                    ),
+                )
+                .add_service(
+                    super::generated::hg_store_state_server::HgStoreStateServer::new(
+                        super::StateService,
+                    ),
+                )
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        let endpoint = format!("http://{}", addr);
+        let mut query =
+            super::generated::query_service_client::QueryServiceClient::connect(endpoint.clone())
+                .await
+                .unwrap();
+        let response = query
+            .query0(super::generated::QueryRequest {
+                query_id: "q".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(response.into_inner().is_ok);
+        let mut state =
+            super::generated::hg_store_state_client::HgStoreStateClient::connect(endpoint)
+                .await
+                .unwrap();
+        let response = state
+            .get_scan_state(super::generated::SubStateReq::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            response.into_inner(),
+            super::generated::ScanState::default()
+        );
+    }
 }
 
 #[tonic::async_trait]

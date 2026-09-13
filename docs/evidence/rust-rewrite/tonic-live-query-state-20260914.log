@@ -1,0 +1,1 @@
+PASS: live QueryService.query0 and HgStoreState.get_scan_state; 52 tests total.

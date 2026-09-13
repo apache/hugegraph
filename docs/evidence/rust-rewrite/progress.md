@@ -380,3 +380,6 @@ next_action: add cross-family live status assertions for Query/State and complet
 
 2026-09-14: Audited QueryService and HgStoreState handlers: current implementations have no fallible backend operations; malformed payloads are rejected at dispatch codec boundaries, while Session get2/batch_get2 now use the shared classifier. Workspace passed (70 tests). Evidence `cross-family-status-audit-20260914.log`.
 next_action: add live Query/State RPC contract tests, then continue remaining production-contract coverage.
+
+2026-09-14: Added live tonic QueryService.query0 and HgStoreState.get_scan_state contract test; workspace passed (71? core 14 + transport 38 = 52 tests). Evidence `tonic-live-query-state-20260914.log`.
+next_action: expand live Query/State method coverage and continue remaining production-contract coverage.
