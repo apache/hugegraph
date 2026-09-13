@@ -155,3 +155,6 @@ next_action: route serve_once through dispatch_payload and add handler-level int
 
 2026-09-14: Added RPC family dispatch matrix covering query, batch, state, graph, and Get2 handlers; 17 tests pass. Evidence `rpc-family-matrix-20260914.log`.
 next_action: implement real proto-generated codecs and replace provisional transport protocol.
+
+2026-09-14: Proto toolchain check: `/usr/bin/protoc` 25.3 is available, but no cached `prost-build` crate is present for offline Rust generation. Evidence `proto-toolchain-20260914.log`.
+next_action: add prost/prost-build generation configuration once dependencies are available, then regenerate and test Rust bindings against hg-store-grpc protos.
