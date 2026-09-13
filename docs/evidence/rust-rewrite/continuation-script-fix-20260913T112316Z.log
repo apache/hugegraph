@@ -1,0 +1,5 @@
+commit c2463296d8ea1bc80b2efecfebbc7db7b973fa3a
+bash -n tools/run-codex-loop.sh: PASS
+python3 tools/raft-linearizability/test_capture_history.py: PASS
+python3 tools/raft-linearizability/test_checker.py: PASS (no output)
+git diff --check: PASS
