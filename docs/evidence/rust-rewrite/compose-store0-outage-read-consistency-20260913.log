@@ -1,0 +1,5 @@
+Date: 2026-09-13
+Fixture: vertex rust-gate-20260913, property value committed.
+Scenario: stop store0; wait 12s; GET vertex through server1 and server2; start store0; wait 35s; GET through server0.
+Result: server1/server2 returned committed fixture during store0 outage; server0 returned committed fixture after store0 recovery.
+Note: curl used --noproxy '*'; this is a smoke consistency check, not a linearizability proof.
