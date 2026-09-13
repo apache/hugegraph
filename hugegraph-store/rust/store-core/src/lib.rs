@@ -280,3 +280,44 @@ mod request_tests {
         let _ = std::fs::remove_file(path);
     }
 }
+
+/// In-process transport service used by gRPC/HTTP adapters and integration tests.
+pub struct StoreService {
+    backend: DurableStore,
+}
+impl StoreService {
+    pub fn new(backend: DurableStore) -> Self {
+        Self { backend }
+    }
+    pub fn call(&mut self, request: StoreRequest) -> std::io::Result<StoreResponse> {
+        self.backend.handle(request)
+    }
+    pub fn into_backend(self) -> DurableStore {
+        self.backend
+    }
+}
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+    #[test]
+    fn client_server_request_mapping() {
+        let path = std::env::temp_dir().join(format!("hg-transport-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut server = StoreService::new(DurableStore::open(&path).unwrap());
+        let put = server
+            .call(StoreRequest::Put {
+                key: b"vertex/1".to_vec(),
+                value: b"alice".to_vec(),
+            })
+            .unwrap();
+        assert!(matches!(put, StoreResponse::Value(None)));
+        let get = server
+            .call(StoreRequest::Get {
+                key: b"vertex/1".to_vec(),
+            })
+            .unwrap();
+        assert!(matches!(get, StoreResponse::Value(Some(v)) if v == b"alice"));
+        let _ = std::fs::remove_file(path);
+    }
+}
