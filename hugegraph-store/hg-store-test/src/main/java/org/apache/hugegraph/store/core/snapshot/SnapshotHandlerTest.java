@@ -236,4 +236,5 @@ public class SnapshotHandlerTest extends StoreEngineTestBase {
         String after = (String) method.invoke(handler, file.getPath());
         assertNotEquals(before, after);
     }
+
 }
