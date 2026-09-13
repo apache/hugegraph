@@ -77,3 +77,5 @@ Rust 工程门禁记录：`cargo fmt -- --check`、`cargo clippy --all-targets -
 跨模块回归复验（2026-09-10）：完整 `pd-core-test,pd-common-test` 通过；Common 83 项，Core 104 项（跳过 2 项），失败/错误均为 0，`BUILD SUCCESS`。完整日志：`/tmp/pd-core-common-all.log`。
 
 POC Oracle 复核（2026-09-13）：修正版本比较与缓存等价性错误后，`verify.sh` 为 13 项通过。该结果仅证明独立模型自身的反例检测，不能替代服务实现级变异和 Java/Rust 差分。
+
+Release 基线（2026-09-13）：`cargo test --release` 13/13 通过；本机一次运行 `elapsed_seconds=0.64`、`max_rss_kb=124420`（仅模型 POC，不能代表生产性能）。完整输出：`/tmp/rust-partition-release.log`。
