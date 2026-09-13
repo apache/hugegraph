@@ -604,9 +604,21 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
     }
     async fn batch_get2(
         &self,
-        _: tonic::Request<generated::BatchGetReq>,
+        request: tonic::Request<generated::BatchGetReq>,
     ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
-        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+        let bytes = prost::Message::encode_to_vec(&request.into_inner());
+        let store = self
+            .shared
+            .backend
+            .lock()
+            .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
+        let values = batch_get_values(&store, &bytes).map_err(tonic::Status::invalid_argument)?;
+        let pairs = values
+            .into_iter()
+            .enumerate()
+            .map(|(i, v)| (i.to_le_bytes().to_vec(), v.unwrap_or_default()))
+            .collect();
+        Ok(tonic::Response::new(feedback_values(pairs)))
     }
     async fn batch(
         &self,
