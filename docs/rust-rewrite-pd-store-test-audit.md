@@ -63,3 +63,5 @@ Profile 隔离修复（2026-09-13）：为 `store-core-test` 设置 `forkCount=1
 离线复验（2026-09-13）：依赖缓存不完整，`hugegraph-core` 在 `build-helper-maven-plugin` 阶段因缺少 `commons-cli:1.0`、`plexus-utils:1.5.8` 失败；这是环境准备失败，不计入 Store 测试失败或通过。日志：`/tmp/store-core-offline-final.log`。
 
 Store 核心 profile 在线复验完成（2026-09-13）：`store-core-test` 构建成功，SnapshotHandler 5/5、BatchGraphIsolation 6/6，profile 汇总 11/11 通过、0 失败；完整日志归档于 `docs/evidence/rust-rewrite/store-core-profile-20260913.log`，SHA-256 `084a53c5204c89ba65657414cf1de9714c2b7f55c5733a17465c12037c0b6f95`。
+
+Store 全量离线回归复验完成（2026-09-13）：`hg-store-test` 构建成功；Client 34、Snapshot 5、Batch 6、Common 2、RocksDB 3、Service 6、Raft 3 等已启用 suite 均为 0 失败。日志归档于 `docs/evidence/rust-rewrite/store-full-regression-20260913.log`。
