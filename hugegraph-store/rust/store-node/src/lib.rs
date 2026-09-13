@@ -309,6 +309,19 @@ mod tests {
         let frame = frames.message().await.unwrap().unwrap();
         assert_eq!(frame.seq_no, 0);
         assert_eq!(frame.vertex.len(), 1);
+        assert_eq!(
+            frame.vertex[0].id.as_ref().unwrap().value_bytes.as_deref(),
+            Some(&b"live-key"[..])
+        );
+        assert_eq!(
+            frame.vertex[0].properties[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .value_bytes
+                .as_deref(),
+            Some(&b"live-value"[..])
+        );
         let mut session = hugegraph_store_transport::generated::hg_store_session_client::HgStoreSessionClient::connect(format!("http://{}", addr)).await.unwrap();
         let feedback = session
             .get2(tonic::Request::new(
