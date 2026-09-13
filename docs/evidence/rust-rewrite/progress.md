@@ -431,3 +431,6 @@ next_action: extend node recovery tests to data/state consistency and continue p
 
 2026-09-14: Added node-level put/get operations gated by Online state and verified data survives lifecycle stop/reopen alongside state; node test passed. Evidence `store-node-data-recovery-20260914.log`.
 next_action: extend node recovery with concurrent command/data fault scenarios and continue production command coverage.
+
+2026-09-14: Added concurrent node data-write test with eight workers; all values remained readable while node stayed Online, then stopped cleanly. Node tests passed (2). Evidence `store-node-concurrency-20260914.log`.
+next_action: continue production command coverage and add end-to-end node server orchestration.
