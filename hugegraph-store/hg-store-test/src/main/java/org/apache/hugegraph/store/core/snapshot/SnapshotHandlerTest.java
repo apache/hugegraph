@@ -31,6 +31,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
+import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -220,6 +221,19 @@ public class SnapshotHandlerTest extends StoreEngineTestBase {
         String before = (String) method.invoke(hgSnapshotHandlerUnderTest, file.getPath());
         FileUtils.writeByteArrayToFile(file, "after".getBytes("UTF-8"));
         String after = (String) method.invoke(hgSnapshotHandlerUnderTest, file.getPath());
+        assertNotEquals(before, after);
+    }
+
+    @Test
+    public void testDeprecatedHandlerChecksumChangesWhenModified() throws Exception {
+        File file = new File("/tmp/snapshot/deprecated-checksum.sst");
+        FileUtils.writeByteArrayToFile(file, "before".getBytes("UTF-8"));
+        Method method = HgSnapshotHandler.class.getDeclaredMethod("calculateChecksum", String.class);
+        method.setAccessible(true);
+        HgSnapshotHandler handler = new HgSnapshotHandler(createPartitionEngine(1));
+        String before = (String) method.invoke(handler, file.getPath());
+        FileUtils.writeByteArrayToFile(file, "after".getBytes("UTF-8"));
+        String after = (String) method.invoke(handler, file.getPath());
         assertNotEquals(before, after);
     }
 }
