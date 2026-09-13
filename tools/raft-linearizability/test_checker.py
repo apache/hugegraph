@@ -34,3 +34,10 @@ def test_overlapping_writes_and_reads_are_not_linearizable():
          {"id": 3, "op": "read", "value": 1, "start": 4, "end": 5},
          {"id": 4, "op": "read", "value": 2, "start": 6, "end": 7}]
     assert not checker.check(h)[0]
+
+
+def test_invalid_operation_is_rejected():
+    ok, detail = checker.check([{"id": 1, "op": "delete", "value": 0,
+                                "start": 0, "end": 1}])
+    assert not ok
+    assert detail == "invalid operation"
