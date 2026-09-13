@@ -158,3 +158,6 @@ next_action: implement real proto-generated codecs and replace provisional trans
 
 2026-09-14: Proto toolchain check: `/usr/bin/protoc` 25.3 is available, but no cached `prost-build` crate is present for offline Rust generation. Evidence `proto-toolchain-20260914.log`.
 next_action: add prost/prost-build generation configuration once dependencies are available, then regenerate and test Rust bindings against hg-store-grpc protos.
+
+2026-09-14: Generated a complete hg-store-grpc protobuf descriptor set with protoc from all 8 proto files; descriptor is ready as deterministic input for Rust binding generation. Evidence `proto-descriptor-20260914.log`.
+next_action: add prost/prost-build generation configuration and generate Rust bindings from the descriptor-compatible proto sources when dependency resolution is available.
