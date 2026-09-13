@@ -284,3 +284,6 @@ next_action: assert filtered persisted vertices through live tonic stream, then 
 
 2026-09-14: Live tonic GraphStore E2E now seeds DurableStore and asserts client receives one persisted vertex frame; workspace passed (50 tests). Evidence `tonic-live-persisted-e2e-20260914.log`.
 next_action: send encoded range request through live stream and assert filtered vertex count.
+
+2026-09-14: Live tonic E2E seeds a DurableStore record and asserts the received ScanResponse contains one vertex; workspace passed (50 tests). Evidence `tonic-live-persisted-e2e-20260914.log`.
+next_action: send encoded range request through live stream and assert filtered vertex count.
