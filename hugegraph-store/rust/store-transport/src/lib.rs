@@ -811,6 +811,11 @@ mod graph_frame_tests {
         assert!(super::scan_request_is_edge(&r));
     }
     #[test]
+    fn malformed_scan_payload_is_rejected() {
+        assert!(super::validate_scan_payload(&[0xff, 0xff]).is_err());
+        assert!(super::validate_scan_payload(&[]).is_err());
+    }
+    #[test]
     fn graph_service_scan_range_reads_durable_entries() {
         let p = std::env::temp_dir().join(format!("hg-graph-e2e-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&p);
