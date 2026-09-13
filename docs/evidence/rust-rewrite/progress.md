@@ -203,3 +203,6 @@ next_action: add failure injection and restart tests around unified recovery ima
 
 2026-09-14: Added failure injection coverage proving truncated DurableStore recovery images are rejected without mutating live state; workspace passed (35 tests). Evidence `recovery-failure-20260914.log`.
 next_action: execute independent oracle scenarios over transaction, rollback, and recovery traces.
+
+2026-09-14: Added deterministic independent reference-model oracle covering put/get/rollback and serialized state equivalence; workspace passed (36 tests). Evidence `independent-oracle-20260914.log`.
+next_action: broaden oracle traces to transaction commit/rollback and durable restart boundaries.
