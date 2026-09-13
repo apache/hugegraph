@@ -1,0 +1,1 @@
+Inventory: main production services implemented; dev-only store_stream.proto remains uncovered pending production-status decision.

@@ -395,3 +395,6 @@ next_action: audit remaining public RPC methods and continue production-contract
 
 2026-09-14: Added Healthy.IsOk protocol contract test; workspace passed (54 tests). Evidence `healthy-contract-20260914.log`.
 next_action: audit remaining public RPC methods and continue production-contract coverage.
+
+2026-09-14: Audited proto/service inventory. Main production protos are implemented (Healthy, GraphStore, HgStoreState, QueryService, HgStoreSession); dev-only `grpc/stream/store_stream.proto` is not part of the main build and remains an uncovered stream contract. Evidence `rpc-inventory-20260914.log`.
+next_action: determine production status of HgStoreStream and either add its generated Rust service implementation or record an explicit exclusion with source evidence.
