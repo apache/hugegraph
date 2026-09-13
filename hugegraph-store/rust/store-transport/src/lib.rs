@@ -1264,3 +1264,12 @@ impl Catalog {
         Ok(())
     }
 }
+
+impl Catalog {
+    pub fn contains_table(&self, n: &str) -> bool {
+        self.tables.contains(n)
+    }
+    pub fn contains_graph(&self, n: &str) -> bool {
+        self.graphs.contains(n)
+    }
+}
