@@ -464,3 +464,6 @@ next_action: add live node GraphStore scan assertion and continue production com
 
 2026-09-14: Added live unified StoreNode GraphStore.ScanPartition assertion using shared backend; node tests passed (4). Evidence `store-node-live-graph-20260914.log`.
 next_action: continue production command coverage and add differential node/server verification.
+
+2026-09-14: Added node put/get differential test against an independent BTreeMap oracle over 16 deterministic keys; node tests passed (5). Evidence `store-node-oracle-20260914.log`.
+next_action: continue production command coverage and add differential node/server verification.
