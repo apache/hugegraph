@@ -43,3 +43,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Updated the contract matrix to mark API-GREMLIN-001 complete (1/6). Remaining executable gates are API-REST-001, SCHEMA-001, TXN-001, RAFT-001, and SNAP-001; mutation validation remains required.
 
 2026-09-13: Pinned API-REST-001 to `VertexApiTest` and executed it under Java 11 Docker. It failed at initialization because no API server was listening (`Connection refused`). Evidence `api-rest-001-vertex-java11-20260913.log`. Next action: start the test server and rerun this entry.
+
+2026-09-13: Started the repository three-node server smoke entry. Initial REST schema and vertex writes returned HTTP 202/201, but recovery timed out with connection resets before completion. Evidence `api-rest-001-server-start-20260913.log`. Next action remains rerun the API REST entry against a stable server.

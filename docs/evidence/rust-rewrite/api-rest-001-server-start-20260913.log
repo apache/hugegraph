@@ -1,0 +1,83 @@
+Sun Sep 13 13:30:15 UTC 2026
+COMMAND=timeout 180s bash tools/rust-rewrite-cluster/smoke.sh
+ Container hg-pd2  Running
+ Container hg-pd0  Running
+ Container hg-pd1  Running
+ Container hg-store1  Recreate
+ Container hg-store0  Recreate
+ Container hg-store2  Recreate
+ Container hg-store0  Recreated
+ Container hg-store1  Recreated
+ Container hg-store2  Recreated
+ Container hg-server2  Running
+ Container hg-server0  Running
+ Container hg-server1  Running
+ Container hg-pd0  Waiting
+ Container hg-pd1  Waiting
+ Container hg-pd2  Waiting
+ Container hg-pd0  Waiting
+ Container hg-pd1  Waiting
+ Container hg-pd2  Waiting
+ Container hg-pd2  Waiting
+ Container hg-pd0  Waiting
+ Container hg-pd1  Waiting
+ Container hg-pd0  Healthy
+ Container hg-pd2  Healthy
+ Container hg-pd0  Healthy
+ Container hg-pd2  Healthy
+ Container hg-pd1  Healthy
+ Container hg-store0  Starting
+ Container hg-pd2  Healthy
+ Container hg-pd1  Healthy
+ Container hg-pd1  Healthy
+ Container hg-pd0  Healthy
+ Container hg-store2  Starting
+ Container hg-store1  Starting
+ Container hg-store2  Started
+ Container hg-store1  Started
+ Container hg-store0  Started
+ Container hg-store0  Waiting
+ Container hg-store1  Waiting
+ Container hg-store2  Waiting
+ Container hg-store1  Waiting
+ Container hg-store2  Waiting
+ Container hg-store0  Waiting
+ Container hg-store2  Waiting
+ Container hg-store0  Waiting
+ Container hg-store1  Waiting
+ Container hg-store1  Healthy
+ Container hg-store1  Healthy
+ Container hg-store1  Healthy
+ Container hg-store0  Healthy
+ Container hg-store0  Healthy
+ Container hg-store0  Healthy
+ Container hg-store2  Healthy
+ Container hg-store2  Healthy
+ Container hg-store2  Healthy
+ Container hg-server2  Restarting
+ Container hg-server0  Restarting
+ Container hg-server1  Restarting
+ Container hg-server1  Started
+ Container hg-server2  Started
+ Container hg-server0  Started
+HTTP 202
+HTTP 201
+{"id":"rust-gate-20260913213115252081582","label":"rust_gate_vl_rustgate20260913213115252081582","type":"vertex","properties":{"rust_gate_pk_rustgate20260913213115252081582":"committed"}}HTTP 201
+ Container hg-pd0  Stopping
+ Container hg-pd0  Stopped
+curl: (28) Connection timed out after 10000 milliseconds
+ Container hg-pd0  Starting
+ Container hg-pd0  Started
+ Container hg-store0  Stopping
+ Container hg-store0  Stopped
+ Container hg-pd0  Waiting
+ Container hg-pd1  Waiting
+ Container hg-pd2  Waiting
+ Container hg-pd0  Healthy
+ Container hg-pd2  Healthy
+ Container hg-pd1  Healthy
+ Container hg-store0  Starting
+ Container hg-store0  Started
+curl: (56) Recv failure: Connection reset by peer
+curl: (56) Recv failure: Connection reset by peer
+RESULT_EXIT_CODE=124
