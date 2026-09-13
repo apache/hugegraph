@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements. See the NOTICE file
-# distributed with this work for additional information.
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with this
+# work for additional information regarding copyright ownership.
 # The ASF licenses this file to you under the Apache License, Version 2.0.
-"""Compare Java and Rust replay traces using a stable, independent oracle.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# http://www.apache.org/licenses/LICENSE-2.0
 
-Each input is a JSON array (or an object containing ``operations``).  Records
-are compared after selecting the contract fields ``op``, ``key``, ``value``
-and ``result``; transport timestamps and implementation metadata are ignored.
-"""
 import argparse, json, sys
 
 FIELDS = ("op", "key", "value", "result")
