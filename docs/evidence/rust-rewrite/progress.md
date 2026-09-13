@@ -503,3 +503,6 @@ next_action: add clean-data fault/recovery and command differential coverage.
 
 2026-09-14: Full workspace regression after CleanData recovery coverage passed (64 tests: core 14, node 5, transport 40). Evidence `workspace-clean-recovery-20260914.log`.
 next_action: add clean-data fault injection and command differential coverage.
+
+2026-09-14: CleanData now restores the in-memory image when durable persistence fails; injected path-directory failure confirms original data remains visible in memory. Node tests passed (5). Evidence `store-node-clean-fault-20260914.log`.
+next_action: add clean-data command differential coverage and continue production command implementation.
