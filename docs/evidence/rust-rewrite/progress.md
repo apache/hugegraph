@@ -35,3 +35,5 @@ next_action: 提供 Java 11/17 运行时（或升级 Groovy/TinkerPop）后重�
 2026-09-13: Resumed the exact Java 11 Docker command; dependency resolution again exceeded the execution window before tests began. Evidence `api-gremlin-001-java11-docker-rerun-20260913.log`. Continue the same command only after the container Maven cache is sufficiently populated.
 
 2026-09-13: API-GREMLIN-001 `TaskCoreTest#testGremlinJob` passed under Java 11 Docker with persistent Maven cache; BUILD SUCCESS, exit 0. Evidence `api-gremlin-001-java11-docker-m2-20260913.log`. Next action: run the pinned serialized-results entry and archive the independent Oracle.
+
+2026-09-13: API-GREMLIN-001 serialized-results entry passed under Java 11 Docker; 1 test, 0 failures, BUILD SUCCESS, exit 0. Evidence `api-gremlin-001-serialized-java11-20260913.log`. Both executable contract entries now pass; next action is independent Oracle archival.
