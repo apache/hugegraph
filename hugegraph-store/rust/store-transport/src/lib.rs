@@ -434,3 +434,45 @@ pub fn dispatch_payload(
         _ => Ok(payload),
     }
 }
+#[cfg(test)]
+mod matrix_tests {
+    use super::*;
+    use hugegraph_store_core::DurableStore;
+    #[test]
+    fn rpc_family_dispatch_matrix() {
+        let p = std::env::temp_dir().join(format!("hg-matrix-{}.img", std::process::id()));
+        let mut s = StoreService::new(DurableStore::open(&p).unwrap());
+        assert_eq!(
+            dispatch_payload(&mut s, "QueryService.query0", b"g.V()".to_vec()).unwrap(),
+            b"g.V()"
+        );
+        assert!(!dispatch_payload(
+            &mut s,
+            "HgStoreSession.Batch",
+            BatchRequest {
+                operations: vec![b"x".to_vec()]
+            }
+            .encode()
+        )
+        .unwrap()
+        .is_empty());
+        assert_eq!(
+            dispatch_payload(&mut s, "HgStoreState.SubState", 7u64.to_le_bytes().to_vec()).unwrap(),
+            7u64.to_le_bytes()
+        );
+        assert_eq!(
+            dispatch_payload(
+                &mut s,
+                "GraphStore.ScanPartition",
+                ScanRequest {
+                    start: b"a".to_vec(),
+                    end: b"z".to_vec()
+                }
+                .encode()
+            )
+            .unwrap(),
+            b"z"
+        );
+        let _ = std::fs::remove_file(p);
+    }
+}
