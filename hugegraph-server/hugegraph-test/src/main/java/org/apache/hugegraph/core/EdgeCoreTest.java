@@ -5381,6 +5381,43 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryOutEdgesOfVertexInPagingAtBatchBoundary() {
+        HugeGraph graph = graph();
+        Assume.assumeTrue("Not support paging",
+                          storeFeatures().supportsQueryByPage());
+        // More edges than BackendEntryIterator.INLINE_BATCH_SIZE (500)
+        int total = 1200;
+        Vertex louise = graph.addVertex(T.label, "person", "name", "Louise",
+                                        "city", "Beijing", "age", 21);
+        Vertex java1 = graph.addVertex(T.label, "book", "name", "java-1");
+        for (int i = 0; i < total; i++) {
+            louise.addEdge("look", java1, "time", String.format("2017-%04d", i));
+        }
+        graph.tx().commit();
+
+        // A page limit ending exactly at a batch boundary (500, 1000) used to
+        // re-emit the last edge of a page as the first edge of the next page
+        for (int limit : new int[]{400, 500, 600, 1000}) {
+            Set<Object> ids = new HashSet<>();
+            int count = 0;
+            String page = PageInfo.PAGE_NONE;
+            while (page != null) {
+                GraphTraversal<Vertex, Edge> iterator = graph.traversal()
+                                                             .V(louise).outE("look")
+                                                             .has("~page", page)
+                                                             .limit(limit);
+                while (iterator.hasNext()) {
+                    ids.add(iterator.next().id());
+                    count++;
+                }
+                page = TraversalUtil.page(iterator);
+            }
+            Assert.assertEquals("limit " + limit, total, count);
+            Assert.assertEquals("limit " + limit, total, ids.size());
+        }
+    }
+
+    @Test
     public void testQueryCount() {
         HugeGraph graph = graph();
 
