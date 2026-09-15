@@ -45,6 +45,7 @@ import org.apache.hugegraph.backend.id.SplicingIdGenerator;
 import org.apache.hugegraph.backend.page.IdHolderList;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.QueryList;
+import org.apache.hugegraph.backend.query.AdjacentEdgesQuery;
 import org.apache.hugegraph.backend.query.Aggregate;
 import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
 import org.apache.hugegraph.backend.query.Condition;
@@ -1301,18 +1302,23 @@ public class GraphTransaction extends IndexableTransaction {
     @Watched
     public static ConditionQuery constructEdgesQuery(Id sourceVertex,
                                                      Directions direction,
-                                                     Id... edgeLabels) {
-        return constructEdgesQuery(sourceVertex, direction, List.of(edgeLabels));
+                                                     List<Id> edgeLabels) {
+        return constructEdgesQuery(sourceVertex, direction,
+                                   edgeLabels.toArray(new Id[0]));
     }
 
     @Watched
     public static ConditionQuery constructEdgesQuery(Id sourceVertex,
                                                      Directions direction,
-                                                     EdgeLabel... edgeLabels) {
+                                                     Id... edgeLabels) {
         E.checkState(sourceVertex != null,
                      "The edge query must contain source vertex");
         E.checkState(direction != null,
                      "The edge query must contain direction");
+
+        if (true) {
+            return new AdjacentEdgesQuery(sourceVertex, direction, edgeLabels);
+        }
 
         ConditionQuery query = new ConditionQuery(HugeType.EDGE);
 
@@ -1331,52 +1337,9 @@ public class GraphTransaction extends IndexableTransaction {
 
         // Edge labels
         if (edgeLabels.length == 1) {
-            EdgeLabel edgeLabel = edgeLabels[0];
-            if (edgeLabel.hasFather()) {
-                query.eq(HugeKeys.LABEL, edgeLabel.fatherId());
-                query.eq(HugeKeys.SUB_LABEL, edgeLabel.id());
-            } else {
-                query.eq(HugeKeys.LABEL, edgeLabel.id());
-            }
-        } else if (edgeLabels.length >= 1) {
-            query.query(
-                    Condition.in(HugeKeys.LABEL,
-                                 Arrays.stream(edgeLabels)
-                                       .map(SchemaElement::id)
-                                       .collect(Collectors.toList())));
-        }
-
-        return query;
-    }
-
-    private static ConditionQuery constructEdgesQuery(Id sourceVertex,
-                                                      Directions direction,
-                                                      List<Id> edgeLabels) {
-        E.checkState(sourceVertex != null,
-                     "The edge query must contain source vertex");
-        E.checkState(direction != null,
-                     "The edge query must contain direction");
-
-        ConditionQuery query = new ConditionQuery(HugeType.EDGE);
-
-        // Edge source vertex
-        query.eq(HugeKeys.OWNER_VERTEX, sourceVertex);
-
-        // Edge direction
-        if (direction == Directions.BOTH) {
-            query.query(Condition.or(
-                    Condition.eq(HugeKeys.DIRECTION, Directions.OUT),
-                    Condition.eq(HugeKeys.DIRECTION, Directions.IN)));
-        } else {
-            assert direction == Directions.OUT || direction == Directions.IN;
-            query.eq(HugeKeys.DIRECTION, direction);
-        }
-
-        // Edge labels
-        if (edgeLabels.size() == 1) {
-            query.eq(HugeKeys.LABEL, edgeLabels.get(0));
-        } else if (edgeLabels.size() > 1) {
-            query.query(Condition.in(HugeKeys.LABEL, edgeLabels));
+            query.eq(HugeKeys.LABEL, edgeLabels[0]);
+        } else if (edgeLabels.length > 1) {
+            query.query(Condition.in(HugeKeys.LABEL, Arrays.asList(edgeLabels)));
         }
 
         return query;
@@ -1459,19 +1422,30 @@ public class GraphTransaction extends IndexableTransaction {
     private static void verifyEdgesConditionQuery(ConditionQuery query) {
         assert query.resultType().isEdge();
 
+        if (query instanceof AdjacentEdgesQuery) {
+            return;
+        }
+
         int total = query.conditionsSize();
-        if (total == 1) {
+        boolean containsLabel = query.containsCondition(HugeKeys.LABEL);
+        boolean containsProps = query.containsCondition(HugeKeys.PROPERTIES);
+        boolean containsScan = query.containsScanRelation();
+
+        if (total == 1 && (containsLabel || containsProps || containsScan)) {
             /*
              * Supported query:
              *  1.query just by edge label
              *  2.query just by PROPERTIES (like containsKey, containsValue)
              *  3.query with scan
              */
-            if (query.containsCondition(HugeKeys.LABEL) ||
-                query.containsCondition(HugeKeys.PROPERTIES) ||
-                query.containsScanRelation()) {
-                return;
-            }
+            return;
+        }
+        if (total == 2 && (containsLabel && containsProps)) {
+            /*
+             * Supported query:
+             *  query by edge label + PROPERTIES
+             */
+            return;
         }
 
         int matched = 0;
@@ -1482,19 +1456,11 @@ public class GraphTransaction extends IndexableTransaction {
             }
             matched++;
         }
-        int count = matched;
-
-        if (query.containsCondition(HugeKeys.PROPERTIES)) {
-            matched++;
-            if (count < 3 && query.containsCondition(HugeKeys.LABEL)) {
-                matched++;
-            }
-        }
 
         if (matched != total) {
             throw new HugeException(
-                    "Not supported querying edges by %s, expect %s",
-                    query.conditions(), EdgeId.KEYS[count]);
+                      "Not supported querying edges by %s, expect %s",
+                      query.conditions(), EdgeId.KEYS[matched]);
         }
     }
 
