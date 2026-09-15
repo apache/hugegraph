@@ -1441,8 +1441,22 @@ public class BusinessHandlerImpl implements BusinessHandler {
                             ReentrantLock rangeLock =
                                     compactionRangeLock.computeIfAbsent(id,
                                                                         k -> new ReentrantLock());
-                            if (!rangeLock.tryLock(compactionRangeLockWaitMillis,
-                                                   TimeUnit.MILLISECONDS)) {
+                            boolean rangeLocked;
+                            try {
+                                rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
+                                                                TimeUnit.MILLISECONDS);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                log.warn("Partition {} dbCompaction interrupted while waiting " +
+                                         "for snapshot range lock", id);
+                                // Interrupted while waiting for the snapshot save to release
+                                // the range lock. The path lock was already acquired and
+                                // must be released here, otherwise later compactions for this
+                                // partition would block until the path lock timeout.
+                                unlock(path);
+                                return;
+                            }
+                            if (!rangeLocked) {
                                 // A snapshot save is still reserving this partition's range lock
                                 // after the wait. Skip this compaction pass rather than block -
                                 // callers of dbCompaction().
@@ -1567,6 +1581,11 @@ public class BusinessHandlerImpl implements BusinessHandler {
     public AtomicInteger getState(int id) {
         AtomicInteger l = compactionState.get(id);
         return l;
+    }
+
+    @Override
+    public AtomicInteger getPathLockState(String path) {
+        return pathLock.get(path);
     }
 
     private AtomicInteger setState(int id, int state) {

@@ -247,6 +247,13 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     String getLockPath(int partitionId);
 
+    /**
+     * The path lock state for {@code path} as set by {@link #lock} / {@link #unlock}
+     * ({@link #compactionCanStart} or {@link #doing}), or {@code null} if {@code path} has
+     * never been locked.
+     */
+    AtomicInteger getPathLockState(String path);
+
     List<Integer> getPartitionIds(String graph);
 
     @NotThreadSafe
