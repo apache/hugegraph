@@ -129,6 +129,7 @@ public class RaftStateMachine extends StateMachineAdapter {
                 if (done != null) {
                     done.run(new Status(RaftError.EINTERNAL, t.getMessage()));
                 }
+                iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
             }
             iter.next();
         }
