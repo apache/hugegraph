@@ -1198,7 +1198,6 @@ public class BusinessHandlerImpl implements BusinessHandler {
         if (partition == null) {
             return true;
         }
-
         log.info("cleanPartition: graph {}, part id: {}, {} -> {}, cleanType:{}", graph, partId,
                  startKey, endKey, cleanType);
 
@@ -1213,15 +1212,36 @@ public class BusinessHandlerImpl implements BusinessHandler {
         taskManager.putAsyncTask(cleanTask);
 
         Utils.runInThread(() -> {
-            cleanPartition(partition, code -> {
-                // in range
-                boolean flag = code >= startKey && code < endKey;
-                return (cleanType == CleanType.CLEAN_TYPE_KEEP_RANGE) == flag;
-            });
-            // May have been destroyed.
-            if (HgStoreEngine.getInstance().getPartitionEngine(partId) != null) {
-                taskManager.updateAsyncTaskState(partId, graph, cleanTask.getId(),
-                                                 AsyncTaskState.SUCCESS);
+            ReentrantLock rangeLock =
+                    compactionRangeLock.computeIfAbsent(partId, k -> new ReentrantLock());
+            boolean rangeLocked = false;
+            try {
+                rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
+                                                TimeUnit.MILLISECONDS);
+                if (!rangeLocked) {
+                    log.warn("Partition {} skip cleanPartition, snapshot save " +
+                             "still in progress after {}ms wait", partId,
+                             compactionRangeLockWaitMillis);
+                    return;
+                }
+                cleanPartition(partition, code -> {
+                    // in range
+                    boolean flag = code >= startKey && code < endKey;
+                    return (cleanType == CleanType.CLEAN_TYPE_KEEP_RANGE) == flag;
+                });
+                // May have been destroyed.
+                if (HgStoreEngine.getInstance().getPartitionEngine(partId) != null) {
+                    taskManager.updateAsyncTaskState(partId, graph, cleanTask.getId(),
+                                                     AsyncTaskState.SUCCESS);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Partition {} cleanPartition interrupted while waiting " +
+                         "for snapshot range lock", partId);
+            } finally {
+                if (rangeLocked) {
+                    rangeLock.unlock();
+                }
             }
         });
         return true;
@@ -1436,62 +1456,58 @@ public class BusinessHandlerImpl implements BusinessHandler {
                         pathLock.putIfAbsent(path, new AtomicInteger(compactionCanStart));
                         compactionState.putIfAbsent(id, new AtomicInteger(0));
                         log.info("Partition {} dbCompaction started", id);
-                        if (tableName.isEmpty()) {
-                            lock(path);
-                            ReentrantLock rangeLock =
-                                    compactionRangeLock.computeIfAbsent(id,
-                                                                        k -> new ReentrantLock());
-                            boolean rangeLocked;
-                            try {
-                                rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
-                                                                TimeUnit.MILLISECONDS);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                log.warn("Partition {} dbCompaction interrupted while waiting " +
-                                         "for snapshot range lock", id);
-                                // Interrupted while waiting for the snapshot save to release
-                                // the range lock. The path lock was already acquired and
-                                // must be released here, otherwise later compactions for this
-                                // partition would block until the path lock timeout.
-                                unlock(path);
-                                return;
-                            }
-                            if (!rangeLocked) {
-                                // A snapshot save is still reserving this partition's range lock
-                                // after the wait. Skip this compaction pass rather than block -
-                                // callers of dbCompaction().
+                        ReentrantLock rangeLock =
+                                compactionRangeLock.computeIfAbsent(id,
+                                                                    k -> new ReentrantLock());
+                        boolean rangeLocked = false;
+                        try {
+                            rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
+                                                            TimeUnit.MILLISECONDS);
+                            if (rangeLocked) {
+                                if (tableName.isEmpty()) {
+                                    lock(path);
+                                    setState(id, doing);
+                                    log.info("Partition {}-{} got lock, dbCompaction start", id, path);
+                                    op.compactRange();
+                                    setState(id, compactionDone);
+                                    log.info("Partition {} dbCompaction end and start to do snapshot", id);
+                                    PartitionEngine pe = HgStoreEngine.getInstance().getPartitionEngine(id);
+                                    // find leader and send blankTask, after execution
+                                    if (pe.isLeader()) {
+                                        RaftClosure bc = (closure) -> {
+                                        };
+                                        pe.addRaftTask(RaftOperation.create(RaftOperation.SYNC_BLANK_TASK),
+                                                       bc);
+                                    } else {
+                                        HgCmdClient client = HgStoreEngine.getInstance().getHgCmdClient();
+                                        BlankTaskRequest request = new BlankTaskRequest();
+                                        request.setGraphName("");
+                                        request.setPartitionId(id);
+                                        client.tryInternalCallSyncWithRpc(request);
+                                    }
+                                    setAndNotifyState(id, compactionDone);
+                                } else {
+                                    op.compactRange(tableName);
+                                }
+                            } else {
                                 log.warn("Partition {} skip dbCompaction, snapshot save " +
                                          "still in progress after {}ms wait", id,
                                          compactionRangeLockWaitMillis);
-                                unlock(path);
-                                return;
                             }
-                            try {
-                                setState(id, doing);
-                                log.info("Partition {}-{} got lock, dbCompaction start", id, path);
-                                op.compactRange();
-                                setState(id, compactionDone);
-                            } finally {
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            log.warn("Partition {} dbCompaction interrupted while waiting " +
+                                     "for snapshot range lock", id);
+                            // Interrupted while waiting for the snapshot save to release
+                            // the range lock. The path lock was already acquired and
+                            // must be released here, otherwise later compactions for this
+                            // partition would block until the path lock timeout.
+                            unlock(path);
+                            return;
+                        } finally {
+                            if (rangeLocked) {
                                 rangeLock.unlock();
                             }
-                            log.info("Partition {} dbCompaction end and start to do snapshot", id);
-                            PartitionEngine pe = HgStoreEngine.getInstance().getPartitionEngine(id);
-                            // find leader and send blankTask, after execution
-                            if (pe.isLeader()) {
-                                RaftClosure bc = (closure) -> {
-                                };
-                                pe.addRaftTask(RaftOperation.create(RaftOperation.SYNC_BLANK_TASK),
-                                               bc);
-                            } else {
-                                HgCmdClient client = HgStoreEngine.getInstance().getHgCmdClient();
-                                BlankTaskRequest request = new BlankTaskRequest();
-                                request.setGraphName("");
-                                request.setPartitionId(id);
-                                client.tryInternalCallSyncWithRpc(request);
-                            }
-                            setAndNotifyState(id, compactionDone);
-                        } else {
-                            op.compactRange(tableName);
                         }
                     }
                     log.info("Partition {}-{} dbCompaction end", id, path);

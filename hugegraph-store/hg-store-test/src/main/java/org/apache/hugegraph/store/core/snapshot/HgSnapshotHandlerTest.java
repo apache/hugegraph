@@ -20,6 +20,7 @@ package org.apache.hugegraph.store.core.snapshot;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import java.io.File;
@@ -29,10 +30,15 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.hugegraph.pd.grpc.pulse.CleanType;
+import org.apache.hugegraph.rocksdb.access.ScanIterator;
+import org.apache.hugegraph.store.PartitionEngine;
+import org.apache.hugegraph.store.UnitTestBase;
 import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.business.BusinessHandlerImpl;
 import org.apache.hugegraph.store.consts.PoolNames;
@@ -40,6 +46,7 @@ import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
+import org.apache.hugegraph.store.util.HgStoreException;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -401,6 +408,230 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
     }
 
     /**
+     * Test that dbCompaction() with a specific tableName also respects compactionRangeLock,
+     * instead of calling op.compactRange(tableName) unconditionally regardless of whether a
+     * snapshot save currently holds the lock. Before the fix (addressing a PR review comment
+     * on #3164), the tableName.isEmpty() check gated only the pathLock/state-tracking logic -
+     * the tableName branch's op.compactRange(tableName) call sat outside the
+     * if (rangeLocked) block entirely, so it ran immediately even while a snapshot save was
+     * in progress, never touching rangeLock at all. Confirms the tableName-branch worker
+     * thread is actually found parked in rangeLock.tryLock(), the same way the empty-tableName
+     * path is in testDbCompactionReleasesPathLockWhenInterruptedWaitingForRangeLock - proof
+     * the fix nested the tableName branch inside the range lock's wait/hold rather than
+     * leaving it unguarded.
+     */
+    @Test
+    public void testDbCompactionWithTableNameRespectsRangeLock() throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 6;
+        createPartitionEngine(partitionId);
+        businessHandler.createTable("graph0", partitionId, UnitTestBase.DEFAULT_TEST_TABLE);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        // Long enough that the worker thread is still parked in tryLock() when observed,
+        // rather than racing a real timeout.
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(60_000);
+        try {
+            // Simulate a snapshot save that is still in progress, forcing dbCompaction() onto
+            // the tryLock(wait) path rather than compacting the table immediately.
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.dbCompaction("graph0", partitionId, UnitTestBase.DEFAULT_TEST_TABLE);
+
+            Thread other = awaitPoolWorkerBlockedInRangeLockWait(PoolNames.COMPACT);
+            assertNotNull("dbCompaction(tableName) task must wait on the range lock instead " +
+                          "of calling compactRange(tableName) unconditionally while a " +
+                          "snapshot save holds it",
+                          other);
+            other.interrupt();
+            // Give the interrupted task time to run its InterruptedException handling and
+            // return, so it does not linger holding the pool thread into later tests.
+            Thread.sleep(200);
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+        }
+    }
+
+    /**
+     * Test that cleanPartition() waits on compactionRangeLock around its actual async
+     * cleaning work, not just the synchronous CleanDataRequest/task-registration step that
+     * runs before Utils.runInThread() is submitted. Before the fix (addressing a PR review
+     * comment on #3164), the lock acquire/release lived outside runInThread's lambda,
+     * guarding only that synchronous submission rather than the real compaction/cleanup work
+     * that happens asynchronously afterward - so a snapshot save's checkpoint could still run
+     * concurrently with the actual data deletion. Confirms the async worker is found parked
+     * in rangeLock.tryLock() while a snapshot save holds the lock, proving the lock now spans
+     * the real cleanup call.
+     */
+    @Test
+    public void testCleanPartitionRespectsRangeLockDuringAsyncWork() throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 7;
+        createPartitionEngine(partitionId);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(60_000);
+        try {
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.cleanPartition("graph0", partitionId, 0, 10,
+                                           CleanType.CLEAN_TYPE_KEEP_RANGE);
+
+            Thread other = awaitPoolWorkerBlockedInRangeLockWait("JRaft-Closure-Executor-");
+            assertNotNull("cleanPartition's async task must be parked waiting for the range " +
+                          "lock while a snapshot save holds it, proving the lock spans the " +
+                          "real cleanup work rather than only the synchronous " +
+                          "task-registration step",
+                          other);
+            other.interrupt();
+            Thread.sleep(200);
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+        }
+    }
+
+    /**
+     * Test that cleanPartition() gives up and skips its cleanup pass, rather than running it
+     * concurrently with a snapshot save, when the range lock is still held after the
+     * configured wait - and that skipping does not release a lock it never acquired (the same
+     * unconditional-unlock class of bug fixed for dbCompaction()'s rangeLock, see
+     * testDbCompactionReleasesPathLockWhenInterruptedWaitingForRangeLock). Shortens
+     * compactionRangeLockWaitMillis so the test does not wait out the real production timeout.
+     */
+    @Test
+    public void testCleanPartitionSkipsWhenRangeLockStillHeldAfterWait()
+            throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 8;
+        createPartitionEngine(partitionId);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(200);
+        try {
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.cleanPartition("graph0", partitionId, 0, 10,
+                                           CleanType.CLEAN_TYPE_KEEP_RANGE);
+
+            // cleanPartition() runs asynchronously via Utils.runInThread(); give it time to
+            // hit the shortened wait and skip.
+            Thread.sleep(1000);
+
+            // The range lock must still belong to the snapshot save - cleanPartition skipping
+            // must not have released a lock it never acquired. Check from another thread since
+            // the lock is a ReentrantLock and the owning (main) thread could always re-acquire
+            // it.
+            AtomicBoolean concurrentResult = new AtomicBoolean();
+            Thread other = new Thread(() -> concurrentResult.set(
+                    businessHandler.tryLockCompactionRange(partitionId)));
+            other.start();
+            other.join();
+            assertFalse("a concurrent reservation attempt must still fail", concurrentResult.get());
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+        }
+    }
+
+    /**
+     * Test the race this whole lock was introduced for: while cleanPartition()'s async work
+     * holds compactionRangeLock (simulating its real compactRange() call in progress),
+     * onSnapshotSave() must not block or corrupt data - it must fail fast with an
+     * HgStoreException coded EC_RKDB_SNAPSHOT_SAVE_BUSY_FAIL. That exact code is what
+     * PartitionStateMachine#onSnapshotSave inspects to report RaftError.EBUSY instead of
+     * RaftError.EIO, so jRaft's snapshot scheduler retries independently rather than the
+     * failure escalating to reportError()/restartRaftNode(). Reserves the lock on a separate
+     * thread (rather than driving a real cleanPartition()) to isolate the assertion to
+     * onSnapshotSave's side of the race - a separate thread is required because
+     * compactionRangeLock is a ReentrantLock, which would let onSnapshotSave's tryLock
+     * silently re-enter if called from the same (main) thread that reserved it, defeating the
+     * point of the test. This mirrors how cleanPartition() and onSnapshotSave() genuinely run
+     * on different executor threads in production.
+     */
+    @Test
+    public void testOnSnapshotSaveFailsWithBusyCodeWhileCleanPartitionHoldsRangeLock()
+            throws Exception {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 9;
+        PartitionEngine partitionEngine = createPartitionEngine(partitionId);
+
+        // The lock must be reserved and released by the SAME thread, since it is a
+        // ReentrantLock - so the "cleanPartition worker" thread is kept alive across both
+        // halves of the test via these latches, rather than the main thread reserving it and
+        // a throwaway thread (illegally) releasing it.
+        AtomicBoolean lockReserved = new AtomicBoolean();
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseNow = new CountDownLatch(1);
+        Thread cleanPartitionWorker = new Thread(() -> {
+            lockReserved.set(businessHandler.tryLockCompactionRange(partitionId));
+            lockAcquired.countDown();
+            try {
+                releaseNow.await();
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            businessHandler.unlockCompactionRange(partitionId);
+        });
+        cleanPartitionWorker.start();
+        lockAcquired.await();
+        assertTrue("cleanPartition's compactRange() must reserve the range lock",
+                   lockReserved.get());
+        try {
+            SnapshotHandler snapshotHandler = new SnapshotHandler(partitionEngine);
+            String snapshotPath = tmpDir.newFolder("snapshot-busy-" + partitionId)
+                                         .getAbsolutePath();
+            SnapshotWriter stubWriter = stubWriter(snapshotPath);
+
+            HgStoreException ex = assertThrows(
+                    "onSnapshotSave must throw while cleanPartition holds the range lock, " +
+                    "rather than blocking or racing saveSnapshot's checkpoint against " +
+                    "cleanPartition's compactRange()",
+                    HgStoreException.class,
+                    () -> snapshotHandler.onSnapshotSave(stubWriter));
+
+            assertEquals("the busy code must be EC_RKDB_SNAPSHOT_SAVE_BUSY_FAIL - this is the " +
+                         "exact code PartitionStateMachine#onSnapshotSave checks to report " +
+                         "RaftError.EBUSY (transient, jRaft retries) instead of RaftError.EIO " +
+                         "(escalates to restartRaftNode())",
+                         HgStoreException.EC_RKDB_SNAPSHOT_SAVE_BUSY_FAIL, ex.getCode());
+            assertTrue("exception message must mention compaction is in progress",
+                       ex.getMessage().contains("compaction in progress"));
+
+            // The failed onSnapshotSave must not have released a lock it never acquired -
+            // cleanPartition's compactRange() must still hold it. Check from another thread
+            // since the lock is a ReentrantLock and the owning (main) thread could always
+            // re-acquire it.
+            AtomicBoolean concurrentResult = new AtomicBoolean();
+            Thread other = new Thread(() -> concurrentResult.set(
+                    businessHandler.tryLockCompactionRange(partitionId)));
+            other.start();
+            other.join();
+            assertFalse("range lock must still belong to cleanPartition's compactRange()",
+                        concurrentResult.get());
+        } finally {
+            releaseNow.countDown();
+            cleanPartitionWorker.join();
+        }
+    }
+
+    private static SnapshotWriter stubWriter(String path) {
+        return new SnapshotWriter() {
+            @Override public boolean saveMeta(RaftOutter.SnapshotMeta meta) { return false; }
+            @Override public boolean addFile(String fileName, Message fileMeta) { return false; }
+            @Override public boolean removeFile(String fileName) { return false; }
+            @Override public void close(boolean keepDataOnError) {}
+            @Override public boolean init(Void opts) { return false; }
+            @Override public void shutdown() {}
+            @Override public String getPath() { return path; }
+            @Override public Set<String> listFiles() { return null; }
+            @Override public Message getFileMeta(String fileName) { return null; }
+            @Override public void close() {}
+        };
+    }
+
+    /**
      * Polls the compactionPool worker threads for one parked inside ReentrantLock#tryLock
      * (the compactionRangeLock wait in dbCompaction()), up to 5s. The pool is shared/static, so
      * this cannot target the task directly - it identifies the right worker by stack trace
@@ -409,10 +640,20 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
      */
     private static Thread awaitCompactionPoolWorkerBlockedInRangeLockWait()
             throws InterruptedException {
+        return awaitPoolWorkerBlockedInRangeLockWait(PoolNames.COMPACT);
+    }
+
+    /**
+     * Same as {@link #awaitCompactionPoolWorkerBlockedInRangeLockWait()}, but generalized to
+     * any thread-name prefix - cleanPartition()'s async work runs on jraft's shared
+     * "JRaft-Closure-Executor-" pool (via Utils.runInThread()) rather than compactionPool.
+     */
+    private static Thread awaitPoolWorkerBlockedInRangeLockWait(String threadNamePrefix)
+            throws InterruptedException {
         long start = System.currentTimeMillis();
         while (System.currentTimeMillis() - start < 5000) {
             for (Thread t : Thread.getAllStackTraces().keySet()) {
-                if (t.getName().startsWith(PoolNames.COMPACT) &&
+                if (t.getName().startsWith(threadNamePrefix) &&
                     t.getState() == Thread.State.TIMED_WAITING &&
                     isBlockedInRangeLockTryLock(t)) {
                     return t;
