@@ -43,7 +43,7 @@ The `docker-compose.yml` defines the stack with 4 services:
 **Services:**
 - `ranger-db` — PostgreSQL 14 (Ranger Admin metadata store)
 - `ranger-solr` — Solr 8.11 (audit backend for Ranger Admin)
-- `ranger` — Apache Ranger 2.4.0 (policy server)
+- `ranger` — Apache Ranger 2.9.0 (policy server)
 - `hugegraph` — HugeGraph 1.7.0 (graph database with Ranger plugin)
 
 **Key files:**
@@ -182,6 +182,118 @@ curl -s -u admin:rangerR0cks! \
   http://localhost:6080/service/plugins/services/name/hugegraph | python3 -m json.tool | grep '"id"'
 ```
 
+### 4d. Enable live dropdown/autocomplete lookups
+
+By default `implClass` is blank (step 4b) — Ranger Admin's policy editor shows the
+`graphspace`/`graph`/`resource-type`/`label` fields as plain text inputs with no
+autocomplete. This step is **required** (not optional) for the UI-driven policy
+creation walkthrough below and for Step 6's dropdown-backed policy authoring — bake
+the plugin's thin jar into Ranger Admin's own image and re-register `implClass`.
+
+**Rebuild the `ranger` image with the plugin jar baked in, then recreate the container**
+(a running container won't pick up a rebuilt image without recreation):
+
+```bash
+docker compose -f docker/hgRangerIntegration/docker-compose.yml build ranger
+docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --force-recreate ranger
+```
+
+`Dockerfile.ranger` builds the classifier-less thin jar
+(`hugegraph-ranger-plugin-1.7.0.jar`, ~40 KB — not the shaded `-plugin` jar used by
+the `hugegraph` service) and copies it to
+`/opt/ranger/ranger-2.9.0-admin/ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph/`,
+mirroring the stock `hdfs/`, `hive/`, etc. layout. Confirm it landed:
+
+```bash
+docker exec ranger ls /opt/ranger/ranger-2.9.0-admin/ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph/
+```
+
+**Restore `implClass`** on the service definition (reverse of step 4b):
+
+```bash
+curl -s -u admin:rangerR0cks! http://localhost:6080/service/plugins/definitions/name/hugegraph \
+  -o /tmp/hugegraph-sdef.json
+python3 -c "
+import json
+with open('/tmp/hugegraph-sdef.json') as f:
+    d = json.load(f)
+d['implClass'] = 'org.apache.hugegraph.ranger.RangerHugeGraphService'
+for r in d['resources']:
+    if r['name'] == 'label':
+        r['lookupSupported'] = True
+with open('/tmp/hugegraph-sdef.json', 'w') as f:
+    json.dump(d, f)
+"
+curl -s -u admin:rangerR0cks! -X PUT "http://localhost:6080/service/plugins/definitions/$SDEF_ID" \
+  -H "Content-Type: application/json" -d @/tmp/hugegraph-sdef.json
+```
+
+Expected: HTTP 200 with `"implClass": "org.apache.hugegraph.ranger.RangerHugeGraphService"`.
+
+**Restart the `ranger` container.** Ranger Admin caches its service-handler instance at
+service-instance creation time; if that instance was created while `implClass` was
+blank (step 4b), restoring `implClass` above updates the DB row but does **not**
+refresh the cached handler — every `lookupResource` call keeps silently returning `[]`
+until the process restarts:
+
+```bash
+docker restart ranger
+# wait for healthy again
+docker inspect --format '{{.State.Health.Status}}' ranger
+```
+
+**Verify via REST (optional — useful for scripted debugging without opening a browser)**,
+calling the same lookup endpoint the policy editor's dropdown JS uses:
+
+```bash
+curl -s -u admin:rangerR0cks! \
+  -X POST http://localhost:6080/service/plugins/services/lookupResource/hugegraph \
+  -H "Content-Type: application/json" \
+  -d '{"resourceName": "graph", "userInput": "", "resources": {"graphspace": ["DEFAULT"]}}'
+```
+
+Expected: `["hugegraph"]`. The `label` lookup (parents `graphspace=DEFAULT`,
+`graph=hugegraph`) should return the union of vertex/edge label names; `resource-type`
+returns a fixed 22-value list with no HTTP call.
+
+> **Caveat — `graphspace` lookup returns `[]` in standalone mode.** This local
+> docker-compose stack runs HugeGraph in **standalone** mode (no PD/store services), and
+> `GraphSpaceAPI.list()` rejects `/graphspaces` there with
+> `"GraphSpace management is not supported in standalone mode"` (HTTP 400). This is
+> HugeGraph's own standalone-mode restriction, not a plugin defect — the top-level
+> "Graph Space" dropdown will legitimately stay empty against this stack. Type
+> `DEFAULT` into that field manually (the standalone-mode convention used elsewhere in
+> HugeGraph's own auth code, e.g. `HugeBelong.DEFAULT_GRAPH_SPACE`) — the `graph`,
+> `resource-type`, and `label` dropdowns all populate correctly once that value is
+> present as a selected parent resource.
+
+**Verify via the UI (recommended — this is what a real policy author does):**
+
+1. Open `http://localhost:6080` and log in as `admin` / `rangerR0cks!`.
+2. **Access Manager → hugegraph** (the service tile created in step 4c) **→ Add New Policy**.
+3. **Graph Space*** — click into the field. The dropdown shows no suggestions (standalone-mode
+   caveat above); type `DEFAULT` and press Enter/Tab to add it as the selected value.
+4. **Graph*** — click into the field now that Graph Space has a value. The dropdown
+   queries `lookupResource` with `graphspace=DEFAULT` as parent and should list `hugegraph`.
+   Select it.
+5. **Resource Type** — click into the field. The dropdown should show the fixed 22-value
+   list (`vertex`, `edge`, `vertex_label`, `edge_label`, `schema`, `gremlin`, `all`, …) with
+   no delay, since this branch makes no HugeGraph HTTP call. Pick a value, e.g. `vertex_label`
+   — the Label field's parent is `resource-type` (see `ranger-servicedef-hugegraph.json`), so
+   Ranger's UI gates the Label lookup on this being set even though the plugin's
+   `lookupResource()` implementation only actually uses `graphspace`/`graph` to compute label
+   values.
+6. **Label** — click into the field now that Resource Type has a value. The dropdown queries
+   `lookupResource` with `graphspace=DEFAULT`, `graph=hugegraph` as parents and should list the
+   union of vertex/edge label names created so far (e.g. `person`, `software`, `likes`).
+7. Under **Allow Conditions**, add a policy item: pick a user (e.g. `bob`), check the
+   **Read** access box, and click **Add**.
+8. Give the policy a **Policy Name** (e.g. `hugegraph-ui-test`) at the top of the form, then
+   click **Save**. Expected: redirected back to the policy list with the new policy visible
+   and enabled.
+9. To confirm the values actually took effect (not just that the dropdown UI looked right),
+   open the saved policy (click its name) and check the **Graph Space**/**Graph** chips show
+   `DEFAULT`/`hugegraph` — or fetch it via REST: `curl -s -u admin:rangerR0cks! http://localhost:6080/service/plugins/policies?serviceName=hugegraph | python3 -m json.tool`.
 ---
 
 ## Step 5 — Create Test Users in HugeGraph
@@ -200,6 +312,34 @@ curl -u admin:admin \
 -d '{"user_name": "alice", "user_password": "alicepass"}'
 ```
 
+> **This stack has no usersync configured.** Ranger Admin keeps its own user store,
+> separate from HugeGraph's `auth/users`. A policy's `policyItems.users` list is
+> validated against *Ranger's* user store — creating `bob`/`alice` only in HugeGraph
+> (above) is not enough. Without a matching Ranger user, Step 6's policy creation fails
+> with `"Operation denied. User name: bob specified in policy does not exist in ranger
+> admin."` Create the same users directly in Ranger Admin before Step 6:
+>
+> ```bash
+> curl -s -u admin:rangerR0cks! \
+>   -X POST http://localhost:6080/service/xusers/secure/users \
+>   -H "Content-Type: application/json" \
+>   -d '{"name": "bob", "password": "Bobpass123", "firstName": "bob", "lastName": "",
+>        "emailAddress": "", "userRoleList": ["ROLE_USER"], "groupIdList": [],
+>        "status": 1, "isVisible": 1}'
+>
+> curl -s -u admin:rangerR0cks! \
+>   -X POST http://localhost:6080/service/xusers/secure/users \
+>   -H "Content-Type: application/json" \
+>   -d '{"name": "alice", "password": "Alicepass123", "firstName": "alice", "lastName": "",
+>        "emailAddress": "", "userRoleList": ["ROLE_USER"], "groupIdList": [],
+>        "status": 1, "isVisible": 1}'
+> ```
+>
+> Ranger's password policy requires 8+ chars with upper/lower/digit — a plain
+> `bobpass`/`alicepass` (matching the HugeGraph password) is rejected, hence the
+> different passwords here. This is Ranger Admin's own login password, not the
+> HugeGraph password bob/alice authenticate with — they're independent credential
+> stores that happen to share a username.
 ---
 
 ## Step 6 — Create Ranger Policies
@@ -270,6 +410,23 @@ curl -s -u admin:rangerR0cks! \
 ```
 
 Expected: HTTP 200 with `"id"` in the response.
+
+> **UI equivalent.** The REST call above is the fastest way to create this exact
+> multi-user policy, but you can build the same thing by hand in the browser (this
+> exercises the live dropdowns end-to-end from step 4d):
+> 1. **Access Manager → hugegraph → Add New Policy**.
+> 2. Set **Policy Name** to `hugegraph-access`.
+> 3. **Graph Space*** → type `DEFAULT` (dropdown is empty in standalone mode — see the
+>    caveat in step 4d), **Graph*** → select `hugegraph` from the dropdown, **Resource
+>    Type** → select `all` (the wildcard-equivalent value; see the "Why `resource-type:
+>    [\"*\"]`" note above), **Label** → select `*` or leave blank to match all labels.
+> 4. Under **Allow Conditions**, add three separate policy items, one per row of the
+>    **Add Permissions** button: `bob` with **Read** checked; `alice` with **Admin**
+>    checked; `admin` with **Read, Write, Delete, Execute, Admin** all checked.
+> 5. Click **Save**.
+>
+> The REST call and the UI flow produce an equivalent policy document — use whichever
+> is faster for your workflow; the rest of this guide assumes the REST version was used.
 
 Wait ~30 seconds for HugeGraph to pull the new policies from Ranger Admin.
 
@@ -573,7 +730,7 @@ with real `resource`/`access` values even with Ranger Admin stopped.
 
 ```bash
 # Bring Ranger Admin back
-docker compose -f docker/ranger-integration/docker-compose.yml start ranger
+docker compose -f docker/hgRangerIntegration/docker-compose.yml start ranger
 ```
 
 ---
@@ -788,3 +945,9 @@ The HugeGraph Ranger plugin is configured to log audit events to a local file:
 | Ranger Admin slow to start | DB initialisation takes time | The `start_period` is 180 s — wait up to 3 min before assuming a failure |
 | Audit log file not appearing | Permissions issue or config not applied | Run `docker exec hugegraph ls -la /var/log/ranger/audit/` to check directory exists and is writable. Rebuild container if config is not applied: `docker compose -f docker/ranger-integration/docker-compose.yml up -d --build` |
 | Schema creation returns `400` unexpectedly (e.g. Test 4) | Label name already exists (`ExistedException`, HTTP 400) — not a Ranger denial | Use a name not already created earlier in the guide (e.g. `person2` instead of `person`), or check `/schema/vertexlabels` for existing labels first |
+| Even `alice` (admin policy grant) gets `403` on Step 7 setup; `docker logs hugegraph` shows no `RangerHugeGraphPlugin`/`PolicyRefresher` log lines at all, just `SLF4J(W): No SLF4J providers were found` / `Defaulting to no-operation (NOP) logger implementation` | The shaded `hugegraph-ranger-plugin-*-plugin.jar` bundled two conflicting transitive SLF4J versions (`slf4j-reload4j:1.7.36` via `hadoop-auth`, and `slf4j-api:2.0.13` via `ranger-audit-dest-solr`) ahead of the server's own `slf4j-api-1.7.31.jar` on the classpath. SLF4J 2.x's `ServiceLoader` provider lookup found nothing and fell back to a silent NOP logger for the *entire JVM* — masking every Ranger plugin log line, including any exception from the policy fetch. | Fixed by adding `<exclude>org.slf4j:*</exclude>` to the maven-shade-plugin `artifactSet.excludes` in `hugegraph-server/hugegraph-ranger-plugin/pom.xml`, then rebuilding the module. Verify with `unzip -l target/hugegraph-ranger-plugin-*-plugin.jar \| grep -i "org/slf4j/spi\|LoggerFactory"` — should return nothing. |
+| After the SLF4J fix, logs show `RangerAdminRESTClient - Error getting Roles/policies. secureMode=false, response={"httpStatusCode":400,"msgDesc":"Unauthenticated access not allowed"}` and `PolicyRefresher - cache file does not exist or not readable`, so the policy cache never populates and every check is denied by default | `ranger-hugegraph-security.xml` set `ranger.plugin.hugegraph.policy.rest.user` / `...policy.rest.password`, but `RangerRESTClient.init()` only reads `<prefix>.policy.rest.client.username` / `<prefix>.policy.rest.client.password` — the `.user`/`.password` names are silently ignored, so no `Authorization` header is ever attached to the Ranger Admin request | Rename the properties to `ranger.plugin.hugegraph.policy.rest.client.username` / `ranger.plugin.hugegraph.policy.rest.client.password` in `ranger-hugegraph-security.xml`, then restart the `hugegraph` container. Confirm with `docker logs hugegraph \| grep PolicyRefresher` — should show `found updated version` / `Switched policy engine to [N]`, and `docker exec hugegraph ls /tmp/ranger/cache/hugegraph/` should show a populated `hugegraph_hugegraph.json`. |
+| After enabling step 4d's `implClass`, `lookupResource` calls return `"...has been compiled by a more recent version of the Java Runtime (class file version 55.0), this version of the Java Runtime only recognizes class file versions up to 52.0"` | `apache/ranger:2.9.0`'s bundled JVM is JDK 8, but `hugegraph-ranger-plugin` inherits `maven.compiler.source/target=11` from the root pom. The shaded `-plugin` jar never hit this because it runs inside HugeGraph server's own JDK 11 process — only the thin jar, loaded directly by Ranger Admin's JVM, is affected | Override `maven.compiler.source`/`target` to `8` in `hugegraph-ranger-plugin/pom.xml`'s `<properties>` (module-local override, doesn't affect the shaded jar's runtime). Rebuild and confirm with `javap -v` that the class file's major version is `52`. |
+| `lookupResource` for `resource-type` throws in `docker logs ranger` (`NoClassDefFoundError: org/apache/hugegraph/auth/ResourceType`) | `hugegraph-core` is deliberately excluded from the thin jar's shade `artifactSet.excludes` (assumed already on the target classpath) — true for the HugeGraph server, but Ranger Admin has no such jar | `RangerHugeGraphService` hardcodes a `RESOURCE_TYPES` string array mirroring `ResourceType`'s lowercased enum names instead of importing the enum directly. If the enum changes, update the array to match. |
+| Step 7 Test 2 (`bob` schema write) unexpectedly returns `201` instead of `403` | Ranger policy drift — bob's `hugegraph-access` policy (id from step 6) picked up a `write` grant it shouldn't have (e.g. from an earlier ad-hoc edit), not a plugin defect | `GET /service/plugins/policies/{id}` and check `bob`'s `policyItems[].accesses` — should be `[{"type":"read"}]` only. `PUT` the policy back if it drifted, and delete any schema element bob's stray write created. |
+| Step 4d dropdowns still return `[]` for every field — including `resource-type`, which has no HugeGraph HTTP dependency at all — even though the jar is on the classpath, `implClass` is set, and `lookupSupported` is `true` on all four resources | Ranger Admin cached its `hugegraph` service-handler instance from when `implClass` was still blank (step 4b); restoring `implClass` via `PUT` updates the DB row but does not refresh that cached handler | `docker restart ranger`, wait for `healthy`, then retry the `lookupResource` call. `resource-type` returning `[]` (vs. the real 22-value list) is the tell that the class isn't loaded at all, as opposed to a HugeGraph connectivity/auth problem. |

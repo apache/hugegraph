@@ -34,11 +34,7 @@
     <description>Apache Ranger authorization plugin for HugeGraph</description>
 
     <properties>
-        <ranger.version>2.4.0</ranger.version>
-        <!-- Ranger Admin runs Java 8; compile to class file 52 so the plugin
-             JAR loads on both HugeGraph (Java 11) and Ranger Admin (Java 8). -->
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
+        <ranger.version>2.9.0</ranger.version>
     </properties>
 
     <dependencies>
@@ -54,7 +50,8 @@
             <version>${revision}</version>
         </dependency>
 
-        <!-- Apache Ranger plugin SDK -->
+        <!-- Apache Ranger plugin SDK; brings in hadoop-client-api/-runtime transitively,
+             which supplies org.apache.hadoop.fs.Path used by RangerHugeGraphPlugin. -->
         <dependency>
             <groupId>org.apache.ranger</groupId>
             <artifactId>ranger-plugins-common</artifactId>
@@ -71,6 +68,11 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <dependency>
+            <groupId>org.apache.ranger</groupId>
+            <artifactId>ranger-audit-dest-solr</artifactId>
+            <version>${ranger.version}</version>
+        </dependency>
 
         <!-- logging -->
         <dependency>
@@ -81,26 +83,6 @@
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
         </dependency>
-
-        <!-- Hadoop configuration is pulled in by ranger-plugins-common at runtime;
-             provided scope lets us compile against it without bundling it. -->
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-common</artifactId>
-            <version>3.3.4</version>
-            <scope>provided</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-
         <!-- test -->
         <dependency>
             <groupId>junit</groupId>
@@ -142,6 +124,18 @@
                                     <exclude>jakarta.ws.rs:jakarta.ws.rs-api</exclude>
                                     <exclude>jakarta.inject:jakarta.inject-api</exclude>
                                     <exclude>jakarta.annotation:jakarta.annotation-api</exclude>
+                                    <!-- SLF4J is provided by HugeGraph's server classpath
+                                         (slf4j-api-1.7.31 + log4j-slf4j-impl). Ranger's own
+                                         transitive deps pull in both slf4j-reload4j:1.7.36
+                                         (via hadoop-auth) and slf4j-api:2.0.13 (via
+                                         ranger-audit-dest-solr) — shading either into this
+                                         jar puts conflicting SLF4J major versions on the
+                                         classpath ahead of the server's own binding, which
+                                         makes the JVM-wide LoggerFactory fall back to a
+                                         silent NOP logger (see SLF4J(W): No SLF4J providers
+                                         were found). Exclude the whole tree so the server's
+                                         own binding is the only one resolved. -->
+                                    <exclude>org.slf4j:*</exclude>
                                 </excludes>
                             </artifactSet>
                             <!-- Strip signature files from bundled signed JARs to prevent

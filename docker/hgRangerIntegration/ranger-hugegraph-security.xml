@@ -45,13 +45,21 @@
         <value>org.apache.ranger.admin.client.RangerAdminRESTClient</value>
     </property>
 
-    <!-- Credentials for the plugin to authenticate to Ranger Admin -->
+    <!-- Credentials for the plugin to authenticate to Ranger Admin.
+         NOTE: the property suffix is ".policy.rest.client.username" /
+         ".policy.rest.client.password" — RangerRESTClient reads exactly
+         these names (see RangerRESTClient.init()). ".policy.rest.user" /
+         ".policy.rest.password" are silently ignored (no such property is
+         ever read), so no Authorization header gets attached and every
+         policy/role fetch is rejected by Ranger Admin as unauthenticated
+         (HTTP 400 "Unauthenticated access not allowed"), leaving the local
+         policy cache empty and every access check denied by default. -->
     <property>
-        <name>ranger.plugin.hugegraph.policy.rest.user</name>
+        <name>ranger.plugin.hugegraph.policy.rest.client.username</name>
         <value>admin</value>
     </property>
     <property>
-        <name>ranger.plugin.hugegraph.policy.rest.password</name>
+        <name>ranger.plugin.hugegraph.policy.rest.client.password</name>
         <value>rangerR0cks!</value>
     </property>
 

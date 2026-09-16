@@ -49,7 +49,10 @@ services:
       retries: 10
 
   ranger:
-    image: apache/ranger:2.4.0
+    build:
+      context: ../..
+      dockerfile: docker/hgRangerIntegration/Dockerfile.ranger
+    image: hugegraph-ranger-admin-local:2.9.0
     container_name: ranger
     depends_on:
       ranger-db:
@@ -57,6 +60,18 @@ services:
       ranger-solr:
         condition: service_healthy
     environment:
+      # apache/ranger:2.9.0's entrypoint (ranger.sh) reads these three vars directly
+      # (db_root_password/db_user/db_password in install.properties) — the legacy
+      # RANGER_ADMIN_DB_* names below are kept for the parts of the image that still
+      # read them, but POSTGRES_PASSWORD/RANGER_DB_USER/RANGER_DB_PASSWORD are what
+      # actually wires up the postgres connection on this image version.
+      # RANGER_DB_PASSWORD also becomes rangerAdmin_password (the "admin" UI login
+      # password) via the same entrypoint, so it must stay "rangerR0cks!" to match
+      # the credentials documented in ranger-integration-test-guide.md and used by
+      # the image's own create-ranger-services.py bootstrap script.
+      POSTGRES_PASSWORD: rangeradmin
+      RANGER_DB_USER: rangeradmin
+      RANGER_DB_PASSWORD: rangerR0cks!
       RANGER_ADMIN_DB_HOST: ranger-db
       RANGER_ADMIN_DB_NAME: ranger
       RANGER_ADMIN_DB_USER: rangeradmin
@@ -68,7 +83,7 @@ services:
     ports:
       - "6080:6080"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --server-response -O/dev/null http://localhost:6080/login.jsp 2>&1 | grep -q '200 OK' || exit 1"]
+      test: ["CMD-SHELL", "wget -q --server-response -O/dev/null http://localhost:6080/login.jsp 2>&1 | grep -q 'HTTP/1.1 200' || exit 1"]
       interval: 15s
       start_period: 180s
       retries: 20
