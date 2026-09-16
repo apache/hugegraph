@@ -200,9 +200,17 @@ align_auth_config() {
     rest_auth=$(get_prop "auth.authenticator" "${REST_SERVER_CONF}")
     yaml_auth=$(get_yaml_authenticator)
     if [[ -z "${yaml_auth}" ]] && has_yaml_authentication_block; then
-        log "WARN: gremlin-server.yaml carries an authentication block" \
-            "without a readable authenticator; leaving both sides untouched"
-        return
+        # Refuse instead of bootstrapping one side: enable-auth.sh runs right
+        # after align and only touches the REST side, so continuing would put
+        # REST on StandardAuthenticator while Gremlin stays on TinkerPop's
+        # AllowAllAuthenticator default.  Failing fast (rather than skipping
+        # enable-auth.sh) keeps a PASSWORD deployment from starting with
+        # authentication silently half-applied.
+        log "ERROR: gremlin-server.yaml carries an authentication block" \
+            "without a readable authenticator; refusing to bootstrap" \
+            "authentication one-sided. Add an 'authenticator:' entry to" \
+            "the block or remove the block, then restart."
+        return 1
     fi
     if [[ -n "${rest_auth}" && -n "${yaml_auth}" && "${rest_auth}" != "${yaml_auth}" ]]; then
         log "WARN: REST and Gremlin name different authenticators" \
@@ -372,6 +380,8 @@ if [[ -n "${AUTH_TOKEN_SECRET_ENCODED}" ]]; then
 fi
 if [[ -n "${PASSWORD:-}" ]]; then
     set_prop_encoded "auth.admin_pa" "${AUTH_ADMIN_PASSWORD_ENCODED}" "${REST_SERVER_CONF}"
+    # A refusal inside align_auth_config exits the entrypoint under set -e,
+    # so enable-auth.sh can never run one-sided after it.
     align_auth_config
     # This script is idempotent and must run outside the initialization guard:
     # an upgrade can preserve the marker from an unauthenticated deployment.

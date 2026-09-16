@@ -207,8 +207,14 @@ function props_set(file, key, enc_val,    tmp, cmd, b, first, ln) {
     }
     # Staged rewrite: everything lands in a sibling temp file first, so a
     # failure before the copy-back leaves the original untouched.  The temp
-    # file can hold secrets, so it is created 0600 regardless of the umask.
+    # file can hold secrets, so it is pre-created 0600 before the first
+    # write: awk's `>` below would otherwise create it under the process
+    # umask (usually 0644), leaving auth.admin_pa or auth.token_secret
+    # briefly group- and world-readable.  Truncating an existing file keeps
+    # its mode, and the chmod after close repairs a stale tmp left behind
+    # by a crashed run.
     tmp = file ".tmp"
+    system("umask 077 && : > " shquote(tmp))
     for (b = 1; b <= NBLOCK; b++) {
         if (BDROP[b]) continue
         if (b == first) {

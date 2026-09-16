@@ -142,9 +142,10 @@ assert_line_count 1 '^unrelated=true$' "${indented_file}"
 # gremlin-server.yaml says: the authenticator inside the authentication
 # block — quoted scalars and inline comments cleaned the way snakeyaml
 # strips them — and a flow mapping on the authentication line itself.
-# align_auth_config must not read an authentication block without a
-# readable authenticator as "no yaml side": exporting the default there
-# would override an explicit choice, so both sides stay untouched.
+# align_auth_config refuses an authentication block without a readable
+# authenticator instead of treating it as "no yaml side": exporting the
+# default there would override an explicit choice, and continuing would let
+# enable-auth.sh write the REST side alone.
 yaml_dir="${test_dir}/yaml"
 mkdir -p "${yaml_dir}/conf"
 (
@@ -164,12 +165,20 @@ mkdir -p "${yaml_dir}/conf"
         > conf/gremlin-server.yaml
     [[ "$(get_yaml_authenticator)" == "com.example.FlowAuth" ]]
 
+# align_auth_config must refuse an authentication block without a readable
+# authenticator: continuing would let enable-auth.sh write the REST side
+# alone (REST on StandardAuthenticator, Gremlin on TinkerPop's
+# AllowAllAuthenticator default), so the entrypoint stops here instead.
     printf '%s\n' \
         'authentication:' \
         '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
         > conf/gremlin-server.yaml
     unset AUTHENTICATOR_CLASS
-    align_auth_config
+    if align_auth_config; then
+        echo "align_auth_config must refuse an authentication block" \
+            "without a readable authenticator" >&2
+        exit 1
+    fi
     [[ -z "${AUTHENTICATOR_CLASS:-}" ]]
     [[ ! -s "${REST_SERVER_CONF}" ]]
 
@@ -179,6 +188,43 @@ mkdir -p "${yaml_dir}/conf"
         > conf/gremlin-server.yaml
     align_auth_config
     grep -q '^auth\.authenticator=com\.example\.YamlAuth$' "${REST_SERVER_CONF}"
+)
+
+# The refusal above is what keeps enable-auth.sh from writing one side:
+# against the same ambiguous layout, enable-auth.sh on its own writes only
+# the REST file (its yaml guard already sees an `authentication:` line),
+# leaving REST on StandardAuthenticator and Gremlin on TinkerPop's
+# AllowAllAuthenticator default.  The entrypoint never lets it run there
+# because align_auth_config fails first under set -e.
+onesided_dir="${test_dir}/yaml-onesided"
+mkdir -p "${onesided_dir}/bin" "${onesided_dir}/conf/graphs"
+cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
+    "${onesided_dir}/bin/enable-auth.sh"
+chmod +x "${onesided_dir}/bin/enable-auth.sh"
+(
+    cd "${onesided_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
+    : > conf/rest-server.properties
+    printf '%s\n' \
+        'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+        > conf/graphs/hugegraph.properties
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+        > conf/gremlin-server.yaml
+    unset AUTHENTICATOR_CLASS
+    if align_auth_config; then
+        echo "align_auth_config must refuse an authentication block without a readable authenticator" >&2
+        exit 1
+    fi
+    ./bin/enable-auth.sh
+    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+        conf/rest-server.properties
+    grep -q 'HugeFactoryAuthProxy' conf/graphs/hugegraph.properties
+    if grep -Eq '^[[:blank:]]*authenticator[[:blank:]]*:' conf/gremlin-server.yaml; then
+        echo "enable-auth.sh must not add an authenticator to the yaml block" >&2
+        exit 1
+    fi
 )
 
 # CRLF (Windows-saved) configs parse the way java.util.Properties reads
