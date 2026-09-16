@@ -68,23 +68,33 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
         while (this.results.hasNext()) {
             Elem elem = this.results.next();
+            if (this.current != null &&
+                this.sizeOf(this.current) >= INLINE_BATCH_SIZE) {
+                /*
+                 * The current entry already holds a full batch: start the
+                 * next entry with this record instead of appending it.
+                 * results.position() has already advanced to this record and
+                 * a page restarts inclusively from position(), so it must
+                 * never point at a record that has been emitted (a page
+                 * limit ending exactly at a batch boundary would otherwise
+                 * re-emit it as the first record of the next page).
+                 */
+                assert this.next == null;
+                this.next = this.merger.apply(null, elem);
+                break;
+            }
             BackendEntry merged = this.merger.apply(this.current, elem);
             E.checkState(merged != null, "Error when merging entry");
             if (this.current == null) {
                 // The first time to read
                 this.current = merged;
-            } else if (merged == this.current) {
-                // The next entry belongs to the current entry
-                assert this.current != null;
-                if (this.sizeOf(this.current) >= INLINE_BATCH_SIZE) {
-                    break;
-                }
-            } else {
+            } else if (merged != this.current) {
                 // New entry
                 assert this.next == null;
                 this.next = merged;
                 break;
             }
+            // Else the record belongs to the current entry
 
             // When limit exceed, stop fetching
             if (this.reachLimit(this.fetched() - 1)) {
