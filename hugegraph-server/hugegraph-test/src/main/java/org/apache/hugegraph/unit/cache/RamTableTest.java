@@ -35,6 +35,7 @@ import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
@@ -106,6 +107,50 @@ public class RamTableTest {
         Assert.assertTrue(table.matched(query));
         query.eq(HugeKeys.LABEL, IdGenerator.of(3));
         Assert.assertFalse(table.matched(query));
+    }
+
+    @Test
+    public void testQueryBranchRejectsUnresolvedLabels() {
+        RamTable table = new RamTable(this.graph(), 10, 20);
+        table.addEdge(true, 1, 2, Directions.OUT, 1);
+        for (Condition[] labels : new Condition[][]{
+                {Condition.in(HugeKeys.LABEL, ImmutableList.of())},
+                {Condition.eq(HugeKeys.LABEL, IdGenerator.of(1)),
+                 Condition.eq(HugeKeys.LABEL, IdGenerator.of(2))},
+                {Condition.in(HugeKeys.LABEL,
+                              ImmutableList.of(IdGenerator.of(1), IdGenerator.of(2)))}}) {
+            ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+            query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            for (Condition label : labels) {
+                query.query(label);
+            }
+            // Bypass matched()/flatten(): the branch itself must fail closed,
+            // independently of Java assertions and the caller's invariants.
+            Assert.assertThrows(IllegalStateException.class, () ->
+                    Whitebox.invoke(RamTable.class, "query", table, query));
+        }
+    }
+
+    @Test
+    public void testQueryBranchWildcardAndSingleLabel() {
+        HugeGraph graph = this.graph();
+        int el1 = (int) graph.edgeLabel("el1").id().asLong();
+        int el2 = (int) graph.edgeLabel("el2").id().asLong();
+        RamTable table = new RamTable(graph, 10, 20);
+        table.addEdge(true, 1, 2, Directions.OUT, el1);
+        table.addEdge(false, 1, 3, Directions.OUT, el2);
+        for (boolean wildcard : new boolean[]{true, false}) {
+            ConditionQuery query = new ConditionQuery(HugeType.EDGE);
+            query.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of(1));
+            if (!wildcard) {
+                query.eq(HugeKeys.LABEL, IdGenerator.of(el1));
+            }
+            Iterator<HugeEdge> edges = Whitebox.invoke(RamTable.class, "query", table, query);
+            List<Long> targets = new ArrayList<>();
+            edges.forEachRemaining(edge -> targets.add(edge.id().otherVertexId().asLong()));
+            Collections.sort(targets);
+            Assert.assertEquals(wildcard ? ImmutableList.of(2L, 3L) : ImmutableList.of(2L), targets);
+        }
     }
 
     @Test

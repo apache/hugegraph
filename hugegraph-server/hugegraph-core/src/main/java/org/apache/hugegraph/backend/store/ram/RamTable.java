@@ -54,6 +54,7 @@ import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.Consumers;
+import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -328,9 +329,12 @@ public final class RamTable {
         if (dir == null) {
             dir = Directions.BOTH;
         }
-        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
-        if (label == null) {
-            label = IdGenerator.ZERO;
+        Id label = IdGenerator.ZERO;
+        if (query.containsConditionValues(HugeKeys.LABEL)) {
+            // Only an absent EQ/IN label condition means all labels. Each
+            // flattened branch must otherwise resolve to exactly one label.
+            label = query.conditionValue(HugeKeys.LABEL);
+            E.checkState(label != null, "Expect one label value for query: %s", query);
         }
         return this.query(owner.asLong(), dir, (int) label.asLong());
     }

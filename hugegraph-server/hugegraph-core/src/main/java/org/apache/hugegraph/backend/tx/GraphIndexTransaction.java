@@ -405,7 +405,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         if (query.allSysprop() && conds.size() == 1 &&
             label != null) {
             // Query only by one EQ/IN-resolved label
-            return this.queryByLabel(query);
+            return this.queryByLabel(query, label);
         } else {
             // Query by userprops (or userprops + label)
             return this.queryByUserprop(query);
@@ -413,16 +413,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     @Watched(prefix = "index")
-    private IdHolderList queryByLabel(ConditionQuery query) {
+    private IdHolderList queryByLabel(ConditionQuery query, Id label) {
         HugeType queryType = query.resultType();
         IndexLabel il = IndexLabel.label(queryType);
         validateIndexLabel(il);
-        // Query-by-label builds a label index entry and requires one
-        // deterministically resolved label instead of best-effort fallback.
-        Id label = query.conditionValue(HugeKeys.LABEL);
-        E.checkState(label != null, "Expect one label value for query: %s",
-                     query);
-
         HugeType indexType;
         SchemaLabel schemaLabel;
         if (queryType.isVertex()) {
