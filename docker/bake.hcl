@@ -20,11 +20,11 @@ variable "MAVEN_ARGS" {
 }
 
 variable "MAVEN_PROJECTS" {
-  default = "hugegraph-server/hugegraph-dist,hugegraph-pd/hg-pd-dist,hugegraph-store/hg-store-dist"
+  default = null
 }
 
 variable "RUNTIME_DEPS_EPOCH" {
-  default = "1"
+  default = null
 }
 
 variable "SOURCE_REVISION" {
