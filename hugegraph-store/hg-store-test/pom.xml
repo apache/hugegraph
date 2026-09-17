@@ -242,6 +242,12 @@
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
                             </testClassesDirectory>
+                            <!-- CoreSuiteTest and BatchGraphIsolationTest must not share a JVM
+                                 fork: HgStoreEngine's `closing` flag is set true by
+                                 CoreSuiteTest's @AfterClass shutdown and never reset, so a
+                                 later class reusing the same fork fails with "store is
+                                 closing". -->
+                            <reuseForks>false</reuseForks>
                             <includes>
                                 <include>**/CoreSuiteTest.java</include>
                                 <include>**/BatchGraphIsolationTest.java</include>
