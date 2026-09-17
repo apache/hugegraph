@@ -33,6 +33,7 @@ import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.Metapb.ShardGroup;
 import org.apache.hugegraph.pd.model.GraphStatistics;
+import org.apache.hugegraph.pd.raft.RaftEngine;
 import org.apache.hugegraph.pd.service.PDRestService;
 import org.apache.hugegraph.pd.service.PDService;
 
@@ -76,7 +77,28 @@ public final class PDMetrics {
         Gauge.builder(PREFIX + ".terms", () -> setTerms())
              .description("term of partitions in PD")
              .register(registry);
+        registerRaftMeters();
+    }
 
+    /**
+     * Raft membership gauges so operators can alert on quorum loss. They mirror what
+     * {@code GET /v1/ready} answers: a PD that sees no leader is outside a quorum.
+     */
+    private void registerRaftMeters() {
+        RaftEngine raft = RaftEngine.getInstance();
+        Gauge.builder(PREFIX + ".raft.leader", () -> raft.getRaftStatus().isLocalLeader() ? 1 : 0)
+             .description("1 if this PD is the raft leader, 0 otherwise")
+             .register(registry);
+        Gauge.builder(PREFIX + ".raft.has.leader", () -> raft.hasLeader() ? 1 : 0)
+             .description("1 if this PD sees a raft leader, i.e. is part of a quorum, 0 otherwise")
+             .register(registry);
+        Gauge.builder(PREFIX + ".raft.alive.peers", () -> {
+                 int alive = raft.getAlivePeerCount();
+                 return alive < 0 ? Double.NaN : alive;
+             })
+             .description("Number of raft peers, itself included, the leader has heard from " +
+                          "within the leader lease timeout; NaN on non-leader nodes")
+             .register(registry);
     }
 
     private long updateGraphs() {

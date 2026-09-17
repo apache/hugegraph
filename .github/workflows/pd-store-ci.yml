@@ -134,6 +134,14 @@ jobs:
           done
           echo "can_run=true" >> "$GITHUB_OUTPUT"
 
+      - name: Run PD docker entrypoint secret override tests
+        run: |
+          $TRAVIS_DIR/test-pd-docker-entrypoint.sh
+
+      - name: Check every shipped PD config carries the REST hardening
+        run: |
+          $TRAVIS_DIR/test-pd-shipped-config.sh
+
       - name: Run start-hugegraph-pd.sh foreground mode tests
         if: steps.pd-preflight.outputs.can_run == 'true'
         run: |
