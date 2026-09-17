@@ -756,6 +756,25 @@ for (Map.Entry<String, byte[]> entry : results.entrySet()) {
 }
 ```
 
+### KV watch recovery
+
+`KvClient.listen()` and `listenPrefix()` restore subscriptions after retryable
+stream failures, including repeated reconnect failures and stream completion.
+Recovery resumes future notifications; events emitted while disconnected are
+not replayed. Consumers that require convergence must reconcile against durable
+PD state (see [graph metadata reconciliation #3151](https://github.com/apache/hugegraph/issues/3151)
+and [schema cache discussion #3205](https://github.com/apache/hugegraph/discussions/3205)).
+
+The overloads accepting an `errorConsumer` report permanent subscription failure,
+such as authentication or permission errors. The two-argument overloads log these
+failures. An initial synchronous registration failure still throws `PDException`.
+Returning from `listen()` does not mean the server has acknowledged registration.
+Close the owning `KvClient` to stop its watches and reconnect workers.
+
+Watch discovery uses at most a five-second budget, capped by `grpcTimeOut`; a
+separate five-second timer retries streams that receive no first response. These
+watch limits do not replace the configured timeout for blocking KV or lock calls.
+
 ## REST API
 
 PD exposes a REST API for management and monitoring (default port: 8620).
