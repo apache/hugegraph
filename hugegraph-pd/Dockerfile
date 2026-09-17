@@ -25,17 +25,18 @@ WORKDIR /pkg
 COPY . .
 
 ARG MAVEN_ARGS
+ARG MAVEN_PROJECTS="hugegraph-server/hugegraph-dist,hugegraph-pd/hg-pd-dist,hugegraph-store/hg-store-dist"
 ARG SOURCE_REVISION=local
 
 RUN --mount=type=cache,id=hugegraph-maven-${SOURCE_REVISION},target=/root/.m2,sharing=locked \
-    mvn install $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
+    mvn install -pl "$MAVEN_PROJECTS" \
+        -am $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
     && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
 FROM eclipse-temurin:11-jre-jammy
 
-COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-*/ /hugegraph-pd/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default
@@ -49,6 +50,7 @@ WORKDIR /hugegraph-pd/
 # Note: lsof is gone because its only consumer was the dead check_port removed
 # from hg-pd-dist bin/util.sh.  PD runs no port preflight, so unlike the server
 # images this needs no socket-table tool in its place.
+ARG RUNTIME_DEPS_EPOCH=1
 RUN apt-get -q update \
     && apt-get -q install -y --no-install-recommends --no-install-suggests \
        dumb-init \
@@ -57,6 +59,8 @@ RUN apt-get -q update \
        vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-*/ /hugegraph-pd/
 
 # 2. Init docker script
 COPY hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh .
