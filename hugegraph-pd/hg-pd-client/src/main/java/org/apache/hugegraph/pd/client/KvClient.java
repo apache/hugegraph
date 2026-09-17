@@ -132,7 +132,7 @@ public class KvClient<T extends WatchResponse> extends AbstractClient implements
     }
 
     @Override
-    protected long stubResetTimeoutMillis() {
+    protected long asyncStubResetTimeoutMillis() {
         return Math.max(1L, Math.min(config.getGrpcTimeOut(), WATCH_START_TIMEOUT_MS));
     }
 

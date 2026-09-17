@@ -106,7 +106,7 @@ public abstract class AbstractClient implements Closeable {
 
     protected synchronized AbstractBlockingStub getBlockingStub() throws PDException {
         if (proxy.getBlockingStub() == null) {
-            String host = resetStub();
+            String host = resetStub(stubResetTimeoutMillis());
             if (host.isEmpty()) {
                 throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
                                       "PD unreachable, pd.peers=" + config.getServerHost());
@@ -117,7 +117,7 @@ public abstract class AbstractClient implements Closeable {
 
     protected synchronized AbstractStub getStub() throws PDException {
         if (proxy.getStub() == null) {
-            String host = resetStub();
+            String host = resetStub(asyncStubResetTimeoutMillis());
             if (host.isEmpty()) {
                 throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
                                       "PD unreachable, pd.peers=" + config.getServerHost());
@@ -143,6 +143,10 @@ public abstract class AbstractClient implements Closeable {
         return (long) config.getGrpcTimeOut() * Math.max(1, proxy.getHostCount());
     }
 
+    protected long asyncStubResetTimeoutMillis() {
+        return stubResetTimeoutMillis();
+    }
+
     protected boolean isShutdown() {
         return false;
     }
@@ -151,9 +155,9 @@ public abstract class AbstractClient implements Closeable {
 
     protected abstract AbstractBlockingStub createBlockingStub();
 
-    private String resetStub() {
+    private String resetStub(long timeoutMillis) {
         Exception ex = null;
-        long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(stubResetTimeoutMillis());
+        long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
         long deadlineNanos = System.nanoTime() + timeoutNanos;
         for (int i = 0; i < proxy.getHostCount(); i++) {
             if (isShutdown() || remainingMillis(deadlineNanos) <= 0L) {

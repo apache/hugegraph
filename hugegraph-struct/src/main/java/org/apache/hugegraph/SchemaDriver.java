@@ -118,6 +118,9 @@ public class SchemaDriver {
 
     public static void init(PDConfig pdConfig, int cacheSize, long expiration) {
         synchronized (LIFECYCLE_LOCK) {
+            if (destroying) {
+                throw new NotAllowException("The SchemaDriver is being destroyed");
+            }
             SchemaDriver instance = INSTANCE.get();
             if (instance != null) {
                 throw new NotAllowException(
@@ -138,7 +141,7 @@ public class SchemaDriver {
             if (destroying) {
                 completion = destroyCompletion;
             } else {
-                instance = INSTANCE.get();
+                instance = INSTANCE.getAndSet(null);
                 if (instance == null) {
                     return;
                 }
@@ -156,7 +159,6 @@ public class SchemaDriver {
             instance.closeResources();
         } finally {
             synchronized (LIFECYCLE_LOCK) {
-                INSTANCE.compareAndSet(instance, null);
                 destroying = false;
             }
             completion.countDown();

@@ -67,7 +67,7 @@ public class SchemaDriverTest {
     }
 
     @Test
-    public void testDestroyKeepsInstanceUntilResourcesAreClosed() throws Exception {
+    public void testDestroyUnpublishesInstanceBeforeClosingResources() throws Exception {
         BlockingCloseKvClient client = new BlockingCloseKvClient();
         SchemaDriver driver = new SchemaDriver(client, 10, 60_000L);
         this.instance.set(driver);
@@ -76,7 +76,7 @@ public class SchemaDriverTest {
             destroyThread.start();
             client.awaitCloseStarted();
 
-            Assert.assertSame(driver, SchemaDriver.getInstance());
+            Assert.assertNull(SchemaDriver.getInstance());
         } finally {
             client.allowClose.countDown();
             destroyThread.join(5000L);

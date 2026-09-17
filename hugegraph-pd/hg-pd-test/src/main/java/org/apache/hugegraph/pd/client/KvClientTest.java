@@ -890,6 +890,40 @@ public class KvClientTest extends BaseClientTest {
     }
 
     @Test
+    public void testBlockingDiscoveryKeepsConfiguredTimeout() throws Exception {
+        AtomicReference<String> address = new AtomicReference<>();
+        AtomicReference<Long> remainingMillis = new AtomicReference<>();
+        Server server = ServerBuilder.forPort(0)
+                                     .addService(new PDGrpc.PDImplBase() {
+                                         @Override
+                                         public void getMembers(Pdpb.GetMembersRequest request,
+                                                StreamObserver<Pdpb.GetMembersResponse> observer) {
+                                             remainingMillis.set(io.grpc.Context.current()
+                                                     .getDeadline()
+                                                     .timeRemaining(TimeUnit.MILLISECONDS));
+                                             observer.onNext(Pdpb.GetMembersResponse.newBuilder()
+                                                     .setLeader(Metapb.Member.newBuilder()
+                                                             .setGrpcUrl(address.get()))
+                                                     .build());
+                                             observer.onCompleted();
+                                         }
+                                     }).build().start();
+        address.set("127.0.0.1:" + server.getPort());
+        PDConfig config = PDConfig.of(address.get() + "," + address.get());
+        config.setGrpcTimeOut(60_000L);
+        try (KvClient<WatchResponse> blockingClient = new KvClient<>(config);
+             KvClient<WatchResponse> watchClient = new KvClient<>(config)) {
+            blockingClient.getBlockingStub();
+            assertThat(remainingMillis.get()).isGreaterThan(30_000L);
+
+            watchClient.getStub();
+            assertThat(remainingMillis.get()).isBetween(1L, 2500L);
+        } finally {
+            server.shutdownNow().awaitTermination(5L, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     public void testLegacyStreamingCallOverrideRemainsDispatchTarget() throws Exception {
         ScheduledExecutorService reconnectScheduler = mock(ScheduledExecutorService.class);
         LegacyStreamingOverrideKvClient testClient =
@@ -1258,7 +1292,7 @@ public class KvClientTest extends BaseClientTest {
         }
 
         @Override
-        protected long stubResetTimeoutMillis() {
+        protected long asyncStubResetTimeoutMillis() {
             return 300L;
         }
     }
