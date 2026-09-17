@@ -126,10 +126,6 @@ public abstract class AbstractClient implements Closeable {
         return setAsyncParams(proxy.getStub(), config);
     }
 
-    protected synchronized void invalidateAsyncStub() {
-        proxy.setStub(null);
-    }
-
     protected synchronized boolean invalidateAsyncStub(Channel expectedChannel) {
         AbstractStub stub = proxy.getStub();
         if (stub == null || stub.getChannel() != expectedChannel) {
