@@ -198,7 +198,13 @@ public class PartitionStateMachine extends StateMachineAdapter {
                 done.run(Status.OK());
             } catch (HgStoreException e) {
                 log.error(String.format("Raft %s onSnapshotSave failed. {}", groupId), e);
-                done.run(new Status(RaftError.EIO, e.toString()));
+                // A busy compaction-range lock is transient: jRaft's snapshot scheduler
+                // retries independently, so report EBUSY rather than EIO to avoid
+                // escalating to reportError()/restartRaftNode() (see SnapshotExecutorImpl
+                // #onSnapshotSaveDone, which only escalates on EIO).
+                RaftError raftError = e.getCode() == HgStoreException.EC_RKDB_SNAPSHOT_SAVE_BUSY_FAIL ?
+                                       RaftError.EBUSY : RaftError.EIO;
+                done.run(new Status(raftError, e.toString()));
             } finally {
                 lock.unlock();
             }

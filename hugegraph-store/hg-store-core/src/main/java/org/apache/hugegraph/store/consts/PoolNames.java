@@ -29,6 +29,7 @@ public class PoolNames {
     public static final String I_JOB = "hg-i-job";
     public static final String U_JOB = "hg-u-job";
     public static final String COMPACT = "hg-compact";
+    public static final String COMPACT_RETRY = "hg-compact-retry";
     public static final String HEARTBEAT = "hg-heartbeat";
     public static final String P_HEARTBEAT = "hg-p-heartbeat";
 

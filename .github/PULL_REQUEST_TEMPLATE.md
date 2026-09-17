@@ -60,8 +60,11 @@ For example:
 
 ## Documentation Status
 
-<!-- DO NOT REMOVE THIS SECTION. CHECK THE PROPER BOX ONLY. -->
+Select one option and provide the documentation location when applicable.
 
-- [ ]  `Doc - TODO` <!-- Your PR changes impact docs and you will update later -->
-- [ ]  `Doc - Done` <!-- Related docs have been already added or updated -->
-- [ ]  `Doc - No Need` <!-- Your PR changes don't impact/need docs -->
+- [ ] `Doc - TODO`: required documentation is pending; complete it before merging.
+- [ ] `Doc - Done`: documentation is included here or linked below.
+- [ ] `Doc - No Need`: no user-visible documentation is affected.
+
+Documentation files in this PR or paired hugegraph-doc PR:
+<!-- For No Need, leave this blank. A follow-up issue alone does not replace required documentation. -->

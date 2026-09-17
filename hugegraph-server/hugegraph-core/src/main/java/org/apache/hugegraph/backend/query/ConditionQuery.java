@@ -611,6 +611,10 @@ public class ConditionQuery extends IdQuery {
 
     @Override
     public boolean test(HugeElement element) {
+        return this.test(element, this.resultsFilter);
+    }
+
+    public boolean test(HugeElement element, ResultsFilter filter) {
         if (!this.ids().isEmpty() && !super.test(element)) {
             return false;
         }
@@ -622,8 +626,8 @@ public class ConditionQuery extends IdQuery {
          * We can't use sub-query results-filter here for fresh element which is
          * not committed to backend store, because it's not from a sub-query.
          */
-        if (this.resultsFilter != null && !element.fresh()) {
-            return this.resultsFilter.test(element);
+        if (filter != null && !element.fresh()) {
+            return filter.test(element);
         }
 
         /*
@@ -705,25 +709,8 @@ public class ConditionQuery extends IdQuery {
         this.resultsFilter = filter;
     }
 
-    public void updateResultsFilter() {
-        Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery originCQ = ((ConditionQuery) originQuery);
-            if (this.resultsFilter != null) {
-                originCQ.updateResultsFilter(this.resultsFilter);
-            } else {
-                originCQ.updateResultsFilter();
-            }
-        }
-    }
-
-    protected void updateResultsFilter(ResultsFilter filter) {
-        this.resultsFilter = filter;
-        Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery originCQ = ((ConditionQuery) originQuery);
-            originCQ.updateResultsFilter(filter);
-        }
+    ResultsFilter resultsFilter() {
+        return this.resultsFilter;
     }
 
     public ConditionQuery originConditionQuery() {

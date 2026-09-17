@@ -20,6 +20,12 @@ pd.enabled=true
 server.direct_url=http://server0:8080
 pd.peers=pd0:8686,pd1:8686,pd2:8686
 pd.server=pd0:8620
+# PD REST credential. The password must equal PD's auth.secret-key, which has
+# no default. Do not edit this tracked example: docker/set-hubble-pd-password.sh
+# generates the untracked .local.properties that Compose mounts, with the value
+# from HG_PD_AUTH_SECRET_KEY in .env.
+operations.pd.username=hubble
+operations.pd.password=
 operations.store.allowed_targets=[http://store0:8520,http://store1:8520,http://store2:8520]
 upload_file.location=/hubble/data/upload-files
 dashboard.address=

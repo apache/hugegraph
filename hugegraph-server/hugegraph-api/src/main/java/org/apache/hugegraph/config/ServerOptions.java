@@ -200,6 +200,17 @@ public class ServerOptions extends OptionHolder {
                     "127.0.0.1:8686"
             );
 
+    public static final ConfigOption<Integer> PD_STORES_WAIT_TIMEOUT =
+            new ConfigOption<>(
+                    "pd.stores_wait_timeout",
+                    "With usePD=true, how many seconds to wait at startup " +
+                    "for pd.initial-store-count stores to be active in PD " +
+                    "before any hstore graph is opened; 0 means do not wait " +
+                    "(on a cold start the server exits if the stores are late).",
+                    rangeInt(0, Integer.MAX_VALUE),
+                    300
+            );
+
     public static final ConfigOption<Boolean> SERVER_USE_K8S =
             new ConfigOption<>(
                     "server.use_k8s",

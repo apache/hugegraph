@@ -32,6 +32,7 @@ import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.StandardHugeGraph;
 import org.apache.hugegraph.backend.cache.CacheManager;
+import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.tx.AbstractTransaction;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.backend.tx.IndexableTransaction;
@@ -272,13 +273,19 @@ public final class HugeFactoryAuthProxy {
                                            "verifyEdgesConditionQuery", "indexQuery",
                                            "joinTxRecords", "propertyUpdated", "parseEntry",
                                            "traverseByLabel", "reset", "queryVerticesByIds",
-                                           "filterInvalidRecords", "filterUnmatchedRecords",
+                                           "filterInvalidRecord", "filterUnmatchedRecord",
                                            "invalidRecord", "warnLeftRecord",
                                            "skipOffsetOrStopLimit",
-                                           "filterExpiredResultFromFromBackend", "queryEdgesByIds",
+                                           "filterExpiredBatches", "queryEdgesByIds",
                                            "matchEdgeSortKeys", "rightResultFromIndexQuery",
-                                           "queryNeedsPostFilter",
-                                           "conditionQueryNeedsPostFilter");
+                                           "queryVertexBatchesFromBackend", "backendBatches",
+                                           "fetchVertexBatch", "processBatches",
+                                           "queryEdgeBatchesFromBackend",
+                                           "queryEdgeBatchesFromBackendInternal",
+                                           "queryEdgesFromMemory", "fetchEdgeBatch");
+        Reflection.registerMethodsToFilter(CachedGraphTransaction.class,
+                                           "fetchVertexBatch", "fetchEdgeBatch",
+                                           "queryEdgesFromMemory", "cacheEdgeBatch");
         Reflection.registerFieldsToFilter(IndexableTransaction.class, "$assertionsDisabled");
         Reflection.registerMethodsToFilter(IndexableTransaction.class, "indexTransaction",
                                            "commit2Backend", "reset");

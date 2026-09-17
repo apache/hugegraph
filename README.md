@@ -315,7 +315,7 @@ For comprehensive documentation, visit the [HugeGraph Documentation](https://hug
 | Understand configuration | `hugegraph-dist` | `src/assembly/static/conf/` |
 | Run tests | `hugegraph-test` | Test suites with multiple profiles |
 
-For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
+For repository constraints and module guidance, see [AGENTS.md](AGENTS.md).
 
 <details>
 <summary><b>For Contributors</b></summary>
@@ -323,7 +323,7 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
 **New to HugeGraph?** Follow this path to get started:
 
 1. **Understand the Architecture**
-   - Read [AGENTS.md](AGENTS.md) for detailed module structure and development patterns
+   - Read [AGENTS.md](AGENTS.md) for key component relationships and module guidance
    - Review the [Architecture Diagram](#architecture) above
 
 2. **Set Up Your Environment**

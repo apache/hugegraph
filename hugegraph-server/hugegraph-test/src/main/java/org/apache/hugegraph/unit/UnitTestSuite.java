@@ -17,12 +17,13 @@
 
 package org.apache.hugegraph.unit;
 
-import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
-import org.apache.hugegraph.backend.tx.GraphTransactionTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
+import org.apache.hugegraph.backend.page.QueryListTest;
+import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
+import org.apache.hugegraph.backend.tx.GraphTransactionTest;
 import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
@@ -48,6 +49,7 @@ import org.apache.hugegraph.unit.core.BackendStoreInfoTest;
 import org.apache.hugegraph.unit.core.ConditionQueryFlattenTest;
 import org.apache.hugegraph.unit.core.ConditionTest;
 import org.apache.hugegraph.unit.core.DataTypeTest;
+import org.apache.hugegraph.unit.core.GraphManagerStoresWaitTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.GraphManagerAdminInitTest;
@@ -58,7 +60,6 @@ import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
 import org.apache.hugegraph.unit.core.QueryResultsTest;
 import org.apache.hugegraph.unit.core.QueryTest;
-import org.apache.hugegraph.unit.core.StandardHugeGraphClearBackendTest;
 import org.apache.hugegraph.unit.core.RangeTest;
 import org.apache.hugegraph.unit.core.RolePermissionTest;
 import org.apache.hugegraph.unit.core.RowLockTest;
@@ -66,6 +67,7 @@ import org.apache.hugegraph.unit.core.SchemaElementTest;
 import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
+import org.apache.hugegraph.unit.core.StandardHugeGraphClearBackendTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
 import org.apache.hugegraph.unit.core.TaskSchedulerServerInfoTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
@@ -135,6 +137,7 @@ import org.junit.runners.Suite;
 
         /* types */
         DataTypeTest.class,
+        GraphManagerStoresWaitTest.class,
         DirectionsTest.class,
         SerialEnumTest.class,
 
@@ -156,6 +159,7 @@ import org.junit.runners.Suite;
         GraphTransactionTest.class,
         QueryTest.class,
         QueryResultsTest.class,
+        QueryListTest.class,
         RangeTest.class,
         SecurityManagerTest.class,
         RolePermissionTest.class,
