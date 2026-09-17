@@ -44,7 +44,8 @@ import org.apache.hugegraph.util.LongEncoding;
  * Regenerate (from the hugegraph-commons directory):
  *   mvn -pl hugegraph-common test-compile dependency:build-classpath \
  *       -Dmdep.outputFile=target/cp.txt -q
- *   java -cp "hugegraph-common/target/test-classes:hugegraph-common/target/classes:$(cat hugegraph-common/target/cp.txt)" \
+ *   java -cp \
+ *       "hugegraph-common/target/test-classes:hugegraph-common/target/classes:$(cat hugegraph-common/target/cp.txt)" \
  *       org.apache.hugegraph.unit.util.LongEncodingGoldenGenerator \
  *       hugegraph-common/src/test/resources/longencoding-golden.txt
  *
@@ -66,8 +67,7 @@ public final class LongEncodingGoldenGenerator {
             System.exit(1);
         }
         OutputStream output = Files.newOutputStream(Paths.get(args[0]));
-        try (Writer writer = new OutputStreamWriter(output,
-                                                    StandardCharsets.US_ASCII)) {
+        try (Writer writer = new OutputStreamWriter(output, StandardCharsets.US_ASCII)) {
             generate(writer);
         }
         System.out.println("Corpus written to " + args[0]);
@@ -79,15 +79,12 @@ public final class LongEncodingGoldenGenerator {
 
         for (long value : longValues()) {
             recordLongOp(emitter, "encodeSortable", value);
-            recordRoundTrip(emitter, "decodeSortable",
-                            LongEncoding.encodeSortable(value), value);
+            recordRoundTrip(emitter, "decodeSortable", LongEncoding.encodeSortable(value), value);
             recordLongOp(emitter, "encodeSignedB64", value);
-            recordRoundTrip(emitter, "decodeSignedB64",
-                            LongEncoding.encodeSignedB64(value), value);
+            recordRoundTrip(emitter, "decodeSignedB64", LongEncoding.encodeSignedB64(value), value);
             recordLongOp(emitter, "encodeB64", value);
             if (value >= 0L) {
-                recordRoundTrip(emitter, "decodeB64",
-                                LongEncoding.encodeB64(value), value);
+                recordRoundTrip(emitter, "decodeB64", LongEncoding.encodeB64(value), value);
             }
         }
 
@@ -112,8 +109,7 @@ public final class LongEncodingGoldenGenerator {
             this.writer = writer;
         }
 
-        void line(String method, String arg, String expected)
-                  throws IOException {
+        void line(String method, String arg, String expected) throws IOException {
             String line = method + '\t' + arg + '\t' + expected;
             if (this.seen.add(line)) {
                 this.writer.write(line);
@@ -211,10 +207,8 @@ public final class LongEncodingGoldenGenerator {
         inputs.add("20");
         inputs.add("2AA");
         // Length-symbol sweep: valid length and off-by-one length
-        String b64 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" +
-                     "_abcdefghijklmnopqrstuvwxyz~";
-        char[] lengthChars = {'0', '1', '2', '9', 'A', 'F', 'G', 'Z',
-                              'a', 'z', '~'};
+        String b64 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "_abcdefghijklmnopqrstuvwxyz~";
+        char[] lengthChars = {'0', '1', '2', '9', 'A', 'F', 'G', 'Z', 'a', 'z', '~'};
         for (char lengthChar : lengthChars) {
             int length = b64.indexOf(lengthChar);
             inputs.add(lengthChar + repeat('1', length));
@@ -240,8 +234,7 @@ public final class LongEncodingGoldenGenerator {
         return inputs;
     }
 
-    private static void recordLongOp(Emitter emitter, String method,
-                                     long value) throws IOException {
+    private static void recordLongOp(Emitter emitter, String method, long value) throws IOException {
         String expected;
         try {
             expected = "ok:" + escape(callLong(method, value));
@@ -251,22 +244,18 @@ public final class LongEncodingGoldenGenerator {
         emitter.line(method, String.valueOf(value), expected);
     }
 
-    private static void recordRoundTrip(Emitter emitter, String method,
-                                        String encoded, long value)
-                                        throws IOException {
+    private static void recordRoundTrip(Emitter emitter, String method, String encoded, long value) throws IOException {
         emitter.line(method, escape(encoded), "ok:" + value);
     }
 
-    private static void recordStringOp(Emitter emitter, String method,
-                                       String input) throws IOException {
+    private static void recordStringOp(Emitter emitter, String method, String input) throws IOException {
         String expected;
         try {
             expected = "ok:" + callString(method, input);
         } catch (RuntimeException e) {
             expected = "throw:" + e.getClass().getSimpleName();
         }
-        emitter.line(method, input == null ? "\\N" : escape(input),
-                     expected);
+        emitter.line(method, input == null ? "\\N" : escape(input), expected);
     }
 
     private static String callLong(String method, long value) {
@@ -354,13 +343,11 @@ public final class LongEncodingGoldenGenerator {
                     sb.append('\r');
                     break;
                 case 'u':
-                    sb.append((char) Integer.parseInt(
-                              value.substring(i + 1, i + 5), 16));
+                    sb.append((char) Integer.parseInt(value.substring(i + 1, i + 5), 16));
                     i += 4;
                     break;
                 default:
-                    throw new IllegalArgumentException(
-                              "Bad escape '\\" + next + "' in: " + value);
+                    throw new IllegalArgumentException("Bad escape '\\" + next + "' in: " + value);
             }
         }
         return sb.toString();

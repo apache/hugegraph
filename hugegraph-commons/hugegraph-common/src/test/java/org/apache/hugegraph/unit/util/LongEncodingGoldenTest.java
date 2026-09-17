@@ -60,8 +60,7 @@ public class LongEncodingGoldenTest extends BaseUnitTest {
 
         InputStream stream = getClass().getResourceAsStream(CORPUS);
         Assert.assertNotNull("Missing corpus resource " + CORPUS, stream);
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(stream, StandardCharsets.US_ASCII))) {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.US_ASCII))) {
             for (String line; (line = reader.readLine()) != null;) {
                 lineNumber++;
                 if (line.isEmpty() || line.charAt(0) == '#') {
@@ -69,18 +68,14 @@ public class LongEncodingGoldenTest extends BaseUnitTest {
                 }
                 cases++;
                 String failure = replay(line);
-                if (failure != null &&
-                    mismatches.size() < MAX_REPORTED_MISMATCHES) {
+                if (failure != null && mismatches.size() < MAX_REPORTED_MISMATCHES) {
                     mismatches.add("line " + lineNumber + ": " + failure);
                 }
             }
         }
 
-        Assert.assertTrue("Corpus suspiciously small: " + cases + " cases",
-                          cases >= MIN_CASES);
-        Assert.assertTrue(cases + " cases, mismatches:\n" +
-                          String.join("\n", mismatches),
-                          mismatches.isEmpty());
+        Assert.assertTrue("Corpus suspiciously small: " + cases + " cases", cases >= MIN_CASES);
+        Assert.assertTrue(cases + " cases, mismatches:\n" + String.join("\n", mismatches), mismatches.isEmpty());
     }
 
     /**
@@ -106,11 +101,9 @@ public class LongEncodingGoldenTest extends BaseUnitTest {
             stream.close();
         }
 
-        Assert.assertEquals("Committed corpus differs from generator " +
-                            "output, regenerate " + CORPUS,
+        Assert.assertEquals("Committed corpus differs from generator " + "output, regenerate " + CORPUS,
                             generated.toString(),
-                            new String(committed.toByteArray(),
-                                       StandardCharsets.US_ASCII));
+                            new String(committed.toByteArray(), StandardCharsets.US_ASCII));
     }
 
     private static String replay(String line) {
@@ -131,38 +124,29 @@ public class LongEncodingGoldenTest extends BaseUnitTest {
         if (actual.equals(expected)) {
             return null;
         }
-        return method + "(" + arg + ") expected " + expected +
-               " but was " + actual;
+        return method + "(" + arg + ") expected " + expected + " but was " + actual;
     }
 
     private static String invoke(String method, String arg) {
         switch (method) {
             case "encodeSortable":
-                return LongEncodingGoldenGenerator.escape(
-                       LongEncoding.encodeSortable(Long.parseLong(arg)));
+                return LongEncodingGoldenGenerator.escape(LongEncoding.encodeSortable(Long.parseLong(arg)));
             case "encodeSignedB64":
-                return LongEncodingGoldenGenerator.escape(
-                       LongEncoding.encodeSignedB64(Long.parseLong(arg)));
+                return LongEncodingGoldenGenerator.escape(LongEncoding.encodeSignedB64(Long.parseLong(arg)));
             case "encodeB64":
-                return LongEncodingGoldenGenerator.escape(
-                       LongEncoding.encodeB64(Long.parseLong(arg)));
+                return LongEncodingGoldenGenerator.escape(LongEncoding.encodeB64(Long.parseLong(arg)));
             case "decodeSortable":
-                return String.valueOf(
-                       LongEncoding.decodeSortable(stringArg(arg)));
+                return String.valueOf(LongEncoding.decodeSortable(stringArg(arg)));
             case "decodeSignedB64":
-                return String.valueOf(
-                       LongEncoding.decodeSignedB64(stringArg(arg)));
+                return String.valueOf(LongEncoding.decodeSignedB64(stringArg(arg)));
             case "decodeB64":
-                return String.valueOf(
-                       LongEncoding.decodeB64(stringArg(arg)));
+                return String.valueOf(LongEncoding.decodeB64(stringArg(arg)));
             default:
-                throw new IllegalArgumentException("Unknown method: " +
-                                                   method);
+                throw new IllegalArgumentException("Unknown method: " + method);
         }
     }
 
     private static String stringArg(String arg) {
-        return "\\N".equals(arg) ? null :
-               LongEncodingGoldenGenerator.unescape(arg);
+        return "\\N".equals(arg) ? null : LongEncodingGoldenGenerator.unescape(arg);
     }
 }
