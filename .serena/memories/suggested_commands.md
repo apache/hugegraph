@@ -5,7 +5,7 @@
 mvn clean install -DskipTests                           # Full build
 mvn clean install -pl hugegraph-server -am -DskipTests  # Server only
 mvn clean compile -U -Dmaven.javadoc.skip=true -ntp     # Compile only
-mvn clean package -DskipTests                           # Distribution → install-dist/target/
+mvn clean package -DskipTests                           # Aggregate distribution → root target/
 ```
 
 ## Test
@@ -19,7 +19,7 @@ mvn test -pl hugegraph-server/hugegraph-test -am -P api-test,rocksdb
 # Single test class
 mvn test -pl hugegraph-server/hugegraph-test -am -P core-test,memory -Dtest=YourTestClass
 
-# TinkerPop compliance (release/test branches only)
+# TinkerPop compliance (can be run locally on any branch)
 mvn test -pl hugegraph-server/hugegraph-test -am -P tinkerpop-structure-test,memory
 
 # PD/Store (build struct first)
@@ -45,8 +45,9 @@ bin/enable-auth.sh                            # Enable auth
 ```
 
 ## Docker
+Create the required authentication environment first; follow `docker/README.md`.
 ```bash
-cd docker && docker compose up -d                                          # Single-node (bridge network)
+cd docker && docker compose up -d                                          # Standalone Server + Hubble (bridge network)
 cd docker && docker compose -f docker-compose-3pd-3store-3server.yml up -d # Cluster
 ```
 

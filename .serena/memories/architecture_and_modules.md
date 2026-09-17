@@ -32,4 +32,5 @@ Distributed storage + Raft: `hg-store-core`, `hg-store-node`, `hg-store-client`,
 - **hugegraph-cluster-test**: Cluster integration tests
 
 ## Distributed Deployment (BETA)
-PD + Store + Server (3+ nodes each), all gRPC. Docker compose configs in `docker/` directory, using bridge networking (migrated from host mode).
+PD manages placement and metadata; Store owns partition data; Server serves graph queries.
+Development and HA topologies differ; see `docker/README.md` for node counts and configuration.

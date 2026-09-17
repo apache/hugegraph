@@ -1,6 +1,8 @@
 # Task Completion Checklist
 
-## 1. Code Quality (MANDATORY)
+## 1. Validation scope
+Documentation-only changes: check links, paths and `git diff --check`.
+For code changes, select relevant checks below and follow root `AGENTS.md` before pushing.
 ```bash
 mvn apache-rat:check -ntp       # License headers
 mvn editorconfig:check          # Style (.editorconfig)
@@ -10,7 +12,7 @@ mvn clean compile -Dmaven.javadoc.skip=true  # Compile warnings
 
 ## 2. Testing
 - Choose backend: `memory` (fast), `rocksdb` (realistic), `hbase` (deprecated compatibility)
-- Single test: `-Dtest=ClassName` works with all profiles
+- Single-test selection: check the module test POM and confirm the requested test actually ran.
 - Bug fix → existing tests; New feature → write tests; Refactor → affected module tests
 
 ## 3. Dependencies (if adding new)
@@ -23,10 +25,13 @@ mvn clean compile -Dmaven.javadoc.skip=true  # Compile warnings
 - `server-ci.yml`: memory/rocksdb/hbase × Java 11
 - `rerun-ci.yml`: auto-retries flaky failures
 - `licence-checker.yml`: header validation
-- Raft tests: only `test*`/`raft*` branches
+- Server Raft API tests are branch-gated; Store raft-core and core tests run in normal PD/Store CI.
 - TinkerPop tests: only `release-*`/`test-*` branches
 
-## 5. Commit
+## 5. Documentation
+- Follow root `AGENTS.md`: user-visible feature/configuration/deployment changes ship with matching docs.
+
+## 6. Commit
 - NEVER commit unless explicitly asked
 - Format: `feat|fix|refactor(module): msg`
 - Include issue ID if available
