@@ -126,10 +126,11 @@ public class PartitionStateMachineTest {
         runOnSnapshotSave(stateMachine);
 
         Lock internalLock = getInternalLock(stateMachine);
+        // The done callback runs before the worker's finally block releases the lock.
         assertTrue("onSnapshotSave's finally block must release its lock even when " +
                    "snapshotHandler.onSnapshotSave() throws, or every later snapshot save " +
                    "attempt on this partition would hang forever",
-                   internalLock.tryLock());
+                   internalLock.tryLock(5, TimeUnit.SECONDS));
         internalLock.unlock();
     }
 

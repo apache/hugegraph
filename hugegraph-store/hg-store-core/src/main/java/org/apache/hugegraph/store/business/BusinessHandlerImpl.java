@@ -1394,6 +1394,10 @@ public class BusinessHandlerImpl implements BusinessHandler {
                          "while waiting for snapshot range lock", graph, partId, attempt,
                          maxCleanPartitionCompactRetries);
                 needsRetry = true;
+            } catch (Exception e) {
+                log.error("Partition {}-{} abandoning cleanPartition compactRange retry {}/{} " +
+                          "after failure", graph, partId, attempt, maxCleanPartitionCompactRetries,
+                          e);
             } finally {
                 if (rangeLocked) {
                     rangeLock.unlock();
