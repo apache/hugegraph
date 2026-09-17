@@ -197,6 +197,12 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
                 while (nextSource < this.iterators.size() &&
                        inFlight < INITIALIZE_THREADS) {
                     if (!useExecutor) {
+                        Future<SourceEntry> completed = completions.poll();
+                        while (completed != null) {
+                            this.addFirst(completed.get());
+                            inFlight--;
+                            completed = completions.poll();
+                        }
                         this.addFirst(this.firstEntry(nextSource++));
                         continue;
                     }

@@ -67,6 +67,21 @@ public class OrderedKvIteratorTest {
     }
 
     @Test
+    public void testSecurityFallbackDrainsSubmittedFailureBeforeInlineSource() {
+        DirectExecutorService executor = new DirectExecutorService();
+        executor.allowedExecutions = 1;
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        RuntimeException failure = new IllegalStateException("Submitted source failed");
+        first.initializationFailure = failure;
+        second.initializationFailure = new IllegalStateException("Inline source should not start");
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 0L, executor);
+        Assert.assertSame(failure, Assert.assertThrows(IllegalStateException.class, iterator::hasNext));
+        Assert.assertTrue(first.closed);
+        Assert.assertTrue(second.closed);
+    }
+
+    @Test
     public void testSecurityFallbackStillPropagatesSourceFailure() {
         DirectExecutorService executor = new DirectExecutorService();
         executor.allowedExecutions = 0;
