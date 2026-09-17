@@ -23,10 +23,14 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.hugegraph.store.cloud.CloudStorageConfig;
 import org.junit.Before;
 import org.junit.Test;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.mock.env.MockEnvironment;
 
 public class AppConfigCloudStorageTest {
@@ -99,8 +103,6 @@ public class AppConfigCloudStorageTest {
         assertTrue(cfg.isStartupHydrationEnabled());
         assertEquals(3000L, cfg.getReadMissGuardWindowMs());
         assertEquals(3, cfg.getUploadRetryMaxAttempts());
-        // Backpressure is opt-in (disabled by default).
-        assertEquals(0, cfg.getUploadBackpressureHighWatermark());
         assertNotNull(cfg.getProviderProperties());
         assertTrue(cfg.getProviderProperties().isEmpty());
     }
@@ -133,11 +135,6 @@ public class AppConfigCloudStorageTest {
 
         springConfig.setUploadRetryMaxDelayMs(30_000L);
         assertEquals(30_000L, springConfig.getUploadRetryMaxDelayMs());
-
-        springConfig.setUploadBackpressureHighWatermark(128);
-        assertEquals(128, springConfig.getUploadBackpressureHighWatermark());
-        assertEquals(128,
-                     springConfig.toCloudStorageConfig().getUploadBackpressureHighWatermark());
     }
 
     /**
@@ -159,6 +156,27 @@ public class AppConfigCloudStorageTest {
                      cfg.getProviderProperties().get("credentials-file-path"));
         assertFalse("s3 keys must not bleed into gcs namespace",
                     cfg.getProviderProperties().containsKey("cloud.storage.s3.bucket"));
+    }
+
+    /**
+     * Provider properties must also resolve from environment-variable-style property names
+     * (e.g. {@code CLOUD_STORAGE_S3_SECRET_KEY}), as those are how credentials typically
+     * arrive in a container deployment. Relaxed binding reconciles these with the kebab-case
+     * key ({@code secret-key}) that {@code S3CloudStorageConfig.KEY_*} expects.
+     */
+    @Test
+    public void testProviderPropertiesResolveFromEnvVarStyleNames() {
+        springConfig.setProvider("s3");
+        Map<String, Object> envVarProps = new HashMap<>();
+        envVarProps.put("CLOUD_STORAGE_S3_SECRET_KEY", "env-var-secret");
+        envVarProps.put("CLOUD_STORAGE_S3_ACCESS_KEY", "env-var-access");
+        mockEnv.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, envVarProps));
+
+        CloudStorageConfig cfg = springConfig.toCloudStorageConfig();
+
+        assertEquals("env-var-secret", cfg.getProviderProperties().get("secret-key"));
+        assertEquals("env-var-access", cfg.getProviderProperties().get("access-key"));
     }
 
     /**

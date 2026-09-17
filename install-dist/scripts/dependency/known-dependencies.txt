@@ -31,6 +31,8 @@ auth-2.33.8.jar
 auto-service-annotations-1.0.jar
 automaton-1.11-8.jar
 aws-core-2.33.8.jar
+aws-crt-0.38.9.jar
+aws-crt-client-2.33.8.jar
 aws-query-protocol-2.33.8.jar
 aws-xml-protocol-2.33.8.jar
 bolt-1.6.2.jar
@@ -508,6 +510,7 @@ rocksdbjni-6.29.5.jar
 rocksdbjni-7.7.3.jar
 rocksdbjni-8.10.2.jar
 s3-2.33.8.jar
+s3-transfer-manager-2.33.8.jar
 scala-java8-compat_2.12-0.8.0.jar
 scala-library-2.12.7.jar
 scala-reflect-2.12.7.jar

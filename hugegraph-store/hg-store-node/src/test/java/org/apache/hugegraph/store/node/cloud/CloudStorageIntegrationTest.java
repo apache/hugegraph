@@ -86,7 +86,6 @@ import org.junit.rules.TemporaryFolder;
  *   <li>{@code readMiss_hydration_restoresMissingLiveFile} — missing live SST is restored on read miss</li>
  *   <li>{@code readMiss_guardWindow_suppressesRepeatAttempts} — guard window dedups rapid re-hydration</li>
  *   <li>{@code deleteGuard_blocksDeleteUntilLiveSetDurable} — delete is held until replacements are in cloud</li>
- *   <li>{@code backpressure_slowsCallerWhenBacklogExceedsWatermark} — upload threads block under load</li>
  * </ol>
  */
 @SuppressWarnings({"BusyWait", "ResultOfMethodCallIgnored"})
@@ -483,7 +482,7 @@ public class CloudStorageIntegrationTest {
         // We use a subclass seam: override captureMetadataSnapshot to supply gen5.
         CloudStorageEventListener guardedListener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker(), 0) {
+                true, 0L, null, new CloudSyncTracker()) {
             private boolean gen10Published = false;
 
             @Override
@@ -535,7 +534,7 @@ public class CloudStorageIntegrationTest {
         ThreadLocal<MetadataSnapshot> perThread = new ThreadLocal<>();
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker(), 0) {
+                true, 0L, null, new CloudSyncTracker()) {
             @Override
             MetadataSnapshot captureMetadataSnapshot(String dbName) {
                 return perThread.get();
@@ -649,7 +648,7 @@ public class CloudStorageIntegrationTest {
                 4, 100L, 400L, dataRoot.toString(), tracker::markConfirmedIfEpoch)) {
 
             CloudStorageEventListener listener = new CloudStorageEventListener(
-                    Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker, 0);
+                    Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker);
 
             CloudStorageProviderFactory.setActiveProviderForTest(null);
             listener.onTableFileCreated("hugegraph", "default", sst.toString(), Files.size(sst));
@@ -703,7 +702,7 @@ public class CloudStorageIntegrationTest {
                 3, 10L, 100L, dataRoot.toString(),
                 tracker::markConfirmedIfEpoch);
         CloudStorageEventListener listener = new CloudStorageEventListener(
-                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker, 0);
+                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker);
 
         // Dispatch the async upload: onTableFileCreated creates the staged pin, then the first
         // attempt fails and (with the fix) hands the PIN to the retry queue.
@@ -774,7 +773,7 @@ public class CloudStorageIntegrationTest {
                 tracker::markConfirmedIfEpoch);
 
         CloudStorageEventListener listener = new CloudStorageEventListener(
-                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker, 0) {
+                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker) {
             @Override
             MetadataSnapshot captureMetadataSnapshot(String db) {
                 try {
@@ -841,7 +840,7 @@ public class CloudStorageIntegrationTest {
         CloudSyncTracker tracker = new CloudSyncTracker();
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, tracker, 0);
+                true, 0L, null, tracker);
 
         List<LiveSstFile> liveFiles = Collections.singletonList(
                 new LiveSstFile(sst.toString(), "default"));
@@ -865,7 +864,7 @@ public class CloudStorageIntegrationTest {
         long guardWindowMs = 1_000L;
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, guardWindowMs, null, new CloudSyncTracker(), 0);
+                true, guardWindowMs, null, new CloudSyncTracker());
 
         // First attempt: allowed.
         assertTrue("First read-miss attempt must be allowed",
@@ -899,7 +898,7 @@ public class CloudStorageIntegrationTest {
 
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, tracker, 0);
+                true, 0L, null, tracker);
 
         List<LiveSstFile> liveFiles = Arrays.asList(
                 new LiveSstFile(sst1.toString(), "default"),
@@ -1260,7 +1259,7 @@ public class CloudStorageIntegrationTest {
         AtomicInteger syncCount = new AtomicInteger(0);
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker(), 0) {
+                true, 0L, null, new CloudSyncTracker()) {
             @Override
             boolean syncMetadataSnapshotInline(CloudStorageProvider p, String db) {
                 syncCount.incrementAndGet();
@@ -1321,7 +1320,7 @@ public class CloudStorageIntegrationTest {
                                                               AtomicInteger publishes) {
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker(), 0) {
+                true, 0L, null, new CloudSyncTracker()) {
             @Override
             MetadataSnapshot captureMetadataSnapshot(String db) {
                 return fake;
@@ -1337,98 +1336,6 @@ public class CloudStorageIntegrationTest {
         listener.setMetadataSyncDebounceMs(60_000L);
         listener.setMetadataSyncMaxUnpublished(3);
         return listener;
-    }
-
-    // =========================================================================
-    // 18. Backpressure slows caller when pending backlog exceeds watermark
-    // =========================================================================
-
-    @Test
-    public void backpressure_slowsCallerWhenBacklogExceedsWatermark() throws Exception {
-        // Latch that holds every upload until we release it, so the backlog stays elevated.
-        CountDownLatch uploadBlocked = new CountDownLatch(1);
-        FakeCloudStore slowStore = new FakeCloudStore() {
-            @Override
-            public void uploadFile(String localPath, String remoteKey) throws IOException {
-                try { uploadBlocked.await(10, TimeUnit.SECONDS); }
-                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-                super.uploadFile(localPath, remoteKey);
-            }
-        };
-        CloudStorageProviderFactory.setActiveProviderForTest(slowStore);
-
-        CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
-                3, 10L, 100L, dataRoot.toString(),
-                tracker::markConfirmedIfEpoch);
-
-        // Watermark of 1: a single in-flight upload should trigger backpressure.
-        int watermark = 1;
-        CloudStorageEventListener listener = new CloudStorageEventListener(
-                Collections.singletonList(dataRoot.toString()),
-                true, 0L, retryQueue, tracker, watermark);
-
-        Path dbDir = mkdirs("hugegraph/db");
-
-        // First SST: queued in the upload executor; its upload is blocked by the latch.
-        Path sst1 = writeSst(dbDir, "000001.sst", "data-1");
-        listener.onTableFileCreated("hugegraph", "default", sst1.toString(), Files.size(sst1));
-
-        // Second SST: must trigger backpressure because the executor queue is non-empty.
-        // Measure how long the call takes — it should block for at least BACKPRESSURE_POLL_MS.
-        Path sst2 = writeSst(dbDir, "000002.sst", "data-2");
-        long t0 = System.nanoTime();
-        listener.onTableFileCreated("hugegraph", "default", sst2.toString(), Files.size(sst2));
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-
-        // Release the blocked uploads before any assertions so cleanup never hangs.
-        uploadBlocked.countDown();
-        retryQueue.close();
-
-        // The call must have waited at least one backpressure poll interval (50 ms), proving
-        // that the throttle actually engaged.  We use a conservative lower bound (30 ms) to
-        // accommodate CI scheduling jitter while still catching the case where backpressure
-        // is completely removed.
-        assertTrue("onTableFileCreated must block under backpressure; elapsed=" + elapsedMs + "ms",
-                   elapsedMs >= 30L);
-    }
-
-    @Test
-    public void backpressure_ignoresHistoricalDlqDepth() throws Exception {
-        // A large DLQ is historical debt (uploads that exhausted their retries), not active lag.
-        // It must NOT throttle ingestion — otherwise a node stays degraded long after the provider
-        // recovered. Only active work (executor queue/active + retry in-flight) may apply backpressure.
-        CloudSyncTracker tracker = new CloudSyncTracker();
-        // maxAttempts=0 routes every submit straight to the DLQ; in-flight stays 0.
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
-                0, 10L, 100L, dataRoot.toString(),
-                tracker::markConfirmedIfEpoch);
-        retryQueue.setMaxDlqSize(1000);
-        for (int i = 0; i < 50; i++) {
-            retryQueue.submit("hugegraph", "default",
-                              dataRoot.resolve("dlq-" + i + ".sst").toString(),
-                              "hugegraph/db/dlq-" + i + ".sst", new IOException("outage"));
-        }
-        assertTrue("DLQ must be populated to exceed the watermark", retryQueue.getDlqSize() >= 50);
-
-        // Watermark far below the DLQ depth: pre-fix, this would throttle every write for up to the
-        // 30s max-wait. The default fast `store` provider keeps active lag ~0.
-        int watermark = 5;
-        CloudStorageEventListener listener = new CloudStorageEventListener(
-                Collections.singletonList(dataRoot.toString()),
-                true, 0L, retryQueue, tracker, watermark);
-
-        Path dbDir = mkdirs("hugegraph/db");
-        Path sst = writeSst(dbDir, "000001.sst", "data");
-
-        long t0 = System.nanoTime();
-        listener.onTableFileCreated("hugegraph", "default", sst.toString(), Files.size(sst));
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
-
-        retryQueue.close();
-
-        assertTrue("A large historical DLQ must not throttle ingestion; elapsed=" + elapsedMs + "ms",
-                   elapsedMs < 5_000L);
     }
 
     @Test
@@ -1456,9 +1363,8 @@ public class CloudStorageIntegrationTest {
         CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
                 0, 10L, 100L, dataRoot.toString(),
                 tracker::markConfirmedIfEpoch);
-        // Backpressure disabled (watermark 0) so the producing thread never blocks.
         CloudStorageEventListener listener = new CloudStorageEventListener(
-                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker, 0);
+                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker);
 
         Path dbDir = mkdirs("hugegraph/db");
         // More SSTs than upload threads: the first few block the workers, the rest queue.
@@ -1487,7 +1393,7 @@ public class CloudStorageIntegrationTest {
 
     private CloudStorageEventListener listenerFor(List<String> roots) {
         return new CloudStorageEventListener(roots, true, 0L, null,
-                                             new CloudSyncTracker(), 0);
+                                             new CloudSyncTracker());
     }
 
     private Path mkdirs(String relative) throws Exception {

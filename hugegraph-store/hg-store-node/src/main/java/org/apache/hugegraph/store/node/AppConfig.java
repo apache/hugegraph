@@ -20,8 +20,8 @@ package org.apache.hugegraph.store.node;
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -40,9 +40,9 @@ import org.apache.hugegraph.store.options.JobOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.env.AbstractEnvironment;
-import org.springframework.core.env.EnumerablePropertySource;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
@@ -220,7 +220,6 @@ public class AppConfig {
                     cfg.getReadMissGuardWindowMs(),
                     retryQueue,
                     syncTracker,
-                    cfg.getUploadBackpressureHighWatermark(),
                     storeScopePrefix,
                     tuning);
 
@@ -670,10 +669,6 @@ public class AppConfig {
         private int uploadRetryMaxAttempts = 3;
         private long uploadRetryInitialDelayMs = 1_000L;
         private long uploadRetryMaxDelayMs = 60_000L;
-        // Backpressure high-watermark on the pending-upload backlog; 0 (default) disables it.
-        // Opt-in: when > 0 the throttle parks RocksDB's flush/compaction thread (up to 30s/event),
-        // which under a sustained cloud outage can stall memtable flushes / stop writes.
-        private int uploadBackpressureHighWatermark = 0;
         // Max DLQ entries before oldest are evicted (bounds memory/disk under a prolonged outage).
         private int dlqMaxSize = 100_000;
         // Debounce window (ms) for the per-SST metadata sync; <= 0 disables debouncing.
@@ -704,7 +699,6 @@ public class AppConfig {
             cfg.setUploadRetryMaxAttempts(uploadRetryMaxAttempts);
             cfg.setUploadRetryInitialDelayMs(uploadRetryInitialDelayMs);
             cfg.setUploadRetryMaxDelayMs(uploadRetryMaxDelayMs);
-            cfg.setUploadBackpressureHighWatermark(uploadBackpressureHighWatermark);
             cfg.setDlqMaxSize(dlqMaxSize);
             cfg.setMetadataSyncDebounceMs(metadataSyncDebounceMs);
             cfg.setMetadataSyncMaxUnpublished(metadataSyncMaxUnpublished);
@@ -718,28 +712,20 @@ public class AppConfig {
          * and returns them as a flat map with the provider sub-prefix stripped.
          *
          * <p>For example, with {@code provider=s3}, the YAML key
-         * {@code cloud.storage.s3.bucket} becomes {@code bucket} in the returned map.
+         * {@code cloud.storage.s3.bucket} becomes {@code bucket} in the returned map, and
+         * relaxed binding lets the env var {@code CLOUD_STORAGE_S3_ACCESS_KEY} resolve the
+         * same way. Multi-word keys bound from a {@code SCREAMING_SNAKE_CASE} source come
+         * back dot-separated (e.g. {@code secret.key}), so they are normalized to the
+         * kebab-case form ({@code secret-key}) that provider configs such as
+         * {@code S3CloudStorageConfig.KEY_*} expect.
          */
         private Map<String, String> readProviderProperties() {
-            Map<String, String> props = new LinkedHashMap<>();
-            if (!(environment instanceof AbstractEnvironment)) {
-                return props;
-            }
-            String prefix = "cloud.storage." + provider + ".";
-            ((AbstractEnvironment) environment).getPropertySources().stream()
-                    .filter(ps -> ps instanceof EnumerablePropertySource)
-                    .map(ps -> (EnumerablePropertySource<?>) ps)
-                    .flatMap(ps -> Arrays.stream(ps.getPropertyNames()))
-                    .filter(key -> key.startsWith(prefix))
-                    .distinct()
-                    .forEach(key -> {
-                        String shortKey = key.substring(prefix.length());
-                        String value = environment.getProperty(key);
-                        if (value != null) {
-                            props.put(shortKey, value);
-                        }
-                    });
-            return props;
+            Map<String, String> props = Binder.get(environment)
+                    .bind("cloud.storage." + provider, Bindable.mapOf(String.class, String.class))
+                    .orElseGet(Collections::emptyMap);
+            return props.entrySet().stream()
+                        .collect(Collectors.toMap(e -> e.getKey().replace('.', '-'),
+                                                   Map.Entry::getValue));
         }
     }
 

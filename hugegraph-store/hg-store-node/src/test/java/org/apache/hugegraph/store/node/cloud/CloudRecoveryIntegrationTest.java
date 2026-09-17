@@ -136,7 +136,7 @@ public class CloudRecoveryIntegrationTest {
         CloudSyncTracker tracker = new CloudSyncTracker();
         this.listener = new CloudStorageEventListener(
                 Collections.singletonList(this.baseDir.toString()),
-                true, 0L, null, tracker, 0);
+                true, 0L, null, tracker);
         factory.addRocksdbChangedListener(this.listener);
 
         // --- Phase 1: create DB, write data, mirror a consistent snapshot to cloud ---

@@ -110,9 +110,6 @@ public class CloudStorageConfigTest {
          assertEquals(3, config.getUploadRetryMaxAttempts());
          assertEquals(1_000L, config.getUploadRetryInitialDelayMs());
          assertEquals(60_000L, config.getUploadRetryMaxDelayMs());
-         // Backpressure is opt-in (disabled by default): when > 0 it parks RocksDB's
-         // flush/compaction thread, which can stall writes during a sustained cloud outage.
-         assertEquals(0, config.getUploadBackpressureHighWatermark());
      }
 
      @Test
@@ -143,15 +140,6 @@ public class CloudStorageConfigTest {
 
          config.setUploadRetryMaxDelayMs(120_000L);
          assertEquals(120_000L, config.getUploadRetryMaxDelayMs());
-     }
-
-     @Test
-     public void testUploadBackpressureHighWatermark() {
-         config.setUploadBackpressureHighWatermark(128);
-         assertEquals(128, config.getUploadBackpressureHighWatermark());
-
-         config.setUploadBackpressureHighWatermark(0);
-         assertEquals(0, config.getUploadBackpressureHighWatermark());
      }
 
      @Test
@@ -230,7 +218,6 @@ public class CloudStorageConfigTest {
          assertNotEquals(new CloudStorageConfig(), withUploadRetryMaxAttempts());
          assertNotEquals(new CloudStorageConfig(), withUploadRetryInitialDelayMs());
          assertNotEquals(new CloudStorageConfig(), withUploadRetryMaxDelayMs());
-         assertNotEquals(new CloudStorageConfig(), withUploadBackpressureHighWatermark());
          assertNotEquals(new CloudStorageConfig(), withDlqMaxSize());
          assertNotEquals(new CloudStorageConfig(), withMetadataSyncDebounceMs());
          assertNotEquals(new CloudStorageConfig(), withMetadataSyncMaxUnpublished());
@@ -310,7 +297,6 @@ public class CloudStorageConfigTest {
          copy.setUploadRetryMaxAttempts(src.getUploadRetryMaxAttempts());
          copy.setUploadRetryInitialDelayMs(src.getUploadRetryInitialDelayMs());
          copy.setUploadRetryMaxDelayMs(src.getUploadRetryMaxDelayMs());
-         copy.setUploadBackpressureHighWatermark(src.getUploadBackpressureHighWatermark());
          copy.setDlqMaxSize(src.getDlqMaxSize());
          copy.setMetadataSyncDebounceMs(src.getMetadataSyncDebounceMs());
          copy.setMetadataSyncMaxUnpublished(src.getMetadataSyncMaxUnpublished());
@@ -370,12 +356,6 @@ public class CloudStorageConfigTest {
      private static CloudStorageConfig withUploadRetryMaxDelayMs() {
          CloudStorageConfig c = new CloudStorageConfig();
          c.setUploadRetryMaxDelayMs(9999L);
-         return c;
-     }
-
-     private static CloudStorageConfig withUploadBackpressureHighWatermark() {
-         CloudStorageConfig c = new CloudStorageConfig();
-         c.setUploadBackpressureHighWatermark(9);
          return c;
      }
 
@@ -491,12 +471,6 @@ public class CloudStorageConfigTest {
          props2.put("key2", "value2");
          config.setProviderProperties(props2);
          assertEquals("value2", config.getProviderProperties().get("key2"));
-     }
-
-     @Test
-     public void testBackpressureDisabled() {
-         config.setUploadBackpressureHighWatermark(0);
-         assertEquals(0, config.getUploadBackpressureHighWatermark());
      }
 
      @Test

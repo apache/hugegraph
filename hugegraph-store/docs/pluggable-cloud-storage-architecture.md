@@ -81,7 +81,6 @@ The pluggable cloud-storage behavior is controlled from `application.yml` under
 | `cloud.storage.upload-retry-max-attempts`            | `3`         | Whole-file retry attempts after a first upload failure. Default `3` retries are enabled to protect against transient network errors. <br/>Set to `0` to disable whole-file retries (failures go directly to DLQ) when the provider already has sufficient internal retry logic. `CloudStorageNonRetryableException` always bypasses retries and goes directly to DLQ regardless of this value. |
 | `cloud.storage.upload-retry-initial-delay-ms`        | `1000`      | Delay before first whole-file retry; subsequent retries use exponential backoff. Only used when `upload-retry-max-attempts > 0`.                                                                                                                                                                                                                                                               |
 | `cloud.storage.upload-retry-max-delay-ms`            | `60000`     | Upper bound for exponential backoff delay between whole-file retry attempts. Only used when `upload-retry-max-attempts > 0`.                                                                                                                                                                                                                                                                   |
-| `cloud.storage.upload-backpressure-high-watermark`   | `0` (disabled) | **Opt-in.** When `> 0`, slows the RocksDB flush/compaction thread in `onTableFileCreated` while the pending-upload backlog exceeds this value, bounding the amount of local-only at-risk data. Blocked at most 30 s per event. `0` (the default) disables backpressure. Because the throttle parks RocksDB's own flush/compaction thread, a sustained cloud outage with this enabled can stall memtable flushes / stop writes for the partition — enable it only when bounding local-only data during an outage is worth trading partition write availability. The backlog is `async-upload queued+active` + `retry-queue in-flight` + a bounded **DLQ enqueue rate** (uploads that exhausted retries within a trailing ~1 s window, capped at this watermark) — the enqueue *rate*, not the static DLQ depth, so backpressure engages while durability is actively degrading and releases once failures stop, rather than pinning the write path on historical DLQ debt.                                                                                                               |
 | `cloud.storage.dlq-max-size`                         | `100000`    | Maximum entries retained in the file-backed dead-letter queue (in memory and, amortized, on disk at `<data-root>/.cloud-upload-dlq.tsv`). Bounds memory/disk growth during a prolonged provider outage; when exceeded the oldest entries are evicted (evicted files stay recoverable via the delete guard and startup SST backfill). Must be `> 0`.                                            |
 | `cloud.storage.metadata-sync-debounce-ms`            | `1000`      | Debounce window for the per-SST metadata sync triggered by `onTableFileCreated`. Within a window per DB at most one metadata publish runs (plus a trailing publish), coalescing checkpoint + list/prune cost under write-heavy load. `<= 0` publishes on every SST (pre-debounce behavior). Event-driven publishes (delete guard, compaction, DB open) are **never** debounced.               |
 | `cloud.storage.metadata-sync-max-unpublished`        | `32`        | Count bound on the debounce: once this many SST uploads accumulate without a metadata publish for a DB, a publish is forced regardless of `metadata-sync-debounce-ms`, bounding the cloud recovery point by count (not just time) during heavy-ingestion bursts. `<= 0` disables the count bound (time-only debounce).                                                                        |
@@ -94,7 +93,6 @@ Notes:
 - Upload retry uses a two-layer model: S3 part-level retries (inside one `uploadFile()` call) are handled by the provider; whole-file retries are handled by `CloudUploadRetryQueue` when `upload-retry-max-attempts > 0` (default `3`).
 - `CloudStorageNonRetryableException` thrown by a provider bypasses immediate retries. The file remains unconfirmed and is automatically retried on the next compaction via the delete guard.
 - Failed uploads are tracked via metrics (`cloud_storage_upload_failures_total`) and structured logs. Automatic retry occurs on subsequent compactions; no manual recovery needed.
-- Backpressure blocks the RocksDB compaction thread for at most 30 s (`BACKPRESSURE_MAX_WAIT_MS`) even if the backlog remains above the watermark after that window.
 - Metadata sync publishes a consistent `CURRENT`/`MANIFEST`/`OPTIONS` snapshot so a full-disk-loss node can reopen from cloud. Capture forces a MemTable flush so the un-flushed tail is persisted into an SST and mirrored (the RocksDB WAL is disabled under Raft — the Raft log is the tail's durability source — so a flush is the only path that pushes recent writes to cloud).
 - Metadata sync is always enabled when cloud storage is enabled.
 - Metadata sync is event-triggered by storage events; there is no background interval scheduler. The per-SST sync is debounced (`metadata-sync-debounce-ms`) and bounded by count (`metadata-sync-max-unpublished`); event-driven publishes (delete guard, compaction, DB open) are never debounced.
@@ -186,10 +184,6 @@ cloud:
     upload-retry-initial-delay-ms: 1000
     upload-retry-max-delay-ms: 60000
 
-    # Backpressure (opt-in): slow RocksDB flush/compaction thread while pending-upload backlog >
-    # watermark. Blocks at most 30 s per event. 0 (default) disables; > 0 can stall writes on outage.
-    upload-backpressure-high-watermark: 0
-
     # Dead-letter queue: max entries before oldest are evicted (bounds memory/disk on outage).
     # DLQ is file-backed at <data-root>/.cloud-upload-dlq.tsv; evicted files stay recoverable
     # via the delete guard / startup backfill.
@@ -270,7 +264,6 @@ Object Storage
 CloudStorageEventListener
   |
   | 10) syncTracker.markConfirmed(dbName, fileNumber)  <- bitmap updated
-  | 11) applyBackpressure(dbName)  <- optional throttle if backlog > watermark
 ```
 
 ### 3b) SST Delete Flow
@@ -579,12 +572,6 @@ cloud.storage.upload-retry-max-attempts: 0   # No immediate retries; rely on del
 - The S3 provider uses this when `multipart-exhausted-direct-dlq: true` and all multipart part retries are exhausted, preventing pointless full-file re-attempts for a part that consistently fails.
 - Metrics (`cloud_storage_upload_failures_total`) and logs track the failure for operational visibility.
 
-### Backpressure timeout
-
-- When `upload-backpressure-high-watermark > 0` and the pending-upload backlog exceeds the watermark, `onTableFileCreated` parks the RocksDB flush/compaction thread in 50 ms increments. The backlog is `async-upload queued+active` + `retry-queue in-flight` + a bounded **DLQ enqueue rate** (retries-exhausted uploads within a trailing ~1 s window) — the enqueue rate, not the static DLQ depth, so backpressure releases once failures stop instead of pinning the write path on historical DLQ debt.
-- After `30 000 ms` (`BACKPRESSURE_MAX_WAIT_MS`) the backpressure wait exits unconditionally and the new SST upload is attempted regardless, to prevent a permanent RocksDB stall.
-- A warning log is emitted when backpressure starts, and an info log when it is released.
-
 ### Delete guard failure (live set not fully durable)
 
 - Before deleting a superseded SST from cloud, `onTableFileDeleted` verifies the entire current live SST set is confirmed present in cloud (`ensureLiveSetUploaded`).
@@ -670,7 +657,7 @@ Cloud storage health is exposed through metrics and logs. Set up monitoring for:
   expr: cloud_storage_retry_queue_size > 10
   annotations:
     summary: "Store node {{ $labels.instance }} has {{ $value }} files in retry queue"
-    action: "Monitor until queue drains; backpressure may be slowing compaction"
+    action: "Monitor until queue drains"
 
 # Alert if sync latency is high (uploads taking too long)
 - alert: CloudStorageSyncLatencyHigh
@@ -724,11 +711,10 @@ kubectl logs -f -l app=hugegraph-store | grep "filePath=/path/to/000123.sst"
 
 **Symptom: Delete operations are slow or stalling**
 
-- **Cause**: Delete guard is re-uploading many files; backpressure may be active.
+- **Cause**: Delete guard is re-uploading many files.
 - **Action**:
   1. Check logs for "Re-uploading M unconfirmed files" — how many?
-  2. If backpressure is active, monitor `cloud_storage_retry_queue_size`. Once it drains, delete resumes.
-  3. Increase `upload-backpressure-high-watermark` if you want to allow more local-only data during cloud outages.
+  2. Monitor `cloud_storage_retry_queue_size`. Once it drains, delete resumes.
 
 **Symptom: High `cloud_storage_sync_latency_ms`**
 

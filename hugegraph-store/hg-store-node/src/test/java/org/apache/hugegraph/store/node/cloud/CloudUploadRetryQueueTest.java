@@ -458,30 +458,6 @@ public class CloudUploadRetryQueueTest {
     }
 
     @Test
-    public void dlqEnqueuedTotal_isMonotonic_andCountsEvictedEntries() {
-        // The DLQ enqueue-rate backpressure signal relies on a monotonic total that only grows as
-        // uploads EXHAUST their retries, unaffected by eviction (cap) draining the live DLQ. This is
-        // what lets backpressure track active durability loss without pinning on a static,
-        // post-recovery DLQ depth.
-        try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
-            queue.setMaxDlqSize(5);
-            assertEquals(0L, queue.getDlqEnqueuedTotal());
-
-            for (int i = 0; i < 20; i++) {
-                queue.submit("db", "cf", tmpRoot.resolve(i + ".sst").toString(),
-                             "db/" + i + ".sst", new IOException("outage"));
-            }
-
-            // Live depth is capped at 5, but the cumulative enqueue total counts every exhausted
-            // upload — including the 15 that were evicted.
-            assertEquals("Live DLQ depth is capped", 5, queue.getDlqSize());
-            assertEquals("Cumulative enqueue total must count all 20 exhausted uploads (incl. evicted)",
-                         20L, queue.getDlqEnqueuedTotal());
-        }
-    }
-
-    @Test
     public void dlq_rewriteIsAtomic_leavesNoTempAndValidFile() throws Exception {
         try (CloudUploadRetryQueue queue =
                      new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {

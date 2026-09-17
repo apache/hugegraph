@@ -26,9 +26,7 @@ import static org.junit.Assert.assertTrue;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -43,9 +41,8 @@ import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.exception.SdkException;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.AbortMultipartUploadResponse;
-import software.amazon.awssdk.services.s3.model.CreateMultipartUploadResponse;
 import software.amazon.awssdk.services.s3.model.DeleteObjectResponse;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.DeletedObject;
@@ -57,23 +54,26 @@ import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Error;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.S3Object;
+import software.amazon.awssdk.transfer.s3.S3TransferManager;
 
 /**
  * Unit-level tests for {@link S3CloudStorageProvider} and {@link S3CloudStorageConfig}, all driven
- * without a live S3/MinIO via a dynamic-{@link Proxy} {@code S3Client}:
+ * without a live S3/MinIO via a dynamic-{@link java.lang.reflect.Proxy} {@code S3Client}:
  * <ul>
- *   <li>SDK-exception classification (retryable vs non-retryable) and multipart
- *       abort-on-non-retryable-failure;</li>
- *   <li>client lifecycle across re-init;</li>
- *   <li>operations: single-PUT upload (success/retry/exhaustion), delete, prefix purge (multi-page,
- *       partial-batch-failure, batch-exception fallback, truncated-without-token safety), listing,
- *       {@code fileExists} status handling, download, and human-size formatting;</li>
- *   <li>the {@link S3CloudStorageConfig} bean (defaults, key constants, accessors/equality).</li>
+ *   <li>SDK-exception classification (retryable vs non-retryable);</li>
+ *   <li>client lifecycle across re-init (sync client, async client, and transfer manager are all
+ *       closed on re-init);</li>
+ *   <li>operations: single-PUT upload, delete, prefix purge (multi-page, partial-batch-failure,
+ *       batch-exception fallback, truncated-without-token safety), listing, {@code fileExists}
+ *       status handling, download, and human-size formatting;</li>
+ *   <li>the {@link S3CloudStorageConfig} bean (key constants, accessors/equality).</li>
  * </ul>
- * The full single-large-file (multipart) upload/download round trip lives in
+ * Retry (including per-part retry for multipart uploads) is delegated entirely to the AWS SDK's
+ * own client-level retry strategy, so there is no app-level retry loop left to test here. The full
+ * single-large-file (multipart, via {@link S3TransferManager}) upload/download round trip lives in
  * {@link S3SingleLargeFileE2ETest}.
  */
-@SuppressWarnings("resource")
+@SuppressWarnings({"resource", "SuspiciousInvocationHandlerImplementation"})
 public class S3CloudStorageProviderTest {
 
     // =========================================================================
@@ -126,87 +126,67 @@ public class S3CloudStorageProviderTest {
     }
 
     // =========================================================================
-    // Multipart upload: non-retryable part failure aborts then rethrows
-    // =========================================================================
-
-    @Test
-    public void testUploadMultipartNonRetryablePartFailureRethrowsNonRetryableAfterAbort()
-            throws Exception {
-        S3CloudStorageProvider provider = new S3CloudStorageProvider();
-        AtomicBoolean aborted = new AtomicBoolean(false);
-
-        // Dynamic proxy keeps this test lightweight without extra mocking deps.
-        S3Client s3 = (S3Client) Proxy.newProxyInstance(
-                S3Client.class.getClassLoader(),
-                new Class<?>[]{S3Client.class},
-                (proxy, method, args) -> {
-                    String name = method.getName();
-                    switch (name) {
-                        case "createMultipartUpload":
-                            return CreateMultipartUploadResponse.builder()
-                                                                .uploadId("u-1")
-                                                                .build();
-                        case "uploadPart":
-                            throw s3ServiceException(403, "AccessDenied", "req-upload-part");
-                        case "abortMultipartUpload":
-                            aborted.set(true);
-                            return AbortMultipartUploadResponse.builder().build();
-                        case "close":
-                            return null;
-                    }
-                    throw new UnsupportedOperationException("Unexpected S3Client method: " + name);
-                });
-
-        setField(provider, "s3Client", s3);
-        setField(provider, "bucket", "test-bucket");
-        setField(provider, "partUploadMaxRetries", 2);
-
-        Path tmp = Files.createTempFile("hg-s3-classify", ".bin");
-        Files.write(tmp, new byte[]{1});
-        try {
-            assertThrows("Non-retryable part failure must propagate as CloudStorageNonRetryableException",
-                         CloudStorageNonRetryableException.class,
-                         () -> invokeUploadMultipart(provider, tmp));
-            assertTrue("Multipart failure must abort upload before rethrowing", aborted.get());
-        } finally {
-            Files.deleteIfExists(tmp);
-        }
-    }
-
-    // =========================================================================
-    // Client lifecycle: init() closes the previous client on re-init (no leak)
+    // Client lifecycle: init() closes all previous clients on re-init (no leak)
     // =========================================================================
 
     /**
      * {@code S3CloudStorageProvider} is a singleton discovered once via SPI; a Spring context
-     * restart re-runs {@code init()} on the same instance. If {@code init()} overwrote the client
-     * without closing the previous one, the old SDK connection pool and threads would leak.
+     * restart re-runs {@code init()} on the same instance. If {@code init()} overwrote the clients
+     * without closing the previous ones, the old SDK connection pools and threads would leak.
      */
     @Test
-    public void testInitClosesPreviousClientOnReinit() throws Exception {
+    public void testInitClosesPreviousClientsOnReinit() throws Exception {
         S3CloudStorageProvider provider = new S3CloudStorageProvider();
 
-        // Inject a stub S3Client that records whether close() was invoked.
-        AtomicBoolean staleClosed = new AtomicBoolean(false);
-        S3Client stale = (S3Client) Proxy.newProxyInstance(
+        AtomicBoolean staleSyncClosed = new AtomicBoolean(false);
+        S3Client staleSync = (S3Client) java.lang.reflect.Proxy.newProxyInstance(
                 S3Client.class.getClassLoader(),
                 new Class<?>[]{S3Client.class},
                 (proxy, method, args) -> {
                     switch (method.getName()) {
                         case "close":
-                            staleClosed.set(true);
+                            staleSyncClosed.set(true);
                             return null;
                         case "serviceName":
                             return "s3";
                         default:
-                            //noinspection SuspiciousInvocationHandlerImplementation
                             return null;
                     }
                 });
-        setField(provider, "s3Client", stale);
+        AtomicBoolean staleAsyncClosed = new AtomicBoolean(false);
+        S3AsyncClient staleAsync = (S3AsyncClient) java.lang.reflect.Proxy.newProxyInstance(
+                S3AsyncClient.class.getClassLoader(),
+                new Class<?>[]{S3AsyncClient.class},
+                (proxy, method, args) -> {
+                    switch (method.getName()) {
+                        case "close":
+                            staleAsyncClosed.set(true);
+                            return null;
+                        case "serviceName":
+                            return "s3";
+                        default:
+                            return null;
+                    }
+                });
+        AtomicBoolean staleTransferManagerClosed = new AtomicBoolean(false);
+        S3TransferManager staleTransferManager = (S3TransferManager) java.lang.reflect.Proxy
+                .newProxyInstance(
+                        S3TransferManager.class.getClassLoader(),
+                        new Class<?>[]{S3TransferManager.class},
+                        (proxy, method, args) -> {
+                            if (method.getName().equals("close")) {
+                                staleTransferManagerClosed.set(true);
+                                return null;
+                            }
+                            return null;
+                        });
 
-        // Re-initialize. Empty path-prefix skips the (network) stale-multipart sweep; a region is
-        // set so the real client builds without needing a resolvable default region.
+        setField(provider, "s3Client", staleSync);
+        setField(provider, "s3AsyncClient", staleAsync);
+        setField(provider, "transferManager", staleTransferManager);
+
+        // Re-initialize. A region is set so the real clients build without needing a resolvable
+        // default region.
         CloudStorageConfig cfg = new CloudStorageConfig();
         cfg.setEnabled(true);
         cfg.setProvider("s3");
@@ -216,8 +196,12 @@ public class S3CloudStorageProviderTest {
 
         try {
             provider.init(cfg);
-            assertTrue("init() must close the previous S3 client to avoid leaking its "
-                       + "connection pool/threads on re-init", staleClosed.get());
+            assertTrue("init() must close the previous sync S3 client to avoid leaking its "
+                       + "connection pool/threads on re-init", staleSyncClosed.get());
+            assertTrue("init() must close the previous async S3 client on re-init",
+                       staleAsyncClosed.get());
+            assertTrue("init() must close the previous transfer manager on re-init",
+                       staleTransferManagerClosed.get());
         } finally {
             provider.close();
         }
@@ -235,7 +219,7 @@ public class S3CloudStorageProviderTest {
     @Test
     public void testDeletePrefixTruncatedWithoutTokenFailsLoudly() throws Exception {
         S3CloudStorageProvider provider = new S3CloudStorageProvider();
-        S3Client s3 = (S3Client) Proxy.newProxyInstance(
+        S3Client s3 = (S3Client) java.lang.reflect.Proxy.newProxyInstance(
                 S3Client.class.getClassLoader(),
                 new Class<?>[]{S3Client.class},
                 (proxy, method, args) -> {
@@ -266,7 +250,7 @@ public class S3CloudStorageProviderTest {
     @Test
     public void testListFilesTruncatedWithoutTokenFailsLoudly() throws Exception {
         S3CloudStorageProvider provider = new S3CloudStorageProvider();
-        S3Client s3 = (S3Client) Proxy.newProxyInstance(
+        S3Client s3 = (S3Client) java.lang.reflect.Proxy.newProxyInstance(
                 S3Client.class.getClassLoader(),
                 new Class<?>[]{S3Client.class},
                 (proxy, method, args) -> {
@@ -300,7 +284,7 @@ public class S3CloudStorageProviderTest {
     @Test
     public void testDeletePrefixNotTruncatedCompletesWithoutError() throws Exception {
         S3CloudStorageProvider provider = new S3CloudStorageProvider();
-        S3Client s3 = (S3Client) Proxy.newProxyInstance(
+        S3Client s3 = (S3Client) java.lang.reflect.Proxy.newProxyInstance(
                 S3Client.class.getClassLoader(),
                 new Class<?>[]{S3Client.class},
                 (proxy, method, args) -> {
@@ -322,20 +306,8 @@ public class S3CloudStorageProviderTest {
     }
 
     // =========================================================================
-    // S3CloudStorageConfig bean: defaults, key constants, accessors/equality
+    // S3CloudStorageConfig bean: key constants, accessors/equality
     // =========================================================================
-
-    @Test
-    public void testConfigDefaults() {
-        S3CloudStorageConfig cfg = new S3CloudStorageConfig();
-        assertEquals(S3CloudStorageConfig.DEFAULT_MULTIPART_PART_RETRY_MAX_ATTEMPTS,
-                     cfg.getMultipartPartRetryMaxAttempts());
-        assertEquals(S3CloudStorageConfig.DEFAULT_MULTIPART_PART_RETRY_BASE_BACKOFF_MS,
-                     cfg.getMultipartPartRetryBaseBackoffMs());
-        assertFalse(cfg.isMultipartExhaustedDirectDlq());
-        assertEquals(S3CloudStorageConfig.DEFAULT_MULTIPART_STALE_ABORT_ON_INIT,
-                     cfg.isMultipartStaleAbortOnInit());
-    }
 
     @Test
     public void testConfigKeyConstants() {
@@ -344,14 +316,6 @@ public class S3CloudStorageProviderTest {
         assertEquals("endpoint", S3CloudStorageConfig.KEY_ENDPOINT);
         assertEquals("access-key", S3CloudStorageConfig.KEY_ACCESS_KEY);
         assertEquals("secret-key", S3CloudStorageConfig.KEY_SECRET_KEY);
-        assertEquals("multipart-part-retry-max-attempts",
-                     S3CloudStorageConfig.KEY_MULTIPART_RETRY_MAX_ATTEMPTS);
-        assertEquals("multipart-part-retry-base-backoff-ms",
-                     S3CloudStorageConfig.KEY_MULTIPART_RETRY_BASE_BACKOFF_MS);
-        assertEquals("multipart-exhausted-direct-dlq",
-                     S3CloudStorageConfig.KEY_MULTIPART_EXHAUSTED_DIRECT_DLQ);
-        assertEquals("multipart-stale-abort-on-init",
-                     S3CloudStorageConfig.KEY_MULTIPART_STALE_ABORT_ON_INIT);
     }
 
     @Test
@@ -362,10 +326,6 @@ public class S3CloudStorageProviderTest {
         assertEquals("http://localhost:9000", a.getEndpoint());
         assertEquals("ak", a.getAccessKey());
         assertEquals("sk", a.getSecretKey());
-        assertEquals(7, a.getMultipartPartRetryMaxAttempts());
-        assertEquals(2500L, a.getMultipartPartRetryBaseBackoffMs());
-        assertTrue(a.isMultipartExhaustedDirectDlq());
-        assertFalse(a.isMultipartStaleAbortOnInit());
 
         assertNotEquals(new S3CloudStorageConfig(), a);
         S3CloudStorageConfig b = newPopulatedConfig();
@@ -392,49 +352,25 @@ public class S3CloudStorageProviderTest {
         Path f = tmpFile();
         try {
             p.uploadFile(f.toString(), "db/000001.sst");
-            assertEquals("one successful PUT expected", 1, puts.get());
+            assertEquals("one PUT expected", 1, puts.get());
         } finally {
             Files.deleteIfExists(f);
         }
     }
 
     @Test
-    public void testUploadFileSinglePartRetriesThenSucceeds() throws Exception {
-        AtomicInteger puts = new AtomicInteger();
+    public void testUploadFileSinglePartPropagatesNonRetryableFailure() throws Exception {
         S3CloudStorageProvider p = proxyProvider(handler(m -> {
             if (m.equals("putObject")) {
-                if (puts.incrementAndGet() == 1) {
-                    throw s3ServiceException(503, "SlowDown", "r1"); // transient → retry
-                }
-                return PutObjectResponse.builder().build();
+                throw s3ServiceException(403, "AccessDenied", "r");
             }
             return null;
         }));
-        setField(p, "partUploadRetryBaseBackoffMs", 1L); // keep the backoff sleep tiny
         Path f = tmpFile();
         try {
-            p.uploadFile(f.toString(), "db/2.sst");
-            assertEquals("PUT should be retried once then succeed", 2, puts.get());
-        } finally {
-            Files.deleteIfExists(f);
-        }
-    }
-
-    @Test
-    public void testUploadFileSinglePartExhaustsRetriesThrowsIoException() throws Exception {
-        S3CloudStorageProvider p = proxyProvider(handler(m -> {
-            if (m.equals("putObject")) {
-                throw s3ServiceException(503, "SlowDown", "r"); // always transient
-            }
-            return null;
-        }));
-        setField(p, "partUploadMaxRetries", 2);
-        setField(p, "partUploadRetryBaseBackoffMs", 1L);
-        Path f = tmpFile();
-        try {
-            IOException ex = assertThrows(IOException.class,
-                                          () -> p.uploadFile(f.toString(), "db/3.sst"));
-            assertTrue(ex.getMessage().contains("after 2 attempt"));
+            assertThrows("A non-retryable PUT failure must propagate without any app-level retry",
+                         CloudStorageNonRetryableException.class,
+                         () -> p.uploadFile(f.toString(), "db/3.sst"));
         } finally {
             Files.deleteIfExists(f);
         }
@@ -632,17 +568,13 @@ public class S3CloudStorageProviderTest {
         c.setEndpoint("http://localhost:9000");
         c.setAccessKey("ak");
         c.setSecretKey("sk");
-        c.setMultipartPartRetryMaxAttempts(7);
-        c.setMultipartPartRetryBaseBackoffMs(2500L);
-        c.setMultipartExhaustedDirectDlq(true);
-        c.setMultipartStaleAbortOnInit(false);
         return c;
     }
 
     /** Builds a provider with the given proxy S3Client and a fixed bucket, no path-prefix. */
     private static S3CloudStorageProvider proxyProvider(InvocationHandler handler) throws Exception {
         S3CloudStorageProvider p = new S3CloudStorageProvider();
-        S3Client s3 = (S3Client) Proxy.newProxyInstance(
+        S3Client s3 = (S3Client) java.lang.reflect.Proxy.newProxyInstance(
                 S3Client.class.getClassLoader(), new Class<?>[]{S3Client.class}, handler);
         setField(p, "s3Client", s3);
         setField(p, "bucket", "test-bucket");
@@ -700,23 +632,7 @@ public class S3CloudStorageProviderTest {
         Method classify = S3CloudStorageProvider.class.getDeclaredMethod(
                 "classifySdkException", String.class, String.class, SdkException.class);
         classify.setAccessible(true);
-        return (IOException) classify.invoke(provider, "uploadPart", "k.sst", e);
-    }
-
-    private static void invokeUploadMultipart(S3CloudStorageProvider provider,
-                                              Path path) throws Exception {
-        Method method = S3CloudStorageProvider.class.getDeclaredMethod(
-                "uploadMultipart", java.nio.file.Path.class, long.class, String.class);
-        method.setAccessible(true);
-        try {
-            method.invoke(provider, path, 1L, "k.sst");
-        } catch (InvocationTargetException ite) {
-            Throwable cause = ite.getCause();
-            if (cause instanceof Exception) {
-                throw (Exception) cause;
-            }
-            throw ite;
-        }
+        return (IOException) classify.invoke(provider, "uploadFile(multipart)", "k.sst", e);
     }
 
     private static void setField(S3CloudStorageProvider provider,

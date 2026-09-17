@@ -56,7 +56,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>The number of whole-file retries is configured by the caller via
  * {@code cloud.storage.upload-retry-max-attempts}, which defaults to {@code 3} (whole-file retries
  * enabled). {@code maxAttempts == 0} is an opt-in mode — not the shipped default — for deployments
- * whose provider already performs sufficient internal retries (e.g. S3 multipart-part-retry).
+ * whose provider already performs sufficient internal retries (e.g. the S3 provider's underlying
+ * AWS SDK client, which retries transient per-request/per-part failures on its own).
  * <ul>
  *   <li>When {@code maxAttempts == 0}, failures go directly to the DLQ with no whole-file retry.</li>
  *   <li>When {@code maxAttempts > 0} (the default), the first retry is scheduled after
@@ -187,17 +188,6 @@ public class CloudUploadRetryQueue implements Closeable {
 
     /** Count of DLQ entries evicted due to the size cap (monitoring / tests). */
     private final AtomicInteger droppedDlqEntries = new AtomicInteger(0);
-
-    /**
-     * Cumulative, monotonically-increasing count of entries moved to the DLQ since startup (i.e.
-     * uploads that EXHAUSTED their retries and are now local-only). Unlike {@link #getDlqSize()},
-     * which shrinks on eviction/replay, this only grows — so a consumer can measure the DLQ
-     * ENQUEUE RATE (durability-loss rate) by sampling the delta over a window. Used by the listener
-     * to fold exhausted-failure pressure into backpressure without pinning the write path on a
-     * static, post-recovery DLQ depth.
-     */
-    private final java.util.concurrent.atomic.AtomicLong dlqEnqueuedTotal =
-            new java.util.concurrent.atomic.AtomicLong(0);
 
     /** Appends since the last on-disk compaction, used to amortize {@link #rewriteDlqFile}. */
     private final AtomicInteger appendsSinceRewrite = new AtomicInteger(0);
@@ -437,17 +427,6 @@ public class CloudUploadRetryQueue implements Closeable {
      */
     public int getDroppedDlqCount() {
         return droppedDlqEntries.get();
-    }
-
-    /**
-     * Returns the cumulative, monotonic count of uploads that have EXHAUSTED their retries and been
-     * moved to the DLQ since startup. Sampling the delta over a window yields the DLQ enqueue rate
-     * (the rate at which uploads become local-only) — the durability-risk signal used for
-     * backpressure. Never decreases (unlike {@link #getDlqSize()}), so a static, post-recovery DLQ
-     * depth contributes zero rate and does not keep the write path throttled.
-     */
-    public long getDlqEnqueuedTotal() {
-        return dlqEnqueuedTotal.get();
     }
 
     /** Cumulative number of DLQ on-disk persistence failures since startup (monitoring / tests). */
@@ -881,9 +860,6 @@ public class CloudUploadRetryQueue implements Closeable {
                                                      System.currentTimeMillis(),
                                                      attemptCount, lastError, uploadEpoch);
         dlq.addLast(task);
-        // Count this exhausted-retry upload for the durability-loss (enqueue) rate signal. Monotonic
-        // so it is unaffected by the eviction/replay below that mutate the live DLQ size.
-        dlqEnqueuedTotal.incrementAndGet();
 
         // Enforce the size cap: evict oldest entries so a sustained outage cannot grow the DLQ
         // (and process memory) without bound. Approximate under concurrency (the deque may briefly

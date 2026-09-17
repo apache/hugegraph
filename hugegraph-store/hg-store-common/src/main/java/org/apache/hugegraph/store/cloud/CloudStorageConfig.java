@@ -96,26 +96,6 @@ public class CloudStorageConfig {
     private long uploadRetryMaxDelayMs = 60_000L;
 
     /**
-     * Backpressure high-watermark on the pending-upload backlog. The backlog is the sum of: the
-     * async upload executor's queued + active uploads, the retry queue's in-flight (scheduled or
-     * executing) retries, and a bounded DLQ <em>enqueue rate</em> — the number of uploads that
-     * exhausted their retries and became local-only within a trailing ~1s window, capped at this
-     * watermark. The DLQ enqueue rate (not the static DLQ depth) is used so backpressure engages
-     * while durability is actively degrading during a sustained outage, yet releases once failures
-     * stop rather than pinning the write path on historical DLQ debt awaiting an explicit replay.
-     * When {@code > 0} and the backlog exceeds this value, RocksDB's flush/compaction thread is
-     * briefly slowed in {@code onTableFileCreated} so ingestion cannot outrun the cloud mirror,
-     * bounding the amount of local-only (at-risk) data.
-     *
-     * <p><b>Default: {@code 0} (disabled).</b> This is opt-in because the throttle parks RocksDB's
-     * own background flush/compaction thread (up to 30 s per event); under a sustained cloud outage
-     * that can turn into a memtable-flush stall / write-stop for the partition. Enable it only when
-     * bounding local-only data during a cloud outage is worth trading partition write availability.
-     */
-    private int uploadBackpressureHighWatermark = 0;
-
-
-    /**
      * Maximum number of entries retained in the failed-upload dead-letter queue (in memory and,
      * amortized, on disk). Bounds memory/disk growth during a prolonged provider outage; when
      * exceeded the oldest entries are evicted (evicted files stay recoverable via the delete guard

@@ -73,6 +73,20 @@
             <version>${aws.sdk.version}</version>
         </dependency>
 
+        <!-- Transfer Manager: multipart upload/download orchestration over an async S3 client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3-transfer-manager</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
+        <!-- CRT-based async S3 client backing Transfer Manager (AWS's recommended pairing) -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>aws-crt-client</artifactId>
+            <version>${aws.sdk.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

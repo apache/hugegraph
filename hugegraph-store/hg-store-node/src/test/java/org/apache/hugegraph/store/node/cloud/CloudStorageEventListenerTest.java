@@ -135,7 +135,7 @@ public class CloudStorageEventListenerTest {
     @Test
     public void toRelativeKey_appliesStoreScopePrefix() {
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(DATA_ROOT), true, 0L, null, new CloudSyncTracker(), 0,
+                List.of(DATA_ROOT), true, 0L, null, new CloudSyncTracker(),
                 "store-127.0.0.1_8501");
         String filePath = DATA_ROOT + "/0/000042.sst";
         assertEquals("store-127.0.0.1_8501/0/000042.sst", l.toRelativeKey(filePath));
@@ -199,7 +199,7 @@ public class CloudStorageEventListenerTest {
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(), 0,
+                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(),
                 "store-127.0.0.1_8501");
         try {
             l.onTableFileCreated("0", "default", sst.toString(), 512L);
@@ -484,7 +484,7 @@ public class CloudStorageEventListenerTest {
     // -----------------------------------------------------------------------
     private static CloudStorageEventListener metadataListener() {
         return new CloudStorageEventListener(List.of(DATA_ROOT), false, 0L,
-                                             null, new CloudSyncTracker(), 0);
+                                             null, new CloudSyncTracker());
     }
 
     private static MetadataSnapshot snapshot(List<String> options, List<String> ssts) {
@@ -535,7 +535,7 @@ public class CloudStorageEventListenerTest {
     public void uploadMetadataSnapshot_holdsPublishWhenSstConfirmationEpochTurnsStale() {
         CloudSyncTracker tracker = new CloudSyncTracker();
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(DATA_ROOT), false, 0L, null, tracker, 0);
+                List.of(DATA_ROOT), false, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider() {
             @Override
             public void uploadFile(String localPath, String remoteKey) throws IOException {
@@ -986,7 +986,7 @@ public class CloudStorageEventListenerTest {
         Files.createDirectories(partitionDir);
 
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(), 0,
+                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(),
                 "store-127.0.0.1_8501");
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("store-127.0.0.1_8501/0/CURRENT", "MANIFEST-000001".getBytes());
@@ -1279,7 +1279,7 @@ public class CloudStorageEventListenerTest {
 
         CloudSyncTracker tracker = new CloudSyncTracker();
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, tracker, 0);
+                List.of(tmpRoot.toString()), true, 0L, null, tracker);
         FailingUploadProvider provider = new FailingUploadProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
@@ -1305,7 +1305,7 @@ public class CloudStorageEventListenerTest {
         // Pre-mark the live file as already confirmed in cloud.
         tracker.markConfirmed("0", liveLocal.toString());
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, tracker, 0);
+                List.of(tmpRoot.toString()), true, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
@@ -1331,7 +1331,7 @@ public class CloudStorageEventListenerTest {
 
         CloudSyncTracker tracker = new CloudSyncTracker();
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, tracker, 0);
+                List.of(tmpRoot.toString()), true, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
@@ -1371,7 +1371,7 @@ public class CloudStorageEventListenerTest {
         tracker.markConfirmed("0", sst2.toString());
 
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, tracker, 0);
+                List.of(tmpRoot.toString()), true, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("0/000001.sst", "sst1".getBytes());
         provider.putRemoteFile("0/000002.sst", "sst2".getBytes());
@@ -1404,7 +1404,7 @@ public class CloudStorageEventListenerTest {
         private final boolean syncResult;
 
         OrderingListener(String dataRoot, CloudSyncTracker tracker, boolean syncResult) {
-            super(List.of(dataRoot), false, 0L, null, tracker, 0);
+            super(List.of(dataRoot), false, 0L, null, tracker);
             this.syncResult = syncResult;
         }
 
@@ -1496,7 +1496,7 @@ public class CloudStorageEventListenerTest {
 
         AtomicBoolean metadataHealthy = new AtomicBoolean(false);
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(), 0) {
+                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker()) {
             @Override
             List<LiveSstFile> currentLiveSstFiles(String dbName) {
                 return List.of();
@@ -1546,7 +1546,7 @@ public class CloudStorageEventListenerTest {
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, tracker, 0) {
+                List.of(tmpRoot.toString()), true, 0L, null, tracker) {
             @Override
             List<LiveSstFile> currentLiveSstFiles(String dbName) {
                 return List.of(new LiveSstFile(liveSst.toString(), "default"));
@@ -1588,7 +1588,7 @@ public class CloudStorageEventListenerTest {
         // Compaction output 000010.sst is live but neither confirmed nor present locally / in cloud,
         // so the live set is not durable.
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(DATA_ROOT), false, 0L, null, tracker, 0) {
+                List.of(DATA_ROOT), false, 0L, null, tracker) {
             @Override
             List<LiveSstFile> currentLiveSstFiles(String dbName) {
                 return List.of(new LiveSstFile(DATA_ROOT + "/db0/000010.sst", "default"));
@@ -1647,7 +1647,7 @@ public class CloudStorageEventListenerTest {
             CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
             CloudStorageEventListener l = new CloudStorageEventListener(
-                    List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(), 0,
+                    List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(),
                     "store-127.0.0.1_8501");
             l.onDBDeleteBegin("mydb", tmpRoot.resolve("mydb").toString());
 
@@ -1750,7 +1750,7 @@ public class CloudStorageEventListenerTest {
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(DATA_ROOT), true, 0L, null, tracker, 0);
+                List.of(DATA_ROOT), true, 0L, null, tracker);
         l.onDBDeleted("mydb", DATA_ROOT + "/mydb");
 
         assertEquals("Sync tracker must be cleared for the deleted DB",

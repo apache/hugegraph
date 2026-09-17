@@ -38,7 +38,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Stream;
 
 import lombok.Getter;
@@ -120,38 +119,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
 
     /** Tracks which SST files are confirmed present in cloud (per-DB Roaring bitmap). */
     private final CloudSyncTracker syncTracker;
-
-    /**
-     * When {@code > 0}, {@link #onTableFileCreated} slows the RocksDB flush/compaction thread while
-     * the pending-upload backlog exceeds this watermark, so ingestion cannot outrun the cloud
-     * mirror. The backlog is the executor's queued/active uploads + the retry queue's in-flight
-     * retries + a bounded DLQ enqueue rate (see {@link #dlqEnqueueRateBacklog()}). {@code 0}
-     * disables backpressure.
-     */
-    private final int backpressureHighWatermark;
-
-
-    /** Upper bound on how long a single {@link #onTableFileCreated} call will block for backpressure. */
-    private static final long BACKPRESSURE_MAX_WAIT_MS = 30_000L;
-    private static final long BACKPRESSURE_POLL_MS = 50L;
-
-    /**
-     * Window over which the DLQ enqueue rate (uploads that exhausted their retries and became
-     * local-only) is measured for backpressure. The count of DLQ enqueues observed in the trailing
-     * window is added — capped at {@link #backpressureHighWatermark} — to the backpressure backlog,
-     * so a sustained cloud outage that keeps pushing uploads to the DLQ throttles ingestion, while a
-     * static post-recovery DLQ (rate 0) does not.
-     */
-    private static final long DLQ_ENQUEUE_RATE_WINDOW_MS = 1_000L;
-
-    /** Guards the DLQ enqueue-rate sample below (touched from every backpressure poll). */
-    private final Object dlqRateLock = new Object();
-    /** Wall-clock time of the last DLQ enqueue-rate sample; {@code 0} until first primed. */
-    private long lastDlqRateSampleMs = 0L;
-    /** {@link CloudUploadRetryQueue#getDlqEnqueuedTotal()} captured at the last sample. */
-    private long lastDlqEnqueuedTotalAtSample = 0L;
-    /** Cached bounded DLQ enqueue-rate contribution to the backpressure backlog. */
-    private int dlqRateBacklogContribution = 0;
 
     /**
      * Hard health flag for pending-delete marker durability. Flips to {@code false} when a marker
@@ -391,7 +358,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                                      long readMissGuardWindowMs,
                                      CloudUploadRetryQueue retryQueue) {
         this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, retryQueue,
-             new CloudSyncTracker(), 0);
+             new CloudSyncTracker(), null);
     }
 
     /**
@@ -399,23 +366,23 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      * @param syncTracker tracks SST files confirmed present in cloud; the delete guard uses it
      *                    to avoid deleting a superseded object before replacements are durable.
      *                    Must be shared with the retry queue.
-     * @param backpressureHighWatermark {@code > 0} to slow ingestion while pending-upload backlog
-     *                                  exceeds this value; {@code 0} disables backpressure.
      */
     public CloudStorageEventListener(List<String> dataRoots,
                                      boolean startupHydrationEnabled,
                                      long readMissGuardWindowMs,
                                      CloudUploadRetryQueue retryQueue,
-                                     CloudSyncTracker syncTracker,
-                                     int backpressureHighWatermark) {
+                                     CloudSyncTracker syncTracker) {
         this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, retryQueue, syncTracker,
-             backpressureHighWatermark, null);
+             null);
     }
 
     /**
      * Multi-root constructor for comma-separated app.data-path configuration.
      *
      * @param dataRoots configured store data roots (absolute, normalised)
+     * @param syncTracker tracks SST files confirmed present in cloud; the delete guard uses it
+     *                    to avoid deleting a superseded object before replacements are durable.
+     *                    Must be shared with the retry queue.
      * @param storeScopePrefix optional per-store key prefix to isolate cloud objects
      */
     public CloudStorageEventListener(List<String> dataRoots,
@@ -423,10 +390,9 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                                      long readMissGuardWindowMs,
                                      CloudUploadRetryQueue retryQueue,
                                      CloudSyncTracker syncTracker,
-                                     int backpressureHighWatermark,
                                      String storeScopePrefix) {
         this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, retryQueue, syncTracker,
-             backpressureHighWatermark, storeScopePrefix, Tuning.defaults());
+             storeScopePrefix, Tuning.defaults());
     }
 
     /**
@@ -444,7 +410,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                                      long readMissGuardWindowMs,
                                      CloudUploadRetryQueue retryQueue,
                                      CloudSyncTracker syncTracker,
-                                     int backpressureHighWatermark,
                                      String storeScopePrefix,
                                      Tuning tuning) {
         // Fail fast on a missing/empty data-root list: primaryDataRoot is derived from index 0
@@ -473,7 +438,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         this.readMissAttemptTs = new ConcurrentHashMap<>();
         this.retryQueue = retryQueue;
         this.syncTracker = syncTracker != null ? syncTracker : new CloudSyncTracker();
-        this.backpressureHighWatermark = Math.max(0, backpressureHighWatermark);
         this.storeScopePrefix = normaliseKeyPrefix(storeScopePrefix);
         this.uploadExecutor = sharedUploadExecutor();
 
@@ -1647,7 +1611,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                 log.warn("Cloud upload skipped: no active provider and no retry queue: db={}, cf={}, "
                          + "path={}", dbName, cfName, filePath);
             }
-            applyBackpressure(dbName);
             return;
         }
 
@@ -1667,7 +1630,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                 // callback; the plain submit() would use epoch 0 and be silently dropped.
                 retryQueue.submit(dbName, cfName, filePath, remoteKey, uploadEpoch, e);
             }
-            applyBackpressure(dbName);
             return;
         }
 
@@ -1695,10 +1657,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                 }
             }
         }
-
-        // Apply backpressure AFTER handling this file so the flush/compaction thread slows down
-        // while the cloud mirror is behind, preventing ingestion from outrunning durability.
-        applyBackpressure(dbName);
     }
 
     /**
@@ -1847,88 +1805,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
             throw new IOException(
                     "Hard link failed; upload will be retried from original SST path: "
                     + linkEx.getMessage(), linkEx);
-        }
-    }
-
-    /**
-     * Blocks the calling (RocksDB flush/compaction) thread while the pending-upload backlog exceeds
-     * {@link #backpressureHighWatermark}, up to {@link #BACKPRESSURE_MAX_WAIT_MS}. This is the
-     * durability-tier backpressure: it keeps at-risk local-only data bounded.
-     */
-    private void applyBackpressure(String dbName) {
-        if (backpressureHighWatermark <= 0 || retryQueue == null) {
-            return;
-        }
-        long waited = 0L;
-        boolean logged = false;
-        while (pendingUploadBacklog() > backpressureHighWatermark
-               && waited < BACKPRESSURE_MAX_WAIT_MS) {
-            if (!logged) {
-                log.warn("Cloud upload backpressure: db={}, backlog={} > watermark={}, "
-                         + "slowing ingestion", dbName, pendingUploadBacklog(),
-                         backpressureHighWatermark);
-                logged = true;
-            }
-            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(BACKPRESSURE_POLL_MS));
-            if (Thread.currentThread().isInterrupted()) {
-                return;
-            }
-            waited += BACKPRESSURE_POLL_MS;
-        }
-        if (logged) {
-            log.info("Cloud upload backpressure released: db={}, backlog={}, waitedMs={}",
-                     dbName, pendingUploadBacklog(), waited);
-        }
-    }
-
-    private int pendingUploadBacklog() {
-        int backlog = uploadExecutor.getQueue().size() + uploadExecutor.getActiveCount();
-        if (retryQueue != null) {
-            // Active lag: the executor's queued/active uploads plus the retry queue's in-flight
-            // (scheduled/executing) retries.
-            backlog += retryQueue.getInFlightCount();
-            // Exhausted-failure pressure: fold in the DLQ ENQUEUE RATE (uploads that just exhausted
-            // their retries and became local-only), bounded by the watermark. This throttles
-            // ingestion while durability is actively degrading during a sustained outage — the
-            // realistic data-loss window the retry-queue in-flight count alone misses once retries
-            // are exhausted. We deliberately use the enqueue RATE, not static DLQ depth: counting
-            // depth would keep the write path throttled long after the provider recovered (historical
-            // debt awaiting an explicit replayDlq()), a self-inflicted availability degradation.
-            // Static DLQ depth remains a separate health signal (getDlqSize / persistence metric).
-            backlog += dlqEnqueueRateBacklog();
-        }
-        return backlog;
-    }
-
-    /**
-     * Bounded backpressure contribution from the DLQ enqueue rate: the number of uploads that
-     * exhausted their retries (moved to the DLQ) within the trailing {@link #DLQ_ENQUEUE_RATE_WINDOW_MS}
-     * window, capped at {@link #backpressureHighWatermark}. Positive only while durability is
-     * actively degrading; falls to zero once failures stop, so it never pins the write path on a
-     * static, post-recovery DLQ.
-     */
-    private int dlqEnqueueRateBacklog() {
-        if (retryQueue == null || backpressureHighWatermark <= 0) {
-            return 0;
-        }
-        long now = System.currentTimeMillis();
-        synchronized (dlqRateLock) {
-            if (lastDlqRateSampleMs == 0L) {
-                // First observation: prime the baseline so a historical DLQ backlog present at
-                // startup is not mistaken for a fresh enqueue burst. Contribute nothing this round.
-                lastDlqRateSampleMs = now;
-                lastDlqEnqueuedTotalAtSample = retryQueue.getDlqEnqueuedTotal();
-                return 0;
-            }
-            if (now - lastDlqRateSampleMs >= DLQ_ENQUEUE_RATE_WINDOW_MS) {
-                long total = retryQueue.getDlqEnqueuedTotal();
-                long enqueuedInWindow = Math.max(0L, total - lastDlqEnqueuedTotalAtSample);
-                lastDlqEnqueuedTotalAtSample = total;
-                lastDlqRateSampleMs = now;
-                dlqRateBacklogContribution =
-                        (int) Math.min(backpressureHighWatermark, enqueuedInWindow);
-            }
-            return dlqRateBacklogContribution;
         }
     }
 
