@@ -20,6 +20,7 @@ package org.apache.hugegraph.store.core.snapshot;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -44,6 +45,9 @@ import org.apache.hugegraph.store.business.BusinessHandlerImpl;
 import org.apache.hugegraph.store.consts.PoolNames;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Partition;
+import org.apache.hugegraph.store.meta.asynctask.AbstractAsyncTask;
+import org.apache.hugegraph.store.meta.asynctask.AsyncTask;
+import org.apache.hugegraph.store.meta.asynctask.AsyncTaskState;
 import org.apache.hugegraph.store.snapshot.HgSnapshotHandler;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
 import org.apache.hugegraph.store.util.HgStoreException;
@@ -353,6 +357,19 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
             // time to acquire the path lock and start waiting on the range lock.
             Thread other = awaitCompactionPoolWorkerBlockedInRangeLockWait();
             assertNotNull("dbCompaction task must be parked in the range lock wait", other);
+
+            // lock(path) must run before the range lock wait, so the path lock is genuinely
+            // in the doing state here - otherwise the InterruptedException handler's
+            // unlock(path) below would not actually be releasing anything it holds.
+            String pathBeforeInterrupt = businessHandler.getLockPath(partitionId);
+            AtomicInteger pathLockBeforeInterrupt =
+                    businessHandler.getPathLockState(pathBeforeInterrupt);
+            assertNotNull("path lock must have been initialized before the range lock wait",
+                           pathLockBeforeInterrupt);
+            assertEquals("path lock must be in the doing state while parked in the range " +
+                         "lock wait, proving lock(path) runs before it rather than after",
+                         BusinessHandler.doing, pathLockBeforeInterrupt.get());
+
             other.interrupt();
             // Give the interrupted task time to run its InterruptedException handling and
             // return.
@@ -454,15 +471,14 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
     }
 
     /**
-     * Test that cleanPartition() waits on compactionRangeLock around its actual async
-     * cleaning work, not just the synchronous CleanDataRequest/task-registration step that
-     * runs before Utils.runInThread() is submitted. Before the fix (addressing a PR review
-     * comment on #3164), the lock acquire/release lived outside runInThread's lambda,
-     * guarding only that synchronous submission rather than the real compaction/cleanup work
-     * that happens asynchronously afterward - so a snapshot save's checkpoint could still run
-     * concurrently with the actual data deletion. Confirms the async worker is found parked
-     * in rangeLock.tryLock() while a snapshot save holds the lock, proving the lock now spans
-     * the real cleanup call.
+     * Test that cleanPartition()'s trailing compactRange() call waits on compactionRangeLock,
+     * even though the delete/scan pass ahead of it does not. Per the PR review comment on
+     * #3164, the lock must NOT span the whole async cleanup - that scan can take minutes, and
+     * holding the range lock for that long would fail every onSnapshotSave on the partition
+     * with EBUSY for the duration. Only the actual compactRange() call (inside the private
+     * cleanPartition(Partition, Function) overload) is guarded. Confirms the async worker is
+     * found parked in rangeLock.tryLock() while a snapshot save holds the lock, proving
+     * compactRange() is still guarded even though the delete pass ahead of it is not.
      */
     @Test
     public void testCleanPartitionRespectsRangeLockDuringAsyncWork() throws InterruptedException {
@@ -480,9 +496,9 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
 
             Thread other = awaitPoolWorkerBlockedInRangeLockWait("JRaft-Closure-Executor-");
             assertNotNull("cleanPartition's async task must be parked waiting for the range " +
-                          "lock while a snapshot save holds it, proving the lock spans the " +
-                          "real cleanup work rather than only the synchronous " +
-                          "task-registration step",
+                          "lock at its trailing compactRange() call while a snapshot save " +
+                          "holds it, proving that call is still guarded even though the " +
+                          "delete/scan pass ahead of it is not",
                           other);
             other.interrupt();
             Thread.sleep(200);
@@ -493,19 +509,22 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
     }
 
     /**
-     * Test that cleanPartition() gives up and skips its cleanup pass, rather than running it
-     * concurrently with a snapshot save, when the range lock is still held after the
-     * configured wait - and that skipping does not release a lock it never acquired (the same
-     * unconditional-unlock class of bug fixed for dbCompaction()'s rangeLock, see
-     * testDbCompactionReleasesPathLockWhenInterruptedWaitingForRangeLock). Shortens
-     * compactionRangeLockWaitMillis so the test does not wait out the real production timeout.
+     * Test that cleanPartition() still completes its delete/scan pass and marks its async
+     * task SUCCESS even when the trailing compactRange() call gives up after the range lock
+     * is still held past the configured wait - per the PR review comment on #3164, a busy
+     * compaction step must be logged and skipped rather than dropping the whole one-shot
+     * cleanup. Also confirms skipping compactRange() does not release a lock it never
+     * acquired (the same unconditional-unlock class of bug fixed for dbCompaction()'s
+     * rangeLock, see testDbCompactionReleasesPathLockWhenInterruptedWaitingForRangeLock).
+     * Shortens compactionRangeLockWaitMillis so the test does not wait out the real
+     * production timeout.
      */
     @Test
-    public void testCleanPartitionSkipsWhenRangeLockStillHeldAfterWait()
+    public void testCleanPartitionSkipsCompactRangeWhenRangeLockStillHeldAfterWait()
             throws InterruptedException {
         BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
         int partitionId = 8;
-        createPartitionEngine(partitionId);
+        PartitionEngine partitionEngine = createPartitionEngine(partitionId);
         long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
         BusinessHandlerImpl.setCompactionRangeLockWaitMillis(200);
         try {
@@ -516,13 +535,23 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
                                            CleanType.CLEAN_TYPE_KEEP_RANGE);
 
             // cleanPartition() runs asynchronously via Utils.runInThread(); give it time to
-            // hit the shortened wait and skip.
+            // finish its (unlocked) delete pass, hit the shortened wait on compactRange(),
+            // skip it, and mark the async task SUCCESS.
             Thread.sleep(1000);
 
-            // The range lock must still belong to the snapshot save - cleanPartition skipping
-            // must not have released a lock it never acquired. Check from another thread since
-            // the lock is a ReentrantLock and the owning (main) thread could always re-acquire
-            // it.
+            List<AsyncTask> tasks =
+                    partitionEngine.getTaskManager().scanAsyncTasks(partitionId, "graph0");
+            assertEquals("exactly one CleanTask must have been recorded", 1, tasks.size());
+            assertEquals("cleanPartition's delete pass must succeed and mark its task " +
+                         "SUCCESS even though compactRange() was skipped - only the " +
+                         "compaction step is allowed to be skipped, not the whole cleanup",
+                         AsyncTaskState.SUCCESS,
+                         ((AbstractAsyncTask) tasks.get(0)).getState());
+
+            // The range lock must still belong to the snapshot save - skipping compactRange()
+            // must not have released a lock it never acquired. Check from another thread
+            // since the lock is a ReentrantLock and the owning (main) thread could always
+            // re-acquire it.
             AtomicBoolean concurrentResult = new AtomicBoolean();
             Thread other = new Thread(() -> concurrentResult.set(
                     businessHandler.tryLockCompactionRange(partitionId)));
@@ -532,6 +561,151 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
         } finally {
             businessHandler.unlockCompactionRange(partitionId);
             BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+        }
+    }
+
+    /**
+     * Test that a skipped cleanPartition() compactRange() pass is retried - per the user's
+     * follow-up request on the PR #3164 review thread, a bounded retry must be scheduled so
+     * the compaction is not silently dropped forever. Holds the range lock the whole time so
+     * the scheduled retry attempt also has to wait on it, and confirms a retry worker (running
+     * on the dedicated PoolNames.COMPACT_RETRY pool) is found parked in the same
+     * ReentrantLock#tryLock() wait the original attempt used - proving the retry actually ran
+     * and attempted compactRange() again, rather than the skip being a dead end.
+     */
+    @Test
+    public void testCleanPartitionCompactRangeRetryAttemptsAgainAfterSkip()
+            throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 10;
+        createPartitionEngine(partitionId);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        long originalRetryDelayMillis = BusinessHandlerImpl.getCleanPartitionCompactRetryDelayMillis();
+        int originalMaxRetries = BusinessHandlerImpl.getMaxCleanPartitionCompactRetries();
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(200);
+        BusinessHandlerImpl.setCleanPartitionCompactRetryDelayMillis(300);
+        try {
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.cleanPartition("graph0", partitionId, 0, 10,
+                                           CleanType.CLEAN_TYPE_KEEP_RANGE);
+
+            // First, the original async worker must hit the shortened wait and skip. Then,
+            // after the retry delay, the dedicated retry pool must attempt the lock again -
+            // give this up to 3s total (200ms wait + 300ms delay + generous margin).
+            Thread other = awaitPoolWorkerBlockedInRangeLockWait(PoolNames.COMPACT_RETRY, 3000);
+            assertNotNull("a scheduled retry must attempt compactRange() again while the " +
+                          "range lock is still held, proving the skipped compaction is not " +
+                          "simply dropped", other);
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+            BusinessHandlerImpl.setCleanPartitionCompactRetryDelayMillis(originalRetryDelayMillis);
+            BusinessHandlerImpl.setMaxCleanPartitionCompactRetries(originalMaxRetries);
+        }
+    }
+
+    /**
+     * Test that the compactRange() retry is bounded rather than retrying forever - per the
+     * user's explicit request for a "bounded retry". Shrinks maxCleanPartitionCompactRetries
+     * to 1 so only a single retry attempt is scheduled after the original skip; holds the
+     * range lock throughout so every attempt (original + the one retry) is forced to skip.
+     * Confirms the one retry attempt happens (a worker is found parked on
+     * PoolNames.COMPACT_RETRY), then confirms no further retry is ever scheduled by checking
+     * no such worker reappears after that attempt also times out and gives up.
+     */
+    @Test
+    public void testCleanPartitionCompactRangeRetryStopsAfterMaxAttempts()
+            throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 11;
+        createPartitionEngine(partitionId);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        long originalRetryDelayMillis = BusinessHandlerImpl.getCleanPartitionCompactRetryDelayMillis();
+        int originalMaxRetries = BusinessHandlerImpl.getMaxCleanPartitionCompactRetries();
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(200);
+        BusinessHandlerImpl.setCleanPartitionCompactRetryDelayMillis(300);
+        BusinessHandlerImpl.setMaxCleanPartitionCompactRetries(1);
+        try {
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.cleanPartition("graph0", partitionId, 0, 10,
+                                           CleanType.CLEAN_TYPE_KEEP_RANGE);
+
+            Thread firstRetry =
+                    awaitPoolWorkerBlockedInRangeLockWait(PoolNames.COMPACT_RETRY, 3000);
+            assertNotNull("the single allowed retry attempt must still happen", firstRetry);
+
+            // Wait for that one retry attempt to finish timing out on its own 200ms wait and
+            // abandon (i.e. leave the TIMED_WAITING/tryLock state), so the next poll below
+            // cannot mistake this same still-in-flight attempt for a second one.
+            long deadline = System.currentTimeMillis() + 3000;
+            while (isBlockedInRangeLockTryLock(firstRetry) &&
+                   System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+
+            // Then wait well past another retry-delay window - since
+            // maxCleanPartitionCompactRetries is 1, no second retry attempt must ever be
+            // scheduled, so no new worker should appear parked on the range lock.
+            Thread secondRetry =
+                    awaitPoolWorkerBlockedInRangeLockWait(PoolNames.COMPACT_RETRY, 1500);
+            assertNull("a bounded retry must give up after maxCleanPartitionCompactRetries " +
+                       "attempts instead of retrying forever", secondRetry);
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+            BusinessHandlerImpl.setCleanPartitionCompactRetryDelayMillis(originalRetryDelayMillis);
+            BusinessHandlerImpl.setMaxCleanPartitionCompactRetries(originalMaxRetries);
+        }
+    }
+
+    /**
+     * Test that a scheduled compactRange() retry abandons itself if the partition has since
+     * been destroyed, rather than reaching into a torn-down partition. Holds the range lock so
+     * the original attempt skips and schedules a retry, then destroys the partition engine
+     * before the retry delay elapses. Confirms the retry never even attempts the lock (no
+     * worker parked on PoolNames.COMPACT_RETRY), since the abandon check runs before the
+     * tryLock() call.
+     *
+     * <p>The retry delay (1500ms) is set well beyond both the initial skip's own wait (200ms)
+     * and the sleep before destroy (600ms), so the destroy is guaranteed to land in the gap
+     * between "skip has happened, retry is scheduled" and "retry fires" regardless of scheduler
+     * jitter under load - avoiding the flaky window where a too-short delay let the retry fire
+     * (and start its own tryLock wait) before the destroy/abandon-check could beat it there.</p>
+     */
+    @Test
+    public void testCleanPartitionCompactRangeRetryAbandonsWhenPartitionDestroyed()
+            throws InterruptedException {
+        BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
+        int partitionId = 12;
+        createPartitionEngine(partitionId);
+        long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
+        long originalRetryDelayMillis = BusinessHandlerImpl.getCleanPartitionCompactRetryDelayMillis();
+        BusinessHandlerImpl.setCompactionRangeLockWaitMillis(200);
+        BusinessHandlerImpl.setCleanPartitionCompactRetryDelayMillis(1500);
+        try {
+            assertTrue("snapshot save must reserve the range lock",
+                       businessHandler.tryLockCompactionRange(partitionId));
+
+            businessHandler.cleanPartition("graph0", partitionId, 0, 10,
+                                           CleanType.CLEAN_TYPE_KEEP_RANGE);
+
+            // Give the original attempt time to hit its shortened wait and skip, scheduling a
+            // retry ~1500ms out, then destroy the partition well before that retry fires.
+            Thread.sleep(600);
+            getStoreEngine().destroyPartitionEngine(partitionId, List.of("graph0"));
+
+            Thread retry = awaitPoolWorkerBlockedInRangeLockWait(PoolNames.COMPACT_RETRY, 3000);
+            assertNull("a retry must abandon itself once the partition no longer exists, " +
+                       "rather than attempting compactRange() on a torn-down partition",
+                       retry);
+        } finally {
+            businessHandler.unlockCompactionRange(partitionId);
+            BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
+            BusinessHandlerImpl.setCleanPartitionCompactRetryDelayMillis(originalRetryDelayMillis);
         }
     }
 
@@ -650,8 +824,19 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
      */
     private static Thread awaitPoolWorkerBlockedInRangeLockWait(String threadNamePrefix)
             throws InterruptedException {
+        return awaitPoolWorkerBlockedInRangeLockWait(threadNamePrefix, 5000);
+    }
+
+    /**
+     * Same as {@link #awaitPoolWorkerBlockedInRangeLockWait(String)}, but with a caller-chosen
+     * timeout - used to assert the *absence* of a blocked worker (e.g. after a bounded retry
+     * has exhausted its attempts) without waiting out the default 5s.
+     */
+    private static Thread awaitPoolWorkerBlockedInRangeLockWait(String threadNamePrefix,
+                                                                 long maxWaitMillis)
+            throws InterruptedException {
         long start = System.currentTimeMillis();
-        while (System.currentTimeMillis() - start < 5000) {
+        while (System.currentTimeMillis() - start < maxWaitMillis) {
             for (Thread t : Thread.getAllStackTraces().keySet()) {
                 if (t.getName().startsWith(threadNamePrefix) &&
                     t.getState() == Thread.State.TIMED_WAITING &&

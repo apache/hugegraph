@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.raftcore;
 
+import org.apache.hugegraph.store.core.raft.PartitionStateMachineTest;
 import org.apache.hugegraph.store.core.snapshot.SnapshotHandlerTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
@@ -25,7 +26,8 @@ import org.junit.runners.Suite;
 @Suite.SuiteClasses({
         BytesCarrierTest.class,
         ZeroByteStringHelperTest.class,
-        SnapshotHandlerTest.class
+        SnapshotHandlerTest.class,
+        PartitionStateMachineTest.class
 })
 public class RaftSuiteTest {
 
