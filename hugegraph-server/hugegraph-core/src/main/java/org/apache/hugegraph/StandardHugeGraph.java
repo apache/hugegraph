@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.analyzer.Analyzer;
@@ -58,6 +59,7 @@ import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.raft.RaftBackendStoreProvider;
 import org.apache.hugegraph.backend.store.raft.RaftGroupManager;
 import org.apache.hugegraph.backend.store.ram.RamTable;
+import org.apache.hugegraph.backend.tx.GraphIndexTransaction;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.backend.tx.ISchemaTransaction;
 import org.apache.hugegraph.config.CoreOptions;
@@ -705,6 +707,11 @@ public class StandardHugeGraph implements HugeGraph {
         LOG.debug("Loading text analyzer '{}' with mode '{}' for graph '{}'",
                   name, mode, this.spaceGraphName());
         return AnalyzerFactory.analyzer(name, mode);
+    }
+
+    @Override
+    public Predicate<Object> searchPredicate(String text) {
+        return GraphIndexTransaction.searchPredicate(this.analyzer(), text);
     }
 
     protected void reloadRamtable() {
