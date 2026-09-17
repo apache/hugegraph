@@ -27,6 +27,7 @@ import org.apache.hugegraph.core.RoleElectionStateMachineTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
 import org.apache.hugegraph.meta.MetaManagerSchemaCacheClearEventTest;
 import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
+import org.apache.hugegraph.store.client.OrderedScanSecurityTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.AccessLogFilterTest;
@@ -158,6 +159,7 @@ import org.junit.runners.Suite;
         QueryResultsTest.class,
         RangeTest.class,
         SecurityManagerTest.class,
+        OrderedScanSecurityTest.class,
         RolePermissionTest.class,
         ExceptionTest.class,
         GraphManagerAdminInitTest.class,
