@@ -24,6 +24,7 @@ import static org.apache.hugegraph.space.GraphSpace.DEFAULT_GRAPH_SPACE_SERVICE_
 import java.io.IOException;
 import java.io.StringWriter;
 import java.text.ParseException;
+import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
@@ -38,6 +39,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.StatusRuntimeException;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.MapConfiguration;
@@ -89,8 +94,10 @@ import org.apache.hugegraph.metrics.ServerReporter;
 import org.apache.hugegraph.pd.client.DiscoveryClientImpl;
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.client.PDConfig;
+import org.apache.hugegraph.pd.client.interceptor.Authentication;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.PDGrpc;
 import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfo;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfos;
@@ -233,6 +240,19 @@ public final class GraphManager {
             this.authManager = this.authenticator.authManager();
         } else {
             this.authManager = null;
+        }
+
+        /*
+         * With PD, opening the first hstore graph on a cold start (a local
+         * conf/graphs one here, the system graph in loadMetaFromPD()) needs
+         * PD to have pd.initial-store-count active stores, and the store
+         * client gives up after a fixed 10 retries (about 38 s). Stores
+         * usually register later than that and the server exits 1, so wait
+         * for PD to report the cluster ready first (issue #3203). A cluster
+         * that already has partitions is not waited for at all.
+         */
+        if (conf.get(ServerOptions.USE_PD)) {
+            this.waitForActiveStores();
         }
 
         // load graphs
@@ -480,6 +500,188 @@ public final class GraphManager {
         graph.createTime(timeStamp);
         graph.updateTime(timeStamp);
         return graph;
+    }
+
+    private void waitForActiveStores() {
+        int timeout = this.conf.get(ServerOptions.PD_STORES_WAIT_TIMEOUT);
+        if (timeout <= 0) {
+            return;
+        }
+        // the same credentials the PD clients of this server use
+        PDConfig pdConfig = PDConfig.of(this.pdPeers);
+        pdConfig.setAuthority(PdMetaDriver.PDAuthConfig.service(),
+                              PdMetaDriver.PDAuthConfig.token());
+        try (PdReadinessProbe probe = new PdReadinessProbe(pdConfig)) {
+            waitForCluster(probe, timeout, STORES_WAIT_POLL_SECONDS);
+        }
+    }
+
+    public static final int STORES_WAIT_POLL_SECONDS = 5;
+
+    /**
+     * One answer of a readiness probe: the cluster is ready (already has
+     * partitions, or PD reports Cluster_OK), not ready yet (with PD's own
+     * message), or PD could not be asked within the given deadline.
+     */
+    public enum Readiness {
+        READY, NOT_READY, UNREACHABLE
+    }
+
+    public interface ReadinessProbe {
+
+        /**
+         * Ask PD once, giving up after {@code deadlineMillis}.
+         *
+         * @return the readiness and a short message for the log
+         */
+        Map.Entry<Readiness, String> probe(long deadlineMillis);
+    }
+
+    /**
+     * Poll {@code probe} until it reports READY, at most
+     * {@code timeoutSeconds}. Every call gets a deadline bounded by the
+     * remaining budget, so the whole wait never exceeds the timeout by more
+     * than one poll interval, even when PD is black-holed.
+     *
+     * @return the number of seconds waited
+     * @throws HugeException when the timeout passes first
+     */
+    public static long waitForCluster(ReadinessProbe probe, long timeoutSeconds,
+                                      long pollSeconds) {
+        long start = System.currentTimeMillis();
+        long deadline = start + timeoutSeconds * 1000L;
+        String last = "";
+        while (true) {
+            long left = deadline - System.currentTimeMillis();
+            if (left <= 0) {
+                throw new HugeException(
+                        "Timed out after %ds waiting for the PD cluster to " +
+                        "be ready (%s); start the stores first or raise %s",
+                        timeoutSeconds, last,
+                        ServerOptions.PD_STORES_WAIT_TIMEOUT.name());
+            }
+            Map.Entry<Readiness, String> answer =
+                    probe.probe(Math.min(left, pollSeconds * 1000L));
+            last = answer.getValue();
+            if (answer.getKey() == Readiness.READY) {
+                break;
+            }
+            LOG.info("Waiting for the PD cluster: {} ({}s left)", last,
+                     (deadline - System.currentTimeMillis()) / 1000);
+            long sleep = Math.min(pollSeconds * 1000L,
+                                  deadline - System.currentTimeMillis());
+            if (sleep > 0) {
+                try {
+                    Thread.sleep(sleep);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new HugeException("Interrupted while waiting for " +
+                                            "the PD cluster", e);
+                }
+            }
+        }
+        long waited = (System.currentTimeMillis() - start) / 1000;
+        LOG.info("PD cluster ready after {}s: {}", waited, last);
+        return waited;
+    }
+
+    /**
+     * A one-shot gRPC probe of PD: one plaintext channel per peer, no
+     * watchers, closed when the wait is over. Each call carries its own
+     * deadline. Any PD member answers, since PD forwards to its leader.
+     */
+    static final class PdReadinessProbe implements ReadinessProbe, AutoCloseable {
+
+        private final List<String> peers;
+        private final PDConfig config;
+        private final Map<String, ManagedChannel> channels = new HashMap<>();
+        private int next = 0;
+
+        PdReadinessProbe(PDConfig config) {
+            this.peers = Arrays.stream(config.getServerHost().split(","))
+                               .map(String::trim)
+                               .filter(p -> !p.isEmpty())
+                               .collect(Collectors.toList());
+            E.checkArgument(!this.peers.isEmpty(),
+                            "pd.peers must not be empty");
+            this.config = config;
+        }
+
+        private PDGrpc.PDBlockingStub stub(String peer, long deadlineMillis) {
+            ManagedChannel channel = this.channels.computeIfAbsent(
+                    peer, p -> ManagedChannelBuilder.forTarget(p)
+                                                    .usePlaintext().build());
+            PDGrpc.PDBlockingStub stub = PDGrpc.newBlockingStub(channel)
+                                               .withMaxInboundMessageSize(
+                                                       PDConfig.getInboundMessageSize())
+                                               .withDeadlineAfter(deadlineMillis,
+                                                                  TimeUnit.MILLISECONDS);
+            // PDConfig.setAuthority() keeps the user name empty when PD
+            // authentication is off; AbstractClient.setBlockingParams() adds
+            // the interceptor the same way
+            if (!StringUtils.isEmpty(this.config.getUserName())) {
+                stub = stub.withInterceptors(new Authentication(
+                        this.config.getUserName(), this.config.getAuthority()));
+            }
+            return stub;
+        }
+
+        @Override
+        public Map.Entry<Readiness, String> probe(long deadlineMillis) {
+            // rotate through the peers so one dead PD does not eat every poll
+            String peer = this.peers.get(this.next++ % this.peers.size());
+            try {
+                PDGrpc.PDBlockingStub stub = this.stub(peer, deadlineMillis);
+                Pdpb.RequestHeader header = Pdpb.RequestHeader.getDefaultInstance();
+                // an initialised cluster already has partitions: nothing to
+                // wait for, even if some store is down at the moment
+                Pdpb.QueryPartitionsResponse parts = stub.queryPartitions(
+                        Pdpb.QueryPartitionsRequest.newBuilder()
+                            .setHeader(header)
+                            .setQuery(Metapb.PartitionQuery.getDefaultInstance())
+                            .build());
+                if (parts.getHeader().hasError() &&
+                    parts.getHeader().getError().getType() != Pdpb.ErrorType.OK) {
+                    return entry(Readiness.UNREACHABLE, peer + ": " +
+                                 parts.getHeader().getError().getMessage());
+                }
+                if (parts.getPartitionsCount() > 0) {
+                    return entry(Readiness.READY, "cluster already has " +
+                                 parts.getPartitionsCount() + " partition(s)");
+                }
+                // first boot: PD's own readiness (pd.initial-store-count
+                // active stores and a majority in every shard group)
+                Pdpb.GetClusterStatsResponse stats = stub.getClusterStats(
+                        Pdpb.GetClusterStatsRequest.newBuilder()
+                            .setHeader(header).build());
+                if (stats.getHeader().hasError() &&
+                    stats.getHeader().getError().getType() != Pdpb.ErrorType.OK) {
+                    return entry(Readiness.UNREACHABLE, peer + ": " +
+                                 stats.getHeader().getError().getMessage());
+                }
+                Metapb.ClusterStats cluster = stats.getCluster();
+                if (cluster.getState() == Metapb.ClusterState.Cluster_OK) {
+                    return entry(Readiness.READY, "PD reports Cluster_OK");
+                }
+                return entry(Readiness.NOT_READY, cluster.getState() + ": " +
+                             cluster.getMessage());
+            } catch (StatusRuntimeException e) {
+                return entry(Readiness.UNREACHABLE,
+                             peer + ": " + e.getStatus().getCode());
+            }
+        }
+
+        private static Map.Entry<Readiness, String> entry(Readiness r, String m) {
+            return new AbstractMap.SimpleImmutableEntry<>(r, m);
+        }
+
+        @Override
+        public void close() {
+            for (ManagedChannel channel : this.channels.values()) {
+                channel.shutdownNow();
+            }
+            this.channels.clear();
+        }
     }
 
     public void init() {
