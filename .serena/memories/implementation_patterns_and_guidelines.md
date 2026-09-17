@@ -20,7 +20,7 @@
 ## gRPC Protocol
 - PD protos: `hugegraph-pd/hg-pd-grpc/src/main/proto/`
 - Store protos: `hugegraph-store/hg-store-grpc/src/main/proto/`
-- After `.proto` changes: `mvn clean compile` → `target/generated-sources/protobuf/`
+- After `.proto` changes: `mvn clean compile`; PD/Store gRPC POMs output to each module's `src/main/java/`.
 
 ## Query Languages
 - **Gremlin**: Native TinkerPop 3.5.1
@@ -36,10 +36,10 @@
 - **Backends in CI**: memory, rocksdb, hbase (matrix)
 - **Single test class**: `mvn test -pl hugegraph-server/hugegraph-test -am -P core-test,memory -Dtest=ClassName`
 - TinkerPop tests: only on `release-*`/`test-*` branches
-- Raft tests: only on `test*`/`raft*` branches
+- Server Raft API tests are branch-gated in `server-ci.yml`; Store raft-core tests run in normal `pd-store-ci.yml` CI.
 
 ## Docker
-- Single-node: `docker/docker-compose.yml` (bridge network, pd+store+server)
+- Standalone: `docker/docker-compose.yml` (bridge network, Server + Hubble)
 - Cluster: `docker/docker-compose-3pd-3store-3server.yml`
 - Container logs: stdout-based
 
