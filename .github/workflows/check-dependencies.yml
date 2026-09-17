@@ -4,8 +4,19 @@ name: "3rd-party"
 on:
   push:
     branches:
-      - /^release-.*$/
+      - 'release-*'
   pull_request:
+    # Keep source/resources and shared build inputs; skip named documentation files.
+    paths:
+      - '**/pom.xml'
+      - '.mvn/**'
+      - '.github/configs/**'
+      - 'install-dist/**'
+      - '**/*.jar'
+      - '.github/workflows/check-dependencies.yml'
+      - '!**/README*'
+      - '!**/AGENTS.md'
+      - '!**/CLAUDE.md'
 
 permissions:
   contents: read

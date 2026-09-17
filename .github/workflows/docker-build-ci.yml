@@ -23,20 +23,26 @@ on:
       - master
       - 'release-*'
   pull_request:
+    # Keep source/resources and shared build inputs; skip named documentation files.
     paths:
-      - '.github/workflows/docker-build-ci.yml'
-      - 'docker/bake.hcl'
-      - '.dockerignore'
-      - '.mvn/**'
       - 'pom.xml'
+      - '.mvn/**'
+      - 'style/**'
+      - '.editorconfig'
+      - '.github/configs/**'
       - 'hugegraph-commons/**'
-      - 'hugegraph-cluster-test/**'
+      - 'hugegraph-struct/**'
       - 'hugegraph-pd/**'
       - 'hugegraph-store/**'
-      - 'hugegraph-struct/**'
       - 'hugegraph-server/**'
-      - 'docker/hbase/**'
+      - 'hugegraph-cluster-test/**'
       - 'install-dist/**'
+      - 'docker/**'
+      - '.dockerignore'
+      - '.github/workflows/docker-build-ci.yml'
+      - '!**/README*'
+      - '!**/AGENTS.md'
+      - '!**/CLAUDE.md'
 
 jobs:
   docker-bake-check:

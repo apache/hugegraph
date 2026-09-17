@@ -7,6 +7,24 @@ on:
       - 'release-*'
       - 'test-*'
   pull_request:
+    # Keep source/resources and shared build inputs; skip named documentation files.
+    paths:
+      - 'pom.xml'
+      - '.mvn/**'
+      - 'style/**'
+      - '.editorconfig'
+      - '.github/configs/**'
+      - 'hugegraph-commons/**'
+      - 'hugegraph-struct/**'
+      - 'hugegraph-pd/**'
+      - 'hugegraph-store/**'
+      - 'hugegraph-server/**'
+      - '.github/workflows/pd-store-ci.yml'
+      - 'docker/**'
+      - 'install-dist/**'
+      - '!**/README*'
+      - '!**/AGENTS.md'
+      - '!**/CLAUDE.md'
 
 # TODO: consider merge to one ci.yml file
 jobs:

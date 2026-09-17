@@ -7,6 +7,24 @@ on:
       - 'release-*'
       - 'test-*'
   pull_request:
+    # Keep source/resources and shared build inputs; skip named documentation files.
+    paths:
+      - 'pom.xml'
+      - '.mvn/**'
+      - 'style/**'
+      - '.editorconfig'
+      - '.github/configs/**'
+      - 'hugegraph-commons/**'
+      - 'hugegraph-struct/**'
+      - 'hugegraph-pd/**'
+      - 'hugegraph-store/**'
+      - 'hugegraph-server/**'
+      - 'hugegraph-cluster-test/**'
+      - 'install-dist/**'
+      - '.github/workflows/cluster-test-ci.yml'
+      - '!**/README*'
+      - '!**/AGENTS.md'
+      - '!**/CLAUDE.md'
 
 jobs:
   cluster-test:
