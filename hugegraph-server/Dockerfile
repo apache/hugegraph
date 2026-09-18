@@ -70,6 +70,7 @@ RUN sed -i "s/^restserver.url.*$/restserver.url=http:\/\/0.0.0.0:8080/g" ./conf/
 COPY hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
 COPY hugegraph-server/hugegraph-dist/docker/scripts/detect-storage.groovy ./scripts
 COPY hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
+COPY hugegraph-server/hugegraph-dist/docker/props.awk .
 RUN chmod 755 ./docker-entrypoint.sh
 
 EXPOSE 8080

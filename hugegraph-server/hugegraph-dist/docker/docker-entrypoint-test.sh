@@ -23,6 +23,7 @@ trap 'rm -rf "${TEST_HOME}"' EXIT
 
 mkdir -p "${TEST_HOME}/bin" "${TEST_HOME}/conf/graphs" "${TEST_HOME}/docker"
 cp "${SCRIPT_DIR}/docker-entrypoint.sh" "${TEST_HOME}/docker-entrypoint.sh"
+cp "${SCRIPT_DIR}/props.awk" "${TEST_HOME}/props.awk"
 touch "${TEST_HOME}/docker/init_complete"
 
 cat > "${TEST_HOME}/conf/rest-server.properties" <<'EOF'
