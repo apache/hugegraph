@@ -575,9 +575,29 @@ public class HugeTask<V> extends FutureTask<V> {
 
         if (this.result != null) {
             byte[] bytes = StringEncoding.compress(this.result);
-            checkPropertySize(bytes.length, P.RESULT);
-            list.add(P.RESULT);
-            list.add(bytes);
+            int chunkSize = CoreOptions.instance().get(CoreOptions.TASK_RESULT_CHUNK_SIZE);
+
+            if (chunkSize > 0 && bytes.length > chunkSize) {
+                // Split into chunks
+                int numChunks = (int) Math.ceil((double) bytes.length / chunkSize);
+                for (int i = 0; i < numChunks; i++) {
+                    int start = i * chunkSize;
+                    int end = Math.min(start + chunkSize, bytes.length);
+                    byte[] chunk = new byte[end - start];
+                    System.arraycopy(bytes, start, chunk, 0, end - start);
+                    checkPropertySize(chunk.length, P.chunkKey(i));
+                    list.add(P.chunkKey(i));
+                    list.add(chunk);
+                }
+                // Write chunk count
+                list.add(P.RESULT_CHUNK_COUNT);
+                list.add(String.valueOf(numChunks));
+            } else {
+                // Single property (original behavior)
+                checkPropertySize(bytes.length, P.RESULT);
+                list.add(P.RESULT);
+                list.add(bytes);
+            }
         }
 
         if (this.server != null) {
@@ -859,8 +879,31 @@ public class HugeTask<V> extends FutureTask<V> {
         public static final String RETRIES = "~task_retries";
         public static final String INPUT = "~task_input";
         public static final String RESULT = "~task_result";
+        public static final String RESULT_CHUNK_COUNT = "~task_result_chunk_count";
         public static final String DEPENDENCIES = "~task_dependencies";
         public static final String SERVER = "~task_server";
+
+        /**
+         * Get the chunk key for a given chunk index.
+         * @param index the chunk index, or -1 for the non-chunked result key
+         * @return the property key for the chunk
+         */
+        public static String chunkKey(int index) {
+            if (index < 0) {
+                return RESULT;
+            }
+            return RESULT + "_" + index;
+        }
+
+        /**
+         * Check if a property key is a chunked result property.
+         * @param key the property key to check
+         * @return true if the key matches the chunk pattern
+         */
+        public static boolean isChunkedProperty(String key) {
+            return key.startsWith(RESULT + "_") && key.length() > RESULT.length() + 1 &&
+                   key.substring(RESULT.length() + 1).matches("\\d+");
+        }
 
         private static final String[] METADATA_PROPERTIES = new String[]{
                 TYPE, NAME, CALLABLE, DESCRIPTION, CONTEXT, STATUS, PROGRESS,
