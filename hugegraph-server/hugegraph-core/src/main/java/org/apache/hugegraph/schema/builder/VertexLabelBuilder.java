@@ -512,6 +512,13 @@ public class VertexLabelBuilder extends AbstractBuilder implements VertexLabel.B
                             "The primary key '%s' of vertex label '%s' " +
                             "must be contained in properties: %s",
                             key, this.name, this.properties);
+            // A primary key becomes part of the vertex id through
+            // LongEncoding/NumericUtil, which is lossy for a decimal
+            // (fractions collapse into a double, uint256 overflows a long)
+            PropertyKey propertyKey = this.graph().propertyKey(key);
+            E.checkArgument(!propertyKey.dataType().isDecimal(),
+                            "The primary key '%s' of vertex label '%s' " +
+                            "can't be a decimal property", key, this.name);
         }
     }
 

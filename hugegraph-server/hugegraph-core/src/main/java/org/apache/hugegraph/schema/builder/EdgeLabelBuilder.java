@@ -602,6 +602,10 @@ public class EdgeLabelBuilder extends AbstractBuilder
                             "The sort key '%s' must be contained in " +
                             "properties '%s' for edge label '%s'",
                             key, this.name, this.properties);
+            PropertyKey propertyKey = this.graph().propertyKey(key);
+            E.checkArgument(!propertyKey.dataType().isDecimal(),
+                            "The sort key '%s' of edge label '%s' can't " +
+                            "be a decimal property", key, this.name);
         }
     }
 

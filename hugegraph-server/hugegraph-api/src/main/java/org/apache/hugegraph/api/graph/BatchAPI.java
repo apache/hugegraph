@@ -28,6 +28,7 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.define.Checkable;
 import org.apache.hugegraph.define.UpdateStrategy;
+import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.metrics.MetricsUtil;
 import org.apache.hugegraph.server.RestServer;
 import org.apache.hugegraph.structure.HugeElement;
@@ -108,6 +109,18 @@ public class BatchAPI extends API {
 
     protected void updateExistElement(JsonElement oldElement, JsonElement newElement,
                                       Map<String, UpdateStrategy> strategies) {
+        this.updateExistElement(null, oldElement, newElement, strategies);
+    }
+
+    /**
+     * Combine two JSON elements of the same id within one batch request. With
+     * a graph the raw JSON values are first normalised to the property key's
+     * data type (a decimal or a date arrives as a string), so the strategy
+     * sees typed values on both sides.
+     */
+    protected void updateExistElement(HugeGraph g, JsonElement oldElement,
+                                      JsonElement newElement,
+                                      Map<String, UpdateStrategy> strategies) {
         if (oldElement == null) {
             return;
         }
@@ -118,9 +131,15 @@ public class BatchAPI extends API {
             UpdateStrategy updateStrategy = kv.getValue();
             if (oldElement.properties.get(key) != null &&
                 newElement.properties.get(key) != null) {
-                Object value = updateStrategy.checkAndUpdateProperty(
-                        oldElement.properties.get(key),
-                        newElement.properties.get(key));
+                Object oldValue = oldElement.properties.get(key);
+                Object newValue = newElement.properties.get(key);
+                if (g != null) {
+                    PropertyKey propertyKey = g.propertyKey(key);
+                    oldValue = propertyKey.validValueOrThrow(oldValue);
+                    newValue = propertyKey.validValueOrThrow(newValue);
+                }
+                Object value = updateStrategy.checkAndUpdateProperty(oldValue,
+                                                                     newValue);
                 newElement.properties.put(key, value);
             } else if (oldElement.properties.get(key) != null &&
                        newElement.properties.get(key) == null) {
@@ -142,10 +161,13 @@ public class BatchAPI extends API {
             UpdateStrategy updateStrategy = kv.getValue();
             if (oldElement.property(key).isPresent() &&
                 newElement.properties.get(key) != null) {
+                PropertyKey propertyKey = g.propertyKey(key);
+                // The stored value is typed; normalise the JSON one to match
+                Object newValue = propertyKey.validValueOrThrow(
+                                  newElement.properties.get(key));
                 Object value = updateStrategy.checkAndUpdateProperty(
-                        oldElement.property(key).value(),
-                        newElement.properties.get(key));
-                value = g.propertyKey(key).validValueOrThrow(value);
+                        oldElement.property(key).value(), newValue);
+                value = propertyKey.validValueOrThrow(value);
                 newElement.properties.put(key, value);
             } else if (oldElement.property(key).isPresent() &&
                        newElement.properties.get(key) == null) {

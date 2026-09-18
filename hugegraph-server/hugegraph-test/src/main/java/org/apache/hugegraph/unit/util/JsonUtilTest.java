@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.unit.util;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
@@ -54,6 +55,8 @@ import org.apache.hugegraph.util.collection.CollectionFactory;
 import org.apache.tinkerpop.shaded.jackson.core.type.TypeReference;
 import org.eclipse.collections.api.map.primitive.MutableIntObjectMap;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableMap;
 import org.mockito.Mockito;
 
 import com.google.common.collect.ImmutableList;
@@ -315,5 +318,28 @@ public class JsonUtilTest extends BaseUnitTest {
         };
         Assert.assertEquals(ImmutableList.of(1, 2, 3),
                             JsonUtil.fromJson(json, typeRef));
+    }
+
+    @Test
+    public void testSerializeBigDecimal() {
+        // decimals travel as plain strings, never as JSON numbers
+        BigDecimal decimal = new BigDecimal("1e21");
+        Assert.assertEquals("\"1000000000000000000000\"",
+                            JsonUtil.toJson(decimal));
+        Assert.assertEquals("\"0.000000000000000001\"",
+                            JsonUtil.toJson(new BigDecimal("1E-18")));
+        Assert.assertEquals("\"-1.50\"",
+                            JsonUtil.toJson(new BigDecimal("-1.50")));
+        Assert.assertEquals("{\"balance\":\"1000000000000000000000\"}",
+                            JsonUtil.toJson(ImmutableMap.of("balance", decimal)));
+
+        // both a string and a number literal are accepted on the way in
+        Assert.assertEquals(new BigDecimal("1.5"),
+                            JsonUtil.fromJson("\"1.5\"", BigDecimal.class));
+        Assert.assertEquals(new BigDecimal("1.5"),
+                            JsonUtil.fromJson("1.5", BigDecimal.class));
+        Assert.assertEquals(new BigDecimal("1000000000000000000000"),
+                            JsonUtil.fromJson("1000000000000000000000",
+                                              BigDecimal.class));
     }
 }

@@ -19,6 +19,7 @@ package org.apache.hugegraph.io;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -183,6 +184,10 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
 
         module.addSerializer(Blob.class, new BlobSerializer());
         module.addDeserializer(Blob.class, new BlobDeserializer());
+
+        // Decimals travel as strings: JSON numbers are doubles to most clients
+        module.addSerializer(BigDecimal.class, new BigDecimalSerializer());
+        module.addDeserializer(BigDecimal.class, new BigDecimalDeserializer());
     }
 
     public static void registerIdSerializers(SimpleModule module) {
@@ -954,6 +959,58 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 throws IOException {
             byte[] bytes = jsonParser.getBinaryValue();
             return Blob.wrap(bytes);
+        }
+    }
+
+    private static class BigDecimalSerializer extends StdSerializer<BigDecimal> {
+
+        public BigDecimalSerializer() {
+            super(BigDecimal.class);
+        }
+
+        @Override
+        public void serialize(BigDecimal decimal, JsonGenerator jsonGenerator,
+                              SerializerProvider provider) throws IOException {
+            jsonGenerator.writeString(decimal.toPlainString());
+        }
+
+        @Override
+        public void serializeWithType(BigDecimal decimal,
+                                      JsonGenerator jsonGenerator,
+                                      SerializerProvider provider,
+                                      TypeSerializer typeSer)
+                throws IOException {
+            /*
+             * The typed GraphSON mappers (v2/v3) call this variant and
+             * StdSerializer does not implement it. Keep the type prefix so
+             * that the value stays "gx:BigDecimal", but carry the plain
+             * string inside it: a JSON number would be read as a double by
+             * most clients, which is what this type exists to avoid.
+             */
+            WritableTypeId typeId = typeSer.typeId(decimal,
+                                                   JsonToken.VALUE_STRING);
+            typeSer.writeTypePrefix(jsonGenerator, typeId);
+            this.serialize(decimal, jsonGenerator, provider);
+            typeSer.writeTypeSuffix(jsonGenerator, typeId);
+        }
+    }
+
+    private static class BigDecimalDeserializer extends StdDeserializer<BigDecimal> {
+
+        public BigDecimalDeserializer() {
+            super(BigDecimal.class);
+        }
+
+        @Override
+        public BigDecimal deserialize(JsonParser jsonParser,
+                                      DeserializationContext ctxt)
+                throws IOException {
+            JsonToken token = jsonParser.getCurrentToken();
+            if (token == JsonToken.VALUE_NUMBER_INT ||
+                token == JsonToken.VALUE_NUMBER_FLOAT) {
+                return jsonParser.getDecimalValue();
+            }
+            return new BigDecimal(jsonParser.getText().trim());
         }
     }
 }

@@ -336,6 +336,42 @@ public class VertexLabelCoreTest extends SchemaCoreTest {
     }
 
     @Test
+    public void testAddVertexLabelWithDecimalPrimaryKey() {
+        super.initPropertyKeys();
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("balance").asDecimal().create();
+
+        // a decimal cannot be part of the vertex id: LongEncoding/NumericUtil
+        // collapse fractions into a double and overflow a long on uint256
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.vertexLabel("account")
+                  .properties("balance", "name")
+                  .primaryKeys("balance")
+                  .create();
+        }, e -> {
+            Assert.assertContains("can't be a decimal property",
+                                  e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.vertexLabel("account")
+                  .properties("name", "balance")
+                  .primaryKeys("name", "balance")
+                  .create();
+        }, e -> {
+            Assert.assertContains("can't be a decimal property",
+                                  e.getMessage());
+        });
+        Assert.assertFalse(graph().existsVertexLabel("account"));
+
+        // as a plain property next to a text primary key it is fine
+        VertexLabel account = schema.vertexLabel("account")
+                                    .properties("name", "balance")
+                                    .primaryKeys("name")
+                                    .create();
+        Assert.assertEquals(1, account.primaryKeys().size());
+    }
+
+    @Test
     public void testAddVertexLabelWith2PrimaryKey() {
         super.initPropertyKeys();
         SchemaManager schema = graph().schema();
