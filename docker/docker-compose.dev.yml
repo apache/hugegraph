@@ -30,25 +30,6 @@ services:
     pull_policy: build
     build:
       context: ..
-      dockerfile: ${HG_STORE_DOCKERFILE:-hugegraph-store/Dockerfile}
-    container_name: hg-store
-    hostname: store
-    restart: unless-stopped
-    networks: [hg-net]
-    depends_on:
-      pd:
-        condition: service_healthy
-    environment:
-      HG_STORE_PD_ADDRESS: pd:8686
-      HG_STORE_GRPC_HOST: store
-      HG_STORE_GRPC_PORT: "8500"
-      HG_STORE_REST_PORT: "8520"
-      HG_STORE_RAFT_ADDRESS: store:8510
-      HG_STORE_DATA_PATH: /hugegraph-store/storage
-    ports:
-      - "8520:8520"
-    volumes:
-      - hg-store-data:/hugegraph-store/storage
       dockerfile: hugegraph-store/Dockerfile
     healthcheck:
       start_period: 30s
