@@ -65,6 +65,7 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
     private int times = 0;
     private long pageSize = 0;
     private int total = 0;
+    private int responseVersion = 0;
     private String graph;
     private String table;
 
@@ -91,6 +92,8 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
     @Override
     public void onNext(ScanStreamReq request) {
         try {
+            this.responseVersion = Math.max(
+                    this.responseVersion, ScanUtil.responseVersion(request));
             if (request.getCloseFlag() == 1) {
                 close();
             } else {
@@ -209,6 +212,7 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
                                              .addAllData(Collections.EMPTY_LIST)
                                              .setOver(true)
                                              .setTimes(++times)
+                                             .setVersion(this.responseVersion)
                                              .build()
             );
         }
@@ -236,7 +240,10 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
             resBuilder = KvPageRes.newBuilder().addAllData(Collections.EMPTY_LIST);
         }
         if (!this.finishFlag.get()) {
-            responseObserver.onNext(resBuilder.setOver(isOver).setTimes(times).build());
+            responseObserver.onNext(resBuilder.setOver(isOver)
+                                              .setTimes(times)
+                                              .setVersion(this.responseVersion)
+                                              .build());
         }
         if (isOver) {
             this.finishServer();

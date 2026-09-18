@@ -222,12 +222,22 @@ public class DataManagerImpl implements DataManager {
 
     @Override
     public void write(BatchPutRequest request) {
-        BusinessHandler.TxBuilder tx =
+        BusinessHandler.TxBuilder builder =
                 businessHandler.txBuilder(request.getGraphName(), request.getPartitionId());
-        for (BatchPutRequest.KV kv : request.getEntries()) {
-            tx.put(kv.getCode(), kv.getTable(), kv.getKey(), kv.getValue());
+        BusinessHandler.Tx transaction = builder.build();
+        try {
+            for (BatchPutRequest.KV kv : request.getEntries()) {
+                builder.put(kv.getCode(), kv.getTable(), kv.getKey(), kv.getValue());
+            }
+            transaction.commit();
+        } catch (Throwable e) {
+            try {
+                transaction.rollback();
+            } catch (Throwable rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
+            throw e;
         }
-        tx.build().commit();
     }
 
     @Override

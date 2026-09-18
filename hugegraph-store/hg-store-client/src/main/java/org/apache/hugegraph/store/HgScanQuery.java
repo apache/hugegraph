@@ -185,6 +185,8 @@ public interface HgScanQuery {
         }
 
         public ScanBuilder setOrderType(ScanOrderType orderType) {
+            HgAssert.isFalse(orderType == ScanOrderType.ORDER_BY_KEY,
+                             "ORDER_BY_KEY is not supported by batch scan");
             this.orderType = orderType;
             return this;
         }

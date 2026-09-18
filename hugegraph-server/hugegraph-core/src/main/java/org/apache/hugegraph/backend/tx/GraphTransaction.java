@@ -20,7 +20,6 @@ package org.apache.hugegraph.backend.tx;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -32,7 +31,6 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.hugegraph.HugeException;
@@ -53,6 +51,8 @@ import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQueryFlatten;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.query.QueryBatch;
+import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendMutation;
@@ -64,9 +64,7 @@ import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.iterator.BatchMapperIterator;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.iterator.FilterIterator;
-import org.apache.hugegraph.iterator.FlatMapperIterator;
 import org.apache.hugegraph.iterator.LimitIterator;
-import org.apache.hugegraph.iterator.ListIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.job.system.DeleteExpiredJob;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
@@ -101,7 +99,6 @@ import org.apache.tinkerpop.gremlin.structure.util.ElementHelper;
 import org.apache.tinkerpop.gremlin.util.iterator.IteratorUtils;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterators;
 
 import jakarta.ws.rs.ForbiddenException;
 
@@ -844,8 +841,8 @@ public class GraphTransaction extends IndexableTransaction {
 
         query.resetActualOffset();
 
-        Iterator<HugeVertex> results = this.queryVerticesFromBackend(query);
-        results = this.filterUnmatchedRecords(results, query);
+        Iterator<HugeVertex> results =
+                this.queryValidVerticesFromBackend(query);
 
         @SuppressWarnings("unchecked")
         Iterator<Vertex> r = (Iterator<Vertex>) joinTxVertices(query, results);
@@ -853,20 +850,43 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     protected Iterator<HugeVertex> queryVerticesFromBackend(Query query) {
+        return this.queryVertexBatchesFromBackend(query).iterator();
+    }
+
+    private QueryResults<HugeVertex> queryVertexBatchesFromBackend(Query query) {
         assert query.resultType().isVertex();
-
-        QueryResults<BackendEntry> results = this.query(query);
-        Iterator<BackendEntry> entries = results.iterator();
-
-        Iterator<HugeVertex> vertices = new MapperIterator<>(entries,
-                                                             this::parseEntry);
-        vertices = this.filterExpiredResultFromBackend(query, vertices);
-
-        if (!this.store().features().supportsQuerySortByInputIds()) {
-            // There is no id in BackendEntry, so sort after deserialization
-            vertices = results.keepInputOrderIfNeeded(vertices);
+        if (!(query instanceof ConditionQuery)) {
+            return this.processBatches(this.fetchVertexBatch(query));
         }
-        return vertices;
+        QueryList<HugeVertex> queries = this.optimizeQueries(query, this::fetchVertexBatch);
+        return this.processBatches(queries.empty() ? QueryResults.empty() :
+                                   queries.fetch(this.pageSize));
+    }
+
+    private QueryResults<BackendEntry> backendBatches(Query query) {
+        QueryResults<BackendEntry> results = super.query(query);
+        if (!results.iterator().hasNext()) {
+            // No raw records means no batch. Filtering a nonempty source may
+            // still produce an empty batch, which must keep its page cursor.
+            return results;
+        }
+        QueryResultContext context = new QueryResultContext(
+                query, this.storeFeatures().supportsQuerySortByInputIds());
+        return results.mapBatches(batch -> new QueryBatch<>(batch.results(), context));
+    }
+
+    protected QueryResults<HugeVertex> fetchVertexBatch(Query query) {
+        return this.filterExpiredBatches(this.backendBatches(query).map(this::parseEntry));
+    }
+
+    private Iterator<HugeVertex> queryValidVerticesFromBackend(Query query) {
+        return this.queryVertexBatchesFromBackend(query)
+                   .filter(this::filterInvalidRecord).iterator();
+    }
+
+    private <T extends HugeElement> QueryResults<T> processBatches(QueryResults<T> batches) {
+        batches = batches.filter(this::filterUnmatchedRecord);
+        return batches.keepInputOrderIfNeeded();
     }
 
     @Watched(prefix = "graph")
@@ -1010,8 +1030,8 @@ public class GraphTransaction extends IndexableTransaction {
 
         query.resetActualOffset();
 
-        Iterator<HugeEdge> results = this.queryEdgesFromBackend(query);
-        results = this.filterUnmatchedRecords(results, query);
+        Iterator<HugeEdge> results =
+                this.queryValidEdgesFromBackend(query);
 
         /*
          * Without repeated edges if not querying by BOTH all edges
@@ -1045,81 +1065,79 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     protected Iterator<HugeEdge> queryEdgesFromBackend(Query query) {
+        return this.queryEdgeBatchesFromBackend(query).iterator();
+    }
+
+    protected QueryResults<HugeEdge> queryEdgesFromMemory(Query query) {
+        return null;
+    }
+
+    private QueryResults<HugeEdge> queryEdgeBatchesFromBackend(Query query) {
         assert query.resultType().isEdge();
-
+        QueryResults<HugeEdge> memory = this.queryEdgesFromMemory(query);
+        if (memory != null) {
+            return memory;
+        }
         if (query instanceof ConditionQuery && !query.paging()) {
-            // TODO: support: paging + parent label
             boolean supportIn = this.storeFeatures().supportsQueryWithInCondition();
-            // consider multi labels + properties,
-            // see org.apache.hugegraph.core.EdgeCoreTest.testQueryInEdgesOfVertexByLabels
-            Stream<ConditionQuery> flattenedQueries =
-                    ConditionQueryFlatten.flatten((ConditionQuery) query, supportIn).stream();
-
-            Stream<Iterator<HugeEdge>> edgeIterators = flattenedQueries.map(cq -> {
+            List<ConditionQuery> flattened = ConditionQueryFlatten.flatten(
+                    (ConditionQuery) query, supportIn);
+            Function<ConditionQuery, QueryResults<HugeEdge>> fetcher = cq -> {
                 Id label = cq.condition(HugeKeys.LABEL);
                 if (this.storeFeatures().supportsFatherAndSubEdgeLabel() &&
-                    label != null &&
-                    graph().edgeLabel(label).isFather() &&
+                    label != null && graph().edgeLabel(label).isFather() &&
                     cq.condition(HugeKeys.SUB_LABEL) == null &&
                     cq.condition(HugeKeys.OWNER_VERTEX) != null &&
                     cq.condition(HugeKeys.DIRECTION) != null &&
                     matchEdgeSortKeys(cq, false, this.graph())) {
-                    // g.V("V.id").outE("parentLabel").has("sortKey","value")
-                    return parentElQueryWithSortKeys(
-                            graph().edgeLabel(label), graph().edgeLabels(), cq);
-                } else {
-                    return queryEdgesFromBackendInternal(cq);
+                    EdgeLabel parent = graph().edgeLabel(label);
+                    Iterator<EdgeLabel> children = graph().edgeLabels().stream()
+                            .filter(el -> el.edgeLabelType().sub() &&
+                                          el.fatherId().equals(parent.id())).iterator();
+                    return QueryResults.flatMap(children, child -> {
+                        ConditionQuery subQuery = cq.copy();
+                        subQuery.eq(HugeKeys.SUB_LABEL, child.id());
+                        return this.queryEdgeBatchesFromBackend(subQuery);
+                    });
                 }
-            });
-
-            return edgeIterators.reduce(ExtendableIterator::concat)
-                                .orElse(Collections.emptyIterator());
+                return this.queryEdgeBatchesFromBackendInternal(cq);
+            };
+            // Preserve immediate validation for a single query without activating a sibling.
+            if (flattened.size() == 1) {
+                return fetcher.apply(flattened.get(0));
+            }
+            // Each branch is validated when activated, so later branches may fail
+            // during iteration after earlier branches have already returned results.
+            return QueryResults.flatMap(flattened.iterator(), fetcher);
         }
-
-        return queryEdgesFromBackendInternal(query);
+        return this.queryEdgeBatchesFromBackendInternal(query);
     }
 
-    private Iterator<HugeEdge> queryEdgesFromBackendInternal(Query query) {
-        assert query.resultType().isEdge();
+    private Iterator<HugeEdge> queryValidEdgesFromBackend(Query query) {
+        return this.queryEdgeBatchesFromBackend(query)
+                   .filter(this::filterInvalidRecord).iterator();
+    }
 
-        QueryResults<BackendEntry> results = this.query(query);
-        Iterator<BackendEntry> entries = results.iterator();
+    private QueryResults<HugeEdge> queryEdgeBatchesFromBackendInternal(Query query) {
+        if (!(query instanceof ConditionQuery)) {
+            return this.processBatches(this.fetchEdgeBatch(query));
+        }
+        QueryList<HugeEdge> queries = this.optimizeQueries(query, this::fetchEdgeBatch);
+        return this.processBatches(queries.empty() ? QueryResults.empty() :
+                                   queries.fetch(this.pageSize));
+    }
 
-        Iterator<HugeEdge> edges = new FlatMapperIterator<>(entries, entry -> {
-            // Edges are in a vertex
+    protected QueryResults<HugeEdge> fetchEdgeBatch(Query query) {
+        QueryResults<HugeEdge> edges = this.backendBatches(query).flatMap(entry -> {
             HugeVertex vertex = this.parseEntry(entry);
             if (vertex == null) {
                 return null;
             }
             assert query.idsSize() != 1 || vertex.getEdges().size() == 1;
-            /*
-             * Copy to avoid ConcurrentModificationException when removing edge
-             * because HugeEdge.remove() will update edges in owner vertex
-             */
-            return new ListIterator<>(ImmutableList.copyOf(vertex.getEdges()));
+            // Removing an edge may change its owner's collection during iteration.
+            return ImmutableList.copyOf(vertex.getEdges()).iterator();
         });
-
-        edges = this.filterExpiredResultFromBackend(query, edges);
-
-        if (!this.store().features().supportsQuerySortByInputIds()) {
-            // There is no id in BackendEntry, so sort after deserialization
-            edges = results.keepInputOrderIfNeeded(edges);
-        }
-        return edges;
-    }
-
-    private Iterator<HugeEdge> parentElQueryWithSortKeys(EdgeLabel label,
-                                                         Collection<EdgeLabel> allEls,
-                                                         ConditionQuery cq) {
-        return allEls.stream()
-                     .filter(el -> el.edgeLabelType().sub() && el.fatherId().equals(label.id()))
-                     .map(el -> {
-                         ConditionQuery tempQuery = cq.copy();
-                         tempQuery.eq(HugeKeys.SUB_LABEL, el.id());
-                         return this.queryEdgesFromBackend(tempQuery);
-                     })
-                     .reduce(Iterators::concat)
-                     .orElse(Collections.emptyIterator());
+        return this.filterExpiredBatches(edges);
     }
 
     @Watched(prefix = "graph")
@@ -1870,53 +1888,51 @@ public class GraphTransaction extends IndexableTransaction {
         }
     }
 
-    private <T extends HugeElement> Iterator<T> filterUnmatchedRecords(
-            Iterator<T> results,
-            Query query) {
-        // Filter unused or incorrect records
-        return new FilterIterator<>(results, elem -> {
-            // TODO: Left vertex/edge should to be auto removed via async task
-            if (elem.schemaLabel().undefined()) {
-                LOG.warn("Left record is found: id={}, label={}, properties={}",
-                         elem.id(), elem.schemaLabel().id(),
-                         elem.getPropertiesMap());
-            }
-            // Filter hidden results
-            if (!query.showHidden() && Graph.Hidden.isHidden(elem.label())) {
-                return false;
-            }
-            // Filter vertices/edges of deleting label
-            if (elem.schemaLabel().status().deleting() &&
-                !query.showDeleting()) {
-                return false;
-            }
-            // Process results that query from left index or primary-key
-            // Only index query will come here
-            return query.resultType().isVertex() != elem.type().isVertex() ||
-                   rightResultFromIndexQuery(query, elem);
-        });
+    private boolean filterInvalidRecord(QueryResultContext context, HugeElement elem) {
+        warnLeftRecord(elem);
+        return !invalidRecord(elem, context);
     }
 
-    private boolean rightResultFromIndexQuery(Query query, HugeElement elem) {
-        /*
-         * If query is ConditionQuery or query.originQuery() is ConditionQuery
-         * means it's index query
-         */
-        if (!(query instanceof ConditionQuery)) {
-            if (query.originQuery() instanceof ConditionQuery) {
-                query = query.originQuery();
-            } else {
-                return true;
-            }
+    private boolean filterUnmatchedRecord(QueryResultContext context, HugeElement elem) {
+        // Invisible records pass to the public visibility stage, without index cleanup.
+        if (invalidRecord(elem, context)) {
+            return true;
         }
+        boolean matched = this.rightResultFromIndexQuery(context, elem);
+        if (!matched) {
+            // Rejected records never reach the public stage; raw callers keep this diagnostic too.
+            warnLeftRecord(elem);
+        }
+        return matched;
+    }
 
-        ConditionQuery cq = (ConditionQuery) query;
+    private static boolean invalidRecord(HugeElement elem, QueryResultContext context) {
+        if (!context.showHidden() && Graph.Hidden.isHidden(elem.label())) {
+            return true;
+        }
+        return elem.schemaLabel().status().deleting() && !context.showDeleting();
+    }
+
+    private static void warnLeftRecord(HugeElement elem) {
+        // TODO: Left vertex/edge should to be auto removed via async task
+        if (elem.schemaLabel().undefined()) {
+            LOG.warn("Left record is found: id={}, label={}, properties={}",
+                     elem.id(), elem.schemaLabel().id(),
+                     elem.getPropertiesMap());
+        }
+    }
+
+    private boolean rightResultFromIndexQuery(QueryResultContext context, HugeElement elem) {
+        ConditionQuery cq = context.matchQuery();
+        if (cq == null || cq.resultType().isVertex() != elem.type().isVertex()) {
+            return true;
+        }
         if (cq.condition(HugeKeys.LABEL) != null && cq.resultType().isEdge()) {
             if (cq.conditions().size() == 1) {
                 // g.E().hasLabel(xxx)
                 return true;
             }
-            if (cq.optimized() == OptimizedType.INDEX) {
+            if (context.optimizedType() == OptimizedType.INDEX) {
                 // g.E().hasLabel(xxx).has(yyy)
                 // consider OptimizedType.INDEX_FILTER occurred in org.apache.hugegraph.core
                 // .EdgeCoreTest.testQueryCount
@@ -1930,7 +1946,7 @@ public class GraphTransaction extends IndexableTransaction {
             }
         }
 
-        if (cq.optimized() == OptimizedType.NONE || cq.test(elem)) {
+        if (!context.conditionFilterRequired() || cq.test(elem, context.resultsFilter())) {
             if (cq.existLeftIndex(elem.id())) {
                 /*
                  * Both have correct and left index, wo should return true
@@ -1946,13 +1962,13 @@ public class GraphTransaction extends IndexableTransaction {
 
             /* Return true if:
              * 1.not query by index or by primary-key/sort-key
-             *   (cq.optimized() == 0 means query just by sysprop)
+             *   (context.optimizedType() == 0 means query just by sysprop)
              * 2.the result match all conditions
              */
             return true;
         }
 
-        if (cq.optimized() == OptimizedType.INDEX) {
+        if (context.optimizedType() == OptimizedType.INDEX) {
             try {
                 this.indexTx.asyncRemoveIndexLeft(cq, elem);
             } catch (Throwable e) {
@@ -1963,18 +1979,16 @@ public class GraphTransaction extends IndexableTransaction {
         return false;
     }
 
-    private <T extends HugeElement> Iterator<T> filterExpiredResultFromBackend(
-            Query query, Iterator<T> results) {
-        if (this.store().features().supportsTtl() || query.showExpired()) {
-            return results;
+    protected <T extends HugeElement> QueryResults<T> filterExpiredBatches(QueryResults<T> batches) {
+        if (this.storeFeatures().supportsTtl()) {
+            return batches;
         }
-        // Filter expired vertices/edges with TTL
-        return new FilterIterator<>(results, elem -> {
-            if (elem.expired()) {
-                DeleteExpiredJob.asyncDeleteExpiredObject(this.graph(), elem);
-                return false;
+        return batches.filter((context, elem) -> {
+            if (context.showExpired() || !elem.expired()) {
+                return true;
             }
-            return true;
+            DeleteExpiredJob.asyncDeleteExpiredObject(this.graph(), elem);
+            return false;
         });
     }
 

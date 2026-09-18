@@ -1815,20 +1815,31 @@ public class StandardAuthManagerV2 implements AuthManager {
     @Override
     public boolean isDefaultRole(String graphSpace, String owner,
                                  HugeDefaultRole role) {
-        return isDefaultRole(graphSpace, owner, role.toString());
+        String roleName = role.isGraphRole() ?
+                          getGraphDefaultRole(ALL_GRAPHS, role.toString()) :
+                          role.toString();
+        return isDefaultRole(graphSpace, owner, roleName);
     }
 
     @Override
     public boolean isDefaultRole(String graphSpace, String graph,
                                  String owner, HugeDefaultRole role) {
         String roleName = getGraphDefaultRole(graph, role.toString());
-        return isDefaultRole(graphSpace, owner, roleName);
+        if (isDefaultRole(graphSpace, owner, roleName)) {
+            return true;
+        }
+        String allGraphsRole = getGraphDefaultRole(ALL_GRAPHS,
+                                                   role.toString());
+        return isDefaultRole(graphSpace, owner, allGraphsRole);
     }
 
     @Override
     public void deleteDefaultRole(String graphSpace, String owner,
                                   HugeDefaultRole role) {
-        deleteDefaultRoleByName(graphSpace, owner, role.toString());
+        String roleName = role.isGraphRole() ?
+                          getGraphDefaultRole(ALL_GRAPHS, role.toString()) :
+                          role.toString();
+        deleteDefaultRoleByName(graphSpace, owner, roleName);
     }
 
     @Override

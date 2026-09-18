@@ -47,7 +47,7 @@ ignored_paths:
   - "hugegraph-server/hugegraph-test/**/tinkerpop/**"
   - "hugegraph-server/hugegraph-example/**"
   - "hugegraph-cluster-test/**"
-  # --- Note: target/, .flattened-pom.xml, .idea/*, apache-hugegraph-*/ already covered by .gitignore ---
+  # --- Note: target/, .flattened-pom.xml, .idea/, apache-hugegraph-*/ already covered by .gitignore ---
 
 # whether the project is in read-only mode
 # If set to true, all editing tools will be disabled and attempts to use them will result in an error

@@ -5162,6 +5162,16 @@ public class EdgeCoreTest extends BaseCoreTest {
         Assert.assertEquals(2, edges.size());
 
         edges = graph.traversal().E().hasLabel("authored")
+                     .has("score", P.within(3, 4, 5))
+                     .has("contribution", Text.contains("2"))
+                     .toList();
+        Assert.assertEquals(2, edges.size());
+        assertContains(edges, "authored", james, book2,
+                       "contribution", "1992 2 2", "score", 4);
+        assertContains(edges, "authored", james, book3,
+                       "contribution", "1993 3 2", "score", 3);
+
+        edges = graph.traversal().E().hasLabel("authored")
                      .has("score", P.gt(3))
                      .has("contribution", Text.contains("3"))
                      .toList();
@@ -5368,6 +5378,43 @@ public class EdgeCoreTest extends BaseCoreTest {
             count += size.intValue();
         }
         Assert.assertEquals(2, count);
+    }
+
+    @Test
+    public void testQueryOutEdgesOfVertexInPagingAtBatchBoundary() {
+        HugeGraph graph = graph();
+        Assume.assumeTrue("Not support paging",
+                          storeFeatures().supportsQueryByPage());
+        // More edges than BackendEntryIterator.INLINE_BATCH_SIZE (500)
+        int total = 1200;
+        Vertex louise = graph.addVertex(T.label, "person", "name", "Louise",
+                                        "city", "Beijing", "age", 21);
+        Vertex java1 = graph.addVertex(T.label, "book", "name", "java-1");
+        for (int i = 0; i < total; i++) {
+            louise.addEdge("look", java1, "time", String.format("2017-%04d", i));
+        }
+        graph.tx().commit();
+
+        // A page limit ending exactly at a batch boundary (500, 1000) used to
+        // re-emit the last edge of a page as the first edge of the next page
+        for (int limit : new int[]{400, 500, 600, 1000}) {
+            Set<Object> ids = new HashSet<>();
+            int count = 0;
+            String page = PageInfo.PAGE_NONE;
+            while (page != null) {
+                GraphTraversal<Vertex, Edge> iterator = graph.traversal()
+                                                             .V(louise).outE("look")
+                                                             .has("~page", page)
+                                                             .limit(limit);
+                while (iterator.hasNext()) {
+                    ids.add(iterator.next().id());
+                    count++;
+                }
+                page = TraversalUtil.page(iterator);
+            }
+            Assert.assertEquals("limit " + limit, total, count);
+            Assert.assertEquals("limit " + limit, total, ids.size());
+        }
     }
 
     @Test

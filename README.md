@@ -263,7 +263,7 @@ bin/init-store.sh
 bin/start-hugegraph.sh
 ```
 
-For detailed build instructions, see [BUILDING.md](BUILDING.md) and [Build from Source Guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#33-source-code-compilation).
+For detailed build instructions, see [BUILDING.md](docs/BUILDING.md) and [Build from Source Guide](https://hugegraph.apache.org/docs/quickstart/hugegraph-server/#33-source-code-compilation).
 
 </details>
 
@@ -315,7 +315,7 @@ For comprehensive documentation, visit the [HugeGraph Documentation](https://hug
 | Understand configuration | `hugegraph-dist` | `src/assembly/static/conf/` |
 | Run tests | `hugegraph-test` | Test suites with multiple profiles |
 
-For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
+For repository constraints and module guidance, see [AGENTS.md](AGENTS.md).
 
 <details>
 <summary><b>For Contributors</b></summary>
@@ -323,12 +323,12 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
 **New to HugeGraph?** Follow this path to get started:
 
 1. **Understand the Architecture**
-   - Read [AGENTS.md](AGENTS.md) for detailed module structure and development patterns
+   - Read [AGENTS.md](AGENTS.md) for key component relationships and module guidance
    - Review the [Architecture Diagram](#architecture) above
 
 2. **Set Up Your Environment**
    - Install Java 11+ and Maven 3.5+
-   - Follow [BUILDING.md](BUILDING.md) for build instructions
+   - Follow [BUILDING.md](docs/BUILDING.md) for build instructions
    - Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 
 3. **Find Your First Issue**
@@ -342,13 +342,13 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
    - Try modifying a test and see what breaks
 
 5. **Code Standards**
-   - Line length: 100 characters
+   - Line length: 120 characters
    - Indentation: 4 spaces
    - No star imports
    - Commit format: `feat|fix|refactor(module): description`
 
 6. **Submit Your Contribution**
-   - Read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
+   - Read [CONTRIBUTING.md](docs/CONTRIBUTING.md) for guidelines
    - Follow the [Contribution Guidelines](https://hugegraph.apache.org/docs/contribution-guidelines/)
    - Use [GitHub Desktop](https://desktop.github.com/) to simplify the PR process
 
@@ -358,7 +358,7 @@ For detailed architecture and development guidance, see [AGENTS.md](AGENTS.md).
 
 Welcome to contribute to HugeGraph!
 
-- **How to Contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md) and [Contribution Guidelines](https://hugegraph.apache.org/docs/contribution-guidelines/)
+- **How to Contribute**: See [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [Contribution Guidelines](https://hugegraph.apache.org/docs/contribution-guidelines/)
 - **Code Style**: Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 - **PR Tool**: [GitHub Desktop](https://desktop.github.com/) is recommended for simpler workflow
 

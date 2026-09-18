@@ -20,21 +20,29 @@ package org.apache.hugegraph.unit.auth;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAuthenticator;
 import org.apache.hugegraph.auth.HugeDefaultRole;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
+import org.apache.hugegraph.auth.HugePermission;
+import org.apache.hugegraph.auth.HugeUser;
+import org.apache.hugegraph.auth.ResourceObject;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.UserWithRole;
+import org.apache.hugegraph.backend.cache.Cache;
+import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.config.AuthOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.task.TaskManager;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
+import org.apache.hugegraph.util.RateLimiter;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Filter;
@@ -44,6 +52,7 @@ import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.junit.After;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -108,6 +117,131 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
         String username = HugeGraphAuthProxy.username();
         Assert.assertEquals("admin", username);
+    }
+
+    @Test
+    public void testRunAsAdminRestoresContext() {
+        HugeAuthenticator.User user = new HugeAuthenticator.User(
+                "test_user",
+                RolePermission.admin()
+        );
+        setContext(new HugeGraphAuthProxy.Context(user));
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Assert.assertEquals(HugeAuthenticator.USER_ADMIN,
+                                HugeGraphAuthProxy.username());
+        });
+
+        Assert.assertEquals("test_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminOverridesTaskContext() {
+        HugeAuthenticator.User taskUser = new HugeAuthenticator.User(
+                "task_user",
+                RolePermission.admin()
+        );
+        TaskManager.setContext(taskUser.toJson());
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Assert.assertEquals(HugeAuthenticator.USER_ADMIN,
+                                HugeGraphAuthProxy.username());
+        });
+
+        Assert.assertEquals("task_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminRestoresContextAfterException() {
+        HugeAuthenticator.User taskUser = new HugeAuthenticator.User(
+                "task_user",
+                RolePermission.admin()
+        );
+        TaskManager.setContext(taskUser.toJson());
+
+        Assert.assertThrows(RuntimeException.class, () -> {
+            HugeGraphAuthProxy.runAsAdmin(() -> {
+                throw new RuntimeException("expected");
+            });
+        });
+
+        Assert.assertEquals("task_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminClearsAndRestoresAllContexts() {
+        HugeAuthenticator.User requestUser = new HugeAuthenticator.User(
+                "request_user", RolePermission.admin());
+        HugeAuthenticator.User taskUser = new HugeAuthenticator.User(
+                "task_user", RolePermission.admin());
+        setContext(new HugeGraphAuthProxy.Context(requestUser));
+        HugeGraphAuthProxy.setRequestGraphSpace("request_space");
+        TaskManager.setContext(taskUser.toJson());
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Assert.assertEquals(HugeAuthenticator.USER_ADMIN,
+                                HugeGraphAuthProxy.username());
+            Assert.assertNull(HugeGraphAuthProxy.getRequestGraphSpace());
+            Assert.assertNull(TaskManager.getContext());
+        });
+
+        Assert.assertEquals("task_user", HugeGraphAuthProxy.username());
+        Assert.assertEquals("request_space",
+                            HugeGraphAuthProxy.getRequestGraphSpace());
+        Assert.assertEquals(taskUser.toJson(), TaskManager.getContext());
+        TaskManager.resetContext();
+        Assert.assertEquals("request_user", HugeGraphAuthProxy.username());
+    }
+
+    @Test
+    public void testRunAsAdminDoesNotPropagateToChildThread()
+            throws InterruptedException {
+        AtomicReference<String> username = new AtomicReference<>();
+
+        HugeGraphAuthProxy.runAsAdmin(() -> {
+            Thread child = new Thread(() -> {
+                username.set(HugeGraphAuthProxy.username());
+            });
+            child.start();
+            try {
+                child.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        });
+
+        Assert.assertEquals("anonymous", username.get());
+    }
+
+    @Test
+    public void testTraversalStrategyListKeepsAuthProxyAndIsImmutable() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthManager authManager = Mockito.mock(AuthManager.class);
+        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+
+        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE))
+               .thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY))
+               .thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
+               .thenReturn(1000D);
+
+        GraphTraversalSource traversal =
+                new HugeGraphAuthProxy(graph).traversal();
+        List<?> strategies = traversal.getStrategies().toList();
+        Assert.assertFalse(strategies.isEmpty());
+        strategies.forEach(strategy -> {
+            Assert.assertEquals("TraversalStrategyProxy",
+                                strategy.getClass().getSimpleName());
+        });
+        Assert.assertThrows(UnsupportedOperationException.class,
+                            strategies::clear);
     }
 
     @Test
@@ -223,6 +357,7 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         HugeConfig config = Mockito.mock(HugeConfig.class);
         AuthManager authManager = Mockito.mock(AuthManager.class);
         TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+        Id storedUserId = IdGenerator.of("stored-user-id");
 
         Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
         Mockito.when(graph.configuration()).thenReturn(config);
@@ -235,7 +370,11 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
                .thenReturn(1000D);
         Mockito.when(authManager.validateUser("cache_user", "pass"))
-               .thenReturn(new UserWithRole("cache_user"));
+               .thenReturn(new UserWithRole(
+                           storedUserId, "cache_user",
+                           RolePermission.all("hugegraph")));
+        Mockito.when(authManager.validateUser("invalid", "wrong"))
+               .thenReturn(new UserWithRole("invalid"));
         Mockito.when(authManager.createDefaultRole("DEFAULT", "cache_user",
                                                   HugeDefaultRole.ANALYST,
                                                   "hugegraph"))
@@ -244,7 +383,15 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         HugeGraphAuthProxy proxy = new HugeGraphAuthProxy(graph);
         AuthManager proxyAuthManager = proxy.authManager();
 
+        proxyAuthManager.validateUser("invalid", "wrong");
         proxyAuthManager.validateUser("cache_user", "pass");
+        Cache<Id, RateLimiter> auditLimiters =
+                Whitebox.getInternalState(proxy, "auditLimiters");
+        Assert.assertFalse(auditLimiters.containsKey(
+                IdGenerator.of("invalid")));
+        Assert.assertTrue(auditLimiters.containsKey(
+                IdGenerator.of("cache_user")));
+        Assert.assertFalse(auditLimiters.containsKey(storedUserId));
         proxyAuthManager.validateUser("cache_user", "pass");
         Mockito.verify(authManager, Mockito.times(1))
                .validateUser("cache_user", "pass");
@@ -263,6 +410,7 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         AuthManager authManager = Mockito.mock(AuthManager.class);
         TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
         String token = "cached-token";
+        Id storedUserId = IdGenerator.of("stored-user-id");
 
         Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
         Mockito.when(graph.configuration()).thenReturn(config);
@@ -275,11 +423,22 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
                .thenReturn(1000D);
         Mockito.when(authManager.validateUser(token))
-               .thenReturn(new UserWithRole("cache_user"));
+               .thenReturn(new UserWithRole(
+                           storedUserId, "cache_user",
+                           RolePermission.all("hugegraph")));
+        Mockito.when(authManager.validateUser("invalid-token"))
+               .thenReturn(new UserWithRole(""));
 
-        AuthManager proxyAuthManager =
-                new HugeGraphAuthProxy(graph).authManager();
+        HugeGraphAuthProxy proxy = new HugeGraphAuthProxy(graph);
+        AuthManager proxyAuthManager = proxy.authManager();
+        proxyAuthManager.validateUser("invalid-token");
         proxyAuthManager.validateUser(token);
+        Cache<Id, RateLimiter> auditLimiters =
+                Whitebox.getInternalState(proxy, "auditLimiters");
+        Assert.assertEquals(1L, auditLimiters.size());
+        Assert.assertTrue(auditLimiters.containsKey(
+                IdGenerator.of("cache_user")));
+        Assert.assertFalse(auditLimiters.containsKey(storedUserId));
         proxyAuthManager.validateUser(token);
         Mockito.verify(authManager, Mockito.times(1)).validateUser(token);
 
@@ -288,6 +447,76 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
 
         Mockito.verify(authManager).logoutUser(token);
         Mockito.verify(authManager, Mockito.times(2)).validateUser(token);
+    }
+
+    @Test
+    public void testAuditLimiterUsesUsernameAndDeleteInvalidatesIt() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        AuthManager authManager = Mockito.mock(AuthManager.class);
+        TaskScheduler scheduler = Mockito.mock(TaskScheduler.class);
+        Id storedUserId = IdGenerator.of("stored-user-id");
+        HugeUser storedUser = new HugeUser(storedUserId, "cache_user");
+
+        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.name()).thenReturn("hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(authManager);
+        Mockito.when(graph.taskScheduler()).thenReturn(scheduler);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE))
+               .thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY))
+               .thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE))
+               .thenReturn(1000D);
+        Mockito.when(authManager.validateUser("cache_user", "pass"))
+               .thenReturn(new UserWithRole(
+                           storedUserId, "cache_user",
+                           RolePermission.all("hugegraph")));
+        Mockito.when(authManager.getUser(storedUserId)).thenReturn(storedUser);
+        Mockito.when(authManager.isAdminManager("custom_admin"))
+               .thenReturn(true);
+
+        HugeGraphAuthProxy proxy = new HugeGraphAuthProxy(graph);
+        AuthManager proxyAuthManager = proxy.authManager();
+        proxyAuthManager.validateUser("cache_user", "pass");
+        Cache<Id, RateLimiter> auditLimiters =
+                Whitebox.getInternalState(proxy, "auditLimiters");
+        Id usernameKey = IdGenerator.of("cache_user");
+        Assert.assertNotEquals(usernameKey, storedUserId);
+        Assert.assertTrue(auditLimiters.containsKey(
+                usernameKey));
+
+        HugeAuthenticator.User cacheUser = new HugeAuthenticator.User(
+                "cache_user", RolePermission.all("hugegraph"));
+        Whitebox.setInternalState(cacheUser, "userId", storedUserId);
+        Assert.assertEquals(storedUserId, cacheUser.userId());
+        setContext(new HugeGraphAuthProxy.Context(cacheUser));
+        proxy.name();
+
+        Assert.assertEquals(1L, auditLimiters.size());
+        Assert.assertTrue(auditLimiters.containsKey(usernameKey));
+        Assert.assertFalse(auditLimiters.containsKey(storedUserId));
+
+        setContext(new HugeGraphAuthProxy.Context(
+                new HugeAuthenticator.User(
+                        HugeAuthenticator.USER_ADMIN,
+                        RolePermission.admin())));
+        proxyAuthManager.updateUser(storedUser);
+
+        setContext(new HugeGraphAuthProxy.Context(
+                new HugeAuthenticator.User(
+                        "custom_admin",
+                        RolePermission.admin())));
+        proxyAuthManager.updateUser(storedUser);
+        proxyAuthManager.deleteUser(storedUserId);
+
+        Assert.assertEquals(0L, auditLimiters.size());
+        Assert.assertFalse(auditLimiters.containsKey(usernameKey));
+        Assert.assertFalse(auditLimiters.containsKey(storedUserId));
+        Mockito.verify(authManager, Mockito.times(2)).updateUser(storedUser);
+        Mockito.verify(authManager).deleteUser(storedUserId);
     }
 
     @Test
@@ -364,6 +593,83 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
             context.updateLoggers();
             appender.stop();
         }
+    }
+
+    @Test
+    public void testSpaceMemberDoesNotGrantMutationPermissions() {
+        RolePermission role = RolePermission.fromJson(
+                "{\"roles\":{\"DEFAULT\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}," +
+                "\"SPACE_MEMBER\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        HugeAuthenticator.RequiredPerm read =
+                new HugeAuthenticator.RequiredPerm()
+                        .graphSpace("DEFAULT")
+                        .owner("hugegraph")
+                        .action("read");
+        HugeAuthenticator.RequiredPerm write =
+                new HugeAuthenticator.RequiredPerm()
+                        .graphSpace("DEFAULT")
+                        .owner("hugegraph")
+                        .action("write");
+        HugeAuthenticator.RequiredPerm delete =
+                new HugeAuthenticator.RequiredPerm()
+                        .graphSpace("DEFAULT")
+                        .owner("hugegraph")
+                        .action("delete");
+
+        Assert.assertTrue(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
+                role, read));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
+                role, write));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.matchApiRequiredPerm(
+                role, delete));
+    }
+
+    @Test
+    public void testSpaceManagerCanManageUserGrantInOwnSpace() {
+        RolePermission managerRole = RolePermission.fromJson(
+                "{\"roles\":{\"space-a\":{\"*\":{" +
+                "\"SPACE\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        RolePermission memberGrant = RolePermission.fromJson(
+                "{\"roles\":{\"space-a\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}," +
+                "\"WRITE\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        RolePermission otherSpaceGrant = RolePermission.fromJson(
+                "{\"roles\":{\"space-b\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}," +
+                "\"WRITE\":{\"ALL\":[{\"type\":\"ALL\"}]}" +
+                "}}}}");
+        RolePermission multiSpaceGrant = RolePermission.fromJson(
+                "{\"roles\":{" +
+                "\"space-a\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}}}," +
+                "\"space-b\":{\"*\":{" +
+                "\"READ\":{\"ALL\":[{\"type\":\"ALL\"}]}}}" +
+                "}}");
+        HugeUser member = new HugeUser("member");
+        ResourceObject<?> ownSpace =
+                ResourceObject.of("space-a", "hugegraph", member);
+        ResourceObject<?> otherSpace =
+                ResourceObject.of("space-b", "hugegraph", member);
+        ResourceObject<?> admin =
+                ResourceObject.of("space-a", "hugegraph",
+                                  new HugeUser(HugeAuthenticator.USER_ADMIN));
+
+        Assert.assertTrue(HugeAuthenticator.RolePerm.match(
+                managerRole, memberGrant, ownSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, memberGrant, otherSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, otherSpaceGrant, ownSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, multiSpaceGrant, ownSpace));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, memberGrant, admin));
+        Assert.assertFalse(HugeAuthenticator.RolePerm.match(
+                managerRole, RolePermission.admin(), ownSpace));
     }
 
     private static class TestAppender extends AbstractAppender {

@@ -58,7 +58,8 @@ public class HstoreFeatures implements BackendFeatures {
 
     @Override
     public boolean supportsQuerySortByInputIds() {
-        return true;
+        // Multi-node batch scans group input keys by Store and lose global order
+        return false;
     }
 
     @Override

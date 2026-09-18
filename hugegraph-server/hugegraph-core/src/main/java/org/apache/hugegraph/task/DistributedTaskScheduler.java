@@ -770,9 +770,9 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         int olapActive =
                 ((ThreadPoolExecutor) olapTaskExecutor).getActiveCount();
 
-        LOG.info("Current State: gremlinTaskExecutor({}), schemaTaskExecutor" +
-                 "({}), ephemeralTaskExecutor({}), olapTaskExecutor({})",
-                 gremlinActive, schemaActive, ephemeralActive, olapActive);
+        LOG.debug("Current State: gremlinTaskExecutor({}), schemaTaskExecutor" +
+                  "({}), ephemeralTaskExecutor({}), olapTaskExecutor({})",
+                  gremlinActive, schemaActive, ephemeralActive, olapActive);
     }
 
     private LockResult tryLockTask(String taskId) {

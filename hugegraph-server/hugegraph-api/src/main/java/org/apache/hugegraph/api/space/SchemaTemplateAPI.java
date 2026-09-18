@@ -20,10 +20,12 @@ package org.apache.hugegraph.api.space;
 import java.util.Date;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.api.API;
+import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.api.filter.StatusFilter;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.core.GraphManager;
@@ -134,9 +136,8 @@ public class SchemaTemplateAPI extends API {
                         "Schema template '%s' does not exist", name);
 
         String username = HugeGraphAuthProxy.username();
-        boolean isSpace = manager.authManager()
-                                 .isSpaceManager(graphSpace, username);
-        if (Objects.equals(st.creator(), username) || isSpace) {
+        if (canManage(manager::authManager, graphSpace, st.creator(),
+                      username)) {
             manager.dropSchemaTemplate(graphSpace, name);
         } else {
             throw new ForbiddenException("No permission to delete schema template");
@@ -165,9 +166,8 @@ public class SchemaTemplateAPI extends API {
         }
 
         String username = HugeGraphAuthProxy.username();
-        boolean isSpace = manager.authManager()
-                                 .isSpaceManager(graphSpace, username);
-        if (Objects.equals(old.creator(), username) || isSpace) {
+        if (canManage(manager::authManager, graphSpace, old.creator(),
+                      username)) {
             SchemaTemplate template = jsonSchemaTemplate.build(old);
             template.creator(old.creator());
             template.create(old.create());
@@ -178,6 +178,17 @@ public class SchemaTemplateAPI extends API {
         }
         throw new ForbiddenException("No permission to update schema template");
 
+    }
+
+    private static boolean canManage(Supplier<AuthManager> authManagerSupplier,
+                                     String graphSpace, String creator,
+                                     String username) {
+        if (Objects.equals(creator, username)) {
+            return true;
+        }
+        AuthManager authManager = authManagerSupplier.get();
+        return authManager.isAdminManager(username) ||
+               authManager.isSpaceManager(graphSpace, username);
     }
 
     private static class JsonSchemaTemplate implements Checkable {

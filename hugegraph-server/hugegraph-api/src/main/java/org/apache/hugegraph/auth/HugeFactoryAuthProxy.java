@@ -32,6 +32,7 @@ import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.StandardHugeGraph;
 import org.apache.hugegraph.backend.cache.CacheManager;
+import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.tx.AbstractTransaction;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.backend.tx.IndexableTransaction;
@@ -159,7 +160,7 @@ public final class HugeFactoryAuthProxy {
                                            "lambda$16", "lambda$17", "lambda$18", "lambda$19",
                                            "lambda$20", "lambda$21", "lambda$22", "lambda$23",
                                            "lambda$24", "access$8", "access$9", "access$10",
-                                           "setContext", "getContext");
+                                           "setContext", "getContext", "runAsAdmin");
         Reflection.registerFieldsToFilter(HugeGraphAuthProxy.AuthManagerProxy.class, "authManager",
                                           "this$0");
         Reflection.registerMethodsToFilter(HugeGraphAuthProxy.AuthManagerProxy.class,
@@ -262,17 +263,29 @@ public final class HugeFactoryAuthProxy {
                                            "checkVertexExistIfCustomizedId",
                                            "checkAggregateProperty", "checkAggregateProperty",
                                            "checkNonnullProperty", "queryEdgesFromBackend",
+                                           "queryValidEdgesFromBackend",
                                            "commitPartOfEdgeDeletions", "optimizeQueries",
                                            "checkVertexLabel", "checkId",
-                                           "queryVerticesFromBackend", "joinTxVertices",
+                                           "queryVerticesFromBackend",
+                                           "queryValidVerticesFromBackend", "joinTxVertices",
                                            "joinTxEdges", "lockForUpdateProperty", "optimizeQuery",
                                            "verifyVerticesConditionQuery",
                                            "verifyEdgesConditionQuery", "indexQuery",
                                            "joinTxRecords", "propertyUpdated", "parseEntry",
                                            "traverseByLabel", "reset", "queryVerticesByIds",
-                                           "filterUnmatchedRecords", "skipOffsetOrStopLimit",
-                                           "filterExpiredResultFromFromBackend", "queryEdgesByIds",
-                                           "matchEdgeSortKeys", "rightResultFromIndexQuery");
+                                           "filterInvalidRecord", "filterUnmatchedRecord",
+                                           "invalidRecord", "warnLeftRecord",
+                                           "skipOffsetOrStopLimit",
+                                           "filterExpiredBatches", "queryEdgesByIds",
+                                           "matchEdgeSortKeys", "rightResultFromIndexQuery",
+                                           "queryVertexBatchesFromBackend", "backendBatches",
+                                           "fetchVertexBatch", "processBatches",
+                                           "queryEdgeBatchesFromBackend",
+                                           "queryEdgeBatchesFromBackendInternal",
+                                           "queryEdgesFromMemory", "fetchEdgeBatch");
+        Reflection.registerMethodsToFilter(CachedGraphTransaction.class,
+                                           "fetchVertexBatch", "fetchEdgeBatch",
+                                           "queryEdgesFromMemory", "cacheEdgeBatch");
         Reflection.registerFieldsToFilter(IndexableTransaction.class, "$assertionsDisabled");
         Reflection.registerMethodsToFilter(IndexableTransaction.class, "indexTransaction",
                                            "commit2Backend", "reset");

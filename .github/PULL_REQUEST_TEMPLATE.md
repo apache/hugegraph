@@ -2,7 +2,7 @@
   Thank you very much for contributing to Apache HugeGraph, we are happy that you want to help us improve it!
 
   Here are some tips for you:
-    1. If this is your first time, please read the [contributing guidelines](https://github.com/apache/hugegraph/blob/master/CONTRIBUTING.md)
+    1. If this is your first time, please read the [contributing guidelines](https://github.com/apache/hugegraph/blob/master/docs/CONTRIBUTING.md)
 
     2. If a PR fix/close an issue, type the message "close xxx" (xxx is the link of related 
 issue) in the content, GitHub will auto link it (Required)
@@ -60,8 +60,11 @@ For example:
 
 ## Documentation Status
 
-<!-- DO NOT REMOVE THIS SECTION. CHECK THE PROPER BOX ONLY. -->
+Select one option and provide the documentation location when applicable.
 
-- [ ]  `Doc - TODO` <!-- Your PR changes impact docs and you will update later -->
-- [ ]  `Doc - Done` <!-- Related docs have been already added or updated -->
-- [ ]  `Doc - No Need` <!-- Your PR changes don't impact/need docs -->
+- [ ] `Doc - TODO`: required documentation is pending; complete it before merging.
+- [ ] `Doc - Done`: documentation is included here or linked below.
+- [ ] `Doc - No Need`: no user-visible documentation is affected.
+
+Documentation files in this PR or paired hugegraph-doc PR:
+<!-- For No Need, leave this blank. A follow-up issue alone does not replace required documentation. -->

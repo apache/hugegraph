@@ -54,11 +54,17 @@ import org.apache.hugegraph.store.client.query.QueryExecutor;
 import org.apache.hugegraph.store.client.util.HgAssert;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.client.util.HgStoreClientUtil;
+import org.apache.hugegraph.store.grpc.common.Header;
+import org.apache.hugegraph.store.grpc.common.ScanMethod;
+import org.apache.hugegraph.store.grpc.common.ScanOrderType;
+import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq.Builder;
 import org.apache.hugegraph.store.query.StoreQueryParam;
 import org.apache.hugegraph.store.term.HgPair;
 import org.apache.hugegraph.store.term.HgTriple;
 import org.apache.hugegraph.structure.BaseElement;
+
+import com.google.protobuf.ByteString;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -70,6 +76,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @NotThreadSafe
 public class NodeTxSessionProxy implements HgStoreSession {
+
+    private static final int ORDERED_SCAN_PAGE_SIZE = 64;
 
     private final HgSessionConfig sessionConfig;
     private final HgStoreNodeManager nodeManager;
@@ -486,6 +494,40 @@ public class NodeTxSessionProxy implements HgStoreSession {
     }
 
     @Override
+    public HgKvIterator<HgKvEntry> scanIteratorOrdered(String table,
+                                                       HgOwnerKey startKey,
+                                                       HgOwnerKey endKey,
+                                                       long limit,
+                                                       int scanType,
+                                                       byte[] query) {
+        HgAssert.isFalse(HgAssert.isInvalid(table),
+                         "The argument is invalid: table");
+        HgAssert.isFalse(startKey == null,
+                         "The argument is invalid: startKey");
+        HgAssert.isFalse(endKey == null,
+                         "The argument is invalid: endKey");
+
+        List<NodeTkv> nodeTkvs =
+                this.toOrderedRangeNodeTkvList(table, startKey, endKey);
+        List<HgKvIterator<HgKvEntry>> iterators =
+                new ArrayList<>(nodeTkvs.size());
+        try {
+            for (NodeTkv nodeTkv : nodeTkvs) {
+                HgKvIterator<HgKvEntry> iterator =
+                        this.getStoreNode(nodeTkv.getNodeId())
+                            .openSession(this.graphName)
+                            .scanIterator(this.orderedRangeScanBuilder(
+                                    nodeTkv, limit, scanType, query));
+                iterators.add(iterator);
+            }
+        } catch (RuntimeException | Error e) {
+            closeIteratorsAfterFailure(iterators, e);
+            throw e;
+        }
+        return mergeOrderedRangeScanIterators(iterators, limit);
+    }
+
+    @Override
     public HgKvIterator<HgKvEntry> scanIterator(String table, int codeFrom, int codeTo,
                                                 int scanType, byte[] query) {
         if (log.isDebugEnabled()) {
@@ -642,6 +684,23 @@ public class NodeTxSessionProxy implements HgStoreSession {
     }
 
     /*-- common --*/
+    static HgKvIterator<HgKvEntry> mergeOrderedRangeScanIterators(
+            List<? extends HgKvIterator<? extends HgKvEntry>> iteratorList,
+            long limit) {
+        return new OrderedKvIterator(iteratorList, limit);
+    }
+
+    private static void closeIteratorsAfterFailure(
+            List<? extends HgKvIterator<?>> iterators, Throwable failure) {
+        for (HgKvIterator<?> iterator : iterators) {
+            try {
+                iterator.close();
+            } catch (RuntimeException | Error closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+        }
+    }
+
     private HgKvIterator toHgKvIteratorProxy(List<HgKvIterator> iteratorList, long limit) {
         boolean isAllOrderedLimiter = iteratorList.stream()
                                                   .allMatch(
@@ -746,6 +805,44 @@ public class NodeTxSessionProxy implements HgStoreSession {
             nodeTkvs.add(new NodeTkv(partition, table, startKey, endKey));
         }
         return nodeTkvs;
+    }
+
+    private List<NodeTkv> toOrderedRangeNodeTkvList(String table,
+                                                    HgOwnerKey startKey,
+                                                    HgOwnerKey endKey) {
+        byte[] allOwner = HgStoreClientConst.ALL_PARTITION_OWNER;
+        Collection<HgNodePartition> partitions =
+                this.doPartition(table, allOwner, allOwner);
+        List<NodeTkv> nodeTkvs = new ArrayList<>(partitions.size());
+        for (HgNodePartition partition : partitions) {
+            nodeTkvs.add(new NodeTkv(partition, table, startKey, endKey));
+        }
+        return nodeTkvs;
+    }
+
+    private Builder orderedRangeScanBuilder(NodeTkv nodeTkv, long limit,
+                                            int scanType, byte[] query) {
+        long scanLimit = limit <= HgStoreClientConst.NO_LIMIT ?
+                         Integer.MAX_VALUE : limit;
+        return ScanStreamReq.newBuilder()
+                            .setHeader(Header.newBuilder()
+                                             .setGraph(this.graphName)
+                                             .build())
+                            .setMethod(ScanMethod.RANGE)
+                            .setTable(nodeTkv.getTable())
+                            .setStart(toByteString(nodeTkv.getKey().getKey()))
+                            .setEnd(toByteString(nodeTkv.getEndKey().getKey()))
+                            .setLimit(scanLimit)
+                            .setCode(nodeTkv.getKey().getKeyCode())
+                            .setScanType(scanType)
+                            .setPageSize(ORDERED_SCAN_PAGE_SIZE)
+                            .setOrderType(ScanOrderType.ORDER_BY_KEY)
+                            .setQuery(toByteString(query));
+    }
+
+    private static ByteString toByteString(byte[] bytes) {
+        return ByteString.copyFrom(bytes != null ? bytes :
+                                   HgStoreClientConst.EMPTY_BYTES);
     }
 
     private List<NodeTkv> toNodeTkvList(String table, int startCode, int endCode) {

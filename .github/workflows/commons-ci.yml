@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - master
-      - /^release-.*$/
-      - /^test-.*$/
+      - 'release-*'
+      - 'test-*'
   pull_request:
 
 jobs:

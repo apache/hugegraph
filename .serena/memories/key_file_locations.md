@@ -16,7 +16,7 @@
 - Tests: `hugegraph-test/src/main/java/.../` → `unit/`, `core/`, `api/`, `tinkerpop/`
 
 ## Docker
-- `docker/docker-compose.yml` — Single-node (bridge network, pd+store+server)
+- `docker/docker-compose.yml` — Standalone Server + Hubble (bridge network)
 - `docker/docker-compose-3pd-3store-3server.yml` — 3-node cluster
 - `docker/docker-compose.dev.yml` — Dev mode
 
@@ -41,4 +41,4 @@
 - `stale.yml` — Stale issue/PR cleanup
 
 ## Docs
-- `README.md`, `BUILDING.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`
+- `README.md`, `docs/BUILDING.md`, `docs/CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`

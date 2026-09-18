@@ -287,9 +287,7 @@ public class ManagerAPI extends API {
             defaultRole = null; // unreachable, satisfies compiler
         }
         validGraphSpace(manager, graphSpace);
-        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER);
-        E.checkArgument(!hasGraph || StringUtils.isNotEmpty(graph),
-                        "Must set a graph for observer");
+        boolean hasGraph = defaultRole.equals(HugeDefaultRole.OBSERVER) && StringUtils.isNotEmpty(graph);
         if (hasGraph) {
             validGraph(manager, graphSpace, graph);
         }
@@ -297,10 +295,10 @@ public class ManagerAPI extends API {
         boolean result;
         if (hasGraph) {
             result = authManager.isDefaultRole(graphSpace, graph, user,
-                                               defaultRole);
+                                               defaultRole) ||
+                     authManager.isDefaultRole(graphSpace, user, defaultRole);
         } else {
-            result = authManager.isDefaultRole(graphSpace, user,
-                                               defaultRole);
+            result = authManager.isDefaultRole(graphSpace, user, defaultRole);
         }
         return manager.serializer().writeMap(ImmutableMap.of("check", result));
     }
