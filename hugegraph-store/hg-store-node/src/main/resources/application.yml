@@ -49,3 +49,10 @@ logging:
   config: classpath:log4j2-dev.xml
   level:
     root: info
+
+arthas:
+  telnetPort: 8566
+  httpPort: 8565
+  # Only allow starting arthas locally
+  ip: 127.0.0.1
+  disabledCommands: jad,ognl,vmtool

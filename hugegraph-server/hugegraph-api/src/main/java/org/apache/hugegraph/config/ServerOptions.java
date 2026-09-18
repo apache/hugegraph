@@ -461,7 +461,7 @@ public class ServerOptions extends OptionHolder {
                     "arthas.ip",
                     "arthas bound ip",
                     disallowEmpty(),
-                    "0.0.0.0"
+                    "127.0.0.1"
             );
 
     public static final ConfigOption<String> ARTHAS_DISABLED_COMMANDS =
@@ -469,7 +469,7 @@ public class ServerOptions extends OptionHolder {
                     "arthas.disabledCommands",
                     "arthas disabled commands",
                     disallowEmpty(),
-                    "jad"
+                    "jad,ognl,vmtool"
             );
 
     public static final ConfigOption<Boolean> ALLOW_TRACE =
