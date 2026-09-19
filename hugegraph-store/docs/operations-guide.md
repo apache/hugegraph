@@ -714,6 +714,18 @@ bin/stop-hugegraph.sh
 bin/start-hugegraph.sh
 ```
 
+**Meta key prefix (`usePD=true`)**: the Server keeps its schema, graph spaces
+and users in PD under `HUGEGRAPH/<cluster>/...`, where `<cluster>` is the
+`cluster` option of `rest-server.properties` (default `hg-test`). Release 1.7.0
+bound that name; master builds between #3008 (2026-07-10) and #3220 bound the
+literal `hg` instead, because a graph was opened before the Server's own
+binding. Since #3220 the Server binds `cluster` again and logs
+`Meta cluster bound to '<cluster>' (keys under HUGEGRAPH/<cluster>/)` at
+startup. If a Server comes up with an empty schema after an upgrade, compare
+that line with the prefix your data lives under (1.7.0: `hg-test`; a master
+snapshot from that window: `hg`) and set `cluster` in `rest-server.properties`
+to the prefix that holds your data.
+
 ### Rollback Procedure
 
 If upgrade fails:
