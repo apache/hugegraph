@@ -1,0 +1,125 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: validateValues guard rails
+templates:
+  - server-deployment.yaml
+tests:
+  - it: rejects a PDB that would let PD drop below raft majority
+    set:
+      pd.pdb.minAvailable: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "pd.pdb.minAvailable must be at least the PD Raft majority"
+
+  - it: rejects a PDB that would permanently block drains
+    set:
+      pd.pdb.minAvailable: 3
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be less than pd.replicas"
+
+  - it: rejects an even shard count
+    set:
+      pd.partition.defaultShardCount: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be odd"
+
+  - it: rejects a shard count above store.replicas
+    set:
+      pd.partition.defaultShardCount: 5
+    asserts:
+      - failedTemplate:
+          errorPattern: "greater than store.replicas"
+
+  - it: rejects operator overrides of the chart-managed JAVA_OPTIONS
+    set:
+      server.extraEnv:
+        - name: JAVA_OPTIONS
+          value: "-Xmx1g"
+    asserts:
+      - failedTemplate:
+          errorPattern: "must not set the chart-managed variable JAVA_OPTIONS"
+
+  - it: rejects networkPolicy.enabled because the chart ships no policies
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "does not implement NetworkPolicy resources"
+
+  - it: rejects Hubble without Server auth
+    set:
+      server.auth.enabled: false
+      hubble.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "hubble.enabled requires server.auth"
+
+  - it: rejects a plain-HTTP Hubble Ingress
+    set:
+      hubble.ingress.enabled: true
+      hubble.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "publishes the plain-HTTP, unauthenticated Hubble UI"
+
+  - it: rejects an empty Hubble image tag
+    set:
+      hubble.image.tag: ""
+      hubble.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "hubble.image needs a tag or a digest"
+
+  - it: rejects a Store PDB that permits two concurrent evictions
+    set:
+      store.replicas: 4
+    asserts:
+      - failedTemplate:
+          errorPattern: "store.pdb.minAvailable must be at least store.replicas - 1"
+
+  - it: rejects podLabels that overwrite a selector label
+    set:
+      store.podLabels:
+        app.kubernetes.io/component: hacked
+    asserts:
+      - failedTemplate:
+          errorPattern: "store.podLabels must not set app.kubernetes.io/component"
+
+  - it: rejects a TLS-less Server Ingress without the plain-HTTP opt-in
+    set:
+      server.ingress.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "server.ingress.enabled without tls"
+
+  - it: rejects a non-ClusterIP PD Service without the exposure acknowledgement
+    set:
+      pd.service.type: NodePort
+    asserts:
+      - failedTemplate:
+          errorPattern: "pd.service.type NodePort or LoadBalancer exposes"
+
+  - it: rejects a read-only root filesystem on Hubble
+    set:
+      hubble.enabled: true
+      hubble.securityContext.readOnlyRootFilesystem: true
+    asserts:
+      - failedTemplate:
+          errorPattern: "readOnlyRootFilesystem=true breaks Hubble"
