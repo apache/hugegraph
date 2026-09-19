@@ -114,6 +114,11 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
             HstoreMetrics metrics = new HstoreMetrics(dbsGet.get(), session);
             return metrics.metrics();
         });
+        this.registerMetaHandler(HstoreStorageProbe.META_STORAGE_READINESS, (session, meta, args) -> {
+            E.checkArgument(args.length == 1 && args[0] instanceof Number,
+                            "Expect the timeout in ms as the only argument");
+            return HstoreStorageProbe.probe(((Number) args[0]).longValue());
+        });
         this.registerMetaHandler("mode", (session, meta, args) -> {
             E.checkArgument(args.length == 1,
                             "The args count of %s must be 1", meta);

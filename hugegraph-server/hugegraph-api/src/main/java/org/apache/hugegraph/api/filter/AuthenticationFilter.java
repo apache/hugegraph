@@ -77,6 +77,7 @@ public class AuthenticationFilter implements ContainerRequestFilter, ContainerRe
     private static final AntPathMatcher MATCHER = new AntPathMatcher();
     private static final Set<String> FIXED_WHITE_API_SET = ImmutableSet.of(
             "versions",
+            "readiness",
             "openapi.json"
     );
     /** Remove auth/login API from whitelist */
