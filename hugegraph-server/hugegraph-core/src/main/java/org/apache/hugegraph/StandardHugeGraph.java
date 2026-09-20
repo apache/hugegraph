@@ -264,10 +264,25 @@ public class StandardHugeGraph implements HugeGraph {
         }
 
         if (isHstore()) {
-            // TODO: parameterize the remaining configurations
-            MetaManager.instance().connect("hg", MetaManager.MetaDriverType.PD,
-                                           "ca", "ca", "ca",
-                                           config.get(CoreOptions.PD_PEERS));
+            MetaManager meta = MetaManager.instance();
+            String cluster = config.get(CoreOptions.PD_CLUSTER);
+            if (!meta.isReady()) {
+                // Fallback for usePD=false: with usePD=true the server has
+                // already connected the MetaManager under ServerOptions.CLUSTER
+                // (the meta keys are prefixed with the cluster name)
+                // TODO: parameterize the remaining configurations
+                meta.connect(cluster, MetaManager.MetaDriverType.PD,
+                             "ca", "ca", "ca", config.get(CoreOptions.PD_PEERS));
+            } else if (config.containsKey(CoreOptions.PD_CLUSTER.name()) &&
+                       !cluster.equals(meta.cluster())) {
+                // The prefix is bound once per process: the server's 'cluster'
+                // or the first hstore graph opened wins, a later different
+                // 'pd.cluster' would otherwise be dropped silently
+                LOG.warn("Graph '{}' sets pd.cluster='{}' but the meta cluster is " +
+                         "already bound to '{}' (keys under HUGEGRAPH/{}/); the " +
+                         "graph's value is ignored", this.name(), cluster,
+                         meta.cluster(), meta.cluster());
+            }
         }
 
         try {

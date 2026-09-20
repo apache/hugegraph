@@ -727,19 +727,44 @@ public final class GraphManager {
     }
 
     private void initMetaManager(HugeConfig conf) {
+        if (conf.get(ServerOptions.META_USE_CA)) {
+            this.ca = new K8sDriver.CA(conf.get(ServerOptions.META_CA),
+                                       conf.get(ServerOptions.META_CLIENT_CA),
+                                       conf.get(ServerOptions.META_CLIENT_KEY));
+        }
+        connectMetaManager(conf);
+    }
+
+    /**
+     * Connect the MetaManager under the cluster name of rest-server.properties
+     * (option 'cluster'). Idempotent, and it fails when the MetaManager was
+     * connected earlier under another name: the meta keys are prefixed with
+     * the cluster, so the server would otherwise read an empty tree. Called
+     * from HugeGraphServer before any graph is opened, because opening an
+     * hstore graph connects the MetaManager with the graph's 'pd.cluster'
+     * (default 'hg') if nothing connected it yet. With usePD=false the server
+     * has no cluster of its own and the graph-level binding is the only one,
+     * so this is a no-op there: the check must never apply to a prefix the
+     * server did not bind.
+     */
+    public static void connectMetaManager(HugeConfig conf) {
+        if (!conf.get(ServerOptions.USE_PD)) {
+            return;
+        }
+        String cluster = conf.get(ServerOptions.CLUSTER);
         String endpoints = conf.get(ServerOptions.PD_PEERS);
-        boolean useCa = conf.get(ServerOptions.META_USE_CA);
         String ca = null;
         String clientCa = null;
         String clientKey = null;
-        if (useCa) {
+        if (conf.get(ServerOptions.META_USE_CA)) {
             ca = conf.get(ServerOptions.META_CA);
             clientCa = conf.get(ServerOptions.META_CLIENT_CA);
             clientKey = conf.get(ServerOptions.META_CLIENT_KEY);
-            this.ca = new K8sDriver.CA(ca, clientCa, clientKey);
         }
-        this.metaManager.connect(this.cluster, MetaManager.MetaDriverType.PD,
-                                 ca, clientCa, clientKey, endpoints);
+        MetaManager manager = MetaManager.instance();
+        manager.connect(cluster, MetaManager.MetaDriverType.PD,
+                        ca, clientCa, clientKey, endpoints);
+        manager.ensureCluster(cluster);
     }
 
     private void initK8sManagerIfNeeded(HugeConfig conf) {
