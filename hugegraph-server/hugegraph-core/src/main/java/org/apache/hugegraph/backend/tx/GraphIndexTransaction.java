@@ -771,14 +771,9 @@ public class GraphIndexTransaction extends AbstractTransaction {
     @Watched(prefix = "index")
     private Set<MatchedIndex> collectMatchedIndexes(ConditionQuery query) {
         ISchemaTransaction schema = this.params().schemaTransaction();
-        boolean hasLabelValues = query.containsConditionValues(HugeKeys.LABEL);
         Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
 
         List<? extends SchemaLabel> schemaLabels;
-        if (hasLabelValues && labels.isEmpty()) {
-            // LABEL EQ/IN conditions resolve to an empty intersection.
-            return Collections.emptySet();
-        }
         if (labels.size() == 1) {
             Id label = (Id) labels.iterator().next();
             // Query has one resolved LABEL condition

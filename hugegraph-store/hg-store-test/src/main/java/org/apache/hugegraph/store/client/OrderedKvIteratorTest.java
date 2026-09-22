@@ -23,17 +23,21 @@ import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.hugegraph.store.HgKvEntry;
@@ -42,6 +46,146 @@ import org.junit.Assert;
 import org.junit.Test;
 
 public class OrderedKvIteratorTest {
+
+    @Test
+    public void testSecurityDeniedSubmissionFallsBackWithoutRetrying() {
+        for (int allowed : new int[]{0, 1}) {
+            DirectExecutorService executor = new DirectExecutorService();
+            executor.allowedExecutions = allowed;
+            TestIterator first = new TestIterator(1, 4);
+            TestIterator second = new TestIterator(2, 3);
+            TestIterator third = new TestIterator(5);
+            try (OrderedKvIterator iterator = new OrderedKvIterator(
+                    Arrays.asList(first, second, third), 0L, executor)) {
+                Assert.assertEquals(Arrays.asList(1, 2, 3, 4, 5), keys(iterator));
+                Assert.assertEquals(allowed + 1, executor.attempts);
+                Assert.assertTrue(first.closed);
+                Assert.assertTrue(second.closed);
+                Assert.assertTrue(third.closed);
+            }
+        }
+    }
+
+    @Test
+    public void testSecurityFallbackDrainsSubmittedFailureBeforeInlineSource() {
+        DirectExecutorService executor = new DirectExecutorService();
+        executor.allowedExecutions = 1;
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        RuntimeException failure = new IllegalStateException("Submitted source failed");
+        first.initializationFailure = failure;
+        second.initializationFailure = new IllegalStateException("Inline source should not start");
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 0L, executor);
+        Assert.assertSame(failure, Assert.assertThrows(IllegalStateException.class, iterator::hasNext));
+        Assert.assertTrue(first.closed);
+        Assert.assertTrue(second.closed);
+    }
+
+    @Test
+    public void testSecurityFallbackStillPropagatesSourceFailure() {
+        DirectExecutorService executor = new DirectExecutorService();
+        executor.allowedExecutions = 0;
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        first.failOnHasNextAfter(0);
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 0L, executor);
+        Assert.assertThrows(IllegalStateException.class, iterator::hasNext);
+        Assert.assertTrue(first.closed);
+        Assert.assertTrue(second.closed);
+    }
+
+    @Test
+    public void testSecurityFallbackDrainsAlreadyRunningSource() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        CountDownLatch denied = new CountDownLatch(1);
+        ExecutorService initializer = new ThreadPoolExecutor(
+                0, 2, 60L, TimeUnit.SECONDS, new SynchronousQueue<>(), task -> {
+                    if (attempts.getAndIncrement() > 0) {
+                        denied.countDown();
+                        throw new SecurityException("Worker creation denied");
+                    }
+                    return new Thread(task);
+                });
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        TestIterator first = new TestIterator(1, 4);
+        TestIterator second = new TestIterator(2, 3);
+        first.blockFirstHasNext(started, release);
+        Future<List<Integer>> result = caller.submit(() -> {
+            try (OrderedKvIterator iterator = new OrderedKvIterator(
+                    Arrays.asList(first, second), 0L, initializer)) {
+                return keys(iterator);
+            }
+        });
+        try {
+            Assert.assertTrue(started.await(3L, TimeUnit.SECONDS));
+            Assert.assertTrue(denied.await(3L, TimeUnit.SECONDS));
+            Assert.assertFalse(result.isDone());
+            release.countDown();
+            Assert.assertEquals(Arrays.asList(1, 2, 3, 4), result.get(3L, TimeUnit.SECONDS));
+            Assert.assertEquals(2, attempts.get());
+            Assert.assertTrue(first.closed);
+            Assert.assertTrue(second.closed);
+        } finally {
+            release.countDown();
+            result.cancel(true);
+            caller.shutdownNow();
+            initializer.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testSourceSecurityExceptionIsNotSubmissionFallback() {
+        for (int allowed : new int[]{0, Integer.MAX_VALUE}) {
+            DirectExecutorService executor = new DirectExecutorService();
+            executor.allowedExecutions = allowed;
+            TestIterator first = new TestIterator(1);
+            TestIterator second = new TestIterator(2);
+            SecurityException failure = new SecurityException("Source access denied");
+            first.initializationFailure = failure;
+            OrderedKvIterator iterator = new OrderedKvIterator(
+                    Arrays.asList(first, second), 0L, executor);
+            Assert.assertSame(failure, Assert.assertThrows(SecurityException.class, iterator::hasNext));
+            Assert.assertTrue(first.closed);
+            Assert.assertTrue(second.closed);
+        }
+    }
+
+    @Test
+    public void testSecurityFallbackPreservesCallerInterrupt() {
+        DirectExecutorService executor = new DirectExecutorService();
+        executor.allowedExecutions = 0;
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        first.initializationFailure = new IllegalStateException(new InterruptedException());
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 0L, executor);
+        try {
+            Assert.assertThrows(IllegalStateException.class, iterator::hasNext);
+            Assert.assertTrue(Thread.currentThread().isInterrupted());
+            Assert.assertTrue(first.closed);
+            Assert.assertTrue(second.closed);
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    public void testSecurityFallbackClosesSourcesWhenCancellationIsDenied() {
+        DirectExecutorService executor = new DirectExecutorService();
+        executor.allowedExecutions = 1;
+        executor.deferExecution = true;
+        executor.cancelFailure = new SecurityException("Worker interruption denied");
+        TestIterator first = new TestIterator(1);
+        TestIterator second = new TestIterator(2);
+        RuntimeException failure = new IllegalStateException("Source failed");
+        second.initializationFailure = failure;
+        OrderedKvIterator iterator = new OrderedKvIterator(Arrays.asList(first, second), 0L, executor);
+        Assert.assertSame(failure, Assert.assertThrows(IllegalStateException.class, iterator::hasNext));
+        Assert.assertArrayEquals(new Throwable[]{executor.cancelFailure}, failure.getSuppressed());
+        Assert.assertTrue(first.closed);
+        Assert.assertTrue(second.closed);
+    }
 
     @Test
     public void testMergeInterleavedSourcesByUnsignedKey() {
@@ -453,6 +597,23 @@ public class OrderedKvIteratorTest {
 
         private boolean shutdown;
         private int executions;
+        private int attempts;
+        private int allowedExecutions = Integer.MAX_VALUE;
+        private boolean deferExecution;
+        private RuntimeException cancelFailure;
+
+        @Override
+        protected <T> RunnableFuture<T> newTaskFor(Callable<T> task) {
+            return new FutureTask<T>(task) {
+                @Override
+                public boolean cancel(boolean mayInterruptIfRunning) {
+                    if (DirectExecutorService.this.cancelFailure != null) {
+                        throw DirectExecutorService.this.cancelFailure;
+                    }
+                    return super.cancel(mayInterruptIfRunning);
+                }
+            };
+        }
 
         private int executions() {
             return this.executions;
@@ -489,8 +650,13 @@ public class OrderedKvIteratorTest {
             if (this.shutdown) {
                 throw new RejectedExecutionException();
             }
+            if (this.attempts++ >= this.allowedExecutions) {
+                throw new SecurityException("Worker creation denied");
+            }
             this.executions++;
-            command.run();
+            if (!this.deferExecution) {
+                command.run();
+            }
         }
     }
 
@@ -520,6 +686,7 @@ public class OrderedKvIteratorTest {
         private boolean firstHasNextBlocked;
         private boolean failAfterFirstHasNextRelease;
         private boolean restoreInterrupt;
+        private RuntimeException initializationFailure;
 
         private TestIterator(Integer... keys) {
             this.entries = new ArrayList<>(keys.length);
@@ -567,6 +734,9 @@ public class OrderedKvIteratorTest {
 
         @Override
         public boolean hasNext() {
+            if (this.initializationFailure != null) {
+                throw this.initializationFailure;
+            }
             if (this.nextCalls == this.failOnHasNextAfter) {
                 throw new IllegalStateException("injected failure");
             }

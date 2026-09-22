@@ -1,108 +1,62 @@
 # AGENTS.md
 
-Single source of truth for AI coding agents.
-README.md covers human-facing deployment/ecosystem context; only consult it on demand.
+Repository-specific guidance; module files add local details.
 
-## Stack & Modules
+## Key relationships
 
-Apache HugeGraph — Apache TinkerPop 3 compliant graph database.
-Java 11+, Maven 3.5+. Version managed via `${revision}` (currently `1.8.0`).
+```text
+Server (hugegraph-server): graph engine + REST/Gremlin API
+  ├─ RocksDB: embedded backend
+  └─ HStore adapter → Store client → Store: partition data + Raft
 
-```
-Client (Gremlin / Cypher / REST)
-   │
-Server = hugegraph-server
-   ├─ hugegraph-api     REST, Gremlin/Cypher, auth
-   ├─ hugegraph-core    engine, schema, traversal, BackendStore interface
-   └─ Backend impls     rocksdb (default, embedded) │ hstore (distributed)
-                                                    ▼
-                           hugegraph-pd (placement) + hugegraph-store (Raft)
+PD: placement + metadata; consulted by Server and Store
+Struct: shared types/codecs; separate implementations also exist in Server
+Commons: shared utilities; independent compiler and test settings
 ```
 
-Top-level modules: `hugegraph-server` · `hugegraph-pd` · `hugegraph-store` ·
-`hugegraph-commons` (shared utils & RPC) · `hugegraph-struct` (data types; dep of PD/Store).
+## Load on demand
 
-Server submodules worth knowing: `hugegraph-core`, `hugegraph-api`,
-`hugegraph-rocksdb`, `hugegraph-hstore`, `hugegraph-test`, `hugegraph-dist`.
-
-## Code Search Anchors
-
-| Area | Path |
+| Work area | Read when working there |
 |---|---|
-| Graph engine | `hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/` |
-| REST APIs | `hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/api/` |
-| Backend interface | `hugegraph-server/hugegraph-core/.../backend/store/BackendStore.java` |
-| Auth | `hugegraph-server/hugegraph-api/.../api/auth/` |
-| gRPC protos | `hugegraph-{pd,store}/hg-{pd,store}-grpc/src/main/proto/` |
+| Graph engine, API, backends | [Server](hugegraph-server/AGENTS.md) |
+| Placement, metadata, PD client | [PD](hugegraph-pd/AGENTS.md) |
+| Distributed storage and client | [Store](hugegraph-store/AGENTS.md) |
+| Shared data types and serialization | [Struct](hugegraph-struct/AGENTS.md) |
+| Utilities and RPC | [Commons](hugegraph-commons/AGENTS.md) |
+| Container deployment | [Docker guide](docker/README.md) |
+| PR requirements | [Contribution guide](docs/CONTRIBUTING.md) |
 
-Config roots (under each dist module's `src/assembly/static/conf/`):
-- Server — `hugegraph.properties`, `rest-server.properties`, `gremlin-server.yaml`
-- PD / Store — `application.yml`
+## Repository constraints
 
-## Build
+- Use existing module boundaries; keep unrelated refactors out of a fix.
+- User-visible feature, configuration or deployment behavior changes must ship with matching docs.
+  Update in-repository docs in the same PR; link a paired `apache/hugegraph-doc` PR when website
+  docs are affected and coordinate both merges. A follow-up issue alone does not satisfy this rule.
+  Internal-only changes can use `Doc - No Need`.
+- Keep README as an entry point; link detailed deployment instructions instead of duplicating them.
+- Keep AGENTS.md under 100 lines where practical. Shared rules belong here, local exceptions
+  in module files. Keep key relationships, common commands and non-obvious pitfalls inline;
+  reference existing sources for versions, configuration details and lengthy procedures.
+
+## Build and validation
+
+Commands run from the repository root. Java 11+ and Maven 3.5+;
+versions come from [pom.xml](pom.xml), including `${revision}`.
 
 ```bash
-# All modules
 mvn clean install -DskipTests
-
-# Single module
 mvn clean install -pl hugegraph-server -am -DskipTests
 ```
 
-Distributed build order (for HStore-enabled dev):
+For separate distributed-module builds, install `hugegraph-struct` first,
+then build PD, Store and Server. Module guidance covers tests and CI prerequisites.
+Commons tests require `-DskipCommonsTests=false`; a successful build does not imply its tests ran.
 
-```bash
-mvn install -pl hugegraph-struct -am -DskipTests         # 1. shared data types
-mvn clean package -pl hugegraph-pd -am -DskipTests       # 2. placement driver
-mvn clean package -pl hugegraph-store -am -DskipTests    # 3. distributed storage
-mvn clean package -pl hugegraph-server -am -DskipTests   # 4. server
-```
-
-Runtime scripts (human-run) live in `hugegraph-server/hugegraph-dist/src/assembly/static/bin/`:
-`init-store.sh`, `start-hugegraph.sh`, `stop-hugegraph.sh`.
-
-## Testing
-
-Server tests implicitly prefix `mvn test -pl hugegraph-server/hugegraph-test -am`:
-
-| Profile | Suffix |
-|---|---|
-| Unit | `-P unit-test` |
-| Core | `-P core-test,rocksdb` (swap `rocksdb` for `memory`) |
-| API | `-P api-test,rocksdb` |
-| TinkerPop structure / process | `-P tinkerpop-{structure,process}-test,memory` |
-| Single class | `-P core-test,rocksdb -Dtest=YourTestClass` |
-
-PD / Store tests (need `hugegraph-struct` installed first):
-
-```bash
-mvn install -pl hugegraph-struct -am -DskipTests
-mvn test -pl hugegraph-pd/hg-pd-test -am
-mvn test -pl hugegraph-store/hg-store-test -am
-```
-
-Before writing new tests, check existing suites under `hugegraph-server/hugegraph-test/`.
-
-## Style & Pre-commit
-
-- Line 120, 4-space indent, LF, UTF-8, **no star imports**
-- Commit format: `feat|fix|refactor(module): msg`
-- Run before pushing:
-  ```bash
-  mvn editorconfig:format                         # enforce code style
-  mvn clean compile -Dmaven.javadoc.skip=true     # surface warnings
-  ```
-
-## Cross-module notes
-
-- `.proto` edits: `mvn clean compile` regenerates gRPC stubs under
-  `target/generated-sources/protobuf/` (output packages `*/grpc/` are excluded from Apache RAT).
-- Adding a third-party dep: update `install-dist/release-docs/{LICENSE,NOTICE,licenses/}`
-  and `install-dist/scripts/dependency/known-dependencies.txt`.
-- `hugegraph-commons` is shared by every module; `hugegraph-struct` must precede PD/Store;
-  server backends depend on `hugegraph-core`.
-
-## Additional context files
-
-`.serena/memories/` — notably `suggested_commands.md` and `task_completion_checklist.md`
-when a task needs depth beyond this file.
+- Java style: 120 columns, 4 spaces, no star imports; see [.editorconfig](.editorconfig).
+- Before pushing code: `mvn editorconfig:format`,
+  `mvn clean compile -Dmaven.javadoc.skip=true`, and relevant module tests.
+  Documentation-only changes need link/path checks and `git diff --check`.
+- PD/Store `.proto` builds generate Java into each `hg-*-grpc/src/main/java/` directory;
+  see the corresponding gRPC module POM before editing or cleaning generated sources.
+- New dependencies require updating [release LICENSE/NOTICE/licenses](install-dist/release-docs/)
+  and [dependency inventory](install-dist/scripts/dependency/known-dependencies.txt).

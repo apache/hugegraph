@@ -125,6 +125,13 @@ Note that since GitHub requires submitting code through `username + token` (inst
 
 Go to the web page of GitHub fork repo, there would be a chance to create a Pull Request after pushing to a new branch, click the button "Compare & pull request" to do it. Then edit the description for proposed changes, which can just be copied from the commit message.
 
+User-visible feature, configuration or deployment behavior changes must ship with matching
+documentation. Include repository documentation in the same PR. When website documentation
+is affected, link a paired [hugegraph-doc](https://github.com/apache/hugegraph-doc) PR and
+coordinate both merges. A follow-up issue alone does not replace required documentation.
+In the PR template, mark pending documentation as `Doc - TODO` until it is ready;
+use `Doc - Done` with the documentation files or PR link, or `Doc - No Need` for internal-only changes.
+
 Note: please make sure the email address you used to submit the code is bound to the GitHub account. For how to bind the email address, please refer to https://github.com/settings/emails:
 <img width="1280" alt="image" src="https://user-images.githubusercontent.com/9625821/163522445-2a50a72a-dea2-434f-9868-3a0d40d0d037.png">
 

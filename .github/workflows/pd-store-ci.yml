@@ -7,6 +7,24 @@ on:
       - 'release-*'
       - 'test-*'
   pull_request:
+    # Keep source/resources and shared build inputs; skip named documentation files.
+    paths:
+      - 'pom.xml'
+      - '.mvn/**'
+      - 'style/**'
+      - '.editorconfig'
+      - '.github/configs/**'
+      - 'hugegraph-commons/**'
+      - 'hugegraph-struct/**'
+      - 'hugegraph-pd/**'
+      - 'hugegraph-store/**'
+      - 'hugegraph-server/**'
+      - '.github/workflows/pd-store-ci.yml'
+      - 'docker/**'
+      - 'install-dist/**'
+      - '!**/README*'
+      - '!**/AGENTS.md'
+      - '!**/CLAUDE.md'
 
 # TODO: consider merge to one ci.yml file
 jobs:
@@ -303,6 +321,11 @@ jobs:
           mvn test -pl hugegraph-store/hg-store-test -am \
             -P store-raftcore-test -Djacoco.sessionId=store-raftcore-test
 
+      - name: Run core test
+        run: |
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-core-test -Djacoco.sessionId=store-core-test
+
       - name: Generate aggregate coverage report
         run: |
           mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \
@@ -319,15 +342,19 @@ jobs:
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml" \
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml" \
+            --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.core.CoreSuiteTest.xml" \
             --require-covered-group hg-store-common \
             --require-covered-group hg-store-client \
             --require-covered-group hg-store-rocksdb \
+            --require-covered-group hg-store-core \
             --require-session store-common-test \
             --require-session store-client-test \
             --require-session store-rocksdb-test \
             --require-session store-raftcore-test \
+            --require-session store-core-test \
             "$REPORT_FILE" \
-            hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb
+            hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb hg-store-core
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

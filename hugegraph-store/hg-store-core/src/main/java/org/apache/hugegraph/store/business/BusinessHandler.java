@@ -230,6 +230,22 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     void unlock(String path);
 
+    /**
+     * Non-blocking attempt to reserve the compactRange() window for partition {@code id}.
+     * Returns false if a compaction is actively running for that partition right now.
+     * Default throws, like {@link #scanOrdered}, so adding this compaction-lock helper does
+     * not break downstream implementations of this public interface that predate it.
+     */
+    default boolean tryLockCompactionRange(int id) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
+    default void unlockCompactionRange(int id) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
     void awaitAndSetLock(int id, int expectedValue, int value) throws InterruptedException,
                                                                       TimeoutException;
 
@@ -238,6 +254,18 @@ public interface BusinessHandler extends DBSessionBuilder {
     AtomicInteger getState(int id);
 
     String getLockPath(int partitionId);
+
+    /**
+     * The path lock state for {@code path} as set by {@link #lock} / {@link #unlock}
+     * ({@link #compactionCanStart} or {@link #doing}), or {@code null} if {@code path} has
+     * never been locked. Default throws, like {@link #scanOrdered}, so adding this
+     * compaction-lock helper does not break downstream implementations of this public
+     * interface that predate it.
+     */
+    default AtomicInteger getPathLockState(String path) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
 
     List<Integer> getPartitionIds(String graph);
 

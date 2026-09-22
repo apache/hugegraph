@@ -33,6 +33,7 @@ github:
   protected_branches:
     master:
       required_status_checks:
+        # Keep workflows providing these checks unfiltered; path skips can leave required checks pending.
         # strict means "Require PR to be up-to-date before merging". (enable when branch unstable)
         strict: false
         # contexts are the names of checks that must pass (now only enable the basic check)

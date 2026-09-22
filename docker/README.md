@@ -16,17 +16,11 @@ cd docker
 | Minimal HStore | `docker-compose-hstore.yml` | 1 PD + 1 Store + 1 Server + 1 Hubble | Distributed local development |
 | HA | `docker-compose-3pd-3store-3server.yml` | 3 PD + 3 Store + 3 Server + 1 Hubble | Reference and evaluation |
 
-Standalone uses `hugegraph/hugegraph:${HUGEGRAPH_VERSION:-latest}`. The HStore
-topologies use the matching `hugegraph/pd`, `hugegraph/store`, and
-`hugegraph/server` tags. Hubble is selected independently with
-`${HUBBLE_IMAGE:-hugegraph/hubble:latest}`.
+Standalone uses `hugegraph/hugegraph:${HUGEGRAPH_VERSION:-latest}`. The HStore topologies use the matching `hugegraph/pd`, `hugegraph/store`, and `hugegraph/server` tags. Hubble is selected independently with `${HUBBLE_IMAGE:-hugegraph/hubble:latest}`.
 
 ### Create the authentication environment
 
-Create `.env` once. Replace `replace-with-your-password` with an administrator
-password that you choose; the command generates and persists a random 32-byte
-JWT secret. For this simple single-quoted format, do not use a password that
-contains a single quote or newline.
+Create `.env` once. Replace `replace-with-your-password` with an administrator password that you choose; the command generates and persists a random 32-byte JWT secret. For this simple single-quoted format, do not use a password that contains a single quote or newline.
 
 ```bash
 (
@@ -48,7 +42,7 @@ contains a single quote or newline.
 )
 ```
 
-Do not commit `.env` or `conf/hubble/*.local.properties`; both are in `.gitignore`. Keeping the same JWT secret preserves authentication tokens when containers are recreated. For authenticated topologies with multiple Server replicas, all replicas receive this same secret. The HA topology fails fast if authentication is enabled without this shared secret.
+Do not commit `.env`. Keeping the same JWT secret preserves authentication tokens when containers are recreated. For authenticated topologies with multiple Server replicas, all replicas receive this same secret. The HA topology fails fast if authentication is enabled without this shared secret.
 
 A non-empty `HUGEGRAPH_ADMIN_PASSWORD` enables Server authentication, and Hubble detects that mode automatically. Omitting the variable or setting it to an empty value disables authentication. Auth-off is only suitable for a trusted local environment; never expose it to a public or untrusted network. Hubble listens on host loopback by default. Set `HUBBLE_PUBLISH_HOST` only behind an HTTPS reverse proxy and trusted network controls.
 
@@ -91,7 +85,10 @@ Status:
 docker compose -f docker-compose.yml ps
 ```
 
-Verify Server readiness, authentication, and Hubble:
+Open `http://localhost:8088` and sign in as `admin` with the password from `.env`.
+
+<details>
+<summary>Verify Server authentication and Hubble</summary>
 
 ```bash
 curl -fsS http://localhost:8080/versions
@@ -102,26 +99,7 @@ test "$(curl -sS -u "admin:${ADMIN_PASSWORD}" -o /dev/null -w '%{http_code}' \
 curl -fsS http://localhost:8088/about
 ```
 
-Open `http://localhost:8088` and sign in as `admin` with the password from
-`.env`.
-
-Stop containers while keeping them:
-
-```bash
-docker compose -f docker-compose.yml stop
-```
-
-Remove containers and the network while keeping data:
-
-```bash
-docker compose -f docker-compose.yml down
-```
-
-Delete containers, the network, and all topology data:
-
-```bash
-docker compose -f docker-compose.yml down -v
-```
+</details>
 
 ### Minimal HStore
 
@@ -137,7 +115,10 @@ Status:
 docker compose -f docker-compose-hstore.yml ps
 ```
 
-Verify PD, Store, Server authentication, and Hubble:
+Open `http://localhost:8088` and sign in as `admin` with the password from `.env`.
+
+<details>
+<summary>Verify PD, Store, Server authentication and Hubble</summary>
 
 ```bash
 curl -fsS http://localhost:8620/v1/health
@@ -150,33 +131,32 @@ test "$(curl -sS -u "admin:${ADMIN_PASSWORD}" -o /dev/null -w '%{http_code}' \
 curl -fsS http://localhost:8088/about
 ```
 
-Open `http://localhost:8088` and sign in as `admin` with the password from
-`.env`.
+</details>
 
-Stop containers while keeping them:
+### Stop or remove a deployment
 
-```bash
-docker compose -f docker-compose-hstore.yml stop
-```
+`stop` keeps containers and data; `down` removes containers and the network but keeps data. **`down -v` also deletes all topology data.**
 
-Remove containers and the network while keeping data:
+| Topology | Action | Command |
+| --- | --- | --- |
+| Standalone | Stop | `docker compose -f docker-compose.yml stop` |
+| Standalone | Remove; keep data | `docker compose -f docker-compose.yml down` |
+| Standalone | **Remove with data** | `docker compose -f docker-compose.yml down -v` |
+| Minimal HStore | Stop | `docker compose -f docker-compose-hstore.yml stop` |
+| Minimal HStore | Remove; keep data | `docker compose -f docker-compose-hstore.yml down` |
+| Minimal HStore | **Remove with data** | `docker compose -f docker-compose-hstore.yml down -v` |
+| HA | Stop | `docker compose -f docker-compose-3pd-3store-3server.yml stop` |
+| HA | Remove; keep data | `docker compose -f docker-compose-3pd-3store-3server.yml down` |
+| HA | **Remove with data** | `docker compose -f docker-compose-3pd-3store-3server.yml down -v` |
 
-```bash
-docker compose -f docker-compose-hstore.yml down
-```
-
-Delete containers, the network, and all topology data:
-
-```bash
-docker compose -f docker-compose-hstore.yml down -v
-```
+For source builds, keep both `-f` arguments for every lifecycle command (see [Developers](#developers)).
 
 ### HA reference
 
-The HA topology is resource-intensive. Running it locally is not required on
-resource-constrained machines, but its Compose configuration must always render
-successfully. This PR validates HA by rendering and static review only; it does
-not start HA locally or in default CI.
+<details>
+<summary>Deploy and verify the 3 PD + 3 Store + 3 Server topology</summary>
+
+The HA topology is resource-intensive. Running it locally is not required on resource-constrained machines, but its Compose configuration must always render successfully. Default CI validates the HA configuration through render checks, not a running HA cluster.
 
 Start:
 
@@ -210,31 +190,14 @@ done
 curl -fsS http://localhost:8088/about
 ```
 
-PD answers two unauthenticated probe endpoints: `/v1/health` for liveness (returns 200 once the REST listener is up, regardless of raft state), and `/v1/ready` for readiness (returns 200 only when PD sees a raft leader, 503 otherwise).
-
-Compose healthchecks currently gate on `/v1/health` for compatibility with published images. When targeting readiness on newer releases or source builds (`docker-compose.dev.yml`), match on the response body (`curl -fsS http://localhost:8620/v1/ready | grep -q '"ready":true'`).
-
 Open `http://localhost:8088` and sign in as `admin` with the password from `.env`.
 
-Stop containers while keeping them:
-
-```bash
-docker compose -f docker-compose-3pd-3store-3server.yml stop
-```
-
-Remove containers and the network while keeping data:
-
-```bash
-docker compose -f docker-compose-3pd-3store-3server.yml down
-```
-
-Delete containers, the network, and all topology data:
-
-```bash
-docker compose -f docker-compose-3pd-3store-3server.yml down -v
-```
+</details>
 
 ### Select image versions
+
+<details>
+<summary>Pin HugeGraph and Hubble images independently</summary>
 
 Set a HugeGraph release for Server, PD, and Store without changing Hubble:
 
@@ -252,29 +215,20 @@ docker compose -f docker-compose.yml up -d
 
 The Hubble `latest` image is expected to work with HugeGraph Server 1.7 and Server `latest`; compatibility with versions older than 1.7 is not promised. Pin immutable image references when reproducibility is required.
 
-### Server startup timeout
-
-Every topology gives each Server 120 seconds to answer on its REST port before the container gives up. Raise it on a slow or contended host with `HG_SERVER_STARTUP_TIMEOUT_S=300 docker compose -f docker-compose-hstore.yml up -d`. Leaving it unset keeps 120; an empty value is rejected rather than treated as a silent default, so a missing value in your own script is not mistaken for a deliberate one.
-
-<details>
-<summary>Keeping it inside the health check budget</summary>
-
-The Server health check keeps a separate budget of roughly 360 seconds that this variable does not move. `up -d --wait` gives up there, and so does a plain `up -d`, because Hubble waits on the Server with `depends_on: condition: service_healthy` in every topology. Keep the startup timeout inside that budget, or raise the Server health check in the Compose file alongside it. [The Server docker README](../hugegraph-server/hugegraph-dist/docker/README.md#6-process-supervision--health-checks) has the accepted range and the `docker run` equivalents.
-
 </details>
 
 ### Data persistence
 
-Each topology creates its own normal Compose network and named volumes. No
-network or volume needs to be created in advance.
+Each topology creates its own normal Compose network and named volumes. No network or volume needs to be created in advance.
 
-Standalone stores RocksDB data at `/hugegraph-server/rocksdb-data`. The HStore
-topologies keep PD and Store data in topology-local volumes. Hubble uses
-`jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE` and stores uploaded
-files under `/hubble/data/upload-files`.
+<details>
+<summary>Data locations inside the containers</summary>
 
-`docker compose down` keeps named-volume data. `docker compose down -v`
-intentionally deletes it.
+Standalone stores RocksDB data at `/hugegraph-server/rocksdb-data`. The HStore topologies keep PD and Store data in topology-local volumes. Hubble uses `jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE` and stores uploaded files under `/hubble/data/upload-files`.
+
+</details>
+
+`docker compose down` keeps named-volume data. `docker compose down -v` intentionally deletes it.
 
 ## Developers
 
@@ -287,17 +241,9 @@ intentionally deletes it.
 | `hugegraph/pd` | `hugegraph-pd/Dockerfile` |
 | `hugegraph/store` | `hugegraph-store/Dockerfile` |
 
-Hubble is built from the separate HugeGraph Toolchain repository and is
-selected here with `HUBBLE_IMAGE`.
+Hubble is built from the separate HugeGraph Toolchain repository and is selected here with `HUBBLE_IMAGE`.
 
-The Compose mapping is intentionally small:
-
-- `docker-compose.yml` is the standalone user default.
-- `docker-compose-hstore.yml` is the minimal 1 PD + 1 Store + 1 Server base.
-- `docker-compose-3pd-3store-3server.yml` is the HA reference.
-- `docker-compose.dev.yml` is a thin source-build override for the minimal
-  HStore topology. It does not duplicate runtime services, networks, volumes,
-  health checks, or Hubble.
+`docker-compose.dev.yml` is a thin source-build override for minimal HStore. It reuses the base services, networks, volumes, health checks, and Hubble. See the topology table above for the other Compose files.
 
 Build and start the minimal topology from local source:
 
@@ -317,9 +263,7 @@ docker compose \
   down
 ```
 
-The development overlay builds `hugegraph/pd:dev`, `hugegraph/store:dev`, and
-`hugegraph/server:dev`. To reuse those local images and a locally built Hubble
-without pulling replacements:
+The development overlay builds `hugegraph/pd:dev`, `hugegraph/store:dev`, and `hugegraph/server:dev`. To reuse those local images and a locally built Hubble without pulling replacements:
 
 ```bash
 HUGEGRAPH_VERSION=dev \
@@ -329,9 +273,57 @@ HUBBLE_PULL_POLICY=never \
 docker compose -f docker-compose-hstore.yml up -d --wait
 ```
 
+### Image build arguments and cache refresh
+
+Run image builds from the **repository root**. Direct Dockerfile builds and Bake use the same defaults: build the Server, PD, and Store distributions plus their dependencies (`-pl ... -am`), and reuse the OS package layer across source changes.
+
+```bash
+docker build -f hugegraph-server/Dockerfile -t hugegraph-standalone:local .
+```
+
+| Argument | Purpose |
+| --- | --- |
+| `MAVEN_PROJECTS` | Override the module selection; retain all three distributions required by the shared build and archive cleanup. |
+| `MAVEN_ARGS` | Pass other Maven options. |
+| `RUNTIME_DEPS_EPOCH` | Change the value to refresh cached OS packages without invalidating the Maven build stage. Default: `1`. |
+
+<details>
+<summary>Custom modules, package refresh, and cache behavior</summary>
+
+Bake accepts these arguments as environment variables. For example, add the PD CLI to the three distributions:
+
+```bash
+MAVEN_PROJECTS=':hugegraph-dist,:hg-pd-dist,:hg-store-dist,:hg-pd-cli' \
+docker buildx bake -f docker/bake.hcl
+```
+
+Refresh OS packages by changing the epoch; keep that value for subsequent builds and choose a new value for the next refresh:
+
+```bash
+RUNTIME_DEPS_EPOCH=2 docker buildx bake -f docker/bake.hcl
+```
+
+For direct Dockerfile builds, pass the same options with `--build-arg`:
+
+```bash
+docker build -f hugegraph-server/Dockerfile \
+  --build-arg RUNTIME_DEPS_EPOCH=2 \
+  --build-arg MAVEN_PROJECTS=':hugegraph-dist,:hg-pd-dist,:hg-store-dist,:hg-pd-cli' \
+  -t hugegraph-standalone:local .
+```
+
+The runtime stage installs packages before copying application artifacts, so source changes can reuse that layer from local or imported registry caches. Cached apt steps do not check for package updates. Changes to the epoch, base image digest, or installation instructions refresh the layer. Bake registry cache export is opt-in (`EXPORT_CACHE=true`).
+
+`COPY . .` still includes sources outside the selected modules, so unrelated edits can invalidate the Maven layer. Build-context narrowing is a follow-up: preserve reactor POMs, custom module selections, and assembly inputs; do not exclude entire module directories blindly.
+
+</details>
+
 ### Hubble configuration
 
-The three small files under `conf/hubble/` contain only topology-specific discovery settings, the PD REST credential (`operations.pd.username` and `operations.pd.password`, which must match PD's `auth.secret-key`), and container paths:
+<details>
+<summary>Topology discovery settings and container paths</summary>
+
+The three small files under `conf/hubble/` contain only topology-specific discovery settings and container paths:
 
 - `conf/hubble/standalone.properties` uses direct Server mode.
 - `conf/hubble/hstore.properties.example` uses one PD and one Store REST target.
@@ -341,7 +333,12 @@ The two HStore topologies mount the generated `*.local.properties` next to these
 
 Hubble detects Server authentication through the Server API. Do not add an `auth.enabled` property or duplicate auth-on/auth-off configurations.
 
+</details>
+
 ### Render and smoke checks
+
+<details>
+<summary>Contributor checks: render all topologies and run smoke tests</summary>
 
 Render every topology with auth-on inputs before submitting a change:
 
@@ -351,7 +348,7 @@ bash test-compose.sh render
 
 The HA render is mandatory even when local resources are insufficient to start its ten containers.
 
-Run focused auth-on smoke checks for standalone and minimal HStore with the corresponding `up -d --wait`, status, authentication, Hubble `/about`, and `down -v` commands from the Users section:
+Run auth-on smoke checks for standalone and minimal HStore:
 
 ```bash
 bash test-compose.sh smoke
@@ -364,3 +361,5 @@ bash test-compose.sh smoke-auth-off
 ```
 
 The auth-off mode is intentionally excluded from the default CI matrix and must remain on a trusted local machine. Both smoke modes remove only the isolated Compose projects and volumes that they create.
+
+</details>

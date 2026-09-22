@@ -192,9 +192,20 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
                     new ExecutorCompletionService<>(this.initializer);
             int nextSource = 0;
             int inFlight = 0;
+            boolean useExecutor = true;
             while (nextSource < this.iterators.size() || inFlight > 0) {
                 while (nextSource < this.iterators.size() &&
                        inFlight < INITIALIZE_THREADS) {
+                    if (!useExecutor) {
+                        Future<SourceEntry> completed = completions.poll();
+                        while (completed != null) {
+                            this.addFirst(completed.get());
+                            inFlight--;
+                            completed = completions.poll();
+                        }
+                        this.addFirst(this.firstEntry(nextSource++));
+                        continue;
+                    }
                     int source = nextSource;
                     try {
                         futures.add(completions.submit(
@@ -209,6 +220,13 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
                             break;
                         }
                         this.addFirst(this.firstEntry(nextSource++));
+                    } catch (SecurityException e) {
+                        // Gremlin's sandbox can deny lazy worker creation,
+                        // including after idle workers expire. Keep its policy
+                        // intact and initialize remaining sources on the caller.
+                        // Submitted tasks are still drained below; source errors
+                        // retain the normal cancellation/close behavior.
+                        useExecutor = false;
                     }
                 }
                 if (inFlight > 0) {
@@ -221,16 +239,19 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
                 }
             }
         } catch (InterruptedException e) {
-            this.cancel(futures);
             Thread.currentThread().interrupt();
+            this.cancel(futures, e);
             throw this.initializationFailure(
                     new IllegalStateException(
                             "Interrupted while initializing ordered scan", e));
         } catch (ExecutionException e) {
-            this.cancel(futures);
+            this.cancel(futures, e.getCause());
             throw this.initializationFailure(e.getCause());
         } catch (RuntimeException | Error e) {
-            this.cancel(futures);
+            if (interruption(e) != null) {
+                Thread.currentThread().interrupt();
+            }
+            this.cancel(futures, e);
             this.closeAfterFailure(e);
             throw e;
         }
@@ -264,10 +285,18 @@ final class OrderedKvIterator implements HgKvIterator<HgKvEntry> {
         return new SourceEntry(source, iterator.next());
     }
 
-    private void cancel(List<Future<SourceEntry>> futures) {
+    private void cancel(List<Future<SourceEntry>> futures, Throwable failure) {
         for (Future<SourceEntry> future : futures) {
             if (!future.isDone()) {
-                future.cancel(true);
+                try {
+                    future.cancel(true);
+                } catch (RuntimeException | Error cancelFailure) {
+                    // The sandbox may also deny interrupting an existing worker.
+                    // Keep closing sources and preserve the original scan error.
+                    if (cancelFailure != failure) {
+                        failure.addSuppressed(cancelFailure);
+                    }
+                }
             }
         }
     }

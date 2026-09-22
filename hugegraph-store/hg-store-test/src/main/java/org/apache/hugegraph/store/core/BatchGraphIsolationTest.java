@@ -57,7 +57,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import com.alipay.sofa.jraft.util.StorageOptionsFactory;
 import com.google.protobuf.ByteString;
 
 public class BatchGraphIsolationTest {
@@ -78,7 +77,6 @@ public class BatchGraphIsolationTest {
 
         Map<String, Object> rocksdbConfig = new HashMap<>();
         rocksdbConfig.put("rocksdb.write_buffer_size", "1048576");
-        StorageOptionsFactory.releaseAllOptions();
         RaftRocksdbOptions.initRocksdbGlobalConfig(rocksdbConfig);
         BusinessHandlerImpl.initRocksdb(rocksdbConfig, null);
 

@@ -34,12 +34,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -49,6 +53,9 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 
 import javax.annotation.concurrent.NotThreadSafe;
+
+import lombok.Getter;
+import lombok.Setter;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.ArrayUtils;
@@ -107,6 +114,7 @@ import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.term.Bits;
 import org.apache.hugegraph.store.term.HgPair;
+import org.apache.hugegraph.store.util.DefaultThreadFactory;
 import org.apache.hugegraph.store.util.ExecutorUtil;
 import org.apache.hugegraph.store.util.HgStoreException;
 import org.apache.hugegraph.structure.BaseElement;
@@ -138,6 +146,12 @@ public class BusinessHandlerImpl implements BusinessHandler {
     private static final ConcurrentMap<String, AtomicInteger> pathLock = new ConcurrentHashMap<>();
     private static final ConcurrentMap<Integer, AtomicInteger> compactionState =
             new ConcurrentHashMap<>();
+    // Guards the compactRange() window specifically, so a snapshot save can atomically
+    // check-and-reserve against a compaction that is actually running right now. This is
+    // narrower than pathLock, which stays held through the post-compaction blank-task
+    // snapshot and must not be reused here to avoid deadlocking that flow.
+    private static final ConcurrentMap<Integer, ReentrantLock> compactionRangeLock =
+            new ConcurrentHashMap<>();
     // Default core thread count
     private static final int compactionThreadCount = 64;
     private static final int compactionMaxThreadCount = 256;
@@ -153,6 +167,33 @@ public class BusinessHandlerImpl implements BusinessHandler {
     private final PdProvider provider;
     private final InnerKeyCreator keyCreator;
     private final Semaphore semaphore = new Semaphore(1);
+
+    /* Bounds how long dbCompaction() waits to acquire compactionRangeLock when a snapshot
+     save is holding it. saveSnapshot() is a RocksDB Checkpoint (hard-links existing SST
+     files, no data copy) plus a partial checksum read, so the lock is normally held for
+     well under a second, at most a few seconds under a slow/busy disk. 10s gives generous
+     margin over that expected hold time while keeping a stuck snapshot save from blocking
+     compaction for long: if the wait is exceeded, dbCompaction just skips this pass and
+     relies on the next trigger (PD instruction, REST call, etc.) to retry - see the
+     tryLock() call below.
+     Not final so tests can shorten it via setCompactionRangeLockWaitMillis() rather than
+     waiting out the real production value.*/
+    @Setter @Getter
+    private static long compactionRangeLockWaitMillis = 10_000;
+    /* Retry cadence for a cleanPartition() compactRange() pass that had to be skipped because
+     compactionRangeLock was still held by a snapshot save after compactionRangeLockWaitMillis.
+     Not final so tests can shorten it via setCleanPartitionCompactRetryDelayMillis() rather
+     than waiting out the real production value. */
+    @Setter @Getter
+    private static long cleanPartitionCompactRetryDelayMillis = 30_000;
+    /* Bounds how many times a skipped cleanPartition() compactRange() pass is retried before
+     it is abandoned and logged, rather than dropped silently forever. Not final so tests can
+     shrink it via setMaxCleanPartitionCompactRetries() to exercise the exhausted-retries path
+     quickly. */
+    @Setter @Getter
+    private static int maxCleanPartitionCompactRetries = 5;
+    private static final ScheduledExecutorService cleanPartitionCompactRetryScheduler =
+            new ScheduledThreadPoolExecutor(1, new DefaultThreadFactory(PoolNames.COMPACT_RETRY));
 
     public BusinessHandlerImpl(PartitionManager partitionManager) {
         this.partitionManager = partitionManager;
@@ -1175,7 +1216,6 @@ public class BusinessHandlerImpl implements BusinessHandler {
         if (partition == null) {
             return true;
         }
-
         log.info("cleanPartition: graph {}, part id: {}, {} -> {}, cleanType:{}", graph, partId,
                  startKey, endKey, cleanType);
 
@@ -1190,6 +1230,13 @@ public class BusinessHandlerImpl implements BusinessHandler {
         taskManager.putAsyncTask(cleanTask);
 
         Utils.runInThread(() -> {
+            // The range lock only guards the actual compactRange() call inside
+            // cleanPartition(Partition, Function) below - not this whole delete pass, which
+            // scans every key in the partition and can take minutes. Holding the range lock
+            // for that long would fail every onSnapshotSave on this partition with EBUSY for
+            // the duration, and a slow snapshot save could then make this one-shot
+            // post-split/move cleanup time out and get dropped entirely instead of just its
+            // compaction step.
             cleanPartition(partition, code -> {
                 // in range
                 boolean flag = code >= startKey && code < endKey;
@@ -1264,9 +1311,108 @@ public class BusinessHandlerImpl implements BusinessHandler {
             }
             op.getDBSession().close();
         }
-        op.compactRange();
+        int partId = partition.getId();
+        ReentrantLock rangeLock =
+                compactionRangeLock.computeIfAbsent(partId, k -> new ReentrantLock());
+        boolean rangeLocked = false;
+        boolean needsRetry = false;
+        try {
+            rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis, TimeUnit.MILLISECONDS);
+            if (rangeLocked) {
+                op.compactRange();
+            } else {
+                // The delete pass above already committed, so the cleanup itself succeeded -
+                // only compaction needs to be retried here. Log and move on rather than failing
+                // the whole cleanup over a busy snapshot save. A bounded retry is scheduled
+                // below so the compaction still eventually runs.
+                log.warn("Partition {}-{} skip cleanPartition compactRange, snapshot save " +
+                         "still in progress after {}ms wait", partition.getGraphName(), partId,
+                         compactionRangeLockWaitMillis);
+                needsRetry = true;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Partition {}-{} cleanPartition interrupted while waiting for snapshot " +
+                     "range lock, will retry compactRange", partition.getGraphName(), partId);
+            needsRetry = true;
+        } finally {
+            if (rangeLocked) {
+                rangeLock.unlock();
+            }
+        }
+        if (needsRetry) {
+            scheduleCleanPartitionCompactRetry(partition, 1);
+        }
         log.info("Partition {}-{} cleanPartition end", partition.getGraphName(), partition.getId());
         return true;
+    }
+
+    /**
+     * Retries a cleanPartition() compactRange() pass that needs to run again because
+     * compactionRangeLock was still held by a snapshot save. The original op's session was
+     * already closed by the time the range-lock section ran, so each attempt opens a fresh
+     * session rather than reusing it. Gives up and logs once maxCleanPartitionCompactRetries
+     * is exhausted, or if the partition has since been destroyed.
+     */
+    private void scheduleCleanPartitionCompactRetry(Partition partition, int attempt) {
+        String graph = partition.getGraphName();
+        int partId = partition.getId();
+        cleanPartitionCompactRetryScheduler.schedule(() -> {
+            if (HgStoreEngine.getInstance().getPartitionEngine(partId) == null) {
+                log.warn("Partition {}-{} abandoning cleanPartition compactRange retry {}/{}, " +
+                         "partition no longer exists", graph, partId, attempt,
+                         maxCleanPartitionCompactRetries);
+                return;
+            }
+            ReentrantLock rangeLock =
+                    compactionRangeLock.computeIfAbsent(partId, k -> new ReentrantLock());
+            boolean rangeLocked = false;
+            boolean needsRetry = false;
+            try {
+                rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
+                                                TimeUnit.MILLISECONDS);
+                if (rangeLocked) {
+                    SessionOperator retryOp = getSession(graph, partId).sessionOp();
+                    try {
+                        retryOp.compactRange();
+                        log.info("Partition {}-{} cleanPartition compactRange retry {}/{} " +
+                                 "succeeded", graph, partId, attempt,
+                                 maxCleanPartitionCompactRetries);
+                    } finally {
+                        retryOp.getDBSession().close();
+                    }
+                } else {
+                    log.warn("Partition {}-{} cleanPartition compactRange retry {}/{} needs " +
+                             "another retry, snapshot save still in progress after {}ms wait",
+                             graph, partId, attempt, maxCleanPartitionCompactRetries,
+                             compactionRangeLockWaitMillis);
+                    needsRetry = true;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Partition {}-{} cleanPartition compactRange retry {}/{} interrupted " +
+                         "while waiting for snapshot range lock", graph, partId, attempt,
+                         maxCleanPartitionCompactRetries);
+                needsRetry = true;
+            } catch (Exception e) {
+                log.error("Partition {}-{} abandoning cleanPartition compactRange retry {}/{} " +
+                          "after failure", graph, partId, attempt, maxCleanPartitionCompactRetries,
+                          e);
+            } finally {
+                if (rangeLocked) {
+                    rangeLock.unlock();
+                }
+            }
+            if (needsRetry) {
+                if (attempt < maxCleanPartitionCompactRetries) {
+                    scheduleCleanPartitionCompactRetry(partition, attempt + 1);
+                } else {
+                    log.warn("Partition {}-{} abandoning cleanPartition compactRange after {} " +
+                             "retries, snapshot save still busy", graph, partId,
+                             maxCleanPartitionCompactRetries);
+                }
+            }
+        }, cleanPartitionCompactRetryDelayMillis, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -1413,12 +1559,50 @@ public class BusinessHandlerImpl implements BusinessHandler {
                         pathLock.putIfAbsent(path, new AtomicInteger(compactionCanStart));
                         compactionState.putIfAbsent(id, new AtomicInteger(0));
                         log.info("Partition {} dbCompaction started", id);
+                        ReentrantLock rangeLock =
+                                compactionRangeLock.computeIfAbsent(id,
+                                                                    k -> new ReentrantLock());
                         if (tableName.isEmpty()) {
+                            // Take the path lock first: it can block for up to timeoutMillis
+                            // (6h) waiting on an earlier compaction/snapshot cycle for this
+                            // partition, so it must not be held while also reserving the
+                            // range lock below - that would let a blocked dbCompaction pin
+                            // the range lock and fail every onSnapshotSave for the partition
+                            // until the wait ends.
                             lock(path);
-                            setState(id, doing);
-                            log.info("Partition {}-{} got lock, dbCompaction start", id, path);
-                            op.compactRange();
-                            setState(id, compactionDone);
+                            boolean rangeLocked;
+                            try {
+                                rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
+                                                                TimeUnit.MILLISECONDS);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                log.warn("Partition {} dbCompaction interrupted while waiting " +
+                                         "for snapshot range lock", id);
+                                // lock(path) above already succeeded, so the path lock is
+                                // definitely held here and must be released, otherwise later
+                                // compactions for this partition would block until the path
+                                // lock timeout.
+                                unlock(path);
+                                return;
+                            }
+                            if (!rangeLocked) {
+                                // A snapshot save is still reserving this partition's range lock
+                                // after the wait. Skip this compaction pass rather than block -
+                                // callers of dbCompaction().
+                                log.warn("Partition {} skip dbCompaction, snapshot save " +
+                                         "still in progress after {}ms wait", id,
+                                         compactionRangeLockWaitMillis);
+                                unlock(path);
+                                return;
+                            }
+                            try {
+                                setState(id, doing);
+                                log.info("Partition {}-{} got lock, dbCompaction start", id, path);
+                                op.compactRange();
+                                setState(id, compactionDone);
+                            } finally {
+                                rangeLock.unlock();
+                            }
                             log.info("Partition {} dbCompaction end and start to do snapshot", id);
                             PartitionEngine pe = HgStoreEngine.getInstance().getPartitionEngine(id);
                             // find leader and send blankTask, after execution
@@ -1436,7 +1620,29 @@ public class BusinessHandlerImpl implements BusinessHandler {
                             }
                             setAndNotifyState(id, compactionDone);
                         } else {
-                            op.compactRange(tableName);
+                            // No path lock in this branch: only guard the actual
+                            // compactRange(tableName) call against a concurrent snapshot save.
+                            boolean rangeLocked = false;
+                            try {
+                                rangeLocked = rangeLock.tryLock(compactionRangeLockWaitMillis,
+                                                                TimeUnit.MILLISECONDS);
+                                if (rangeLocked) {
+                                    op.compactRange(tableName);
+                                } else {
+                                    log.warn("Partition {} skip dbCompaction({}), snapshot " +
+                                             "save still in progress after {}ms wait", id,
+                                             tableName, compactionRangeLockWaitMillis);
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                log.warn("Partition {} dbCompaction({}) interrupted while " +
+                                         "waiting for snapshot range lock", id, tableName);
+                                return;
+                            } finally {
+                                if (rangeLocked) {
+                                    rangeLock.unlock();
+                                }
+                            }
                         }
                     }
                     log.info("Partition {}-{} dbCompaction end", id, path);
@@ -1485,6 +1691,20 @@ public class BusinessHandlerImpl implements BusinessHandler {
     }
 
     @Override
+    public boolean tryLockCompactionRange(int id) {
+        ReentrantLock rangeLock = compactionRangeLock.computeIfAbsent(id, k -> new ReentrantLock());
+        return rangeLock.tryLock();
+    }
+
+    @Override
+    public void unlockCompactionRange(int id) {
+        ReentrantLock rangeLock = compactionRangeLock.get(id);
+        if (rangeLock != null) {
+            rangeLock.unlock();
+        }
+    }
+
+    @Override
     public void awaitAndSetLock(int id, int expectedValue, int value) throws InterruptedException,
                                                                              TimeoutException {
         long start = System.currentTimeMillis();
@@ -1512,6 +1732,11 @@ public class BusinessHandlerImpl implements BusinessHandler {
     public AtomicInteger getState(int id) {
         AtomicInteger l = compactionState.get(id);
         return l;
+    }
+
+    @Override
+    public AtomicInteger getPathLockState(String path) {
+        return pathLock.get(path);
     }
 
     private AtomicInteger setState(int id, int state) {

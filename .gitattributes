@@ -14,3 +14,6 @@ hugegraph-store/hg-store-dist/src/assembly/static/bin/libjemalloc_aarch64.so exp
 install-dist/scripts/ export-ignore
 hugegraph-commons/hugegraph-dist/ export-ignore
 docker/ export-ignore
+
+# Keep the generated golden corpus byte-identical across checkouts
+hugegraph-commons/hugegraph-common/src/test/resources/longencoding-golden.txt text eol=lf

@@ -22,6 +22,7 @@ import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.constant.ServiceConstant;
+import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
@@ -67,6 +68,18 @@ public class HugeGraphServer {
             PdMetaDriver.PDAuthConfig.setAuthority(
                     ServiceConstant.SERVICE_NAME,
                     ServiceConstant.AUTHORITY);
+
+            // Bind the meta cluster name ('cluster' in rest-server.properties)
+            // before any graph is opened: prepare() below opens every graph
+            // in conf/graphs, and an hstore graph would otherwise connect the
+            // MetaManager first under its own 'pd.cluster' (default 'hg'),
+            // hiding the meta written under the configured cluster
+            if (restServerConfig.get(ServerOptions.USE_PD)) {
+                GraphManager.connectMetaManager(restServerConfig);
+                String cluster = MetaManager.instance().cluster();
+                LOG.info("Meta cluster bound to '{}' (keys under HUGEGRAPH/{}/)",
+                         cluster, cluster);
+            }
 
             // Prepare GremlinServer (registers GRAPH_CREATE listener) BEFORE
             // RestServer starts loading graphs from PD/meta. This ensures that
