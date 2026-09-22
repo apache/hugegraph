@@ -55,22 +55,40 @@ fi
 # resolved in opposite directions, leaving Gremlin and REST on different
 # authenticators.
 
+# Appended with `>>` rather than `sed -i '$a\...'`: GNU sed's `$` address
+# never matches when the file has no lines, so on an empty mounted config
+# every append below silently did nothing.  Neither the REST
+# `auth.authenticator` nor the yaml `authentication:` block was written,
+# while the entrypoint had already applied PASSWORD and init-store had run
+# in auth mode — the servers then came up unauthenticated with no error.
+# `sed -i '$a'` also closed the previous last line for us, which `>>` does
+# not, so a file without a trailing newline gets one first.
+append_lines() {
+    local file="$1"
+    shift
+    if [[ -s "${file}" && -n "$(tail -c 1 "${file}")" ]]; then
+        printf '\n' >> "${file}"
+    fi
+    printf '%s\n' "$@" >> "${file}"
+}
+
 AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
 
 if ! grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' "${CONF}/${GREMLIN_SERVER_CONF}"; then
-    sed -i -e '$a\authentication: {' \
-        -e "\$a\\  authenticator: ${AUTHENTICATOR_CLASS}," \
-        -e '$a\  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler,' \
-        -e '$a\  config: {tokens: conf/rest-server.properties}' \
-        -e '$a\}' ${CONF}/${GREMLIN_SERVER_CONF}
+    append_lines "${CONF}/${GREMLIN_SERVER_CONF}" \
+        'authentication: {' \
+        "  authenticator: ${AUTHENTICATOR_CLASS}," \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler,' \
+        '  config: {tokens: conf/rest-server.properties}' \
+        '}'
 fi
 
 if ! grep -Eq '^[[:blank:]]*auth[\\]?\.authenticator[[:blank:]]*([:=]|[[:blank:]])' "${CONF}/${REST_SERVER_CONF}"; then
-    sed -i -e "\$a\\auth.authenticator=${AUTHENTICATOR_CLASS}" ${CONF}/${REST_SERVER_CONF}
+    append_lines "${CONF}/${REST_SERVER_CONF}" "auth.authenticator=${AUTHENTICATOR_CLASS}"
 fi
 
 if ! grep -Eq '^[[:blank:]]*auth[\\]?\.graph_store[[:blank:]]*([:=]|[[:blank:]])' "${CONF}/${REST_SERVER_CONF}"; then
-    sed -i -e '$a\auth.graph_store=hugegraph' ${CONF}/${REST_SERVER_CONF}
+    append_lines "${CONF}/${REST_SERVER_CONF}" 'auth.graph_store=hugegraph'
 fi
 
 # GNU grep reads \r in a pattern as the letter r, so the carriage return a

@@ -159,6 +159,7 @@ get_yaml_authenticator() {
         /^[ \t]*#/ { next }
         /^[ \t]*authentication[ \t]*:/ {
             inblk = 1
+            indent = match($0, /[^ \t]/)
             line = $0
             sub(/^[ \t]*authentication[ \t]*:[ \t]*/, "", line)
             if (match(line, /authenticator[ \t]*:/)) {
@@ -167,6 +168,15 @@ get_yaml_authenticator() {
             }
             next
         }
+        # A blank line does not close a YAML mapping.
+        /^[ \t\r]*$/ { next }
+        # The authenticator has to belong to the authentication mapping:
+        # any key at or left of that key is a sibling, so the block is
+        # over.  Without this, the first `authenticator:` anywhere below
+        # `authentication:` is taken as the Gremlin one, which lets a
+        # later top-level mapping carrying its own authenticator decide
+        # the REST side too.
+        inblk && match($0, /[^ \t]/) <= indent { inblk = 0 }
         inblk && /^[ \t]+authenticator[ \t]*:/ {
             line = $0
             sub(/^[ \t]*authenticator[ \t]*:[ \t]*/, "", line)
@@ -218,7 +228,11 @@ align_auth_config() {
         return
     fi
     if [[ -z "${rest_auth}" && -z "${yaml_auth}" ]]; then
-        export AUTHENTICATOR_CLASS="org.apache.hugegraph.auth.StandardAuthenticator"
+        # Only fill in a default: an operator-supplied AUTHENTICATOR_CLASS
+        # is the intent for a config that names no authenticator yet, and
+        # assigning here would turn it back into StandardAuthenticator
+        # before enable-auth.sh ever saw it.
+        export AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
     elif [[ -n "${yaml_auth}" ]]; then
         set_prop "auth.authenticator" "${yaml_auth}" "${REST_SERVER_CONF}"
     else

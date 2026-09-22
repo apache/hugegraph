@@ -196,7 +196,7 @@ function props_load(file,    raw, rc, nl, stripped, next_raw, start, logical) {
     }
 }
 
-function props_set(file, key, enc_val,    tmp, cmd, b, first, ln) {
+function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg) {
     props_load(file)
     first = 0
     for (b = 1; b <= NBLOCK; b++) {
@@ -233,13 +233,33 @@ function props_set(file, key, enc_val,    tmp, cmd, b, first, ln) {
     # umask-world-readable), turn a symlinked config into a regular file,
     # and fail with EBUSY on a config bind-mounted as a single file — the
     # mounted case this path exists for.  The copy keeps the inode, mode,
-    # symlink and mount point, and since the temp file is fully written
-    # before the original is truncated, a failed copy still leaves the
-    # previous content on disk.
+    # symlink and mount point.
+    #
+    # The copy itself is not atomic and the shell's `>` truncates the
+    # destination before cat writes a byte, so an ENOSPC or I/O error
+    # mid-copy used to leave a truncated config on disk — a truncated
+    # rest-server.properties loses `auth.authenticator` and boots the
+    # server with authentication off.  Snapshot the original first (under
+    # umask 077 so a backup of a 0644 mounted config never ends up more
+    # permissive than it started, and chmodded in case a crashed run left
+    # one behind) and put it back when the copy fails.
     system("chmod 600 -- " shquote(tmp))
-    cmd = "cat -- " shquote(tmp) " > " shquote(file) " && rm -f -- " shquote(tmp)
-    if (system(cmd) != 0)
-        die("cannot copy " tmp " back over " file)
+    bak = file ".bak"
+    cmd = "umask 077 && cp -- " shquote(file) " " shquote(bak)
+    if (system(cmd " && chmod 600 -- " shquote(bak)) != 0)
+        die("cannot back up " file " before the copy-back")
+    cmd = "cat -- " shquote(tmp) " > " shquote(file)
+    if (system(cmd) != 0) {
+        # Best effort: the destination is already damaged, so restoring it
+        # from the snapshot comes first, and the temp file is kept for an
+        # operator who wants to inspect what was being written.
+        msg = "cannot copy " tmp " over " file
+        cmd = "cat -- " shquote(bak) " > " shquote(file)
+        if (system(cmd) == 0) die(msg "; the previous content is restored")
+        die(msg "; " file " is damaged, previous content is in " bak)
+    }
+    if (system("rm -f -- " shquote(tmp) " " shquote(bak)) != 0)
+        die("cannot remove " tmp " and " bak " after the copy-back")
 }
 
 function props_get(file, key,    b) {

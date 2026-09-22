@@ -283,6 +283,7 @@ set_prop "init_store.enabled" "true" "${mode_file}"
 grep -q '^init_store\.enabled=true$' "${mode_file}"
 grep -q '^unrelated=true$' "${mode_file}"
 [[ ! -e "${mode_file}.tmp" ]]
+[[ ! -e "${mode_file}.bak" ]]
 
 target_file="${test_dir}/config-target"
 link_file="${test_dir}/config-link"
@@ -291,3 +292,173 @@ ln -s "${target_file}" "${link_file}"
 set_prop "init_store.enabled" "true" "${link_file}"
 [[ -L "${link_file}" ]]
 grep -q '^init_store\.enabled=true$' "${target_file}"
+
+# An `authenticator:` below a *sibling* mapping is not the Gremlin one.
+# `get_yaml_authenticator` opens its block on `authentication:` and has to
+# close it again on the next key at the same indentation, or the yaml below
+# reports com.example.TlsOnly — and align_auth_config then writes that
+# class into rest-server.properties, so REST authenticates with a class the
+# operator only ever mentioned to an unrelated mapping.
+scope_dir="${test_dir}/yaml-scope"
+mkdir -p "${scope_dir}/conf"
+(
+    cd "${scope_dir}" || exit 1
+
+    printf '%s\n' \
+        'authentication:' \
+        '  config: {tokens: conf/rest-server.properties}' \
+        'ssl:' \
+        '  authenticator: com.example.TlsOnly' \
+        > conf/gremlin-server.yaml
+    [[ -z "$(get_yaml_authenticator)" ]]
+
+    # The block's own authenticator is still found when a sibling follows
+    # it, and one deeper than the key is still inside it.
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: com.example.GremlinAuth' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+        'ssl:' \
+        '  authenticator: com.example.TlsOnly' \
+        > conf/gremlin-server.yaml
+    [[ "$(get_yaml_authenticator)" == "com.example.GremlinAuth" ]]
+
+    # A blank line does not close a YAML mapping, and neither does a
+    # comment — including one that names an authenticator.
+    printf '%s\n' \
+        'authentication:' \
+        '' \
+        '#  authenticator: com.example.CommentedAuth' \
+        '  authenticator: com.example.BlankLineAuth' \
+        > conf/gremlin-server.yaml
+    [[ "$(get_yaml_authenticator)" == "com.example.BlankLineAuth" ]]
+
+    # Same indentation as the key means a sibling, not a member: the last
+    # case a mounted file is likely to get wrong, because a two-space
+    # `authentication:` under a top-level key is how some deployments
+    # indent the whole block.
+    printf '%s\n' \
+        '  authentication:' \
+        '    authenticator: com.example.IndentedAuth' \
+        '  ssl:' \
+        '    authenticator: com.example.TlsOnly' \
+        > conf/gremlin-server.yaml
+    [[ "$(get_yaml_authenticator)" == "com.example.IndentedAuth" ]]
+)
+
+# Both sides silent means "bootstrap authentication", but an operator who
+# passed AUTHENTICATOR_CLASS named the class they want.  The default may
+# fill that in, it may not overwrite it: enable-auth.sh appends the value
+# it is given, so overwriting here put StandardAuthenticator into a
+# deployment that asked for something else.
+class_dir="${test_dir}/authenticator-class"
+mkdir -p "${class_dir}/conf"
+(
+    cd "${class_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
+    : > "${REST_SERVER_CONF}"
+    printf '%s\n' 'restserver.url=http://0.0.0.0:8080' > conf/gremlin-server.yaml
+
+    AUTHENTICATOR_CLASS=com.example.OperatorAuth
+    export AUTHENTICATOR_CLASS
+    align_auth_config
+    [[ "${AUTHENTICATOR_CLASS}" == "com.example.OperatorAuth" ]]
+
+    unset AUTHENTICATOR_CLASS
+    align_auth_config
+    [[ "${AUTHENTICATOR_CLASS}" == \
+        "org.apache.hugegraph.auth.StandardAuthenticator" ]]
+)
+
+# An empty mounted config still gets its definitions.  GNU sed's `$`
+# address never matches when the file has no lines, so enable-auth.sh's
+# `sed -i '$a\...'` appends were silent no-ops on an empty
+# rest-server.properties and an empty gremlin-server.yaml: the
+# entrypoint had already written auth.admin_pa and init-store had run in
+# auth mode, yet neither server was told to authenticate at all.
+empty_dir="${test_dir}/empty-config"
+mkdir -p "${empty_dir}/bin" "${empty_dir}/conf/graphs"
+cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
+    "${empty_dir}/bin/enable-auth.sh"
+chmod +x "${empty_dir}/bin/enable-auth.sh"
+(
+    cd "${empty_dir}" || exit 1
+    : > conf/rest-server.properties
+    : > conf/gremlin-server.yaml
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+        > conf/graphs/hugegraph.properties
+    unset AUTHENTICATOR_CLASS
+    ./bin/enable-auth.sh
+    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+        conf/rest-server.properties
+    grep -q '^auth\.graph_store=hugegraph$' conf/rest-server.properties
+    grep -q '^authentication: {$' conf/gremlin-server.yaml
+    grep -q '^  authenticator: org\.apache\.hugegraph\.auth\.StandardAuthenticator,$' \
+        conf/gremlin-server.yaml
+    grep -q '^  config: {tokens: conf/rest-server\.properties}$' \
+        conf/gremlin-server.yaml
+    grep -q '^}' conf/gremlin-server.yaml
+    grep -q 'HugeFactoryAuthProxy' conf/graphs/hugegraph.properties
+    # Idempotent: a second run adds nothing to what the first one wrote.
+    wc -l < conf/gremlin-server.yaml > "${test_dir}/empty-yaml-count"
+    ./bin/enable-auth.sh
+    [[ "$(wc -l < conf/gremlin-server.yaml)" == \
+        "$(cat "${test_dir}/empty-yaml-count")" ]]
+
+    # A config whose last line has no terminator still gets a line of its
+    # own; `sed -i '$a'` closed that terminator for us.
+    printf 'restserver.url=http://127.0.0.1:8080' > conf/rest-server.properties
+    ./bin/enable-auth.sh
+    grep -q '^auth\.authenticator=' conf/rest-server.properties
+    grep -q '^restserver\.url=http://127\.0\.0\.1:8080$' conf/rest-server.properties
+)
+
+# A copy-back that fails part way must not leave a truncated config.  The
+# shell's `>` truncates the destination before cat writes a byte, so
+# props.awk snapshots the original first and puts it back.  The snapshot
+# `cat` is replaced through PATH to fail the copy the way ENOSPC would:
+# stdout here *is* the already-truncated destination, so a few bytes and a
+# non-zero exit is exactly a half-written config.
+failbin="${test_dir}/fakebin"
+mkdir -p "${failbin}"
+real_cat="$(command -v cat)"
+printf '%s\n' \
+    '#!/bin/sh' \
+    'case "$*" in' \
+    '    *.tmp) printf "auth.authenticator=par"; exit 1 ;;' \
+    'esac' \
+    'exec "${FAKE_CAT_REAL}" "$@"' \
+    > "${failbin}/cat"
+chmod +x "${failbin}/cat"
+rb_file="${test_dir}/config-rollback"
+rb_expect="${test_dir}/config-rollback.expected"
+printf '%s\n' \
+    'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+    'auth.token_secret=s3cr3t' \
+    'unrelated=true' > "${rb_file}"
+cp -p "${rb_file}" "${rb_expect}"
+(
+    PATH="${failbin}:${PATH}"
+    FAKE_CAT_REAL="${real_cat}"
+    export PATH FAKE_CAT_REAL
+    if set_prop 'auth.authenticator' 'com.example.HalfWritten' "${rb_file}"; then
+        echo "set_prop must fail when the copy-back fails" >&2
+        exit 1
+    fi
+) 2>/dev/null
+cmp -s "${rb_file}" "${rb_expect}" || {
+    echo "a failed copy-back must leave the previous content in place" >&2
+    exit 1
+}
+# Both staging files survive on purpose: the temp file is what was being
+# written, and the snapshot is the operator's way back.
+[[ -e "${rb_file}.tmp" ]]
+[[ -e "${rb_file}.bak" ]]
+# Once the condition clears the same set goes through, and leaves nothing
+# behind.
+set_prop 'auth.authenticator' 'com.example.HalfWritten' "${rb_file}"
+grep -q '^auth\.authenticator=com\.example\.HalfWritten$' "${rb_file}"
+grep -q '^auth\.token_secret=s3cr3t$' "${rb_file}"
+grep -q '^unrelated=true$' "${rb_file}"
+[[ ! -e "${rb_file}.tmp" ]]
+[[ ! -e "${rb_file}.bak" ]]
