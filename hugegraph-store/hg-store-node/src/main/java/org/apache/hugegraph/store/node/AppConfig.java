@@ -209,11 +209,6 @@ public class AppConfig {
             String storeScopePrefix = resolveStableStoreScopePrefix(cfg.getNodeId(),
                                                                     primaryDataRoot);
 
-            CloudStorageEventListener.Tuning tuning = CloudStorageEventListener.Tuning.builder()
-                    .metadataSyncDebounceMs(cfg.getMetadataSyncDebounceMs())
-                    .metadataSyncMaxUnpublished(cfg.getMetadataSyncMaxUnpublished())
-                    .build();
-
             CloudStorageEventListener listener = new CloudStorageEventListener(
                     resolvedDataRoots,
                     cfg.isStartupHydrationEnabled(),
@@ -221,7 +216,8 @@ public class AppConfig {
                     retryQueue,
                     syncTracker,
                     storeScopePrefix,
-                    tuning);
+                    cfg.getMetadataSyncDebounceMs(),
+                    cfg.getMetadataSyncMaxUnpublished());
 
             // After a retry / DLQ-replay upload becomes durable, publish CURRENT/MANIFEST so the
             // mirrored recovery point advances even on an idle DB (the tracker-confirm callback

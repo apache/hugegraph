@@ -96,7 +96,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     /** Optional per-store namespace prefix prepended to every remote cloud key. */
     private final String storeScopePrefix;
 
-    private static final long DEFAULT_READ_MISS_GUARD_WINDOW_MS = 3000L;
+    static final long DEFAULT_READ_MISS_GUARD_WINDOW_MS = 3000L;
 
     private final boolean startupHydrationEnabled;
     private final long readMissGuardWindowMs;
@@ -117,7 +117,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      */
     private final CloudUploadRetryQueue retryQueue;
 
-    /** Tracks which SST files are confirmed present in cloud (per-DB Roaring bitmap). */
+    /** Tracks which SST files are confirmed present in cloud (per-DB confirmed-file-number set). */
     private final CloudSyncTracker syncTracker;
 
     /**
@@ -192,7 +192,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     // syncMetadataSnapshotInline directly and are NOT debounced.
 
     /** Default debounce window for the post-upload metadata sync. */
-    private static final long DEFAULT_METADATA_SYNC_DEBOUNCE_MS = 1_000L;
+    static final long DEFAULT_METADATA_SYNC_DEBOUNCE_MS = 1_000L;
 
     /**
      * Single shared scheduler for trailing (deferred) metadata syncs. Not {@code final}: like the
@@ -243,7 +243,7 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
      * a publish is forced immediately regardless of the time window, bounding RPO by count as well
      * as by time. {@code <= 0} disables the count bound (time-only debounce).
      */
-    private static final int DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED = 32;
+    static final int DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED = 32;
     /**
      * -- SETTER --
      *  Sets the maximum number of uploaded-but-unmirrored SSTs tolerated before a metadata publish
@@ -319,91 +319,27 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
     static final String DB_TOMBSTONE_SUFFIX = "_DELETED";
 
     /**
-     * Convenience constructor with startup hydration enabled and default read-miss guard window.
+     * Fully-parameterised constructor: the listener is completely configured the moment it is
+     * constructed, so there is no window in which a registered listener can be observed with the
+     * tuning setters not yet applied. The equivalent {@code set*} methods remain for tests and
+     * runtime overrides.
      *
      * @param dataRoots configured store data roots (typically parsed from comma-separated
      *                  {@code app.data-path})
-     */
-    public CloudStorageEventListener(List<String> dataRoots) {
-        this(dataRoots, true, DEFAULT_READ_MISS_GUARD_WINDOW_MS, null);
-    }
-
-    /**
-     * @param dataRoots configured store data roots
-     */
-    public CloudStorageEventListener(List<String> dataRoots,
-                                     boolean startupHydrationEnabled) {
-        this(dataRoots, startupHydrationEnabled, DEFAULT_READ_MISS_GUARD_WINDOW_MS, null);
-    }
-
-    /**
-     * @param dataRoots configured store data roots
      * @param readMissGuardWindowMs guard window in ms for repeated read-miss hydration attempts
      *                              for the same db/table pair (cloud.storage.read-miss-guard-window-ms)
-     */
-    public CloudStorageEventListener(List<String> dataRoots,
-                                     boolean startupHydrationEnabled,
-                                     long readMissGuardWindowMs) {
-        this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, null);
-    }
-
-    /**
-     * @param dataRoots configured store data roots
      * @param retryQueue optional {@link CloudUploadRetryQueue}; when non-null, upload failures
      *                   are retried asynchronously and eventually moved to the dead-letter queue.
      *                   Pass {@code null} to disable retries (failures are only logged).
-     */
-    public CloudStorageEventListener(List<String> dataRoots,
-                                     boolean startupHydrationEnabled,
-                                     long readMissGuardWindowMs,
-                                     CloudUploadRetryQueue retryQueue) {
-        this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, retryQueue,
-             new CloudSyncTracker(), null);
-    }
-
-    /**
-     * @param dataRoots configured store data roots
      * @param syncTracker tracks SST files confirmed present in cloud; the delete guard uses it
      *                    to avoid deleting a superseded object before replacements are durable.
-     *                    Must be shared with the retry queue.
-     */
-    public CloudStorageEventListener(List<String> dataRoots,
-                                     boolean startupHydrationEnabled,
-                                     long readMissGuardWindowMs,
-                                     CloudUploadRetryQueue retryQueue,
-                                     CloudSyncTracker syncTracker) {
-        this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, retryQueue, syncTracker,
-             null);
-    }
-
-    /**
-     * Multi-root constructor for comma-separated app.data-path configuration.
-     *
-     * @param dataRoots configured store data roots (absolute, normalised)
-     * @param syncTracker tracks SST files confirmed present in cloud; the delete guard uses it
-     *                    to avoid deleting a superseded object before replacements are durable.
-     *                    Must be shared with the retry queue.
+     *                    Must be shared with the retry queue. Pass {@code null} for a fresh
+     *                    {@link CloudSyncTracker}.
      * @param storeScopePrefix optional per-store key prefix to isolate cloud objects
-     */
-    public CloudStorageEventListener(List<String> dataRoots,
-                                     boolean startupHydrationEnabled,
-                                     long readMissGuardWindowMs,
-                                     CloudUploadRetryQueue retryQueue,
-                                     CloudSyncTracker syncTracker,
-                                     String storeScopePrefix) {
-        this(dataRoots, startupHydrationEnabled, readMissGuardWindowMs, retryQueue, syncTracker,
-             storeScopePrefix, Tuning.defaults());
-    }
-
-    /**
-     * Fully-parameterised constructor. Prefer this in production wiring: passing {@link Tuning}
-     * makes the listener completely configured the moment it is constructed, so there is no window
-     * in which a registered listener can be observed with the tuning setters not yet applied. The
-     * equivalent {@code set*} methods remain for tests and runtime overrides.
-     *
-     * @param storeScopePrefix optional per-store key prefix to isolate cloud objects
-     * @param tuning debounce / backlog-bound tuning (never {@code null}; use
-     *               {@link Tuning#defaults()} for defaults)
+     * @param metadataSyncDebounceMs debounce window (ms) for the per-SST metadata sync; see
+     *                               {@link #setMetadataSyncDebounceMs(long)}
+     * @param metadataSyncMaxUnpublished backlog bound on the debounce; see
+     *                                   {@link #setMetadataSyncMaxUnpublished(int)}
      */
     public CloudStorageEventListener(List<String> dataRoots,
                                      boolean startupHydrationEnabled,
@@ -411,7 +347,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
                                      CloudUploadRetryQueue retryQueue,
                                      CloudSyncTracker syncTracker,
                                      String storeScopePrefix,
-                                     Tuning tuning) {
+                                     long metadataSyncDebounceMs,
+                                     int metadataSyncMaxUnpublished) {
         // Fail fast on a missing/empty data-root list: primaryDataRoot is derived from index 0
         // below, and every key<->path conversion depends on at least one root. Without this guard
         // the constructor would throw an opaque IndexOutOfBoundsException at
@@ -440,10 +377,8 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         this.syncTracker = syncTracker != null ? syncTracker : new CloudSyncTracker();
         this.storeScopePrefix = normaliseKeyPrefix(storeScopePrefix);
         this.uploadExecutor = sharedUploadExecutor();
-
-        Tuning t = tuning != null ? tuning : Tuning.defaults();
-        this.metadataSyncDebounceMs = t.metadataSyncDebounceMs;
-        this.metadataSyncMaxUnpublished = t.metadataSyncMaxUnpublished;
+        this.metadataSyncDebounceMs = metadataSyncDebounceMs;
+        this.metadataSyncMaxUnpublished = metadataSyncMaxUnpublished;
 
         // A crash may leave local pending-delete markers whose remote cleanup never completed.
         // Kick off bounded async retries for each so stale remote data is eventually purged even if
@@ -451,54 +386,6 @@ public class CloudStorageEventListener implements RocksdbChangedListener {
         processPendingDeleteMarkersOnStartup();
         // Truncate purge intent is also crash-durable via local markers.
         processPendingTruncateMarkersOnStartup();
-    }
-
-    /**
-     * Immutable tuning bundle for the listener's post-upload metadata sync behaviour. Grouping these
-     * into one params object keeps the constructor readable and lets the listener be fully configured
-     * at construction time. Build with {@link #builder()}; unset knobs fall back to the documented
-     * defaults.
-     */
-    public static final class Tuning {
-
-        private final long metadataSyncDebounceMs;
-        private final int metadataSyncMaxUnpublished;
-
-        private Tuning(Builder b) {
-            this.metadataSyncDebounceMs = b.metadataSyncDebounceMs;
-            this.metadataSyncMaxUnpublished = b.metadataSyncMaxUnpublished;
-        }
-
-        /** Tuning with all defaults (equivalent to constructing the listener with no {@code set*}). */
-        public static Tuning defaults() {
-            return builder().build();
-        }
-
-        public static Builder builder() {
-            return new Builder();
-        }
-
-        public static final class Builder {
-
-            private long metadataSyncDebounceMs = DEFAULT_METADATA_SYNC_DEBOUNCE_MS;
-            private int metadataSyncMaxUnpublished = DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED;
-
-            /** @see CloudStorageEventListener#setMetadataSyncDebounceMs(long) */
-            public Builder metadataSyncDebounceMs(long ms) {
-                this.metadataSyncDebounceMs = ms;
-                return this;
-            }
-
-            /** @see CloudStorageEventListener#setMetadataSyncMaxUnpublished(int) */
-            public Builder metadataSyncMaxUnpublished(int maxUnpublished) {
-                this.metadataSyncMaxUnpublished = maxUnpublished;
-                return this;
-            }
-
-            public Tuning build() {
-                return new Tuning(this);
-            }
-        }
     }
 
     private static ThreadFactory newUploadThreadFactory() {

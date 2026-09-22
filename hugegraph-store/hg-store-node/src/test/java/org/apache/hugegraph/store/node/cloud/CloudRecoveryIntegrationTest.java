@@ -134,7 +134,7 @@ public class CloudRecoveryIntegrationTest {
         CloudStorageProviderFactory.setActiveProviderForTest(cloud);
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        this.listener = new CloudStorageEventListener(
+        this.listener = CloudStorageTestFactory.newListener(
                 Collections.singletonList(this.baseDir.toString()),
                 true, 0L, null, tracker);
         factory.addRocksdbChangedListener(this.listener);
@@ -206,10 +206,10 @@ public class CloudRecoveryIntegrationTest {
             assertNotNull("expected a real RocksDB session", session);
             // maxAttempts=0 → an async upload failure is routed straight to the DLQ, giving a
             // deterministic postcondition instead of a timing-dependent retry cycle.
-            this.retryQueue = new CloudUploadRetryQueue(0, 50L, 50L, this.baseDir.toString());
+            this.retryQueue = CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, this.baseDir.toString());
             // Data root = baseDir so the SST files RocksDB writes under dbPath (a child of
             // baseDir) can be hard-link staged for async upload.
-            this.listener = new CloudStorageEventListener(
+            this.listener = CloudStorageTestFactory.newListener(
                     List.of(this.baseDir.toString()), false, 0L, this.retryQueue);
 
             // Register AFTER open, then inject an always-failing provider so ONLY the real

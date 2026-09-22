@@ -183,7 +183,7 @@ public class CloudUploadRetryQueue implements Closeable {
      * When the cap is exceeded the oldest entries are evicted; those files remain recoverable via
      * the delete guard and startup SST backfill, which re-upload any live SST missing from cloud.
      */
-    private static final int DEFAULT_MAX_DLQ_SIZE = 100_000;
+    static final int DEFAULT_MAX_DLQ_SIZE = 100_000;
     private volatile int maxDlqSize = DEFAULT_MAX_DLQ_SIZE;
 
     /** Count of DLQ entries evicted due to the size cap (monitoring / tests). */
@@ -225,53 +225,21 @@ public class CloudUploadRetryQueue implements Closeable {
     // -----------------------------------------------------------------------
 
     /**
-     * @param maxAttempts      maximum whole-file upload retries after a first failure.
-     *                         {@code 0} means no retries – failures go directly to DLQ
-     *                         (provider is expected to handle its own retries internally).
-     *                         Positive values enable exponential-backoff whole-file retries.
-     * @param initialDelayMs   delay before the first retry, in milliseconds; clamped to &ge; 100.
-     *                         Ignored when {@code maxAttempts == 0}.
-     * @param maxDelayMs       upper bound for exponential backoff delay; clamped to
-     *                         &ge; {@code initialDelayMs}. Ignored when {@code maxAttempts == 0}.
-     * @param dataRoot         absolute path of the store's data directory – the DLQ file is
-     *                         written here
-     */
-    public CloudUploadRetryQueue(int maxAttempts, long initialDelayMs,
-                                 long maxDelayMs, String dataRoot) {
-        this(maxAttempts, initialDelayMs, maxDelayMs, dataRoot,
-             (UploadConfirmedCallback) null);
-    }
-
-    /**
-     * Legacy convenience constructor accepting a simple {@link java.util.function.BiConsumer}.
-     * The epoch parameter is not forwarded; use the {@link UploadConfirmedCallback} overload for
-     * epoch-safe confirmation.
-     */
-    public CloudUploadRetryQueue(int maxAttempts, long initialDelayMs,
-                                 long maxDelayMs, String dataRoot,
-                                 java.util.function.BiConsumer<String, String> onUploadConfirmed) {
-        this(maxAttempts, initialDelayMs, maxDelayMs, dataRoot,
-             onUploadConfirmed == null ? null
-                                      : (db, path, epoch) -> onUploadConfirmed.accept(db, path));
-    }
-
-    /**
-     * @param onUploadConfirmed epoch-aware callback invoked on every successful retry/DLQ-replay
-     *                          upload; pass {@code null} for none.
-     */
-    public CloudUploadRetryQueue(int maxAttempts, long initialDelayMs,
-                                 long maxDelayMs, String dataRoot,
-                                 UploadConfirmedCallback onUploadConfirmed) {
-        this(maxAttempts, initialDelayMs, maxDelayMs, dataRoot, onUploadConfirmed,
-             DEFAULT_MAX_DLQ_SIZE);
-    }
-
-    /**
      * Fully-configured constructor. Prefer this over the {@link #setMaxDlqSize(int)} setter when the
      * cap is known at construction time: setting it here applies the cap <em>before</em> the on-disk
      * DLQ is loaded, so a large persisted file is bounded to the configured cap during the load
      * itself — avoiding the post-load trim-and-rewrite the setter must perform.
      *
+     * @param maxAttempts       maximum whole-file upload retries after a first failure.
+     *                          {@code 0} means no retries – failures go directly to DLQ
+     *                          (provider is expected to handle its own retries internally).
+     *                          Positive values enable exponential-backoff whole-file retries.
+     * @param initialDelayMs    delay before the first retry, in milliseconds; clamped to &ge; 100.
+     *                          Ignored when {@code maxAttempts == 0}.
+     * @param maxDelayMs        upper bound for exponential backoff delay; clamped to
+     *                          &ge; {@code initialDelayMs}. Ignored when {@code maxAttempts == 0}.
+     * @param dataRoot          absolute path of the store's data directory – the DLQ file is
+     *                          written here
      * @param onUploadConfirmed epoch-aware callback invoked on every successful retry/DLQ-replay
      *                          upload; pass {@code null} for none.
      * @param maxDlqSize        maximum number of DLQ entries retained before the oldest are evicted;

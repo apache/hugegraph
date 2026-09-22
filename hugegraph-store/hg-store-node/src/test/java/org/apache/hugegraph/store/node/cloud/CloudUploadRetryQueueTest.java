@@ -86,7 +86,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(3, 50L, 200L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(3, 50L, 200L, tmpRoot.toString())) {
 
             queue.submit("db1", "default", sstFile.toString(),
                          "db1/000001.sst", new IOException("initial failure"));
@@ -106,7 +106,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(4, 100L, 400L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(4, 100L, 400L, tmpRoot.toString())) {
 
             queue.submit("db-null", "default", sstFile.toString(),
                          "db-null/000001.sst", new IOException("initial failure"));
@@ -147,7 +147,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(2, 100L, 100L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(2, 100L, 100L, tmpRoot.toString())) {
 
             queue.submit("db-long", "default", sstFile.toString(),
                          "db-long/000001.sst", new IOException("initial failure"));
@@ -190,7 +190,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(2, 100L, 100L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(2, 100L, 100L, tmpRoot.toString())) {
             queue.setMaxProviderUnavailableRetriesForTest(3);
             queue.setProviderUnavailableMaxDelayMsForTest(120L);
 
@@ -219,7 +219,7 @@ public class CloudUploadRetryQueueTest {
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
-        try (CloudUploadRetryQueue queue = new CloudUploadRetryQueue(
+        try (CloudUploadRetryQueue queue = CloudStorageTestFactory.newRetryQueue(
                 1, 50L, 50L, tmpRoot.toString(),
                 (db, source, epoch) -> {
                     throw new RuntimeException("tracker callback failed");
@@ -261,7 +261,7 @@ public class CloudUploadRetryQueueTest {
 
         // maxAttempts=2, initial+retry delay 50ms → DLQ after ~100ms total
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(2, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(2, 50L, 50L, tmpRoot.toString())) {
 
             queue.submit("db1", "default", sstFile.toString(),
                          "db1/000002.sst", new IOException("initial"));
@@ -300,7 +300,7 @@ public class CloudUploadRetryQueueTest {
         // schedule on the executor. After close() the scheduler is shut down and
         // scheduler.schedule(...) throws RejectedExecutionException.
         CloudUploadRetryQueue queue =
-                new CloudUploadRetryQueue(3, 50L, 200L, tmpRoot.toString());
+                CloudStorageTestFactory.newRetryQueue(3, 50L, 200L, tmpRoot.toString());
         queue.close();
 
         // This simulates a RocksDB callback firing during a shutdown race. It must NOT throw
@@ -337,7 +337,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         CloudUploadRetryQueue queue =
-                new CloudUploadRetryQueue(3, 60_000L, 120_000L, tmpRoot.toString());
+                CloudStorageTestFactory.newRetryQueue(3, 60_000L, 120_000L, tmpRoot.toString());
         // First failure schedules attempt #1 ~60s out — it will still be pending at close().
         queue.submit("db-x", "default", sstFile.toString(), "db-x/000042.sst",
                      new IOException("initial failure"));
@@ -391,7 +391,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         CloudUploadRetryQueue queue =
-                new CloudUploadRetryQueue(3, 50L, 200L, tmpRoot.toString());
+                CloudStorageTestFactory.newRetryQueue(3, 50L, 200L, tmpRoot.toString());
         // The scheduled retry starts quickly and then hangs inside uploadFile.
         queue.submit("db-h", "default", sstFile.toString(), "db-h/000077.sst",
                      new IOException("initial failure"));
@@ -429,7 +429,7 @@ public class CloudUploadRetryQueueTest {
         // maxAttempts=0 routes every failure straight to the DLQ (the default provider-handles-
         // its-own-retries mode). Simulates a prolonged outage flooding the DLQ.
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             queue.setMaxDlqSize(5);
 
             for (int i = 0; i < 20; i++) {
@@ -460,7 +460,7 @@ public class CloudUploadRetryQueueTest {
     @Test
     public void dlq_rewriteIsAtomic_leavesNoTempAndValidFile() throws Exception {
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             queue.setMaxDlqSize(3);
             // >maxDlqSize appends force at least one amortized rewrite (compaction).
             for (int i = 0; i < 12; i++) {
@@ -493,7 +493,7 @@ public class CloudUploadRetryQueueTest {
         Files.createDirectory(dlqPath);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             assertTrue("Healthy before any persist attempt", queue.isDlqPersistenceHealthy());
 
             queue.submit("db", "cf", tmpRoot.resolve("x.sst").toString(),
@@ -516,7 +516,7 @@ public class CloudUploadRetryQueueTest {
         Files.createDirectory(dlqPath);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             // Entry A: append fails (path is a directory) -> degraded, A is memory-only.
             queue.submit("db", "cf", tmpRoot.resolve("a.sst").toString(),
                          "db/a.sst", new IOException("outage"));
@@ -563,7 +563,7 @@ public class CloudUploadRetryQueueTest {
 
         // First queue instance: run until task hits DLQ.
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
             queue.submit("db2", "cf1", sstFile.toString(),
                          "db2/000003.sst", new IOException("fail"));
 
@@ -580,7 +580,7 @@ public class CloudUploadRetryQueueTest {
 
         // Second queue instance: should load the persisted entry.
         try (CloudUploadRetryQueue queue2 =
-                     new CloudUploadRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
             assertEquals("DLQ entry should have been loaded from disk", 1, queue2.getDlqSize());
             FailedUploadTask loaded = queue2.getDlqEntries().get(0);
             assertEquals("db2", loaded.getDbName());
@@ -594,7 +594,7 @@ public class CloudUploadRetryQueueTest {
         // Simulate a large persisted DLQ from a long outage: flood the first queue (maxAttempts=0
         // routes straight to DLQ) so many entries land on disk under the default cap.
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             for (int i = 0; i < 30; i++) {
                 queue.submit("db", "cf", tmpRoot.resolve(i + ".sst").toString(),
                              "db/" + i + ".sst", new IOException("outage"));
@@ -606,7 +606,7 @@ public class CloudUploadRetryQueueTest {
         // SMALLER configured cap, which must trim the loaded set and rewrite the on-disk file so a
         // large persisted DLQ cannot linger unbounded despite a tighter configuration.
         try (CloudUploadRetryQueue queue2 =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             assertEquals("Reload must recover all persisted entries under the default cap",
                          30, queue2.getDlqSize());
 
@@ -653,7 +653,7 @@ public class CloudUploadRetryQueueTest {
         Files.createFile(sstFile);
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
             queue.submit("db3", "default", sstFile.toString(),
                          "db3/000004.sst", new IOException("initial fail"));
 
@@ -688,7 +688,7 @@ public class CloudUploadRetryQueueTest {
         String nonExistentFile = tmpRoot.resolve("gone.sst").toString();
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(1, 50L, 50L, tmpRoot.toString())) {
             // Submit; the retry will run but the local file doesn't exist → drop silently.
             queue.submit("db4", "default", nonExistentFile,
                          "db4/gone.sst", new IOException("initial"));
@@ -718,7 +718,7 @@ public class CloudUploadRetryQueueTest {
         String pin = tmpRoot.resolve("000005.sst.upload-123").toString();
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             // maxAttempts=0 => submitPinned routes straight to the DLQ with filePath=pin (missing),
             // sourceSstPath=source (present).
             queue.submitPinned("db5", "default", pin, source.toString(), "db5/000005.sst",
@@ -745,7 +745,7 @@ public class CloudUploadRetryQueueTest {
         String source = tmpRoot.resolve("gone.sst").toString();
 
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, tmpRoot.toString())) {
             queue.submitPinned("db6", "default", pin, source, "db6/gone.sst",
                                new IOException("outage"));
             assertEquals(1, queue.getDlqSize());
@@ -764,7 +764,7 @@ public class CloudUploadRetryQueueTest {
     @Test
     public void serialize_deserialize_roundTrip() {
         try (CloudUploadRetryQueue queue =
-                     new CloudUploadRetryQueue(3, 100L, 1000L, tmpRoot.toString())) {
+                     CloudStorageTestFactory.newRetryQueue(3, 100L, 1000L, tmpRoot.toString())) {
 
             FailedUploadTask original = new FailedUploadTask(
                     "db\twith-tab", "cf-name",

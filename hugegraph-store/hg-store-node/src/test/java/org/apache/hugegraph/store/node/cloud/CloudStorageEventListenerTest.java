@@ -71,7 +71,7 @@ public class CloudStorageEventListenerTest {
 
     @Before
     public void setUp() {
-        listener = new CloudStorageEventListener(List.of(DATA_ROOT));
+        listener = CloudStorageTestFactory.newListener(List.of(DATA_ROOT));
     }
 
     @After
@@ -94,7 +94,7 @@ public class CloudStorageEventListenerTest {
     public void constructor_rejectsEmptyDataRoots() {
         // Fail fast with a clear config error instead of an opaque IndexOutOfBoundsException later.
         try {
-            new CloudStorageEventListener(Collections.emptyList());
+            CloudStorageTestFactory.newListener(Collections.emptyList());
             fail("Expected IllegalArgumentException for empty data-root list");
         } catch (IllegalArgumentException expected) {
             assertTrue("Message should mention data root: " + expected.getMessage(),
@@ -105,7 +105,7 @@ public class CloudStorageEventListenerTest {
     @Test
     public void constructor_rejectsNullDataRoots() {
         try {
-            new CloudStorageEventListener(null);
+            CloudStorageTestFactory.newListener(null);
             fail("Expected IllegalArgumentException for null data-root list");
         } catch (IllegalArgumentException expected) {
             // expected
@@ -127,14 +127,14 @@ public class CloudStorageEventListenerTest {
     @Test
     public void toRelativeKey_handlesDataRootWithTrailingSlash() {
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(DATA_ROOT + File.separator));
+                CloudStorageTestFactory.newListener(List.of(DATA_ROOT + File.separator));
         assertEquals("hgstore-metadata/000008.sst",
                      l.toRelativeKey(DATA_ROOT + "/hgstore-metadata/000008.sst"));
     }
 
     @Test
     public void toRelativeKey_appliesStoreScopePrefix() {
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(DATA_ROOT), true, 0L, null, new CloudSyncTracker(),
                 "store-127.0.0.1_8501");
         String filePath = DATA_ROOT + "/0/000042.sst";
@@ -172,7 +172,7 @@ public class CloudStorageEventListenerTest {
 
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()));
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()));
 
         try {
             l.onTableFileCreated("hgstore-metadata", "default", sst.toString(), 512L);
@@ -198,7 +198,7 @@ public class CloudStorageEventListenerTest {
 
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(),
                 "store-127.0.0.1_8501");
         try {
@@ -224,7 +224,11 @@ public class CloudStorageEventListenerTest {
 
         CountDownLatch metadataSyncCalled = new CountDownLatch(1);
         AtomicReference<String> observedDbName = new AtomicReference<>();
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString())) {
+        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()),
+                true, CloudStorageEventListener.DEFAULT_READ_MISS_GUARD_WINDOW_MS, null,
+                new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             void requestDebouncedMetadataSync(CloudStorageProvider provider, String dbName) {
                 observedDbName.set(dbName);
@@ -261,7 +265,11 @@ public class CloudStorageEventListenerTest {
         Files.createDirectories(dbDir);
 
         AtomicReference<String> observedDbName = new AtomicReference<>();
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString())) {
+        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()),
+                true, CloudStorageEventListener.DEFAULT_READ_MISS_GUARD_WINDOW_MS, null,
+                new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             boolean syncMetadataSnapshotInline(CloudStorageProvider provider, String dbName) {
                 observedDbName.set(dbName);
@@ -301,9 +309,9 @@ public class CloudStorageEventListenerTest {
 
         // maxAttempts=0 → after the async upload fails, the task is routed straight to the DLQ,
         // giving a deterministic, observable postcondition (no timing-dependent retry cycle).
-        try (CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        try (CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 0, 50L, 50L, tmpRoot.toString())) {
-            CloudStorageEventListener l = new CloudStorageEventListener(
+            CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                     List.of(tmpRoot.toString()), true, 0L, retryQueue);
             CloudStorageProviderFactory.setActiveProviderForTest(new FailingUploadProvider());
             // Must NOT throw – the provider failure is handled asynchronously.
@@ -337,9 +345,9 @@ public class CloudStorageEventListenerTest {
         Path sst = dbDir.resolve("000002.sst");
         Files.write(sst, "sst-body".getBytes());
 
-        try (CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        try (CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 3, 50L, 5000L, tmpRoot.toString())) {
-            CloudStorageEventListener l = new CloudStorageEventListener(
+            CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                     List.of(tmpRoot.toString()), true, 0L, retryQueue);
             CloudStorageProviderFactory.setActiveProviderForTest(new NonRetryableUploadProvider());
             // Must NOT throw – the provider failure is handled asynchronously.
@@ -380,7 +388,7 @@ public class CloudStorageEventListenerTest {
         Files.write(sst, "sst".getBytes());
 
         try {
-            CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()));
+            CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()));
             long sleepDurationMs = 1000L;  // Provider will sleep for 1 second
             CloudStorageProviderFactory.setActiveProviderForTest(
                     new SlowUploadProvider(sleepDurationMs));
@@ -406,7 +414,11 @@ public class CloudStorageEventListenerTest {
     public void onTableFileDeleted_delegatesToProvider_withRelativeKey() {
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(DATA_ROOT)) {
+        CloudStorageEventListener l = new CloudStorageEventListener(List.of(DATA_ROOT),
+                true, CloudStorageEventListener.DEFAULT_READ_MISS_GUARD_WINDOW_MS, null,
+                new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             boolean syncMetadataSnapshotInline(CloudStorageProvider p, String dbName) {
                 return true;
@@ -434,7 +446,7 @@ public class CloudStorageEventListenerTest {
         Files.createFile(partitionDir.resolve("000002.sst"));
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()));
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()));
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
@@ -468,7 +480,7 @@ public class CloudStorageEventListenerTest {
         Files.createFile(partitionDir.resolve("000001.sst"));
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()));
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()));
         CloudStorageProviderFactory.setActiveProviderForTest(new FailingUploadProvider());
 
         try {
@@ -483,7 +495,7 @@ public class CloudStorageEventListenerTest {
     // metadata mirroring (upload order, CURRENT-last, prune, consistent restore)
     // -----------------------------------------------------------------------
     private static CloudStorageEventListener metadataListener() {
-        return new CloudStorageEventListener(List.of(DATA_ROOT), false, 0L,
+        return CloudStorageTestFactory.newListener(List.of(DATA_ROOT), false, 0L,
                                              null, new CloudSyncTracker());
     }
 
@@ -534,7 +546,7 @@ public class CloudStorageEventListenerTest {
     @Test
     public void uploadMetadataSnapshot_holdsPublishWhenSstConfirmationEpochTurnsStale() {
         CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(DATA_ROOT), false, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider() {
             @Override
@@ -589,7 +601,7 @@ public class CloudStorageEventListenerTest {
         Path partitionDir = tmpRoot.resolve("0");
         Files.createDirectories(partitionDir);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         // CURRENT points at a manifest that was never mirrored → restore must refuse to open.
         provider.putRemoteFile("0/CURRENT", "MANIFEST-000009\n".getBytes());
@@ -705,7 +717,9 @@ public class CloudStorageEventListenerTest {
                                            long blockedGeneration,
                                            CountDownLatch blockedEntered,
                                            CountDownLatch blockedRelease) {
-            super(List.of(DATA_ROOT));
+            super(List.of(DATA_ROOT), true, DEFAULT_READ_MISS_GUARD_WINDOW_MS, null,
+                  new CloudSyncTracker(), null, DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                  DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED);
             this.snapshots = snapshots;
             this.blockedGeneration = blockedGeneration;
             this.blockedEntered = blockedEntered;
@@ -962,7 +976,7 @@ public class CloudStorageEventListenerTest {
         Files.createDirectories(partitionDir);
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("0/CURRENT", "MANIFEST-000001".getBytes());
         provider.putRemoteFile("0/MANIFEST-000001", "manifest-body".getBytes());
@@ -985,7 +999,7 @@ public class CloudStorageEventListenerTest {
         Path partitionDir = tmpRoot.resolve("0");
         Files.createDirectories(partitionDir);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(),
                 "store-127.0.0.1_8501");
         CapturingProvider provider = new CapturingProvider();
@@ -1015,7 +1029,7 @@ public class CloudStorageEventListenerTest {
         Files.write(partitionDir.resolve("MANIFEST-000005"), "manifest-5".getBytes());
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         // Cloud holds a strictly newer generation 10.
         provider.putRemoteFile("0/CURRENT", "MANIFEST-000010".getBytes());
@@ -1049,7 +1063,7 @@ public class CloudStorageEventListenerTest {
         Files.write(partitionDir.resolve("MANIFEST-000010"), "manifest-10".getBytes());
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         // Cloud lags at an older generation 5.
         provider.putRemoteFile("0/CURRENT", "MANIFEST-000005".getBytes());
@@ -1076,7 +1090,7 @@ public class CloudStorageEventListenerTest {
         Files.write(partitionDir.resolve("000001.sst"), "orphan".getBytes());
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider() {
             @Override
             public boolean fileExists(String remoteKey) {
@@ -1113,7 +1127,7 @@ public class CloudStorageEventListenerTest {
         Files.write(partitionDir.resolve("000001.sst"), "data".getBytes());
 
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider() {
             @Override
             public boolean fileExists(String remoteKey) {
@@ -1147,7 +1161,7 @@ public class CloudStorageEventListenerTest {
         Path partitionDir = tmpRoot.resolve("0");
         Files.createDirectories(partitionDir);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("0/000001.sst", "sst-body".getBytes());
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
@@ -1171,7 +1185,7 @@ public class CloudStorageEventListenerTest {
         Path partitionDir = tmpRoot.resolve("0");
         Files.createDirectories(partitionDir);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("0/000001.sst", "g-body".getBytes());
         provider.putRemoteFile("0/000002.sst", "q-body".getBytes());
@@ -1202,7 +1216,7 @@ public class CloudStorageEventListenerTest {
         Files.createDirectories(partitionDir);
         Files.write(partitionDir.resolve("000001.sst"), "already-here".getBytes());
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("0/000001.sst", "cloud-body".getBytes());
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
@@ -1224,7 +1238,7 @@ public class CloudStorageEventListenerTest {
     @Test
     public void readMissGuard_skipsRepeatedAttemptsWithinWindow() {
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(DATA_ROOT), true, 60_000L);
+                CloudStorageTestFactory.newListener(List.of(DATA_ROOT), true, 60_000L);
         assertTrue(l.shouldAttemptReadMissHydration("0", "default"));
         assertFalse(l.shouldAttemptReadMissHydration("0", "default"));
         // A different table is not throttled by the first table's attempt.
@@ -1236,7 +1250,7 @@ public class CloudStorageEventListenerTest {
         // The guard must admit ONLY ONE caller per DB/table window even under a concurrent read
         // storm; a non-atomic get-then-put would let multiple callers pass on the race boundary.
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(DATA_ROOT), true, 60_000L);
+                CloudStorageTestFactory.newListener(List.of(DATA_ROOT), true, 60_000L);
 
         int threads = 32;
         ExecutorService pool = Executors.newFixedThreadPool(threads);
@@ -1278,7 +1292,7 @@ public class CloudStorageEventListenerTest {
         Files.write(liveLocal, "live".getBytes());
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(tmpRoot.toString()), true, 0L, null, tracker);
         FailingUploadProvider provider = new FailingUploadProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
@@ -1304,7 +1318,7 @@ public class CloudStorageEventListenerTest {
         CloudSyncTracker tracker = new CloudSyncTracker();
         // Pre-mark the live file as already confirmed in cloud.
         tracker.markConfirmed("0", liveLocal.toString());
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(tmpRoot.toString()), true, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
@@ -1330,7 +1344,7 @@ public class CloudStorageEventListenerTest {
         Files.write(liveLocal, "live".getBytes());
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(tmpRoot.toString()), true, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
@@ -1370,7 +1384,7 @@ public class CloudStorageEventListenerTest {
         tracker.markConfirmed("0", sst1.toString());
         tracker.markConfirmed("0", sst2.toString());
 
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(tmpRoot.toString()), true, 0L, null, tracker);
         CapturingProvider provider = new CapturingProvider();
         provider.putRemoteFile("0/000001.sst", "sst1".getBytes());
@@ -1404,7 +1418,8 @@ public class CloudStorageEventListenerTest {
         private final boolean syncResult;
 
         OrderingListener(String dataRoot, CloudSyncTracker tracker, boolean syncResult) {
-            super(List.of(dataRoot), false, 0L, null, tracker);
+            super(List.of(dataRoot), false, 0L, null, tracker, null,
+                  DEFAULT_METADATA_SYNC_DEBOUNCE_MS, DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED);
             this.syncResult = syncResult;
         }
 
@@ -1496,7 +1511,9 @@ public class CloudStorageEventListenerTest {
 
         AtomicBoolean metadataHealthy = new AtomicBoolean(false);
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker()) {
+                List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             List<LiveSstFile> currentLiveSstFiles(String dbName) {
                 return List.of();
@@ -1546,7 +1563,9 @@ public class CloudStorageEventListenerTest {
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(tmpRoot.toString()), true, 0L, null, tracker) {
+                List.of(tmpRoot.toString()), true, 0L, null, tracker, null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             List<LiveSstFile> currentLiveSstFiles(String dbName) {
                 return List.of(new LiveSstFile(liveSst.toString(), "default"));
@@ -1588,7 +1607,9 @@ public class CloudStorageEventListenerTest {
         // Compaction output 000010.sst is live but neither confirmed nor present locally / in cloud,
         // so the live set is not durable.
         CloudStorageEventListener l = new CloudStorageEventListener(
-                List.of(DATA_ROOT), false, 0L, null, tracker) {
+                List.of(DATA_ROOT), false, 0L, null, tracker, null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             List<LiveSstFile> currentLiveSstFiles(String dbName) {
                 return List.of(new LiveSstFile(DATA_ROOT + "/db0/000010.sst", "default"));
@@ -1623,7 +1644,7 @@ public class CloudStorageEventListenerTest {
             CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
             CloudStorageEventListener l =
-                    new CloudStorageEventListener(List.of(tmpRoot.toString()));
+                    CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()));
             l.onDBDeleteBegin("mydb", tmpRoot.resolve("mydb").toString());
 
             // Tombstone key is now a sibling of the data prefix, not inside it.
@@ -1646,7 +1667,7 @@ public class CloudStorageEventListenerTest {
             CapturingProvider provider = new CapturingProvider();
             CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
-            CloudStorageEventListener l = new CloudStorageEventListener(
+            CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                     List.of(tmpRoot.toString()), true, 0L, null, new CloudSyncTracker(),
                     "store-127.0.0.1_8501");
             l.onDBDeleteBegin("mydb", tmpRoot.resolve("mydb").toString());
@@ -1674,7 +1695,7 @@ public class CloudStorageEventListenerTest {
         Path notADir = Files.createTempFile("hgstore-notadir", ".tmp");
         try {
             CloudStorageEventListener l =
-                    new CloudStorageEventListener(List.of(notADir.toString()));
+                    CloudStorageTestFactory.newListener(List.of(notADir.toString()));
             try {
                 l.onDBDeleteBegin("mydb", notADir.resolve("mydb").toString());
                 fail("Expected delete to be held when the marker cannot be durably persisted");
@@ -1703,7 +1724,7 @@ public class CloudStorageEventListenerTest {
                                "deleted".getBytes());
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(DATA_ROOT));
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(DATA_ROOT));
         l.onDBDeleted("mydb", DATA_ROOT + "/mydb");
 
         // Data prefix objects are purged by deletePrefix; tombstone is deleted individually.
@@ -1733,7 +1754,7 @@ public class CloudStorageEventListenerTest {
         provider.putRemoteFile(tombstoneKey, "deleted".getBytes());
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(DATA_ROOT));
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(DATA_ROOT));
         l.onDBDeleted("mydb", DATA_ROOT + "/mydb");
 
         assertFalse("Tombstone must be preserved when the prefix purge is incomplete",
@@ -1749,7 +1770,7 @@ public class CloudStorageEventListenerTest {
         CapturingProvider provider = new CapturingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(
                 List.of(DATA_ROOT), true, 0L, null, tracker);
         l.onDBDeleted("mydb", DATA_ROOT + "/mydb");
 
@@ -1763,7 +1784,7 @@ public class CloudStorageEventListenerTest {
         Path partitionDir = tmpRoot.resolve("mydb");
         Files.createDirectories(partitionDir);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         // Populate cloud with stale data from a previous deleted generation + sibling tombstone.
         provider.putRemoteFile("mydb/000001.sst", "stale-sst".getBytes());
@@ -1797,7 +1818,7 @@ public class CloudStorageEventListenerTest {
         Path partitionDir = tmpRoot.resolve("mydb");
         Files.createDirectories(partitionDir);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
         CapturingProvider provider = new CapturingProvider();
         // Normal cloud state — no tombstone.
         provider.putRemoteFile("mydb/000001.sst", "sst-body".getBytes());
@@ -1833,7 +1854,7 @@ public class CloudStorageEventListenerTest {
         provider.putRemoteFile("graph0/CURRENT", "MANIFEST-000001".getBytes());
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
 
-        CloudStorageEventListener l = new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+        CloudStorageEventListener l = CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
 
         // Step 1: begin delete — tombstone uploaded as a sibling key.
         l.onDBDeleteBegin("graph0", dbDir.toString());
@@ -1901,7 +1922,7 @@ public class CloudStorageEventListenerTest {
         TombstoneCheckFailingProvider provider = new TombstoneCheckFailingProvider();
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
 
         try {
             l.onDBOpening("graph0", dbDir.toString());
@@ -1938,7 +1959,7 @@ public class CloudStorageEventListenerTest {
         // No remote files: after the fall-through, listRemoteKeys is empty and hydration is a no-op.
         CloudStorageProviderFactory.setActiveProviderForTest(provider);
         CloudStorageEventListener l =
-                new CloudStorageEventListener(List.of(tmpRoot.toString()), true);
+                CloudStorageTestFactory.newListener(List.of(tmpRoot.toString()), true);
 
         try {
             // Must NOT throw despite the tombstone-check IOException.

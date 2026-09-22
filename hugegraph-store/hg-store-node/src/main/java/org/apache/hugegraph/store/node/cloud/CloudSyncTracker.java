@@ -20,21 +20,20 @@ package org.apache.hugegraph.store.node.cloud;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory.LiveSstFile;
-import org.roaringbitmap.longlong.Roaring64NavigableMap;
 
 /**
  * Tracks which RocksDB SST files are confirmed present in cloud storage.
  *
  * <p>SST file names are monotonic per-DB file numbers ({@code 000123.sst}), so the natural key is
- * the integer file number rather than the string path. Sync state is kept as one
- * {@link Roaring64NavigableMap} per DB — each set bit means "SST file number N for this DB is
- * confirmed present in cloud". Roaring bitmaps stay compact even as low numbers are cleared after
- * old files are deleted, and file numbers are unique across column families within a DB, so a
- * single bitmap per DB is sufficient (which fits RocksDB delete events not carrying a CF name)
+ * the integer file number rather than the string path. Sync state is kept as one confirmed-file-
+ * number set per DB — each entry means "SST file number N for this DB is confirmed present in
+ * cloud". File numbers are unique across column families within a DB, so a single set per DB is
+ * sufficient (which fits RocksDB delete events not carrying a CF name).
  *
  * <p>This tracker is the linchpin of the delete-guard invariant: a superseded cloud object is
  * deleted only once every live SST file of that DB is confirmed here.
@@ -44,20 +43,17 @@ import org.roaringbitmap.longlong.Roaring64NavigableMap;
  * recreation must first call {@link #currentEpoch} before the upload, then pass the captured
  * epoch to {@link #markConfirmedIfEpoch}. A late callback carrying an old epoch is silently
  * dropped, preventing file-number reuse after DB recreation from producing stale confirmations.
- *
- * <p>{@link Roaring64NavigableMap} is not thread-safe, so all access to a per-DB bitmap is
- * synchronized on the bitmap instance.
  */
 public final class CloudSyncTracker {
 
-    /** Holds the bitmap and the epoch it was created under. */
+    /** Holds the confirmed-file-number set and the epoch it was created under. */
     private static final class DbState {
         final long epoch;
-        final Roaring64NavigableMap bitmap;
+        final Set<Long> confirmed;
 
         DbState(long epoch) {
             this.epoch = epoch;
-            this.bitmap = new Roaring64NavigableMap();
+            this.confirmed = ConcurrentHashMap.newKeySet();
         }
     }
 
@@ -143,9 +139,9 @@ public final class CloudSyncTracker {
         return markBit(dbName, number, epoch);
     }
 
-    /** Core: set the bit for {@code number} if the current epoch matches {@code requiredEpoch}. */
+    /** Core: mark {@code number} confirmed if the current epoch matches {@code requiredEpoch}. */
     private boolean markBit(String dbName, long number, long requiredEpoch) {
-        // Use compute() to hold the CHM bin lock across both the epoch check and the bitmap write,
+        // Use compute() to hold the CHM bin lock across both the epoch check and the write,
         // preventing clearDb() from removing the entry between the two steps.
         boolean[] set = {false};
         stateByDb.compute(dbName, (k, state) -> {
@@ -159,9 +155,7 @@ public final class CloudSyncTracker {
             } else if (state.epoch != requiredEpoch) {
                 return state;  // stale callback — leave state unchanged
             }
-            synchronized (state.bitmap) {
-                state.bitmap.addLong(number);
-            }
+            state.confirmed.add(number);
             set[0] = true;
             return state;
         });
@@ -176,9 +170,7 @@ public final class CloudSyncTracker {
         }
         boolean[] result = {false};
         stateByDb.computeIfPresent(dbName, (k, state) -> {
-            synchronized (state.bitmap) {
-                result[0] = state.bitmap.contains(number);
-            }
+            result[0] = state.confirmed.contains(number);
             return state;
         });
         return result[0];
@@ -191,9 +183,7 @@ public final class CloudSyncTracker {
             return;
         }
         stateByDb.computeIfPresent(dbName, (k, state) -> {
-            synchronized (state.bitmap) {
-                state.bitmap.removeLong(number);
-            }
+            state.confirmed.remove(number);
             return state;
         });
     }
@@ -216,15 +206,13 @@ public final class CloudSyncTracker {
         }
         boolean[] allPresent = {false};
         stateByDb.computeIfPresent(dbName, (k, state) -> {
-            synchronized (state.bitmap) {
-                for (LiveSstFile live : liveFiles) {
-                    long num = parseSstFileNumber(live.getAbsolutePath());
-                    if (num >= 0 && !state.bitmap.contains(num)) {
-                        return state;  // allPresent stays false — short-circuit
-                    }
+            for (LiveSstFile live : liveFiles) {
+                long num = parseSstFileNumber(live.getAbsolutePath());
+                if (num >= 0 && !state.confirmed.contains(num)) {
+                    return state;  // allPresent stays false — short-circuit
                 }
-                allPresent[0] = true;
             }
+            allPresent[0] = true;
             return state;
         });
         return allPresent[0];
@@ -247,11 +235,6 @@ public final class CloudSyncTracker {
     /** Number of confirmed SST files for a DB (testing / monitoring). */
     public long confirmedCount(String dbName) {
         DbState state = stateByDb.get(dbName);
-        if (state == null) {
-            return 0L;
-        }
-        synchronized (state.bitmap) {
-            return state.bitmap.getLongCardinality();
-        }
+        return state == null ? 0L : state.confirmed.size();
     }
 }

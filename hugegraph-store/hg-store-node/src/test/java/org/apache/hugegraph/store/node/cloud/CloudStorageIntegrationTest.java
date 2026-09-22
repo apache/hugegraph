@@ -482,7 +482,9 @@ public class CloudStorageIntegrationTest {
         // We use a subclass seam: override captureMetadataSnapshot to supply gen5.
         CloudStorageEventListener guardedListener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker()) {
+                true, 0L, null, new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             private boolean gen10Published = false;
 
             @Override
@@ -534,7 +536,9 @@ public class CloudStorageIntegrationTest {
         ThreadLocal<MetadataSnapshot> perThread = new ThreadLocal<>();
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker()) {
+                true, 0L, null, new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             MetadataSnapshot captureMetadataSnapshot(String dbName) {
                 return perThread.get();
@@ -612,7 +616,7 @@ public class CloudStorageIntegrationTest {
         // Wire the SAME epoch-aware callback production uses (AppConfig wires
         // syncTracker::markConfirmedIfEpoch). This ensures the test fails if the retry path drops
         // the epoch — the plain 2-arg callback would confirm regardless and hide that defect.
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 3, 10L, 100L,
                 dataRoot.toString(),
                 tracker::markConfirmedIfEpoch);
@@ -644,10 +648,10 @@ public class CloudStorageIntegrationTest {
         Path sst = writeSst(dbDir, "000011.sst", "retry-after-provider-down");
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        try (CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        try (CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 4, 100L, 400L, dataRoot.toString(), tracker::markConfirmedIfEpoch)) {
 
-            CloudStorageEventListener listener = new CloudStorageEventListener(
+            CloudStorageEventListener listener = CloudStorageTestFactory.newListener(
                     Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker);
 
             CloudStorageProviderFactory.setActiveProviderForTest(null);
@@ -698,10 +702,10 @@ public class CloudStorageIntegrationTest {
         CloudStorageProviderFactory.setActiveProviderForTest(flakyStore);
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 3, 10L, 100L, dataRoot.toString(),
                 tracker::markConfirmedIfEpoch);
-        CloudStorageEventListener listener = new CloudStorageEventListener(
+        CloudStorageEventListener listener = CloudStorageTestFactory.newListener(
                 Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker);
 
         // Dispatch the async upload: onTableFileCreated creates the staged pin, then the first
@@ -768,12 +772,14 @@ public class CloudStorageIntegrationTest {
 
     private @NotNull CloudUploadRetryQueue createRetryQueue(CloudSyncTracker tracker, Path dbDir,
                                                             Path tempDir) {
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 3, 10L, 100L, dataRoot.toString(),
                 tracker::markConfirmedIfEpoch);
 
         CloudStorageEventListener listener = new CloudStorageEventListener(
-                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker) {
+                Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker,
+                null, CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             MetadataSnapshot captureMetadataSnapshot(String db) {
                 try {
@@ -807,7 +813,7 @@ public class CloudStorageIntegrationTest {
         CloudStorageProviderFactory.setActiveProviderForTest(alwaysFail);
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 2, 10L, 50L,
                 dataRoot.toString(),
                 tracker::markConfirmed);
@@ -838,7 +844,7 @@ public class CloudStorageIntegrationTest {
         store.put(remoteKey, bytes("row1=v1;row2=v2"));
 
         CloudSyncTracker tracker = new CloudSyncTracker();
-        CloudStorageEventListener listener = new CloudStorageEventListener(
+        CloudStorageEventListener listener = CloudStorageTestFactory.newListener(
                 Collections.singletonList(dataRoot.toString()),
                 true, 0L, null, tracker);
 
@@ -862,7 +868,7 @@ public class CloudStorageIntegrationTest {
     @Test
     public void readMiss_guardWindow_suppressesRepeatAttempts() throws Exception {
         long guardWindowMs = 1_000L;
-        CloudStorageEventListener listener = new CloudStorageEventListener(
+        CloudStorageEventListener listener = CloudStorageTestFactory.newListener(
                 Collections.singletonList(dataRoot.toString()),
                 true, guardWindowMs, null, new CloudSyncTracker());
 
@@ -896,7 +902,7 @@ public class CloudStorageIntegrationTest {
 
         store.put("hugegraph/db/000001.sst", bytes("old-data"));
 
-        CloudStorageEventListener listener = new CloudStorageEventListener(
+        CloudStorageEventListener listener = CloudStorageTestFactory.newListener(
                 Collections.singletonList(dataRoot.toString()),
                 true, 0L, null, tracker);
 
@@ -1259,7 +1265,9 @@ public class CloudStorageIntegrationTest {
         AtomicInteger syncCount = new AtomicInteger(0);
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker()) {
+                true, 0L, null, new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             boolean syncMetadataSnapshotInline(CloudStorageProvider p, String db) {
                 syncCount.incrementAndGet();
@@ -1320,7 +1328,9 @@ public class CloudStorageIntegrationTest {
                                                               AtomicInteger publishes) {
         CloudStorageEventListener listener = new CloudStorageEventListener(
                 Collections.singletonList(dataRoot.toString()),
-                true, 0L, null, new CloudSyncTracker()) {
+                true, 0L, null, new CloudSyncTracker(), null,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_DEBOUNCE_MS,
+                CloudStorageEventListener.DEFAULT_METADATA_SYNC_MAX_UNPUBLISHED) {
             @Override
             MetadataSnapshot captureMetadataSnapshot(String db) {
                 return fake;
@@ -1360,10 +1370,10 @@ public class CloudStorageIntegrationTest {
 
         CloudSyncTracker tracker = new CloudSyncTracker();
         // maxAttempts=0 => handed-off tasks land directly in the DLQ where the test can observe them.
-        CloudUploadRetryQueue retryQueue = new CloudUploadRetryQueue(
+        CloudUploadRetryQueue retryQueue = CloudStorageTestFactory.newRetryQueue(
                 0, 10L, 100L, dataRoot.toString(),
                 tracker::markConfirmedIfEpoch);
-        CloudStorageEventListener listener = new CloudStorageEventListener(
+        CloudStorageEventListener listener = CloudStorageTestFactory.newListener(
                 Collections.singletonList(dataRoot.toString()), true, 0L, retryQueue, tracker);
 
         Path dbDir = mkdirs("hugegraph/db");
@@ -1392,7 +1402,7 @@ public class CloudStorageIntegrationTest {
     }
 
     private CloudStorageEventListener listenerFor(List<String> roots) {
-        return new CloudStorageEventListener(roots, true, 0L, null,
+        return CloudStorageTestFactory.newListener(roots, true, 0L, null,
                                              new CloudSyncTracker());
     }
 

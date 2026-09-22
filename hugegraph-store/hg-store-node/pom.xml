@@ -125,12 +125,6 @@
             <artifactId>hg-store-cloud-s3</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.roaringbitmap</groupId>
-            <artifactId>RoaringBitmap</artifactId>
-            <version>0.9.38</version>
-        </dependency>
-
-        <dependency>
             <groupId>com.taobao.arthas</groupId>
             <artifactId>arthas-agent-attach</artifactId>
             <version>3.6.4</version>
