@@ -426,6 +426,7 @@ printf '%s\n' \
     '#!/bin/sh' \
     'case "$*" in' \
     '    *.tmp) printf "auth.authenticator=par"; exit 1 ;;' \
+    '    *.bak) [ -n "${FAKE_BAK_FAIL:-}" ] && exit 1' \
     'esac' \
     'exec "${FAKE_CAT_REAL}" "$@"' \
     > "${failbin}/cat"
@@ -462,3 +463,29 @@ grep -q '^auth\.token_secret=s3cr3t$' "${rb_file}"
 grep -q '^unrelated=true$' "${rb_file}"
 [[ ! -e "${rb_file}.tmp" ]]
 [[ ! -e "${rb_file}.bak" ]]
+# When the restore fails too there is nothing left to do but say so and
+# point at the snapshot, because that snapshot is the only copy of a
+# working config the operator has.
+printf '%s\n' \
+    'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+    'auth.token_secret=s3cr3t' \
+    'unrelated=true' > "${rb_file}"
+rb_out=$(
+    PATH="${failbin}:${PATH}"
+    FAKE_CAT_REAL="${real_cat}"
+    FAKE_BAK_FAIL=1
+    export PATH FAKE_CAT_REAL FAKE_BAK_FAIL
+    set_prop 'auth.authenticator' 'com.example.HalfWritten' "${rb_file}" 2>&1
+) || true
+[[ "${rb_out}" == *"${rb_file}.bak"* ]] || {
+    echo "props.awk must name the snapshot when the restore also fails" >&2
+    exit 1
+}
+# The damaged config keeps whatever the aborted copy left, and the
+# snapshot still holds the last known good content.
+[[ -e "${rb_file}.bak" ]]
+[[ -e "${rb_file}.tmp" ]]
+cmp -s "${rb_file}.bak" "${rb_expect}" || {
+    echo "the snapshot must be a byte-for-byte copy of the original" >&2
+    exit 1
+}
