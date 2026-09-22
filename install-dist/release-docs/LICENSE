@@ -675,6 +675,8 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-rule/2.0.0-RC.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4/2.0.0-RC.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.powermock/powermock-reflect/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.roaringbitmap/RoaringBitmap/0.9.38 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.roaringbitmap/shims/0.9.38 -> Apache 2.0
     https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/6.29.5 -> Apache 2.0
     https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/7.7.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/8.10.2 -> Apache 2.0
