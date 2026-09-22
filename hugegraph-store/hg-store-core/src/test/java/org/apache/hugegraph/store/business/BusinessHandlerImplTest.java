@@ -47,6 +47,9 @@ import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.store.meta.PartitionManager;
 import org.apache.hugegraph.store.pd.PdProvider;
 import org.apache.hugegraph.store.util.HgStoreException;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.config.Configurator;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -236,6 +239,13 @@ public class BusinessHandlerImplTest {
          BusinessHandlerImpl localHandler =
                  new SessionOverridingBusinessHandler(partitionManager, session);
 
+         // doPut logs this exception at ERROR before wrapping it; silence it so the expected
+         // failure doesn't print a misleading stack trace into the test run's output.
+         String loggerName = BusinessHandlerImpl.class.getName();
+         Level originalLevel =
+                 ((org.apache.logging.log4j.core.Logger) LogManager.getLogger(loggerName))
+                         .getLevel();
+         Configurator.setLevel(loggerName, Level.OFF);
          try {
              localHandler.doPut("g", 1, "g+v", new byte[]{1}, new byte[]{2});
              fail("Expected HgStoreException");
@@ -243,6 +253,8 @@ public class BusinessHandlerImplTest {
              assertEquals(HgStoreException.EC_RKDB_DOPUT_FAIL, e.getCode());
              assertTrue(e.getMessage().contains("prepare boom"));
              verify(op, times(1)).rollback();
+         } finally {
+             Configurator.setLevel(loggerName, originalLevel);
          }
      }
 
@@ -365,8 +377,15 @@ public class BusinessHandlerImplTest {
          BusinessHandlerImpl localHandler =
                  new SessionOverridingBusinessHandler(mockPartitionManager, session);
 
-         assertNotNull(localHandler.txBuilder("g", 1));
+         BusinessHandler.TxBuilder txBuilder = localHandler.txBuilder("g", 1);
+         assertNotNull(txBuilder);
          verify(op, times(1)).prepare();
+
+         // The constructor takes graphLock("g", 1).readLock() and only releases it when the
+         // built Tx is committed or rolled back; leaving it held here would deadlock any later
+         // test that takes the write lock for the same (graph, partId), e.g. truncate("g", 1).
+         txBuilder.build().rollback();
+         verify(op, times(1)).rollback();
      }
 
      // ========== Tests for database operations ==========
