@@ -27,8 +27,8 @@ trap 'rm -rf "${test_dir}"' EXIT
 # top-level code hard-exits when props.awk is missing, so it cannot be
 # sourced directly; extracting by function name keeps this independent of
 # helper order.  PROPS_AWK is recomputed below.
-for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded get_prop \
-          get_yaml_authenticator has_yaml_authentication_block align_auth_config; do
+for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded \
+          yaml_auth_state check_auth_sides; do
     eval "$(awk -v fn="${fn}" '
         index($0, fn "() {") == 1 { capture = 1 }
         capture { print }
@@ -138,56 +138,137 @@ set_prop_encoded 'auth.token_secret' 'new-secret' "${indented_file}"
 assert_line_count 1 'auth\.token_secret' "${indented_file}"
 assert_line_count 1 '^unrelated=true$' "${indented_file}"
 
-# get_yaml_authenticator must agree with snakeyaml on what a mounted
-# gremlin-server.yaml says: the authenticator inside the authentication
-# block — quoted scalars and inline comments cleaned the way snakeyaml
-# strips them — and a flow mapping on the authentication line itself.
-# align_auth_config refuses an authentication block without a readable
-# authenticator instead of treating it as "no yaml side": exporting the
-# default there would override an explicit choice, and continuing would let
-# enable-auth.sh write the REST side alone.
+# yaml_auth_state reports whether the top-level authentication mapping names
+# an authenticator, without ever reading the class: quoted scalars and inline
+# comments still count as naming one, a flow mapping on the key line counts, a
+# mapping with no authenticator is "nameless", and an `authentication:` nested
+# under some other key is not the Gremlin mapping at all.
 yaml_dir="${test_dir}/yaml"
 mkdir -p "${yaml_dir}/conf"
 (
     cd "${yaml_dir}" || exit 1
-    REST_SERVER_CONF="./conf/rest-server.properties"
-    : > "${REST_SERVER_CONF}"
+    state_file="conf/gremlin-server.yaml"
+
+    want_state() {
+        if [[ "$1" != "$2" ]]; then
+            echo "expected yaml state '$1', got '$2'" >&2
+            exit 1
+        fi
+    }
+
+    printf '%s\n' 'host: 0.0.0.0' > "${state_file}"
+    want_state none "$(yaml_auth_state)"
+
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: com.example.MyAuth' \
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
 
     printf '%s\n' \
         'authentication:' \
         '  authenticator: "com.example.MyAuth"  # custom' \
         '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
-        > conf/gremlin-server.yaml
-    [[ "$(get_yaml_authenticator)" == "com.example.MyAuth" ]]
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
 
     printf '%s\n' \
         'authentication: {authenticator: com.example.FlowAuth, authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler, config: {tokens: conf/rest-server.properties}}' \
-        > conf/gremlin-server.yaml
-    [[ "$(get_yaml_authenticator)" == "com.example.FlowAuth" ]]
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
 
-# align_auth_config must refuse an authentication block without a readable
-# authenticator: continuing would let enable-auth.sh write the REST side
-# alone (REST on StandardAuthenticator, Gremlin on TinkerPop's
-# AllowAllAuthenticator default), so the entrypoint stops here instead.
     printf '%s\n' \
         'authentication:' \
         '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
-        > conf/gremlin-server.yaml
-    unset AUTHENTICATOR_CLASS
-    if align_auth_config; then
-        echo "align_auth_config must refuse an authentication block" \
-            "without a readable authenticator" >&2
-        exit 1
-    fi
-    [[ -z "${AUTHENTICATOR_CLASS:-}" ]]
-    [[ ! -s "${REST_SERVER_CONF}" ]]
+        > "${state_file}"
+    want_state nameless "$(yaml_auth_state)"
 
+    # The nested mapping belongs to someFeature, not to the Gremlin server.
+    # Reading it as the Gremlin one would let com.example.Nested authenticate
+    # REST while Gremlin stayed on TinkerPop's AllowAllAuthenticator default.
+    printf '%s\n' \
+        'someFeature:' \
+        '  authentication:' \
+        '    authenticator: com.example.Nested' \
+        > "${state_file}"
+    want_state none "$(yaml_auth_state)"
+
+    # An authenticator that only appears after the block ends is a sibling's.
     printf '%s\n' \
         'authentication:' \
-        '  authenticator: com.example.YamlAuth' \
+        '  tokens: conf/rest-server.properties' \
+        'other:' \
+        '  authenticator: com.example.Other' \
+        > "${state_file}"
+    want_state nameless "$(yaml_auth_state)"
+
+    # A blank line does not close a YAML mapping.
+    printf '%s\n' \
+        'authentication:' \
+        '  tokens: conf/rest-server.properties' \
+        '' \
+        '  authenticator: com.example.Later' \
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
+
+    rm -f "${state_file}"
+    want_state none "$(yaml_auth_state)"
+)
+
+# check_auth_sides keeps the guarantee the class parsing used to serve: REST and
+# Gremlin never end up with authentication on one side only.  Neither and both
+# pass; one side, or a mapping that names no authenticator, stops the boot.
+sides_dir="${test_dir}/sides"
+mkdir -p "${sides_dir}/conf"
+(
+    cd "${sides_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
+
+    must_refuse() {
+        if check_auth_sides; then
+            echo "check_auth_sides must refuse: $1" >&2
+            exit 1
+        fi
+    }
+
+    printf '%s\n' 'host: 0.0.0.0' > conf/gremlin-server.yaml
+    : > "${REST_SERVER_CONF}"
+    check_auth_sides
+
+    # Both sides configured, different classes: untouched.  enable-auth.sh's
+    # per-file guards then make its appends no-ops, so nothing here has to
+    # know which class either side names.
+    printf '%s\n' 'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+        > "${REST_SERVER_CONF}"
+    printf '%s\n' 'authentication:' '  authenticator: com.example.OtherAuth' \
         > conf/gremlin-server.yaml
-    align_auth_config
-    grep -q '^auth\.authenticator=com\.example\.YamlAuth$' "${REST_SERVER_CONF}"
+    check_auth_sides
+    grep -Eq '^[[:blank:]]*auth[\\]?\.authenticator[[:blank:]]*([:=]|[[:blank:]])com\.example\.OtherAuth' \
+        "${REST_SERVER_CONF}" && {
+        echo "check_auth_sides must not copy a class into rest-server.properties" >&2
+        exit 1
+    }
+
+    # One side only.
+    printf '%s\n' 'auth.authenticator=com.example.MyAuth' > "${REST_SERVER_CONF}"
+    printf '%s\n' 'host: 0.0.0.0' > conf/gremlin-server.yaml
+    must_refuse "rest-server.properties names an authenticator and the yaml does not"
+
+    : > "${REST_SERVER_CONF}"
+    printf '%s\n' 'authentication:' '  authenticator: com.example.YamlAuth' \
+        > conf/gremlin-server.yaml
+    must_refuse "the yaml names an authenticator and rest-server.properties does not"
+
+    # A mapping that names no authenticator is refused even when REST is empty:
+    # enable-auth.sh guards on the presence of `authentication:`, so it would
+    # write the REST file alone and leave Gremlin unauthenticated.
+    printf '%s\n' 'authentication:' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+        > conf/gremlin-server.yaml
+    : > "${REST_SERVER_CONF}"
+    must_refuse "the yaml mapping names no authenticator"
+    printf '%s\n' 'auth.authenticator=com.example.MyAuth' > "${REST_SERVER_CONF}"
+    must_refuse "the yaml mapping names no authenticator and REST does"
 )
 
 # The refusal above is what keeps enable-auth.sh from writing one side:
@@ -195,7 +276,7 @@ mkdir -p "${yaml_dir}/conf"
 # the REST file (its yaml guard already sees an `authentication:` line),
 # leaving REST on StandardAuthenticator and Gremlin on TinkerPop's
 # AllowAllAuthenticator default.  The entrypoint never lets it run there
-# because align_auth_config fails first under set -e.
+# because check_auth_sides fails first under set -e.
 onesided_dir="${test_dir}/yaml-onesided"
 mkdir -p "${onesided_dir}/bin" "${onesided_dir}/conf/graphs"
 cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
@@ -212,9 +293,8 @@ chmod +x "${onesided_dir}/bin/enable-auth.sh"
         'authentication:' \
         '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
         > conf/gremlin-server.yaml
-    unset AUTHENTICATOR_CLASS
-    if align_auth_config; then
-        echo "align_auth_config must refuse an authentication block without a readable authenticator" >&2
+    if check_auth_sides; then
+        echo "check_auth_sides must refuse a yaml mapping without an authenticator" >&2
         exit 1
     fi
     ./bin/enable-auth.sh
@@ -238,8 +318,6 @@ printf 'unrelated=true\r\n' >> "${crlf_file}"
 [[ "$(get_prop_encoded 'auth.authenticator' "${crlf_file}")" == \
     "org.apache.hugegraph.auth.StandardAuthenticator" ]]
 [[ "$(get_prop_encoded 'pd.peers' "${crlf_file}")" == "a,b" ]]
-[[ "$(get_prop 'auth.authenticator' "${crlf_file}")" == \
-    "org.apache.hugegraph.auth.StandardAuthenticator" ]]
 set_prop 'auth.authenticator' 'com.example.NewAuth' "${crlf_file}"
 grep -q '^auth\.authenticator=com\.example\.NewAuth$' "${crlf_file}"
 [[ "$(get_prop_encoded 'pd.peers' "${crlf_file}")" == "a,b" ]]
@@ -248,27 +326,26 @@ if ! grep -q $'^unrelated=true\r$' "${crlf_file}"; then
     exit 1
 fi
 
-# An escaped authenticator and a plain yaml scalar name the same class:
-# the comparison unescapes first, so no spurious WARN and no skipped
-# alignment.
-escaped_auth_dir="${test_dir}/yaml-escaped-auth"
+# An escaped key is the same key: java.util.Properties unescapes the name, so
+# `auth\.authenticator` has to be found by a read or a write of
+# `auth.authenticator` instead of being treated as absent and appended beside.
+# (Comparing the class across the two files went away with the yaml scalar
+# parser, so only the key grammar is left to pin down here.)
+escaped_auth_dir="${test_dir}/escaped-auth-key"
 mkdir -p "${escaped_auth_dir}/conf"
 (
     cd "${escaped_auth_dir}" || exit 1
     REST_SERVER_CONF="./conf/rest-server.properties"
     printf '%s\n' \
-        'auth.authenticator=org.apache.hugegraph.auth\.StandardAuthenticator' \
+        'auth\.authenticator=com.example.OldAuth' \
+        'unrelated=true' \
         > "${REST_SERVER_CONF}"
-    printf '%s\n' \
-        'authentication:' \
-        '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
-        > conf/gremlin-server.yaml
-    unset AUTHENTICATOR_CLASS
-    align_out=$(align_auth_config 2>&1)
-    [[ -z "${AUTHENTICATOR_CLASS:-}" ]]
-    [[ "${align_out}" != *"different authenticators"* ]]
-    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
-        "${REST_SERVER_CONF}"
+    [[ "$(get_prop_encoded 'auth.authenticator' "${REST_SERVER_CONF}")" == \
+        "com.example.OldAuth" ]]
+    set_prop 'auth.authenticator' 'com.example.NewAuth' "${REST_SERVER_CONF}"
+    assert_line_count 1 'auth[\\]?\.authenticator' "${REST_SERVER_CONF}"
+    grep -q '^auth\.authenticator=com\.example\.NewAuth$' "${REST_SERVER_CONF}"
+    assert_line_count 1 '^unrelated=true$' "${REST_SERVER_CONF}"
 )
 
 # A set must keep the config's inode: a copy-back preserves the file's
@@ -293,27 +370,20 @@ set_prop "init_store.enabled" "true" "${link_file}"
 [[ -L "${link_file}" ]]
 grep -q '^init_store\.enabled=true$' "${target_file}"
 
-# An `authenticator:` below a *sibling* mapping is not the Gremlin one.
-# `get_yaml_authenticator` opens its block on `authentication:` and has to
-# close it again on the next key at the same indentation, or the yaml below
-# reports com.example.TlsOnly — and align_auth_config then writes that
-# class into rest-server.properties, so REST authenticates with a class the
-# operator only ever mentioned to an unrelated mapping.
+# Two yaml shapes the scoping has to keep getting right: a sibling mapping
+# that carries its own authenticator must not hide the block's, and a commented
+# authenticator must not count as one.
 scope_dir="${test_dir}/yaml-scope"
 mkdir -p "${scope_dir}/conf"
 (
     cd "${scope_dir}" || exit 1
+    want_state() {
+        if [[ "$1" != "$2" ]]; then
+            echo "expected yaml state '$1', got '$2'" >&2
+            exit 1
+        fi
+    }
 
-    printf '%s\n' \
-        'authentication:' \
-        '  config: {tokens: conf/rest-server.properties}' \
-        'ssl:' \
-        '  authenticator: com.example.TlsOnly' \
-        > conf/gremlin-server.yaml
-    [[ -z "$(get_yaml_authenticator)" ]]
-
-    # The block's own authenticator is still found when a sibling follows
-    # it, and one deeper than the key is still inside it.
     printf '%s\n' \
         'authentication:' \
         '  authenticator: com.example.GremlinAuth' \
@@ -321,53 +391,58 @@ mkdir -p "${scope_dir}/conf"
         'ssl:' \
         '  authenticator: com.example.TlsOnly' \
         > conf/gremlin-server.yaml
-    [[ "$(get_yaml_authenticator)" == "com.example.GremlinAuth" ]]
+    want_state named "$(yaml_auth_state)"
 
-    # A blank line does not close a YAML mapping, and neither does a
-    # comment — including one that names an authenticator.
     printf '%s\n' \
         'authentication:' \
-        '' \
         '#  authenticator: com.example.CommentedAuth' \
-        '  authenticator: com.example.BlankLineAuth' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
         > conf/gremlin-server.yaml
-    [[ "$(get_yaml_authenticator)" == "com.example.BlankLineAuth" ]]
-
-    # Same indentation as the key means a sibling, not a member: the last
-    # case a mounted file is likely to get wrong, because a two-space
-    # `authentication:` under a top-level key is how some deployments
-    # indent the whole block.
-    printf '%s\n' \
-        '  authentication:' \
-        '    authenticator: com.example.IndentedAuth' \
-        '  ssl:' \
-        '    authenticator: com.example.TlsOnly' \
-        > conf/gremlin-server.yaml
-    [[ "$(get_yaml_authenticator)" == "com.example.IndentedAuth" ]]
+    want_state nameless "$(yaml_auth_state)"
 )
 
-# Both sides silent means "bootstrap authentication", but an operator who
-# passed AUTHENTICATOR_CLASS named the class they want.  The default may
-# fill that in, it may not overwrite it: enable-auth.sh appends the value
-# it is given, so overwriting here put StandardAuthenticator into a
-# deployment that asked for something else.
+# Both sides silent means "bootstrap authentication", and the class then comes
+# from enable-auth.sh: an operator who passed AUTHENTICATOR_CLASS gets the class
+# they asked for, and only an unset one falls back to StandardAuthenticator.
+# With the entrypoint no longer exporting a class of its own, this is the whole
+# of the guarantee, so it is asserted where the default now lives.
 class_dir="${test_dir}/authenticator-class"
-mkdir -p "${class_dir}/conf"
 (
-    cd "${class_dir}" || exit 1
-    REST_SERVER_CONF="./conf/rest-server.properties"
-    : > "${REST_SERVER_CONF}"
-    printf '%s\n' 'restserver.url=http://0.0.0.0:8080' > conf/gremlin-server.yaml
+    # A fresh tree per run: enable-auth.sh keeps its own backup of the configs
+    # it writes, so re-running it over one directory is not a clean case.
+    run_enable_auth() {
+        local dir="$1" want="$2"
+        mkdir -p "${dir}/bin" "${dir}/conf/graphs"
+        cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
+            "${dir}/bin/enable-auth.sh"
+        chmod +x "${dir}/bin/enable-auth.sh"
+        printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+            > "${dir}/conf/graphs/hugegraph.properties"
+        : > "${dir}/conf/rest-server.properties"
+        : > "${dir}/conf/gremlin-server.yaml"
+        (
+            cd "${dir}" || exit 1
+            if [[ -n "${want}" ]]; then
+                AUTHENTICATOR_CLASS="${want}"
+                export AUTHENTICATOR_CLASS
+            else
+                unset AUTHENTICATOR_CLASS
+            fi
+            ./bin/enable-auth.sh
+        )
+    }
 
-    AUTHENTICATOR_CLASS=com.example.OperatorAuth
-    export AUTHENTICATOR_CLASS
-    align_auth_config
-    [[ "${AUTHENTICATOR_CLASS}" == "com.example.OperatorAuth" ]]
+    run_enable_auth "${class_dir}/operator" "com.example.OperatorAuth"
+    grep -q '^auth\.authenticator=com\.example\.OperatorAuth$' \
+        "${class_dir}/operator/conf/rest-server.properties"
+    grep -q '^  authenticator: com\.example\.OperatorAuth,$' \
+        "${class_dir}/operator/conf/gremlin-server.yaml"
 
-    unset AUTHENTICATOR_CLASS
-    align_auth_config
-    [[ "${AUTHENTICATOR_CLASS}" == \
-        "org.apache.hugegraph.auth.StandardAuthenticator" ]]
+    run_enable_auth "${class_dir}/default" ""
+    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+        "${class_dir}/default/conf/rest-server.properties"
+    grep -q '^  authenticator: org\.apache\.hugegraph\.auth\.StandardAuthenticator,$' \
+        "${class_dir}/default/conf/gremlin-server.yaml"
 )
 
 # An empty mounted config still gets its definitions.  GNU sed's `$`
@@ -489,3 +564,33 @@ cmp -s "${rb_file}.bak" "${rb_expect}" || {
     echo "the snapshot must be a byte-for-byte copy of the original" >&2
     exit 1
 }
+
+# A value whose encoded form ends in an odd number of backslashes must not be
+# written at all.  The entrypoint copies an existing secret between files with
+# set_prop_encoded, replaying the raw bytes, and on disk `key=abc\` as the last
+# line of a mounted config reads back as no property at all under
+# commons-configuration2 (what HugeConfig extends).  Written into a file where
+# it is no longer last, it turns the following line into a continuation of the
+# secret: the server then sees neither the secret nor that property, and the
+# entrypoint has published a credential nothing will read.
+bs_file="${test_dir}/config-trailing-backslash"
+bs_pristine="${test_dir}/config-trailing-backslash.pristine"
+printf '%s\n' 'unrelated=true' > "${bs_file}"
+cp "${bs_file}" "${bs_pristine}"
+if set_prop_encoded 'auth.token_secret' 'abc\' "${bs_file}" 2>/dev/null; then
+    echo "props.awk must refuse a value ending in an odd number of backslashes" >&2
+    exit 1
+fi
+cmp -s "${bs_file}" "${bs_pristine}" || {
+    echo "a refused set must leave the config byte-for-byte untouched" >&2
+    exit 1
+}
+
+# An escaped backslash — two of them — is not a continuation, so it stays
+# writable and replays byte for byte.  Built from parts because a doubled
+# backslash inside one literal is easy to write and hard to read back.
+bs='\'
+two_bs="abc${bs}${bs}"
+set_prop_encoded 'auth.token_secret' "${two_bs}" "${bs_file}"
+[[ "$(get_prop_encoded 'auth.token_secret' "${bs_file}")" == "${two_bs}" ]]
+assert_line_count 1 '^unrelated=true$' "${bs_file}"

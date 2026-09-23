@@ -196,8 +196,19 @@ function props_load(file,    raw, rc, nl, stripped, next_raw, start, logical) {
     }
 }
 
-function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg) {
+function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs) {
     props_load(file)
+    # A value whose encoded form ends in an odd number of backslashes would
+    # turn the line written after it into a continuation of that value.
+    # Measured against commons-configuration2 (what HugeConfig extends), the
+    # same input read back yields no property at all, so a secret written this
+    # way would never reach the server that is supposed to authenticate with
+    # it; the entrypoint has to refuse instead of guessing a target.
+    nbs = 0
+    while (nbs < length(enc_val) && substr(enc_val, length(enc_val) - nbs, 1) == "\\")
+        nbs++
+    if (nbs % 2 == 1)
+        die("refusing to write " key ": the encoded value ends in an odd number of backslashes")
     first = 0
     for (b = 1; b <= NBLOCK; b++) {
         if (BTYPE[b] == "entry" && BKEY[b] == key) {
@@ -272,16 +283,6 @@ function props_get(file, key,    b) {
     }
 }
 
-function props_get_decoded(file, key,    b) {
-    props_load(file)
-    for (b = 1; b <= NBLOCK; b++) {
-        if (BTYPE[b] == "entry" && BKEY[b] == key) {
-            print unescape(BVAL[b])
-            return
-        }
-    }
-}
-
 BEGIN {
     mode = ENVIRON["PROPS_MODE"]
     key = ENVIRON["PROPS_KEY"]
@@ -290,11 +291,9 @@ BEGIN {
         die("PROPS_FILE and PROPS_KEY must be set")
     if (mode == "get") {
         props_get(file, key)
-    } else if (mode == "get-decoded") {
-        props_get_decoded(file, key)
     } else if (mode == "set") {
         props_set(file, key, ENVIRON["PROPS_VALUE_ENCODED"])
     } else {
-        die("PROPS_MODE must be get, get-decoded or set")
+        die("PROPS_MODE must be get or set")
     }
 }

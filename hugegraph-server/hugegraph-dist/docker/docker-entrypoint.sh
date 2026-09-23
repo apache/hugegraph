@@ -110,136 +110,77 @@ get_prop_encoded() {
         awk -f "${PROPS_AWK}" /dev/null
 }
 
-# Decoded read: unescapes the on-disk value the way java.util.Properties
-# does, so it compares equal with the snakeyaml-decoded scalar from
-# get_yaml_authenticator.  The raw get_prop_encoded mode stays for the
-# secret round trip, which must replay backslashes byte-for-byte.
-get_prop() {
-    local key="$1" file="$2"
-
-    PROPS_MODE=get-decoded PROPS_KEY="${key}" PROPS_FILE="${file}" \
-        awk -f "${PROPS_AWK}" /dev/null
-}
-
-# First uncommented `authenticator:` inside the gremlin-server.yaml
-# authentication block, or on the `authentication:` line itself (a flow
-# mapping).  snakeyaml resolves duplicate top-level keys to the last one,
-# but a mounted file carrying two authentication blocks is pathological;
-# report the first and let the mismatch WARN handle it.  The scalar is
-# cleaned the way snakeyaml reads it — an inline comment (a '#' preceded
-# by whitespace), surrounding quotes and padding are stripped — because
-# java.util.Properties keeps all of those in the class name.
-get_yaml_authenticator() {
+# What the top-level authentication mapping of gremlin-server.yaml says about
+# authentication, as one of three states:
+#
+#   none     no such mapping
+#   named    the mapping carries an authenticator
+#   nameless the mapping exists but names no authenticator
+#
+# Only presence is asked for, never the class: the entrypoint does not copy a
+# value between the two files any more, so quotes, inline comments and flow
+# mappings stay snakeyaml's business instead of becoming a parser here.  The
+# key must start at column 0 — an `authentication:` nested under another
+# mapping belongs to that feature, not to the Gremlin server, and reading it as
+# the Gremlin one would let an unrelated class decide whether REST is
+# authenticated while Gremlin stayed on TinkerPop's AllowAllAuthenticator.
+yaml_auth_state() {
     local yaml="./conf/gremlin-server.yaml"
 
-    [[ -f "${yaml}" ]] || return 0
+    [[ -f "${yaml}" ]] || { echo "none"; return 0; }
     awk '
-        function scalar(s,    out, i, n, c, q) {
-            out = ""
-            q = ""
-            n = length(s)
-            for (i = 1; i <= n; i++) {
-                c = substr(s, i, 1)
-                if (q != "") {
-                    if (c == q) q = ""
-                    else out = out c
-                    continue
-                }
-                if (c == "\"" || c == "\047") { q = c; continue }
-                if (c == "#" &&
-                    (out == "" || substr(out, length(out), 1) ~ /[ \t]/))
-                    break
-                if (c == "," || c == "}" || c == "]") break
-                out = out c
-            }
-            sub(/^[ \t\r]+/, "", out)
-            sub(/[ \t\r]+$/, "", out)
-            return out
-        }
-        /^[ \t]*#/ { next }
-        /^[ \t]*authentication[ \t]*:/ {
+        /^authentication[ \t]*:/ {
             inblk = 1
-            indent = match($0, /[^ \t]/)
-            line = $0
-            sub(/^[ \t]*authentication[ \t]*:[ \t]*/, "", line)
-            if (match(line, /authenticator[ \t]*:/)) {
-                print scalar(substr(line, RSTART + RLENGTH))
-                exit
-            }
+            have = 1
+            # A flow mapping keeps the authenticator on the same line as the
+            # key, so it has to count there too; missing it would report a
+            # configured mapping as nameless and refuse a valid deployment.
+            if (match($0, /authenticator[ \t]*:/)) { named = 1; exit }
             next
         }
-        # A blank line does not close a YAML mapping.
-        /^[ \t\r]*$/ { next }
-        # The authenticator has to belong to the authentication mapping:
-        # any key at or left of that key is a sibling, so the block is
-        # over.  Without this, the first `authenticator:` anywhere below
-        # `authentication:` is taken as the Gremlin one, which lets a
-        # later top-level mapping carrying its own authenticator decide
-        # the REST side too.
-        inblk && match($0, /[^ \t]/) <= indent { inblk = 0 }
-        inblk && /^[ \t]+authenticator[ \t]*:/ {
-            line = $0
-            sub(/^[ \t]*authenticator[ \t]*:[ \t]*/, "", line)
-            print scalar(line)
-            exit
+        # Any other column-0 key ends the mapping.  A blank or whitespace-only
+        # line does not, because YAML does not close a mapping on an empty line.
+        inblk && /^[^ \t]/ { inblk = 0 }
+        inblk && /^[ \t]+authenticator[ \t]*:/ { named = 1; exit }
+        END {
+            if (named) print "named"
+            else if (have) print "nameless"
+            else print "none"
         }
     ' "${yaml}"
 }
 
-# A mounted yaml can carry an authentication block whose authenticator
-# cannot be read (an empty or unparseable one).  That is not the
-# both-empty case: exporting the default would override an explicit
-# choice that snakeyaml does resolve, so callers treat it as a mismatch.
-has_yaml_authentication_block() {
-    local yaml="./conf/gremlin-server.yaml"
+# Authentication has to be configured on both sides or on neither.  A mounted
+# config carrying only one is refused rather than completed: the entrypoint
+# cannot know which class the operator means, and finishing the other side from
+# a guessed default is how Gremlin ends up on AllowAllAuthenticator while REST
+# enforces StandardAuthenticator.  A mapping that names no authenticator is
+# refused by itself, because enable-auth.sh guards on the presence of that
+# mapping and would otherwise write only the REST side.
+check_auth_sides() {
+    local rest=0 yaml=0 state
 
-    [[ -f "${yaml}" ]] || return 1
-    grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' "${yaml}"
-}
-
-# enable-auth.sh appends definitions to files it did not write.  On a
-# mounted config those appended definitions are duplicates the two parsers
-# resolve in opposite directions — HugeConfig (commons-configuration) takes
-# the first, snakeyaml takes the last — so Gremlin and REST can land on
-# different authenticators with no error from either.  Normalize both sides
-# to one definition of the same authenticator here; enable-auth.sh's
-# per-file guards then make its appends no-ops on anything already set.
-align_auth_config() {
-    local rest_auth yaml_auth
-
-    rest_auth=$(get_prop "auth.authenticator" "${REST_SERVER_CONF}")
-    yaml_auth=$(get_yaml_authenticator)
-    if [[ -z "${yaml_auth}" ]] && has_yaml_authentication_block; then
-        # Refuse instead of bootstrapping one side: enable-auth.sh runs right
-        # after align and only touches the REST side, so continuing would put
-        # REST on StandardAuthenticator while Gremlin stays on TinkerPop's
-        # AllowAllAuthenticator default.  Failing fast (rather than skipping
-        # enable-auth.sh) keeps a PASSWORD deployment from starting with
-        # authentication silently half-applied.
-        log "ERROR: gremlin-server.yaml carries an authentication block" \
-            "without a readable authenticator; refusing to bootstrap" \
-            "authentication one-sided. Add an 'authenticator:' entry to" \
-            "the block or remove the block, then restart."
+    state=$(yaml_auth_state)
+    if [[ "${state}" == "nameless" ]]; then
+        log "ERROR: gremlin-server.yaml carries a top-level authentication" \
+            "mapping that names no authenticator; add an authenticator entry" \
+            "to it or remove the mapping, then restart."
         return 1
     fi
-    if [[ -n "${rest_auth}" && -n "${yaml_auth}" && "${rest_auth}" != "${yaml_auth}" ]]; then
-        log "WARN: REST and Gremlin name different authenticators" \
-            "('${rest_auth}' vs '${yaml_auth}'); leaving both untouched"
-        return
+    if [[ -n "$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}")" ]]; then
+        rest=1
     fi
-    if [[ -z "${rest_auth}" && -z "${yaml_auth}" ]]; then
-        # Only fill in a default: an operator-supplied AUTHENTICATOR_CLASS
-        # is the intent for a config that names no authenticator yet, and
-        # assigning here would turn it back into StandardAuthenticator
-        # before enable-auth.sh ever saw it.
-        export AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
-    elif [[ -n "${yaml_auth}" ]]; then
-        set_prop "auth.authenticator" "${yaml_auth}" "${REST_SERVER_CONF}"
-    else
-        export AUTHENTICATOR_CLASS="${rest_auth}"
+    if [[ "${state}" == "named" ]]; then
+        yaml=1
     fi
-    # auth.graph_store and the gremlin.graph flip are left to enable-auth.sh,
-    # which appends/rewrites only what is absent or still the plain default.
+    if (( rest == yaml )); then
+        return 0
+    fi
+    log "ERROR: authentication is configured in only one of" \
+        "rest-server.properties (auth.authenticator) and" \
+        "gremlin-server.yaml (authentication.authenticator);" \
+        "configure both or neither, then restart."
+    return 1
 }
 
 migrate_env() {
@@ -394,9 +335,9 @@ if [[ -n "${AUTH_TOKEN_SECRET_ENCODED}" ]]; then
 fi
 if [[ -n "${PASSWORD:-}" ]]; then
     set_prop_encoded "auth.admin_pa" "${AUTH_ADMIN_PASSWORD_ENCODED}" "${REST_SERVER_CONF}"
-    # A refusal inside align_auth_config exits the entrypoint under set -e,
-    # so enable-auth.sh can never run one-sided after it.
-    align_auth_config
+    # A refusal here exits the entrypoint under set -e, so enable-auth.sh can
+    # never run one-sided after it.
+    check_auth_sides
     # This script is idempotent and must run outside the initialization guard:
     # an upgrade can preserve the marker from an unauthenticated deployment.
     ./bin/enable-auth.sh
@@ -532,7 +473,11 @@ if [[ "$READY_STATUS" -ne 0 ]]; then
 fi
 
 # Post-startup cluster stabilization check (hstore only — rocksdb has no partitions)
-ACTUAL_BACKEND=$(grep -E '^[[:space:]]*backend[[:space:]]*=' "${GRAPH_CONF}" | head -n 1 | sed 's/.*=//' | tr -d '[:space:]' || true)
+# Read through props.awk so a mounted config using the `:` or bare-whitespace
+# separator is seen at all, and first-definition-wins matches HugeConfig; the
+# grep this replaces only ever accepted `=`.  Trailing whitespace is dropped
+# here rather than in the reader, which reports the on-disk bytes verbatim.
+ACTUAL_BACKEND=$(get_prop_encoded "backend" "${GRAPH_CONF}" | tr -d '[:space:]' || true)
 if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
     STORE_REST="${STORE_REST:-store:8520}"
     export STORE_REST
