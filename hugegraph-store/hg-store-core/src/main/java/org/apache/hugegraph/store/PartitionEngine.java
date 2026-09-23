@@ -659,6 +659,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
             partitionManager.updateShardGroup(shardGroup);
 
             if (isLeader()) {
+                // TODO: remove this commented-out block if nothing still needs it
                 // partitionManager.getPartitionList(getGroupId()).forEach(partition -> {
                 //    partitionManager.changeShards(partition, shardGroup.getMetaPbShard());
                 // });
@@ -1133,6 +1134,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         try {
             doSnapshotSync(done);
         } catch (Exception e) {
+            // TODO: groupId is unused and the error is never logged; log it or remove both
             Integer groupId = getGroupId();
             // String msg = String.format("Partition %s blank task done with error：", groupId);
             // log.error(msg, e);
@@ -1159,6 +1161,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
 
         @Override
         public void onError(PeerId peer, Status status) {
+            // TODO: replicator errors are silently dropped; log them or remove this line
             // log.info("Raft {} Replicator onError {} {}", getGroupId(), peer, status);
         }
 

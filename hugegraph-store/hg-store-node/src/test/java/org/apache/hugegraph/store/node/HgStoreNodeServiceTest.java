@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
  * 3, test copy addition and subtraction
  * 4. Test single frame with log storage turned off
  */
+// TODO: every @Test here is commented out, so this class runs nothing; write real tests or remove it
 public class HgStoreNodeServiceTest {
 
     String yml =

@@ -87,8 +87,9 @@ public class PartitionAPI {
             raft.setGroupId(engine.getGroupId());
             raft.setLeader(engine.getLeader());
             raft.setRole(engine.getRaftNode().getNodeState().name());
-            raft.setConf(engine.getCurrentConf().toString());
+            // jraft only lists peers and learners on the leader
             if (engine.isLeader()) {
+                raft.setConf(engine.getCurrentConf().toString());
                 raft.setPeers(engine.getRaftNode().listPeers());
                 raft.setLearners(engine.getRaftNode().listLearners());
             }
@@ -139,6 +140,7 @@ public class PartitionAPI {
         }
 
         return raft;
+        // TODO: remove this dead return, the method already returns raft above
         //return okMap("partition", rafts);
     }
 
@@ -195,6 +197,7 @@ public class PartitionAPI {
         configMap.put("arthas.ip", appConfig.getArthasConfig().getArthasip());
         configMap.put("arthas.disabledCommands", appConfig.getArthasConfig().getDisCmd());
         ArthasAgent.attach(configMap);
+        // TODO: remove this commented-out line, retPose is never used
 //        DashResponse retPose = new DashResponse();
         List<String> ret = new ArrayList<>();
         ret.add("Arthas started successfully");
