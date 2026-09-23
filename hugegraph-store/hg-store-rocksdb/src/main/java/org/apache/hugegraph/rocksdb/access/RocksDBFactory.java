@@ -494,6 +494,15 @@ public final class RocksDBFactory {
     }
 
     /**
+     * Whether any {@link RocksdbChangedListener} is currently registered (e.g. a cloud storage
+     * provider). Used to decide whether the native event listener needs to be wired into
+     * {@link org.rocksdb.DBOptions} at all.
+     */
+    public boolean hasRocksdbChangedListeners() {
+        return !rocksdbChangedListeners.isEmpty();
+    }
+
+    /**
      * Notifies all registered listeners that a RocksDB truncate operation is about to start.
      *
      * @param dbName  the graph / partition name

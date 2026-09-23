@@ -488,11 +488,17 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         RocksDBSession.initOptions(hugeConfig, opts, opts, opts, opts);
         dbOptions = new DBOptions(opts);
         dbOptions.setStatistics(rocksDbStats);
-        // Register the factory-level event listener so that table-file events
-        // (onTableFileCreated / onTableFileDeleted) are forwarded to all
-        // RocksdbChangedListener implementations (e.g. cloud storage providers).
-        dbOptions.setListeners(
-                Collections.singletonList(RocksDBFactory.getInstance().getEventListener()));
+        // Only register the factory-level event listener when a RocksdbChangedListener is
+        // actually registered (e.g. a cloud storage provider). RocksDB's native callbacks
+        // (onTableFileCreated/onTableFileDeleted/onCompactionCompleted) run on RocksDB's own
+        // native threads and resolve classes via the plain system classloader; when this module
+        // is loaded from a Spring Boot fat jar's nested BOOT-INF/lib, that classloader cannot see
+        // the listener classes, causing a NoClassDefFoundError storm on every callback. Skipping
+        // the registration when there is nothing to notify avoids the callback entirely.
+        if (RocksDBFactory.getInstance().hasRocksdbChangedListeners()) {
+            dbOptions.setListeners(
+                    Collections.singletonList(RocksDBFactory.getInstance().getEventListener()));
+        }
 
         try {
             List<ColumnFamilyDescriptor> columnFamilyDescriptorList =
