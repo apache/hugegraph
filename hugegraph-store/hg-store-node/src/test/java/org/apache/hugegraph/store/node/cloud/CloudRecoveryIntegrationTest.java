@@ -198,23 +198,29 @@ public class CloudRecoveryIntegrationTest {
         this.dbName = "jni-boundary-db";
         Path dbPath = this.baseDir.resolve(this.dbName);
 
-        // Open a real RocksDB instance. No listener/provider is wired yet, so the open path
-        // (onDBOpening / onDBCreated) is unaffected by the injected failure below.
+        // maxAttempts=0 → an async upload failure is routed straight to the DLQ, giving a
+        // deterministic postcondition instead of a timing-dependent retry cycle.
+        this.retryQueue = CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, this.baseDir.toString());
+        // Data root = baseDir so the SST files RocksDB writes under dbPath (a child of
+        // baseDir) can be hard-link staged for async upload.
+        this.listener = CloudStorageTestFactory.newListener(
+                List.of(this.baseDir.toString()), false, 0L, this.retryQueue);
+
+        // The listener must be registered BEFORE the DB is opened: RocksDBSession#openRocksDB
+        // only wires the native RocksdbChangedListener into dbOptions when
+        // RocksDBFactory#hasRocksdbChangedListeners() is true AT OPEN TIME (a one-time decision,
+        // to avoid ever exercising the native callback — and its classloading — when no listener
+        // feature is enabled). No provider is active yet, so onDBOpening/onDBCreated still see a
+        // null active provider and no-op; only the flush below exercises the injected failure.
+        factory.addRocksdbChangedListener(this.listener);
+
         RocksDBSession session = factory.createGraphDB(dbPath.toString(), this.dbName);
 
         try (session) {
             assertNotNull("expected a real RocksDB session", session);
-            // maxAttempts=0 → an async upload failure is routed straight to the DLQ, giving a
-            // deterministic postcondition instead of a timing-dependent retry cycle.
-            this.retryQueue = CloudStorageTestFactory.newRetryQueue(0, 50L, 50L, this.baseDir.toString());
-            // Data root = baseDir so the SST files RocksDB writes under dbPath (a child of
-            // baseDir) can be hard-link staged for async upload.
-            this.listener = CloudStorageTestFactory.newListener(
-                    List.of(this.baseDir.toString()), false, 0L, this.retryQueue);
 
-            // Register AFTER open, then inject an always-failing provider so ONLY the real
-            // onTableFileCreated callback (fired by the flush below) exercises the failure path.
-            factory.addRocksdbChangedListener(this.listener);
+            // Inject an always-failing provider now, so ONLY the real onTableFileCreated callback
+            // (fired by the flush below) exercises the failure path.
             AtomicInteger uploadAttempts = new AtomicInteger(0);
             CloudStorageProviderFactory.setActiveProviderForTest(
                     new AlwaysFailingUploadProvider(uploadAttempts));
