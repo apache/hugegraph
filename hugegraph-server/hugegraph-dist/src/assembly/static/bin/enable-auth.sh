@@ -62,17 +62,9 @@ for candidate in "${PROPS_AWK:-}" "${BIN}/props.awk" "${TOP}/props.awk"; do
 done
 [[ -n "${PROPS_AWK:-}" ]] || fail "props.awk not found beside this script"
 
-# Exit status of the reader is meaningful: 1 means the key has no definition,
-# 2 means props.awk could not do its job.  Only 1 is an acceptable answer here.
-props_has() {
-    local status=0
-    PROPS_MODE=has PROPS_KEY="$1" PROPS_FILE="$2" awk -f "${PROPS_AWK}" /dev/null || status=$?
-    if (( status > 1 )); then
-        fail "cannot read $2"
-    fi
-    return "${status}"
-}
-
+# props_get is the only reader used here, and it treats any nonzero status from
+# props.awk as an error: 2 means the file could not be read at all, which must
+# not be mistaken for "the key is not there" and answered with a write.
 props_get() {
     local status=0 value
     value=$(PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY="$1" PROPS_FILE="$2" \
@@ -94,6 +86,24 @@ props_set() {
         awk -f "${PROPS_AWK}" /dev/null || fail "cannot update $3"
 }
 
+# Give `$3` its default `$2` for key `$1`, in place, unless it already has a
+# value.  Guarding with props_has and appending was not the same question:
+# `auth.authenticator=` and a bare `auth.authenticator` line both parse to the
+# empty string (measured against java.util.Properties, which also strips the
+# trailing blanks of `auth.authenticator=   `), so props_has reported them as
+# answered and the append was skipped -- while the entrypoint's
+# check_auth_sides, which asks for the value rather than the key, counted the
+# same file as unconfigured.  `loadAuthenticator("")` returns null, so REST then
+# served without authentication next to a Gremlin that required it.
+#
+# props_set covers both shapes the guard had to split: with a definition
+# present it replaces the first one where it stands (no duplicate for
+# first-definition-wins to bury), with none present it appends.
+ensure_rest_prop() {
+    [[ -n "$(props_get "$1" "$3")" ]] && return 0
+    props_set "$1" "$2" "$3"
+}
+
 # make a backup
 BAK_CONF="$TOP/conf-bak"
 if [ ! -d "$BAK_CONF" ]; then
@@ -106,11 +116,14 @@ if [ ! -d "$BAK_CONF" ]; then
         fail "cannot back up ${GRAPH_CONF}"
 fi
 
-# The appends below are guarded per file and skip any file that already carries
-# the property, so they are no-ops on a mounted config or a re-run.  Appending
-# unconditionally used to create duplicate definitions that the properties
-# parser (first definition wins) and the yaml parser (last wins) resolved in
-# opposite directions, leaving Gremlin and REST on different authenticators.
+# Both writes below skip a side that already carries a real value, so they are
+# no-ops on a mounted config or a re-run.  Appending unconditionally used to
+# create duplicate definitions that the properties parser (first definition
+# wins) and the yaml parser (last wins) resolved in opposite directions, leaving
+# Gremlin and REST on different authenticators.  That is why the REST side goes
+# through ensure_rest_prop rather than a presence guard plus an append: a
+# presence guard also lets a defined-but-empty key count as answered, and the
+# appended default would then be the definition the server never reads.
 #
 # Appended with `>>` rather than `sed -i '$a\...'`: GNU sed's `$` address never
 # matches when the file has no lines, so on an empty mounted config every append
@@ -136,7 +149,14 @@ append_lines() {
 
 AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
 
-if ! grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' "${CONF}/${GREMLIN_SERVER_CONF}"; then
+# Only a column-0 `authentication` mapping is the Gremlin server's, which is the
+# rule yamlscan.awk applies to decide the same thing for check_auth_sides.  With
+# `[[:blank:]]*` here the two disagreed on a config that nests `authentication`
+# under another feature: the entrypoint read it as `none`, so parity held and it
+# called this script, but this guard saw the nested key and skipped the append,
+# writing the REST side only -- StandardAuthenticator on REST, TinkerPop's
+# AllowAllAuthenticator on Gremlin.
+if ! grep -Eq '^authentication[[:blank:]]*:' "${CONF}/${GREMLIN_SERVER_CONF}"; then
     append_lines "${CONF}/${GREMLIN_SERVER_CONF}" \
         'authentication: {' \
         "  authenticator: ${AUTHENTICATOR_CLASS}," \
@@ -145,13 +165,8 @@ if ! grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' "${CONF}/${GREMLIN_SERV
         '}'
 fi
 
-if ! props_has "auth.authenticator" "${CONF}/${REST_SERVER_CONF}"; then
-    append_lines "${CONF}/${REST_SERVER_CONF}" "auth.authenticator=${AUTHENTICATOR_CLASS}"
-fi
-
-if ! props_has "auth.graph_store" "${CONF}/${REST_SERVER_CONF}"; then
-    append_lines "${CONF}/${REST_SERVER_CONF}" 'auth.graph_store=hugegraph'
-fi
+ensure_rest_prop "auth.authenticator" "${AUTHENTICATOR_CLASS}" "${CONF}/${REST_SERVER_CONF}"
+ensure_rest_prop "auth.graph_store" "hugegraph" "${CONF}/${REST_SERVER_CONF}"
 
 # Wrap the graph factory only when it really is the plain HugeFactory, which is
 # a question about the decoded value, so it goes through the same reader.

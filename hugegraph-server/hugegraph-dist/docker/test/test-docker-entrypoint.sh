@@ -975,3 +975,134 @@ mkdir -p "${mounted_dir}/conf/graphs"
         > conf/rest-server.properties
     check_auth_sides
 )
+
+# ── Trees the entrypoint hands to enable-auth.sh ───────────────────────
+# check_auth_sides and enable-auth.sh answer one question from two files, so
+# they have to answer it the same way.  Every case below is a tree that
+# check_auth_sides ACCEPTS -- which is why the entrypoint goes on to run
+# enable-auth.sh -- and where the old guard here wrote only one side: it asked
+# whether a key or a block was present, while the entrypoint asks whether a
+# value names a class.  Those disagree for an `authentication:` nested under
+# another feature and for a defined-but-empty `auth.authenticator`, and the
+# result was REST enforcing StandardAuthenticator beside a Gremlin left on
+# TinkerPop's AllowAllAuthenticator.
+parity_dir="${test_dir}/enable-auth-parity"
+
+# bootstrap <dir>: the layout the script ships in, with props.awk beside it.
+bootstrap_tree() {
+    local dir="$1"
+    rm -rf "${dir}"
+    mkdir -p "${dir}/conf/graphs"
+    install_enable_auth "${dir}"
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+        > "${dir}/conf/graphs/hugegraph.properties"
+    : > "${dir}/conf/gremlin-server.yaml"
+    : > "${dir}/conf/rest-server.properties"
+}
+
+# The class the server would read, through the same reader rather than through
+# grep: an appended second definition looks correct to grep and is invisible
+# here, which is the failure these cases are about.
+rest_class() {
+    PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY=auth.authenticator \
+        PROPS_FILE="$1/conf/rest-server.properties" awk -f "${PROPS_AWK}" /dev/null
+}
+
+gremlin_state() {
+    ( cd "$1" && yaml_auth_state )
+}
+
+# accepted_then_both_sides <case> <dir> -- refuse to test a tree the
+# entrypoint would never run the script on, then require both sides named.
+# REST_SERVER_CONF is a top-level assignment in docker-entrypoint.sh and this
+# group evals only the functions, so each call has to carry it: unset, the REST
+# side reads as unconfigured whatever the file says, and a one-sided tree would
+# be waved through the very guard being asserted.
+sides_agree() {
+    ( cd "$1" && REST_SERVER_CONF="./conf/rest-server.properties" check_auth_sides )
+}
+
+accepted_then_both_sides() {
+    local desc="$1" dir="$2" state class
+    if ! sides_agree "${dir}" >/dev/null 2>&1; then
+        echo "${desc}: check_auth_sides refused this tree, so enable-auth.sh
+  is never reached -- the case no longer tests what it was written for" >&2
+        exit 1
+    fi
+    ( cd "${dir}" && unset AUTHENTICATOR_CLASS && ./bin/enable-auth.sh ) || {
+        echo "${desc}: enable-auth.sh failed" >&2
+        exit 1
+    }
+    state=$(gremlin_state "${dir}")
+    if [[ "${state}" != "named" ]]; then
+        echo "${desc}: gremlin-server.yaml is ${state}, not named" >&2
+        exit 1
+    fi
+    class=$(rest_class "${dir}")
+    if [[ "${class}" != "org.apache.hugegraph.auth.StandardAuthenticator" ]]; then
+        echo "${desc}: rest-server.properties reads back [${class}]" >&2
+        exit 1
+    fi
+    if [[ "$(grep -c '^auth\.authenticator' "${dir}/conf/rest-server.properties")" != "1" ]]; then
+        echo "${desc}: auth.authenticator has more than one definition" >&2
+        exit 1
+    fi
+    # Parity has to survive the run, not just the files: a tree the script
+    # leaves one-sided must not still pass the guard that let it through.
+    if ! sides_agree "${dir}"; then
+        echo "${desc}: check_auth_sides rejects the tree enable-auth.sh left" >&2
+        exit 1
+    fi
+}
+
+# An `authentication:` that belongs to another mapping is not the server's, so
+# the script owns the whole of the Gremlin side and has to write it.
+bootstrap_tree "${parity_dir}/nested"
+printf '%s\n' 'host: 0.0.0.0' 'someFeature:' '  authentication:' \
+    '    authenticator: com.example.Nested' \
+    > "${parity_dir}/nested/conf/gremlin-server.yaml"
+printf '%s\n' 'restserver.url=http://127.0.0.1:8080' \
+    > "${parity_dir}/nested/conf/rest-server.properties"
+accepted_then_both_sides "nested authentication mapping" "${parity_dir}/nested"
+# The other feature keeps its own block untouched, and the block written for
+# the server is the one at column 0.
+grep -q '^authentication: {$' "${parity_dir}/nested/conf/gremlin-server.yaml"
+grep -q '^  authentication:$' "${parity_dir}/nested/conf/gremlin-server.yaml"
+grep -q '^    authenticator: com\.example\.Nested$' \
+    "${parity_dir}/nested/conf/gremlin-server.yaml"
+
+# Both empty spellings, plus a whitespace value: each parses to the empty
+# string, so each is the unconfigured side and has to be filled in place.
+for empty in 'auth.authenticator=' 'auth.authenticator' 'auth.authenticator=   '; do
+    bootstrap_tree "${parity_dir}/empty"
+    printf '%s\n' 'host: 0.0.0.0' > "${parity_dir}/empty/conf/gremlin-server.yaml"
+    printf '%s\n' "${empty}" 'unrelated=true' \
+        > "${parity_dir}/empty/conf/rest-server.properties"
+    accepted_then_both_sides "empty definition [${empty}]" "${parity_dir}/empty"
+    # The placeholder is rewritten where it stood; unrelated content is kept.
+    grep -q '^unrelated=true$' "${parity_dir}/empty/conf/rest-server.properties"
+    [[ "$(head -1 "${parity_dir}/empty/conf/rest-server.properties")" == \
+        'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' ]]
+done
+
+# A value the operator did write is never a default's target.  This tree is
+# accepted because both sides already name the same class, and the script has
+# to leave it alone rather than replace it with StandardAuthenticator.
+bootstrap_tree "${parity_dir}/operator"
+printf '%s\n' 'authentication:' '  authenticator: com.example.OperatorAuth' \
+    > "${parity_dir}/operator/conf/gremlin-server.yaml"
+printf '%s\n' 'auth.authenticator=com.example.OperatorAuth' \
+    > "${parity_dir}/operator/conf/rest-server.properties"
+if ! sides_agree "${parity_dir}/operator" >/dev/null 2>&1; then
+    echo "operator class tree: check_auth_sides refused" >&2
+    exit 1
+fi
+( cd "${parity_dir}/operator" && unset AUTHENTICATOR_CLASS && ./bin/enable-auth.sh )
+if [[ "$(rest_class "${parity_dir}/operator")" != "com.example.OperatorAuth" ]]; then
+    echo "operator class must survive the default write: got [$(rest_class "${parity_dir}/operator")]" >&2
+    exit 1
+fi
+if ! sides_agree "${parity_dir}/operator"; then
+    echo "operator class tree lost parity" >&2
+    exit 1
+fi
