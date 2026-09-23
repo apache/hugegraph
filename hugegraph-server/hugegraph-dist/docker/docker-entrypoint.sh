@@ -39,13 +39,40 @@ run_startup_step() {
 
 # Property reading/writing goes through props.awk, which implements the
 # java.util.Properties grammar HugeConfig applies (escapes, `:`/whitespace
-# separators, continuations, first-definition-wins duplicates).  grep/sed
-# rewrites disagree with it on mounted or upgraded configs, silently
-# producing two definitions of one key.  Values move through environment
-# variables rather than argv so a PASSWORD never shows up in `ps` output.
-PROPS_AWK="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/props.awk"
-if [[ ! -f "${PROPS_AWK}" ]]; then
-    log "ERROR: props.awk not found next to the entrypoint"
+# separators, CR/CRLF/LF line terminators, continuations, first-definition-wins
+# duplicates).  grep/sed rewrites disagree with it on mounted or upgraded
+# configs, silently producing two definitions of one key.  Values move through
+# environment variables rather than argv so a PASSWORD never shows up in `ps`
+# output.
+#
+# props.awk lives in the packaged bin/ directory because bin/enable-auth.sh
+# reads properties with it too, and that assembly fileSet is what both the
+# release tarball and this image are built from.  Beside the entrypoint is only
+# where the source tree and the tests put it.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+props_from_env="${PROPS_AWK:-}"
+yaml_from_env="${YAMLSCAN_AWK:-}"
+PROPS_AWK=""
+for candidate in "${props_from_env}" "${HERE}/props.awk" "${HERE}/bin/props.awk"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+        PROPS_AWK="${candidate}"
+        break
+    fi
+done
+if [[ -z "${PROPS_AWK}" ]]; then
+    log "ERROR: props.awk not found beside the entrypoint or in bin/"
+    exit 1
+fi
+
+YAMLSCAN=""
+for candidate in "${yaml_from_env}" "${HERE}/yamlscan.awk"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+        YAMLSCAN="${candidate}"
+        break
+    fi
+done
+if [[ -z "${YAMLSCAN}" ]]; then
+    log "ERROR: yamlscan.awk not found beside the entrypoint"
     exit 1
 fi
 
@@ -111,43 +138,22 @@ get_prop_encoded() {
 }
 
 # What the top-level authentication mapping of gremlin-server.yaml says about
-# authentication, as one of three states:
+# authentication, as one of three states: none, named, nameless.
 #
-#   none     no such mapping
-#   named    the mapping carries an authenticator
-#   nameless the mapping exists but names no authenticator
-#
-# Only presence is asked for, never the class: the entrypoint does not copy a
-# value between the two files any more, so quotes, inline comments and flow
-# mappings stay snakeyaml's business instead of becoming a parser here.  The
-# key must start at column 0 — an `authentication:` nested under another
-# mapping belongs to that feature, not to the Gremlin server, and reading it as
-# the Gremlin one would let an unrelated class decide whether REST is
-# authenticated while Gremlin stayed on TinkerPop's AllowAllAuthenticator.
+# The question and its answer live in yamlscan.awk, which reads the mapping the
+# way snakeyaml presents it to the server: only a column-0 `authentication`
+# mapping counts, only its direct `authenticator` child names a class, comment
+# text never counts as content, and a nested `config.authenticator` belongs to
+# the config map rather than to the server.  Those distinctions are the whole
+# decision -- an earlier grep-shaped version of this function reported `named`
+# for `authentication: {} # authenticator: X` and for a class nested under
+# `config:`, which passed the REST/Gremlin parity check while Gremlin was
+# running on AllowAllAuthenticator.
 yaml_auth_state() {
     local yaml="./conf/gremlin-server.yaml"
 
     [[ -f "${yaml}" ]] || { echo "none"; return 0; }
-    awk '
-        /^authentication[ \t]*:/ {
-            inblk = 1
-            have = 1
-            # A flow mapping keeps the authenticator on the same line as the
-            # key, so it has to count there too; missing it would report a
-            # configured mapping as nameless and refuse a valid deployment.
-            if (match($0, /authenticator[ \t]*:/)) { named = 1; exit }
-            next
-        }
-        # Any other column-0 key ends the mapping.  A blank or whitespace-only
-        # line does not, because YAML does not close a mapping on an empty line.
-        inblk && /^[^ \t]/ { inblk = 0 }
-        inblk && /^[ \t]+authenticator[ \t]*:/ { named = 1; exit }
-        END {
-            if (named) print "named"
-            else if (have) print "nameless"
-            else print "none"
-        }
-    ' "${yaml}"
+    awk -f "${YAMLSCAN}" "${yaml}"
 }
 
 # Authentication has to be configured on both sides or on neither.  A mounted
@@ -333,11 +339,16 @@ if [[ -n "${AUTH_TOKEN_SECRET_ENCODED}" ]]; then
     set_prop_encoded "auth.token_secret" "${AUTH_TOKEN_SECRET_ENCODED}" \
         "${GRAPH_CONF}"
 fi
+# Both sides have to agree whether authentication is on, whatever the reason
+# the container was started for.  Running this only inside the PASSWORD branch
+# below left a mounted rest-server.properties that carried auth.authenticator
+# with no matching yaml mapping completely unvalidated: with no PASSWORD the
+# entrypoint skipped the check, enable-auth.sh never ran, and the server came
+# up with REST enforcing and Gremlin open.  A refusal exits under set -e.
+check_auth_sides
+
 if [[ -n "${PASSWORD:-}" ]]; then
     set_prop_encoded "auth.admin_pa" "${AUTH_ADMIN_PASSWORD_ENCODED}" "${REST_SERVER_CONF}"
-    # A refusal here exits the entrypoint under set -e, so enable-auth.sh can
-    # never run one-sided after it.
-    check_auth_sides
     # This script is idempotent and must run outside the initialization guard:
     # an upgrade can preserve the marker from an unauthenticated deployment.
     ./bin/enable-auth.sh

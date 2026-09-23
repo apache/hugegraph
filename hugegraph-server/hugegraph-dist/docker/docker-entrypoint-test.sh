@@ -23,7 +23,10 @@ trap 'rm -rf "${TEST_HOME}"' EXIT
 
 mkdir -p "${TEST_HOME}/bin" "${TEST_HOME}/conf/graphs" "${TEST_HOME}/docker"
 cp "${SCRIPT_DIR}/docker-entrypoint.sh" "${TEST_HOME}/docker-entrypoint.sh"
-cp "${SCRIPT_DIR}/props.awk" "${TEST_HOME}/props.awk"
+# props.awk is packaged in the release bin/; the image gets it from there, and
+# the entrypoint accepts it beside itself so this harness can stage either.
+cp "${SCRIPT_DIR}/../src/assembly/static/bin/props.awk" "${TEST_HOME}/props.awk"
+cp "${SCRIPT_DIR}/yamlscan.awk" "${TEST_HOME}/yamlscan.awk"
 touch "${TEST_HOME}/docker/init_complete"
 
 cat > "${TEST_HOME}/conf/rest-server.properties" <<'EOF'
@@ -561,6 +564,52 @@ for invalid_k8s_flag in 1 0 enabled "t rue" "tr ue"; do
     cmp "${TEST_HOME}/conf/graphs/hugegraph.properties.before-k8s-flag" \
         "${TEST_HOME}/conf/graphs/hugegraph.properties"
 done
+
+# A mounted rest-server.properties that already carries auth.authenticator,
+# with no matching yaml mapping and no PASSWORD given, used to start without a
+# word: the parity check ran only inside the PASSWORD branch, so nothing ever
+# compared the two sides and the server came up with REST enforcing and Gremlin
+# on AllowAllAuthenticator.  The check now runs on every start, and a refusal
+# has to come before anything touches the backend.
+printf '%s\n' 'host: 8182' > "${TEST_HOME}/conf/gremlin-server.yaml"
+grep -qx 'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+    "${TEST_HOME}/conf/rest-server.properties" ||
+    printf '%s\n' \
+        'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+        >> "${TEST_HOME}/conf/rest-server.properties"
+rm -f "${TEST_HOME}/docker/init_complete"
+before_calls="$(wc -l < "${TEST_HOME}/docker/init-store-calls")"
+before_auth="$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")"
+status=0
+(
+    cd "${TEST_HOME}"
+    bash ./docker-entrypoint.sh
+) || status=$?
+if (( status == 0 )); then
+    echo "entrypoint must refuse a mounted REST-only authenticator with no PASSWORD" >&2
+    exit 1
+fi
+if [[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" != "${before_calls}" ]]; then
+    echo "the refusal must happen before init-store runs" >&2
+    exit 1
+fi
+if [[ "$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")" != "${before_auth}" ]]; then
+    echo "a refused start must not run enable-auth.sh" >&2
+    exit 1
+fi
+
+# The same start is accepted once both sides agree, so the check above is a
+# parity decision and not a blanket refusal to run without PASSWORD.
+printf '%s\n' \
+    'authentication: {' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator,' \
+    '  config: {tokens: conf/rest-server.properties}' \
+    '}' > "${TEST_HOME}/conf/gremlin-server.yaml"
+rm -f "${TEST_HOME}/docker/init_complete"
+(
+    cd "${TEST_HOME}"
+    bash ./docker-entrypoint.sh
+)
 
 echo "PASS: Docker entrypoint configures HStore discovery and authentication"
 bash "${SCRIPT_DIR}/test/test-docker-entrypoint-process.sh"

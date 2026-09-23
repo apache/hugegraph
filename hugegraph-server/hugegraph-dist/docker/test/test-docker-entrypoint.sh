@@ -36,8 +36,54 @@ for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded \
     ' "${entrypoint}")"
 done
 log() { echo "[hugegraph-server-entrypoint] $*"; }
-PROPS_AWK="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/props.awk"
-export PROPS_AWK
+static_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)"
+docker_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROPS_AWK="${static_bin}/props.awk"
+YAMLSCAN="${docker_dir}/yamlscan.awk"
+export PROPS_AWK YAMLSCAN
+
+# enable-auth.sh reads and writes .properties through props.awk, which the
+# release assembly packages in the same bin/ directory.  A test tree that runs
+# the script therefore has to carry both, or it is not the layout it ships in.
+install_enable_auth() {
+    local dir="$1"
+    mkdir -p "${dir}/bin"
+    cp "${static_bin}/enable-auth.sh" "${dir}/bin/enable-auth.sh"
+    cp "${static_bin}/props.awk" "${dir}/bin/props.awk"
+    chmod +x "${dir}/bin/enable-auth.sh"
+}
+
+# ── What this host can actually be asked about ─────────────────────────
+# CI runs these assertions on Ubuntu, where every one of them means what it
+# says.  Developed against a Windows host, three things silently stop being
+# observations about props.awk and become observations about the platform:
+# MSYS gawk opens text files in translation mode and drops the CR of a CRLF
+# pair, chmod does not affect the mode stat reports, and a symlinked config is
+# not a symlink.  Each group is therefore gated on a probe of the host, and a
+# skipped group says so out loud rather than passing quietly.
+skip() { echo "note: skipped $1 -- this host cannot exercise it; it runs under CI" >&2; }
+
+probe="${test_dir}/probe"
+
+awk_sees_crlf_cr=0
+if [[ "$(printf 'x\r\n' | awk 'NR == 1 { print length($0) }')" == "2" ]]; then
+    awk_sees_crlf_cr=1
+fi
+awk_sees_lone_cr=0
+if [[ "$(printf 'a\rb' | awk 'NR == 1 { print length($0) }')" == "3" ]]; then
+    awk_sees_lone_cr=1
+fi
+
+host_keeps_chmod=0
+printf '%s\n' x > "${probe}"
+chmod 600 "${probe}"
+[[ "$(stat -c '%a' "${probe}")" == "600" ]] && host_keeps_chmod=1
+rm -f "${probe}"
+
+host_keeps_symlink=0
+printf '%s\n' x > "${probe}-t"
+ln -s "${probe}-t" "${probe}-l" 2>/dev/null && [[ -L "${probe}-l" ]] && host_keeps_symlink=1
+rm -f "${probe}-t" "${probe}-l"
 
 assert_replaced() {
     local separator="$1"
@@ -279,9 +325,7 @@ mkdir -p "${sides_dir}/conf"
 # because check_auth_sides fails first under set -e.
 onesided_dir="${test_dir}/yaml-onesided"
 mkdir -p "${onesided_dir}/bin" "${onesided_dir}/conf/graphs"
-cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
-    "${onesided_dir}/bin/enable-auth.sh"
-chmod +x "${onesided_dir}/bin/enable-auth.sh"
+install_enable_auth "${onesided_dir}"
 (
     cd "${onesided_dir}" || exit 1
     REST_SERVER_CONF="./conf/rest-server.properties"
@@ -313,7 +357,12 @@ chmod +x "${onesided_dir}/bin/enable-auth.sh"
 # Untouched lines keep their CR bytes on rewrite.
 crlf_file="${test_dir}/config-crlf"
 printf 'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator\r\n' > "${crlf_file}"
-printf 'pd.peers=a,\\\r\n  b\r\n' >> "${crlf_file}"
+# The backslash goes through %s on purpose: in one format string, `\\\r` is
+# reduced to a backslash followed by the letter r by some printf
+# implementations, which quietly turns this continuation case into a plain line
+# and makes the assertions below pass for the wrong reason.
+printf '%s\r\n' 'pd.peers=a,\' >> "${crlf_file}"
+printf '  b\r\n' >> "${crlf_file}"
 printf 'unrelated=true\r\n' >> "${crlf_file}"
 [[ "$(get_prop_encoded 'auth.authenticator' "${crlf_file}")" == \
     "org.apache.hugegraph.auth.StandardAuthenticator" ]]
@@ -321,9 +370,13 @@ printf 'unrelated=true\r\n' >> "${crlf_file}"
 set_prop 'auth.authenticator' 'com.example.NewAuth' "${crlf_file}"
 grep -q '^auth\.authenticator=com\.example\.NewAuth$' "${crlf_file}"
 [[ "$(get_prop_encoded 'pd.peers' "${crlf_file}")" == "a,b" ]]
-if ! grep -q $'^unrelated=true\r$' "${crlf_file}"; then
-    echo "CRLF bytes of untouched lines must be preserved" >&2
-    exit 1
+if (( awk_sees_crlf_cr )); then
+    if ! grep -q $'^unrelated=true\r$' "${crlf_file}"; then
+        echo "CRLF bytes of untouched lines must be preserved" >&2
+        exit 1
+    fi
+else
+    skip "the CRLF byte check"
 fi
 
 # An escaped key is the same key: java.util.Properties unescapes the name, so
@@ -356,19 +409,33 @@ mode_file="${test_dir}/config-mode"
 printf '%s\n' 'unrelated=true' > "${mode_file}"
 chmod 600 "${mode_file}"
 set_prop "init_store.enabled" "true" "${mode_file}"
-[[ "$(stat -c '%a' "${mode_file}")" == "600" ]]
 grep -q '^init_store\.enabled=true$' "${mode_file}"
 grep -q '^unrelated=true$' "${mode_file}"
 [[ ! -e "${mode_file}.tmp" ]]
 [[ ! -e "${mode_file}.bak" ]]
+if (( host_keeps_chmod )); then
+    [[ "$(stat -c '%a' "${mode_file}")" == "600" ]]
+else
+    skip "the config-mode-preservation check"
+fi
 
 target_file="${test_dir}/config-target"
 link_file="${test_dir}/config-link"
-printf '%s\n' 'unrelated=true' > "${target_file}"
-ln -s "${target_file}" "${link_file}"
-set_prop "init_store.enabled" "true" "${link_file}"
-[[ -L "${link_file}" ]]
-grep -q '^init_store\.enabled=true$' "${target_file}"
+if (( host_keeps_symlink )); then
+    # The whole block has to be gated, not just the -L check: where ln -s
+    # produces a copy instead, writing the link updates a regular file and the
+    # target stays untouched, which would fail for the host's reason.
+    printf '%s\n' 'unrelated=true' > "${target_file}"
+    ln -s "${target_file}" "${link_file}"
+    set_prop "init_store.enabled" "true" "${link_file}"
+    [[ -L "${link_file}" ]] || {
+        echo "a set must not replace a symlinked config with a regular file" >&2
+        exit 1
+    }
+    grep -q '^init_store\.enabled=true$' "${target_file}"
+else
+    skip "the symlinked-config check"
+fi
 
 # Two yaml shapes the scoping has to keep getting right: a sibling mapping
 # that carries its own authenticator must not hide the block's, and a commented
@@ -412,10 +479,8 @@ class_dir="${test_dir}/authenticator-class"
     # it writes, so re-running it over one directory is not a clean case.
     run_enable_auth() {
         local dir="$1" want="$2"
-        mkdir -p "${dir}/bin" "${dir}/conf/graphs"
-        cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
-            "${dir}/bin/enable-auth.sh"
-        chmod +x "${dir}/bin/enable-auth.sh"
+        mkdir -p "${dir}/conf/graphs"
+        install_enable_auth "${dir}"
         printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
             > "${dir}/conf/graphs/hugegraph.properties"
         : > "${dir}/conf/rest-server.properties"
@@ -453,9 +518,7 @@ class_dir="${test_dir}/authenticator-class"
 # auth mode, yet neither server was told to authenticate at all.
 empty_dir="${test_dir}/empty-config"
 mkdir -p "${empty_dir}/bin" "${empty_dir}/conf/graphs"
-cp "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../src/assembly/static/bin" && pwd)/enable-auth.sh" \
-    "${empty_dir}/bin/enable-auth.sh"
-chmod +x "${empty_dir}/bin/enable-auth.sh"
+install_enable_auth "${empty_dir}"
 (
     cd "${empty_dir}" || exit 1
     : > conf/rest-server.properties
@@ -594,3 +657,321 @@ two_bs="abc${bs}${bs}"
 set_prop_encoded 'auth.token_secret' "${two_bs}" "${bs_file}"
 [[ "$(get_prop_encoded 'auth.token_secret' "${bs_file}")" == "${two_bs}" ]]
 assert_line_count 1 '^unrelated=true$' "${bs_file}"
+
+# ── CR-only line terminators ──────────────────────────────────────────
+# java.util.Properties ends a line at a bare CR as well, so a config written
+# that way holds one property per CR-separated chunk.  Reading it with a
+# \n-only split made the entire file one record: only the first key was ever
+# seen, and rewriting that key replaced the record with a single line, which
+# silently deleted every property after it -- including auth.authenticator, so
+# the file the server then read had no authentication configured at all.
+if (( awk_sees_lone_cr )); then
+    cr_file="${test_dir}/config-cr"
+    printf 'graph=a\rpd.peers=b\rauth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator\r' \
+        > "${cr_file}"
+
+    [[ "$(get_prop_encoded 'graph' "${cr_file}")" == "a" ]]
+    [[ "$(get_prop_encoded 'pd.peers' "${cr_file}")" == "b" ]]
+    [[ "$(get_prop_encoded 'auth.authenticator' "${cr_file}")" == \
+        "org.apache.hugegraph.auth.StandardAuthenticator" ]]
+
+    cp "${cr_file}" "${cr_file}.before"
+    set_prop 'graph' 'org.apache.hugegraph.auth.HugeFactoryAuthProxy' "${cr_file}"
+
+    # Every key that was there before is still there afterwards, with the
+    # values the rewrite was not about.
+    [[ "$(get_prop_encoded 'pd.peers' "${cr_file}")" == "b" ]] || {
+        echo "a CR-only config lost pd.peers when an unrelated key was rewritten" >&2
+        exit 1
+    }
+    [[ "$(get_prop_encoded 'auth.authenticator' "${cr_file}")" == \
+        "org.apache.hugegraph.auth.StandardAuthenticator" ]] || {
+        echo "a CR-only config lost auth.authenticator when an unrelated key was rewritten" >&2
+        exit 1
+    }
+    [[ "$(get_prop_encoded 'graph' "${cr_file}")" == \
+        "org.apache.hugegraph.auth.HugeFactoryAuthProxy" ]]
+    # One definition per key, so the rewrite replaced rather than appended.
+    # Counted on CR folded to LF because grep only ever starts a new line at
+    # LF, and a CR-only file is a single line to it.
+    count_records() {
+        local pattern="$1" file="$2"
+        # grep exits 1 on a zero count, which errexit would take as the
+        # interesting failure; the printed number is the answer here.
+        tr '\r' '\n' < "${file}" | grep -Ec "${pattern}" || true
+    }
+    [[ "$(count_records '^graph=' "${cr_file}")" == "1" ]] || {
+        echo "a CR-only rewrite must leave exactly one graph definition" >&2
+        exit 1
+    }
+    [[ "$(count_records '^auth\.authenticator=' "${cr_file}")" == "1" ]] || {
+        echo "a CR-only rewrite must leave exactly one auth.authenticator definition" >&2
+        exit 1
+    }
+
+    # Mixed terminators in one file, the state an upgraded mounted volume
+    # actually reaches: CRLF from a Windows edit, CR from an old store(), LF
+    # from the image.
+    mix_file="${test_dir}/config-mixed-eol"
+    printf 'graph=a\rpd.peers=b\nauth.authenticator=c\r\nunrelated=d\n' > "${mix_file}"
+    [[ "$(get_prop_encoded 'graph' "${mix_file}")" == "a" ]]
+    [[ "$(get_prop_encoded 'pd.peers' "${mix_file}")" == "b" ]]
+    [[ "$(get_prop_encoded 'auth.authenticator' "${mix_file}")" == "c" ]]
+    [[ "$(get_prop_encoded 'unrelated' "${mix_file}")" == "d" ]]
+fi
+
+# ── Form feed is separator whitespace to Java ─────────────────────────
+# java.util.Properties counts \f as whitespace on both sides of the key/value
+# boundary, so `auth.authenticator<FF>=...` is that property.  Recognising only
+# space and tab parsed the form feed into the key name instead, and a mounted
+# config written that way read as unconfigured -- which the guards then answered
+# by appending a second, competing definition.
+ff_file="${test_dir}/config-formfeed"
+printf 'auth.authenticator\fs=org.apache.hugegraph.auth.StandardAuthenticator\n' > "${ff_file}"
+[[ "$(get_prop_encoded 'auth.authenticator' "${ff_file}")" == \
+    "s=org.apache.hugegraph.auth.StandardAuthenticator" ]] || {
+    echo "a form feed before the separator must end the key, as it does in Java" >&2
+    exit 1
+}
+printf 'auth.authenticator\forg.apache.hugegraph.auth.X\n' > "${ff_file}"
+[[ "$(get_prop_encoded 'auth.authenticator' "${ff_file}")" == \
+    "org.apache.hugegraph.auth.X" ]]
+printf 'auth.authenticator=\f1\n' > "${ff_file}"
+[[ "$(get_prop_encoded 'auth.authenticator' "${ff_file}")" == "1" ]]
+printf '\fauth.authenticator=1\n' > "${ff_file}"
+[[ "$(get_prop_encoded 'auth.authenticator' "${ff_file}")" == "1" ]]
+# A line that is only form feed whitespace is blank to Java, not a property.
+printf '\f\f\ngraph=a\n' > "${ff_file}"
+[[ "$(get_prop_encoded 'graph' "${ff_file}")" == "a" ]]
+assert_line_count 1 '^graph=a$' "${ff_file}"
+
+# has-mode answers "is this key defined" without confusing an empty definition
+# with no definition, which is what an append guard needs: appending a default
+# on top of `auth.authenticator=` leaves the empty first definition in force.
+has_file="${test_dir}/config-has"
+printf 'auth.authenticator=\n' > "${has_file}"
+if ! PROPS_MODE=has PROPS_KEY='auth.authenticator' PROPS_FILE="${has_file}" \
+        awk -f "${PROPS_AWK}" /dev/null; then
+    echo "PROPS_MODE=has must report an empty definition as present" >&2
+    exit 1
+fi
+if PROPS_MODE=has PROPS_KEY='auth.graph_store' PROPS_FILE="${has_file}" \
+        awk -f "${PROPS_AWK}" /dev/null; then
+    echo "PROPS_MODE=has must report an absent key as absent" >&2
+    exit 1
+fi
+# An unreadable file must not read as "absent": status 2 is what tells a caller
+# wearing errexit to stop rather than append a default over a file it could not
+# read.
+status=0
+PROPS_MODE=has PROPS_KEY='k' PROPS_FILE="${test_dir}/no-such-file" \
+    awk -f "${PROPS_AWK}" /dev/null 2>/dev/null || status=$?
+if (( status != 2 )); then
+    echo "PROPS_MODE=has must exit 2 for an unreadable file, got ${status}" >&2
+    exit 1
+fi
+
+# get with PROPS_DECODED=1 hands back the value as the server would see it,
+# which is what a guard that compares a class name needs.
+dec_file="${test_dir}/config-decoded"
+printf 'gremlin\\u002egraph=org.apache.hugegraph.HugeFactory\n' > "${dec_file}"
+[[ "$(PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY='gremlin.graph' \
+      PROPS_FILE="${dec_file}" awk -f "${PROPS_AWK}" /dev/null)" == \
+    "org.apache.hugegraph.HugeFactory" ]]
+[[ "$(PROPS_MODE=get PROPS_KEY='gremlin\u002egraph' PROPS_FILE="${dec_file}" \
+      awk -f "${PROPS_AWK}" /dev/null)" == "" ]]
+
+# ── gremlin.graph spelled with a Unicode escape still gets wrapped ──────
+# \u002e is a dot to java.util.Properties, so this is the plain HugeFactory and
+# enable-auth.sh has to route authentication through it.  The grep/sed pair
+# matched only a literal or backslash-escaped dot, missed this one, and left the
+# graph factory unwrapped while both servers had been told authentication was
+# on -- the one remaining path where the REST side was configured and the graph
+# behind it was not.
+u2e_dir="${test_dir}/u2e-wrap"
+mkdir -p "${u2e_dir}/conf/graphs"
+install_enable_auth "${u2e_dir}"
+: > "${u2e_dir}/conf/rest-server.properties"
+: > "${u2e_dir}/conf/gremlin-server.yaml"
+printf '%s\n' 'gremlin\u002egraph=org.apache.hugegraph.HugeFactory' \
+    > "${u2e_dir}/conf/graphs/hugegraph.properties"
+(
+    cd "${u2e_dir}" || exit 1
+    unset AUTHENTICATOR_CLASS
+    ./bin/enable-auth.sh
+    if [[ "$(PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY='gremlin.graph' \
+             PROPS_FILE=./conf/graphs/hugegraph.properties \
+             awk -f "${PROPS_AWK}" /dev/null)" != \
+          "org.apache.hugegraph.auth.HugeFactoryAuthProxy" ]]; then
+        echo "a gremlin.graph key written as \\u002e must still be wrapped" >&2
+        exit 1
+    fi
+    # One definition, not the original left behind plus a new one.
+    if [[ "$(grep -c 'HugeFactory' ./conf/graphs/hugegraph.properties)" != "1" ]]; then
+        echo "wrapping a \\u002e-escaped key must not leave the old definition" >&2
+        exit 1
+    fi
+)
+
+# A CR-only graph config wraps too, and keeps the keys around it.
+if (( awk_sees_lone_cr )); then
+    crwrap_dir="${test_dir}/cr-wrap"
+    mkdir -p "${crwrap_dir}/conf/graphs"
+    install_enable_auth "${crwrap_dir}"
+    : > "${crwrap_dir}/conf/rest-server.properties"
+    : > "${crwrap_dir}/conf/gremlin-server.yaml"
+    printf 'gremlin.graph=org.apache.hugegraph.HugeFactory\rbackend=rocksdb\r' \
+        > "${crwrap_dir}/conf/graphs/hugegraph.properties"
+    (
+        cd "${crwrap_dir}" || exit 1
+        unset AUTHENTICATOR_CLASS
+        ./bin/enable-auth.sh
+        [[ "$(get_prop_encoded 'backend' ./conf/graphs/hugegraph.properties)" == \
+            "rocksdb" ]] || {
+            echo "wrapping a CR-only graph config dropped a later key" >&2
+            exit 1
+        }
+        [[ "$(get_prop_encoded 'gremlin.graph' ./conf/graphs/hugegraph.properties)" == \
+            "org.apache.hugegraph.auth.HugeFactoryAuthProxy" ]]
+    )
+fi
+
+# ── A failed append must fail the script ──────────────────────────────
+# The entrypoint runs enable-auth.sh and trusts its exit status, so a run that
+# configures REST and then cannot write the yaml has to say so.  Without
+# errexit and per-write checks it exited 0 on exactly that half-done tree: the
+# mounted read-only gremlin-server.yaml made the yaml append fail while both
+# rest-server.properties appends succeeded.
+ro_dir="${test_dir}/read-only-yaml"
+mkdir -p "${ro_dir}/conf/graphs"
+install_enable_auth "${ro_dir}"
+: > "${ro_dir}/conf/rest-server.properties"
+printf 'host: 8182\n' > "${ro_dir}/conf/gremlin-server.yaml"
+printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+    > "${ro_dir}/conf/graphs/hugegraph.properties"
+(
+    cd "${ro_dir}" || exit 1
+    unset AUTHENTICATOR_CLASS
+    chmod 444 conf/gremlin-server.yaml
+    status=0
+    ./bin/enable-auth.sh 2>/dev/null || status=$?
+    chmod 644 conf/gremlin-server.yaml
+    if (( status == 0 )); then
+        echo "enable-auth.sh must exit nonzero when a config append fails" >&2
+        exit 1
+    fi
+    if grep -Eq '^[[:blank:]]*authentication[[:blank:]]*:' conf/gremlin-server.yaml; then
+        echo "the unwritable yaml file must not have been changed" >&2
+        exit 1
+    fi
+)
+
+# ── yaml_auth_state answers about the mapping, not about the text ───────
+# Each case below is a mounted gremlin-server.yaml that a grep-shaped reader
+# calls named while the Gremlin server runs without an authenticator.  Reported
+# parity on such a file is how REST ends up enforcing and Gremlin open, so the
+# reader follows the mapping structure instead of the substring.
+yaml_case() {
+    local want="$1" desc="$2" dir
+    shift 2
+    dir="${test_dir}/yaml-$(printf '%s' "${desc}" | tr -c 'A-Za-z0-9' '-')"
+    mkdir -p "${dir}/conf"
+    printf '%s\n' "$@" > "${dir}/conf/gremlin-server.yaml"
+    (
+        cd "${dir}" || exit 1
+        got=$(yaml_auth_state)
+        if [[ "${got}" != "${want}" ]]; then
+            echo "yaml_auth_state: ${desc}: got ${got}, want ${want}" >&2
+            exit 1
+        fi
+    )
+}
+
+# A flow mapping that names nothing, with a commented-out authenticator behind
+# it: the text is there, the key is not.
+yaml_case nameless "flow empty with authenticator in a comment" \
+    'authentication: {} # authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+# A comment line inside the mapping is not the end of it, so a valid
+# deployment with a note between the keys must not be refused.
+yaml_case named "column-zero comment inside the mapping" \
+    'authentication:' \
+    '# configured by the operator' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+# config is its own map, so an authenticator under it is the token store
+# configuration and not the server authenticator.
+yaml_case nameless "authenticator nested under config" \
+    'authentication:' \
+    '  config:' \
+    '    authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+yaml_case nameless "authenticator nested inside a flow config" \
+    'authentication: {config: {authenticator: org.apache.hugegraph.auth.StandardAuthenticator}}'
+# The positive cases a wrong reader must keep accepting.
+yaml_case named "plain block child" \
+    'authentication:' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+yaml_case named "direct flow child with siblings" \
+    'authentication: {config: {tokens: conf/rest-server.properties}, authenticator: org.apache.hugegraph.auth.StandardAuthenticator}'
+yaml_case named "quoted key" \
+    'authentication:' \
+    '  "authenticator": org.apache.hugegraph.auth.StandardAuthenticator'
+# An authenticator key that names no class leaves the server on
+# AllowAllAuthenticator, so it is the nameless case.
+yaml_case nameless "direct authenticator with no value" \
+    'authentication:' \
+    '  authenticator:'
+yaml_case nameless "direct authenticator set to null" \
+    'authentication:' \
+    '  authenticator: null'
+# An `authentication:` belonging to another mapping is not the server's.
+yaml_case none "authentication nested under another key" \
+    'server:' \
+    '  authentication:' \
+    '    authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+yaml_case none "no authentication anywhere" \
+    'host: 8182' \
+    'port: 1'
+# A sibling key at column zero closes the mapping; an authenticator after it
+# belongs to the sibling, not to authentication.
+yaml_case nameless "sibling key closes the mapping" \
+    'authentication:' \
+    '  handler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+    'metrics:' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+
+# ── Mounted one-sided config is refused with no PASSWORD ───────────────
+# check_auth_sides used to run only inside the PASSWORD branch, so a mounted
+# rest-server.properties that already carried auth.authenticator and a yaml
+# without a matching mapping was never validated at all: the entrypoint skipped
+# the check, never called enable-auth.sh, and started the server with REST
+# enforcing and Gremlin open.  The parity check now runs on every start.
+mounted_dir="${test_dir}/mounted-one-sided"
+mkdir -p "${mounted_dir}/conf/graphs"
+(
+    cd "${mounted_dir}" || exit 1
+    # check_auth_sides reads these two paths, which the entrypoint sets at the
+    # top of a run; this block calls the guard directly, as the other unit
+    # groups here do.
+    REST_SERVER_CONF="./conf/rest-server.properties"
+    GRAPH_CONF="./conf/graphs/hugegraph.properties"
+    printf '%s\n' \
+        'restserver.url=http://127.0.0.1:8080' \
+        'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+        > conf/rest-server.properties
+    printf '%s\n' 'host: 8182' > conf/gremlin-server.yaml
+    printf '%s\n' 'backend=rocksdb' > conf/graphs/hugegraph.properties
+    if check_auth_sides; then
+        echo "check_auth_sides must refuse REST configured with yaml not" >&2
+        exit 1
+    fi
+    # And it accepts the two balanced states, so this is not just a refusal:
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
+        > conf/gremlin-server.yaml
+    check_auth_sides
+    printf '%s\n' 'host: 8182' > conf/gremlin-server.yaml
+    printf '%s\n' \
+        'restserver.url=http://127.0.0.1:8080' \
+        > conf/rest-server.properties
+    check_auth_sides
+)

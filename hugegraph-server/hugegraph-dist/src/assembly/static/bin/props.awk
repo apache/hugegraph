@@ -23,7 +23,12 @@
 # One invocation, selected with the `PROPS_MODE` environment variable:
 #
 #   PROPS_MODE=get  PROPS_KEY=K PROPS_FILE=F
-#       print the value of K's first logical definition
+#       print the value of K's first logical definition, in the on-disk
+#       escaped form; with PROPS_DECODED=1 print it as java.util.Properties
+#       would hand it to the server.  Always exits 0.
+#   PROPS_MODE=has  PROPS_KEY=K PROPS_FILE=F
+#       print nothing; exit 0 when K has any definition at all, empty
+#       included, 1 when it has none, 2 on an error
 #   PROPS_MODE=set  PROPS_KEY=K PROPS_FILE=F
 #       replace K's first definition in place, drop every other
 #       definition of K, append one when the file has none.  The new
@@ -34,9 +39,11 @@
 #
 # Grammar implemented (java.util.Properties line reader + the
 # first-definition-wins rule Configuration.getString applies):
+#   - physical lines end at \r\n, \n or a bare \r, as in java.util.Properties
 #   - '#' / '!' comments and blank lines
-#   - '=' / ':' / whitespace separators, with whitespace then an optional
-#     single '=' or ':' accepted as one separator
+#   - '=' / ':' / whitespace separators, where the whitespace Java counts is
+#     space, tab and form feed, with whitespace then an optional single '=' or
+#     ':' accepted as one separator
 #   - continuations: a physical line ending in an odd number of
 #     backslashes joins the next line (its leading whitespace stripped)
 #   - backslash escapes in keys and values, including \uXXXX
@@ -48,7 +55,10 @@
 
 function die(msg) {
     printf "props.awk: %s\n", msg > "/dev/stderr"
-    exit 1
+    # 2 for an error, so a caller that reads exit status 1 as "the key is not
+    # there" (PROPS_MODE=has) cannot mistake an unreadable file for an absent
+    # property and append a definition on top of one it failed to read.
+    exit 2
 }
 
 function hex_digit(c) {
@@ -101,11 +111,14 @@ function trailing_backslashes(s,    n, k) {
 }
 
 function is_skipped(raw) {
-    return raw ~ /^[ \t]*([#!]|$)/
+    return raw ~ /^[ \t\f]*([#!]|$)/
 }
 
 # Split a logical line into its raw (still-escaped) key and value parts.
 # Results land in K_RAW / V_RAW because awk returns one value.
+# Java treats form feed as whitespace on both sides of the separator, so
+# `auth.authenticator<FF>=...` is one property here too; reading it as part of
+# the key name made a valid mounted configuration invisible to the guards.
 function split_kv(s,    n, i, c, esc, sep_at, rest) {
     n = length(s)
     esc = 0
@@ -114,7 +127,7 @@ function split_kv(s,    n, i, c, esc, sep_at, rest) {
         c = substr(s, i, 1)
         if (esc) { esc = 0; continue }
         if (c == "\\") { esc = 1; continue }
-        if (c == "=" || c == ":" || c == " " || c == "\t") { sep_at = i; break }
+        if (c == "=" || c == ":" || c == " " || c == "\t" || c == "\f") { sep_at = i; break }
     }
     if (sep_at == 0) {
         K_RAW = s
@@ -127,11 +140,11 @@ function split_kv(s,    n, i, c, esc, sep_at, rest) {
     if (c == "=" || c == ":") {
         rest = substr(rest, 2)
     } else {
-        sub(/^[ \t]+/, "", rest)
+        sub(/^[ \t\f]+/, "", rest)
         c = substr(rest, 1, 1)
         if (c == "=" || c == ":") rest = substr(rest, 2)
     }
-    sub(/^[ \t]+/, "", rest)
+    sub(/^[ \t\f]+/, "", rest)
     V_RAW = rest
 }
 
@@ -140,26 +153,63 @@ function shquote(s) {
     return "'" s "'"
 }
 
+# java.util.Properties ends a physical line at \r\n, \n or a bare \r, but
+# getline splits on \n alone.  A properties file saved with CR-only endings --
+# which java.util.Properties writes for a lone `store()` on some platforms, and
+# which a mounted config can arrive with -- therefore reached the parser as one
+# enormous record: only its first key was ever seen, and rewriting that key
+# replaced the whole record and dropped every later entry, including
+# auth.authenticator.  So the file is re-scanned for terminators here.
+#
+# RAW[] keeps the exact bytes of each line and RAWTERM[] its terminator, so a
+# rewrite still replays untouched lines byte-for-byte.  A file whose last line
+# carries no terminator gets a \n, which is what the replay did before.
+function scan_records(s,    i, n, c, start, term, len, cnt) {
+    n = length(s)
+    cnt = 0
+    start = 1
+    i = 1
+    while (i <= n) {
+        c = substr(s, i, 1)
+        if (c != "\r" && c != "\n") { i++; continue }
+        if (c == "\r" && substr(s, i + 1, 1) == "\n") {
+            term = "\r\n"
+            len = 2
+        } else {
+            term = c
+            len = 1
+        }
+        cnt++
+        RAW[cnt] = substr(s, start, i - start)
+        RAWTERM[cnt] = term
+        start = i + len
+        i = start
+    }
+    if (start <= n) {
+        cnt++
+        RAW[cnt] = substr(s, start)
+        RAWTERM[cnt] = ""
+    }
+    return cnt
+}
+
 # Load `file` into per-block arrays: one block per comment/blank line or
 # logical entry, spanning exactly the physical lines it occupies.
-function props_load(file,    raw, rc, nl, stripped, next_raw, start, logical) {
-    NLINES = 0
-    while ((rc = (getline raw < file)) > 0) {
-        NLINES++
-        RAW[NLINES] = raw
-    }
+function props_load(file,    raw, rc, content, nl, stripped, next_raw, start, logical) {
+    content = ""
+    while ((rc = (getline raw < file)) > 0)
+        content = content raw "\n"
     if (rc == -1)
         die("cannot read " file)
     close(file)
 
+    NLINES = scan_records(content)
+
     NBLOCK = 0
     for (nl = 1; nl <= NLINES; nl++) {
-        raw = RAW[nl]
-        # CRLF: java.util.Properties drops the line terminator, so one
-        # trailing CR is stripped for parsing only.  RAW[] keeps the byte
-        # so props_set replays untouched lines byte-for-byte.
-        stripped = raw
-        sub(/\r$/, "", stripped)
+        # RAW[] holds one java.util.Properties physical line with its terminator
+        # already removed, so no CR stripping is needed here.
+        stripped = RAW[nl]
         if (is_skipped(stripped)) {
             NBLOCK++
             BTYPE[NBLOCK] = "skip"
@@ -173,15 +223,14 @@ function props_load(file,    raw, rc, nl, stripped, next_raw, start, logical) {
             logical = substr(logical, 1, length(logical) - 1)
             nl++
             next_raw = RAW[nl]
-            sub(/\r$/, "", next_raw)
-            sub(/^[ \t]+/, "", next_raw)
+            sub(/^[ \t\f]+/, "", next_raw)
             logical = logical next_raw
         }
         # java.util.Properties ignores whitespace before the key; strip it
         # so split_kv's separator scan agrees (an indented key used to be
         # read as a key whose name started with a space, and a set then
         # appended a second definition of the real key).
-        sub(/^[ \t]+/, "", logical)
+        sub(/^[ \t\f]+/, "", logical)
         split_kv(logical)
         NBLOCK++
         BTYPE[NBLOCK] = "entry"
@@ -231,8 +280,14 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs)
         if (b == first) {
             printf "%s=%s\n", key, enc_val > tmp
         } else {
-            for (ln = BFIRST[b]; ln <= BLAST[b]; ln++)
-                print RAW[ln] > tmp
+            for (ln = BFIRST[b]; ln <= BLAST[b]; ln++) {
+                # Replay the line with the terminator it was read with, so a
+                # CRLF or CR-only config keeps its endings on lines the
+                # rewrite does not touch.
+                msg = RAWTERM[ln]
+                if (msg == "") msg = "\n"
+                printf "%s%s", RAW[ln], msg > tmp
+            }
         }
     }
     if (first == 0)
@@ -273,27 +328,47 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs)
         die("cannot remove " tmp " and " bak " after the copy-back")
 }
 
-function props_get(file, key,    b) {
+function props_get(file, key, decoded,    b) {
     props_load(file)
     for (b = 1; b <= NBLOCK; b++) {
         if (BTYPE[b] == "entry" && BKEY[b] == key) {
-            print BVAL[b]
+            if (decoded) print unescape(BVAL[b])
+            else print BVAL[b]
             return
         }
     }
+    # Absence prints nothing and is NOT an exit status: callers assign from
+    # command substitution (`rest=$(get_prop ...)`) under a shell with errexit
+    # on, where a nonzero status would abort the entrypoint over a merely
+    # missing property.  PROPS_MODE=has is the mode that reports by status.
+}
+
+# Exit status only: 0 when the key has any definition at all, including an
+# empty one.  Guards that append a default must not treat `auth.authenticator=`
+# as absent, because appending a second definition leaves the empty first one
+# in force under first-definition-wins.
+function props_has(file, key,    b) {
+    props_load(file)
+    for (b = 1; b <= NBLOCK; b++) {
+        if (BTYPE[b] == "entry" && BKEY[b] == key) return 0
+    }
+    return 1
 }
 
 BEGIN {
     mode = ENVIRON["PROPS_MODE"]
     key = ENVIRON["PROPS_KEY"]
     file = ENVIRON["PROPS_FILE"]
+    decoded = (ENVIRON["PROPS_DECODED"] == "1")
     if (file == "" || key == "")
         die("PROPS_FILE and PROPS_KEY must be set")
     if (mode == "get") {
-        props_get(file, key)
+        props_get(file, key, decoded)
+    } else if (mode == "has") {
+        if (props_has(file, key)) exit 1
     } else if (mode == "set") {
         props_set(file, key, ENVIRON["PROPS_VALUE_ENCODED"])
     } else {
-        die("PROPS_MODE must be get or set")
+        die("PROPS_MODE must be get, has or set")
     }
 }
