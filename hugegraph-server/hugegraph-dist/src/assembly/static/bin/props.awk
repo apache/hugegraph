@@ -229,7 +229,7 @@ function scan_records(s,    i, n, c, start, term, len, cnt) {
 
 # Load `file` into per-block arrays: one block per comment/blank line or
 # logical entry, spanning exactly the physical lines it occupies.
-function props_load(file,    raw, rc, content, nl, stripped, next_raw, start, logical) {
+function props_load(file,    raw, rc, content, nl, stripped, next_raw, start, logical, inc) {
     content = ""
     while ((rc = (getline raw < file)) > 0)
         content = content raw "\n"
@@ -271,16 +271,21 @@ function props_load(file,    raw, rc, content, nl, stripped, next_raw, start, lo
         BFIRST[NBLOCK] = start
         BLAST[NBLOCK] = nl
         BKEY[NBLOCK] = unescape(K_RAW)
-        # `include` is not an ordinary property to the server: commons
+        # An include directive is not an ordinary property to the server: commons
         # configuration splices the named file into this one at this point, so
         # auth.authenticator can be defined over there and be invisible from
         # here, and which of the two definitions wins follows the spliced
         # order rather than the order of this file.  Answering that needs the
         # parser the server uses, and answering it wrong is how a mounted
-        # config boots with REST open and Gremlin protected.  So a file that
-        # uses the directive is refused in every mode, and nothing is written.
-        if (BKEY[NBLOCK] == "include")
-            die("refusing to read or rewrite " file ": it includes another file (line " start "), which this helper cannot resolve")
+        # config boots with REST open and Gremlin protected.  Commons
+        # configuration 2 treats both `include` and `includeOptional` as
+        # directives, and matches the property name case-insensitively, so the
+        # guard below rejects every spelling a real loader would honour -- not
+        # just the exact lowercase `include` this first refused.  A file that
+        # uses any of them is refused in every mode and nothing is written.
+        inc = tolower(BKEY[NBLOCK])
+        if (inc == "include" || inc == "includeoptional")
+            die("refusing to read or rewrite " file ": it uses an include directive (line " start "), which this helper cannot resolve")
         # Values stay in their on-disk escaped form.  get Prop callers feed
         # the result straight back into set, which would corrupt a decoded
         # value by re-writing its backslashes as literals; keys are

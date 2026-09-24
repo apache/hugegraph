@@ -17,6 +17,18 @@
 #
 set -euo pipefail
 
+# CI runs this harness under a backend matrix: server-ci.yml exports BACKEND for
+# the rocksdb leg, which is the only leg that reaches these tests.  The
+# entrypoint maps BACKEND to HG_SERVER_BACKEND and then overwrites whatever a
+# fixture writes into hugegraph.properties, so a case that decides on the
+# on-disk backend -- the escaped-hstore assertion below -- would be answered by
+# the matrix value rather than by the file it is checking, and would fail in CI
+# while passing locally.  Clear the inherited backend/pd environment so the
+# harness is hermetic; cases that mean to drive the entrypoint from the
+# environment set it on their own invocation (see the hstore mapping test).  The
+# production precedence (environment beats file) is left exactly as it is.
+unset BACKEND HG_SERVER_BACKEND PD_PEERS HG_SERVER_PD_PEERS
+
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TEST_HOME=$(mktemp -d "${TMPDIR:-/tmp}/hugegraph-entrypoint-test.XXXXXX")
 trap 'rm -rf "${TEST_HOME}"' EXIT

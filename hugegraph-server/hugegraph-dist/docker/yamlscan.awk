@@ -28,8 +28,10 @@
 # snakeyaml hands to the server, within the subset of YAML that shipped and
 # mounted configs use:
 #
-#   1. the mapping must start at column 0 -- an `authentication:` nested under
-#      some other key belongs to that feature, not to the Gremlin server;
+#   1. the mapping must sit at the indentation of the document root -- an
+#      `authentication:` nested under some other key belongs to that feature,
+#      not to the Gremlin server, while a root mapping written indented below a
+#      document marker still counts because the server reads it as the root;
 #   2. only a direct child `authenticator` counts -- a class reached through
 #      `authentication.config`, or through any other nested mapping, is not
 #      the server authenticator, because TinkerPop keeps `config` as its own
@@ -45,6 +47,11 @@
 #   6. a mapping is read to its end before it is answered, because the server
 #      sees the whole node: a direct `authenticator` defined twice is refused
 #      rather than settled by whoever met it first;
+#   6b. the file is read to its end, not to the first mapping, because two
+#      top-level `authentication` mappings resolve to the last one (or are
+#      rejected outright).  Answering from the first reported `named` for a
+#      server left on AllowAllAuthenticator by the empty second mapping, so a
+#      duplicate root mapping is refused rather than guessed at;
 #   7. YAML ends a line at CR, LF or CRLF, so a CR that has survived the
 #      comment being stripped is line noise, not part of a key or a value.
 #      Reading `authentication:\r` as no key at all reported a Gremlin mapping
@@ -199,9 +206,19 @@ function auth_state(    msg) {
     return "nameless"
 }
 
-# Report and stop.  Output happens in END only, because awk runs END after
-# `exit` and a second print there would emit two states on one run.
-function finish(r) { RESULT = r; exit }
+# The answer when the file carries more than one top-level `authentication`
+# mapping.  SnakeYAML either takes the last one or, with unique keys enforced,
+# rejects the document and the server never starts -- either way the effective
+# mapping is not the first the scanner met, so this cannot be answered here.
+# Report it on stderr and refuse through the nameless state, exactly like the
+# duplicate-authenticator case above, so check_auth_sides stops the boot.
+function duplicate_root(    msg) {
+    msg = "yamlscan.awk: " AUTH_BLOCKS " top-level authentication mappings"
+    print msg > "/dev/stderr"
+    print "cannot be answered here: the server takes the last one, or rejects the file." > "/dev/stderr"
+    print "Keep a single top-level authentication mapping in gremlin-server.yaml." > "/dev/stderr"
+    return "nameless"
+}
 
 # Feed one line of a flow collection to the brace scanner.  DEPTH counts open
 # collections; keys and values are only read at depth one, which is what makes
@@ -296,7 +313,9 @@ BEGIN {
     CUR_VAL = ""
     AUTH_SEEN = 0
     AUTH_NAMED = 0
-    found = 0
+    ROOT_IND = -1
+    AUTH_BLOCKS = 0
+    in_auth = 0
     child = -1
     flow = 0
     RESULT = ""
@@ -309,16 +328,45 @@ BEGIN {
     # a whole mapping as absent.
     line = strip_comment($0)
     sub(/[ \t\r]+$/, "", line)
+    if (trim(line) == "") next
 
-    if (!found) {
-        if (line ~ /^[ \t]/) next
+    ind = indent_of(line)
+
+    # The indentation of the first real content line is the root indentation.
+    # A document marker or a stray scalar opens no mapping, so keep looking
+    # until a key:value line is met.  Every comparison below is against that
+    # indentation rather than column 0, so a root mapping written indented --
+    # valid to Settings.read() -- is recognized, while an `authentication:`
+    # nested under some other key is still not mistaken for the Gremlin one.
+    if (ROOT_IND < 0) {
         if (!split_pair(line)) next
-        if (unquote(K_TXT) != "authentication") next
-        found = 1
+        ROOT_IND = ind
+    } else if (ind == ROOT_IND && in_auth) {
+        # A root-level sibling closes the mapping being read.
+        in_auth = 0
+        flow = 0
+        child = -1
+    }
+
+    # A top-level authentication key opens a mapping.  Count them and read to
+    # EOF rather than exiting at the first: two top-level mappings resolve to
+    # the last one (or are rejected), and answering from the first reported
+    # `named` for a server the empty second mapping left open.
+    if (ind == ROOT_IND && split_pair(line) &&
+        unquote(K_TXT) == "authentication") {
+        AUTH_BLOCKS++
+        if (AUTH_BLOCKS > 1) {
+            AUTH_SEEN = 0
+            AUTH_NAMED = 0
+        }
+        in_auth = 1
+        child = -1
         if (substr(V_TXT, 1, 1) == "{") {
             flow = 1
-            if (scan_flow(V_TXT)) finish(auth_state())
-            next
+            if (scan_flow(V_TXT)) {
+                in_auth = 0
+                flow = 0
+            }
         }
         # Anything else on the key line -- a scalar, a sequence, nothing -- is
         # not a mapping that names a class.  Reading `authentication: some.Name`
@@ -326,19 +374,23 @@ BEGIN {
         next
     }
 
+    if (!in_auth) next
+
     if (flow) {
-        if (scan_flow(line)) finish(auth_state())
+        if (scan_flow(line)) {
+            in_auth = 0
+            flow = 0
+        }
         next
     }
 
-    if (trim(line) == "") next
-    # A column-0 line after the comment was stripped is a sibling key, so the
-    # mapping has ended and what was recorded while reading it is the answer.
-    if (indent_of(line) == 0) finish(auth_state())
-
+    # Inside a block mapping: the first child sets the child indentation, and
+    # only a direct child at that indentation counts.  A line reaching here is
+    # never at the root indentation (the sibling case above consumed those),
+    # so `child` is always deeper than the root, as a real child must be.
     if (!split_pair(line)) next
-    if (child < 0) child = indent_of(line)
-    if (indent_of(line) != child) next
+    if (child < 0) child = ind
+    if (ind != child) next
     if (names_authenticator(K_TXT)) {
         AUTH_SEEN++
         AUTH_NAMED = names_class(V_TXT)
@@ -346,10 +398,8 @@ BEGIN {
 }
 
 END {
-    if (RESULT == "") {
-        if (!found) RESULT = "none"
-        else if (flow) RESULT = "nameless"
-        else RESULT = auth_state()
-    }
+    if (AUTH_BLOCKS == 0) RESULT = "none"
+    else if (AUTH_BLOCKS > 1) RESULT = duplicate_root()
+    else RESULT = auth_state()
     print RESULT
 }

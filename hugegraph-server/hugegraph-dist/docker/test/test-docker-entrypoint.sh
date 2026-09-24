@@ -999,6 +999,33 @@ yaml_case nameless "flow value that is an empty quoted string" \
 yaml_case nameless "explicit str tag, a type this scanner cannot resolve" \
     'authentication:' \
     '  authenticator: !!str org.apache.hugegraph.auth.StandardAuthenticator'
+# Two top-level authentication mappings: Settings.read() resolves the LAST one,
+# or rejects the file, so the first must not decide the answer.  Reporting
+# `named` for a config whose empty second mapping leaves Gremlin on
+# AllowAllAuthenticator is the same unsafe direction the duplicate-authenticator
+# case refuses for -- so read to EOF and refuse.
+yaml_case nameless "duplicate root authentication mappings" \
+    'authentication:' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
+    'metrics:' \
+    '  tokens: conf/tokens' \
+    'authentication:' \
+    '  handler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler'
+# A root mapping written indented below a document marker is still the root to
+# Settings.read().  Reporting `none` for it is the opposite mismatch: REST would
+# start open beside a Gremlin that authenticates.
+yaml_case named "indented root mapping after a document marker" \
+    '---' \
+    '  authentication:' \
+    '    authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+# ...but an `authentication:` nested under a real root key belongs to that key,
+# not to the server: the root is where the document opens, at column 0 here, so
+# the indented one stays invisible exactly as before.
+yaml_case none "nested authentication is not the root even when indented" \
+    'host: 8182' \
+    'someFeature:' \
+    '  authentication:' \
+    '    authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
 
 # ── Mounted one-sided config is refused with no PASSWORD ───────────────
 # check_auth_sides used to run only inside the PASSWORD branch, so a mounted
@@ -1430,6 +1457,28 @@ mkdir -p "${include_dir}/conf"
         *) echo "check_auth_sides must say the REST side could not be read, got [${inc_out}]" >&2
            exit 1 ;;
     esac
+
+    # Commons configuration 2 matches the directive name case-insensitively and
+    # carries a second spelling, `includeOptional`, that splices a file in the
+    # same way.  Refusing only the exact lowercase `include` let `INCLUDE=` or
+    # `includeOptional=` through as an ordinary property, so the entrypoint read
+    # and rewrote a file whose effective authenticator lived over there -- the
+    # same wrong direction the plain include is refused for.
+    for directive in 'include' 'INCLUDE' 'Include' \
+                     'includeOptional' 'includeoptional' 'IncludeOptional' 'INCLUDEOPTIONAL'; do
+        printf '%s\n' "${directive}=conf/rest-auth.properties" \
+                       'restserver.url=http://127.0.0.1:8080' > "${REST_SERVER_CONF}"
+        if get_prop_encoded restserver.url "${REST_SERVER_CONF}" >/dev/null 2>&1; then
+            echo "a read must refuse the include spelling [${directive}]" >&2
+            exit 1
+        fi
+        if PROPS_MODE=set PROPS_KEY=auth.authenticator \
+            PROPS_VALUE_ENCODED=com.example.Written PROPS_FILE="${REST_SERVER_CONF}" \
+            awk -f "${PROPS_AWK}" /dev/null 2>/dev/null; then
+            echo "a set must refuse the include spelling [${directive}]" >&2
+            exit 1
+        fi
+    done
 
     # Controls: `include` is the whole key, and only a live directive counts.
     printf '%s\n' 'included.filter=1' 'auth.authenticator=com.example.Plain' \
