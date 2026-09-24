@@ -91,10 +91,9 @@ public class RaftStateMachine extends StateMachineAdapter {
                 }
             } catch (Throwable t) {
                 log.error("StateMachine encountered critical error", t);
-                if (done != null) {
-                    done.run(new Status(RaftError.EINTERNAL, t.getMessage()));
-                }
+                // JRaft completes the failed and remaining closures with the state machine error.
                 iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
+                return;
             }
             iter.next();
         }

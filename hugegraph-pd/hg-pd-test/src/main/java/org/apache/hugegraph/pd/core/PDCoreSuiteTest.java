@@ -26,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        RaftStateMachineTest.class,
         MetadataKeyHelperTest.class,
         HgKVStoreImplTest.class,
         ConfigServiceTest.class,
