@@ -89,9 +89,16 @@ public class TaskAPI extends API {
         }
     }
 
-    @GetMapping(value = "/balanceLeaders")
-    public Map<Integer, Long> balanceLeaders() throws PDException {
-        return pdRestService.balancePartitionLeader();
+    @GetMapping(value = "/balanceLeaders", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public String balanceLeaders() {
+        try {
+            Map<Integer, Long> leaders = pdRestService.balancePartitionLeader();
+            return toJSON(leaders);
+        } catch (PDException e) {
+            e.printStackTrace();
+            return toJSON(e);
+        }
     }
 
     @GetMapping(value = "/compact")
