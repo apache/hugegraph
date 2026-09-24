@@ -52,8 +52,8 @@ fail() {
 # to be handed a carriage return for is now handled by the reader itself.
 #
 # props.awk is packaged in this same bin/ directory by the release assembly, so
-# it is present in the tarball and in the image; the entrypoint also exports
-# PROPS_AWK when it calls this script.
+# it is present in the tarball and in the image.  PROPS_AWK lets a caller point
+# at a different copy; the entrypoint reads that same variable for itself.
 for candidate in "${PROPS_AWK:-}" "${BIN}/props.awk" "${TOP}/props.awk"; do
     if [[ -n "${candidate}" && -f "${candidate}" ]]; then
         PROPS_AWK="${candidate}"
@@ -61,6 +61,20 @@ for candidate in "${PROPS_AWK:-}" "${BIN}/props.awk" "${TOP}/props.awk"; do
     fi
 done
 [[ -n "${PROPS_AWK:-}" ]] || fail "props.awk not found beside this script"
+
+# The Gremlin half of the decision below has to be made by the same reader the
+# entrypoint uses.  yamlscan.awk is not in bin/: the Dockerfile places it in the
+# install home, one above this script, which is where the image layout is
+# mirrored in the test tree; PROPS_AWK and YAMLSCAN_AWK cover a caller that
+# keeps it elsewhere.  The release tarball carries no copy at all, so the
+# fallback below has to answer on its own.
+YAMLSCAN=""
+for candidate in "${YAMLSCAN_AWK:-}" "${TOP}/yamlscan.awk" "${BIN}/yamlscan.awk"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+        YAMLSCAN="${candidate}"
+        break
+    fi
+done
 
 # props_get is the only reader used here, and it treats any nonzero status from
 # props.awk as an error: 2 means the file could not be read at all, which must
@@ -149,14 +163,37 @@ append_lines() {
 
 AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
 
+# Does the Gremlin config already carry a top-level `authentication` mapping?
+# This is the same question check_auth_sides answers, so it has to go to the same
+# reader: a mapping is the server's only at column 0, comment text is not
+# content, and the key may be quoted.  grep asks it differently -- it sees only
+# the bare spelling, so an operator's `"authentication":` block read as absent
+# and a second default block was appended beside it, after which the two servers
+# can resolve the key in opposite directions while REST keeps its existing
+# authenticator.  Anything other than `none` means a mapping is there and the
+# append is not this script's to make.
+gremlin_has_auth_block() {
+    local file="$1" state
+    [[ -f "${file}" ]] || return 1
+    if [[ -n "${YAMLSCAN}" ]]; then
+        state=$(awk -f "${YAMLSCAN}" "${file}") || fail "cannot read ${file}"
+        [[ "${state}" != "none" ]]
+        return
+    fi
+    # No parser in this layout (the plain release tarball).  Match what grep can
+    # honestly answer here: a column-0 key in either quote style or none.  The
+    # nested-mapping and comment cases are the ones that need the real reader,
+    # and the image, where the entrypoint runs this script, always has it.
+    grep -Eq "^[\"']?authentication[\"']?[[:blank:]]*:" "${file}"
+}
+
 # Only a column-0 `authentication` mapping is the Gremlin server's, which is the
 # rule yamlscan.awk applies to decide the same thing for check_auth_sides.  With
-# `[[:blank:]]*` here the two disagreed on a config that nests `authentication`
-# under another feature: the entrypoint read it as `none`, so parity held and it
-# called this script, but this guard saw the nested key and skipped the append,
-# writing the REST side only -- StandardAuthenticator on REST, TinkerPop's
-# AllowAllAuthenticator on Gremlin.
-if ! grep -Eq '^authentication[[:blank:]]*:' "${CONF}/${GREMLIN_SERVER_CONF}"; then
+# a guard that disagreed on nesting, the entrypoint read the file as `none`, so
+# parity held and it called this script, but the guard saw the nested key and
+# skipped the append, writing the REST side only -- StandardAuthenticator on
+# REST, TinkerPop's AllowAllAuthenticator on Gremlin.
+if ! gremlin_has_auth_block "${CONF}/${GREMLIN_SERVER_CONF}"; then
     append_lines "${CONF}/${GREMLIN_SERVER_CONF}" \
         'authentication: {' \
         "  authenticator: ${AUTHENTICATOR_CLASS}," \

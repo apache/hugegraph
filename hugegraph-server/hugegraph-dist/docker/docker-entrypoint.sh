@@ -137,6 +137,17 @@ get_prop_encoded() {
         awk -f "${PROPS_AWK}" /dev/null
 }
 
+# The value as java.util.Properties hands it to the server, escapes resolved.
+# Compare against this, not the on-disk bytes: `backend=h\u0073tore` is a legal
+# spelling of hstore that the JVM reads as hstore and a string compare against
+# the raw text does not.
+get_prop_decoded() {
+    local key="$1" file="$2"
+
+    PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY="${key}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
+}
+
 # What the top-level authentication mapping of gremlin-server.yaml says about
 # authentication, as one of three states: none, named, nameless.
 #
@@ -486,9 +497,13 @@ fi
 # Post-startup cluster stabilization check (hstore only — rocksdb has no partitions)
 # Read through props.awk so a mounted config using the `:` or bare-whitespace
 # separator is seen at all, and first-definition-wins matches HugeConfig; the
-# grep this replaces only ever accepted `=`.  Trailing whitespace is dropped
-# here rather than in the reader, which reports the on-disk bytes verbatim.
-ACTUAL_BACKEND=$(get_prop_encoded "backend" "${GRAPH_CONF}" | tr -d '[:space:]' || true)
+# grep this replaces only ever accepted `=`.  Decoded, because this is compared
+# against a literal: the JVM reads `backend=h\u0073tore` as hstore while the
+# on-disk bytes are not that string, and the comparison deciding to skip
+# wait-partition.sh is how startup continued before partitions were assigned.
+# Trailing whitespace is dropped here rather than in the reader, which reports
+# the value verbatim apart from the escapes java.util.Properties resolves.
+ACTUAL_BACKEND=$(get_prop_decoded "backend" "${GRAPH_CONF}" | tr -d '[:space:]' || true)
 if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
     STORE_REST="${STORE_REST:-store:8520}"
     export STORE_REST

@@ -124,10 +124,37 @@ function split_pair(s,    i, n, c, q) {
 
 function names_authenticator(k) { return unquote(k) == "authenticator" }
 
-# An authenticator entry only counts when it actually names a class.
-function names_class(v) {
+# An authenticator entry only counts when it actually names a class, and the
+# answer has to be what snakeyaml hands the server rather than what the bytes
+# look like.  The unsafe direction is `named` for a config that leaves Gremlin
+# on AllowAllAuthenticator while REST enforces, so anything this scanner cannot
+# resolve to a class is refused instead of guessed at:
+#
+#   - a plain scalar that resolves to null in any spelling, and YAML resolves
+#     null case-insensitively (null, Null, NULL, nUll) as well as to ~, names
+#     no class;
+#   - a leading `!` makes the tag, not the text, decide the type: !!null is the
+#     explicit spelling of empty and every other tag is a type not resolvable
+#     here, so neither counts;
+#   - a quoted scalar is a string and never null, but `""` and the empty single
+#     quoted form are the empty string, and loadAuthenticator("") returns null,
+#     which is the same no-authenticator state;
+#   - an unterminated quote is not a scalar at all.
+function names_class(v,    first, last, body) {
     v = trim(v)
-    return v != "" && v != "null" && v != "~"
+    if (v == "") return 0
+    first = substr(v, 1, 1)
+    if (first == "!") return 0
+    if (first == apos() || first == dquo()) {
+        if (length(v) < 2) return 0
+        last = substr(v, length(v), 1)
+        if (last != first) return 0
+        body = trim(substr(v, 2, length(v) - 2))
+        return body != ""
+    }
+    if (v == "~") return 0
+    if (tolower(v) == "null") return 0
+    return 1
 }
 
 # Report and stop.  Output happens in END only, because awk runs END after
@@ -139,19 +166,32 @@ function finish(r) { RESULT = r; exit }
 # a nested mapping under `config` invisible to it.  FSET records a direct
 # authenticator that names a class.  Returns 1 once the outermost collection
 # has closed.
-function scan_flow(s,    i, n, c, q) {
+function scan_flow(s,    i, n, c, q, esc) {
     n = length(s)
     q = ""
+    esc = 0
     for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
         if (q != "") {
+            # Every byte inside the quotes belongs to the scalar, delimiters
+            # included; unquote and names_class take the quotes off.  Dropping
+            # the value here is what made {authenticator: "org.A"} read as
+            # nameless and refuse a valid mounted config.  A backslash escapes
+            # the next byte in a double quoted scalar only -- in a single
+            # quoted one the way out is a doubled quote, which this loop
+            # already gets right because the first one closes and the next
+            # reopens, and the pair still counts as content.
             if (FST == "key") CUR = CUR c
-            if (c == q) q = ""
+            else if (FST == "val") CUR_VAL = CUR_VAL c
+            if (esc) esc = 0
+            else if (q == dquo() && c == "\\") esc = 1
+            else if (c == q) q = ""
             continue
         }
         if (is_quote(c)) {
             q = c
             if (FST == "key") CUR = CUR c
+            else if (FST == "val") CUR_VAL = CUR_VAL c
             continue
         }
         if (c == "{" || c == "[") {

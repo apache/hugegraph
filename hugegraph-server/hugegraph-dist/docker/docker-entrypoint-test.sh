@@ -66,6 +66,7 @@ printf 'called\n' >> ./docker/enable-auth-calls
 EOF
 cat > "${TEST_HOME}/bin/wait-partition.sh" <<'EOF'
 #!/usr/bin/env bash
+printf 'called\n' >> ./docker/wait-partition-calls
 exit 0
 EOF
 cat > "${TEST_HOME}/bin/wait-storage.sh" <<'EOF'
@@ -610,6 +611,51 @@ rm -f "${TEST_HOME}/docker/init_complete"
     cd "${TEST_HOME}"
     bash ./docker-entrypoint.sh
 )
+
+# ── The stabilization check follows the backend the JVM actually loaded ──
+# ACTUAL_BACKEND is compared against a literal, so it has to be the decoded
+# value.  A mounted hugegraph.properties may spell the word with a unicode
+# escape for the s, which java.util.Properties hands the server as hstore;
+# reading the on-disk escaping instead compared something else to hstore,
+# skipped wait-partition.sh, and let startup continue before the partitions
+# were assigned.  bs is the backslash, taken from its code point rather than
+# written here: printf '%c' 92 hands back the digit 9, which would have built a
+# fixture holding a different word than the one being decoded.
+bs=$(awk 'BEGIN { printf "%c", 92 }')
+if [[ "${#bs}" != 1 || "$(printf '%d' "'${bs}")" != 92 ]]; then
+    echo "this host did not yield a backslash for code point 92" >&2
+    exit 1
+fi
+touch "${TEST_HOME}/docker/init_complete"
+rm -f "${TEST_HOME}/docker/wait-partition-calls"
+printf '%s\n' "backend=h${bs}u0073tore" 'pd.peers=pd:8686' \
+    > "${TEST_HOME}/conf/graphs/hugegraph.properties"
+if [[ "$(head -n 1 "${TEST_HOME}/conf/graphs/hugegraph.properties")" != \
+       "backend=h${bs}u0073tore" ]]; then
+    echo "the fixture has to hold the escaped bytes, not the decoded word" >&2
+    exit 1
+fi
+(
+    cd "${TEST_HOME}"
+    bash ./docker-entrypoint.sh
+)
+if [[ ! -s "${TEST_HOME}/docker/wait-partition-calls" ]]; then
+    echo "an escaped hstore backend must still reach wait-partition.sh" >&2
+    exit 1
+fi
+# The other half: this is a read that follows the server, not a switch that
+# simply always waits.
+rm -f "${TEST_HOME}/docker/wait-partition-calls"
+printf '%s\n' 'backend=rocksdb' 'pd.peers=pd:8686' \
+    > "${TEST_HOME}/conf/graphs/hugegraph.properties"
+(
+    cd "${TEST_HOME}"
+    bash ./docker-entrypoint.sh
+)
+if [[ -e "${TEST_HOME}/docker/wait-partition-calls" ]]; then
+    echo "wait-partition.sh ran for a rocksdb backend" >&2
+    exit 1
+fi
 
 echo "PASS: Docker entrypoint configures HStore discovery and authentication"
 bash "${SCRIPT_DIR}/test/test-docker-entrypoint-process.sh"

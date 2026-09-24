@@ -28,7 +28,7 @@ trap 'rm -rf "${test_dir}"' EXIT
 # sourced directly; extracting by function name keeps this independent of
 # helper order.  PROPS_AWK is recomputed below.
 for fn in encode_prop_value set_prop_encoded set_prop get_prop_encoded \
-          yaml_auth_state check_auth_sides; do
+          get_prop_decoded yaml_auth_state check_auth_sides; do
     eval "$(awk -v fn="${fn}" '
         index($0, fn "() {") == 1 { capture = 1 }
         capture { print }
@@ -45,11 +45,16 @@ export PROPS_AWK YAMLSCAN
 # enable-auth.sh reads and writes .properties through props.awk, which the
 # release assembly packages in the same bin/ directory.  A test tree that runs
 # the script therefore has to carry both, or it is not the layout it ships in.
+# yamlscan.awk goes one level up, in the install home, exactly where the
+# Dockerfile puts it: the guard in enable-auth.sh has to answer the Gremlin
+# question with the same reader check_auth_sides uses, so a tree without it
+# would be testing the tarball fallback rather than the image.
 install_enable_auth() {
     local dir="$1"
     mkdir -p "${dir}/bin"
     cp "${static_bin}/enable-auth.sh" "${dir}/bin/enable-auth.sh"
     cp "${static_bin}/props.awk" "${dir}/bin/props.awk"
+    cp "${docker_dir}/yamlscan.awk" "${dir}/yamlscan.awk"
     chmod +x "${dir}/bin/enable-auth.sh"
 }
 
@@ -937,6 +942,47 @@ yaml_case nameless "sibling key closes the mapping" \
     '  handler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
     'metrics:' \
     '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+# What snakeyaml resolves to null names no class, and it resolves null
+# case-insensitively, so NULL, Null and nUll are the refusal case just as null
+# is.  An explicit !!null says it outright, and an empty quoted scalar is the
+# empty string, for which loadAuthenticator returns null.  Reporting any of
+# these as named is the one direction that cannot be forgiven: REST would
+# enforce while Gremlin ran on AllowAllAuthenticator.
+for nullish in 'null' 'NULL' 'Null' 'nUll' '~' '!!null' '!!null ~' '""' "''"; do
+    yaml_case nameless "authenticator set to the null spelling [${nullish}]" \
+        'authentication:' \
+        "  authenticator: ${nullish}"
+done
+# The same values in a flow mapping, where the reader has to reach the value at
+# all: a quoted class name used to arrive empty, which refused a valid mounted
+# config before the server started.
+yaml_case named "unquoted class in a flow mapping" \
+    'authentication: {authenticator: org.apache.hugegraph.auth.StandardAuthenticator}'
+yaml_case named "double quoted class in a flow mapping" \
+    'authentication: {authenticator: "org.apache.hugegraph.auth.StandardAuthenticator"}'
+yaml_case named "single quoted class in a flow mapping" \
+    "authentication: {authenticator: 'org.apache.hugegraph.auth.StandardAuthenticator'}"
+yaml_case named "double quoted class between flow siblings" \
+    'authentication: {config: {tokens: conf/rest-server.properties}, authenticator: "org.apache.hugegraph.auth.StandardAuthenticator"}'
+# Quoting a scalar makes it a string rather than the null node, so "null" names
+# a class the server fails to load loudly at startup; that is not the silent
+# no-authenticator state the plain spellings above are.  Pinned so a later
+# tightening of the null rules cannot move it without saying so here.
+yaml_case named "quoted null is a string, not the null node" \
+    'authentication:' \
+    '  authenticator: "null"'
+# A nested mapping is still the config map even when the value inside it is
+# quoted, and an empty quoted scalar is the empty string the server reads as no
+# authenticator.
+yaml_case nameless "class nested under a flow config, quoted" \
+    'authentication: {config: {authenticator: "org.apache.hugegraph.auth.StandardAuthenticator"}}'
+yaml_case nameless "flow value that is an empty quoted string" \
+    'authentication: {authenticator: ""}'
+# A tag, not the text, decides the type of a scalar, and a type this scanner
+# cannot resolve is refused rather than guessed at.
+yaml_case nameless "explicit str tag, a type this scanner cannot resolve" \
+    'authentication:' \
+    '  authenticator: !!str org.apache.hugegraph.auth.StandardAuthenticator'
 
 # ── Mounted one-sided config is refused with no PASSWORD ───────────────
 # check_auth_sides used to run only inside the PASSWORD branch, so a mounted
@@ -1106,3 +1152,83 @@ if ! sides_agree "${parity_dir}/operator"; then
     echo "operator class tree lost parity" >&2
     exit 1
 fi
+
+# ── The Gremlin guard and check_auth_sides have to read the same key ────
+# enable-auth.sh skips the yaml append when the file already carries a
+# top-level authentication mapping.  A grep that only knew the bare spelling
+# called an operator's "authentication": block absent and appended a second
+# one beside it, after which the two servers resolve the key in opposite
+# directions while REST keeps the authenticator the operator named.
+top_level_auth_keys() {
+    local file="$1" sq="'"
+    grep -Ec "^[\"${sq}]?authentication[\"${sq}]?[[:blank:]]*:" "${file}"
+}
+
+quoted_key_tree() {  # <dir> <with yamlscan.awk: yes|no>
+    local dir="$1" with_scan="$2"
+    bootstrap_tree "${dir}"
+    [[ "${with_scan}" == "yes" ]] || rm -f "${dir}/yamlscan.awk"
+    printf '%s\n' 'host: 0.0.0.0' '"authentication":' \
+        '  authenticator: com.example.OperatorAuth' > "${dir}/conf/gremlin-server.yaml"
+    printf '%s\n' 'restserver.url=http://127.0.0.1:8080' \
+        'auth.authenticator=com.example.OperatorAuth' \
+        > "${dir}/conf/rest-server.properties"
+    if ! sides_agree "${dir}" >/dev/null 2>&1; then
+        echo "quoted top-level key (${with_scan}): check_auth_sides refused" >&2
+        exit 1
+    fi
+    ( cd "${dir}" && unset AUTHENTICATOR_CLASS && ./bin/enable-auth.sh ) || {
+        echo "quoted top-level key (${with_scan}): enable-auth.sh failed" >&2
+        exit 1
+    }
+    if [[ "$(top_level_auth_keys "${dir}/conf/gremlin-server.yaml")" != "1" ]]; then
+        echo "quoted top-level key (${with_scan}): the append duplicated the" \
+            "operator block, got $(top_level_auth_keys "${dir}/conf/gremlin-server.yaml")" >&2
+        cat "${dir}/conf/gremlin-server.yaml" >&2
+        exit 1
+    fi
+    if [[ "$(gremlin_state "${dir}")" != "named" ]]; then
+        echo "quoted top-level key (${with_scan}): yaml is no longer named" >&2
+        exit 1
+    fi
+    if [[ "$(rest_class "${dir}")" != "com.example.OperatorAuth" ]]; then
+        echo "quoted top-level key (${with_scan}): REST lost the operator class" >&2
+        exit 1
+    fi
+}
+
+# The image layout, where yamlscan.awk sits in the install home, so the guard
+# asks the same reader the entrypoint does.
+quoted_key_tree "${parity_dir}/quoted-key" yes
+# The plain release tarball carries no yamlscan.awk; the fallback has to keep
+# the same answer for the question it can honestly settle on its own.
+quoted_key_tree "${parity_dir}/quoted-key-tarball" no
+
+# ── A value compared to a literal is the decoded value, not the bytes ───
+# wait-partition.sh is skipped unless ACTUAL_BACKEND reads hstore.  The JVM
+# resolves `backend=h\u0073tore` to hstore, so a reader that hands back the
+# on-disk escaping does not see the backend that is actually running, and
+# startup continues before the partitions are assigned.
+escaped_backend="${test_dir}/backend-escape.properties"
+# %s, not the format string: printf resolves \u0073 in a format itself and would
+# write the decoded word, which is the very thing this case has to hand the
+# reader.  The next assertion is the guard rail against that happening silently.
+printf '%s\n' 'backend=h\u0073tore' > "${escaped_backend}"
+if [[ "$(tr -d '\n' < "${escaped_backend}")" != 'backend=h\u0073tore' ]]; then
+    echo "fixture must hold the escaped bytes on disk, got [$(cat "${escaped_backend}")]" >&2
+    exit 1
+fi
+if [[ "$(get_prop_encoded backend "${escaped_backend}")" == "hstore" ]]; then
+    echo "the encoded reader is expected to report the on-disk escaping" >&2
+    exit 1
+fi
+if [[ "$(get_prop_decoded backend "${escaped_backend}")" != "hstore" ]]; then
+    echo "decoded read of an escaped backend gave" \
+         "[$(get_prop_decoded backend "${escaped_backend}")]" >&2
+    exit 1
+fi
+# The ordinary spelling is unaffected, so this is not decode-instead-of-read.
+plain_backend="${test_dir}/backend-plain.properties"
+printf 'backend=hstore\n' > "${plain_backend}"
+[[ "$(get_prop_decoded backend "${plain_backend}")" == "hstore" ]]
+[[ "$(get_prop_encoded backend "${plain_backend}")" == "hstore" ]]
