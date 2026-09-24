@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.core;
 
+import org.apache.hugegraph.store.StoreIdChangeTest;
 import org.apache.hugegraph.store.core.snapshot.HgSnapshotHandlerTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
@@ -44,7 +45,8 @@ import lombok.extern.slf4j.Slf4j;
 //        HgBusinessImplTest.class
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
-        HgSnapshotHandlerTest.class
+        HgSnapshotHandlerTest.class,
+        StoreIdChangeTest.class
 })
 @Slf4j
 public class CoreSuiteTest {

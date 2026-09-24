@@ -498,6 +498,22 @@ scp backup-store1-*.tar.gz backup-server:/backups/
    - Deploy new Store node with same configuration
    - PD automatically assigns partitions to new node
    - Wait for data replication (may take hours)
+   - If the new node reuses the failed node's raft address with an empty data directory (for
+     example a Kubernetes StatefulSet Pod rebuilt after its volume was lost), it registers under
+     a new store ID while the old ID still holds its partitions. Retire the old ID on the PD
+     leader so the replicas move to the new node:
+     ```bash
+     # Two entries share the address: the new ID and the old one
+     curl http://192.168.1.10:8620/v1/stores
+     curl -X POST -H 'Content-Type: application/json' -d '{"storeState":"Tombstone"}' \
+          http://192.168.1.10:8620/v1/store/<oldStoreId>
+     curl http://192.168.1.10:8620/v1/task/patrolPartitions
+     ```
+     Every shard group in `/v1/shardGroups` should then list the new ID, and the new node's
+     `http://<store>:8520/v1/partition/<partitionId>` should answer for each group. Then remove
+     the old record with `curl -X DELETE http://192.168.1.10:8620/v1/store/<oldStoreId>`. Store
+     versions without the fix for apache/hugegraph#3227 never finish this: the groups keep the
+     old ID and the new node stays empty.
 
 4. **Verify**: Check partition distribution
    ```bash
