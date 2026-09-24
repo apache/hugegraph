@@ -456,7 +456,9 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
      * 3. Wait for the peer to catch up.
      *
      * @param shards shard list from PD
-     * @return OK when nothing changed or the peers caught up, TASK_CONTINUE to retry
+     * @return OK when nothing changed or the peers caught up, the createRaftNode status when an
+     * endpoint is unreachable (retried when its replicator comes online), TASK_ERROR when a peer
+     * has not caught up in time (its replicator keeps installing the snapshot)
      */
     private Status syncShardIdentities(List<Metapb.Shard> shards) {
         Map<String, Long> pdIds = partitionManager.shardIdsByEndpoint(shards);
@@ -471,8 +473,6 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         log.info("Raft {} store id changed at raft address {}, local {}, pd {}",
                  getGroupId(), changed, localIds, pdIds);
 
-        doSnapshot(status -> log.info("Raft {} snapshot before create raft node, result:{}",
-                                      getGroupId(), status));
         for (String peer : changed) {
             FutureClosure closure = new FutureClosure();
             storeEngine.getHgCmdClient().createRaftNode(peer, partitionManager.getPartitionList(
@@ -481,9 +481,11 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
             if (!status.isOk()) {
                 log.info("Raft {} createRaftNode, peer:{}, reason:{}", getGroupId(), peer,
                          status.getErrorMsg());
-                return HgRaftError.TASK_CONTINUE.toStatus();
+                return status;
             }
         }
+        doSnapshot(status -> log.info("Raft {} snapshot after create raft node, result:{}",
+                                      getGroupId(), status));
 
         List<Long> peerIds = new ArrayList<>();
         for (String peer : RaftUtils.getPeerEndpoints(raftNode)) {
@@ -510,8 +512,14 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         log.info("Raft {} shard group after store id change {}", getGroupId(),
                  shardGroup.getMetaPbShard());
 
-        return waitForReplicate(changed) ? HgRaftError.OK.toStatus() :
-               HgRaftError.TASK_CONTINUE.toStatus();
+        // The store ids are taken before the wait: a rebuilt Store that restarts before PD names
+        // it would exit in loadPartitions. A timeout loses nothing, the replicator keeps going.
+        if (!waitForReplicate(changed)) {
+            log.warn("Raft {} peers {} not caught up in time, replication continues",
+                     getGroupId(), changed);
+            return HgRaftError.TASK_ERROR.toStatus();
+        }
+        return HgRaftError.OK.toStatus();
     }
 
     /**
