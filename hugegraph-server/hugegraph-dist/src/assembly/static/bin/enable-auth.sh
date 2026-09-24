@@ -207,7 +207,20 @@ ensure_rest_prop "auth.graph_store" "hugegraph" "${CONF}/${REST_SERVER_CONF}"
 
 # Wrap the graph factory only when it really is the plain HugeFactory, which is
 # a question about the decoded value, so it goes through the same reader.
+#
+# The trailing blanks come off before the comparison because the server reads
+# the trimmed line: commons-configuration right-trims a property line before it
+# resolves the class, so a mounted `gremlin.graph=org.apache.hugegraph.HugeFactory  `
+# opens the graph through the plain factory exactly as if it carried no blanks.
+# java.util.Properties by itself keeps them (measured against JDK 17), which is
+# why the reader hands the value back verbatim.  Comparing the untrimmed bytes
+# left such a config unwrapped: authentication on both servers, and no
+# HugeFactoryAuthProxy in front of the graph, which GraphManager only warns
+# about.  A factory that is not HugeFactory stays untouched either way.
 GRAPH_FACTORY=$(props_get "gremlin.graph" "${CONF}/graphs/${GRAPH_CONF}")
+while [[ "${GRAPH_FACTORY}" =~ [[:space:]]$ ]]; do
+    GRAPH_FACTORY="${GRAPH_FACTORY%?}"
+done
 if [[ "${GRAPH_FACTORY}" == "org.apache.hugegraph.HugeFactory" ]]; then
     props_set "gremlin.graph" "org.apache.hugegraph.auth.HugeFactoryAuthProxy" \
         "${CONF}/graphs/${GRAPH_CONF}"

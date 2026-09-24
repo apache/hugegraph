@@ -264,6 +264,36 @@ reused_trailing_space_secret=$(sed -n 's/^auth\.token_secret=//p' \
 [[ "${reused_trailing_space_secret}" == "${trailing_space_secret}" ]]
 grep -Fqx 'auth.admin_pa=pa' \
     "${TEST_HOME}/conf/rest-server.properties"
+# The secret above ends in a space, and commons-configuration trims a physical
+# line before it asks whether that line continues: the `\ ` the encoder used to
+# write survives the trim as a lone trailing backslash, which pulls the property
+# under it into the password -- that is how a file that plainly carried
+# auth.admin_pa next to it would reach the server as one long secret.  \u0020
+# leaves the trimmer nothing to take.
+grep -Fqx 'auth.token_secret=SecretEnds\u00200123456789abcdefABCDE\u0020' \
+    "${TEST_HOME}/conf/rest-server.properties" || {
+    echo "a trailing space must not be written as a backslash-space" >&2
+    sed -n 's/^auth\.token_secret=/written: [&]/p' \
+        "${TEST_HOME}/conf/rest-server.properties" >&2
+    exit 1
+}
+# Round trip: the secret comes back with both spaces it started with, and the
+# property written under it is still its own property.
+props_read() {
+    PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY="$1" \
+        PROPS_FILE="${TEST_HOME}/conf/rest-server.properties" \
+        awk -f "${TEST_HOME}/props.awk" /dev/null
+}
+[[ "$(props_read auth.token_secret)" == 'SecretEnds 0123456789abcdefABCDE ' ]] || {
+    echo "auth.token_secret lost its spaces: [$(props_read auth.token_secret)]" >&2
+    exit 1
+}
+[[ "$(props_read auth.admin_pa)" == "pa" ]] || {
+    echo "auth.admin_pa is not its own property any more: [$(props_read auth.admin_pa)]" >&2
+    exit 1
+}
+grep -Fqx 'auth.admin_pa=pa' \
+    "${TEST_HOME}/conf/rest-server.properties"
 
 (
     cd "${TEST_HOME}"

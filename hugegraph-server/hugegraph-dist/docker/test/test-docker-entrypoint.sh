@@ -562,14 +562,19 @@ install_enable_auth "${empty_dir}"
 # `cat` is replaced through PATH to fail the copy the way ENOSPC would:
 # stdout here *is* the already-truncated destination, so a few bytes and a
 # non-zero exit is exactly a half-written config.
+#
+# The staging names are unpredictable now, so this group follows the paths
+# props.awk left behind instead of naming `<file>.tmp` and `<file>.bak`: a
+# fixed name is the thing that had to go, and an assertion that has to guess
+# the name would have to be rewritten every time the generator changes.
 failbin="${test_dir}/fakebin"
 mkdir -p "${failbin}"
 real_cat="$(command -v cat)"
 printf '%s\n' \
     '#!/bin/sh' \
-    'case "$*" in' \
-    '    *.tmp) printf "auth.authenticator=par"; exit 1 ;;' \
-    '    *.bak) [ -n "${FAKE_BAK_FAIL:-}" ] && exit 1' \
+    'case "$2" in' \
+    '    *.tmp*) printf "auth.authenticator=par"; exit 1 ;;' \
+    '    *.bak*) [ -n "${FAKE_BAK_FAIL:-}" ] && exit 1 ;;' \
     'esac' \
     'exec "${FAKE_CAT_REAL}" "$@"' \
     > "${failbin}/cat"
@@ -581,6 +586,9 @@ printf '%s\n' \
     'auth.token_secret=s3cr3t' \
     'unrelated=true' > "${rb_file}"
 cp -p "${rb_file}" "${rb_expect}"
+staged() {
+    find "${test_dir}" -maxdepth 1 -name "config-rollback.$1.*" | sort
+}
 (
     PATH="${failbin}:${PATH}"
     FAKE_CAT_REAL="${real_cat}"
@@ -596,16 +604,24 @@ cmp -s "${rb_file}" "${rb_expect}" || {
 }
 # Both staging files survive on purpose: the temp file is what was being
 # written, and the snapshot is the operator's way back.
-[[ -e "${rb_file}.tmp" ]]
-[[ -e "${rb_file}.bak" ]]
+rb_left_tmp=$(staged tmp | head -1)
+rb_left_bak=$(staged bak | head -1)
+[[ -n "${rb_left_tmp}" && -n "${rb_left_bak}" ]] || {
+    echo "a failed copy-back must leave both staging files for the operator" >&2
+    exit 1
+}
 # Once the condition clears the same set goes through, and leaves nothing
-# behind.
+# behind.  The operator's leftovers go first, so a leftover from this run cannot
+# be mistaken for one from that run.
+rm -f "${rb_left_tmp}" "${rb_left_bak}"
 set_prop 'auth.authenticator' 'com.example.HalfWritten' "${rb_file}"
 grep -q '^auth\.authenticator=com\.example\.HalfWritten$' "${rb_file}"
 grep -q '^auth\.token_secret=s3cr3t$' "${rb_file}"
 grep -q '^unrelated=true$' "${rb_file}"
-[[ ! -e "${rb_file}.tmp" ]]
-[[ ! -e "${rb_file}.bak" ]]
+[[ -z "$(staged tmp)$(staged bak)" ]] || {
+    echo "a successful set left staging files behind: $(staged tmp) $(staged bak)" >&2
+    exit 1
+}
 # When the restore fails too there is nothing left to do but say so and
 # point at the snapshot, because that snapshot is the only copy of a
 # working config the operator has.
@@ -620,15 +636,15 @@ rb_out=$(
     export PATH FAKE_CAT_REAL FAKE_BAK_FAIL
     set_prop 'auth.authenticator' 'com.example.HalfWritten' "${rb_file}" 2>&1
 ) || true
-[[ "${rb_out}" == *"${rb_file}.bak"* ]] || {
-    echo "props.awk must name the snapshot when the restore also fails" >&2
+rb_bak=$(staged bak)
+[[ "${rb_out}" == *"${rb_file}.bak."* ]] || {
+    echo "props.awk must name the snapshot when the restore also fails, got [${rb_out}]" >&2
     exit 1
 }
 # The damaged config keeps whatever the aborted copy left, and the
 # snapshot still holds the last known good content.
-[[ -e "${rb_file}.bak" ]]
-[[ -e "${rb_file}.tmp" ]]
-cmp -s "${rb_file}.bak" "${rb_expect}" || {
+[[ -n "${rb_bak}" ]] || { echo "the snapshot is gone" >&2; exit 1; }
+cmp -s "${rb_bak}" "${rb_expect}" || {
     echo "the snapshot must be a byte-for-byte copy of the original" >&2
     exit 1
 }
@@ -1232,3 +1248,335 @@ plain_backend="${test_dir}/backend-plain.properties"
 printf 'backend=hstore\n' > "${plain_backend}"
 [[ "$(get_prop_decoded backend "${plain_backend}")" == "hstore" ]]
 [[ "$(get_prop_encoded backend "${plain_backend}")" == "hstore" ]]
+
+# ── The value is judged as the YAML node, not as the bytes after the colon ──
+# An anchor label is not part of the value it names, so `authenticator: &noAuth
+# null` is a mapping whose authenticator resolves to null; an alias points at a
+# node this scanner does not resolve.  Both read as a class name if only the
+# first byte is looked at, and the direction that error moves the server in is
+# REST enforcing StandardAuthenticator over a Gremlin left on TinkerPop's
+# AllowAllAuthenticator -- check_auth_sides reports parity and never asks again.
+# An anchor in front of a real class still has to count, or a valid mounted
+# config gets refused before startup.
+anchor_dir="${test_dir}/yaml-anchor"
+mkdir -p "${anchor_dir}/conf"
+(
+    cd "${anchor_dir}" || exit 1
+    state_file="conf/gremlin-server.yaml"
+    want_yaml() {
+        if [[ "$1" != "$2" ]]; then
+            echo "expected yaml state '$1', got '$2'" >&2
+            exit 1
+        fi
+    }
+
+    printf '%s\n' 'authentication:' '  authenticator: &noAuth null' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    printf '%s\n' 'authentication:' '  authenticator: &anchorOnly' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    printf '%s\n' 'authentication:' '  authenticator: *noAuth' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    printf '%s\n' 'authentication: {authenticator: &noAuth null}' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    printf '%s\n' 'authentication:' '  authenticator: &cls com.example.Anchored' > "${state_file}"
+    want_yaml named "$(yaml_auth_state)"
+)
+
+# One mapping is answered only once it has been read to the end.  Resolving the
+# first direct `authenticator` seen is not a question the scanner can keep: the
+# server takes the last value of a repeated key, and current snakeyaml rejects
+# the document outright instead.  `authenticator: com.example.First` followed by
+# `authenticator: null` answered `named` on the first row, which is the config
+# that boots with no Gremlin authenticator while REST has one, in block and in
+# flow form alike.
+dup_dir="${test_dir}/yaml-duplicate"
+mkdir -p "${dup_dir}/conf"
+(
+    cd "${dup_dir}" || exit 1
+    state_file="conf/gremlin-server.yaml"
+    want_yaml() {
+        if [[ "$1" != "$2" ]]; then
+            echo "expected yaml state '$1', got '$2'" >&2
+            exit 1
+        fi
+    }
+
+    printf '%s\n' 'authentication:' '  authenticator: com.example.First' \
+                   '  authenticator: null' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    printf '%s\n' 'authentication:' '  authenticator: com.example.First' \
+                   '  authenticator: com.example.Second' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    printf '%s\n' 'authentication: {authenticator: com.example.A, authenticator: null}' > "${state_file}"
+    want_yaml nameless "$(yaml_auth_state)"
+    # A duplicate under a different key, or one indented into a nested mapping,
+    # is not a second definition of the authenticator and must not refuse a
+    # config the server reads as one clean mapping.
+    printf '%s\n' 'authentication:' '  authenticator: com.example.Only' \
+                   '  config: {authenticator: com.example.Nested}' > "${state_file}"
+    want_yaml named "$(yaml_auth_state)"
+    # A single entry is still answered by its own value, however far down the
+    # mapping it sits, so this is last-wins rather than give-up.
+    printf '%s\n' 'authentication:' '  authenticationHandler: org.X' \
+                   '  config: {tokens: conf/rest-server.properties}' \
+                   '  authenticator: com.example.Late' > "${state_file}"
+    want_yaml named "$(yaml_auth_state)"
+    printf '%s\n' 'authentication:' '  authenticator: com.example.First' \
+                   'other: x' '  authenticator: null' > "${state_file}"
+    want_yaml named "$(yaml_auth_state)"
+)
+
+# A Gremlin config saved with CRLF breaks its lines at CR too: YAML ends a line
+# at CR, LF or CRLF.  Carrying the CR into the parse made `authentication:\r`
+# fail the split, so a mapping that does name an authenticator was reported as
+# absent -- and with REST holding no authenticator either, check_auth_sides saw
+# two sides agreeing and started a server that authenticates on Gremlin and
+# leaves REST open.
+#
+# The fixture writes one CR for the host: where awk drops the CR of a CRLF pair
+# in text mode, two are written so that exactly one reaches the record, and the
+# probe below refuses to run the group rather than let it pass on a fixture that
+# quietly became plain LF.
+yaml_cr=$'\r\n'
+if ! (( awk_sees_crlf_cr )); then
+    yaml_cr=$'\r\r\n'
+fi
+crlf_yaml_dir="${test_dir}/yaml-crlf"
+mkdir -p "${crlf_yaml_dir}/conf"
+(
+    cd "${crlf_yaml_dir}" || exit 1
+    state_file="conf/gremlin-server.yaml"
+    REST_SERVER_CONF="./conf/rest-server.properties"
+
+    if [[ "$(printf "probe${yaml_cr}" | awk 'NR == 1 { print length($0) }')" != "6" ]]; then
+        skip "the CRLF gremlin-server.yaml check"
+        exit 0
+    fi
+
+    printf "authentication:%s  authenticator: com.example.CrlfAuth%shost: 0.0.0.0%s" \
+        "${yaml_cr}" "${yaml_cr}" "${yaml_cr}" > "${state_file}"
+    [[ "$(yaml_auth_state)" == "named" ]] || {
+        echo "a CRLF mapping that names a class read as [$(yaml_auth_state)]" >&2
+        exit 1
+    }
+
+    printf "authentication:%s  tokens: conf/rest-server.properties%s" \
+        "${yaml_cr}" "${yaml_cr}" > "${state_file}"
+    [[ "$(yaml_auth_state)" == "nameless" ]] || {
+        echo "a CRLF mapping without one read as [$(yaml_auth_state)]" >&2
+        exit 1
+    }
+
+    # The one-sided direction, end to end: Gremlin authenticates, REST does not.
+    printf "authentication:%s  authenticator: com.example.CrlfAuth%s" \
+        "${yaml_cr}" "${yaml_cr}" > "${state_file}"
+    : > "${REST_SERVER_CONF}"
+    if check_auth_sides; then
+        echo "check_auth_sides must refuse a CRLF yaml that authenticates alone" >&2
+        exit 1
+    fi
+)
+
+# ── props.awk refuses a file it cannot answer a question about ──────────
+# commons-configuration splices an `include` file into the one being read, so
+# `auth.authenticator` can be defined over there and be nowhere in the bytes
+# here.  Answering "absent" for it is what starts a REST-open server beside a
+# Gremlin that requires authentication, and the spliced order also decides which
+# of the two definitions wins, so even a key this file does carry cannot be
+# called the effective one.  Neither of those is a question this reader can
+# answer, so it stops rather than guessing.
+include_dir="${test_dir}/props-include"
+mkdir -p "${include_dir}/conf"
+(
+    cd "${include_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
+    printf '%s\n' 'include=conf/rest-auth.properties' \
+                   'restserver.url=http://127.0.0.1:8080' > "${REST_SERVER_CONF}"
+    printf '%s\n' 'auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator' \
+        > conf/rest-auth.properties
+    printf '%s\n' 'authentication:' '  authenticator: com.example.IncludedAuth' \
+        > conf/gremlin-server.yaml
+
+    if get_prop_encoded restserver.url "${REST_SERVER_CONF}" >/dev/null 2>&1; then
+        echo "a read of a file with an include must refuse, not answer" >&2
+        exit 1
+    fi
+    if PROPS_MODE=has PROPS_KEY=restserver.url PROPS_FILE="${REST_SERVER_CONF}" \
+        awk -f "${PROPS_AWK}" /dev/null 2>/dev/null; then
+        echo "PROPS_MODE=has must refuse too" >&2
+        exit 1
+    fi
+    # A refused write leaves the config exactly as it stood: no second
+    # definition is appended beside one the server may resolve the other way.
+    if set_prop auth.authenticator com.example.Written "${REST_SERVER_CONF}" 2>/dev/null; then
+        echo "a set must refuse to write into an including file" >&2
+        exit 1
+    fi
+    grep -Fxq 'include=conf/rest-auth.properties' "${REST_SERVER_CONF}"
+    grep -Fxq 'restserver.url=http://127.0.0.1:8080' "${REST_SERVER_CONF}"
+
+    # The operator has to be told which question could not be read, rather than
+    # being sent to the other side of the parity check.
+    if check_auth_sides 2>/dev/null; then
+        echo "check_auth_sides must not boot on an unreadable side" >&2
+        exit 1
+    fi
+    # Captured rather than piped: pipefail makes a refused check the status of
+    # the pipeline no matter what grep matched, so the message would have to be
+    # asserted through a variable.
+    inc_out=$(check_auth_sides 2>&1 || true)
+    case "${inc_out}" in
+        *"cannot read auth.authenticator"*) ;;
+        *) echo "check_auth_sides must say the REST side could not be read, got [${inc_out}]" >&2
+           exit 1 ;;
+    esac
+
+    # Controls: `include` is the whole key, and only a live directive counts.
+    printf '%s\n' 'included.filter=1' 'auth.authenticator=com.example.Plain' \
+        > "${REST_SERVER_CONF}"
+    [[ "$(get_prop_encoded auth.authenticator "${REST_SERVER_CONF}")" == \
+        "com.example.Plain" ]]
+    printf '%s\n' '#include=conf/rest-auth.properties' \
+                   'auth.authenticator=com.example.Comment' > "${REST_SERVER_CONF}"
+    [[ "$(get_prop_encoded auth.authenticator "${REST_SERVER_CONF}")" == \
+        "com.example.Comment" ]]
+)
+
+# ── Temporary files are private and cannot be arranged in advance ───────
+# A predictable `<file>.tmp` is a name anyone with write access to a mounted
+# conf directory can use first, and neither the pre-creating redirection nor
+# awk's `>` checks what is behind it: run as root in the default image, the
+# copy-back would write auth.admin_pa through a planted symlink into whatever
+# file that link named.  The same holds for the `.bak` snapshot.  Both names now
+# come from an exclusive create, so there is nothing to arrange and nothing to
+# follow.
+planted_dir="${test_dir}/planted-temps"
+mkdir -p "${planted_dir}"
+planted="${planted_dir}/rest-server.properties"
+printf '%s\n' 'auth.authenticator=com.example.Old' > "${planted}"
+printf 'NOT-YOURS-TMP\n' > "${planted}.tmp"
+printf 'NOT-YOURS-BAK\n' > "${planted}.bak"
+set_prop auth.authenticator com.example.New "${planted}"
+grep -Fxq 'auth.authenticator=com.example.New' "${planted}"
+grep -Fxq 'NOT-YOURS-TMP' "${planted}.tmp" || {
+    echo "a file already named <config>.tmp was written through" >&2
+    exit 1
+}
+grep -Fxq 'NOT-YOURS-BAK' "${planted}.bak" || {
+    echo "a file already named <config>.bak was written through" >&2
+    exit 1
+}
+if [[ -n "$(find "${planted_dir}" \( -name '*.tmp.*' -o -name '*.bak.*' \) 2>/dev/null)" ]]; then
+    echo "the staged rewrite left a temporary file behind" >&2
+    exit 1
+fi
+if (( host_keeps_symlink )); then
+    victim="${planted_dir}/victim.txt"
+    printf 'VICTIM\n' > "${victim}"
+    rm -f "${planted}.tmp"
+    ln -s "${victim}" "${planted}.tmp"
+    set_prop auth.authenticator com.example.Linked "${planted}"
+    grep -Fxq 'VICTIM' "${victim}" || {
+        echo "the entrypoint wrote credentials through a symlinked temp file" >&2
+        exit 1
+    }
+    grep -Fxq 'auth.authenticator=com.example.Linked' "${planted}"
+else
+    skip "the symlinked-temp-file check"
+fi
+
+# ── A trailing blank on gremlin.graph must not leave the graph unwrapped ──
+# commons-configuration trims the line before it resolves the class, so a
+# mounted `gremlin.graph=org.apache.hugegraph.HugeFactory  ` opens the graph
+# through the plain factory exactly as the same line without the blanks does.
+# Comparing the untrimmed bytes answered "not HugeFactory" and left
+# HugeFactoryAuthProxy out of an otherwise fully authenticated tree, which
+# GraphManager only warns about.  (java.util.Properties by itself keeps the
+# blanks -- measured against JDK 17 -- which is why the reader hands them back.)
+run_enable_auth() {
+    local dir="$1" graph_line="$2"
+
+    mkdir -p "${dir}/bin" "${dir}/conf/graphs"
+    install_enable_auth "${dir}"
+    printf '%s\n' 'host: 0.0.0.0' > "${dir}/conf/gremlin-server.yaml"
+    printf '%s\n' 'restserver.url=http://127.0.0.1:8080' > "${dir}/conf/rest-server.properties"
+    printf '%s\n' "${graph_line}" > "${dir}/conf/graphs/hugegraph.properties"
+    if ! ( cd "${dir}" && ./bin/enable-auth.sh ); then
+        echo "enable-auth.sh failed for [${graph_line}]" >&2
+        exit 1
+    fi
+}
+for blank in '  ' '\ '; do
+    blank_dir="${test_dir}/factory-blank-${blank//\\/esc}"
+    run_enable_auth "${blank_dir}" "gremlin.graph=org.apache.hugegraph.HugeFactory${blank}"
+    grep -q '^gremlin\.graph=org\.apache\.hugegraph\.auth\.HugeFactoryAuthProxy$' \
+        "${blank_dir}/conf/graphs/hugegraph.properties" || {
+        echo "a trailing blank (${blank}) left the graph outside the auth proxy" >&2
+        exit 1
+    }
+done
+# A factory that is not HugeFactory is left exactly as mounted, blanks and all.
+foreign_dir="${test_dir}/factory-foreign"
+run_enable_auth "${foreign_dir}" 'gremlin.graph=com.example.OtherFactory  '
+if grep -q 'HugeFactoryAuthProxy' "${foreign_dir}/conf/graphs/hugegraph.properties"; then
+    echo "enable-auth.sh rewrote a factory it does not own" >&2
+    exit 1
+fi
+
+# ── A written value must not end where a trim turns it into a continuation ─
+# encode_prop_value wrote a space as `\ `.  Read back by java.util.Properties
+# that is a space, but commons-configuration right-trims the physical line first
+# and then asks whether it continues, so `abc\ ` became `abc\` and swallowed the
+# line under it -- a password ending in a space ate the `auth.authenticator`
+# written below it, and the guards reported a config that was already broken.
+# \u0020 decodes to the same space in both readers and leaves nothing to trim.
+space_file="${test_dir}/encoded-trailing-space"
+printf '%s\n' 'auth.admin_pa=placeholder' \
+               'auth.authenticator=com.example.Below' > "${space_file}"
+[[ "$(encode_prop_value 'abc ')" == 'abc\u0020' ]] || {
+    echo "a space is still encoded in a form a trim can cut: [$(encode_prop_value 'abc ')]" >&2
+    exit 1
+}
+set_prop auth.admin_pa 'abc ' "${space_file}"
+grep -Fxq 'auth.admin_pa=abc\u0020' "${space_file}" || {
+    echo "written on disk as [$(sed -n 's/^auth\.admin_pa=//p' "${space_file}")]" >&2
+    exit 1
+}
+[[ "$(get_prop_decoded auth.admin_pa "${space_file}")" == "abc " ]]
+# The property under a value that ends in a space is still its own property.
+[[ "$(get_prop_decoded auth.authenticator "${space_file}")" == "com.example.Below" ]]
+grep -Fxq 'auth.authenticator=com.example.Below' "${space_file}"
+# The guard judges the line the way the server sees it, so an encoded value
+# built somewhere else cannot carry the hazard in through the back door.
+if set_prop_encoded auth.token_secret 'abc\ ' "${space_file}" 2>/dev/null; then
+    echo "a value ending in backslash+blank would swallow the next line" >&2
+    exit 1
+fi
+if set_prop_encoded auth.token_secret 'abc\\\ ' "${space_file}" 2>/dev/null; then
+    echo "a value ending in an odd run of backslashes before a blank was accepted" >&2
+    exit 1
+fi
+# An even run is a literal backslash and continues nothing.
+set_prop_encoded auth.token_secret 'abc\\ ' "${space_file}"
+[[ "$(get_prop_decoded auth.token_secret "${space_file}")" == 'abc\ ' ]]
+grep -Fxq 'auth.admin_pa=abc\u0020' "${space_file}"
+
+# ── No helper hands chmod an argument it means as an option ─────────────
+# `chmod 600 -- file` is GNU-only: BSD chmod reads `--` as the file name after
+# the mode and fails, which on macOS left props.awk unable to back up the config
+# it was about to rewrite.  Nothing needs the separator here -- every path goes
+# through shquote, so an argument can only start at a quote byte -- and the two
+# calls it was written for are gone now that the staged files are created 0600
+# by mktemp.
+dash_dir="${test_dir}/dash-named-config"
+mkdir -p "${dash_dir}"
+printf '%s\n' 'auth.authenticator=com.example.Old' > "${dash_dir}/-config.properties"
+set_prop auth.authenticator com.example.New "${dash_dir}/-config.properties"
+grep -Fxq 'auth.authenticator=com.example.New' "${dash_dir}/-config.properties"
+[[ "$(get_prop_encoded auth.authenticator "${dash_dir}/-config.properties")" == \
+    "com.example.New" ]]
+if grep -Eq 'chmod[^#]*--' "${PROPS_AWK}"; then
+    echo "props.awk still passes -- to chmod, which BSD chmod reads as a file" >&2
+    grep -En 'chmod[^#]*--' "${PROPS_AWK}" >&2
+    exit 1
+fi

@@ -87,7 +87,13 @@ encode_prop_value() {
         char="${value:i:1}"
         case "${char}" in
             "\\") encoded+="\\\\" ;;
-            " ") encoded+="\\ " ;;
+            # \u0020 and not `\ `: both readers turn it back into a space, but
+            # a line right-trimmed before the continuation check -- which is how
+            # commons-configuration reads it -- leaves the backslash of `\ `
+            # behind at the end of the line, and that swallows the property
+            # written under it.  A secret ending in a space used to move
+            # auth.authenticator inside the password value.
+            " ") encoded+="\\u0020" ;;
             $'\t') encoded+="\\t" ;;
             $'\n') encoded+="\\n" ;;
             $'\r') encoded+="\\r" ;;
@@ -175,7 +181,7 @@ yaml_auth_state() {
 # refused by itself, because enable-auth.sh guards on the presence of that
 # mapping and would otherwise write only the REST side.
 check_auth_sides() {
-    local rest=0 yaml=0 state
+    local rest=0 yaml=0 state rest_value
 
     state=$(yaml_auth_state)
     if [[ "${state}" == "nameless" ]]; then
@@ -184,7 +190,17 @@ check_auth_sides() {
             "to it or remove the mapping, then restart."
         return 1
     fi
-    if [[ -n "$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}")" ]]; then
+    # A nonzero status here means the reader could not answer at all -- props.awk
+    # exits 2 rather than guess, e.g. for a file that splices another one with an
+    # commons-configuration `include`.  Calling that "configured on one side"
+    # would send the operator to the wrong file, and calling it absent is the
+    # direction that lets REST start open beside a Gremlin that authenticates.
+    if ! rest_value=$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}"); then
+        log "ERROR: cannot read auth.authenticator from ${REST_SERVER_CONF};" \
+            "see the reason above, fix it, then restart."
+        return 1
+    fi
+    if [[ -n "${rest_value}" ]]; then
         rest=1
     fi
     if [[ "${state}" == "named" ]]; then

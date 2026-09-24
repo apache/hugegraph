@@ -52,6 +52,15 @@
 # Rewrites keep every untouched line byte-for-byte (comments, blank
 # lines, unrelated entries), and replace the first definition where it
 # stands, so mounted configs stay reviewable in git diffs.
+#
+# A file that carries commons-configuration's `include` directive is refused in
+# every mode, with exit status 2: the directive splices another file into this
+# one, so "this key is absent" is a question that cannot be answered from this
+# file alone, and writing into it could bury the definition the server reads.
+# Rewrites stage through two exclusively created 0600 files (`mktemp`) rather
+# than a predictable `<file>.tmp` / `<file>.bak`, which a writer in a mounted
+# conf directory could have arranged as a symlink before the entrypoint, running
+# as root, opened either of them.
 
 function die(msg) {
     printf "props.awk: %s\n", msg > "/dev/stderr"
@@ -153,6 +162,31 @@ function shquote(s) {
     return "'" s "'"
 }
 
+# A private temporary file, created exclusively, beside `file`.
+#
+# The name has to come from mktemp.  With a fixed `<file>.tmp` anyone able to
+# write in a mounted conf directory could leave that name as a symlink to a
+# file elsewhere in the container, and neither the shell redirection that
+# pre-created it nor awk's own `>` checks for that: both follow it, so the
+# entrypoint, running as root by default, would write auth.admin_pa or
+# auth.token_secret through the link and into whatever it points at.  An
+# exclusive create of an unpredictable name cannot be pre-arranged, and mktemp
+# makes the file 0600 whatever the umask says, which is the reason no chmod
+# follows it here.
+#
+# The template is quoted, which is also why no `--` is passed: the argument
+# starts at a quote byte, so it can never read as an option.
+function make_temp(file, kind,    cmd, path) {
+    path = ""
+    cmd = "umask 077 && mktemp " shquote(file) "." kind ".XXXXXX"
+    if ((cmd | getline path) <= 0 || path == "") {
+        close(cmd)
+        die("cannot create a private " kind " file beside " file)
+    }
+    close(cmd)
+    return path
+}
+
 # java.util.Properties ends a physical line at \r\n, \n or a bare \r, but
 # getline splits on \n alone.  A properties file saved with CR-only endings --
 # which java.util.Properties writes for a lone `store()` on some platforms, and
@@ -237,6 +271,16 @@ function props_load(file,    raw, rc, content, nl, stripped, next_raw, start, lo
         BFIRST[NBLOCK] = start
         BLAST[NBLOCK] = nl
         BKEY[NBLOCK] = unescape(K_RAW)
+        # `include` is not an ordinary property to the server: commons
+        # configuration splices the named file into this one at this point, so
+        # auth.authenticator can be defined over there and be invisible from
+        # here, and which of the two definitions wins follows the spliced
+        # order rather than the order of this file.  Answering that needs the
+        # parser the server uses, and answering it wrong is how a mounted
+        # config boots with REST open and Gremlin protected.  So a file that
+        # uses the directive is refused in every mode, and nothing is written.
+        if (BKEY[NBLOCK] == "include")
+            die("refusing to read or rewrite " file ": it includes another file (line " start "), which this helper cannot resolve")
         # Values stay in their on-disk escaped form.  get Prop callers feed
         # the result straight back into set, which would corrupt a decoded
         # value by re-writing its backslashes as literals; keys are
@@ -245,19 +289,25 @@ function props_load(file,    raw, rc, content, nl, stripped, next_raw, start, lo
     }
 }
 
-function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs) {
+function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs, tail) {
     props_load(file)
-    # A value whose encoded form ends in an odd number of backslashes would
-    # turn the line written after it into a continuation of that value.
-    # Measured against commons-configuration2 (what HugeConfig extends), the
-    # same input read back yields no property at all, so a secret written this
-    # way would never reach the server that is supposed to authenticate with
-    # it; the entrypoint has to refuse instead of guessing a target.
+    # A value whose written form leaves an odd number of backslashes at the end
+    # of the physical line turns the line after it into a continuation of that
+    # value.  The line has to be judged as the server sees it: commons
+    # configuration trims the line before it looks for the continuation, so
+    # `abc\ ` -- the spelling encode_prop_value used to give a trailing space --
+    # reaches the server as `abc\` and swallows whatever follows it.  Measured
+    # against commons-configuration2 (what HugeConfig extends), the same input
+    # read back yields no property at all, so a secret written this way never
+    # reaches the server that is supposed to authenticate with it.  The
+    # entrypoint has to refuse instead of guessing a target.
+    tail = enc_val
+    sub(/[ \t\f\r]+$/, "", tail)
     nbs = 0
-    while (nbs < length(enc_val) && substr(enc_val, length(enc_val) - nbs, 1) == "\\")
+    while (nbs < length(tail) && substr(tail, length(tail) - nbs, 1) == "\\")
         nbs++
     if (nbs % 2 == 1)
-        die("refusing to write " key ": the encoded value ends in an odd number of backslashes")
+        die("refusing to write " key ": trimmed of its trailing blanks the value ends in a backslash, which would swallow the next line")
     first = 0
     for (b = 1; b <= NBLOCK; b++) {
         if (BTYPE[b] == "entry" && BKEY[b] == key) {
@@ -265,16 +315,12 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs)
             else BDROP[b] = 1
         }
     }
-    # Staged rewrite: everything lands in a sibling temp file first, so a
-    # failure before the copy-back leaves the original untouched.  The temp
-    # file can hold secrets, so it is pre-created 0600 before the first
-    # write: awk's `>` below would otherwise create it under the process
-    # umask (usually 0644), leaving auth.admin_pa or auth.token_secret
-    # briefly group- and world-readable.  Truncating an existing file keeps
-    # its mode, and the chmod after close repairs a stale tmp left behind
-    # by a crashed run.
-    tmp = file ".tmp"
-    system("umask 077 && : > " shquote(tmp))
+    # Staged rewrite: everything lands in a private temp file first, so a
+    # failure before the copy-back leaves the original untouched.  The temp file
+    # holds secrets, so it is created 0600 and exclusively (see make_temp): a
+    # reused, predictable name is both a disclosure risk under the process umask
+    # and a path someone else can have arranged already.
+    tmp = make_temp(file, "tmp")
     for (b = 1; b <= NBLOCK; b++) {
         if (BDROP[b]) continue
         if (b == first) {
@@ -305,14 +351,12 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs)
     # destination before cat writes a byte, so an ENOSPC or I/O error
     # mid-copy used to leave a truncated config on disk — a truncated
     # rest-server.properties loses `auth.authenticator` and boots the
-    # server with authentication off.  Snapshot the original first (under
-    # umask 077 so a backup of a 0644 mounted config never ends up more
-    # permissive than it started, and chmodded in case a crashed run left
-    # one behind) and put it back when the copy fails.
-    system("chmod 600 -- " shquote(tmp))
-    bak = file ".bak"
-    cmd = "umask 077 && cp -- " shquote(file) " " shquote(bak)
-    if (system(cmd " && chmod 600 -- " shquote(bak)) != 0)
+    # server with authentication off.  Snapshot the original first, into a
+    # second exclusively created 0600 file for the same reason as the temp,
+    # and put it back when the copy fails.
+    bak = make_temp(file, "bak")
+    cmd = "cp -- " shquote(file) " " shquote(bak)
+    if (system(cmd) != 0)
         die("cannot back up " file " before the copy-back")
     cmd = "cat -- " shquote(tmp) " > " shquote(file)
     if (system(cmd) != 0) {
