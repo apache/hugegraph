@@ -9242,6 +9242,40 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testNegativeLabelAfterReturningToSourceThroughEdge() {
+        HugeGraph graph = graph();
+        initPersonIndex(true);
+        graph.schema().edgeLabel("fanToPerson").link("fan", "person").create();
+        graph.schema().edgeLabel("personToFan").link("person", "fan").create();
+        Vertex outFan = graph.addVertex(T.label, "fan", "name", "out-fan",
+                                        "age", 20, "city", "Beijing");
+        Vertex inFan = graph.addVertex(T.label, "fan", "name", "in-fan",
+                                       "age", 20, "city", "Beijing");
+        Vertex target = graph.addVertex(T.label, "person", "name", "target",
+                                        "age", 20, "city", "Shanghai");
+        outFan.addEdge("fanToPerson", target);
+        target.addEdge("personToFan", inFan);
+        this.commitTx();
+        GraphTraversalSource g = graph.traversal();
+        Assert.assertEquals(ImmutableList.of(outFan), g.V().has("city", "Beijing")
+                .outE().outV().hasLabel(P.neq("person")).toList());
+        Assert.assertEquals(ImmutableList.of(inFan), g.V().has("city", "Beijing")
+                .inE().inV().hasLabel(P.neq("person")).toList());
+        Assert.assertEquals(ImmutableList.of(outFan), g.V().has("city", "Beijing")
+                .where(__.outE().outV().hasLabel(P.neq("person"))).toList());
+        Assert.assertEquals(ImmutableList.of(inFan), g.V().has("city", "Beijing")
+                .where(__.inE().inV().hasLabel(P.neq("person"))).toList());
+        Assert.assertEquals(ImmutableSet.of(outFan, inFan),
+                ImmutableSet.copyOf(g.V().has("city", "Beijing")
+                        .bothE().bothV().hasLabel(P.neq("person")).toList()));
+        Assert.assertEquals(ImmutableSet.of(outFan, inFan),
+                ImmutableSet.copyOf(g.V().has("city", "Beijing")
+                        .where(__.bothE().bothV().hasLabel(P.neq("person"))).toList()));
+        Assert.assertEquals(ImmutableList.of(outFan), g.V().has("city", "Beijing")
+                .where(__.outE().barrier().outV().hasLabel(P.neq("person"))).toList());
+    }
+
+    @Test
     public void testChildSourceBeforeParentNegativeLabel() {
         HugeGraph graph = graph();
         initPersonIndex(true);
@@ -10044,12 +10078,20 @@ public class VertexCoreTest extends BaseCoreTest {
                 P.within("sourceV", "targetV"), P.within(label, "sourceV")}) {
             GraphTraversal<Vertex, Vertex> query = g.V().has(T.label, predicate)
                     .has("unindexedAge", 18)
-                    .where(__.out().hasLabel(P.neq("sourceV")));
+                    .where(__.hasLabel(P.neq("targetV")));
             query.asAdmin().applyStrategies();
             HugeGraphStep<?, ?> step = (HugeGraphStep<?, ?>) query.asAdmin().getStartStep();
             Assert.assertEquals(1, step.getHasContainers().size());
             Assert.assertEquals(T.label.getAccessor(), step.getHasContainers().get(0).getKey());
             Assert.assertEquals(ImmutableList.of(source), query.toList());
+            GraphTraversal<Vertex, Vertex> downstream = g.V().has(T.label, predicate)
+                    .has("unindexedAge", 18)
+                    .where(__.out().hasLabel(P.neq("sourceV")));
+            downstream.asAdmin().applyStrategies();
+            HugeGraphStep<?, ?> downstreamStep =
+                    (HugeGraphStep<?, ?>) downstream.asAdmin().getStartStep();
+            Assert.assertEquals(2, downstreamStep.getHasContainers().size());
+            Assert.assertThrows(NoIndexException.class, downstream::toList);
             Assert.assertEquals(ImmutableList.of(source), g.V(source.id(), target.id())
                     .has(T.label, predicate).where(__.out().hasLabel(P.neq("sourceV"))).toList());
         }
@@ -10059,8 +10101,12 @@ public class VertexCoreTest extends BaseCoreTest {
                            .where(__.out().hasLabel(P.neq("sourceV"))).toList().isEmpty());
         Assert.assertTrue(g.V().hasLabel("sourceV").hasLabel("targetV")
                            .where(__.out().hasLabel(P.neq("sourceV"))).toList().isEmpty());
+        // Unknown labels are evaluated locally only when fallback is required.
         Assert.assertEquals(ImmutableList.of(source), g.V().hasLabel(P.within("sourceV", "missing"))
-                .where(__.out().hasLabel(P.neq("sourceV"))).toList());
+                .where(__.hasLabel(P.neq("targetV"))).toList());
+        Assert.assertThrows(IllegalArgumentException.class,
+                () -> g.V().hasLabel(P.within("sourceV", "missing"))
+                       .where(__.out().hasLabel(P.neq("sourceV"))).toList());
         Assert.assertTrue(g.V().hasLabel("missing").hasLabel(P.neq("sourceV")).toList().isEmpty());
         Assert.assertEquals(ImmutableList.of(unindexed), g.V().hasLabel("withoutLabelIndex")
                 .hasLabel(P.neq("sourceV")).toList());

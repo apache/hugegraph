@@ -78,7 +78,6 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.map.EdgeVertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.IdStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.LabelStep;
@@ -1098,8 +1097,10 @@ public final class TraversalUtil {
     }
 
     private static boolean changesCurrentElement(Step<?, ?> step) {
-        return step instanceof VertexStep || step instanceof EdgeVertexStep ||
-               step instanceof PropertiesStep;
+        // Edge endpoints can recover the source (outE().outV(), inE().inV(),
+        // bothV()). Do not admit EdgeVertexStep here or in the suffix allowlist:
+        // checking only that step is too late if outE() already ended the scan.
+        return step instanceof VertexStep || step instanceof PropertiesStep;
     }
 
     private static boolean onlyCurrentElementSuffix(List<Step> steps) {
@@ -1685,7 +1686,18 @@ public final class TraversalUtil {
             return (Iterator<V>) iterator;
         }
         Iterator<?> result = new FilterIterator<>(iterator, elem -> {
-            return HasContainer.testAll(elem, hasContainers);
+            for (HasContainer has : hasContainers) {
+                // Explicit-ID queries bypass backend label conversion. Keep the
+                // same name/Id/number semantics as backend and fallback queries.
+                boolean matches = T.label.getAccessor().equals(has.getKey()) &&
+                                  elem instanceof HugeElement ?
+                                  testLabelPredicate(has.getPredicate(),
+                                          ((HugeElement) elem).schemaLabel()) : has.test(elem);
+                if (!matches) {
+                    return false;
+                }
+            }
+            return true;
         });
         return (Iterator<V>) result;
     }
