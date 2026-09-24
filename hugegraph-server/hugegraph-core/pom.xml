@@ -29,7 +29,6 @@
 
     <properties>
         <top.level.dir>${basedir}/..</top.level.dir>
-        <jraft.version>1.3.11</jraft.version>
         <ohc.version>0.7.4</ohc.version>
         <jna.version>5.12.1</jna.version>
         <lz4.version>1.8.1</lz4.version>
