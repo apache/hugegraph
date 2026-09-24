@@ -150,9 +150,14 @@ public class StoreAPI extends API {
         return leaders;
     }
 
-    @GetMapping(value = "/balanceLeaders")
-    public Map<Integer, Long> balanceLeaders() throws PDException {
-        return pdRestService.balancePartitionLeader();
+    @GetMapping(value = "/balanceLeaders", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public String balanceLeaders() {
+        try {
+            return toJSON(pdRestService.balancePartitionLeader());
+        } catch (PDException e) {
+            return toJSON(e);
+        }
     }
 
     @DeleteMapping(value = "/store/{storeId}")
