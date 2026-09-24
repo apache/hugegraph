@@ -1057,7 +1057,7 @@ public final class TraversalUtil {
         // steps don't reliably expose element identity, so stay conservative.
         // FIXME(#3201): Restore selective pushdown when every candidate schema label
         // has compatible index coverage for extracted property predicates.
-        // Outside the proven root suffix below, negative labels can disable
+        // Outside proven root and child suffixes, negative labels can disable
         // property pushdown even across element changes (including ancestors
         // and unknown extension steps), potentially requiring a full scan.
         List<Step> steps = traversal.getSteps();
@@ -1163,7 +1163,16 @@ public final class TraversalUtil {
 
     private static boolean hasUnsafeLabelInChildTraversal(
             Traversal.Admin<?, ?> traversal, boolean negated) {
-        for (Step<?, ?> childStep : traversal.getSteps()) {
+        List<Step> steps = traversal.getSteps();
+        for (int i = 0; i < steps.size(); i++) {
+            Step<?, ?> childStep = steps.get(i);
+            // A child may filter a different element without constraining the
+            // source label. Only stop when the suffix cannot recover the source
+            // through select/path, repeat, or an unknown extension step.
+            if (changesCurrentElement(childStep) &&
+                onlyCurrentElementSuffix(steps.subList(i, steps.size()))) {
+                return false;
+            }
             if (childStep instanceof HasStep &&
                 hasUnsafeLabelPredicate((HasContainerHolder) childStep, negated)) {
                 return true;

@@ -10100,6 +10100,12 @@ public class VertexCoreTest extends BaseCoreTest {
         GraphTraversalSource g = graph.traversal();
         Assert.assertThrows(NoIndexException.class,
                             () -> g.V().has("unindexedProp", "x").toList());
+        Assert.assertThrows(NoIndexException.class,
+                            () -> g.V().has("unindexedProp", "x")
+                                   .where(__.out().hasLabel(P.neq("scanExcluded"))).toList());
+        Assert.assertThrows(NoIndexException.class,
+                            () -> g.V().has("unindexedProp", "x")
+                                   .not(__.out().hasLabel("scanExcluded")).toList());
         Assert.assertEquals(ImmutableList.of(match.id()),
                             g.V().has("unindexedProp", "x")
                              .hasLabel(P.neq("scanExcluded")).id().toList());

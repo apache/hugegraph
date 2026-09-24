@@ -21,6 +21,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Proxy;
 import java.util.Collections;
 import java.util.Set;
 
@@ -552,7 +554,7 @@ public class TraversalUtilOptimizeTest {
         for (P<?> label : new P<?>[]{P.eq("person"), P.within("person", "fan"),
                                     P.within(Collections.emptyList())}) {
             Traversal.Admin<?, ?> traversal = traversal(__.V().has(T.label, label).has("age", 18)
-                    .where(__.out().hasLabel(P.neq("software"))), graph);
+                    .where(__.hasLabel(P.neq("software"))), graph);
             HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
             TraversalUtil.extractHasContainer(source, traversal);
             Assert.assertEquals(1, source.getHasContainers().size());
@@ -718,7 +720,12 @@ public class TraversalUtilOptimizeTest {
     @Test
     public void testSearchPredicateDefaultCompatibility() throws Exception {
         Assert.assertTrue(HugeGraph.class.getMethod("searchPredicate", String.class).isDefault());
-        HugeGraph graph = Mockito.mock(HugeGraph.class, Mockito.CALLS_REAL_METHODS);
+        HugeGraph graph = (HugeGraph) Proxy.newProxyInstance(
+                HugeGraph.class.getClassLoader(), new Class<?>[]{HugeGraph.class},
+                (proxy, method, args) -> MethodHandles.privateLookupIn(
+                        method.getDeclaringClass(), MethodHandles.lookup())
+                        .unreflectSpecial(method, method.getDeclaringClass())
+                        .bindTo(proxy).invokeWithArguments(args));
         Assert.assertThrows(UnsupportedOperationException.class, () -> graph.searchPredicate("word"));
     }
 
@@ -804,6 +811,37 @@ public class TraversalUtilOptimizeTest {
                 __.V().has("city", "Beijing").as("a").out().select("a").hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().path().unfold().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().filter(__.select("a").hasLabel(P.neq("author")))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertFalse(hasContainer(source, "city"));
+            Assert.assertTrue(hasStepExists(admin, "city"));
+        }
+    }
+
+    @Test
+    public void testChildElementChangeKeepsSourceIndexPlan() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").where(__.out().hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").filter(__.out().hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").not(__.out().hasLabel("author")),
+                __.V().has("city", "Beijing")
+                  .where(__.outE().inV().hasLabel(P.neq("author")))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertTrue(hasContainer(source, "city"));
+            Assert.assertFalse(hasStepExists(admin, "city"));
+        }
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").where(__.hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").as("a")
+                  .where(__.out().select("a").hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing")
+                  .where(__.out().path().unfold().hasLabel(P.neq("author")))}) {
             Traversal.Admin<?, ?> admin = traversal(query, graph);
             HugeGraphStep<?, ?> source = replaceGraphStep(admin);
             TraversalUtil.extractHasContainer(source, admin);

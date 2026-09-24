@@ -774,6 +774,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
         Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
 
         List<? extends SchemaLabel> schemaLabels;
+        if (query.containsConditionValues(HugeKeys.LABEL) && labels.isEmpty()) {
+            // An empty intersection is not an unrestricted label query.
+            return Collections.emptySet();
+        }
         if (labels.size() == 1) {
             Id label = (Id) labels.iterator().next();
             // Query has one resolved LABEL condition
@@ -1841,7 +1845,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 Set<Object> indexValues = leftIndex.indexFieldValues();
                 IndexLabel indexLabel = this.findMatchedIndexLabel(query,
                                                                    leftIndex);
-                assert indexLabel != null;
+                if (indexLabel == null) {
+                    // No matching schema index remains for this stale entry.
+                    continue;
+                }
 
                 AbstractSerializer serializer = this.tx.serializer;
                 for (Object value : indexValues) {

@@ -17,9 +17,11 @@
 
 package org.apache.hugegraph.backend.tx;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.hugegraph.HugeFactory;
@@ -52,6 +54,31 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 public class GraphTransactionTest {
+
+    @Test
+    public void testRangeIndexCleanupWithoutMatchingLabel() throws Exception {
+        try (FilterFixture fixture = new FilterFixture()) {
+            ConditionQuery query = Mockito.spy(new ConditionQuery(HugeType.VERTEX));
+            query.eq(HugeKeys.LABEL, fixture.vertex.schemaLabel().id());
+            query.eq(HugeKeys.LABEL, IdGenerator.of(Long.MAX_VALUE));
+            Id field = fixture.graph.propertyKey("name").id();
+            ConditionQuery.LeftIndex left = new ConditionQuery.LeftIndex(
+                    Collections.singleton("stale"), field);
+            Mockito.doReturn(Collections.singleton(left)).when(query)
+                   .getLeftIndexOfElement(fixture.vertex.id());
+            Constructor<RemoveLeftIndexJob> constructor =
+                    RemoveLeftIndexJob.class.getDeclaredConstructor(
+                            ConditionQuery.class, HugeElement.class);
+            constructor.setAccessible(true);
+            RemoveLeftIndexJob job = constructor.newInstance(query, fixture.vertex);
+            Whitebox.setInternalState(job, "tx", fixture.transaction.indexTransaction());
+            Method process = RemoveLeftIndexJob.class.getDeclaredMethod(
+                    "processRangeIndexLeft", ConditionQuery.class, HugeElement.class);
+            process.setAccessible(true);
+            Assert.assertEquals(0L, process.invoke(job, query, fixture.vertex));
+            Mockito.verify(query).removeElementLeftIndex(fixture.vertex.id());
+        }
+    }
 
     @Test
     public void testResolvedEdgeLabelsInBatchResultFilter() throws Exception {
