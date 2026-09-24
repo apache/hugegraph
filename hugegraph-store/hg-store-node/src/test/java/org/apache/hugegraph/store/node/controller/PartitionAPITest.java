@@ -67,6 +67,24 @@ public class PartitionAPITest {
                             leaderRaft.getPeers());
     }
 
+    @Test
+    public void testGetPartitionsWhenLeaderStepsDown() {
+        // isLeader() still returns true, but the node stepped down before listPeers()
+        PartitionEngine steppedDown = mockEngine(1, true, false);
+        PartitionAPI api = newApi(steppedDown);
+
+        @SuppressWarnings("unchecked")
+        List<PartitionAPI.Raft> rafts =
+                (List<PartitionAPI.Raft>) api.getPartitions("").get("partitions");
+
+        Assert.assertEquals(1, rafts.size());
+        PartitionAPI.Raft raft = rafts.get(0);
+        Assert.assertEquals(1, raft.getGroupId());
+        Assert.assertNull(raft.getConf());
+        Assert.assertNull(raft.getPeers());
+        Assert.assertNull(raft.getLearners());
+    }
+
     private static PartitionAPI newApi(PartitionEngine... engines) {
         Map<Integer, PartitionEngine> partitionEngines = new LinkedHashMap<>();
         for (PartitionEngine engine : engines) {
@@ -84,10 +102,14 @@ public class PartitionAPITest {
     }
 
     private static PartitionEngine mockEngine(int groupId, boolean isLeader) {
+        return mockEngine(groupId, isLeader, isLeader);
+    }
+
+    private static PartitionEngine mockEngine(int groupId, boolean isLeader, boolean nodeLeads) {
         // Same contract as jraft NodeImpl: peer and learner lists are leader-only
         Node node = mock(Node.class);
         List<PeerId> peers = Collections.singletonList(PeerId.parsePeer("127.0.0.1:8510"));
-        if (isLeader) {
+        if (nodeLeads) {
             when(node.getNodeState()).thenReturn(State.STATE_LEADER);
             when(node.listPeers()).thenReturn(peers);
             when(node.listLearners()).thenReturn(Collections.emptyList());
@@ -102,7 +124,7 @@ public class PartitionAPITest {
         when(engine.isLeader()).thenReturn(isLeader);
         when(engine.getRaftNode()).thenReturn(node);
         when(engine.getPartitions()).thenReturn(Collections.emptyMap());
-        if (isLeader) {
+        if (nodeLeads) {
             when(engine.getCurrentConf()).thenReturn(new Configuration(peers));
         } else {
             when(engine.getCurrentConf()).thenThrow(new IllegalStateException(NOT_LEADER));
