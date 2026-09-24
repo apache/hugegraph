@@ -44,8 +44,7 @@ public class AuthOptions extends OptionHolder {
             new ConfigOption<>(
                     "auth.authenticator",
                     "The class path of authenticator implementation. " +
-                    "e.g., org.apache.hugegraph.auth.StandardAuthenticator, " +
-                    "or org.apache.hugegraph.auth.ConfigAuthenticator.",
+                    "e.g., org.apache.hugegraph.auth.StandardAuthenticator.",
                     null,
                     ""
             );
@@ -57,24 +56,6 @@ public class AuthOptions extends OptionHolder {
                     "like users, only for org.apache.hugegraph.auth.StandardAuthenticator.",
                     disallowEmpty(),
                     "hugegraph"
-            );
-
-    public static final ConfigOption<String> AUTH_ADMIN_TOKEN =
-            new ConfigOption<>(
-                    "auth.admin_token",
-                    "Token for administrator operations, " +
-                    "only for org.apache.hugegraph.auth.ConfigAuthenticator.",
-                    disallowEmpty(),
-                    "162f7848-0b6d-4faf-b557-3a0797869c55"
-            );
-
-    public static final ConfigListOption<String> AUTH_USER_TOKENS =
-            new ConfigListOption<>(
-                    "auth.user_tokens",
-                    "The map of user tokens with name and password, " +
-                    "only for org.apache.hugegraph.auth.ConfigAuthenticator.",
-                    disallowEmpty(),
-                    "hugegraph:9fd95c9c-711b-415b-b85f-d4df46ba5c31"
             );
 
     public static final ConfigOption<String> AUTH_REMOTE_URL =

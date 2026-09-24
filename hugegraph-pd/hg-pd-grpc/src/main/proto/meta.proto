@@ -1,0 +1,71 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+syntax = "proto3";
+package meta;
+option java_package = "org.apache.hugegraph.pd.grpc";
+import "google/protobuf/any.proto";
+import "metapb.proto";
+import "pd_common.proto";
+import "pdpb.proto";
+option java_multiple_files = true;
+
+service MetaService{
+  rpc getStores(NoArg) returns(Stores);
+  rpc getPartitions(NoArg) returns(Partitions);
+  rpc getShardGroups(NoArg) returns(ShardGroups);
+  rpc getGraphSpaces(NoArg) returns(GraphSpaces);
+  rpc getGraphs(NoArg) returns(Graphs);
+  rpc updateStore(metapb.Store) returns(VoidResponse);
+  rpc updatePartition(metapb.Partition) returns(VoidResponse);
+  rpc updateShardGroup(metapb.ShardGroup) returns(VoidResponse);
+  rpc updateGraphSpace(metapb.GraphSpace) returns(VoidResponse);
+  rpc updateGraph(metapb.Graph) returns(VoidResponse);
+}
+message Stores{
+  pdpb.ResponseHeader header = 1;
+  repeated metapb.Store data = 2;
+}
+message Partitions{
+  pdpb.ResponseHeader header = 1;
+  repeated metapb.Partition data = 2;
+}
+message ShardGroups{
+  pdpb.ResponseHeader header = 1;
+  repeated metapb.ShardGroup data = 2;
+}
+message Shards{
+  pdpb.ResponseHeader header = 1;
+  repeated metapb.Shard data = 2;
+}
+message GraphSpaces{
+  pdpb.ResponseHeader header = 1;
+  repeated metapb.GraphSpace data = 2;
+}
+message Graphs{
+  pdpb.ResponseHeader header = 1;
+  repeated metapb.Graph data = 2;
+}
+
+message DefaultResponse{
+  pdpb.ResponseHeader header = 1;
+  repeated google.protobuf.Any data = 2;
+}
+
+message VoidResponse{
+  pdpb.ResponseHeader header = 1;
+}

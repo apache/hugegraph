@@ -38,12 +38,30 @@ public class InnerKeyCreator {
 
     public int getGraphId(Integer partId, String graphName) throws HgStoreException {
         try {
+            GraphIdManager manager = graphIdCache.computeIfAbsent(partId,
+                                                                  id -> new GraphIdManager(
+                                                                          businessHandler, id));
+            return (int) manager.getGraphId(graphName);
+        } catch (
+                Exception e) {
+            throw new HgStoreException(HgStoreException.EC_RKDB_PD_FAIL, e.getMessage());
+        }
+    }
+
+    /**
+     * @param partId    partition id
+     * @param graphName graph name
+     * @return 65, 535 if absent
+     * @throws HgStoreException
+     */
+    public int getGraphIdOrCreate(Integer partId, String graphName) throws HgStoreException {
+        try {
             GraphIdManager manager;
             if ((manager = graphIdCache.get(partId)) == null) {
                 manager = new GraphIdManager(businessHandler, partId);
                 graphIdCache.put(partId, manager);
             }
-            return (int) manager.getGraphId(graphName);
+            return (int) manager.getGraphIdOrCreate(graphName);
         } catch (Exception e) {
             throw new HgStoreException(HgStoreException.EC_RKDB_PD_FAIL, e.getMessage());
         }
@@ -68,12 +86,35 @@ public class InnerKeyCreator {
         return Bits.getShort(innerKey, innerKey.length - Short.BYTES);
     }
 
+    public byte[] getKeyOrCreate(Integer partId, String graph, int code, byte[] key) {
+        int graphId = getGraphIdOrCreate(partId, graph);
+        byte[] buf = new byte[Short.BYTES + key.length + Short.BYTES];
+        Bits.putShort(buf, 0, graphId);
+        Bits.put(buf, Short.BYTES, key);
+        Bits.putShort(buf, key.length + Short.BYTES, code);
+        return buf;
+    }
+
     public byte[] getKey(Integer partId, String graph, int code, byte[] key) {
         int graphId = getGraphId(partId, graph);
         byte[] buf = new byte[Short.BYTES + key.length + Short.BYTES];
         Bits.putShort(buf, 0, graphId);
         Bits.put(buf, Short.BYTES, key);
         Bits.putShort(buf, key.length + Short.BYTES, code);
+        return buf;
+    }
+
+    /**
+     * @param partId
+     * @param graph
+     * @param key
+     * @return
+     */
+    public byte[] getKey(Integer partId, String graph, byte[] key) {
+        int graphId = getGraphId(partId, graph);
+        byte[] buf = new byte[Short.BYTES + key.length];
+        Bits.putShort(buf, 0, graphId);
+        Bits.put(buf, Short.BYTES, key);
         return buf;
     }
 

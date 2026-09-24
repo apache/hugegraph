@@ -50,7 +50,7 @@
 
     <developers>
         <developer>
-            <id>Apache Hugegraph(Incubating)</id>
+            <id>Apache HugeGraph</id>
             <email>dev-subscribe@hugegraph.apache.org</email>
             <url>https://hugegraph.apache.org/</url>
         </developer>
@@ -61,7 +61,7 @@
             <name>Developer List</name>
             <subscribe>dev-subscribe@hugegraph.apache.org</subscribe>
             <unsubscribe>dev-unsubscribe@hugegraph.apache.org</unsubscribe>
-            <post>dev@hugegraph.incubator.apache.org</post>
+            <post>dev@hugegraph.apache.org</post>
         </mailingList>
         <mailingList>
             <name>Commits List</name>
@@ -90,7 +90,8 @@
 
     <properties>
         <!-- Note: We need also update the version in CommonVersion.java & RpcVersion.java now -->
-        <revision>1.5.0</revision>
+        <!-- TODO: Remove the revision property below after verifying parent POM inheritance works correctly -->
+        <revision>1.7.0</revision>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <top.level.dir>${project.basedir}/..</top.level.dir>
         <compiler.source>1.8</compiler.source>

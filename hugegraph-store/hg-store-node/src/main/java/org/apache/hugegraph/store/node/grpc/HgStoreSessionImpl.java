@@ -26,13 +26,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.Metapb.GraphMode;
-import org.apache.hugegraph.rocksdb.access.ScanIterator;
-import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.grpc.common.Key;
 import org.apache.hugegraph.store.grpc.common.Kv;
 import org.apache.hugegraph.store.grpc.common.ResCode;
 import org.apache.hugegraph.store.grpc.common.ResStatus;
-import org.apache.hugegraph.store.grpc.session.Agg;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
 import org.apache.hugegraph.store.grpc.session.BatchGetReq;
 import org.apache.hugegraph.store.grpc.session.BatchReq;
@@ -45,7 +42,6 @@ import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc;
 import org.apache.hugegraph.store.grpc.session.KeyValueResponse;
 import org.apache.hugegraph.store.grpc.session.TableReq;
 import org.apache.hugegraph.store.grpc.session.ValueResponse;
-import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.meta.Graph;
 import org.apache.hugegraph.store.meta.GraphManager;
 import org.apache.hugegraph.store.node.AppConfig;
@@ -66,7 +62,7 @@ import lombok.extern.slf4j.Slf4j;
 @GRpcService
 public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBase {
 
-    @Autowired()
+    @Autowired
     private AppConfig appConfig;
     @Autowired
     private HgStoreNodeService storeService;
@@ -228,7 +224,8 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
                         GraphMode graphMode = graphState.getMode();
                         if (graphMode != null &&
                             graphMode.getNumber() == GraphMode.ReadOnly_VALUE) {
-                            // When in read-only state, getMetric the latest graph state from pd, the graph's read-only state will be updated in pd's notification.
+                            // When in read-only state, getMetric the latest graph state from pd,
+                            // the graph's read-only state will be updated in pd's notification.
                             Metapb.Graph pdGraph =
                                     pd.getPDClient().getGraph(graph);
                             Metapb.GraphState pdGraphState =
@@ -237,13 +234,15 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
                                 pdGraphState.getMode() != null &&
                                 pdGraphState.getMode().getNumber() ==
                                 GraphMode.ReadOnly_VALUE) {
-                                // Confirm that the current state stored in pd is also read-only, then inserting data is not allowed.
+                                // Confirm that the current state stored in pd is also read-only,
+                                // then inserting data is not allowed.
                                 throw new PDException(-1,
                                                       "the graph space size " +
                                                       "has " +
                                                       "reached the threshold");
                             }
-                            // pd status is inconsistent with local cache, update local cache to the status in pd
+                            // pd status is inconsistent with local cache, update local cache to
+                            // the status in pd
                             managerGraph.setProtoObj(pdGraph);
                         }
                     }
@@ -526,26 +525,5 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
             builder.setStatus(HgGrpc.fail(msg));
         }
         GrpcClosure.setResult(response, builder.build());
-    }
-
-    @Override
-    public void count(ScanStreamReq request, StreamObserver<Agg> observer) {
-        ScanIterator it = null;
-        try {
-            BusinessHandler handler = storeService.getStoreEngine().getBusinessHandler();
-            long count = handler.count(request.getHeader().getGraph(), request.getTable());
-            observer.onNext(Agg.newBuilder().setCount(count).build());
-            observer.onCompleted();
-        } catch (Exception e) {
-            observer.onError(e);
-        } finally {
-            if (it != null) {
-                try {
-                    it.close();
-                } catch (Exception e) {
-
-                }
-            }
-        }
     }
 }

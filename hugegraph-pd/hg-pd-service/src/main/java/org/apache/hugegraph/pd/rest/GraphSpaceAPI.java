@@ -46,6 +46,13 @@ public class GraphSpaceAPI extends API {
     @Autowired
     PDRestService pdRestService;
 
+    /**
+     * Get the list of graph spaces.
+     * Get the list of graph spaces via a GET request and return the results in JSON format.
+     *
+     * @return JSON format string of graph spaces.
+     * @throws PDException When an exception occurs while getting the list of graph spaces.
+     */
     @GetMapping(value = "/graph-spaces", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public String getGraphSpaces() {
@@ -58,6 +65,19 @@ public class GraphSpaceAPI extends API {
         }
     }
 
+    /**
+     * Set graph space configuration
+     * <p>
+     * Set the configuration information of the graph space, including the graph space name and storage limits, through a POST request.
+     * The request URL format is “/graph-spaces/**”, where “**” represents the name of the graph space,
+     * which will be used after URL decoding in the request body. The request and response content types are both JSON.
+     *
+     * @param body    Request body containing graph space configuration information, type is GraphSpaceRestRequest
+     * @param request HTTP request object used to obtain the request URL
+     * @return JSON string containing the configured graph space information, or error information in case of an exception
+     * @throws PDException If an exception occurs while setting the graph space configuration, it will be caught and returned as a JSON representation of the exception.
+     * @throws Exception If other exceptions occur while decoding the URL or processing the request, they will be caught and returned as a JSON representation of the exception.
+     */
     @PostMapping(value = "/graph-spaces/**", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -80,6 +100,16 @@ public class GraphSpaceAPI extends API {
         }
     }
 
+    /**
+     * Get graph space information
+     * <p>
+     * Get information about the specified graph space via an HTTP GET request and return it in JSON format.
+     *
+     * @param request HTTP request object used to obtain the request URL
+     * @return JSON string containing graph space information or error information
+     * @throws PDException If an exception occurs while obtaining graph space information, a PDException exception will be thrown
+     * @throws Exception If other exceptions occur while decoding the URL or processing the request, an Exception exception will be thrown
+     */
     @GetMapping(value = "/graph-spaces/**", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public String getGraphSpace(HttpServletRequest request) {

@@ -105,6 +105,15 @@ service PD {
 
   rpc getCache(GetGraphRequest) returns (CacheResponse)  {}
   rpc getPartitions(GetGraphRequest) returns (CachePartitionResponse)  {}
+
+  // Submit rebuild index task
+  rpc submitTask(IndexTaskCreateRequest) returns (IndexTaskCreateResponse) {}
+  // Check task status
+  rpc queryTaskState(IndexTaskQueryRequest) returns (IndexTaskQueryResponse) {}
+  // Retry index
+  rpc retryIndexTask(IndexTaskQueryRequest) returns (IndexTaskQueryResponse){}
+  rpc getGraphStats(GetGraphRequest) returns (GraphStatsResponse)  {}
+  rpc GetMembersAndClusterState(GetMembersRequest) returns (MembersAndClusterState) {}
 }
 
 message RequestHeader {
@@ -372,6 +381,13 @@ message GetMembersResponse{
   metapb.Member leader = 3;
 }
 
+message MembersAndClusterState{
+  ResponseHeader header = 1;
+  repeated metapb.Member members = 2;
+  metapb.Member leader = 3;
+  metapb.ClusterState state = 4;
+}
+
 message GetPDConfigRequest{
   RequestHeader header = 1;
   uint64 version = 2 ;
@@ -601,4 +617,31 @@ message CacheResponse {
 message CachePartitionResponse {
   ResponseHeader header = 1;
   repeated metapb.Partition partitions = 2;
+}
+
+
+message IndexTaskCreateRequest {
+  RequestHeader header = 1;
+  metapb.BuildIndexParam param = 2;
+}
+
+message IndexTaskCreateResponse {
+  ResponseHeader header = 1;
+  uint64 task_id = 2;
+}
+
+message IndexTaskQueryRequest {
+  RequestHeader header = 1;
+  uint64 task_id = 2;
+}
+
+message IndexTaskQueryResponse{
+  ResponseHeader header = 1;
+  metaTask.TaskState state = 2;
+  string message = 3;
+}
+
+message GraphStatsResponse {
+  ResponseHeader header = 1;
+  metapb.GraphStats stats = 2;
 }

@@ -43,6 +43,9 @@ public class HugeConfig extends PropertiesConfiguration {
 
     private static final Logger LOG = Log.logger(HugeConfig.class);
 
+    // Cache for URL normalization metadata (populated lazily per key)
+    private static final Map<String, String> URL_NORMALIZATIONS = new HashMap<>();
+
     private String configPath;
 
     public HugeConfig(Configuration config) {
@@ -87,9 +90,17 @@ public class HugeConfig extends PropertiesConfiguration {
     @SuppressWarnings("unchecked")
     public <T, R> R get(TypedOption<T, R> option) {
         Object value = this.getProperty(option.name());
+        boolean fromDefault = false;
+
         if (value == null) {
-            return option.defaultValue();
+            value = option.defaultValue();
+            fromDefault = true;
         }
+
+        if (!fromDefault) {
+            value = normalizeUrlOptionIfNeeded(option.name(), value);
+        }
+
         return (R) value;
     }
 
@@ -212,5 +223,87 @@ public class HugeConfig extends PropertiesConfiguration {
             throw new ConfigException("Unable to load config: '%s'",
                                       e, configFile);
         }
+    }
+
+    private static Object normalizeUrlOptionIfNeeded(String key, Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        String scheme = defaultSchemeFor(key);
+        if (scheme == null) {
+            return value;
+        }
+
+        // Normalize URL options if configured with .withUrlNormalization()
+        if (value instanceof String) {
+            String original = (String) value;
+            String normalized = prefixSchemeIfMissing(original, scheme);
+
+            if (!original.equals(normalized)) {
+                LOG.warn("Config '{}' is missing scheme, auto-corrected to '{}'",
+                         key, normalized);
+            }
+
+            return normalized;
+        }
+
+        // If it ever hits here, it means config storage returned a non-string type;
+        // leave it unchanged (safer than forcing toString()).
+        return value;
+    }
+
+    private static String defaultSchemeFor(String key) {
+        // Check if we already cached this key's scheme
+        if (URL_NORMALIZATIONS.containsKey(key)) {
+            return URL_NORMALIZATIONS.get(key);
+        }
+
+        // We don't know yet - look it up NOW from OptionSpace
+        synchronized (URL_NORMALIZATIONS) {
+            // Double-check after acquiring lock
+            if (URL_NORMALIZATIONS.containsKey(key)) {
+                return URL_NORMALIZATIONS.get(key);
+            }
+
+            // Look up the option from OptionSpace
+            TypedOption<?, ?> option = OptionSpace.get(key);
+            String scheme = null;
+
+            if (option instanceof ConfigOption) {
+                ConfigOption<?> configOption = (ConfigOption<?>) option;
+                if (configOption.needsUrlNormalization()) {
+                    scheme = configOption.getDefaultScheme();
+                }
+            }
+
+            // Cache it for next time (even if null)
+            URL_NORMALIZATIONS.put(key, scheme);
+            return scheme;
+        }
+    }
+
+    private static String prefixSchemeIfMissing(String raw, String scheme) {
+        if (raw == null) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.isEmpty()) {
+            return s;
+        }
+
+        int scIdx = s.indexOf("://");
+        if (scIdx > 0) {
+            // Normalize existing scheme to lowercase while preserving the rest
+            String existingScheme = s.substring(0, scIdx).toLowerCase();
+            String rest = s.substring(scIdx + 3); // skip the "://" delimiter
+            return existingScheme + "://" + rest;
+        }
+
+        String defaultScheme = scheme == null ? "" : scheme;
+        if (!defaultScheme.isEmpty() && !defaultScheme.endsWith("://")) {
+            defaultScheme = defaultScheme + "://";
+        }
+        return defaultScheme + s;
     }
 }

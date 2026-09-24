@@ -632,6 +632,26 @@ public class PropertyKeyCoreTest extends SchemaCoreTest {
     }
 
     @Test
+    public void testEliminatePropertyKeyCreateTimeUserdata() {
+        SchemaManager schema = graph().schema();
+
+        PropertyKey age = schema.propertyKey("age")
+                                .userdata("min", 0)
+                                .create();
+        Assert.assertEquals(2, age.userdata().size());
+        Assert.assertTrue(age.userdata().containsKey(Userdata.CREATE_TIME));
+
+        // "" is a key-only placeholder for eliminate; it must not be parsed
+        // as a date (regression: normalization on Userdata.put()).
+        age = schema.propertyKey("age")
+                    .userdata(Userdata.CREATE_TIME, "")
+                    .eliminate();
+        Assert.assertEquals(1, age.userdata().size());
+        Assert.assertFalse(age.userdata().containsKey(Userdata.CREATE_TIME));
+        Assert.assertEquals(0, age.userdata().get("min"));
+    }
+
+    @Test
     public void testUpdatePropertyKeyWithoutUserdata() {
         SchemaManager schema = graph().schema();
 

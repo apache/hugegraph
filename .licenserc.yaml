@@ -59,6 +59,7 @@ header: # `header` section is configurations for source codes license header.
     - 'LICENSE'
     - 'NOTICE'
     - 'DISCLAIMER'
+    - '.serena/**'
     - '**/*.versionsBackup'
     - '**/*.versionsBackup'
     - '**/*.proto'
@@ -100,6 +101,8 @@ header: # `header` section is configurations for source codes license header.
     - 'hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/tinkerpop/StructureBasicSuite.java'
     - 'hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/opencypher/CypherOpProcessor.java'
     - 'hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/opencypher/CypherPlugin.java'
+    - 'hugegraph-struct/src/main/java/org/apache/hugegraph/type/define/Cardinality.java'
+    - 'hugegraph-struct/src/main/java/org/apache/hugegraph/type/Namifiable.java'
   comment: on-failure # on what condition license-eye will comment on the pull request, `on-failure`, `always`, `never`.
 
   # license-location-threshold specifies the index threshold where the license header can be located,

@@ -45,7 +45,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/crosspoints")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/crosspoints")
 @Singleton
 @Tag(name = "CrosspointsAPI")
 public class CrosspointsAPI extends API {
@@ -56,6 +56,7 @@ public class CrosspointsAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @PathParam("graphspace") String graphSpace,
                       @PathParam("graph") String graph,
                       @QueryParam("source") String source,
                       @QueryParam("target") String target,
@@ -79,7 +80,7 @@ public class CrosspointsAPI extends API {
         Id targetId = VertexAPI.checkAndParseVertexId(target);
         Directions dir = Directions.convert(EdgeAPI.parseDirection(direction));
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         PathsTraverser traverser = new PathsTraverser(g);
         HugeTraverser.PathSet paths = traverser.paths(sourceId, dir, targetId,
                                                       dir, edgeLabel, depth,

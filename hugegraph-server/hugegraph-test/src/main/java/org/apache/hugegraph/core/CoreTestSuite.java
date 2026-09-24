@@ -17,10 +17,20 @@
 
 package org.apache.hugegraph.core;
 
-import org.apache.hugegraph.core.PropertyCoreTest.EdgePropertyCoreTest;
-import org.apache.hugegraph.core.PropertyCoreTest.VertexPropertyCoreTest;
+import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.constant.ServiceConstant;
+import org.apache.hugegraph.dist.RegisterUtil;
+import org.apache.hugegraph.masterelection.GlobalMasterInfo;
+import org.apache.hugegraph.meta.MetaManager;
+import org.apache.hugegraph.meta.PdMetaDriver;
+import org.apache.hugegraph.task.TaskAndResultSchedulerTest;
+import org.apache.hugegraph.testutil.Utils;
+import org.apache.hugegraph.util.Log;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
+import org.slf4j.Logger;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
@@ -30,15 +40,98 @@ import org.junit.runners.Suite;
         IndexLabelCoreTest.class,
         VertexCoreTest.class,
         EdgeCoreTest.class,
+        CountStrategyCoreTest.class,
+        PrimaryKeyStrategyCoreTest.class,
         ParentAndSubEdgeCoreTest.class,
-        VertexPropertyCoreTest.class,
-        EdgePropertyCoreTest.class,
+        PropertyCoreTest.VertexPropertyCoreTest.class,
+        PropertyCoreTest.EdgePropertyCoreTest.class,
         RestoreCoreTest.class,
         TaskCoreTest.class,
+        TaskAndResultSchedulerTest.class,
         AuthTest.class,
         MultiGraphsTest.class,
         RamTableTest.class
 })
 public class CoreTestSuite {
 
+    private static boolean registered = false;
+    private static volatile HugeGraph graph = null;
+
+    public static HugeGraph graph() {
+        if (graph == null) {
+            synchronized (CoreTestSuite.class) {
+                if (graph == null) {
+                    try {
+                        initEnv();
+                        init();
+                    } catch (Throwable e) {
+                        LOG.error("Failed to initialize HugeGraph instance", e);
+                        graph = null;
+                        throw new RuntimeException("Failed to initialize HugeGraph instance", e);
+                    }
+                    if (graph == null) {
+                        String msg = "HugeGraph instance is null after initialization. " +
+                                     "Please check Utils.open() configuration.";
+                        LOG.error(msg);
+                        throw new IllegalStateException(msg);
+                    }
+                }
+            }
+        }
+        return graph;
+    }
+
+    protected static final Logger LOG = Log.logger(CoreTestSuite.class);
+
+    @BeforeClass
+    public static void initEnv() {
+        if (registered) {
+            return;
+        }
+        RegisterUtil.registerBackends();
+        registered = true;
+    }
+
+    @BeforeClass
+    public static void init() {
+        PdMetaDriver.PDAuthConfig.setAuthority(ServiceConstant.SERVICE_NAME,
+                                               ServiceConstant.AUTHORITY);
+        graph = Utils.open();
+        graph.clearBackend();
+        graph.initBackend();
+        graph.serverStarted(GlobalMasterInfo.master("server-test"));
+
+        // Initialize DEFAULT graphspace for V2 tests
+        try {
+            MetaManager metaManager =
+                    MetaManager.instance();
+            if (metaManager.isReady()) {
+                metaManager.initDefaultGraphSpace();
+            }
+        } catch (Exception e) {
+            // MetaManager may not be initialized for non-hstore backends
+            LOG.debug(
+                    "Failed to initialize default graphspace (expected for non-hstore backends): " +
+                    "{}",
+                    e.getMessage());
+        }
+    }
+
+    @AfterClass
+    public static void clear() {
+        if (graph == null) {
+            return;
+        }
+
+        try {
+            graph.clearBackend();
+        } finally {
+            try {
+                graph.close();
+            } catch (Throwable e) {
+                LOG.error("Error when close()", e);
+            }
+            graph = null;
+        }
+    }
 }

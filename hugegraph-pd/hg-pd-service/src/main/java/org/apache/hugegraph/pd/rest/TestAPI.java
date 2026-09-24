@@ -31,6 +31,7 @@ import org.apache.hugegraph.pd.grpc.pulse.PartitionHeartbeatResponse;
 import org.apache.hugegraph.pd.meta.MetadataFactory;
 import org.apache.hugegraph.pd.meta.QueueStore;
 import org.apache.hugegraph.pd.pulse.PDPulseSubject;
+import org.apache.hugegraph.pd.watch.ChangeType;
 import org.apache.hugegraph.pd.watch.PDWatchSubject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -93,7 +94,7 @@ public class TestAPI {
     @GetMapping(value = "/partition", produces = MediaType.TEXT_PLAIN_VALUE)
     @ResponseBody
     public String noticePartition() {
-        PDWatchSubject.notifyPartitionChange(PDWatchSubject.ChangeType.ALTER, "graph-test", 99);
+        PDWatchSubject.notifyPartitionChange(ChangeType.ALTER, "graph-test", 99);
         return "partition";
     }
 

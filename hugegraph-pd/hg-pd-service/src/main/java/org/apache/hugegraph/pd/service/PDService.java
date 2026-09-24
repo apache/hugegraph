@@ -25,11 +25,21 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
+
+import com.alipay.sofa.jraft.util.OnlyForTest;
+
+import io.grpc.CallOptions;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.MethodDescriptor;
+
+import io.grpc.stub.AbstractBlockingStub;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.pd.ConfigService;
@@ -46,12 +56,15 @@ import org.apache.hugegraph.pd.TaskScheduleService;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
+import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Metapb.GraphStats;
 import org.apache.hugegraph.pd.grpc.PDGrpc;
 import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.grpc.Pdpb.CachePartitionResponse;
 import org.apache.hugegraph.pd.grpc.Pdpb.CacheResponse;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetGraphRequest;
+import org.apache.hugegraph.pd.grpc.Pdpb.GraphStatsResponse;
 import org.apache.hugegraph.pd.grpc.Pdpb.PutLicenseRequest;
 import org.apache.hugegraph.pd.grpc.Pdpb.PutLicenseResponse;
 import org.apache.hugegraph.pd.grpc.pulse.ChangeShard;
@@ -67,15 +80,20 @@ import org.apache.hugegraph.pd.grpc.watch.NodeEventType;
 import org.apache.hugegraph.pd.grpc.watch.WatchGraphResponse;
 import org.apache.hugegraph.pd.grpc.watch.WatchResponse;
 import org.apache.hugegraph.pd.grpc.watch.WatchType;
+import org.apache.hugegraph.pd.license.LicenseVerifierService;
 import org.apache.hugegraph.pd.pulse.PDPulseSubject;
 import org.apache.hugegraph.pd.pulse.PulseListener;
+import org.apache.hugegraph.pd.raft.PeerUtil;
 import org.apache.hugegraph.pd.raft.RaftEngine;
 import org.apache.hugegraph.pd.raft.RaftStateListener;
+import org.apache.hugegraph.pd.raft.auth.IpAuthHandler;
 import org.apache.hugegraph.pd.util.grpc.StreamObserverUtil;
 import org.apache.hugegraph.pd.watch.PDWatchSubject;
 import org.lognet.springboot.grpc.GRpcService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.CollectionUtils;
+
+import org.apache.hugegraph.pd.watch.ChangeType;
 
 import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Status;
@@ -89,9 +107,10 @@ import lombok.extern.slf4j.Slf4j;
 // TODO: uncomment later - remove license verifier service now
 @Slf4j
 @GRpcService
-public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftStateListener {
+public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
 
     static String TASK_ID_KEY = "task_id";
+    private static final String BUILD_INDEX_TASK_ID_KEY = "build_index_task_key";
     private final Pdpb.ResponseHeader okHeader = Pdpb.ResponseHeader.newBuilder().setError(
             Pdpb.Error.newBuilder().setType(Pdpb.ErrorType.OK)).build();
     // private ManagedChannel channel;
@@ -104,9 +123,8 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     private IdService idService;
     private ConfigService configService;
     private LogService logService;
-    //private LicenseVerifierService licenseVerifierService;
+    private LicenseVerifierService licenseVerifierService;
     private StoreMonitorDataService storeMonitorDataService;
-    private ManagedChannel channel;
 
     private Pdpb.ResponseHeader newErrorHeader(int errorCode, String errorMsg) {
         Pdpb.ResponseHeader header = Pdpb.ResponseHeader.newBuilder().setError(
@@ -145,9 +163,14 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         return logService;
     }
 
-    //public LicenseVerifierService getLicenseVerifierService() {
-    //    return licenseVerifierService;
-    //}
+    public LicenseVerifierService getLicenseVerifierService() {
+        return licenseVerifierService;
+    }
+
+    @OnlyForTest
+    public void setInitConfig(PDConfig pdConfig) {
+        this.pdConfig = pdConfig;
+    }
 
     /**
      * initialize
@@ -167,9 +190,9 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         idService = new IdService(pdConfig);
         logService = new LogService(pdConfig);
         storeMonitorDataService = new StoreMonitorDataService(pdConfig);
-        //if (licenseVerifierService == null) {
-        //    licenseVerifierService = new LicenseVerifierService(pdConfig);
-        //}
+        if (licenseVerifierService == null) {
+            licenseVerifierService = new LicenseVerifierService(pdConfig);
+        }
         RaftEngine.getInstance().addStateListener(partitionService);
         pdConfig.setIdService(idService);
 
@@ -192,7 +215,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         });
 
         /**
-         // Listen for partition commands and forward them to Store
+         * Listen for partition commands and forward them to Store
          */
         partitionService.addInstructionListener(new PartitionInstructionListener() {
             private PartitionHeartbeatResponse.Builder getBuilder(Metapb.Partition partition) throws
@@ -259,14 +282,13 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         partitionService.addStatusListener(new PartitionStatusListener() {
             @Override
             public void onPartitionChanged(Metapb.Partition old, Metapb.Partition partition) {
-                PDWatchSubject.notifyPartitionChange(PDWatchSubject.ChangeType.ALTER,
+                PDWatchSubject.notifyPartitionChange(ChangeType.ALTER,
                                                      partition.getGraphName(), partition.getId());
             }
 
             @Override
             public void onPartitionRemoved(Metapb.Partition partition) {
-                PDWatchSubject.notifyPartitionChange(PDWatchSubject.ChangeType.DEL,
-                                                     partition.getGraphName(),
+                PDWatchSubject.notifyPartitionChange(ChangeType.DEL, partition.getGraphName(),
                                                      partition.getId());
 
             }
@@ -276,20 +298,26 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             @Override
             public void onShardListChanged(Metapb.ShardGroup shardGroup,
                                            Metapb.ShardGroup newShardGroup) {
+                if (shardGroup == null && newShardGroup == null) {
+                    return;
+                }
+
                 // invoked before change, saved to db and update cache.
                 if (newShardGroup == null) {
-                    PDWatchSubject.notifyShardGroupChange(PDWatchSubject.ChangeType.DEL,
-                                                          shardGroup.getId(),
+                    PDWatchSubject.notifyShardGroupChange(ChangeType.DEL, shardGroup.getId(),
                                                           shardGroup);
+                } else if (shardGroup == null) {
+                    PDWatchSubject.notifyShardGroupChange(ChangeType.ADD,
+                                                          newShardGroup.getId(), newShardGroup);
                 } else {
-                    PDWatchSubject.notifyShardGroupChange(PDWatchSubject.ChangeType.ALTER,
+                    PDWatchSubject.notifyShardGroupChange(ChangeType.ALTER,
                                                           shardGroup.getId(), newShardGroup);
                 }
             }
 
             @Override
             public void onShardListOp(Metapb.ShardGroup shardGroup) {
-                PDWatchSubject.notifyShardGroupChange(PDWatchSubject.ChangeType.USER_DEFINED,
+                PDWatchSubject.notifyShardGroupChange(ChangeType.USER_DEFINED,
                                                       shardGroup.getId(), shardGroup);
             }
         });
@@ -363,6 +391,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             response = Pdpb.RegisterStoreResponse.newBuilder().setHeader(newErrorHeader(e)).build();
             log.error("registerStore exception: ", e);
         }
+        // Retrieve all partition information and return it.
         observer.onNext(response);
         observer.onCompleted();
 
@@ -397,7 +426,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Modify information such as the status of the store.
      * </pre>
      */
-    @Override
     public void setStore(Pdpb.SetStoreRequest request,
                          StreamObserver<Pdpb.SetStoreResponse> observer) {
         if (!isLeader()) {
@@ -454,7 +482,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
                     }
                 }
                 try {
-                    //licenseVerifierService.verify(cores, nodeCount);
+                    licenseVerifierService.verify(cores, nodeCount);
                 } catch (Exception e) {
                     Metapb.Store store = Metapb.Store.newBuilder(request.getStore())
                                                      .setState(Metapb.StoreState.Pending).build();
@@ -508,6 +536,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
                                           "the partitions of current store!");
                 }
             }
+            // Replace license using grpc
             store = storeNodeService.updateStore(store);
             response =
                     Pdpb.SetStoreResponse.newBuilder().setHeader(okHeader).setStore(store).build();
@@ -566,13 +595,13 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             } catch (PDException e) {
                 log.error("save status failed, state:{}", stats);
             }
-            // remove system_metrics
-            stats = Metapb.StoreStats.newBuilder()
-                                     .mergeFrom(request.getStats())
-                                     .clearField(Metapb.StoreStats.getDescriptor().findFieldByName(
-                                             "system_metrics"))
-                                     .build();
         }
+
+        // remove system_metrics
+        stats = Metapb.StoreStats.newBuilder()
+                                 .mergeFrom(request.getStats())
+                                 .clearSystemMetrics()
+                                 .build();
 
         Pdpb.StoreHeartbeatResponse response = null;
         try {
@@ -686,7 +715,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Update partition information, mainly used to update the partition key range, call this API with caution, otherwise it will cause data loss.
      * </pre>
      */
-    @Override
     public void updatePartition(Pdpb.UpdatePartitionRequest request,
                                 io.grpc.stub.StreamObserver<Pdpb.UpdatePartitionResponse> observer) {
         if (!isLeader()) {
@@ -723,7 +751,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
                                                                            request.getPartitionId());
             if (partition != null) {
                 partitionService.removePartition(request.getGraphName(),
-                                                 request.getPartitionId());
+                                                 (int) request.getPartitionId());
                 response = Pdpb.DelPartitionResponse.newBuilder().setHeader(okHeader)
                                                     .setPartition(partition)
                                                     .build();
@@ -770,7 +798,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     /**
      * Get graph information
      */
-    @Override
     public void getGraph(GetGraphRequest request,
                          io.grpc.stub.StreamObserver<Pdpb.GetGraphResponse> observer) {
         if (!isLeader()) {
@@ -801,7 +828,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     /**
      * Modify the diagram information
      */
-    @Override
     public void setGraph(Pdpb.SetGraphRequest request,
                          io.grpc.stub.StreamObserver<Pdpb.SetGraphResponse> observer) {
         if (!isLeader()) {
@@ -825,7 +851,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     /**
      * Get graph information
      */
-    @Override
     public void delGraph(Pdpb.DelGraphRequest request,
                          io.grpc.stub.StreamObserver<Pdpb.DelGraphResponse> observer) {
         if (!isLeader()) {
@@ -854,7 +879,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Query partition information based on conditions, such as Store and Graph
      * </pre>
      */
-    @Override
     public void queryPartitions(Pdpb.QueryPartitionsRequest request,
                                 io.grpc.stub.StreamObserver<Pdpb.QueryPartitionsResponse> observer) {
         if (!isLeader()) {
@@ -945,7 +969,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     /**
      * Obtain cluster member information
      */
-    @Override
     public void getMembers(Pdpb.GetMembersRequest request,
                            io.grpc.stub.StreamObserver<Pdpb.GetMembersResponse> observer) {
         if (!isLeader()) {
@@ -1112,7 +1135,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Data fragmentation
      * </pre>
      */
-    @Override
     public void splitData(Pdpb.SplitDataRequest request,
                           StreamObserver<Pdpb.SplitDataResponse> observer) {
         if (!isLeader()) {
@@ -1157,7 +1179,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     /**
      * Balance data between stores
      */
-    @Override
     public void movePartition(Pdpb.MovePartitionRequest request,
                               StreamObserver<Pdpb.MovePartitionResponse> observer) {
         if (!isLeader()) {
@@ -1183,7 +1204,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Obtain the cluster health status
      * </pre>
      */
-    @Override
     public void getClusterStats(Pdpb.GetClusterStatsRequest request,
                                 io.grpc.stub.StreamObserver<Pdpb.GetClusterStatsResponse> observer) {
         if (!isLeader()) {
@@ -1203,7 +1223,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Report the results of tasks such as partition splitting
      * </pre>
      */
-    @Override
     public void reportTask(Pdpb.ReportTaskRequest request,
                            io.grpc.stub.StreamObserver<Pdpb.ReportTaskResponse> observer) {
         if (!isLeader()) {
@@ -1224,7 +1243,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     /**
      *
      */
-    @Override
     public void getPartitionStats(Pdpb.GetPartitionStatsRequest request,
                                   io.grpc.stub.StreamObserver<Pdpb.GetPartitionStatsResponse> observer) {
         if (!isLeader()) {
@@ -1248,37 +1266,43 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         observer.onCompleted();
     }
 
-    @Override
     public boolean isLeader() {
         return RaftEngine.getInstance().isLeader();
     }
 
-    //private <ReqT, RespT, StubT extends AbstractBlockingStub<StubT>> void redirectToLeader(
-    //        MethodDescriptor<ReqT, RespT> method, ReqT req, io.grpc.stub.StreamObserver<RespT>
-    //        observer) {
-    //    try {
-    //        var addr = RaftEngine.getInstance().getLeaderGrpcAddress();
-    //        ManagedChannel channel;
-    //
-    //        if ((channel = channelMap.get(addr)) == null) {
-    //            synchronized (this) {
-    //                if ((channel = channelMap.get(addr)) == null|| channel.isShutdown()) {
-    //                    channel = ManagedChannelBuilder
-    //                            .forTarget(addr).usePlaintext()
-    //                            .build();
-    //                }
-    //            }
-    //            log.info("Grpc get leader address {}", RaftEngine.getInstance()
-    //            .getLeaderGrpcAddress());
-    //        }
-    //
-    //        io.grpc.stub.ClientCalls.asyncUnaryCall(channel.newCall(method, CallOptions
-    //        .DEFAULT), req,
-    //                                                observer);
-    //    } catch (Exception e) {
-    //        e.printStackTrace();
-    //    }
-    //}
+    private <ReqT, RespT, StubT extends AbstractBlockingStub<StubT>> void redirectToLeader(
+            MethodDescriptor<ReqT, RespT> method, ReqT req,
+            io.grpc.stub.StreamObserver<RespT> observer) {
+        try {
+            var addr = RaftEngine.getInstance().getLeaderGrpcAddress();
+            ManagedChannel channel;
+
+            if ((channel = channelMap.get(addr)) == null || channel.isTerminated() ||
+                channel.isShutdown()) {
+                synchronized (this) {
+                    if ((channel = channelMap.get(addr)) == null || channel.isTerminated() ||
+                        channel.isShutdown()) {
+                        while (channel != null && channel.isShutdown() && !channel.isTerminated()) {
+                            channel.awaitTermination(50, TimeUnit.MILLISECONDS);
+                        }
+
+                        channel = ManagedChannelBuilder
+                                .forTarget(addr).usePlaintext()
+                                .build();
+                        channelMap.put(addr, channel);
+                    }
+                }
+                log.info("Grpc get leader address {}",
+                         RaftEngine.getInstance().getLeaderGrpcAddress());
+            }
+
+            io.grpc.stub.ClientCalls.asyncUnaryCall(channel.newCall(method, CallOptions.DEFAULT),
+                                                    req,
+                                                    observer);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
     /**
      * Renewal peerList
@@ -1313,11 +1337,10 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
     public synchronized void onRaftLeaderChanged() {
         log.info("onLeaderChanged");
         // channel = null;
-        // TODO: uncomment later
-        //if (licenseVerifierService == null) {
-        //    licenseVerifierService = new LicenseVerifierService(pdConfig);
-        //}
-        //licenseVerifierService.init();
+        if (licenseVerifierService == null) {
+            licenseVerifierService = new LicenseVerifierService(pdConfig);
+        }
+        licenseVerifierService.init();
 
         try {
             PDWatchSubject.notifyNodeChange(NodeEventType.NODE_EVENT_TYPE_PD_LEADER_CHANGE,
@@ -1340,7 +1363,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             taskService.balancePartitionLeader(true);
             response = Pdpb.BalanceLeadersResponse.newBuilder().setHeader(okHeader).build();
         } catch (PDException e) {
-            log.error("balance Leaders exception: ", e);
+            log.error("balance Leaders exception {}", e);
             response =
                     Pdpb.BalanceLeadersResponse.newBuilder().setHeader(newErrorHeader(e)).build();
         }
@@ -1368,12 +1391,12 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             }
             FileUtils.writeByteArrayToFile(licenseFile, content, false);
         } catch (Exception e) {
-            log.error("putLicense with error:", e);
+            log.error("putLicense with error: {}", e);
             if (moved) {
                 try {
                     FileUtils.moveFile(bakFile, licenseFile);
                 } catch (IOException ex) {
-                    log.error("failed to restore the license file:", ex);
+                    log.error("failed to restore the license file.{}", ex);
                 }
             }
             Pdpb.ResponseHeader header =
@@ -1396,6 +1419,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         try {
             Metapb.Store store = storeNodeService.getStore(storeId);
             if (Metapb.StoreState.Tombstone == store.getState()) {
+                // Only stores that have been taken offline (Tombstone) can be deleted.
                 storeNodeService.removeStore(storeId);
                 response = Pdpb.DetStoreResponse.newBuilder()
                                                 .setHeader(okHeader)
@@ -1453,8 +1477,8 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             long totalAvaible = 0L;
             // Statistics on the current storage space
             for (Metapb.Store store : storeNodeService.getStores()) {
-                List<Metapb.GraphStats> graphStatsList = store.getStats().getGraphStatsList();
-                for (Metapb.GraphStats graphStats : graphStatsList) {
+                List<GraphStats> graphStatsList = store.getStats().getGraphStatsList();
+                for (GraphStats graphStats : graphStatsList) {
                     currentDataSize += graphStats.getApproximateSize();
                 }
             }
@@ -1479,7 +1503,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
      * Compaction on rocksdb
      * </pre>
      */
-    @Override
     public void dbCompaction(Pdpb.DbCompactionRequest request,
                              StreamObserver<Pdpb.DbCompactionResponse> observer) {
         if (!isLeader()) {
@@ -1564,7 +1587,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         observer.onCompleted();
     }
 
-    @Override
     public void getShardGroup(Pdpb.GetShardGroupRequest request,
                               io.grpc.stub.StreamObserver<Pdpb.GetShardGroupResponse> observer) {
         if (!isLeader()) {
@@ -1654,7 +1676,6 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         observer.onCompleted();
     }
 
-    @Override
     public void updatePdRaft(Pdpb.UpdatePdRaftRequest request,
                              StreamObserver<Pdpb.UpdatePdRaftResponse> observer) {
         if (!isLeader()) {
@@ -1662,7 +1683,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             return;
         }
 
-        var list = parseConfig(request.getConfig());
+        var list = PeerUtil.parseConfig(request.getConfig());
 
         log.info("update raft request: {}, list: {}", request.getConfig(), list);
 
@@ -1679,7 +1700,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
                 // change leader
                 var peers = new HashSet<>(node.listPeers());
 
-                if (!peerEquals(leaderPeer, node.getLeaderId())) {
+                if (!PeerUtil.isPeerEquals(leaderPeer, node.getLeaderId())) {
                     if (peers.contains(leaderPeer)) {
                         log.info("updatePdRaft, transfer to {}", leaderPeer);
                         node.transferLeadershipTo(leaderPeer);
@@ -1716,6 +1737,17 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
             node.changePeers(config, status -> {
                 if (status.isOk()) {
                     log.info("updatePdRaft, change peers success");
+                    // Refresh IpAuthHandler so newly added peers are not blocked
+                    IpAuthHandler handler = IpAuthHandler.getInstance();
+                    if (handler != null) {
+                        Set<String> newIps = new HashSet<>();
+                        config.getPeers().forEach(p -> newIps.add(p.getIp()));
+                        config.getLearners().forEach(p -> newIps.add(p.getIp()));
+                        handler.refresh(newIps);
+                        log.info("IpAuthHandler refreshed after updatePdRaft peer change");
+                    } else {
+                        log.warn("IpAuthHandler not initialized, skipping refresh");
+                    }
                 } else {
                     log.error("changePeers status: {}, msg:{}, code: {}, raft error:{}",
                               status, status.getErrorMsg(), status.getCode(),
@@ -1760,36 +1792,229 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         observer.onCompleted();
     }
 
-    private List<KVPair<String, PeerId>> parseConfig(String conf) {
-        List<KVPair<String, PeerId>> result = new LinkedList<>();
-
-        if (conf != null && conf.length() > 0) {
-            for (var s : conf.split(",")) {
-                if (s.endsWith("/leader")) {
-                    result.add(new KVPair<>("leader",
-                                            JRaftUtils.getPeerId(s.substring(0, s.length() - 7))));
-                } else if (s.endsWith("/learner")) {
-                    result.add(new KVPair<>("learner",
-                                            JRaftUtils.getPeerId(s.substring(0, s.length() - 8))));
-                } else if (s.endsWith("/follower")) {
-                    result.add(new KVPair<>("follower",
-                                            JRaftUtils.getPeerId(s.substring(0, s.length() - 9))));
-                } else {
-                    result.add(new KVPair<>("follower", JRaftUtils.getPeerId(s)));
+    @Override
+    public void getGraphStats(GetGraphRequest request,
+                              io.grpc.stub.StreamObserver<GraphStatsResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getGetGraphStatsMethod(), request, observer);
+            return;
+        }
+        String graphName = request.getGraphName();
+        GraphStatsResponse.Builder builder = GraphStatsResponse.newBuilder();
+        try {
+            List<Metapb.Store> stores = storeNodeService.getStores(graphName);
+            long dataSize = 0;
+            long keySize = 0;
+            for (Metapb.Store store : stores) {
+                List<GraphStats> gss = store.getStats().getGraphStatsList();
+                if (gss.size() > 0) {
+                    String gssGraph = gss.get(0).getGraphName();
+                    String suffix = "/g";
+                    if (gssGraph.split("/").length > 2 && !graphName.endsWith(suffix)) {
+                        graphName += suffix;
+                    }
+                    for (GraphStats gs : gss) {
+                        boolean nameEqual = graphName.equals(gs.getGraphName());
+                        boolean roleEqual = Metapb.ShardRole.Leader.equals(gs.getRole());
+                        if (nameEqual && roleEqual) {
+                            dataSize += gs.getApproximateSize();
+                            keySize += gs.getApproximateKeys();
+                        }
+                    }
                 }
             }
+            GraphStats stats = GraphStats.newBuilder().setApproximateSize(dataSize)
+                                         .setApproximateKeys(keySize)
+                                         .setGraphName(request.getGraphName())
+                                         .build();
+            builder.setStats(stats);
+        } catch (PDException e) {
+            builder.setHeader(newErrorHeader(e));
         }
-
-        return result;
+        observer.onNext(builder.build());
+        observer.onCompleted();
     }
 
-    private boolean peerEquals(PeerId p1, PeerId p2) {
-        if (p1 == null && p2 == null) {
-            return true;
+    @Override
+    public void getMembersAndClusterState(Pdpb.GetMembersRequest request,
+                                          io.grpc.stub.StreamObserver<Pdpb.MembersAndClusterState> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getGetMembersAndClusterStateMethod(), request, observer);
+            return;
         }
-        if (p1 == null || p2 == null) {
-            return false;
+        Pdpb.MembersAndClusterState response;
+        try {
+            response = Pdpb.MembersAndClusterState.newBuilder()
+                                                  .addAllMembers(
+                                                          RaftEngine.getInstance().getMembers())
+                                                  .setLeader(
+                                                          RaftEngine.getInstance().getLocalMember())
+                                                  .setState(storeNodeService.getClusterStats()
+                                                                            .getState())
+                                                  .build();
+
+        } catch (Exception e) {
+            log.error("getMembers exception: ", e);
+            response = Pdpb.MembersAndClusterState.newBuilder()
+                                                  .setHeader(newErrorHeader(-1, e.getMessage()))
+                                                  .build();
         }
-        return Objects.equals(p1.getIp(), p2.getIp()) && Objects.equals(p1.getPort(), p2.getPort());
+        observer.onNext(response);
+        observer.onCompleted();
+    }
+
+    @Override
+    public void submitTask(Pdpb.IndexTaskCreateRequest request,
+                           StreamObserver<Pdpb.IndexTaskCreateResponse> observer) {
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getSubmitTaskMethod(), request, observer);
+            return;
+        }
+
+        var builder = Pdpb.IndexTaskCreateResponse.newBuilder();
+        var param = request.getParam();
+        try {
+            var partitions = partitionService.getPartitions(param.getGraph());
+
+            if (partitions.isEmpty()) {
+                throw new PDException(-1, "graph has no partition");
+            }
+
+            var newTaskId = idService.getId(BUILD_INDEX_TASK_ID_KEY, 1);
+
+            var taskInfo = storeNodeService.getTaskInfoMeta();
+            for (var partition : partitions) {
+                var buildIndex = Metapb.BuildIndex.newBuilder()
+                                                  .setPartitionId(partition.getId())
+                                                  .setTaskId(newTaskId)
+                                                  .setParam(param)
+                                                  .build();
+
+                var task = MetaTask.Task.newBuilder()
+                                        .setId(newTaskId)
+                                        .setType(MetaTask.TaskType.Build_Index)
+                                        .setState(MetaTask.TaskState.Task_Doing)
+                                        .setStartTimestamp(System.currentTimeMillis())
+                                        .setPartition(partition)
+                                        .setBuildIndex(buildIndex)
+                                        .build();
+
+                taskInfo.updateBuildIndexTask(task);
+
+                log.info("notify client build index task: {}", buildIndex);
+
+                PDPulseSubject.notifyClient(PartitionHeartbeatResponse.newBuilder()
+                                                                      .setPartition(partition)
+                                                                      .setId(idService.getId(
+                                                                              TASK_ID_KEY, 1))
+                                                                      .setBuildIndex(buildIndex));
+            }
+            observer.onNext(builder.setHeader(okHeader).setTaskId(newTaskId).build());
+        } catch (PDException e) {
+            log.error("IndexTaskGrpcService.submitTask", e);
+            observer.onNext(builder.setHeader(newErrorHeader(e)).build());
+        }
+        observer.onCompleted();
+    }
+
+    @Override
+    public void queryTaskState(org.apache.hugegraph.pd.grpc.Pdpb.IndexTaskQueryRequest request,
+                               StreamObserver<org.apache.hugegraph.pd.grpc.Pdpb.IndexTaskQueryResponse> observer) {
+
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getQueryTaskStateMethod(), request, observer);
+            return;
+        }
+
+        var taskInfo = storeNodeService.getTaskInfoMeta();
+        var builder = Pdpb.IndexTaskQueryResponse.newBuilder();
+
+        try {
+            var tasks = taskInfo.scanBuildIndexTask(request.getTaskId());
+
+            if (tasks.size() == 0) {
+                builder.setHeader(okHeader).setState(MetaTask.TaskState.Task_Unknown)
+                       .setMessage("task not found");
+            } else {
+                var state = MetaTask.TaskState.Task_Success;
+                String message = "OK";
+                int countOfSuccess = 0;
+                int countOfDoing = 0;
+
+                for (var task : tasks) {
+                    var state0 = task.getState();
+                    if (state0 == MetaTask.TaskState.Task_Failure) {
+                        state = MetaTask.TaskState.Task_Failure;
+                        message = task.getMessage();
+                        break;
+                    } else if (state0 == MetaTask.TaskState.Task_Doing) {
+                        state = MetaTask.TaskState.Task_Doing;
+                        countOfDoing++;
+                    } else if (state0 == MetaTask.TaskState.Task_Success) {
+                        countOfSuccess++;
+                    }
+                }
+
+                if (state == MetaTask.TaskState.Task_Doing) {
+                    message = "Doing/" + countOfDoing + ", Success/" + countOfSuccess;
+                }
+
+                builder.setHeader(okHeader).setState(state).setMessage(message);
+            }
+        } catch (PDException e) {
+            builder.setHeader(newErrorHeader(e));
+        }
+
+        observer.onNext(builder.build());
+        observer.onCompleted();
+    }
+
+    @Override
+    public void retryIndexTask(Pdpb.IndexTaskQueryRequest request,
+                               StreamObserver<Pdpb.IndexTaskQueryResponse> observer) {
+
+        if (!isLeader()) {
+            redirectToLeader(PDGrpc.getRetryIndexTaskMethod(), request, observer);
+            return;
+        }
+
+        var taskInfo = storeNodeService.getTaskInfoMeta();
+        var builder = Pdpb.IndexTaskQueryResponse.newBuilder();
+        var taskId = request.getTaskId();
+
+        try {
+            var tasks = taskInfo.scanBuildIndexTask(taskId);
+
+            if (tasks.size() == 0) {
+                builder.setHeader(okHeader).setState(MetaTask.TaskState.Task_Failure)
+                       .setMessage("task not found");
+            } else {
+                var state = MetaTask.TaskState.Task_Success;
+                String message = "OK";
+                for (var task : tasks) {
+                    var state0 = task.getState();
+                    if (state0 == MetaTask.TaskState.Task_Failure ||
+                        state0 == MetaTask.TaskState.Task_Doing) {
+                        var partition = task.getPartition();
+                        var buildIndex = task.getBuildIndex();
+
+                        log.info("notify client retry build index task: {}", buildIndex);
+
+                        PDPulseSubject.notifyClient(PartitionHeartbeatResponse.newBuilder()
+                                                                              .setPartition(
+                                                                                      partition)
+                                                                              .setId(task.getId())
+                                                                              .setBuildIndex(
+                                                                                      buildIndex));
+                    }
+                }
+                builder.setHeader(okHeader).setState(state).setMessage(message);
+            }
+        } catch (PDException e) {
+            builder.setHeader(newErrorHeader(e));
+        }
+
+        observer.onNext(builder.build());
+        observer.onCompleted();
     }
 }

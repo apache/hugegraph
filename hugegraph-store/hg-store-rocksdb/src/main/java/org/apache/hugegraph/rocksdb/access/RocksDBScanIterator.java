@@ -20,6 +20,7 @@ package org.apache.hugegraph.rocksdb.access;
 import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBSession.BackendColumn;
 import org.apache.hugegraph.util.Bytes;
@@ -39,11 +40,13 @@ public class RocksDBScanIterator<T> implements ScanIterator {
 
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final RocksDBSession.RefCounter iterReference;
+    private final Consumer<Boolean> closeOp;
     private byte[] key;
     private boolean matched;
 
     public RocksDBScanIterator(RocksIterator rawIt, byte[] keyBegin, byte[] keyEnd,
-                               int scanType, RocksDBSession.RefCounter iterReference) {
+                               int scanType, RocksDBSession.RefCounter iterReference,
+                               Consumer<Boolean> closeOp) {
         this.rawIt = rawIt;
         this.keyBegin = keyBegin;
         this.keyEnd = keyEnd;
@@ -52,6 +55,7 @@ public class RocksDBScanIterator<T> implements ScanIterator {
         this.key = keyBegin;
         this.matched = false;
         this.iterReference = iterReference;
+        this.closeOp = closeOp;
         this.seek();
     }
 
@@ -226,6 +230,7 @@ public class RocksDBScanIterator<T> implements ScanIterator {
             if (this.rawIt.isOwningHandle()) {
                 this.rawIt.close();
             }
+            this.closeOp.accept(true);
             this.iterReference.release();
         }
     }

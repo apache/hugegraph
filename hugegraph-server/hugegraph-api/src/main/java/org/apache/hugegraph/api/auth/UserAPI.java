@@ -20,7 +20,6 @@ package org.apache.hugegraph.api.auth;
 import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.auth.HugeUser;
@@ -38,6 +37,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -52,7 +53,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/auth/users")
+@Path("graphspaces/{graphspace}/auth/users")
 @Singleton
 @Tag(name = "UserAPI")
 public class UserAPI extends API {
@@ -65,15 +66,15 @@ public class UserAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
-                         @PathParam("graph") String graph,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
                          JsonUser jsonUser) {
-        LOG.debug("Graph [{}] create user: {}", graph, jsonUser);
+        LOG.debug("GraphSpace [{}] create user: {}", graphSpace, jsonUser);
         checkCreatingBody(jsonUser);
 
-        HugeGraph g = graph(manager, graph);
         HugeUser user = jsonUser.build();
         user.id(manager.authManager().createUser(user));
-        return manager.serializer(g).writeAuthElement(user);
+        return manager.serializer().writeAuthElement(user);
     }
 
     @PUT
@@ -82,13 +83,14 @@ public class UserAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
-                         @PathParam("graph") String graph,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The user id")
                          @PathParam("id") String id,
                          JsonUser jsonUser) {
-        LOG.debug("Graph [{}] update user: {}", graph, jsonUser);
+        LOG.debug("GraphSpace [{}] update user: {}", graphSpace, jsonUser);
         checkUpdatingBody(jsonUser);
 
-        HugeGraph g = graph(manager, graph);
         HugeUser user;
         try {
             user = manager.authManager().getUser(UserAPI.parseId(id));
@@ -97,20 +99,32 @@ public class UserAPI extends API {
         }
         user = jsonUser.build(user);
         manager.authManager().updateUser(user);
-        return manager.serializer(g).writeAuthElement(user);
+        return manager.serializer().writeAuthElement(user);
     }
 
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "Filter by user name")
+                       @QueryParam("name") String name,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
-        LOG.debug("Graph [{}] list users", graph);
+        LOG.debug("GraphSpace [{}] list users, name={}", graphSpace, name);
 
-        HugeGraph g = graph(manager, graph);
+        if (StringUtils.isNotEmpty(name)) {
+            HugeUser user = manager.authManager().findUser(name);
+            if (user == null) {
+                throw new NotFoundException("Can't find user with name '%s'",
+                                            name);
+            }
+            return manager.serializer().writeAuthElement(user);
+        }
+
         List<HugeUser> users = manager.authManager().listAllUsers(limit);
-        return manager.serializer(g).writeAuthElements("users", users);
+        return manager.serializer().writeAuthElements("users", users);
     }
 
     @GET
@@ -118,13 +132,14 @@ public class UserAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
-                      @PathParam("graph") String graph,
+                      @Parameter(description = "The graph space name")
+                      @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The user id")
                       @PathParam("id") String id) {
-        LOG.debug("Graph [{}] get user: {}", graph, id);
+        LOG.debug("GraphSpace [{}] get user: {}", graphSpace, id);
 
-        HugeGraph g = graph(manager, graph);
         HugeUser user = manager.authManager().getUser(IdGenerator.of(id));
-        return manager.serializer(g).writeAuthElement(user);
+        return manager.serializer().writeAuthElement(user);
     }
 
     @GET
@@ -132,12 +147,12 @@ public class UserAPI extends API {
     @Path("{id}/role")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String role(@Context GraphManager manager,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The user id")
                        @PathParam("id") String id) {
-        LOG.debug("Graph [{}] get user role: {}", graph, id);
+        LOG.debug("GraphSpace [{}] get user role: {}", graphSpace, id);
 
-        @SuppressWarnings("unused") // just check if the graph exists
-        HugeGraph g = graph(manager, graph);
         HugeUser user = manager.authManager().getUser(IdGenerator.of(id));
         return manager.authManager().rolePermission(user).toJson();
     }
@@ -147,12 +162,12 @@ public class UserAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The user id")
                        @PathParam("id") String id) {
-        LOG.debug("Graph [{}] delete user: {}", graph, id);
+        LOG.debug("GraphSpace [{}] delete user: {}", graphSpace, id);
 
-        @SuppressWarnings("unused") // just check if the graph exists
-        HugeGraph g = graph(manager, graph);
         try {
             manager.authManager().deleteUser(IdGenerator.of(id));
         } catch (NotFoundException e) {
@@ -169,16 +184,25 @@ public class UserAPI extends API {
     private static class JsonUser implements Checkable {
 
         @JsonProperty("user_name")
+        @Schema(description = "The user name", required = true)
         private String name;
         @JsonProperty("user_password")
+        @Schema(description = "The user password", required = true)
         private String password;
+        @JsonProperty("user_nickname")
+        @Schema(description = "The user nickname")
+        private String nickname;
         @JsonProperty("user_phone")
+        @Schema(description = "The user phone number")
         private String phone;
         @JsonProperty("user_email")
+        @Schema(description = "The user email address")
         private String email;
         @JsonProperty("user_avatar")
+        @Schema(description = "The user avatar URL")
         private String avatar;
         @JsonProperty("user_description")
+        @Schema(description = "The user description")
         private String description;
 
         public HugeUser build(HugeUser user) {
@@ -186,6 +210,9 @@ public class UserAPI extends API {
                             "The name of user can't be updated");
             if (this.password != null) {
                 user.password(StringEncoding.hashPassword(this.password));
+            }
+            if (this.nickname != null) {
+                user.nickname(this.nickname);
             }
             if (this.phone != null) {
                 user.phone(this.phone);
@@ -205,6 +232,7 @@ public class UserAPI extends API {
         public HugeUser build() {
             HugeUser user = new HugeUser(this.name);
             user.password(StringEncoding.hashPassword(this.password));
+            user.nickname(this.nickname);
             user.phone(this.phone);
             user.email(this.email);
             user.avatar(this.avatar);
@@ -223,10 +251,12 @@ public class UserAPI extends API {
         @Override
         public void checkUpdate() {
             E.checkArgument(!StringUtils.isEmpty(this.password) ||
+                            this.nickname != null ||
                             this.phone != null ||
                             this.email != null ||
-                            this.avatar != null,
-                            "Expect one of user password/phone/email/avatar]");
+                            this.avatar != null ||
+                            this.description != null,
+                            "Expect one of user password/nickname/phone/email/avatar/description");
         }
     }
 }

@@ -45,6 +45,7 @@ message ScanPartitionRequest{
     bytes position = 10;
     // Return condition
     repeated int64 properties = 11;
+    int32 batchSize = 12;
   }
 
 
@@ -54,9 +55,9 @@ message ScanPartitionRequest{
   RequestHeader header = 1;
   oneof request {
     Request scan_request = 2;
-    // Each time a data packet is consumed, notify the server once, return the message sequence number
+    // Notify the server after each data packet is consumed; includes the message sequence number.
     Reply reply_request = 4;
-  }
+    }
 }
 
 message ScanResponse{
@@ -74,17 +75,17 @@ message Property{
 }
 
 message Vertex{
-  int64 label = 1; // Point type
-  Variant id = 2;  // Point ID
-  repeated Property properties = 3; // Point properties
+  int64 label = 1;                  // Vertex label.
+  Variant id = 2;                   // Vertex ID.
+  repeated Property properties = 3; // Vertex properties.
 }
 
 message Edge{
-  int64 label = 1;        // Edge type
-  int64 sourceLabel = 2;
-  int64 targetLabel = 3;
-  Variant source_id = 4;  // Source point ID
-  Variant target_id = 5;  // Target point ID
+  int64 label = 1;                  // Edge label.
+  int64 sourceLabel = 2;            
+  int64 targetLabel = 3;            
+  Variant source_id = 4;            // Source vertex ID
+  Variant target_id = 5;            // Target vertex ID
 
   repeated Property properties = 6; // Edge properties
 }

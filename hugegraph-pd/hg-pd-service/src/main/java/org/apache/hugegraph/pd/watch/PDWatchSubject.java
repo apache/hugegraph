@@ -48,7 +48,7 @@ public class PDWatchSubject implements StreamObserver<WatchRequest> {
         subjectHolder.put(WatchType.WATCH_TYPE_STORE_NODE_CHANGE.name(), new NodeChangeSubject());
         subjectHolder.put(WatchType.WATCH_TYPE_GRAPH_CHANGE.name(), new NodeChangeSubject());
         subjectHolder.put(WatchType.WATCH_TYPE_SHARD_GROUP_CHANGE.name(),
-                          new org.apache.hugegraph.pd.watch.ShardGroupChangeSubject());
+                          new ShardGroupChangeSubject());
     }
 
     private final StreamObserver<WatchResponse> responseObserver;
@@ -80,7 +80,7 @@ public class PDWatchSubject implements StreamObserver<WatchRequest> {
 
     public static void notifyShardGroupChange(ChangeType changeType, int groupId,
                                               Metapb.ShardGroup group) {
-        ((org.apache.hugegraph.pd.watch.ShardGroupChangeSubject) subjectHolder.get(
+        ((ShardGroupChangeSubject) subjectHolder.get(
                 WatchType.WATCH_TYPE_SHARD_GROUP_CHANGE.name()))
                 .notifyWatcher(changeType.getGrpcType(), groupId, group);
     }
@@ -192,24 +192,6 @@ public class PDWatchSubject implements StreamObserver<WatchRequest> {
     @Override
     public void onCompleted() {
         this.cancelWatcher();
-    }
-
-    public enum ChangeType {
-        ADD(WatchChangeType.WATCH_CHANGE_TYPE_ADD),
-        ALTER(WatchChangeType.WATCH_CHANGE_TYPE_ALTER),
-        DEL(WatchChangeType.WATCH_CHANGE_TYPE_DEL),
-
-        USER_DEFINED(WatchChangeType.WATCH_CHANGE_TYPE_SPECIAL1);
-
-        private final WatchChangeType grpcType;
-
-        ChangeType(WatchChangeType grpcType) {
-            this.grpcType = grpcType;
-        }
-
-        public WatchChangeType getGrpcType() {
-            return this.grpcType;
-        }
     }
 
 }

@@ -28,7 +28,7 @@ import lombok.Data;
 public class RaftRpcProcessor<T extends RaftRpcProcessor.BaseRequest> implements RpcProcessor<T> {
 
     private final Class<?> requestClass;
-    private final RaftEngine raftEngine;
+    private RaftEngine raftEngine;
 
     public RaftRpcProcessor(Class<?> requestClass, RaftEngine raftEngine) {
         this.requestClass = requestClass;
@@ -73,7 +73,7 @@ public class RaftRpcProcessor<T extends RaftRpcProcessor.BaseRequest> implements
         EXCEPTION(12, "exception"),
         ABORT(100, "Transmission aborted");
 
-        private final int code;
+        private int code;
         private String msg;
 
         Status(int code, String msg) {

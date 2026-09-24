@@ -45,11 +45,16 @@
 
     <properties>
         <log4j2.version>2.15.0</log4j2.version>
-        <final.name>apache-${release.name}-store-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-store-${project.version}</final.name>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.apache.hugegraph</groupId>
+                <artifactId>hugegraph-struct</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>org.apache.hugegraph</groupId>
                 <artifactId>hg-store-common</artifactId>
@@ -93,7 +98,10 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.4</version>
+                <version>0.8.8</version>
+                <configuration>
+                    <append>true</append>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>

@@ -51,7 +51,7 @@ public class SequencedIterator implements HgKvIterator {
     SequencedIterator(List<HgKvOrderedIterator> iterators, long limit) {
         Collections.sort(iterators);
         this.queue = new LinkedList(iterators);
-        this.limit = limit <= 0 ? Integer.MAX_VALUE : limit;
+        this.limit = limit <= 0 ? Long.MAX_VALUE : limit;
     }
 
     private HgKvOrderedIterator getIterator() {

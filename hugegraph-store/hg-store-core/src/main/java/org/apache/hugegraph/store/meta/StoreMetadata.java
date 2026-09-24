@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.store.meta.base.GlobalMetaStore;
 import org.apache.hugegraph.store.options.MetadataOptions;
@@ -54,7 +55,8 @@ public class StoreMetadata extends GlobalMetaStore {
     }
 
     public Store load() {
-        // For the case of multi-directory storage, pre-create folders to facilitate pd-side file storage statistics.
+        // For the case of multi-directory storage, pre-create folders to facilitate pd-side file
+        // storage statistics.
         dataLocations.forEach(path -> {
             String strPath = Paths.get(path).toAbsolutePath().toString();
             File dbFile = new File(strPath);
@@ -115,6 +117,16 @@ public class StoreMetadata extends GlobalMetaStore {
         return get(Metapb.PartitionStore.parser(), key);
     }
 
+    /**
+     * Delete the storage metadata corresponding to the specified partition.
+     *
+     * @param partitionId Partition ID.
+     */
+    public void removePartitionStore(int partitionId) {
+        byte[] key = MetadataKeyHelper.getPartitionStoreKey(partitionId);
+        delete(key);
+    }
+
     public List<Metapb.PartitionStore> getPartitionStores() {
         byte[] key = MetadataKeyHelper.getPartitionStorePrefix();
         return scan(Metapb.PartitionStore.parser(), key);
@@ -141,16 +153,14 @@ public class StoreMetadata extends GlobalMetaStore {
     }
 
     private String getMinDataLocation() {
-        Map<String, Integer> counter = new HashMap<>();
-        dataLocations.forEach(l -> {
-            counter.put(l, Integer.valueOf(0));
-        });
-        getPartitionStores().forEach(ptStore -> {
-            if (counter.containsKey(ptStore.getStoreLocation())) {
-                counter.put(ptStore.getStoreLocation(),
-                            counter.get(ptStore.getStoreLocation()) + 1);
-            }
-        });
+        var counter = stateLocByFreeSpace();
+        if (counter.isEmpty()) {
+            counter = stateLocByPartitionCount();
+            log.info("allocate db path using partition count: db count stats: {}", counter);
+        } else {
+            log.info("allocate db path using free space: db size stats: {}", counter);
+        }
+
         int min = Integer.MAX_VALUE;
         String location = "";
         for (String k : counter.keySet()) {
@@ -160,6 +170,91 @@ public class StoreMetadata extends GlobalMetaStore {
             }
         }
         return location;
+    }
+
+    /**
+     * get location count by allocated db count
+     *
+     * @return loc -> db count
+     */
+    private Map<String, Integer> stateLocByPartitionCount() {
+        Map<String, Integer> counter = new HashMap<>();
+        dataLocations.forEach(l -> counter.put(l, 0));
+
+        getPartitionStores().forEach(ptStore -> {
+            if (counter.containsKey(ptStore.getStoreLocation())) {
+                counter.put(ptStore.getStoreLocation(),
+                            counter.get(ptStore.getStoreLocation()) + 1);
+            }
+        });
+        return counter;
+    }
+
+    /**
+     * get location count by free space
+     *
+     * @return location -> free space, return null when disk usage greater than 20%
+     */
+    private Map<String, Integer> stateLocByFreeSpace() {
+        Map<String, Integer> counter = new HashMap<>();
+        double maxRate = 0;
+        for (String loc : dataLocations) {
+            var file = new File(loc);
+            if (!file.exists()) {
+                file.mkdirs();
+            }
+
+            // Estimated Size
+            long left = (file.getFreeSpace() - getLocDbSizeDelta(loc)) / 1024 / 1024 * -1;
+
+            var dbSizeRate = FileUtils.sizeOfDirectory(file) / file.getTotalSpace();
+            // log.info("loc: {}, dir size {}, total size: {}, rate :{}", loc, FileUtils
+            // .sizeOfDirectory(file),
+            //        file.getTotalSpace(), dbSizeRate);
+            if (dbSizeRate > maxRate) {
+                maxRate = dbSizeRate;
+            }
+            counter.put(loc, (int) left);
+        }
+        // log.info("max rate: {}",  maxRate);
+
+        if (maxRate < 0.2) {
+            counter.clear();
+        }
+        return counter;
+    }
+
+    /**
+     * db file delta by dbs, considering new db
+     *
+     * @param path
+     * @return
+     */
+    private long getLocDbSizeDelta(String path) {
+        File file = new File(path + "/db");
+        if (!file.exists()) {
+            return 0;
+        }
+
+        long max = 0;
+        int n = 0;
+        int sum = 0;
+        File[] fs = file.listFiles();
+        if (fs != null) {
+            for (File sub : fs) {
+                if (sub.isDirectory()) {
+                    continue;
+                }
+
+                long size = FileUtils.sizeOfDirectory(sub);
+                if (size > max) {
+                    max = size;
+                }
+                n += 1;
+            }
+        }
+
+        return max * n - sum;
     }
 
     private String getMinRaftLocation() {
@@ -186,7 +281,8 @@ public class StoreMetadata extends GlobalMetaStore {
     }
 
     /**
-     * Get the location of the partitioned data storage, if distributed data does not exist, automatically create a new location.
+     * Get the location of the partitioned data storage, if distributed data does not exist,
+     * automatically create a new location.
      *
      * @param partitionId
      * @return

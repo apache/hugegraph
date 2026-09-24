@@ -35,6 +35,9 @@ import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.space.GraphSpace;
+import org.apache.hugegraph.space.SchemaTemplate;
+import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.traversal.algorithm.CustomizedCrosspointsTraverser.CrosspointsPaths;
 import org.apache.hugegraph.traversal.algorithm.FusiformSimilarityTraverser.SimilarsMap;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser;
@@ -388,4 +391,20 @@ public class JsonSerializer implements Serializer {
 
         return JsonUtil.toJson(builder.build());
     }
+
+    @Override
+    public String writeGraphSpace(GraphSpace graphSpace) {
+        return JsonUtil.toJson(graphSpace);
+    }
+
+    @Override
+    public String writeService(Service service) {
+        return JsonUtil.toJson(service);
+    }
+
+    @Override
+    public String writeSchemaTemplate(SchemaTemplate template) {
+        return JsonUtil.toJson(template.asMap());
+    }
+
 }

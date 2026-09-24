@@ -163,6 +163,30 @@ public class ExtendableIteratorTest extends BaseUnitTest {
     }
 
     @Test
+    public void testCloseAllWhenCloseFails() {
+        Exception firstFailure = new Exception("first");
+        Exception lastFailure = new Exception("last");
+        CloseableItor<Integer> c1 = new CloseableItor<>(DATA1.iterator(),
+                                                       firstFailure);
+        CloseableItor<Integer> c2 = new CloseableItor<>(DATA2.iterator());
+        CloseableItor<Integer> c3 = new CloseableItor<>(DATA3.iterator(),
+                                                       lastFailure);
+        ExtendableIterator<Integer> results = new ExtendableIterator<>();
+        results.extend(c1).extend(c2).extend(c3);
+
+        Throwable actual = Assert.assertThrows(
+                           Exception.class,
+                           (Assert.ThrowableRunnable) results::close);
+
+        Assert.assertSame(firstFailure, actual);
+        Assert.assertTrue(c1.closed());
+        Assert.assertTrue(c2.closed());
+        Assert.assertTrue(c3.closed());
+        Assert.assertEquals(1, actual.getSuppressed().length);
+        Assert.assertSame(lastFailure, actual.getSuppressed()[0]);
+    }
+
+    @Test
     public void testCloseAfterNext1() throws Exception {
         CloseableItor<Integer> c1 = new CloseableItor<>(DATA1.iterator());
         CloseableItor<Integer> c2 = new CloseableItor<>(DATA2.iterator());
@@ -217,10 +241,16 @@ public class ExtendableIteratorTest extends BaseUnitTest {
                                                        AutoCloseable {
 
         private final Iterator<V> iter;
+        private final Exception closeFailure;
         private boolean closed = false;
 
         public CloseableItor(Iterator<V> iter) {
+            this(iter, null);
+        }
+
+        public CloseableItor(Iterator<V> iter, Exception closeFailure) {
             this.iter = iter;
+            this.closeFailure = closeFailure;
         }
 
         @Override
@@ -236,6 +266,9 @@ public class ExtendableIteratorTest extends BaseUnitTest {
         @Override
         public void close() throws Exception {
             this.closed  = true;
+            if (this.closeFailure != null) {
+                throw this.closeFailure;
+            }
         }
 
         public boolean closed() {

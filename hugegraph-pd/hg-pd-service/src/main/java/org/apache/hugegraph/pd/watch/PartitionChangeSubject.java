@@ -38,10 +38,11 @@ final class PartitionChangeSubject extends AbstractWatchSubject {
 
     @Override
     String toNoticeString(WatchResponse res) {
-        String sb = "graph:" + res.getPartitionResponse().getGraph() +
-                    "," +
-                    "partitionId:" + res.getPartitionResponse().getPartitionId();
-        return sb;
+        StringBuilder sb = new StringBuilder();
+        return sb.append("graph:").append(res.getPartitionResponse().getGraph())
+                 .append(",")
+                 .append("partitionId:").append(res.getPartitionResponse().getPartitionId())
+                 .toString();
     }
 
     public void notifyWatcher(WatchChangeType changeType, String graph, int partitionId) {

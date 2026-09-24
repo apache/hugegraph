@@ -29,6 +29,9 @@ import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.space.GraphSpace;
+import org.apache.hugegraph.space.SchemaTemplate;
+import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.traversal.algorithm.CustomizedCrosspointsTraverser.CrosspointsPaths;
 import org.apache.hugegraph.traversal.algorithm.FusiformSimilarityTraverser.SimilarsMap;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser;
@@ -98,4 +101,10 @@ public interface Serializer {
     String writeNodesWithPath(String name, List<Id> nodes, long size,
                               Collection<HugeTraverser.Path> paths,
                               Iterator<?> vertices, Iterator<?> edges);
+
+    String writeGraphSpace(GraphSpace graphSpace);
+
+    String writeService(Service service);
+
+    String writeSchemaTemplate(SchemaTemplate template);
 }

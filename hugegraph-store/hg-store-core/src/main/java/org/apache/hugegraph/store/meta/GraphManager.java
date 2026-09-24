@@ -41,7 +41,8 @@ public class GraphManager extends GlobalMetaStore {
 
     /**
      * Modify image
-     * This place does not add a lock, requiring the graph to be cloned, forbidden to modify the original object.
+     * This place does not add a lock, requiring the graph to be cloned, forbidden to modify the
+     * original object.
      *
      * @param graph
      * @return

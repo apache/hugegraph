@@ -25,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.BiPredicate;
 
+import io.grpc.Status;
+
 import org.apache.hugegraph.pd.KvService;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
@@ -49,12 +51,13 @@ public class KvWatchSubject {
     public static final String KEY_DELIMITER = "KW";
     public static final String PREFIX_DELIMITER = "PW";
     public static final String ALL_PREFIX = "W";
-    public static final long WATCH_TTL = 20000L;
+    public static final long WATCH_TTL = 1800000L;
     private static final ConcurrentMap<String, StreamObserver<WatchResponse>> clients =
             new ConcurrentHashMap<>();
-    private final KvService kvService;
-    BiPredicate<String, String> equal = String::equals;
-    BiPredicate<String, String> startWith = String::startsWith;
+    private KvService kvService;
+    BiPredicate<String, String> equal = (kvKey, watchKey) -> kvKey.equals(watchKey);
+    BiPredicate<String, String> startWith = (kvKey, watchKey) -> kvKey.startsWith(watchKey);
+
 
     /**
      * The following three sets of keys will be used:
@@ -207,19 +210,21 @@ public class KvWatchSubject {
                         value.onNext(testAlive);
                     }
                     Map<String, String> clientKeys = kvService.scanWithPrefix(clientKey);
-                    for (Map.Entry<String, String> keyEntry : clientKeys.entrySet()) {
+                    Set<Map.Entry<String, String>> set = clientKeys.entrySet();
+                    for (Map.Entry<String, String> keyEntry : set) {
                         String entryKey = keyEntry.getKey();
                         String aliveKey = entryKey.replaceFirst(removes, "");
-                        boolean keepAliveKey = kvService.keepAlive(aliveKey);
-                        boolean keepAliveEntry = kvService.keepAlive(entryKey);
-                        // log.info("keep alive client:{},{}:{},{}:{}", client, aliveKey,
-                        // keepAliveKey,
-                        //         entryKey,
-                        //         keepAliveEntry);
+                        kvService.keepAlive(aliveKey);
+                        kvService.keepAlive(entryKey);
                         done = true;
                     }
                     break;
                 } catch (Exception e) {
+                    if (e instanceof StatusRuntimeException &&
+                        ((StatusRuntimeException) e).getStatus().getCode()
+                                                    .equals(Status.Code.CANCELLED)) {
+                        break;
+                    }
                     try {
                         Thread.sleep(100);
                     } catch (InterruptedException ex) {
@@ -249,7 +254,11 @@ public class KvWatchSubject {
 
             if (value != null) {
                 synchronized (value) {
-                    value.onCompleted();
+                    try {
+                        value.onCompleted();
+                    } catch (Exception e) {
+                        log.warn("Exception occurred while completing observer for removeClient {}: {}", clientKey, e.toString(), e);
+                    }
                 }
             }
             clients.remove(key);

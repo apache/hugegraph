@@ -22,9 +22,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.auth.SchemaDefine.Entity;
 import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Graph.Hidden;
@@ -35,12 +37,15 @@ public class HugeGroup extends Entity {
 
     private static final long serialVersionUID = 2330399818352242686L;
 
+    public static final String ID_PREFIX = "group-";
+
     private String name;
     private String nickname;
     private String description;
 
     public HugeGroup(String name) {
-        this(null, name);
+        this(StringUtils.isNotEmpty(name) ? IdGenerator.of(name) : null,
+             name);
     }
 
     public HugeGroup(Id id) {
@@ -51,6 +56,10 @@ public class HugeGroup extends Entity {
         this.id = id;
         this.name = name;
         this.description = null;
+    }
+
+    public static boolean isGroup(String id) {
+        return StringUtils.isNotEmpty(id) && id.startsWith(ID_PREFIX);
     }
 
     @Override

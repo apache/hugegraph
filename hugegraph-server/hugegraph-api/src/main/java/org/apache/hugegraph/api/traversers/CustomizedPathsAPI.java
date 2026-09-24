@@ -57,7 +57,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/customizedpaths")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/customizedpaths")
 @Singleton
 @Tag(name = "CustomizedPathsAPI")
 public class CustomizedPathsAPI extends API {
@@ -79,6 +79,7 @@ public class CustomizedPathsAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String post(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        PathRequest request) {
         E.checkArgumentNotNull(request, "The path request body can't be null");
@@ -98,7 +99,7 @@ public class CustomizedPathsAPI extends API {
 
         ApiMeasurer measure = new ApiMeasurer();
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         Iterator<Vertex> sources = request.sources.vertices(g);
         List<WeightedEdgeStep> steps = step(g, request);
         boolean sorted = request.sortBy != SortBy.NONE;

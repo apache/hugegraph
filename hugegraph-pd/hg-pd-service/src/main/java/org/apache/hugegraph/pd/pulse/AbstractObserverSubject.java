@@ -17,9 +17,9 @@
 
 package org.apache.hugegraph.pd.pulse;
 
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -39,9 +39,10 @@ import lombok.extern.slf4j.Slf4j;
 abstract class AbstractObserverSubject {
 
     /* send notice to client */
-    private final Map<Long, StreamObserver<PulseResponse>> observerHolder = new HashMap<>(1024);
+    private final Map<Long, StreamObserver<PulseResponse>> observerHolder =
+            new ConcurrentHashMap<>(1024);
     /* notice from client */
-    private final Map<Long, PulseListener> listenerHolder = new HashMap<>(1024);
+    private final Map<Long, PulseListener> listenerHolder = new ConcurrentHashMap<>(1024);
 
     private final byte[] lock = new byte[0];
     private final PulseResponse.Builder builder = PulseResponse.newBuilder();

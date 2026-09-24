@@ -82,7 +82,6 @@ public class ScanBatchOneShotResponse {
                                            .setKey(ByteString.copyFrom(col.name))
                                            .setValue(ByteString.copyFrom(col.value))
                                            .setCode(HgStoreNodeUtil.toInt(iterator.position()))
-//position == partition-id.
                 );
 
             }

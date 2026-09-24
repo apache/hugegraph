@@ -45,6 +45,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -59,7 +61,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/schema/edgelabels")
+@Path("graphspaces/{graphspace}/graphs/{graph}/schema/edgelabels")
 @Singleton
 @Tag(name = "EdgeLabelAPI")
 public class EdgeLabelAPI extends API {
@@ -71,18 +73,22 @@ public class EdgeLabelAPI extends API {
     @Status(Status.CREATED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=edge_label_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=edge_label_write"})
     @RedirectFilter.RedirectMasterRole
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          JsonEdgeLabel jsonEdgeLabel) {
         LOG.debug("Graph [{}] create edge label: {}", graph, jsonEdgeLabel);
         checkCreatingBody(jsonEdgeLabel);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         EdgeLabel.Builder builder = jsonEdgeLabel.convert2Builder(g);
         EdgeLabel edgeLabel = builder.create();
-        return manager.serializer(g).writeEdgeLabel(edgeLabel);
+        return manager.serializer().writeEdgeLabel(edgeLabel);
     }
 
     @PUT
@@ -90,11 +96,17 @@ public class EdgeLabelAPI extends API {
     @Path("{name}")
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=edge_label_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=edge_label_write"})
     @RedirectFilter.RedirectMasterRole
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
+                         @Parameter(description = "The edge label name")
                          @PathParam("name") String name,
+                         @Parameter(description = "Action to perform: 'append' or 'remove'")
                          @QueryParam("action") String action,
                          JsonEdgeLabel jsonEdgeLabel) {
         LOG.debug("Graph [{}] {} edge label: {}",
@@ -107,18 +119,23 @@ public class EdgeLabelAPI extends API {
         // Parse action param
         boolean append = checkAndParseAction(action);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         EdgeLabel.Builder builder = jsonEdgeLabel.convert2Builder(g);
         EdgeLabel edgeLabel = append ? builder.append() : builder.eliminate();
-        return manager.serializer(g).writeEdgeLabel(edgeLabel);
+        return manager.serializer().writeEdgeLabel(edgeLabel);
     }
 
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=edge_label_read"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=edge_label_read"})
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "Filter edge labels by names")
                        @QueryParam("names") List<String> names) {
         boolean listAll = CollectionUtils.isEmpty(names);
         if (listAll) {
@@ -127,7 +144,7 @@ public class EdgeLabelAPI extends API {
             LOG.debug("Graph [{}] get edge labels by names {}", graph, names);
         }
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         List<EdgeLabel> labels;
         if (listAll) {
             labels = g.schema().getEdgeLabels();
@@ -137,22 +154,27 @@ public class EdgeLabelAPI extends API {
                 labels.add(g.schema().getEdgeLabel(name));
             }
         }
-        return manager.serializer(g).writeEdgeLabels(labels);
+        return manager.serializer().writeEdgeLabels(labels);
     }
 
     @GET
     @Timed
     @Path("{name}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=edge_label_read"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=edge_label_read"})
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
+                      @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("graph") String graph,
+                      @Parameter(description = "The edge label name")
                       @PathParam("name") String name) {
         LOG.debug("Graph [{}] get edge label by name '{}'", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         EdgeLabel edgeLabel = g.schema().getEdgeLabel(name);
-        return manager.serializer(g).writeEdgeLabel(edgeLabel);
+        return manager.serializer().writeEdgeLabel(edgeLabel);
     }
 
     @DELETE
@@ -161,14 +183,19 @@ public class EdgeLabelAPI extends API {
     @Status(Status.ACCEPTED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=edge_label_delete"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=edge_label_delete"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> delete(@Context GraphManager manager,
+                                  @Parameter(description = "The graph space name")
+                                  @PathParam("graphspace") String graphSpace,
+                                  @Parameter(description = "The graph name")
                                   @PathParam("graph") String graph,
+                                  @Parameter(description = "The edge label name to delete")
                                   @PathParam("name") String name) {
         LOG.debug("Graph [{}] remove edge label by name '{}'", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         // Throw 404 if not exists
         g.schema().getEdgeLabel(name);
         return ImmutableMap.of("task_id",
@@ -179,38 +206,55 @@ public class EdgeLabelAPI extends API {
      * JsonEdgeLabel is only used to receive create and append requests
      */
     @JsonIgnoreProperties(value = {"index_labels", "status"})
+    @Schema(description = "Edge label creation/update request")
     private static class JsonEdgeLabel implements Checkable {
 
+        @Schema(description = "The edge label ID (only used in RESTORING mode)")
         @JsonProperty("id")
         public long id;
+        @Schema(description = "The edge label name", required = true)
         @JsonProperty("name")
         public String name;
+        @Schema(description = "The edge label type: NORMAL, EDGE, or RELATION")
         @JsonProperty("edgelabel_type")
         public EdgeLabelType edgeLabelType;
+        @Schema(description = "The parent edge label name (for inheritance)")
         @JsonProperty("parent_label")
         public String fatherLabel;
+        @Schema(description = "The source vertex label name", required = true)
         @JsonProperty("source_label")
         public String sourceLabel;
+        @Schema(description = "The target vertex label name", required = true)
         @JsonProperty("target_label")
         public String targetLabel;
+        @Schema(description = "Links between source and target vertex labels")
         @JsonProperty("links")
         public Set<Map<String, String>> links;
+        @Schema(description = "The frequency: NORMAL or ONE_DAILY")
         @JsonProperty("frequency")
         public Frequency frequency;
+        @Schema(description = "The property key names associated with this edge label")
         @JsonProperty("properties")
         public String[] properties;
+        @Schema(description = "The sort key names for edge properties")
         @JsonProperty("sort_keys")
         public String[] sortKeys;
+        @Schema(description = "The nullable property key names")
         @JsonProperty("nullable_keys")
         public String[] nullableKeys;
+        @Schema(description = "Time-to-live in seconds")
         @JsonProperty("ttl")
         public long ttl;
+        @Schema(description = "The property key name to use as TTL start time")
         @JsonProperty("ttl_start_time")
         public String ttlStartTime;
+        @Schema(description = "Whether to enable label indexing")
         @JsonProperty("enable_label_index")
         public Boolean enableLabelIndex;
+        @Schema(description = "User-defined metadata")
         @JsonProperty("user_data")
         public Userdata userdata;
+        @Schema(description = "Whether to check if edge label exists before creation")
         @JsonProperty("check_exist")
         public Boolean checkExist;
 

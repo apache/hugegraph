@@ -24,9 +24,11 @@ import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Metapb.PartitionStats;
 import org.apache.hugegraph.store.meta.GraphManager;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.Store;
+import org.apache.hugegraph.store.processor.Processors;
 import org.apache.hugegraph.store.util.HgStoreException;
 
 public interface PdProvider {
@@ -57,9 +59,11 @@ public interface PdProvider {
 
     boolean startHeartbeatStream(Consumer<Throwable> onError);
 
-    boolean addPartitionInstructionListener(PartitionInstructionListener listener);
+    boolean setCommandProcessors(Processors processors);
 
-    boolean partitionHeartbeat(List<Metapb.PartitionStats> statsList);
+    boolean partitionHeartbeat(List<PartitionStats> statsList);
+
+    boolean partitionHeartbeat(PartitionStats stats);
 
     boolean isLocalPartition(long storeId, int partitionId);
 
@@ -86,7 +90,15 @@ public interface PdProvider {
         return null;
     }
 
+    default Metapb.ShardGroup getShardGroupDirect(int partitionId) {
+        return null;
+    }
+
     default void updateShardGroup(Metapb.ShardGroup shardGroup) throws PDException {
     }
 
+    String getPdServerAddress();
+
+    default void resetPulseClient() {
+    }
 }

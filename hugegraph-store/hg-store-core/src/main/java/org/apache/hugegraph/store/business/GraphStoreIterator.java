@@ -18,7 +18,6 @@
 package org.apache.hugegraph.store.business;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -31,14 +30,10 @@ import javax.script.ScriptEngineManager;
 import javax.script.ScriptException;
 
 import org.apache.commons.lang.StringUtils;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.rocksdb.access.RocksDBSession.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.store.grpc.Graphpb;
 import org.apache.hugegraph.store.grpc.Graphpb.Edge;
 import org.apache.hugegraph.store.grpc.Graphpb.ScanPartitionRequest;
@@ -47,19 +42,21 @@ import org.apache.hugegraph.store.grpc.Graphpb.ScanPartitionRequest.ScanType;
 import org.apache.hugegraph.store.grpc.Graphpb.Variant.Builder;
 import org.apache.hugegraph.store.grpc.Graphpb.VariantType;
 import org.apache.hugegraph.store.grpc.Graphpb.Vertex;
-import org.apache.hugegraph.structure.HugeEdge;
-import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeProperty;
-import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.structure.BaseEdge;
+import org.apache.hugegraph.structure.BaseElement;
+import org.apache.hugegraph.structure.BaseProperty;
+import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.Blob;
-import org.apache.tinkerpop.gremlin.structure.Property;
-import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.codehaus.groovy.jsr223.GroovyScriptEngineImpl;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors;
 
+import groovy.lang.MissingMethodException;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -78,10 +75,11 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
     private final Set properties;
     private Vertex.Builder vertex;
     private Edge.Builder edge;
-    private ArrayList<BackendColumn> data;
+    private ArrayList<RocksDBSession.BackendColumn> data;
     private GroovyScriptEngineImpl engine;
     private CompiledScript script;
-    private HugeElement current;
+    private BaseElement current;
+    private Exception stopCause;
 
     public GraphStoreIterator(ScanIterator iterator,
                               ScanPartitionRequest scanRequest) {
@@ -117,40 +115,27 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
         }
     }
 
-    private HugeElement getElement(BackendColumn next) {
-        BackendEntry entry = null;
-        BackendEntry.BackendColumn column = BackendEntry.BackendColumn.of(
-                next.name, next.value);
-        if (entry == null || !belongToMe(entry, column) || !isVertex) {
-            try {
-                entry = new BinaryBackendEntry(type, next.name);
-            } catch (Exception e) {
-                log.error("using core to new entry with error:", e);
-            }
-        }
-        BackendEntry.BackendColumn[] columns =
-                new BackendEntry.BackendColumn[]{column};
-        entry.columns(Arrays.asList(columns));
-        return this.parseEntry(entry, isVertex);
+    private BaseElement getElement(RocksDBSession.BackendColumn next) {
+        return this.parseEntry(BackendColumn.of(next.name, next.value), isVertex);
     }
 
     @Override
     public boolean hasNext() {
         if (current == null) {
             while (iter.hasNext()) {
-                BackendColumn next = this.iter.next();
-                HugeElement element = getElement(next);
+                RocksDBSession.BackendColumn next = this.iter.next();
+                BaseElement element = getElement(next);
                 try {
                     boolean evalResult = true;
                     if (isVertex) {
-                        HugeVertex el = (HugeVertex) element;
+                        BaseVertex el = (BaseVertex) element;
                         if (engine != null) {
                             Bindings bindings = engine.createBindings();
                             bindings.put("element", el);
                             evalResult = (boolean) script.eval(bindings);
                         }
                     } else {
-                        HugeEdge el = (HugeEdge) element;
+                        BaseEdge el = (BaseEdge) element;
                         if (engine != null) {
                             Bindings bindings = engine.createBindings();
                             bindings.put("element", el);
@@ -162,6 +147,10 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
                     }
                     current = element;
                     return true;
+                } catch (ScriptException | MissingMethodException se) {
+                    stopCause = se;
+                    log.error("get next with error which cause to stop:", se);
+                    return false;
                 } catch (Exception e) {
                     log.error("get next with error:", e);
                 }
@@ -189,8 +178,8 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
         return next;
     }
 
-    public T select(BackendColumn current) {
-        HugeElement element = getElement(current);
+    public T select(RocksDBSession.BackendColumn current) {
+        BaseElement element = getElement(current);
         if (isVertex) {
             return (T) parseVertex(element);
         } else {
@@ -206,7 +195,7 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
         return result;
     }
 
-    private <P extends Property<Object>> List<Graphpb.Property> buildProperties(
+    private <P extends BaseProperty<?>> List<Graphpb.Property> buildProperties(
             Builder variant,
             int size,
             Iterator<P> eps) {
@@ -215,7 +204,7 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
                                                        pSize : size);
         Graphpb.Property.Builder pb = Graphpb.Property.newBuilder();
         while (eps.hasNext()) {
-            HugeProperty<?> property = (HugeProperty<?>) eps.next();
+            BaseProperty<?> property = eps.next();
             PropertyKey key = property.propertyKey();
             long pkId = key.id().asLong();
             if (pSize > 0 && !properties.contains(pkId)) {
@@ -309,8 +298,8 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
         }
     }
 
-    private Edge parseEdge(HugeElement element) {
-        HugeEdge e = (HugeEdge) element;
+    private Edge parseEdge(BaseElement element) {
+        BaseEdge e = (BaseEdge) element;
         edge.clear();
         EdgeLabel label = e.schemaLabel();
         edge.setLabel(label.longId());
@@ -323,14 +312,14 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
         buildId(variant, e.targetVertex().id());
         edge.setTargetId(variant.build());
         int size = e.sizeOfProperties();
-        Iterator<Property<Object>> eps = e.properties();
+        Iterator<BaseProperty<?>> eps = e.properties().iterator();
         List<Graphpb.Property> props = buildProperties(variant, size, eps);
         edge.setField(propertiesDesEdge, props);
         return edge.build();
     }
 
-    private Vertex parseVertex(HugeElement element) {
-        HugeVertex v = (HugeVertex) element;
+    private Vertex parseVertex(BaseElement element) {
+        BaseVertex v = (BaseVertex) element;
         vertex.clear();
         VertexLabel label = v.schemaLabel();
         vertex.setLabel(label.longId());
@@ -338,7 +327,7 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
         buildId(variant, v.id());
         vertex.setId(variant.build());
         int size = v.sizeOfProperties();
-        Iterator<VertexProperty<Object>> vps = v.properties();
+        Iterator<BaseProperty<?>> vps = v.properties().iterator();
         List<Graphpb.Property> props = buildProperties(variant, size, vps);
         vertex.setField(propertiesDesVertex, props);
         return vertex.build();
@@ -347,5 +336,9 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
     @Override
     public void close() {
         iter.close();
+    }
+
+    public Exception getStopCause() {
+        return stopCause;
     }
 }

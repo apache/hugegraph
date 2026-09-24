@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.apache.commons.collections4.SetUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
@@ -59,13 +60,13 @@ public class PartitionService implements RaftStateListener {
 
     private final long Partition_Version_Skip = 0x0F;
     private final StoreNodeService storeService;
-    private final PartitionMeta partitionMeta;
-    private final PDConfig pdConfig;
+    private PartitionMeta partitionMeta;
+    private PDConfig pdConfig;
     // Partition command listening
-    private final List<PartitionInstructionListener> instructionListeners;
+    private List<PartitionInstructionListener> instructionListeners;
 
     // Partition status listeners
-    private final List<PartitionStatusListener> statusListeners;
+    private List<PartitionStatusListener> statusListeners;
 
     public PartitionService(PDConfig config, StoreNodeService storeService) {
         this.pdConfig = config;
@@ -379,7 +380,7 @@ public class PartitionService implements RaftStateListener {
 
     public Metapb.PartitionStats getPartitionStats(String graphName, int partitionId) throws
                                                                                       PDException {
-        return partitionMeta.getPartitionStats(graphName, partitionId);
+        return partitionMeta.getPartitionStats("", partitionId);
     }
 
     /**
@@ -412,6 +413,9 @@ public class PartitionService implements RaftStateListener {
         });
         partitionMeta.removeAllPartitions(graphName);
         partitionMeta.removeGraph(graphName);
+        if (!StringUtils.isEmpty(graphName)) {
+            partitionMeta.removePartitionStats(graphName);
+        }
         return graph;
     }
 
@@ -670,7 +674,7 @@ public class PartitionService implements RaftStateListener {
                                              List<KVPair<Integer, Integer>> splits)
             throws PDException {
         var taskInfoMeta = storeService.getTaskInfoMeta();
-        if (taskInfoMeta.scanSplitTask(graph.getGraphName()).size() > 0) {
+        if (!taskInfoMeta.scanSplitTask(graph.getGraphName()).isEmpty()) {
             return;
         }
 
@@ -844,7 +848,7 @@ public class PartitionService implements RaftStateListener {
         }
 
         var taskInfoMeta = storeService.getTaskInfoMeta();
-        if (taskInfoMeta.scanMoveTask(graph.getGraphName()).size() > 0) {
+        if (!taskInfoMeta.scanMoveTask(graph.getGraphName()).isEmpty()) {
             throw new PDException(3, "Graph Combine process exists");
         }
 
@@ -945,22 +949,37 @@ public class PartitionService implements RaftStateListener {
         // (The shard group is controlled by the PD, and there may be brief inconsistencies after
         // operations such as splitting, subject to PD)
         // store Upload the final one raft group data
-        if (shardGroup != null &&
-            (shardGroup.getVersion() < stats.getLeaderTerm() ||
-             shardGroup.getConfVer() < stats.getConfVer())) {
-            storeService.updateShardGroup(stats.getId(),
-                                          stats.getShardList(), stats.getLeaderTerm(),
-                                          stats.getConfVer());
+        if (shardGroup != null) {
+            if (shardGroup.getVersion() < stats.getLeaderTerm() ||
+                shardGroup.getConfVer() < stats.getConfVer() ||
+                !isShardEquals(shardGroup.getShardsList(), stats.getShardList())) {
+                storeService.updateShardGroup(stats.getId(),
+                                              stats.getShardList(), stats.getLeaderTerm(),
+                                              stats.getConfVer());
+            }
         }
 
-        List<Metapb.Partition> partitions = getPartitionById(stats.getId());
-        for (Metapb.Partition partition : partitions) {
-            // partitionMeta.getAndCreateGraph(partition.getGraphName());
-            checkShardState(partition, stats);
-        }
+        // List<Metapb.Partition> partitions = getPartitionById(stats.getId());
+        // for (Metapb.Partition partition : partitions) {
+        // partitionMeta.getAndCreateGraph(partition.getGraphName());
+        checkShardState(shardGroup, stats);
+        // }
         // statistics
         partitionMeta.updatePartitionStats(stats.toBuilder()
                                                 .setTimestamp(System.currentTimeMillis()).build());
+    }
+
+    private boolean isShardEquals(List<Metapb.Shard> list1, List<Metapb.Shard> list2) {
+        return SetUtils.isEqualSet(list1, list2);
+    }
+
+    private Long getLeader(Metapb.ShardGroup group) {
+        for (var shard : group.getShardsList()) {
+            if (shard.getRole() == Metapb.ShardRole.Leader) {
+                return shard.getStoreId();
+            }
+        }
+        return null;
     }
 
     /**
@@ -968,30 +987,35 @@ public class PartitionService implements RaftStateListener {
      *
      * @param stats
      */
-    private void checkShardState(Metapb.Partition partition, Metapb.PartitionStats stats) {
+    private void checkShardState(Metapb.ShardGroup shardGroup, Metapb.PartitionStats stats) {
 
         try {
+            Metapb.PartitionState state = Metapb.PartitionState.PState_Normal;
+
             int offCount = 0;
+
             for (Metapb.ShardStats shard : stats.getShardStatsList()) {
                 if (shard.getState() == Metapb.ShardState.SState_Offline) {
                     offCount++;
                 }
             }
-            if (partition.getState() != Metapb.PartitionState.PState_Offline) {
-                if (offCount == 0) {
-                    updatePartitionState(partition.getGraphName(), partition.getId(),
-                                         Metapb.PartitionState.PState_Normal);
-                } else if (offCount * 2 < stats.getShardStatsCount()) {
-                    updatePartitionState(partition.getGraphName(), partition.getId(),
-                                         Metapb.PartitionState.PState_Warn);
-                } else {
-                    updatePartitionState(partition.getGraphName(), partition.getId(),
-                                         Metapb.PartitionState.PState_Warn);
+
+            if (offCount > 0 && offCount * 2 < stats.getShardStatsCount()) {
+                state = Metapb.PartitionState.PState_Warn;
+            }
+
+            if (shardGroup.getState() != state) {
+                // update graph state
+                for (var graph : getGraphs()) {
+                    if (graph.getState() != state) {
+                        updateGraphState(graph.getGraphName(), state);
+                    }
                 }
+
+                storeService.updateShardGroupState(shardGroup.getId(), state);
             }
         } catch (Exception e) {
-            log.error("Partition {}-{} checkShardState exception {}",
-                      partition.getGraphName(), partition.getId(), e);
+            log.error("checkShardState {} failed, error: ", shardGroup.getId(), e);
         }
     }
 
@@ -1025,7 +1049,7 @@ public class PartitionService implements RaftStateListener {
 
     public void changeShard(int groupId, List<Metapb.Shard> shards) throws PDException {
         var partitions = getPartitionById(groupId);
-        if (partitions.size() == 0) {
+        if (partitions.isEmpty()) {
             return;
         }
         fireChangeShard(partitions.get(0), shards, ConfChangeType.CONF_CHANGE_TYPE_ADJUST);
@@ -1327,6 +1351,32 @@ public class PartitionService implements RaftStateListener {
         // If it fails, try again?
     }
 
+    public void handleBuildIndexTask(MetaTask.Task task) throws PDException {
+        if (task == null) {
+            throw new PDException(-1, "Invalid build index task: task is null");
+        }
+
+        if (task.getType() != MetaTask.TaskType.Build_Index) {
+            throw new PDException(-1, "Task type must be Build_Index");
+        }
+
+        if (!task.hasBuildIndex()) {
+            throw new PDException(-1, "Task must contain build index data");
+        }
+
+        log.info("build index task {} -{} , report state: {}",
+                 task.getPartition().getGraphName(),
+                 task.getPartition().getId(),
+                 task.getState());
+
+        try {
+            storeService.getTaskInfoMeta().updateBuildIndexTask(task);
+        } catch (Exception e) {
+            log.error("Failed to update build index task {}", task.getId(), e);
+            throw new PDException(-1, "Failed to update build index task: " + e.getMessage());
+        }
+    }
+
     public synchronized void handleSplitTask(MetaTask.Task task) throws PDException {
 
         var taskInfoMeta = storeService.getTaskInfoMeta();
@@ -1534,6 +1584,10 @@ public class PartitionService implements RaftStateListener {
             for (Metapb.Graph graph : getGraphs()) {
                 Metapb.Partition partition =
                         partitionMeta.getPartitionById(graph.getGraphName(), partId);
+                // some graphs may doesn't have such partition
+                if (partition == null) {
+                    continue;
+                }
 
                 DbCompaction dbCompaction = DbCompaction.newBuilder()
                                                         .setTableName(tableName)
@@ -1541,10 +1595,12 @@ public class PartitionService implements RaftStateListener {
                 instructionListeners.forEach(cmd -> {
                     try {
                         cmd.dbCompaction(partition, dbCompaction);
+                        log.info("compact partition: {}", partId);
                     } catch (Exception e) {
                         log.error("firedbCompaction", e);
                     }
                 });
+                break;
             }
         } catch (PDException e) {
             e.printStackTrace();
@@ -1554,5 +1610,9 @@ public class PartitionService implements RaftStateListener {
 
     public void updateShardGroupCache(Metapb.ShardGroup group) {
         partitionMeta.getPartitionCache().updateShardGroup(group);
+    }
+
+    public Map<Integer, Metapb.ShardGroup> getShardGroupCache() {
+        return partitionMeta.getPartitionCache().getShardGroups();
     }
 }

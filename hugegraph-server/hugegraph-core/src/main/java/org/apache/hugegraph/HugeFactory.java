@@ -36,12 +36,16 @@ import org.apache.hugegraph.traversal.algorithm.OltpTraverser;
 import org.apache.hugegraph.type.define.SerialEnum;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
+import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.slf4j.Logger;
 
 public class HugeFactory {
 
+    public static final String SYS_GRAPH = Graph.Hidden.hide("sys_graph");
     private static final Logger LOG = Log.logger(HugeFactory.class);
-
+    private static final String NAME_REGEX = "^[A-Za-z][A-Za-z0-9_]{0,47}$";
+    private static final Map<String, HugeGraph> GRAPHS = new HashMap<>();
+    private static final AtomicBoolean SHUT_DOWN = new AtomicBoolean(false);
     private static final Thread SHUT_DOWN_HOOK = new Thread(() -> {
         LOG.info("HugeGraph is shutting down");
         HugeFactory.shutdown(30L, true);
@@ -53,12 +57,6 @@ public class HugeFactory {
 
         Runtime.getRuntime().addShutdownHook(SHUT_DOWN_HOOK);
     }
-
-    private static final String NAME_REGEX = "^[A-Za-z][A-Za-z0-9_]{0,47}$";
-
-    private static final Map<String, HugeGraph> GRAPHS = new HashMap<>();
-
-    private static final AtomicBoolean SHUT_DOWN = new AtomicBoolean(false);
 
     public static synchronized HugeGraph open(Configuration config) {
         HugeConfig conf = config instanceof HugeConfig ?
@@ -82,11 +80,13 @@ public class HugeFactory {
 
         String name = config.get(CoreOptions.STORE);
         checkGraphName(name, "graph config(like hugegraph.properties)");
+        String graphSpace = config.get(CoreOptions.GRAPH_SPACE);
         name = name.toLowerCase();
-        HugeGraph graph = GRAPHS.get(name);
+        String spaceGraphName = graphSpace + "-" + name;
+        HugeGraph graph = GRAPHS.get(spaceGraphName);
         if (graph == null || graph.closed()) {
             graph = new StandardHugeGraph(config);
-            GRAPHS.put(name, graph);
+            GRAPHS.put(spaceGraphName, graph);
         } else {
             String backend = config.get(CoreOptions.BACKEND);
             E.checkState(backend.equalsIgnoreCase(graph.backend()),
@@ -105,12 +105,12 @@ public class HugeFactory {
     }
 
     public static void remove(HugeGraph graph) {
-        String name = graph.option(CoreOptions.STORE);
-        GRAPHS.remove(name);
+        String spaceGraphName = graph.spaceGraphName();
+        GRAPHS.remove(spaceGraphName);
     }
 
     public static void checkGraphName(String name, String configFile) {
-        E.checkArgument(name.matches(NAME_REGEX),
+        E.checkArgument(SYS_GRAPH.equals(name) || name.matches(NAME_REGEX),
                         "Invalid graph name '%s' in %s, " +
                         "valid graph name is up to 48 alpha-numeric " +
                         "characters and underscores and only letters are " +
@@ -154,6 +154,7 @@ public class HugeFactory {
             return;
         }
         try {
+
             if (!EventHub.destroy(timeout)) {
                 throw new TimeoutException(timeout + "s");
             }

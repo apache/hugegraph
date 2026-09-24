@@ -25,6 +25,7 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_DELIMITER;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_GRAPHSPACE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_GROUP;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_HUGEGRAPH;
+import static org.apache.hugegraph.meta.MetaManager.META_PATH_PROJECT;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_ROLE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_TARGET;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_USER;
@@ -32,6 +33,7 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_USER;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -41,6 +43,7 @@ import org.apache.hugegraph.auth.HugeAccess;
 import org.apache.hugegraph.auth.HugeBelong;
 import org.apache.hugegraph.auth.HugeGroup;
 import org.apache.hugegraph.auth.HugePermission;
+import org.apache.hugegraph.auth.HugeProject;
 import org.apache.hugegraph.auth.HugeRole;
 import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.auth.HugeUser;
@@ -50,13 +53,13 @@ import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
+import org.apache.tinkerpop.gremlin.structure.Graph.Hidden;
 
 public class AuthMetaManager extends AbstractMetaManager {
 
     public AuthMetaManager(MetaDriver metaDriver, String cluster) {
         super(metaDriver, cluster);
     }
-
 
     public void createUser(HugeUser user) throws IOException {
         String result = this.metaDriver.get(userKey(user.name()));
@@ -213,13 +216,11 @@ public class AuthMetaManager extends AbstractMetaManager {
         return HugeGroup.fromMap(map);
     }
 
-    public HugeGroup findGroup(String name) throws IOException,
-                                                   ClassNotFoundException {
+    public HugeGroup findGroup(String name) {
         String result = this.metaDriver.get(groupKey(name));
         if (StringUtils.isEmpty(result)) {
             return null;
         }
-
         return HugeGroup.fromMap(JsonUtil.fromJson(result, Map.class));
     }
 
@@ -371,10 +372,11 @@ public class AuthMetaManager extends AbstractMetaManager {
         E.checkArgument(StringUtils.isNotEmpty(result),
                         "The target name '%s' is not existed", target.name());
 
-        // only resources and update-time could be updated
+        // only url, graph, description, resources and update-time could be updated
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        HugeTarget ori = HugeTarget.fromMap(map);
+        HugeTarget ori = deserializeTarget(graphSpace, map);
         ori.update(new Date());
+        ori.url(target.url());
         ori.graph(target.graph());
         ori.description(target.description());
         ori.resources(target.resources());
@@ -393,10 +395,12 @@ public class AuthMetaManager extends AbstractMetaManager {
                                                       id.asString()));
         E.checkArgument(StringUtils.isNotEmpty(result),
                         "The target name '%s' is not existed", id.asString());
-        this.metaDriver.delete(targetKey(graphSpace, id.asString()));
-        this.putAuthEvent(new MetaManager.AuthEvent("DELETE", "TARGET", id.asString()));
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        return HugeTarget.fromMap(map);
+        HugeTarget target = deserializeTarget(graphSpace, map);
+        this.metaDriver.delete(targetKey(graphSpace, id.asString()));
+        this.putAuthEvent(new MetaManager.AuthEvent("DELETE", "TARGET",
+                                                    id.asString()));
+        return target;
     }
 
     @SuppressWarnings("unchecked")
@@ -407,7 +411,7 @@ public class AuthMetaManager extends AbstractMetaManager {
             return null;
         }
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        return HugeTarget.fromMap(map);
+        return deserializeTarget(graphSpace, map);
     }
 
     @SuppressWarnings("unchecked")
@@ -419,7 +423,7 @@ public class AuthMetaManager extends AbstractMetaManager {
         E.checkArgument(StringUtils.isNotEmpty(result),
                         "The target name '%s' is not existed", id.asString());
         Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
-        return HugeTarget.fromMap(map);
+        return deserializeTarget(graphSpace, map);
     }
 
     @SuppressWarnings("unchecked")
@@ -435,7 +439,7 @@ public class AuthMetaManager extends AbstractMetaManager {
                                                               id.asString()));
                 Map<String, Object> map = JsonUtil.fromJson(targetString,
                                                             Map.class);
-                HugeTarget target = HugeTarget.fromMap(map);
+                HugeTarget target = deserializeTarget(graphSpace, map);
                 result.add(target);
             }
         }
@@ -456,11 +460,25 @@ public class AuthMetaManager extends AbstractMetaManager {
             }
             Map<String, Object> map = JsonUtil.fromJson(item.getValue(),
                                                         Map.class);
-            HugeTarget target = HugeTarget.fromMap(map);
+            HugeTarget target = deserializeTarget(graphSpace, map);
             result.add(target);
         }
 
         return result;
+    }
+
+    private static HugeTarget deserializeTarget(String graphSpace,
+                                                 Map<String, Object> map) {
+        String key = Hidden.unHide(HugeTarget.P.GRAPHSPACE);
+        Map<String, Object> scoped = new HashMap<>(map);
+        if (!scoped.containsKey(key)) {
+            scoped.put(key, graphSpace);
+        } else {
+            E.checkArgument(graphSpace.equals(scoped.get(key)),
+                            "The target graphspace '%s' does not match '%s'",
+                            scoped.get(key), graphSpace);
+        }
+        return HugeTarget.fromMap(scoped);
     }
 
     public Id createBelong(String graphSpace, HugeBelong belong)
@@ -683,9 +701,21 @@ public class AuthMetaManager extends AbstractMetaManager {
 
     public String checkAccess(String graphSpace, HugeAccess access)
             throws IOException, ClassNotFoundException {
-        HugeRole role = this.getRole(graphSpace, access.source());
-        E.checkArgument(role != null,
-                        "The role name '%s' is not existed",
+        // Try to find as role first, then as group
+        String sourceName = null;
+        HugeRole role = this.findRole(graphSpace, access.source());
+        if (role != null) {
+            sourceName = role.name();
+        } else {
+            // If not found as role, try to find as group
+            HugeGroup group = this.findGroup(access.source().asString());
+            if (group != null) {
+                sourceName = group.name();
+            }
+        }
+
+        E.checkArgument(sourceName != null,
+                        "The role or group name '%s' is not existed",
                         access.source().asString());
 
         HugeTarget target = this.getTarget(graphSpace, access.target());
@@ -693,7 +723,7 @@ public class AuthMetaManager extends AbstractMetaManager {
                         "The target name '%s' is not existed",
                         access.target().asString());
 
-        return accessId(role.name(), target.name(), access.permission());
+        return accessId(sourceName, target.name(), access.permission());
     }
 
     @SuppressWarnings("unchecked")
@@ -793,6 +823,24 @@ public class AuthMetaManager extends AbstractMetaManager {
         return result;
     }
 
+    public List<HugeAccess> listAccessByGroup(String graphSpace,
+                                              Id group, long limit) {
+        List<HugeAccess> result = new ArrayList<>();
+        Map<String, String> accessMap = this.metaDriver.scanWithPrefix(
+                accessListKeyByGroup(graphSpace, group.asString()));
+        for (Map.Entry<String, String> item : accessMap.entrySet()) {
+            if (limit >= 0 && result.size() >= limit) {
+                break;
+            }
+            Map<String, Object> map = JsonUtil.fromJson(item.getValue(),
+                                                        Map.class);
+            HugeAccess access = HugeAccess.fromMap(map);
+            result.add(access);
+        }
+
+        return result;
+    }
+
     public String targetFromAccess(String accessKey) {
         E.checkArgument(StringUtils.isNotEmpty(accessKey),
                         "The access name '%s' is empty", accessKey);
@@ -867,6 +915,114 @@ public class AuthMetaManager extends AbstractMetaManager {
                            META_PATH_HUGEGRAPH,
                            this.cluster,
                            META_PATH_AUTH_EVENT);
+    }
+
+    public Id createProject(String graphSpace, HugeProject project)
+            throws IOException {
+        String result = this.metaDriver.get(projectKey(graphSpace,
+                                                       project.name()));
+        E.checkArgument(StringUtils.isEmpty(result),
+                        "The project name '%s' has existed in graphSpace '%s'",
+                        project.name(), graphSpace);
+        this.metaDriver.put(projectKey(graphSpace, project.name()),
+                            serialize(project));
+        this.putAuthEvent(new MetaManager.AuthEvent("CREATE", "PROJECT",
+                                                    project.id().asString()));
+        return project.id();
+    }
+
+    @SuppressWarnings("unchecked")
+    public HugeProject updateProject(String graphSpace, HugeProject project)
+            throws IOException {
+        String result = this.metaDriver.get(projectKey(graphSpace,
+                                                       project.name()));
+        E.checkArgument(StringUtils.isNotEmpty(result),
+                        "The project name '%s' does not exist in graphSpace '%s'",
+                        project.name(), graphSpace);
+
+        // Update project
+        Map<String, Object> map = JsonUtil.fromJson(result, Map.class);
+        HugeProject ori = HugeProject.fromMap(map);
+        ori.update(new Date());
+        ori.description(project.description());
+        ori.graphs(project.graphs());
+        ori.adminGroupId(project.adminGroupId());
+        ori.opGroupId(project.opGroupId());
+        ori.targetId(project.targetId());
+
+        this.metaDriver.put(projectKey(graphSpace, project.name()),
+                            serialize(ori));
+        this.putAuthEvent(new MetaManager.AuthEvent("UPDATE", "PROJECT",
+                                                    ori.id().asString()));
+        return ori;
+    }
+
+    @SuppressWarnings("unchecked")
+    public HugeProject deleteProject(String graphSpace, Id id)
+            throws IOException, ClassNotFoundException {
+        // Find project by id first
+        Map<String, String> projectMap =
+                this.metaDriver.scanWithPrefix(projectListKey(graphSpace));
+        HugeProject project = null;
+        String projectKey = null;
+
+        for (Map.Entry<String, String> entry : projectMap.entrySet()) {
+            Map<String, Object> map = JsonUtil.fromJson(entry.getValue(), Map.class);
+            HugeProject p = HugeProject.fromMap(map);
+            if (p.id().equals(id)) {
+                project = p;
+                projectKey = entry.getKey();
+                break;
+            }
+        }
+
+        E.checkArgument(project != null,
+                        "The project with id '%s' does not exist in graphSpace '%s'",
+                        id, graphSpace);
+
+        this.metaDriver.delete(projectKey);
+        this.putAuthEvent(new MetaManager.AuthEvent("DELETE", "PROJECT", id.asString()));
+        return project;
+    }
+
+    @SuppressWarnings("unchecked")
+    public HugeProject getProject(String graphSpace, Id id)
+            throws IOException, ClassNotFoundException {
+        // Find project by id
+        Map<String, String> projectMap =
+                this.metaDriver.scanWithPrefix(projectListKey(graphSpace));
+
+        for (Map.Entry<String, String> entry : projectMap.entrySet()) {
+            Map<String, Object> map = JsonUtil.fromJson(entry.getValue(), Map.class);
+            HugeProject project = HugeProject.fromMap(map);
+            if (project.id().equals(id)) {
+                return project;
+            }
+        }
+
+        E.checkArgument(false,
+                        "The project with id '%s' does not exist in graphSpace '%s'",
+                        id, graphSpace);
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<HugeProject> listAllProjects(String graphSpace, long limit)
+            throws IOException, ClassNotFoundException {
+        List<HugeProject> result = new ArrayList<>();
+        Map<String, String> projectMap =
+                this.metaDriver.scanWithPrefix(projectListKey(graphSpace));
+
+        for (Map.Entry<String, String> entry : projectMap.entrySet()) {
+            if (limit >= 0 && result.size() >= limit) {
+                break;
+            }
+            Map<String, Object> map = JsonUtil.fromJson(entry.getValue(), Map.class);
+            HugeProject project = HugeProject.fromMap(map);
+            result.add(project);
+        }
+
+        return result;
     }
 
     private String userKey(String name) {
@@ -1031,5 +1187,40 @@ public class AuthMetaManager extends AbstractMetaManager {
                            META_PATH_AUTH,
                            META_PATH_ACCESS,
                            roleName + "->");
+    }
+
+    private String accessListKeyByGroup(String graphSpace, String groupName) {
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphSpace}/AUTH/ACCESS/{groupName}
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_GRAPHSPACE,
+                           graphSpace,
+                           META_PATH_AUTH,
+                           META_PATH_ACCESS,
+                           groupName + "->");
+    }
+
+    private String projectKey(String graphSpace, String projectName) {
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphSpace}/AUTH/PROJECT/{projectName}
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_GRAPHSPACE,
+                           graphSpace,
+                           META_PATH_AUTH,
+                           META_PATH_PROJECT,
+                           projectName);
+    }
+
+    private String projectListKey(String graphSpace) {
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphSpace}/AUTH/PROJECT
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_GRAPHSPACE,
+                           graphSpace,
+                           META_PATH_AUTH,
+                           META_PATH_PROJECT);
     }
 }

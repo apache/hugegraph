@@ -46,6 +46,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -56,7 +58,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/jobs/gremlin")
+@Path("graphspaces/{graphspace}/graphs/{graph}/jobs/gremlin")
 @Singleton
 @Tag(name = "GremlinAPI")
 public class GremlinAPI extends API {
@@ -73,20 +75,27 @@ public class GremlinAPI extends API {
     @Status(Status.CREATED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=gremlin_execute"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=gremlin_execute"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> post(@Context GraphManager manager,
+                                @Parameter(description = "The graphspace name")
+                                @PathParam("graphspace") String graphSpace,
+                                @Parameter(description = "The graph name")
                                 @PathParam("graph") String graph,
+                                @Parameter(description = "The Gremlin job request")
                                 GremlinRequest request) {
         LOG.debug("Graph [{}] schedule gremlin job: {}", graph, request);
         checkCreatingBody(request);
         GREMLIN_JOB_INPUT_HISTOGRAM.update(request.gremlin.length());
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         request.aliase(graph, "graph");
         JobBuilder<Object> builder = JobBuilder.of(g);
         builder.name(request.name())
                .input(request.toJson())
+               //todo: auth
+               //.context(HugeGraphAuthProxy.getContextString())
                .job(new GremlinJob());
         return ImmutableMap.of("task_id", builder.schedule().id());
     }
@@ -95,12 +104,16 @@ public class GremlinAPI extends API {
 
         // See org.apache.tinkerpop.gremlin.server.channel.HttpChannelizer
         @JsonProperty
+        @Schema(description = "The Gremlin script to execute", required = true)
         private String gremlin;
         @JsonProperty
+        @Schema(description = "The bindings for the Gremlin script")
         private Map<String, Object> bindings = new HashMap<>();
         @JsonProperty
+        @Schema(description = "The language of the Gremlin script", example = "gremlin-groovy")
         private String language = "gremlin-groovy";
         @JsonProperty
+        @Schema(description = "The aliases for graph references")
         private Map<String, String> aliases = new HashMap<>();
 
         public String gremlin() {

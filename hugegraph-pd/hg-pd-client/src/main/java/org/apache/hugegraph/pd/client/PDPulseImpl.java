@@ -41,15 +41,16 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class PDPulseImpl implements PDPulse {
 
-    private static final ConcurrentHashMap<String, ManagedChannel> chs = new ConcurrentHashMap<>();
-    private final ExecutorService threadPool;
+    private static ConcurrentHashMap<String, ManagedChannel> chs = new ConcurrentHashMap<>();
+    private ExecutorService threadPool;
     private HgPdPulseGrpc.HgPdPulseStub stub;
     private String pdServerAddress;
 
     // TODO: support several servers.
-    public PDPulseImpl(String pdServerAddress) {
+    public PDPulseImpl(String pdServerAddress, PDConfig config) {
         this.pdServerAddress = pdServerAddress;
-        this.stub = HgPdPulseGrpc.newStub(Channels.getChannel(pdServerAddress));
+        this.stub = AbstractClient.setAsyncParams(
+                HgPdPulseGrpc.newStub(Channels.getChannel(pdServerAddress)), config);
         var namedThreadFactory =
                 new ThreadFactoryBuilder().setNameFormat("ack-notice-pool-%d").build();
         threadPool = Executors.newSingleThreadExecutor(namedThreadFactory);

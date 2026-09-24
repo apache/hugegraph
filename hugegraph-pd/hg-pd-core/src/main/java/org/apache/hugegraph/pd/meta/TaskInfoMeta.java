@@ -114,6 +114,22 @@ public class TaskInfoMeta extends MetadataRocksDBStore {
         return scanPrefix(MetaTask.Task.parser(), prefix);
     }
 
+    public List<MetaTask.Task> scanBuildIndexTask(long taskId) throws PDException {
+        byte[] prefix = MetadataKeyHelper.getBuildIndexTaskPrefix(taskId);
+        return scanPrefix(MetaTask.Task.parser(), prefix);
+    }
+
+    public MetaTask.Task getBuildIndexTask(long taskId, int partitionId) throws PDException {
+        byte[] key = MetadataKeyHelper.getBuildIndexTaskKey(taskId, partitionId);
+        return getOne(MetaTask.Task.parser(), key);
+    }
+
+    public void updateBuildIndexTask(MetaTask.Task task) throws PDException {
+        var bt = task.getBuildIndex();
+        byte[] key = MetadataKeyHelper.getBuildIndexTaskKey(bt.getTaskId(), bt.getPartitionId());
+        put(key, task.toByteArray());
+    }
+
     /**
      * Delete the migration task by prefixing it and group them all at once
      *

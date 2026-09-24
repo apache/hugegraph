@@ -81,11 +81,11 @@ enum ScanMethod {
   RANGE = 3;
 }
 
-enum ScanOrderType{
-  // Under batch interface, the requirement for return order
+enum ScanOrderType {
   ORDER_NONE = 0;             // Allow unordered
   ORDER_WITHIN_VERTEX = 1;    // Edges within a vertex will not be broken, but the order between different vertices is unordered.
   ORDER_STRICT = 2;           // Ensure the original input point order
+  ORDER_BY_KEY = 3;           // Sort scan results by their complete key
 }
 
 enum OpType {
@@ -110,4 +110,11 @@ enum TableMethod{
 enum GraphMethod{
   GRAPH_METHOD_UNKNOWN = 0;
   GRAPH_METHOD_DELETE = 3;
+}
+
+message TTLCleanRequest {
+  string graph = 1;
+  int32 partitionId = 2;
+  string table = 3;
+  repeated bytes ids = 4;
 }

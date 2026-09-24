@@ -118,25 +118,18 @@ public class API {
     }
 
     public String toJSON(PDException exception) {
-        String builder = "{" +
-                         QUOTATION + STATUS_KEY + QUOTATION + COLON +
-                         exception.getErrorCode() + COMMA +
-                         QUOTATION + ERROR_KEY + QUOTATION + COLON +
-                         QUOTATION + exception.getMessage() + QUOTATION +
-                         "}";
-
-        return builder;
+        Map<String, Object> m = new HashMap<>();
+        m.put(STATUS_KEY, exception.getErrorCode());
+        m.put(ERROR_KEY, exception.getMessage() == null ? "" : exception.getMessage());
+        return toJSON(m);
     }
 
-    public String toJSON(Exception exception) {
-        String builder = "{" +
-                         QUOTATION + STATUS_KEY + QUOTATION + COLON + "-1" +
-                         COMMA +
-                         QUOTATION + ERROR_KEY + QUOTATION + COLON +
-                         QUOTATION + exception.getMessage() + QUOTATION +
-                         "}";
-
-        return builder;
+    public String toJSON(Throwable exception) {
+        Map<String, Object> m = new HashMap<>();
+        m.put(STATUS_KEY, -1);
+        m.put(ERROR_KEY,
+              exception == null || exception.getMessage() == null ? "" : exception.getMessage());
+        return toJSON(m);
     }
 
     public String toJSON(Object object) {

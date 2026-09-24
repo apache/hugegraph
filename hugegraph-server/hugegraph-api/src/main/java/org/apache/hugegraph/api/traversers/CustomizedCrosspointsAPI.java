@@ -55,7 +55,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/customizedcrosspoints")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/customizedcrosspoints")
 @Singleton
 @Tag(name = "CustomizedCrosspointsAPI")
 public class CustomizedCrosspointsAPI extends API {
@@ -82,6 +82,7 @@ public class CustomizedCrosspointsAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String post(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        CrosspointsRequest request) {
         E.checkArgumentNotNull(request,
@@ -101,7 +102,7 @@ public class CustomizedCrosspointsAPI extends API {
 
         ApiMeasurer measure = new ApiMeasurer();
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         Iterator<Vertex> sources = request.sources.vertices(g);
 
         CustomizedCrosspointsTraverser traverser =

@@ -30,7 +30,7 @@ import jakarta.ws.rs.core.Response;
 
 public class TaskApiTest extends BaseApiTest {
 
-    private static final String PATH = "/graphs/hugegraph/tasks/";
+    private static final String PATH = "/graphspaces/DEFAULT/graphs/hugegraph/tasks/";
 
     @Before
     public void prepareSchema() {
@@ -88,6 +88,28 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testGetWithoutResult() {
+        int taskId = this.gremlinJob("1 + 2");
+
+        waitTaskSuccess(taskId);
+
+        Response r = client().get(PATH, ImmutableMap.of("limit", -1));
+        String content = assertResponseStatus(200, r);
+        Assert.assertFalse(content, content.contains("task_result"));
+
+        r = client().get(PATH, String.valueOf(taskId));
+        content = assertResponseStatus(200, r);
+        assertJsonContains(content, "task_result");
+
+        r = client().get(PATH + taskId,
+                         ImmutableMap.of("with_result", false));
+        content = assertResponseStatus(200, r);
+        assertJsonContains(content, "id");
+        assertJsonContains(content, "task_callable");
+        Assert.assertFalse(content, content.contains("task_result"));
+    }
+
+    @Test
     public void testCancel() {
         // create a task
         int taskId = this.gremlinJob();
@@ -134,7 +156,7 @@ public class TaskApiTest extends BaseApiTest {
 
     private int rebuild() {
         // create a rebuild_index task
-        String rebuildPath = "/graphs/hugegraph/jobs/rebuild/indexlabels";
+        String rebuildPath = "/graphspaces/DEFAULT/graphs/hugegraph/jobs/rebuild/indexlabels";
         String personByCity = "personByCity";
         Map<String, Object> params = ImmutableMap.of();
         Response r = client().put(rebuildPath, personByCity, "", params);
@@ -143,12 +165,16 @@ public class TaskApiTest extends BaseApiTest {
     }
 
     private int gremlinJob() {
+        return this.gremlinJob("Thread.sleep(1000L)");
+    }
+
+    private int gremlinJob(String gremlin) {
         String body = "{" +
-                      "\"gremlin\":\"Thread.sleep(1000L)\"," +
+                      "\"gremlin\":\"" + gremlin + "\"," +
                       "\"bindings\":{}," +
                       "\"language\":\"gremlin-groovy\"," +
                       "\"aliases\":{}}";
-        String path = "/graphs/hugegraph/jobs/gremlin";
+        String path = "/graphspaces/DEFAULT/graphs/hugegraph/jobs/gremlin";
         String content = assertResponseStatus(201, client().post(path, body));
         return assertJsonContains(content, "task_id");
     }

@@ -63,10 +63,6 @@ class GrpcStoreNodeImpl implements HgStoreNode {
 
     @Override
     public HgStoreSession openSession(String graphName) {
-        // HgAssert.isFalse(HgAssert.isInvalid(graphName), "the argument: graphName is invalid.");
-        // return new GrpcStoreNodeSessionImpl2(this, graphName,this.nodeManager, this
-        // .sessionClient, this
-        // .streamClient);
         return new GrpcStoreNodeSessionImpl(this, graphName, this.nodeManager, this.sessionClient,
                                             this.streamClient);
     }

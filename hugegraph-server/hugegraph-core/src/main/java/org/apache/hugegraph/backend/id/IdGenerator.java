@@ -23,6 +23,7 @@ import java.util.UUID;
 import org.apache.hugegraph.backend.id.Id.IdType;
 import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.hugegraph.util.NumericUtil;
@@ -128,14 +129,20 @@ public abstract class IdGenerator {
     public static class StringId implements Id {
 
         protected String id;
+        protected byte[] bytes;
 
         public StringId(String id) {
-            E.checkArgument(!id.isEmpty(), "The id can't be empty");
+            E.checkArgument(id != null && !id.isEmpty(),
+                            "The id can't be null or empty");
             this.id = id;
+            this.bytes = null;
         }
 
         public StringId(byte[] bytes) {
-            this.id = StringEncoding.decode(bytes);
+            E.checkArgument(bytes != null && bytes.length > 0,
+                            "The id bytes can't be null or empty");
+            this.bytes = bytes;
+            this.id = null;
         }
 
         @Override
@@ -145,27 +152,35 @@ public abstract class IdGenerator {
 
         @Override
         public Object asObject() {
-            return this.id;
+            return this.asString();
         }
 
         @Override
         public String asString() {
+            if (this.id == null) {
+                assert this.bytes != null;
+                this.id = StringEncoding.decode(this.bytes);
+            }
             return this.id;
         }
 
         @Override
         public long asLong() {
-            return Long.parseLong(this.id);
+            return Long.parseLong(this.asString());
         }
 
         @Override
         public byte[] asBytes() {
-            return StringEncoding.encode(this.id);
+            if (this.bytes == null) {
+                assert this.id != null;
+                this.bytes = StringEncoding.encode(this.id);
+            }
+            return this.bytes;
         }
 
         @Override
         public int length() {
-            return this.id.length();
+            return this.asString().length();
         }
 
         @Override
@@ -174,25 +189,37 @@ public abstract class IdGenerator {
             if (cmp != 0) {
                 return cmp;
             }
-            return this.id.compareTo(other.asString());
+            if (this.id != null) {
+                return this.id.compareTo(other.asString());
+            } else {
+                return Bytes.compare(this.bytes, other.asBytes());
+            }
         }
 
         @Override
         public int hashCode() {
-            return this.id.hashCode();
+            return this.asString().hashCode();
         }
 
         @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof StringId)) {
+        public boolean equals(Object obj) {
+            if (!(obj instanceof StringId)) {
                 return false;
             }
-            return this.id.equals(((StringId) other).id);
+            StringId other = (StringId) obj;
+            if (this.id != null) {
+                return this.id.equals(other.asString());
+            } else if (other.bytes == null) {
+                return this.asString().equals(other.asString());
+            } else {
+                assert this.bytes != null;
+                return Bytes.equals(this.bytes, other.asBytes());
+            }
         }
 
         @Override
         public String toString() {
-            return this.id;
+            return this.asString();
         }
     }
 

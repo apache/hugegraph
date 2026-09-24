@@ -27,7 +27,7 @@ import org.apache.hugegraph.pd.upgrade.scripts.TaskCleanUpgrade;
 @Useless("upgrade related")
 public class VersionScriptFactory {
 
-    private static final List<VersionUpgradeScript> SCRIPTS = new LinkedList<>();
+    private static List<VersionUpgradeScript> SCRIPTS = new LinkedList<>();
     private static volatile VersionScriptFactory factory;
 
     static {

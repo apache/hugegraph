@@ -18,22 +18,23 @@
 package org.apache.hugegraph.store.pd;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.client.PDConfig;
 import org.apache.hugegraph.pd.client.PDPulse;
-import org.apache.hugegraph.pd.client.PDPulseImpl;
+import org.apache.hugegraph.pd.client.listener.PDEventListener;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Metapb.PartitionStats;
 import org.apache.hugegraph.pd.grpc.pulse.PartitionHeartbeatRequest;
 import org.apache.hugegraph.pd.grpc.pulse.PartitionHeartbeatResponse;
 import org.apache.hugegraph.pd.grpc.pulse.PdInstructionType;
 import org.apache.hugegraph.pd.grpc.pulse.PulseResponse;
+import org.apache.hugegraph.pd.grpc.watch.WatchChangeType;
 import org.apache.hugegraph.pd.grpc.watch.WatchGraphResponse;
 import org.apache.hugegraph.pd.grpc.watch.WatchResponse;
 import org.apache.hugegraph.pd.pulse.PulseServerNotice;
@@ -43,8 +44,10 @@ import org.apache.hugegraph.store.HgStoreEngine;
 import org.apache.hugegraph.store.meta.Graph;
 import org.apache.hugegraph.store.meta.GraphManager;
 import org.apache.hugegraph.store.meta.Partition;
+import org.apache.hugegraph.store.meta.ShardGroup;
 import org.apache.hugegraph.store.meta.Store;
 import org.apache.hugegraph.store.metric.HgMetricService;
+import org.apache.hugegraph.store.processor.Processors;
 import org.apache.hugegraph.store.util.Asserts;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
@@ -59,10 +62,14 @@ public class DefaultPdProvider implements PdProvider {
     private final String pdServerAddress;
     private final PDPulse pulseClient;
     private Consumer<Throwable> hbOnError = null;
-    private List<PartitionInstructionListener> partitionCommandListeners;
     private PDPulse.Notifier<PartitionHeartbeatRequest.Builder> pdPulse;
+    private Processors processors;
     private GraphManager graphManager = null;
-    PDClient.PDEventListener listener = new PDClient.PDEventListener() {
+
+    public static String name = "store";
+    public static String authority = "default";
+
+    PDEventListener listener = new PDEventListener() {
         // Listening to pd change information listener
         @Override
         public void onStoreChanged(NodeEvent event) {
@@ -72,9 +79,9 @@ public class DefaultPdProvider implements PdProvider {
                 HgStoreEngine.getInstance().rebuildRaftGroup(event.getNodeId());
             } else if (event.getEventType() == NodeEvent.EventType.NODE_PD_LEADER_CHANGE) {
                 log.info("pd leader changed!, {}. restart heart beat", event);
-                if (pulseClient.resetStub(event.getGraph(), pdPulse)) {
-                    startHeartbeatStream(hbOnError);
-                }
+//                if (pulseClient.resetStub(event.getGraph(), pdPulse)) {
+//                    startHeartbeatStream(hbOnError);
+//                }
             }
         }
 
@@ -92,15 +99,31 @@ public class DefaultPdProvider implements PdProvider {
             }
 
         }
+
+        @Override
+        public void onShardGroupChanged(WatchResponse event) {
+            var response = event.getShardGroupResponse();
+            if (response.getType() == WatchChangeType.WATCH_CHANGE_TYPE_SPECIAL1) {
+                HgStoreEngine.getInstance().handleShardGroupOp(response.getShardGroupId(),
+                                                               response.getShardGroup()
+                                                                       .getShardsList());
+            } else if (response.getType() == WatchChangeType.WATCH_CHANGE_TYPE_ADD) {
+                var shardGroup = response.getShardGroup();
+                HgStoreEngine.getInstance().createPartitionEngine(shardGroup.getId(),
+                                                                  ShardGroup.from(shardGroup),
+                                                                  null);
+            }
+        }
     };
 
     public DefaultPdProvider(String pdAddress) {
-        this.pdClient = PDClient.create(PDConfig.of(pdAddress).setEnableCache(true));
+        PDConfig config = PDConfig.of(pdAddress).setEnableCache(true);
+        config.setAuthority(name, authority);
+        this.pdClient = PDClient.create(config);
         this.pdClient.addEventListener(listener);
         this.pdServerAddress = pdAddress;
-        partitionCommandListeners = Collections.synchronizedList(new ArrayList());
         log.info("pulse client connect to {}", pdClient.getLeaderIp());
-        this.pulseClient = new PDPulseImpl(pdClient.getLeaderIp());
+        this.pulseClient = this.pdClient.getPulse();
     }
 
     @Override
@@ -258,7 +281,8 @@ public class DefaultPdProvider implements PdProvider {
             public void onNotice(PulseServerNotice<PulseResponse> response) {
                 PulseResponse content = response.getContent();
 
-                // Message consumption acknowledgment, if the message can be consumed correctly, call accept to return the status code, otherwise do not call accept.
+                // Message consumption acknowledgment, if the message can be consumed correctly,
+                // call accept to return the status code, otherwise do not call accept.
                 Consumer<Integer> consumer = integer -> {
                     LOG.debug("Partition heartbeat accept instruction: {}", content);
                     // LOG.info("accept notice id : {}, ts:{}", response.getNoticeId(), System
@@ -286,72 +310,29 @@ public class DefaultPdProvider implements PdProvider {
                 }
 
                 PartitionHeartbeatResponse instruct = content.getPartitionHeartbeatResponse();
-                LOG.debug("Partition heartbeat receive instruction: {}", instruct);
+                processors.process(instruct, consumer);
 
-                Partition partition = new Partition(instruct.getPartition());
-
-                for (PartitionInstructionListener event : partitionCommandListeners) {
-                    if (instruct.hasChangeShard()) {
-                        event.onChangeShard(instruct.getId(), partition, instruct
-                                                    .getChangeShard(),
-                                            consumer);
-                    }
-                    if (instruct.hasSplitPartition()) {
-                        event.onSplitPartition(instruct.getId(), partition,
-                                               instruct.getSplitPartition(), consumer);
-                    }
-                    if (instruct.hasTransferLeader()) {
-                        event.onTransferLeader(instruct.getId(), partition,
-                                               instruct.getTransferLeader(), consumer);
-                    }
-                    if (instruct.hasDbCompaction()) {
-                        event.onDbCompaction(instruct.getId(), partition,
-                                             instruct.getDbCompaction(), consumer);
-                    }
-
-                    if (instruct.hasMovePartition()) {
-                        event.onMovePartition(instruct.getId(), partition,
-                                              instruct.getMovePartition(), consumer);
-                    }
-
-                    if (instruct.hasCleanPartition()) {
-                        event.onCleanPartition(instruct.getId(), partition,
-                                               instruct.getCleanPartition(),
-                                               consumer);
-                    }
-
-                    if (instruct.hasKeyRange()) {
-                        event.onPartitionKeyRangeChanged(instruct.getId(), partition,
-                                                         instruct.getKeyRange(),
-                                                         consumer);
-                    }
-                }
             }
 
             @Override
             public void onError(Throwable throwable) {
-                LOG.error("Partition heartbeat stream error. {}", throwable);
-                pulseClient.resetStub(pdClient.getLeaderIp(), pdPulse);
-                onError.accept(throwable);
+                LOG.error("Partition heartbeat stream error.", throwable);
             }
 
             @Override
             public void onCompleted() {
                 LOG.info("Partition heartbeat stream complete");
+                if (pulseClient.resetStub(pdClient.getLeaderIp(), pdPulse)) {
+                    startHeartbeatStream(hbOnError);
+                }
             }
         });
         return true;
     }
 
-    /**
-     * Add server-side message listening
-     *
-     * @param listener
-     * @return
-     */
     @Override
-    public boolean addPartitionInstructionListener(PartitionInstructionListener listener) {
-        partitionCommandListeners.add(listener);
+    public boolean setCommandProcessors(Processors processors) {
+        this.processors = processors;
         return true;
     }
 
@@ -360,6 +341,16 @@ public class DefaultPdProvider implements PdProvider {
         for (Metapb.PartitionStats stats : statsList) {
             PartitionHeartbeatRequest.Builder request = PartitionHeartbeatRequest.newBuilder()
                                                                                  .setStates(stats);
+            pdPulse.notifyServer(request);
+        }
+        return false;
+    }
+
+    @Override
+    public boolean partitionHeartbeat(PartitionStats stats) {
+        PartitionHeartbeatRequest.Builder request = PartitionHeartbeatRequest.newBuilder()
+                                                                             .setStates(stats);
+        synchronized (pdPulse) {
             pdPulse.notifyServer(request);
         }
         return false;
@@ -425,6 +416,9 @@ public class DefaultPdProvider implements PdProvider {
             Metapb.StoreStats.Builder stats = HgMetricService.getInstance().getMetrics();
             LOG.debug("storeHeartbeat StoreStats: {}", stats);
             stats.setCores(node.getCores());
+            var executor = HgStoreEngine.getUninterruptibleJobs();
+            stats.setExecutingTask(
+                    executor.getActiveCount() != 0 || !executor.getQueue().isEmpty());
             return pdClient.storeHeartbeat(stats.build());
 
         } catch (PDException e) {
@@ -466,7 +460,27 @@ public class DefaultPdProvider implements PdProvider {
     }
 
     @Override
+    public Metapb.ShardGroup getShardGroupDirect(int partitionId) {
+        try {
+            return pdClient.getShardGroupDirect(partitionId);
+        } catch (PDException e) {
+            log.error("get shard group :{} from pd failed: {}", partitionId, e.getMessage());
+        }
+        return null;
+    }
+
+    @Override
     public void updateShardGroup(Metapb.ShardGroup shardGroup) throws PDException {
         pdClient.updateShardGroup(shardGroup);
+    }
+
+    @Override
+    public String getPdServerAddress() {
+        return pdServerAddress;
+    }
+
+    @Override
+    public void resetPulseClient() {
+        pulseClient.resetStub(pdClient.getLeaderIp(), pdPulse);
     }
 }

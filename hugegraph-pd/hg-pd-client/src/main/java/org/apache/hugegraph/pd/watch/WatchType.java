@@ -21,9 +21,9 @@ enum WatchType {
 
     PARTITION_CHANGE(10);
 
-    private final int value;
+    private int value;
 
-    WatchType(int value) {
+    private WatchType(int value) {
         this.value = value;
     }
 

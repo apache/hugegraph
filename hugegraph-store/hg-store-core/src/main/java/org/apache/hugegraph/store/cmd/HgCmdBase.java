@@ -32,6 +32,10 @@ public class HgCmdBase {
     public static final byte ROCKSDB_COMPACTION = 0x05;
     public static final byte CREATE_RAFT = 0x06;
     public static final byte DESTROY_RAFT = 0x07;
+    public static final byte TTL_CLEAN = 0x08;
+    public static final byte BLANK_TASK = 0x09;
+
+    public static final byte REDIRECT_RAFT_TASK = 0x10;
 
     @Data
     public abstract static class BaseRequest implements Serializable {

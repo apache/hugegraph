@@ -36,6 +36,7 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -46,7 +47,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/jobs/computer")
+@Path("graphspaces/{graphspace}/graphs/{graph}/jobs/computer")
 @Singleton
 @Tag(name = "ComputerAPI")
 public class ComputerAPI extends API {
@@ -61,8 +62,13 @@ public class ComputerAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> post(@Context GraphManager manager,
+                                @Parameter(description = "The graph name")
                                 @PathParam("graph") String graph,
+                                @Parameter(description = "The graphspace name")
+                                @PathParam("graphspace") String graphSpace,
+                                @Parameter(description = "The computer name")
                                 @PathParam("name") String computer,
+                                @Parameter(description = "The computer parameters")
                                 Map<String, Object> parameters) {
         LOG.debug("Graph [{}] schedule computer job: {}", graph, parameters);
         E.checkArgument(computer != null && !computer.isEmpty(),
@@ -74,12 +80,14 @@ public class ComputerAPI extends API {
             throw new NotFoundException("Not found computer: " + computer);
         }
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         Map<String, Object> input = ImmutableMap.of("computer", computer,
                                                     "parameters", parameters);
         JobBuilder<Object> builder = JobBuilder.of(g);
         builder.name("computer:" + computer)
                .input(JsonUtil.toJson(input))
+               //todo: auth
+               //.context(HugeGraphAuthProxy.getContextString())
                .job(new ComputerJob());
         HugeTask<Object> task = builder.schedule();
         return ImmutableMap.of("task_id", task.id());

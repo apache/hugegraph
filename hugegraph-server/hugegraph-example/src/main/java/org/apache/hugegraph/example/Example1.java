@@ -357,7 +357,7 @@ public class Example1 {
             LOG.info(">>>> queryEdges(id-condition): {}", edges2.next());
         }
 
-        // NOTE: query edge by has-key just supported by Cassandra
+        // Query edge by property key when the backend supports it
         if (graph.backendStoreFeatures().supportsQueryWithContainsKey()) {
             PropertyKey contribution = graph.propertyKey("contribution");
             q.key(HugeKeys.PROPERTIES, contribution.id());

@@ -32,7 +32,7 @@ service HgStoreState {
   // Unsubscribe Store Node state publishing.
   rpc UnsubState(SubStateReq) returns (google.protobuf.Empty){}
   rpc getScanState(SubStateReq) returns (ScanState){}
-
+  rpc getPeers(PartitionRequest) returns (PeersResponse){}
 }
 
 message SubStateReq{
@@ -70,4 +70,11 @@ enum NodeStateType {
 
 message QuotaRequest {
   map<string, bool> limits = 1;
+}
+
+message PartitionRequest{
+  int32 id = 1;
+}
+message PeersResponse{
+  string peers = 1;
 }

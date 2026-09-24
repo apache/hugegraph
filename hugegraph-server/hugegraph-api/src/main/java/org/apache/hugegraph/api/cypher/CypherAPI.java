@@ -33,6 +33,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -46,7 +47,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 
-@Path("graphs/{graph}/cypher")
+@Path("graphspaces/{graphspace}/graphs/{graph}/cypher")
 @Singleton
 @Tag(name = "CypherAPI")
 public class CypherAPI extends API {
@@ -71,31 +72,47 @@ public class CypherAPI extends API {
     @Timed
     @CompressInterceptor.Compress(buffer = (1024 * 40))
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    public CypherModel query(@PathParam("graph") String graph, @Context HttpHeaders headers,
+    public CypherModel query(@Context HttpHeaders headers,
+                             @Parameter(description = "The graph space name")
+                             @PathParam("graphspace") String graphspace,
+                             @Parameter(description = "The graph name")
+                             @PathParam("graph") String graph,
+                             @Parameter(description = "The cypher query string")
                              @QueryParam("cypher") String cypher) {
-        LOG.debug("Graph [{}] query by cypher: {}", graph, cypher);
-        return this.queryByCypher(graph, headers, cypher);
+
+        return this.queryByCypher(headers, graphspace, graph, cypher);
     }
+
 
     @POST
     @Timed
     @CompressInterceptor.Compress
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    public CypherModel post(@PathParam("graph") String graph,
-                            @Context HttpHeaders headers, String cypher) {
-        LOG.debug("Graph [{}] query by cypher: {}", graph, cypher);
-        return this.queryByCypher(graph, headers, cypher);
+    public CypherModel post(@Context HttpHeaders headers,
+                            @Parameter(description = "The graph space name")
+                            @PathParam("graphspace") String graphspace,
+                            @Parameter(description = "The graph name")
+                            @PathParam("graph") String graph,
+                            @Parameter(description = "The cypher query string")
+                            String cypher) {
+
+        return this.queryByCypher(headers, graphspace, graph, cypher);
     }
 
-    private CypherModel queryByCypher(String graph, HttpHeaders headers, String cypher) {
+    private CypherModel queryByCypher(HttpHeaders headers, String graphspace,
+                                      String graph, String cypher) {
+        E.checkArgument(graphspace != null && !graphspace.isEmpty(),
+                        "The graphspace parameter can't be null or empty");
         E.checkArgument(graph != null && !graph.isEmpty(),
                         "The graph parameter can't be null or empty");
         E.checkArgument(cypher != null && !cypher.isEmpty(),
                         "The cypher parameter can't be null or empty");
 
-        Map<String, String> aliases = new HashMap<>(1, 1);
-        aliases.put("g", "__g_" + graph);
+        String graphInfo = graphspace + "-" + graph;
+        Map<String, String> aliases = new HashMap<>(2, 1);
+        aliases.put("graph", graphInfo);
+        aliases.put("g", "__g_" + graphInfo);
 
         return this.client(headers).submitQuery(cypher, aliases);
     }

@@ -20,7 +20,9 @@ package org.apache.hugegraph.pd.meta;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.hugegraph.pd.common.PDException;
+import org.apache.hugegraph.pd.common.PDRuntimeException;
 import org.apache.hugegraph.pd.common.PartitionCache;
 import org.apache.hugegraph.pd.config.PDConfig;
 import org.apache.hugegraph.pd.grpc.Metapb;
@@ -33,12 +35,14 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PartitionMeta extends MetadataRocksDBStore {
 
-    static String CID_GRAPH_ID_KEY = "GraphID";
-    static int CID_GRAPH_ID_MAX = 0xFFFE;
-    private final PartitionCache cache;
+    public static final String CID_GRAPH_ID_KEY = "GraphID";
+    public static final int CID_GRAPH_ID_MAX = 0xFFFE;
+    private PDConfig pdConfig;
+    private PartitionCache cache;
 
     public PartitionMeta(PDConfig pdConfig) {
         super(pdConfig);
+        this.pdConfig = pdConfig;
         //this.timeout = pdConfig.getEtcd().getTimeout();
         this.cache = new PartitionCache();
     }
@@ -176,6 +180,14 @@ public class PartitionMeta extends MetadataRocksDBStore {
         return partition;
     }
 
+    /**
+     * Check the database to see if the corresponding graph exists. If it does not exist, create it.
+     * Update partition version, conf version, and shard list
+     *
+     * @param partition
+     * @return
+     * @throws PDException
+     */
     public Metapb.Partition updateShardList(Metapb.Partition partition) throws PDException {
         if (!cache.hasGraph(partition.getGraphName())) {
             getAndCreateGraph(partition.getGraphName());
@@ -209,10 +221,10 @@ public class PartitionMeta extends MetadataRocksDBStore {
     }
 
     public void updatePartitionStats(Metapb.PartitionStats stats) throws PDException {
-        for (String graphName : stats.getGraphNameList()) {
-            byte[] prefix = MetadataKeyHelper.getPartitionStatusKey(graphName, stats.getId());
-            put(prefix, stats.toByteArray());
-        }
+        // for (String graphName : stats.getGraphNameList()) {
+        byte[] prefix = MetadataKeyHelper.getPartitionStatusKey("", stats.getId());
+        put(prefix, stats.toByteArray());
+        // }
     }
 
     /**
@@ -240,6 +252,7 @@ public class PartitionMeta extends MetadataRocksDBStore {
     public Metapb.Graph updateGraph(Metapb.Graph graph) throws PDException {
         log.info("updateGraph {}", graph);
         byte[] key = MetadataKeyHelper.getGraphKey(graph.getGraphName());
+        // save graph information
         put(key, graph.toByteString().toByteArray());
         cache.updateGraph(graph);
         return graph;
@@ -247,10 +260,16 @@ public class PartitionMeta extends MetadataRocksDBStore {
 
     public List<Metapb.Partition> getPartitions() {
         List<Metapb.Partition> partitions = new ArrayList<>();
-        List<Metapb.Graph> graphs = cache.getGraphs();
-        graphs.forEach(e -> {
-            partitions.addAll(cache.getPartitions(e.getGraphName()));
-        });
+        try {
+            List<Metapb.Graph> graphs = cache.getGraphs();
+            if (CollectionUtils.isEmpty(graphs)) {
+                loadGraphs();
+                graphs = cache.getGraphs();
+            }
+            graphs.forEach(e -> partitions.addAll(cache.getPartitions(e.getGraphName())));
+        } catch (PDException e) {
+            throw new PDRuntimeException(e.getErrorCode(), e);
+        }
         return partitions;
     }
 
@@ -275,6 +294,11 @@ public class PartitionMeta extends MetadataRocksDBStore {
         byte[] key = MetadataKeyHelper.getGraphKey(graphName);
         long l = remove(key);
         return l;
+    }
+
+    public long removePartitionStats(String graphName) throws PDException {
+        byte[] prefix = MetadataKeyHelper.getPartitionStatusPrefixKey(graphName);
+        return removeByPrefix(prefix);
     }
 
     public PartitionCache getPartitionCache() {

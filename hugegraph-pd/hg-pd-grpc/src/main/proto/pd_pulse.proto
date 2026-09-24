@@ -93,6 +93,7 @@ message PartitionHeartbeatResponse {
   CleanPartition clean_partition = 9;
   // partition key range variation
   PartitionKeyRange key_range = 10;
+  metapb.BuildIndex build_index = 11;
 }
 
 /* Date model */

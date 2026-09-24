@@ -71,8 +71,8 @@ public class UnsafeUtil {
      * Writes a byte value to a specified index in a byte array.
      *
      * @param target the target byte array.
-     * @param index the index to write to.
-     * @param value the byte value to write.
+     * @param index  the index to write to.
+     * @param value  the byte value to write.
      */
     public static void putByte(final byte[] target, final long index, final byte value) {
         assert UNSAFE_ACCESSOR != null; // Ensure UnsafeAccessor is available
@@ -83,7 +83,7 @@ public class UnsafeUtil {
      * Reads a byte value from a specified index in a byte array.
      *
      * @param target the target byte array.
-     * @param index the index to read from.
+     * @param index  the index to read from.
      * @return the byte value at the specified index.
      */
     public static byte getByte(final byte[] target, final long index) {
@@ -158,13 +158,13 @@ public class UnsafeUtil {
     /**
      * Gets a declared field from a class by name and checks its type.
      *
-     * @param clazz the class to search in.
-     * @param fieldName the name of the field to retrieve.
+     * @param clazz        the class to search in.
+     * @param fieldName    the name of the field to retrieve.
      * @param expectedType the expected type of the field.
      * @return the Field object if found and type matches, otherwise null.
      */
     private static Field field(final Class<?> clazz, final String fieldName,
-            final Class<?> expectedType) {
+                               final Class<?> expectedType) {
         Field field;
         try {
             field = clazz.getDeclaredField(fieldName); // Get the declared field
@@ -222,7 +222,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the byte value.
          * @param offset the memory offset at which to write the byte value.
-         * @param value the byte value to be written to the target object.
+         * @param value  the byte value to be written to the target object.
          */
         public void putByte(final Object target, final long offset, final byte value) {
             this.unsafe.putByte(target, offset, value);
@@ -244,7 +244,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the short value.
          * @param offset the memory offset at which to write the short value.
-         * @param value the short value to be written to the target object.
+         * @param value  the short value to be written to the target object.
          */
         public void putShort(final Object target, final long offset, final short value) {
             this.unsafe.putShort(target, offset, value);
@@ -266,7 +266,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the integer value.
          * @param offset the memory offset at which to write the integer value.
-         * @param value the integer value to be written to the target object.
+         * @param value  the integer value to be written to the target object.
          */
         public void putInt(final Object target, final long offset, final int value) {
             this.unsafe.putInt(target, offset, value);
@@ -288,7 +288,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the long value.
          * @param offset the memory offset at which to write the long value.
-         * @param value the long value to be written to the target object.
+         * @param value  the long value to be written to the target object.
          */
         public void putLong(final Object target, final long offset, final long value) {
             this.unsafe.putLong(target, offset, value);
@@ -310,7 +310,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the boolean value.
          * @param offset the memory offset at which to write the boolean value.
-         * @param value the boolean value to be written to the target object.
+         * @param value  the boolean value to be written to the target object.
          */
         public void putBoolean(final Object target, final long offset, final boolean value) {
             this.unsafe.putBoolean(target, offset, value);
@@ -332,7 +332,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the float value.
          * @param offset the memory offset at which to write the float value.
-         * @param value the float value to be written to the target object.
+         * @param value  the float value to be written to the target object.
          */
         public void putFloat(final Object target, final long offset, final float value) {
             this.unsafe.putFloat(target, offset, value);
@@ -354,7 +354,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the double value.
          * @param offset the memory offset at which to write the double value.
-         * @param value the double value to be written to the target object.
+         * @param value  the double value to be written to the target object.
          */
         public void putDouble(final Object target, final long offset, final double value) {
             this.unsafe.putDouble(target, offset, value);
@@ -376,7 +376,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the object reference.
          * @param offset the memory offset at which to write the object reference.
-         * @param value the object reference to be written to the target object.
+         * @param value  the object reference to be written to the target object.
          */
         public void putObject(final Object target, final long offset, final Object value) {
             this.unsafe.putObject(target, offset, value);
@@ -396,7 +396,7 @@ public class UnsafeUtil {
          * Writes a byte value to a specific memory address.
          *
          * @param address the memory address at which to write the byte value.
-         * @param value the byte value to be written to the specified memory address.
+         * @param value   the byte value to be written to the specified memory address.
          */
         public void putByte(final long address, final byte value) {
             this.unsafe.putByte(address, value);
@@ -416,7 +416,7 @@ public class UnsafeUtil {
          * Writes a short value to a specific memory address.
          *
          * @param address the memory address at which to write the short value.
-         * @param value the short value to be written to the specified memory address.
+         * @param value   the short value to be written to the specified memory address.
          */
         public void putShort(final long address, final short value) {
             this.unsafe.putShort(address, value);
@@ -436,7 +436,7 @@ public class UnsafeUtil {
          * Writes an integer value to a specific memory address.
          *
          * @param address the memory address at which to write the integer value.
-         * @param value the integer value to be written to the specified memory address.
+         * @param value   the integer value to be written to the specified memory address.
          */
         public void putInt(final long address, final int value) {
             this.unsafe.putInt(address, value);
@@ -456,7 +456,7 @@ public class UnsafeUtil {
          * Writes a long value to a specific memory address.
          *
          * @param address the memory address at which to write the long value.
-         * @param value the long value to be written to the specified memory address.
+         * @param value   the long value to be written to the specified memory address.
          */
         public void putLong(final long address, final long value) {
             this.unsafe.putLong(address, value);
@@ -465,15 +465,15 @@ public class UnsafeUtil {
         /**
          * Copies a block of memory from one location to another.
          *
-         * @param srcBase the source object from which to copy memory.
+         * @param srcBase   the source object from which to copy memory.
          * @param srcOffset the offset in the source object from which to start copying.
-         * @param dstBase the destination object to which to copy memory.
+         * @param dstBase   the destination object to which to copy memory.
          * @param dstOffset the offset in the destination object at which to start writing.
-         * @param bytes the number of bytes to copy.
+         * @param bytes     the number of bytes to copy.
          */
         public void copyMemory(final Object srcBase, final long srcOffset, final Object dstBase,
-                final long dstOffset,
-                final long bytes) {
+                               final long dstOffset,
+                               final long bytes) {
             this.unsafe.copyMemory(srcBase, srcOffset, dstBase, dstOffset, bytes);
         }
 
@@ -482,7 +482,7 @@ public class UnsafeUtil {
          *
          * @param srcAddress the source memory address from which to copy.
          * @param dstAddress the destination memory address to which to copy.
-         * @param bytes the number of bytes to copy.
+         * @param bytes      the number of bytes to copy.
          */
         public void copyMemory(final long srcAddress, final long dstAddress, final long bytes) {
             this.unsafe.copyMemory(srcAddress, dstAddress, bytes);
@@ -504,7 +504,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile byte value.
          * @param offset the memory offset at which to write the volatile byte value.
-         * @param value the volatile byte value to be written to the target object.
+         * @param value  the volatile byte value to be written to the target object.
          */
         public void putByteVolatile(final Object target, final long offset, final byte value) {
             this.unsafe.putByteVolatile(target, offset, value);
@@ -526,7 +526,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile short value.
          * @param offset the memory offset at which to write the volatile short value.
-         * @param value the volatile short value to be written to the target object.
+         * @param value  the volatile short value to be written to the target object.
          */
         public void putShortVolatile(final Object target, final long offset, final short value) {
             this.unsafe.putShortVolatile(target, offset, value);
@@ -548,7 +548,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile integer value.
          * @param offset the memory offset at which to write the volatile integer value.
-         * @param value the volatile integer value to be written to the target object.
+         * @param value  the volatile integer value to be written to the target object.
          */
         public void putIntVolatile(final Object target, final long offset, final int value) {
             this.unsafe.putIntVolatile(target, offset, value);
@@ -570,7 +570,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile long value.
          * @param offset the memory offset at which to write the volatile long value.
-         * @param value the volatile long value to be written to the target object.
+         * @param value  the volatile long value to be written to the target object.
          */
         public void putLongVolatile(final Object target, final long offset, final long value) {
             this.unsafe.putLongVolatile(target, offset, value);
@@ -592,10 +592,10 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile boolean value.
          * @param offset the memory offset at which to write the volatile boolean value.
-         * @param value the volatile boolean value to be written to the target object.
+         * @param value  the volatile boolean value to be written to the target object.
          */
         public void putBooleanVolatile(final Object target, final long offset,
-                final boolean value) {
+                                       final boolean value) {
             this.unsafe.putBooleanVolatile(target, offset, value);
         }
 
@@ -615,7 +615,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile float value.
          * @param offset the memory offset at which to write the volatile float value.
-         * @param value the volatile float value to be written to the target object.
+         * @param value  the volatile float value to be written to the target object.
          */
         public void putFloatVolatile(final Object target, final long offset, final float value) {
             this.unsafe.putFloatVolatile(target, offset, value);
@@ -637,14 +637,15 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile double value.
          * @param offset the memory offset at which to write the volatile double value.
-         * @param value the volatile double value to be written to the target object.
+         * @param value  the volatile double value to be written to the target object.
          */
         public void putDoubleVolatile(final Object target, final long offset, final double value) {
             this.unsafe.putDoubleVolatile(target, offset, value);
         }
 
         /**
-         * Retrieves a volatile object reference from the specified object at the given memory offset.
+         * Retrieves a volatile object reference from the specified object at the given memory
+         * offset.
          *
          * @param target the object from which to read the volatile object reference.
          * @param offset the memory offset from which to read the volatile object reference.
@@ -659,7 +660,7 @@ public class UnsafeUtil {
          *
          * @param target the object to which to write the volatile object reference.
          * @param offset the memory offset at which to write the volatile object reference.
-         * @param value the volatile object reference to be written to the target object.
+         * @param value  the volatile object reference to be written to the target object.
          */
         public void putObjectVolatile(final Object target, final long offset, final Object value) {
             this.unsafe.putObjectVolatile(target, offset, value);
@@ -669,27 +670,32 @@ public class UnsafeUtil {
          * Reports the offset of the first element in the storage allocation of a given array class.
          *
          * @param clazz the class of the array for which to report the base offset.
-         * @return the offset of the first element in the storage allocation of the given array class.
+         * @return the offset of the first element in the storage allocation of the given array
+         * class.
          */
         public int arrayBaseOffset(final Class<?> clazz) {
             return this.unsafe != null ? this.unsafe.arrayBaseOffset(clazz) : -1;
         }
 
         /**
-         * Reports the scale factor for addressing elements in the storage allocation of a given array class.
+         * Reports the scale factor for addressing elements in the storage allocation of a given
+         * array class.
          *
          * @param clazz the class of the array for which to report the index scale.
-         * @return the scale factor for addressing elements in the storage allocation of the given array class.
+         * @return the scale factor for addressing elements in the storage allocation of the
+         * given array class.
          */
         public int arrayIndexScale(final Class<?> clazz) {
             return this.unsafe != null ? this.unsafe.arrayIndexScale(clazz) : -1;
         }
 
         /**
-         * Returns the offset of the provided field, or {@code -1} if {@code sun.misc.Unsafe} is not available.
+         * Returns the offset of the provided field, or {@code -1} if {@code sun.misc.Unsafe} is
+         * not available.
          *
          * @param field the field for which to get the offset.
-         * @return the offset of the provided field, or {@code -1} if {@code sun.misc.Unsafe} is not available.
+         * @return the offset of the provided field, or {@code -1} if {@code sun.misc.Unsafe} is
+         * not available.
          */
         public long objectFieldOffset(final Field field) {
             return field == null || this.unsafe == null ? -1 : this.unsafe.objectFieldOffset(field);

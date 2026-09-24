@@ -28,6 +28,7 @@ enum TaskType {
   Move_Partition = 3;
   Clean_Partition = 4;
   Change_KeyRange = 5;
+  Build_Index = 6;
 }
 
 message Task {
@@ -43,6 +44,7 @@ message Task {
   MovePartition movePartition = 11;
   CleanPartition cleanPartition = 12;
   PartitionKeyRange partitionKeyRange = 13;
+  metapb.BuildIndex buildIndex = 14;
 }
 
 enum TaskState{

@@ -83,7 +83,8 @@ public class IndexAPI {
     @Data
     public class PartitionInfo {
 
-        private final int id;                                             // region id
+        // region id
+        private final int id;
         private final String graphName;
         // Region key range [startKey, endKey)
         private final long startKey;

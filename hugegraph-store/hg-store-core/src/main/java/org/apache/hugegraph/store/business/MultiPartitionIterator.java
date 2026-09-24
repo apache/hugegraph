@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 
@@ -196,6 +197,18 @@ public class MultiPartitionIterator implements ScanIterator {
             return null;
         }
 
+    }
+
+    /**
+     * obtain iteration list of all partitions
+     *
+     * @return iteration list
+     */
+    public List<ScanIterator> getIterators() {
+        return this.partitions.stream()
+                              .map(id -> supplier.apply(id, getPositionKey(id)))
+                              .filter(ScanIterator::hasNext)
+                              .collect(Collectors.toList());
     }
 
 }

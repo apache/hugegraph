@@ -41,8 +41,8 @@ import com.google.common.collect.TreeRangeMap;
  */
 public class PartitionCache {
 
-    private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
-    private final Map<String, AtomicBoolean> locks = new HashMap<>();
+    private ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+    private volatile Map<String, AtomicBoolean> locks = new ConcurrentHashMap<>();
     Lock writeLock = readWriteLock.writeLock();
     // One cache per graph
     private volatile Map<String, RangeMap<Long, Integer>> keyToPartIdCache;
@@ -53,8 +53,8 @@ public class PartitionCache {
     private volatile Map<String, Metapb.Graph> graphCache;
 
     public PartitionCache() {
-        keyToPartIdCache = new HashMap<>();
-        partitionCache = new HashMap<>();
+        keyToPartIdCache = new ConcurrentHashMap<>();
+        partitionCache = new ConcurrentHashMap<>();
         shardGroupCache = new ConcurrentHashMap<>();
         storeCache = new ConcurrentHashMap<>();
         graphCache = new ConcurrentHashMap<>();
@@ -214,7 +214,8 @@ public class PartitionCache {
                 }
             }
 
-            partitionCache.computeIfAbsent(graphName, k -> new HashMap<>()).put(partId, partition);
+            partitionCache.computeIfAbsent(graphName, k -> new ConcurrentHashMap<>())
+                          .put(partId, partition);
             keyToPartIdCache.computeIfAbsent(graphName, k -> TreeRangeMap.create())
                             .put(Range.closedOpen(partition.getStartKey(), partition.getEndKey()),
                                  partId);
@@ -270,8 +271,8 @@ public class PartitionCache {
     public void removePartitions() {
         writeLock.lock();
         try {
-            partitionCache = new HashMap<>();
-            keyToPartIdCache = new HashMap<>();
+            partitionCache = new ConcurrentHashMap<>();
+            keyToPartIdCache = new ConcurrentHashMap<>();
             locks.clear();
         } finally {
             writeLock.unlock();
@@ -313,6 +314,10 @@ public class PartitionCache {
 
     public Metapb.ShardGroup getShardGroup(int groupId) {
         return shardGroupCache.get(groupId);
+    }
+
+    public Map<Integer, Metapb.ShardGroup> getShardGroups() {
+        return this.shardGroupCache;
     }
 
     public boolean addStore(Long storeId, Metapb.Store store) {
@@ -358,8 +363,8 @@ public class PartitionCache {
     public void reset() {
         writeLock.lock();
         try {
-            partitionCache = new HashMap<>();
-            keyToPartIdCache = new HashMap<>();
+            partitionCache = new ConcurrentHashMap<>();
+            keyToPartIdCache = new ConcurrentHashMap<>();
             shardGroupCache = new ConcurrentHashMap<>();
             storeCache = new ConcurrentHashMap<>();
             graphCache = new ConcurrentHashMap<>();

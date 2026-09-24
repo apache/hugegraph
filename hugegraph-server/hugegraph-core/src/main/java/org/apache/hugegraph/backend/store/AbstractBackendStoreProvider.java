@@ -45,7 +45,7 @@ public abstract class AbstractBackendStoreProvider
 
     protected Map<String, BackendStore> stores = null;
 
-    protected final void notifyAndWaitEvent(String event) {
+    public final void notifyAndWaitEvent(String event) {
         Future<?> future = this.storeEventHub.notify(event, this);
         try {
             future.get();

@@ -48,7 +48,20 @@ public class Utils {
         } catch (Exception ignored) {
             // ignored Exception
         }
-        return HugeFactory.open(confPath);
+
+        return HugeFactory.open(getLocalConfig(confPath));
+    }
+
+    private static PropertiesConfiguration getLocalConfig(String path) {
+        File file = new File(path);
+        E.checkArgument(file.exists() && file.isFile() && file.canRead(),
+                        "Please specify a proper config file rather than: %s",
+                        file.toString());
+        try {
+            return new Configurations().properties(file);
+        } catch (ConfigurationException e) {
+            throw new HugeException("Unable to load config file: %s", e, path);
+        }
     }
 
     public static boolean containsId(List<Vertex> vertices, Id id) {

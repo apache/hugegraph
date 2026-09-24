@@ -81,7 +81,8 @@ public class ScanResponseObserver<T> implements
      * November 2, 2022
      * 1. Read the thread of rocksdb iterator read
      * 2. Perform data conversion and send to the blocking queue thread offer
-     * 3. Thread for reading data from the blocking queue and sending, including waking up the reading and sending threads when no data is read
+     * 3. Thread for reading data from the blocking queue and sending, including waking up the
+     * reading and sending threads when no data is read
      * */
 
     public ScanResponseObserver(StreamObserver<ScanResponse> sender,

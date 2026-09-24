@@ -30,16 +30,20 @@ TOP="$(cd $BIN/../ && pwd)"
 CONF=$TOP/conf
 LIB=$TOP/lib
 
+. "${BIN}"/util.sh
+
+configure_riscv64_libatomic || exit 1
+
 if [ -n "$JAVA_HOME" ]; then
     JAVA="$JAVA_HOME"/bin/java
 else
     JAVA=java
 fi
 
-conf=$1
 if [ $# -eq 0 ]; then
-    conf=$CONF/hugegraph.properties
+    set -- "$CONF/graphs/hugegraph.properties"
 fi
+conf=$1
 
 cd $TOP
 
@@ -47,5 +51,5 @@ echo "Dumping HugeGraph Store($conf)..."
 
 dump_store_ext_jar_path=$LIB/hugegraph-dist-*.jar
 for i in $LIB/*.jar; do dump_store_ext_jar_path=$dump_store_ext_jar_path:$i;  export dump_store_ext_jar_path; done
-exec $JAVA -cp dump_store_ext_jar_path \
-org.apache.hugegraph.cmd.StoreDumper $conf $2 $3 $4
+exec "$JAVA" -cp "$dump_store_ext_jar_path" \
+org.apache.hugegraph.cmd.StoreDumper "$@"

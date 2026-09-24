@@ -38,6 +38,7 @@ import org.slf4j.Logger;
 
 import com.codahale.metrics.annotation.Timed;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.DefaultValue;
@@ -48,7 +49,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/edges")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/edges")
 @Singleton
 @Tag(name = "EdgesAPI")
 public class EdgesAPI extends API {
@@ -60,6 +61,7 @@ public class EdgesAPI extends API {
     @Compress
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        @QueryParam("ids") List<String> stringIds) {
         LOG.debug("Graph [{}] get edges by ids: {}", graph, stringIds);
@@ -72,10 +74,10 @@ public class EdgesAPI extends API {
             ids[i] = HugeEdge.getIdValue(stringIds.get(i), false);
         }
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
 
         Iterator<Edge> edges = g.edges(ids);
-        return manager.serializer(g).writeEdges(edges, false);
+        return manager.serializer().writeEdges(edges, false);
     }
 
     @GET
@@ -84,14 +86,16 @@ public class EdgesAPI extends API {
     @Compress
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String shards(@Context GraphManager manager,
+                         @PathParam("graphspace") String graphSpace,
                          @PathParam("graph") String graph,
+                         @Parameter(description = "The split size for shards")
                          @QueryParam("split_size") long splitSize) {
         LOG.debug("Graph [{}] get vertex shards with split size '{}'",
                   graph, splitSize);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         List<Shard> shards = g.metadata(HugeType.EDGE_OUT, "splits", splitSize);
-        return manager.serializer(g).writeList("shards", shards);
+        return manager.serializer().writeList("shards", shards);
     }
 
     @GET
@@ -100,6 +104,7 @@ public class EdgesAPI extends API {
     @Compress
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String scan(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        @QueryParam("start") String start,
                        @QueryParam("end") String end,
@@ -109,7 +114,7 @@ public class EdgesAPI extends API {
         LOG.debug("Graph [{}] query edges by shard(start: {}, end: {}, " +
                   "page: {}) ", graph, start, end, page);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
 
         ConditionQuery query = new ConditionQuery(HugeType.EDGE_OUT);
         query.scan(start, end);
@@ -119,6 +124,6 @@ public class EdgesAPI extends API {
         }
         Iterator<Edge> edges = g.edges(query);
 
-        return manager.serializer(g).writeEdges(edges, query.paging());
+        return manager.serializer().writeEdges(edges, query.paging());
     }
 }

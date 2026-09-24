@@ -24,6 +24,7 @@ public class LimitIterator<T> extends WrappedIterator<T> {
 
     private final Iterator<T> originIterator;
     private final Function<T, Boolean> filterCallback;
+    private boolean originClosed;
 
     public LimitIterator(Iterator<T> origin, Function<T, Boolean> filter) {
         this.originIterator = origin;
@@ -33,6 +34,15 @@ public class LimitIterator<T> extends WrappedIterator<T> {
     @Override
     protected Iterator<T> originIterator() {
         return this.originIterator;
+    }
+
+    @Override
+    public void close() throws Exception {
+        if (this.originClosed || this.originIterator == null) {
+            return;
+        }
+        this.originClosed = true;
+        super.close();
     }
 
     @Override
@@ -56,9 +66,10 @@ public class LimitIterator<T> extends WrappedIterator<T> {
     }
 
     protected final void closeOriginIterator() {
-        if (this.originIterator == null) {
+        if (this.originClosed || this.originIterator == null) {
             return;
         }
+        this.originClosed = true;
         close(this.originIterator);
     }
 }

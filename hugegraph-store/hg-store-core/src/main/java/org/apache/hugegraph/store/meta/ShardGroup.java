@@ -52,9 +52,15 @@ public class ShardGroup {
         shardGroup.setId(meta.getId());
         shardGroup.setVersion(meta.getVersion());
         shardGroup.setConfVersion(meta.getConfVer());
-        shardGroup.setShards(meta.getShardsList().stream().map(Shard::fromMetaPbShard)
-                                 .collect(Collectors.toList()));
+        shardGroup.setShards(new CopyOnWriteArrayList<>(
+                meta.getShardsList().stream().map(Shard::fromMetaPbShard)
+                    .collect(Collectors.toList())));
         return shardGroup;
+    }
+
+    public ShardGroup addShard(Shard shard) {
+        this.shards.add(shard);
+        return this;
     }
 
     public synchronized ShardGroup changeLeader(long storeId) {

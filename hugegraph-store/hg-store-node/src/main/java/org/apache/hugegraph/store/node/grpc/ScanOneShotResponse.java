@@ -50,7 +50,6 @@ public class ScanOneShotResponse {
                                    HgStoreWrapperEx wrapper) {
         KvPageRes.Builder resBuilder = KvPageRes.newBuilder();
         Kv.Builder kvBuilder = Kv.newBuilder();
-        ScanIterator iterator = ScanUtil.getIterator(ScanUtil.toSq(request), wrapper);
 
         long limit = request.getLimit();
 
@@ -58,6 +57,7 @@ public class ScanOneShotResponse {
             responseObserver.onError(HgGrpc.toErr("limit<=0, please to invoke stream scan."));
             return;
         }
+        ScanIterator iterator = ScanUtil.getIterator(request, wrapper);
 
         int count = 0;
 
@@ -74,12 +74,13 @@ public class ScanOneShotResponse {
                                            .setKey(ByteString.copyFrom(col.name))
                                            .setValue(ByteString.copyFrom(col.value))
                                            .setCode(HgStoreNodeUtil.toInt(iterator.position()))
-//position == partition-id.
                 );
 
             }
 
-            responseObserver.onNext(resBuilder.build());
+            responseObserver.onNext(
+                    resBuilder.setVersion(ScanUtil.responseVersion(request))
+                              .build());
             responseObserver.onCompleted();
 
         } catch (Throwable t) {

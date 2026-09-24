@@ -29,7 +29,7 @@ import org.slf4j.Logger;
  */
 public class PerfExample4 extends PerfExample3 {
 
-    private static final Logger LOG = Log.logger(PerfExample3.class);
+    private static final Logger LOG = Log.logger(PerfExample4.class);
 
     /**
      * Main method
@@ -78,10 +78,5 @@ public class PerfExample4 extends PerfExample3 {
             assert persons.size() == i;
             LOG.info(">>>> query by range index, cost: {}ms", elapsed(current));
         }
-    }
-
-    protected static long elapsed(long start) {
-        long current = System.currentTimeMillis();
-        return current - start;
     }
 }

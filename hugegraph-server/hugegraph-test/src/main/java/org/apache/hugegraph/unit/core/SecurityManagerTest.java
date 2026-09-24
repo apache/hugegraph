@@ -282,6 +282,12 @@ public class SecurityManagerTest {
         System.getProperty("java.version");
         result = runGremlinJob("System.getProperty(\"java.version\")");
         assertError(result, "Not allowed to access system property(java.version) via Gremlin");
+
+        result = runGremlinJob("System.getProperty(\"socksProxyHost\")");
+        assertError(result, "Not allowed to access system property(socksProxyHost) via Gremlin");
+
+        result = runGremlinJob("System.getProperty(\"file.encoding\")");
+        assertError(result, "Not allowed to access system property(file.encoding) via Gremlin");
     }
 
     @Test

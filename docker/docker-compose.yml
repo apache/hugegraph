@@ -15,44 +15,63 @@
 # limitations under the License.
 #
 
-version: "3"
+name: hugegraph-standalone
+
+networks:
+  hg-net:
+
+volumes:
+  server-data:
+  hubble-data:
 
 services:
-  pd:
-    image: hugegraph/pd
-    container_name: pd
-    hostname: pd
-    network_mode: host
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8620"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
-  store:
-    image: hugegraph/store
-    container_name: store
-    hostname: store
-    network_mode: host
-    depends_on:
-      pd:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8520"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
   server:
-    image: hugegraph/server
-    container_name: server
-    hostname: server
-    network_mode: host
-    depends_on:
-      store:
-        condition: service_healthy
+    image: hugegraph/hugegraph:${HUGEGRAPH_VERSION:-latest}
+    pull_policy: ${HUGEGRAPH_PULL_POLICY:-missing}
+    restart: unless-stopped
+    networks: [hg-net]
+    environment:
+      PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:-}
+      HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
+      HG_SERVER_MIN_FREE_MEMORY: "0"
+      # Unset-only default: a host value overrides it, an absent one
+      # renders the entrypoint default. ":-" would turn an empty host
+      # value into 120 silently, which the entrypoint rejects on purpose.
+      HG_SERVER_STARTUP_TIMEOUT_S: ${HG_SERVER_STARTUP_TIMEOUT_S-120}
+    ports:
+      - "8080:8080"
+    volumes:
+      - server-data:/hugegraph-server/rocksdb-data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 30
+      start_period: 60s
+
+  hubble:
+    image: ${HUBBLE_IMAGE:-hugegraph/hubble:latest}
+    pull_policy: ${HUBBLE_PULL_POLICY:-missing}
+    restart: unless-stopped
+    networks: [hg-net]
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:h2:file:/hubble/data/hubble;DB_CLOSE_ON_EXIT=FALSE
+    ports:
+      - "${HUBBLE_PUBLISH_HOST:-127.0.0.1}:8088:8088"
+    volumes:
+      - hubble-data:/hubble/data
+      - ./conf/hubble/standalone.properties:/hubble/conf/hugegraph-hubble.properties:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          body=$$(curl -fsS http://localhost:8088/about) &&
+          printf '%s' "$$body" | grep -q '"status":200' &&
+          printf '%s' "$$body" | grep -q '"name":"hugegraph-hubble"'
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s

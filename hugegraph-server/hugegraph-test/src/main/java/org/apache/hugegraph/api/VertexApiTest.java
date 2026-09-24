@@ -26,7 +26,7 @@ import jakarta.ws.rs.core.Response;
 
 public class VertexApiTest extends BaseApiTest {
 
-    private static final String PATH = "/graphs/hugegraph/graph/vertices/";
+    private static final String PATH = "/graphspaces/DEFAULT/graphs/hugegraph/graph/vertices/";
 
     @Before
     public void prepareSchema() {

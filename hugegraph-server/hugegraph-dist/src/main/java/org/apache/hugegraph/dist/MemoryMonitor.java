@@ -102,7 +102,7 @@ public class MemoryMonitor {
 
     public void start() {
         if (MEMORY_MONITOR_THRESHOLD >= 1.0) {
-            LOG.info("Invalid parameter, MEMORY_MONITOR_THRESHOLD should ≤ 1.0.");
+            LOG.info("Memory monitoring is disabled by threshold setting.");
             return;
         }
         this.scheduler.scheduleAtFixedRate(this::runMemoryDetect, 0, MEMORY_MONITOR_DETECT_PERIOD,

@@ -132,6 +132,10 @@ public class PDRestService implements InitializingBean {
         return partitionService.getPartitions(graphName);
     }
 
+    public Map<Integer, Metapb.ShardGroup> getShardGroupCache() {
+        return partitionService.getShardGroupCache();
+    }
+
     public List<Metapb.Store> patrolStores() throws PDException {
         return monitorService.patrolStores();
     }
@@ -267,5 +271,10 @@ public class PDRestService implements InitializingBean {
 
     public List<Metapb.Shard> getShardList(int partitionId) throws PDException {
         return storeNodeService.getShardList(partitionId);
+    }
+
+    public void resetPartitionState(Metapb.Partition partition) throws PDException {
+        partitionService.updatePartitionState(partition.getGraphName(), partition.getId(),
+                                              Metapb.PartitionState.PState_Normal);
     }
 }

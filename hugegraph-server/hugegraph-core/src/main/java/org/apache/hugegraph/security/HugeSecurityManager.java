@@ -48,7 +48,6 @@ public class HugeSecurityManager extends SecurityManager {
 
     private static final Set<String> ACCEPT_CLASS_LOADERS = ImmutableSet.of(
             "groovy.lang.GroovyClassLoader",
-            "sun.reflect.DelegatingClassLoader",
             "jdk.internal.reflect.DelegatingClassLoader",
             "org.codehaus.groovy.reflection.SunClassLoader",
             "org.codehaus.groovy.runtime.callsite.CallSiteClassLoader",
@@ -64,11 +63,7 @@ public class HugeSecurityManager extends SecurityManager {
             "line.separator",
             "file.separator",
             // Sofa
-            "java.specification.version",
-            // MySQL
-            "socksProxyHost",
-            // PostgreSQL
-            "file.encoding"
+            "java.specification.version"
     );
 
     private static final Map<String, Set<String>> ASYNC_TASKS = ImmutableMap.of(
@@ -78,21 +73,6 @@ public class HugeSecurityManager extends SecurityManager {
                             "removeIndexLabel", "rebuildIndex"),
             "org.apache.hugegraph.backend.tx.GraphIndexTransaction",
             ImmutableSet.of("asyncRemoveIndexLeft")
-    );
-
-    private static final Map<String, Set<String>> BACKEND_SOCKET = ImmutableMap.of(
-            // Fixed #758
-            "org.apache.hugegraph.backend.store.mysql.MysqlStore",
-            ImmutableSet.of("open", "init", "clear", "opened", "initialized")
-    );
-
-    private static final Map<String, Set<String>> BACKEND_THREAD = ImmutableMap.of(
-            // Fixed #758
-            "org.apache.hugegraph.backend.store.cassandra.CassandraStore",
-            ImmutableSet.of("open", "opened", "init"),
-            // Fixed https://github.com/apache/hugegraph/pull/892#issuecomment-598545072
-            "com.datastax.driver.core.AbstractSession",
-            ImmutableSet.of("execute")
     );
 
     private static final Map<String, Set<String>> BACKEND_SNAPSHOT = ImmutableMap.of(
@@ -172,7 +152,7 @@ public class HugeSecurityManager extends SecurityManager {
     public void checkAccess(Thread thread) {
         if (callFromGremlin() && !callFromCaffeine() &&
             !callFromAsyncTasks() && !callFromEventHubNotify() &&
-            !callFromBackendThread() && !callFromBackendHbase() &&
+            !callFromBackendHbase() &&
             !callFromRaft() && !callFromSofaRpc() && !callFromIgnoreCheckedClass()) {
             throw newSecurityException("Not allowed to access thread via Gremlin");
         }
@@ -183,7 +163,7 @@ public class HugeSecurityManager extends SecurityManager {
     public void checkAccess(ThreadGroup threadGroup) {
         if (callFromGremlin() && !callFromCaffeine() &&
             !callFromAsyncTasks() && !callFromEventHubNotify() &&
-            !callFromBackendThread() && !callFromBackendHbase() &&
+            !callFromBackendHbase() &&
             !callFromRaft() && !callFromSofaRpc() &&
             !callFromIgnoreCheckedClass()) {
             throw newSecurityException("Not allowed to access thread group via Gremlin");
@@ -209,8 +189,7 @@ public class HugeSecurityManager extends SecurityManager {
 
     @Override
     public void checkRead(FileDescriptor fd) {
-        if (callFromGremlin() && !callFromBackendSocket() && !callFromRaft() &&
-            !callFromSofaRpc()) {
+        if (callFromGremlin() && !callFromRaft() && !callFromSofaRpc()) {
             throw newSecurityException("Not allowed to read fd via Gremlin");
         }
         super.checkRead(fd);
@@ -236,8 +215,7 @@ public class HugeSecurityManager extends SecurityManager {
 
     @Override
     public void checkWrite(FileDescriptor fd) {
-        if (callFromGremlin() && !callFromBackendSocket() && !callFromRaft() &&
-            !callFromSofaRpc()) {
+        if (callFromGremlin() && !callFromRaft() && !callFromSofaRpc()) {
             throw newSecurityException("Not allowed to write fd via Gremlin");
         }
         super.checkWrite(fd);
@@ -277,8 +255,8 @@ public class HugeSecurityManager extends SecurityManager {
 
     @Override
     public void checkConnect(String host, int port) {
-        if (callFromGremlin() && !callFromBackendSocket() &&
-            !callFromBackendHbase() && !callFromRaft() && !callFromSofaRpc()) {
+        if (callFromGremlin() && !callFromBackendHbase() &&
+            !callFromRaft() && !callFromSofaRpc()) {
             throw newSecurityException("Not allowed to connect socket via Gremlin");
         }
         super.checkConnect(host, port);
@@ -398,16 +376,6 @@ public class HugeSecurityManager extends SecurityManager {
 
     private static boolean callFromCaffeine() {
         return callFromWorkerWithClass(CAFFEINE_CLASSES);
-    }
-
-    private static boolean callFromBackendSocket() {
-        // Fixed issue #758
-        return callFromMethods(BACKEND_SOCKET);
-    }
-
-    private static boolean callFromBackendThread() {
-        // Fixed issue #758
-        return callFromMethods(BACKEND_THREAD);
     }
 
     private static boolean callFromEventHubNotify() {

@@ -21,6 +21,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -85,7 +89,8 @@ public final class ConfigUtil {
 
     public static Map<String, String> scanGraphsDir(String graphsDirPath) {
         LOG.info("Scanning option 'graphs' directory '{}'", graphsDirPath);
-        File graphsDir = new File(graphsDirPath);
+        // Validate and normalize the path to prevent path traversal attacks
+        File graphsDir = validateAndNormalizePath(graphsDirPath);
         E.checkArgument(graphsDir.exists() && graphsDir.isDirectory(),
                         "Please ensure the path '%s' of option 'graphs' " +
                         "exist and it's a directory", graphsDir);
@@ -106,9 +111,12 @@ public final class ConfigUtil {
 
     public static String writeToFile(String dir, String graphName,
                                      HugeConfig config) {
-        File file = FileUtils.getFile(dir);
+        // Validate and normalize the directory path
+        File file = validateAndNormalizePath(dir);
         E.checkArgument(file.exists(),
                         "The directory '%s' must exist", dir);
+        // Validate graph name to prevent path traversal
+        validateGraphName(graphName);
         String fileName = file.getPath() + File.separator + graphName + CONF_SUFFIX;
         try {
             File newFile = FileUtils.getFile(fileName);
@@ -145,5 +153,78 @@ public final class ConfigUtil {
             throw new IllegalStateException("Failed to read config options", e);
         }
         return propConfig;
+    }
+
+    /**
+     * Validate and normalize file path to prevent path traversal attacks
+     */
+    private static File validateAndNormalizePath(String pathString) {
+        E.checkArgument(StringUtils.isNotEmpty(pathString),
+                        "Path cannot be null or empty");
+
+        try {
+            Path path = Paths.get(pathString).normalize().toAbsolutePath();
+            String normalizedPath = path.toString();
+
+            // Check for path traversal patterns
+            E.checkArgument(!normalizedPath.contains(".."),
+                            "Path traversal not allowed: %s", pathString);
+
+            return path.toFile();
+        } catch (Exception e) {
+            throw new HugeException("Invalid path: %s", e, pathString);
+        }
+    }
+
+    /**
+     * Validate graph name to prevent path traversal in file names
+     */
+    private static void validateGraphName(String graphName) {
+        E.checkArgument(StringUtils.isNotEmpty(graphName),
+                        "Graph name cannot be null or empty");
+        E.checkArgument(!graphName.contains(".."),
+                        "Graph name cannot contain '..': %s", graphName);
+        E.checkArgument(!graphName.contains("/") && !graphName.contains("\\"),
+                        "Graph name cannot contain path separators: %s", graphName);
+        E.checkArgument(graphName.matches("^[a-zA-Z0-9_\\-]+$"),
+                        "Graph name can only contain letters, numbers, hyphens and underscores: %s",
+                        graphName);
+    }
+
+    /**
+     * Serialize a HugeConfig to a JSON string for frontend consumption.
+     * <p>
+     * Sensitive configuration keys (containing keywords such as "password",
+     * "secret", "token", "credential", "auth.key") are excluded to prevent
+     * accidental exposure of credentials through the API response.
+     */
+    public static String writeConfigToString(HugeConfig config) {
+        Map<String, Object> configMap = new HashMap<>();
+        Iterator<String> iterator = config.getKeys();
+        while (iterator.hasNext()) {
+            String key = iterator.next();
+            if (isSensitiveKey(key)) {
+                continue;
+            }
+            configMap.put(key, config.getProperty(key));
+        }
+        return JsonUtil.toJson(configMap);
+    }
+
+    /**
+     * Returns true if the config key looks like it may contain sensitive data.
+     * Uses a case-insensitive keyword blacklist.
+     */
+    private static boolean isSensitiveKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        String lower = key.toLowerCase();
+        return lower.contains("password") ||
+               lower.contains("secret")   ||
+               lower.contains("token")    ||
+               lower.contains("credential") ||
+               lower.contains("private_key") ||
+               lower.contains("auth.key");
     }
 }

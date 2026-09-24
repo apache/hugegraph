@@ -20,16 +20,17 @@ package org.apache.hugegraph.auth;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy.Context;
-import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
 import org.apache.hugegraph.config.ServerOptions;
+import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.type.Nameable;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
@@ -49,6 +50,7 @@ public interface HugeAuthenticator extends Authenticator {
     String KEY_ROLE = "role";
     String KEY_ADDRESS = "address";
     String KEY_PATH = "path";
+    String GENERAL_PATTERN = "*";
 
     String USER_SYSTEM = "system";
     String USER_ADMIN = "admin";
@@ -58,6 +60,7 @@ public interface HugeAuthenticator extends Authenticator {
     RolePermission ROLE_ADMIN = RolePermission.admin();
 
     String VAR_PREFIX = "$";
+    String KEY_GRAPHSPACE = VAR_PREFIX + "graphspace";
     String KEY_OWNER = VAR_PREFIX + "owner";
     String KEY_DYNAMIC = VAR_PREFIX + "dynamic";
     String KEY_ACTION = VAR_PREFIX + "action";
@@ -95,7 +98,6 @@ public interface HugeAuthenticator extends Authenticator {
             String password = credentials.get(KEY_PASSWORD);
             String token = credentials.get(KEY_TOKEN);
 
-            // Currently we just use config tokens to authenticate
             UserWithRole role = this.authenticate(username, password, token);
             if (!verifyRole(role.role())) {
                 // Throw if not certified
@@ -134,10 +136,9 @@ public interface HugeAuthenticator extends Authenticator {
         ClassLoader cl = conf.getClass().getClassLoader();
         try {
             authenticator = (HugeAuthenticator) cl.loadClass(authClass)
-                                                  .newInstance();
+                                                  .getDeclaredConstructor().newInstance();
         } catch (Exception e) {
-            throw new HugeException("Failed to load authenticator: '%s'",
-                                    authClass, e);
+            throw new HugeException("Failed to load authenticator: '%s'", authClass, e);
         }
 
         authenticator.setup(conf);
@@ -252,14 +253,17 @@ public interface HugeAuthenticator extends Authenticator {
 
     class RolePerm {
 
-        @JsonProperty("roles") // graph -> action -> resource
-        private Map<String, Map<HugePermission, Object>> roles;
+        public static final String ANY = "*";
+        public static final String POUND_SEPARATOR = "#";
+        @JsonProperty("roles") // graphspace -> graph -> action -> resource
+        private final Map<String, Map<String, Map<HugePermission, Object>>> roles;
 
         public RolePerm() {
             this.roles = new HashMap<>();
         }
 
-        public RolePerm(Map<String, Map<HugePermission, Object>> roles) {
+        public RolePerm(Map<String, Map<String, Map<HugePermission,
+                Object>>> roles) {
             this.roles = roles;
         }
 
@@ -268,11 +272,153 @@ public interface HugeAuthenticator extends Authenticator {
             return JsonUtil.toJson(this);
         }
 
-        private boolean matchOwner(String owner) {
-            if (owner == null) {
+        private static boolean matchedPrefix(String key, String graph) {
+            if (key.equals(graph)) {
+                return true;
+            } else if (key.endsWith("*")) {
+                key = key.substring(0, key.length() - 1);
+                return graph.startsWith(key);
+            }
+            return false;
+        }
+
+        private static Object matchedAction(HugePermission action,
+                                            Map<HugePermission, Object> perms) {
+            Object matched = perms.get(action);
+            if (matched != null) {
+                return matched;
+            }
+            for (Map.Entry<HugePermission, Object> e : perms.entrySet()) {
+                HugePermission permission = e.getKey();
+                if (permission == HugePermission.SPACE ||
+                    permission == HugePermission.SPACE_MEMBER) {
+                    continue;
+                }
+                // Maybe required = ANY
+                if (action.match(permission) ||
+                    action.equals(HugePermission.EXECUTE)) {
+                    // Return matched resource of corresponding action
+                    return e.getValue();
+                }
+            }
+            return null;
+        }
+
+        public static boolean matchApiRequiredPerm(Object role, RequiredPerm requiredPerm) {
+            if (RolePermission.isAdmin((RolePermission) role)) {
                 return true;
             }
-            return this.roles.containsKey(owner);
+            if (ROLE_NONE.equals(role)) {
+                return false;
+            }
+
+            RolePerm rolePerm = RolePerm.fromJson(role);
+            if (rolePerm.matchSpace(requiredPerm.graphSpace(), requiredPerm.owner)) {
+                return true;
+            }
+
+            if (requiredPerm.action() == HugePermission.NONE) {
+                // None action means any action is OK if the owner matched
+                return rolePerm.matchOwner(requiredPerm.graphSpace(),
+                                           requiredPerm.owner());
+            }
+            return rolePerm.matchResource(requiredPerm.action(),
+                                          requiredPerm.resourceObject());
+        }
+
+        public static boolean match(Object role, HugePermission required,
+                                    ResourceObject<?> resourceObject) {
+            if (role == null || ROLE_NONE.equals(role)) {
+                return false;
+            }
+            if (RolePermission.isAdmin((RolePermission) role)) {
+                return true;
+            }
+
+            RolePerm rolePerm = RolePerm.fromJson(role);
+            // Check if user is space manager（member cannot operate auth api)
+            if (rolePerm.matchSpace(resourceObject.graphSpace(), "space")) {
+                return true;
+            }
+            return rolePerm.matchResource(required, resourceObject);
+        }
+
+        public static boolean match(Object role, RolePermission grant,
+                                    ResourceObject<?> resourceObject) {
+            if (role == null || ROLE_NONE.equals(role)) {
+                return false;
+            }
+
+            if (RolePermission.isAdmin((RolePermission) role)) {
+                return true;
+            }
+
+            if (resourceObject != null) {
+                SchemaDefine.AuthElement element =
+                        (SchemaDefine.AuthElement) resourceObject.operated();
+                if (element instanceof HugeUser &&
+                    ((HugeUser) element).name().equals(USER_ADMIN)) {
+                    // Can't access admin by other users
+                    return false;
+                }
+            }
+
+            RolePermission grantedRole = RolePermission.fromJson(grant);
+            RolePermission currentRole = RolePermission.fromJson(role);
+            RolePerm rolePerm = RolePerm.fromJson(currentRole);
+            if (resourceObject != null &&
+                !RolePermission.isAdmin(grantedRole) &&
+                grantedRole.roles().size() == 1 &&
+                grantedRole.roles().containsKey(resourceObject.graphSpace()) &&
+                rolePerm.matchSpace(resourceObject.graphSpace(), "space")) {
+                return true;
+            }
+            return currentRole.contains(grantedRole);
+        }
+
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        public static RolePerm fromJson(Object role) {
+            RolePermission table = RolePermission.fromJson(role);
+            return new RolePerm((Map) table.map());
+        }
+
+        private boolean matchOwner(String graphSpace, String owner) {
+            if (graphSpace == null && owner == null) {
+                return true;
+            }
+
+            return this.roles.containsKey(graphSpace) &&
+                   this.roles.get(graphSpace).containsKey(owner);
+        }
+
+        private boolean matchSpace(String graphSpace, String requiredRole) {
+            if (graphSpace == null) {
+                return true;
+            }
+
+            if (!this.roles.containsKey(graphSpace)) {
+                return false;
+            }
+
+            Map<String, Map<HugePermission, Object>> graphPermissions =
+                    this.roles.get(graphSpace);
+
+            for (Map<HugePermission, Object> permissions : graphPermissions.values()) {
+                if (permissions == null) {
+                    continue;
+                }
+
+                if (permissions.containsKey(HugePermission.SPACE)) {
+                    return true;
+                }
+
+                if ("space_member".equals(requiredRole) &&
+                    permissions.containsKey(HugePermission.SPACE_MEMBER)) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private boolean matchResource(HugePermission requiredAction,
@@ -288,110 +434,107 @@ public interface HugeAuthenticator extends Authenticator {
                 return true;
             }
 
+            Map<String, Map<HugePermission, Object>> innerRoles =
+                    this.roles.get(requiredResource.graphSpace());
+            if (innerRoles == null) {
+                return false;
+            }
+
+            // * or {graph}
             String owner = requiredResource.graph();
-            Map<HugePermission, Object> permissions = this.roles.get(owner);
-            if (permissions == null) {
-                return false;
-            }
-            Object permission = matchedAction(requiredAction, permissions);
-            if (permission == null) {
-                // Deny all if no specified permission
-                return false;
-            }
-            List<HugeResource> ress;
-            if (permission instanceof List) {
-                @SuppressWarnings("unchecked")
-                List<HugeResource> list = (List<HugeResource>) permission;
-                ress = list;
-            } else {
-                ress = HugeResource.parseResources(permission.toString());
-            }
-            for (HugeResource res : ress) {
-                if (res.filter(requiredResource)) {
-                    return true;
+            for (Map.Entry<String, Map<HugePermission, Object>> e : innerRoles.entrySet()) {
+                if (!matchedPrefix(e.getKey(), owner)) {
+                    continue;
+                }
+                Map<HugePermission, Object> permissions = e.getValue();
+                if (permissions == null) {
+                    permissions = innerRoles.get(GENERAL_PATTERN);
+                    if (permissions == null) {
+                        continue;
+                    }
+                }
+
+                Object permission = matchedAction(requiredAction, permissions);
+                if (permission == null) {
+                    continue;
+                }
+
+                var ressMap = (Map<String, List<HugeResource>>) permission;
+
+                ResourceType requiredType = requiredResource.type();
+                for (Map.Entry<String, List<HugeResource>> entry : ressMap.entrySet()) {
+                    String[] typeLabel = entry.getKey().split(POUND_SEPARATOR);
+                    ResourceType type = ResourceType.valueOf(typeLabel[0]);
+                    /* assert one type can match but not equal to other only
+                     * when it is related to schema and data
+                     */
+                    if (!type.match(requiredType)) {
+                        continue;
+                    } else if (type != requiredType) {
+                        return true;
+                    }
+
+                    // check label
+                    String requiredLabel;
+                    if (requiredType.isSchema()) {
+                        requiredLabel = ((Nameable) requiredResource.operated()).name();
+                    } else if (requiredType.isGraph()) {
+                        if (requiredResource.operated() instanceof HugeElement) {
+                            requiredLabel = ((HugeElement) requiredResource.operated()).label();
+                        } else {
+                            requiredLabel = ((Nameable) requiredResource.operated()).name();
+                        }
+                    } else {
+                        return true;
+                    }
+                    String label = typeLabel[1];
+                    if (!(ANY.equals(label) ||
+                          "null".equals(label) || matchLabel(requiredLabel, label))) {
+                        continue;
+                    } else if (requiredType.isSchema()) {
+                        return true;
+                    }
+
+                    // check properties
+                    List<HugeResource> ress = ressMap.get(type + POUND_SEPARATOR + label);
+
+                    for (HugeResource res : ress) {
+                        if (res.filter(requiredResource)) {
+                            return true;
+                        }
+                    }
                 }
             }
             return false;
         }
 
-        private static Object matchedAction(HugePermission action,
-                                            Map<HugePermission, Object> perms) {
-            Object matched = perms.get(action);
-            if (matched != null) {
-                return matched;
+        /**
+         * Safely match a label pattern against the required label.
+         * Prevents ReDoS attacks by using controlled wildcard matching instead of
+         * arbitrary regex patterns.
+         *
+         * @param requiredLabel the label to match against
+         * @param pattern the pattern (may contain * and ? wildcards)
+         * @return true if the label matches the pattern
+         */
+        private static boolean matchLabel(String requiredLabel, String pattern) {
+            // Use simple wildcard matching instead of arbitrary regex
+            if (pattern.contains("*") || pattern.contains("?")) {
+                // Convert pattern to safe regex: escape special chars, then convert wildcards
+                String regex = Pattern.quote(pattern)
+                                      .replace("\\*", ".*")
+                                      .replace("\\?", ".");
+                return Pattern.matches(regex, requiredLabel);
             }
-            for (Map.Entry<HugePermission, Object> e : perms.entrySet()) {
-                HugePermission permission = e.getKey();
-                // May be required = ANY
-                if (action.match(permission)) {
-                    // Return matched resource of corresponding action
-                    return e.getValue();
-                }
-            }
-            return null;
-        }
-
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        public static RolePerm fromJson(Object role) {
-            RolePermission table = RolePermission.fromJson(role);
-            return new RolePerm((Map) table.map());
-        }
-
-        public static boolean match(Object role, RequiredPerm requiredPerm) {
-            if (role == ROLE_ADMIN) {
-                return true;
-            }
-            if (role == ROLE_NONE) {
-                return false;
-            }
-
-            RolePerm rolePerm = RolePerm.fromJson(role);
-
-            if (requiredPerm.action() == HugePermission.NONE) {
-                // None action means any action is OK if the owner matched
-                return rolePerm.matchOwner(requiredPerm.owner());
-            }
-            return rolePerm.matchResource(requiredPerm.action(),
-                                          requiredPerm.resourceObject());
-        }
-
-        public static boolean match(Object role, HugePermission required,
-                                    ResourceObject<?> resourceObject) {
-            if (role == ROLE_ADMIN) {
-                return true;
-            }
-            if (role == ROLE_NONE) {
-                return false;
-            }
-            RolePerm rolePerm = RolePerm.fromJson(role);
-            return rolePerm.matchResource(required, resourceObject);
-        }
-
-        public static boolean match(Object role, RolePermission grant,
-                                    ResourceObject<?> resourceObject) {
-            if (role == ROLE_ADMIN) {
-                return true;
-            }
-            if (role == ROLE_NONE) {
-                return false;
-            }
-
-            if (resourceObject != null) {
-                AuthElement element = (AuthElement) resourceObject.operated();
-                if (element instanceof HugeUser &&
-                    ((HugeUser) element).name().equals(USER_ADMIN)) {
-                    // Can't access admin by other users
-                    return false;
-                }
-            }
-
-            RolePermission rolePerm = RolePermission.fromJson(role);
-            return rolePerm.contains(grant);
+            // Simple equality check if no wildcards
+            return requiredLabel.equals(pattern);
         }
     }
 
     class RequiredPerm {
 
+        @JsonProperty("graphspace")
+        private String graphSpace;
         @JsonProperty("owner")
         private String owner;
         @JsonProperty("action")
@@ -400,9 +543,47 @@ public interface HugeAuthenticator extends Authenticator {
         private ResourceType resource;
 
         public RequiredPerm() {
+            this.graphSpace = "";
             this.owner = "";
             this.action = HugePermission.NONE;
             this.resource = ResourceType.NONE;
+        }
+
+        public static RequiredPerm fromPermission(String permission) {
+            // Permission format like: "$graphspace=$default $owner=$graph1 $action=vertex-write"
+            RequiredPerm
+                    requiredPerm = new RequiredPerm();
+            String[] spaceAndOwnerAndAction = permission.split(" ");
+            String[] spaceKV = spaceAndOwnerAndAction[0].split("=", 2);
+            E.checkState(spaceKV.length == 2 && spaceKV[0].equals(KEY_GRAPHSPACE),
+                         "Bad permission format: '%s'", permission);
+            requiredPerm.graphSpace(spaceKV[1]);
+
+            String[] ownerKV = spaceAndOwnerAndAction[1].split("=", 2);
+            E.checkState(ownerKV.length == 2 && ownerKV[0].equals(KEY_OWNER),
+                         "Bad permission format: '%s'", permission);
+            requiredPerm.owner(ownerKV[1]);
+
+            if (spaceAndOwnerAndAction.length == 2) {
+                // Return owner if no action (means NONE)
+                return requiredPerm;
+            }
+
+            E.checkState(spaceAndOwnerAndAction.length == 3,
+                         "Bad permission format: '%s'", permission);
+            String[] actionKV = spaceAndOwnerAndAction[2].split("=", 2);
+            E.checkState(actionKV.length == 2,
+                         "Bad permission format: '%s'", permission);
+            E.checkState(actionKV[0].equals(StandardAuthenticator.KEY_ACTION),
+                         "Bad permission format: '%s'", permission);
+            requiredPerm.action(actionKV[1]);
+
+            return requiredPerm;
+        }
+
+        public RequiredPerm graphSpace(String graphSpace) {
+            this.graphSpace = graphSpace;
+            return this;
         }
 
         public RequiredPerm owner(String owner) {
@@ -427,9 +608,8 @@ public interface HugeAuthenticator extends Authenticator {
             return this.resource;
         }
 
-        public ResourceObject<?> resourceObject() {
-            Nameable elem = HugeResource.NameObject.ANY;
-            return ResourceObject.of(this.owner, this.resource, elem);
+        public String graphSpace() {
+            return this.graphSpace;
         }
 
         @Override
@@ -441,7 +621,7 @@ public interface HugeAuthenticator extends Authenticator {
             int offset = action.lastIndexOf('_');
             if (0 < offset && ++offset < action.length()) {
                 /*
-                 * In order to be compatible with the old permission mechanism,
+                 * To be compatible with the old permission mechanism,
                  * here is only to provide pre-control by extract the
                  * resource_action {vertex/edge/schema}_{read/write},
                  * resource_action like vertex_read.
@@ -453,46 +633,26 @@ public interface HugeAuthenticator extends Authenticator {
             this.action = HugePermission.valueOf(action.toUpperCase());
         }
 
-        public static String roleFor(String owner, HugePermission perm) {
+        public static String roleFor(String graphSpace, String owner, HugePermission perm) {
             /*
-             * Construct required permission such as:
+             * Construct required permission such as
              *  $owner=graph1 $action=read
              *  (means required read permission of any one resource)
              *
              * In the future maybe also support:
              *  $owner=graph1 $action=vertex_read
              */
-            return String.format("%s=%s %s=%s", KEY_OWNER, owner,
-                                 KEY_ACTION, perm.string());
+            return String.format("%s=%s %s=%s %s=%s", KEY_GRAPHSPACE, graphSpace,
+                                 KEY_OWNER, owner, KEY_ACTION, perm.string());
         }
 
         public static RequiredPerm fromJson(String json) {
             return JsonUtil.fromJson(json, RequiredPerm.class);
         }
 
-        public static RequiredPerm fromPermission(String permission) {
-            // Permission format like: "$owner=$graph1 $action=vertex-write"
-            RequiredPerm requiredPerm = new RequiredPerm();
-            String[] ownerAndAction = permission.split(" ");
-            String[] ownerKV = ownerAndAction[0].split("=", 2);
-            E.checkState(ownerKV.length == 2 && ownerKV[0].equals(KEY_OWNER),
-                         "Bad permission format: '%s'", permission);
-            requiredPerm.owner(ownerKV[1]);
-            if (ownerAndAction.length == 1) {
-                // Return owner if no action (means NONE)
-                return requiredPerm;
-            }
-
-            E.checkState(ownerAndAction.length == 2,
-                         "Bad permission format: '%s'", permission);
-            String[] actionKV = ownerAndAction[1].split("=", 2);
-            E.checkState(actionKV.length == 2,
-                         "Bad permission format: '%s'", permission);
-            E.checkState(actionKV[0].equals(KEY_ACTION),
-                         "Bad permission format: '%s'", permission);
-            requiredPerm.action(actionKV[1]);
-
-            return requiredPerm;
+        public ResourceObject<?> resourceObject() {
+            Nameable elem = HugeResource.NameObject.ANY;
+            return ResourceObject.of(this.graphSpace, this.owner, this.resource, elem);
         }
     }
 }

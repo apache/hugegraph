@@ -21,6 +21,7 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
+@Deprecated
 public class Base58Encoder {
 
     public static final char[] CHAR_SET =

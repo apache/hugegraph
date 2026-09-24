@@ -34,7 +34,7 @@
         <RollingRandomAccessFile name="file" fileName="${LOG_PATH}/${FILE_NAME}.log"
                                  filePattern="${LOG_PATH}/$${date:yyyy-MM}/${FILE_NAME}-%d{yyyy-MM-dd}-%i.log"
                                  bufferedIO="true" bufferSize="524288" immediateFlush="true">
-            <ThresholdFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY"/>
+            <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
             <PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} [%t] [%p] %c{1.} - %m%n"/>
             <!--JsonLayout compact="true" eventEol="true" complete="true" locationInfo="true">
                 <KeyValuePair key="timestamp" value="$${date:yyyy-MM-dd HH:mm:ss.SSS}"/>
@@ -61,7 +61,7 @@
         <RollingRandomAccessFile name="raft_file" fileName="${LOG_PATH}/${FILE_NAME}_raft.log"
                                  filePattern="${LOG_PATH}/$${date:yyyy-MM}/${FILE_NAME}-%d{yyyy-MM-dd}-%i.log"
                                  bufferedIO="true" bufferSize="524288" immediateFlush="false">
-            <ThresholdFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY"/>
+            <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
             <PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} [%t] [%p] %c{1.} - %m%n"/>
             <!--JsonLayout compact="true" eventEol="true" complete="true" locationInfo="true">
                 <KeyValuePair key="timestamp" value="$${date:yyyy-MM-dd HH:mm:ss.SSS}"/>
@@ -88,7 +88,7 @@
         <RollingRandomAccessFile name="audit" fileName="${LOG_PATH}/audit-${FILE_NAME}.log"
                                  filePattern="${LOG_PATH}/$${date:yyyy-MM}/audit-${FILE_NAME}-%d{yyyy-MM-dd-HH}-%i.gz"
                                  bufferedIO="true" bufferSize="524288" immediateFlush="false">
-            <ThresholdFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY"/>
+            <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
             <!-- Use simple format for audit log to speed up -->
             <!-- PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} - %m%n"/ -->
             <JsonLayout compact="true" eventEol="true" locationInfo="true">
@@ -116,10 +116,7 @@
     <loggers>
         <root level="DEBUG">
             <appender-ref ref="console"/>
-        </root>
-        <root level="INFO">
             <appender-ref ref="file"/>
-            <appender-ref ref="console"/>
         </root>
         <logger name="com.alipay.sofa" level="INFO" additivity="false">
             <appender-ref ref="raft_file"/>

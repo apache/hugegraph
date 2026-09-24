@@ -32,6 +32,7 @@ import org.apache.hugegraph.auth.HugeAccess;
 import org.apache.hugegraph.auth.HugeBelong;
 import org.apache.hugegraph.auth.HugeGroup;
 import org.apache.hugegraph.auth.HugePermission;
+import org.apache.hugegraph.auth.HugeProject;
 import org.apache.hugegraph.auth.HugeRole;
 import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.auth.HugeUser;
@@ -56,10 +57,15 @@ import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.JsonUtil;
+import org.apache.hugegraph.util.Log;
+import org.slf4j.Logger;
 
 import com.google.common.collect.ImmutableMap;
 
 public class MetaManager {
+
+    private static final Logger LOG = Log.logger(MetaManager.class);
 
     public static final String META_PATH_DELIMITER = "/";
     public static final String META_PATH_JOIN = "-";
@@ -67,6 +73,8 @@ public class MetaManager {
     public static final String META_PATH_HUGEGRAPH = "HUGEGRAPH";
     public static final String META_PATH_GRAPHSPACE = "GRAPHSPACE";
     public static final String META_PATH_GRAPHSPACE_LIST = "GRAPHSPACE_LIST";
+    public static final String META_PATH_SYS_GRAPH_CONF = "SYS_GRAPH_CONF";
+    public static final String META_PATH_DEFAULT_GS = "DEFAULT";
     public static final String META_PATH_SERVICE = "SERVICE";
     public static final String META_PATH_SERVICE_CONF = "SERVICE_CONF";
     public static final String META_PATH_GRAPH_CONF = "GRAPH_CONF";
@@ -86,6 +94,7 @@ public class MetaManager {
     public static final String META_PATH_TARGET = "TARGET";
     public static final String META_PATH_BELONG = "BELONG";
     public static final String META_PATH_ACCESS = "ACCESS";
+    public static final String META_PATH_PROJECT = "PROJECT";
     public static final String META_PATH_K8S_BINDINGS = "BINDING";
     public static final String META_PATH_REST_PROPERTIES = "REST_PROPERTIES";
     public static final String META_PATH_GREMLIN_YAML = "GREMLIN_YAML";
@@ -115,6 +124,8 @@ public class MetaManager {
     public static final long LOCK_DEFAULT_LEASE = 30L;
     public static final long LOCK_DEFAULT_TIMEOUT = 10L;
     public static final int RANDOM_USER_ID = 100;
+    private static final String SCHEMA_CACHE_CLEAR_GRAPH_KEY = "graph";
+    private static final String SCHEMA_CACHE_CLEAR_SOURCE_KEY = "source";
     private static final String META_PATH_URLS = "URLS";
     private static final String META_PATH_PD_PEERS = "HSTORE_PD_PEERS";
     private static final MetaManager INSTANCE = new MetaManager();
@@ -151,7 +162,13 @@ public class MetaManager {
                                      String clientKeyFile, Object... args) {
         E.checkArgument(cluster != null && !cluster.isEmpty(),
                         "The cluster can't be null or empty");
-        if (this.metaDriver == null) {
+        if (this.metaDriver != null) {
+            if (!cluster.equals(this.cluster)) {
+                LOG.warn("MetaManager is already connected to cluster '{}', " +
+                         "ignoring the connect request for cluster '{}'",
+                         this.cluster, cluster);
+            }
+        } else {
             this.cluster = cluster;
 
             switch (type) {
@@ -174,6 +191,24 @@ public class MetaManager {
             }
         }
         this.initManagers(this.cluster);
+    }
+
+    /**
+     * Fail fast when the MetaManager was connected earlier under another
+     * cluster name: every meta key is prefixed with the cluster, so a server
+     * that expects `expected` would otherwise silently read an empty tree.
+     */
+    public synchronized void ensureCluster(String expected) {
+        E.checkState(this.metaDriver != null,
+                     "The MetaManager is not connected yet");
+        if (!expected.equals(this.cluster)) {
+            throw new IllegalStateException(String.format(
+                    "The MetaManager is connected to cluster '%s', but the " +
+                    "configured cluster is '%s'; the meta keys live under " +
+                    "'HUGEGRAPH/%s/', set the same cluster name for the " +
+                    "server ('cluster') and the graphs ('pd.cluster')",
+                    this.cluster, expected, this.cluster));
+        }
     }
 
     private void initManagers(String cluster) {
@@ -376,6 +411,23 @@ public class MetaManager {
         return this.metaDriver.extractValuesFromResponse(response);
     }
 
+    public <T> List<SchemaCacheClearEvent> extractSchemaCacheClearEventsFromResponse(
+            T response) {
+        List<String> values = this.metaDriver.extractValuesFromResponse(response);
+        if (values == null) {
+            return null;
+        }
+
+        List<SchemaCacheClearEvent> events = new ArrayList<>(values.size());
+        for (String value : values) {
+            SchemaCacheClearEvent event = SchemaCacheClearEvent.fromValue(value);
+            if (event != null) {
+                events.add(event);
+            }
+        }
+        return events;
+    }
+
     public <T> Map<String, String> extractKVFromResponse(T response) {
         return this.metaDriver.extractKVFromResponse(response);
     }
@@ -408,6 +460,18 @@ public class MetaManager {
     public void updateGraphConfig(String graphSpace, String graph,
                                   Map<String, Object> configs) {
         this.graphMetaManager.updateGraphConfig(graphSpace, graph, configs);
+    }
+
+    public void addSysGraphConfig(Map<String, Object> configs) {
+        this.graphMetaManager.addSysGraphConfig(configs);
+    }
+
+    public Map<String, Object> getSysGraphConfig() {
+        return this.graphMetaManager.getSysGraphConfig();
+    }
+
+    public void removeSysGraphConfig() {
+        this.graphMetaManager.removeSysGraphConfig();
     }
 
     public GraphSpace graphSpace(String name) {
@@ -483,7 +547,12 @@ public class MetaManager {
     }
 
     public void notifySchemaCacheClear(String graphSpace, String graph) {
-        this.graphMetaManager.notifySchemaCacheClear(graphSpace, graph);
+        this.notifySchemaCacheClear(graphSpace, graph, null);
+    }
+
+    public void notifySchemaCacheClear(String graphSpace, String graph,
+                                       String source) {
+        this.graphMetaManager.notifySchemaCacheClear(graphSpace, graph, source);
     }
 
     public void notifyGraphCacheClear(String graphSpace, String graph) {
@@ -508,6 +577,10 @@ public class MetaManager {
      */
     public void notifyGraphEdgeCacheClear(String graphSpace, String graph) {
         this.graphMetaManager.notifyGraphEdgeCacheClear(graphSpace, graph);
+    }
+
+    public LockResult lock(String... keys) {
+        return this.lockMetaManager.lock(keys);
     }
 
     public LockResult tryLock(String key) {
@@ -749,7 +822,6 @@ public class MetaManager {
                                 EdgeLabel edgeLabel) {
         this.schemaMetaManager.updateEdgeLabel(graphSpace, graph, edgeLabel);
     }
-
 
     public EdgeLabel getEdgeLabel(String graphSpace, String graph,
                                   Id edgeLabel) {
@@ -1028,6 +1100,13 @@ public class MetaManager {
         return this.authMetaManager.listAccessByRole(graphSpace, role, limit);
     }
 
+    public List<HugeAccess> listAccessByGroup(String graphSpace,
+                                              Id group, long limit)
+            throws IOException,
+                   ClassNotFoundException {
+        return this.authMetaManager.listAccessByGroup(graphSpace, group, limit);
+    }
+
     public String targetFromAccess(String accessKey) {
         return this.authMetaManager.targetFromAccess(accessKey);
     }
@@ -1042,6 +1121,31 @@ public class MetaManager {
                    ClassNotFoundException {
         return this.authMetaManager.listAccessByTarget(graphSpace, target,
                                                        limit);
+    }
+
+    public Id createProject(String graphSpace, HugeProject project)
+            throws IOException {
+        return this.authMetaManager.createProject(graphSpace, project);
+    }
+
+    public HugeProject updateProject(String graphSpace, HugeProject project)
+            throws IOException {
+        return this.authMetaManager.updateProject(graphSpace, project);
+    }
+
+    public HugeProject deleteProject(String graphSpace, Id id)
+            throws IOException, ClassNotFoundException {
+        return this.authMetaManager.deleteProject(graphSpace, id);
+    }
+
+    public HugeProject getProject(String graphSpace, Id id)
+            throws IOException, ClassNotFoundException {
+        return this.authMetaManager.getProject(graphSpace, id);
+    }
+
+    public List<HugeProject> listAllProjects(String graphSpace, long limit)
+            throws IOException, ClassNotFoundException {
+        return this.authMetaManager.listAllProjects(graphSpace, limit);
     }
 
     public List<String> listGraphSpace() {
@@ -1236,6 +1340,70 @@ public class MetaManager {
         this.metaDriver.put(key, ((Boolean) status).toString());
     }
 
+    public static String schemaCacheClearEventValue(String graph,
+                                                    String source) {
+        if (StringUtils.isEmpty(source)) {
+            return graph;
+        }
+        return JsonUtil.toJson(ImmutableMap.of(SCHEMA_CACHE_CLEAR_GRAPH_KEY,
+                                               graph,
+                                               SCHEMA_CACHE_CLEAR_SOURCE_KEY,
+                                               source));
+    }
+
+    public static final class SchemaCacheClearEvent {
+
+        private final String graph;
+        private final String source;
+
+        private SchemaCacheClearEvent(String graph, String source) {
+            this.graph = graph;
+            this.source = source;
+        }
+
+        public String graph() {
+            return this.graph;
+        }
+
+        public String source() {
+            return this.source;
+        }
+
+        @SuppressWarnings("unchecked")
+        static SchemaCacheClearEvent fromValue(String value) {
+            if (StringUtils.isEmpty(value)) {
+                return null;
+            }
+            // Compatibility: events published before source-id support stored
+            // only the graph name as a plain string. Keep accepting that format
+            // so mixed-version clusters can consume old/new schema-cache-clear
+            // events during rolling upgrades.
+            if (value.charAt(0) != '{') {
+                return new SchemaCacheClearEvent(value, null);
+            }
+
+            Map<String, Object> payload;
+            try {
+                payload = JsonUtil.fromJson(value, Map.class);
+            } catch (RuntimeException e) {
+                LOG.debug("Malformed schema-cache-clear payload, ignoring: {}",
+                          value, e);
+                return null;
+            }
+
+            Object graph = payload.get(SCHEMA_CACHE_CLEAR_GRAPH_KEY);
+            if (graph == null) {
+                LOG.debug("Schema-cache-clear payload missing '{}' field: {}",
+                          SCHEMA_CACHE_CLEAR_GRAPH_KEY, value);
+                return null;
+            }
+
+            Object source = payload.get(SCHEMA_CACHE_CLEAR_SOURCE_KEY);
+            String sourceValue = source == null ? null : source.toString();
+            return new SchemaCacheClearEvent(graph.toString(), sourceValue);
+        }
+    }
+
     public enum MetaDriverType {
         ETCD,
         PD
@@ -1248,6 +1416,7 @@ public class MetaManager {
     }
 
     public static class AuthEvent {
+
         private String op; // ALLOW: CREATE | DELETE | UPDATE
         private String type; // ALLOW: USER | GROUP | TARGET | ACCESS | BELONG
         private String id;

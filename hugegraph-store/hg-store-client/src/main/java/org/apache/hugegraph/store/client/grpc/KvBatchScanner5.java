@@ -35,7 +35,7 @@ import org.apache.hugegraph.store.HgPageSize;
 import org.apache.hugegraph.store.HgScanQuery;
 import org.apache.hugegraph.store.client.HgStoreNodeSession;
 import org.apache.hugegraph.store.client.type.HgStoreClientException;
-import org.apache.hugegraph.store.util.Base58Encoder;
+import org.apache.hugegraph.store.client.util.Base58;
 import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
 import org.apache.hugegraph.store.grpc.common.Kv;
 import org.apache.hugegraph.store.grpc.stream.HgStoreStreamGrpc;
@@ -107,7 +107,7 @@ class KvBatchScanner5 {
 
             if (log.isDebugEnabled()) {
                 if (scanQuery.getPrefixList() != null && scanQuery.getPrefixList().size() > 0) {
-                    brokerId = Base58Encoder.convertToBase58(scanQuery.getPrefixList().get(0).getKey());
+                    brokerId = Base58.encode(scanQuery.getPrefixList().get(0).getKey());
 
                     log.debug(
                             "[ANALYSIS START] [{}] firstKey: {}, keyLength: {}, table: {}, node: {}"

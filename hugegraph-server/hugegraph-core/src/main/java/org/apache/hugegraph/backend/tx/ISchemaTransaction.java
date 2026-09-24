@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.backend.tx;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -96,6 +95,8 @@ public interface ISchemaTransaction {
     void checkSchemaName(String name);
 
     String graphName();
+
+    String spaceGraphName();
 
     void updateSchemaStatus(SchemaElement element, SchemaStatus status);
 

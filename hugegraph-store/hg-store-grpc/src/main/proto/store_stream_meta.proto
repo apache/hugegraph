@@ -61,21 +61,21 @@ message ScanReceiptRequest {
 }
 
 message ScanCondition {
-  int32 code = 1;      // owner key hashcode
-  bytes prefix = 2;   // key prefix
-  bytes start = 3;    // start key
-  bytes end = 4;      // end key
-  int32 serialNo = 5; // serial no
+  int32 code = 1;      // Owner key hash code.
+  bytes prefix = 2;    // Key prefix.
+  bytes start = 3;     // Start key.
+  bytes end = 4;       // End key.
+  int32 serialNo = 5;  // Serial number.
 }
 
 message ScanStreamReq {
   Header header = 1;
   ScanMethod method = 2;
   string table = 3;
-  int32 code = 4;  // partitionId
-  bytes prefix = 5;   // key prefix
-  bytes start = 6;    //start key
-  bytes end = 7;      //end key
+  int32 code = 4;   // Partition ID.
+  bytes prefix = 5; // Key prefix.
+  bytes start = 6;  // Start key.
+  bytes end = 7;    // End key.
   int64 limit = 8;
   int32 scanType = 9;
   bytes query = 10;
@@ -83,6 +83,7 @@ message ScanStreamReq {
   bytes position = 12;
   uint32 closeFlag = 13;
   SelectParam selects = 14;
+  ScanOrderType orderType = 15;
 }
 
 message SelectParam {
@@ -92,11 +93,16 @@ message SelectParam {
 }
 
 message KvPageRes {
-  int32 times = 1;        //query times.
-  bool over = 2;          //true=no more data
+  int32 times = 1;        // Query times.
+  bool over = 2;          // True if no more data.
   repeated Kv data = 3;
   uint32 version = 4;
   bytes stream = 5;
+}
+
+enum ScanStreamVersion {
+  SCAN_STREAM_VERSION_UNKNOWN = 0;
+  SCAN_STREAM_VERSION_ORDERED_BY_KEY = 1;
 }
 
 enum KvStreamType {

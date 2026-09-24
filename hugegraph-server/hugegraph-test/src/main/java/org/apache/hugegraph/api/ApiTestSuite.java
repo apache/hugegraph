@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.api;
 
-import org.apache.hugegraph.api.graphspaces.GraphSpaceApiTestSuite;
 import org.apache.hugegraph.api.traversers.TraversersApiTestSuite;
 import org.apache.hugegraph.dist.RegisterUtil;
 import org.junit.BeforeClass;
@@ -42,7 +41,12 @@ import org.junit.runners.Suite;
         TraversersApiTestSuite.class,
         CypherApiTest.class,
         ArthasApiTest.class,
-        GraphSpaceApiTestSuite.class
+        GraphSpaceApiTest.class,
+        GraphSpaceApiStandaloneTest.class,
+        ManagerApiStandaloneTest.class,
+        GraphsApiStandaloneTest.class,
+        SchemaTemplateApiTest.class,
+        DefaultRoleApiStandaloneTest.class,
 })
 public class ApiTestSuite {
 

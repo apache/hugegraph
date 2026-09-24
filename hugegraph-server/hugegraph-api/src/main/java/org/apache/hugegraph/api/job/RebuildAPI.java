@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -40,7 +41,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/jobs/rebuild")
+@Path("graphspaces/{graphspace}/graphs/{graph}/jobs/rebuild")
 @Singleton
 @Tag(name = "RebuildAPI")
 public class RebuildAPI extends API {
@@ -52,14 +53,20 @@ public class RebuildAPI extends API {
     @Path("vertexlabels/{name}")
     @Status(Status.ACCEPTED)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=index_write"})
+    @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=index_label_write"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> vertexLabelRebuild(@Context GraphManager manager,
+                                              @Parameter(description = "The graphspace name")
+                                              @PathParam("graphspace")
+                                              String graphSpace,
+                                              @Parameter(description = "The graph name")
                                               @PathParam("graph") String graph,
+                                              @Parameter(description = "The vertex label to rebuild")
                                               @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild vertex label: {}", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         return ImmutableMap.of("task_id",
                                g.schema().vertexLabel(name).rebuildIndex());
     }
@@ -69,14 +76,19 @@ public class RebuildAPI extends API {
     @Path("edgelabels/{name}")
     @Status(Status.ACCEPTED)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=index_write"})
-    @RedirectFilter.RedirectMasterRole
+    @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=index_label_write"})
     public Map<String, Id> edgeLabelRebuild(@Context GraphManager manager,
+                                            @Parameter(description = "The graphspace name")
+                                            @PathParam("graphspace")
+                                            String graphSpace,
+                                            @Parameter(description = "The graph name")
                                             @PathParam("graph") String graph,
+                                            @Parameter(description = "The edge label name to rebuild")
                                             @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild edge label: {}", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         return ImmutableMap.of("task_id",
                                g.schema().edgeLabel(name).rebuildIndex());
     }
@@ -86,14 +98,20 @@ public class RebuildAPI extends API {
     @Path("indexlabels/{name}")
     @Status(Status.ACCEPTED)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=index_write"})
+    @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
+                            "$action=index_label_write"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> indexLabelRebuild(@Context GraphManager manager,
+                                             @Parameter(description = "The graphspace name")
+                                             @PathParam("graphspace")
+                                             String graphSpace,
+                                             @Parameter(description = "The graph name")
                                              @PathParam("graph") String graph,
+                                             @Parameter(description = "The index label name to rebuild")
                                              @PathParam("name") String name) {
         LOG.debug("Graph [{}] rebuild index label: {}", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         return ImmutableMap.of("task_id",
                                g.schema().indexLabel(name).rebuild());
     }

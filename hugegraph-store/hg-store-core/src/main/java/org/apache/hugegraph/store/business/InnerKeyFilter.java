@@ -40,6 +40,14 @@ public class InnerKeyFilter<T extends BackendColumn> implements ScanIterator {
         moveNext();
     }
 
+    public InnerKeyFilter(ScanIterator iterator, boolean codeFilter) {
+        this.iterator = iterator;
+        this.codeFrom = Integer.MIN_VALUE;
+        this.codeTo = Integer.MAX_VALUE;
+        this.codeFilter = codeFilter;
+        moveNext();
+    }
+
     public InnerKeyFilter(ScanIterator iterator, int codeFrom, int codeTo) {
         this.iterator = iterator;
         this.codeFrom = codeFrom;

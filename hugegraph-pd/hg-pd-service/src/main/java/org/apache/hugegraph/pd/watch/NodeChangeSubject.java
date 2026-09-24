@@ -37,10 +37,11 @@ final class NodeChangeSubject extends AbstractWatchSubject {
 
     @Override
     String toNoticeString(WatchResponse res) {
-        String sb = "graph:" + res.getNodeResponse().getGraph() +
-                    "," +
-                    "nodeId:" + res.getNodeResponse().getNodeId();
-        return sb;
+        StringBuilder sb = new StringBuilder();
+        return sb.append("graph:").append(res.getNodeResponse().getGraph())
+                 .append(",")
+                 .append("nodeId:").append(res.getNodeResponse().getNodeId())
+                 .toString();
     }
 
     public void notifyWatcher(NodeEventType nodeEventType, String graph, long nodeId) {

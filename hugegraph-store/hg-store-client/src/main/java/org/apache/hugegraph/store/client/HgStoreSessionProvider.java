@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.client;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import org.apache.hugegraph.store.HgSessionConfig;
 import org.apache.hugegraph.store.HgSessionProvider;
 import org.apache.hugegraph.store.HgStoreSession;
 
@@ -33,5 +34,10 @@ public class HgStoreSessionProvider implements HgSessionProvider {
     @Override
     public HgStoreSession createSession(String graphName) {
         return this.sessionFactory.createStoreSession(graphName);
+    }
+
+    @Override
+    public HgStoreSession createSession(String graphName, HgSessionConfig sessionConfig) {
+        return this.sessionFactory.createStoreSession(graphName, sessionConfig);
     }
 }

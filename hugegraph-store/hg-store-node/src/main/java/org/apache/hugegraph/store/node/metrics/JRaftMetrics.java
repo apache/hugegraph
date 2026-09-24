@@ -32,8 +32,6 @@ import org.apache.hugegraph.store.node.util.HgRegexUtil;
 import com.alipay.sofa.jraft.core.NodeMetrics;
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Meter;
-import com.codahale.metrics.Snapshot;
-import com.codahale.metrics.Timer;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -278,7 +276,7 @@ public class JRaftMetrics {
 
         name = name.toLowerCase();
 
-        //Adapted a counter to be a gauge.
+        // Adapted a counter to be a gauge.
         Gauge.builder(PREFIX + "." + name + ".count", counter, Counter::getCount)
              .tags(tags).register(registry);
     }

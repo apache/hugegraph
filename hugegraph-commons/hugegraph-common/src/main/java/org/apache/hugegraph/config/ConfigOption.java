@@ -20,6 +20,22 @@ package org.apache.hugegraph.config;
 import com.google.common.base.Predicate;
 
 public class ConfigOption<T> extends TypedOption<T, T> {
+    private boolean urlNormalize = false;
+    private String defaultScheme = null;
+
+    public ConfigOption<T> withUrlNormalization(String scheme) {
+        this.urlNormalize = true;
+        this.defaultScheme = scheme;
+        return this;
+    }
+
+    public boolean needsUrlNormalization() {
+        return this.urlNormalize;
+    }
+
+    public String getDefaultScheme() {
+        return this.defaultScheme;
+    }
 
     public ConfigOption(String name, String desc, T value) {
         this(name, desc, null, value);

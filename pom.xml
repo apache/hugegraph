@@ -15,7 +15,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
   -->
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.apache.hugegraph</groupId>
@@ -47,7 +47,7 @@
 
     <developers>
         <developer>
-            <id>Apache Hugegraph(incubating)</id>
+            <id>Apache HugeGraph</id>
             <email>dev-subscribe@hugegraph.apache.org</email>
             <url>https://hugegraph.apache.org/</url>
         </developer>
@@ -58,7 +58,7 @@
             <name>Development Mailing List</name>
             <subscribe>dev-subscribe@hugegraph.apache.org</subscribe>
             <unsubscribe>dev-unsubscribe@hugegraph.apache.org</unsubscribe>
-            <post>dev@hugegraph.incubator.apache.org</post>
+            <post>dev@hugegraph.apache.org</post>
         </mailingList>
         <mailingList>
             <name>Commits List</name>
@@ -86,8 +86,8 @@
     </scm>
 
     <properties>
-        <revision>1.5.0</revision>
-        <hugegraph-commons.version>1.5.0</hugegraph-commons.version>
+        <fabric8.version>5.6.0</fabric8.version>
+        <revision>1.7.0</revision>
         <lombok.version>1.18.30</lombok.version>
         <release.name>hugegraph</release.name>
         <maven.compiler.source>11</maven.compiler.source>
@@ -104,6 +104,7 @@
         <module>hugegraph-commons</module>
         <module>install-dist</module>
         <module>hugegraph-cluster-test</module>
+        <module>hugegraph-struct</module>
     </modules>
 
     <dependencyManagement>
@@ -133,20 +134,28 @@
                                 <!-- Accept the pom module -->
                                 <acceptPomPackaging>true</acceptPomPackaging>
                                 <!-- Using the template which is grouped by License file -->
-                                <fileTemplate>/org/codehaus/mojo/license/third-party-file-groupByMultiLicense.ftl</fileTemplate>
+                                <fileTemplate>/org/codehaus/mojo/license/third-party-file-groupByMultiLicense.ftl
+                                </fileTemplate>
                                 <licenseMerges>
-                                    <licenseMerge>The Apache Software License, Version 2.0|The Apache License, Version 2.0</licenseMerge>
-                                    <licenseMerge>The Apache Software License, Version 2.0|Apache License, Version 2.0</licenseMerge>
-                                    <licenseMerge>The Apache Software License, Version 2.0|Apache Public License 2.0</licenseMerge>
+                                    <licenseMerge>The Apache Software License, Version 2.0|The Apache License, Version
+                                        2.0
+                                    </licenseMerge>
+                                    <licenseMerge>The Apache Software License, Version 2.0|Apache License, Version 2.0
+                                    </licenseMerge>
+                                    <licenseMerge>The Apache Software License, Version 2.0|Apache Public License 2.0
+                                    </licenseMerge>
                                     <licenseMerge>The Apache Software License, Version 2.0|Apache 2</licenseMerge>
                                     <licenseMerge>The Apache Software License, Version 2.0|Apache 2.0</licenseMerge>
                                     <licenseMerge>The Apache Software License, Version 2.0|Apache-2.0</licenseMerge>
-                                    <licenseMerge>The Apache Software License, Version 2.0|Apache License 2.0</licenseMerge>
-                                    <licenseMerge>The Apache Software License, Version 2.0|Apache License, version 2.0</licenseMerge>
+                                    <licenseMerge>The Apache Software License, Version 2.0|Apache License 2.0
+                                    </licenseMerge>
+                                    <licenseMerge>The Apache Software License, Version 2.0|Apache License, version 2.0
+                                    </licenseMerge>
                                     <licenseMerge>3-Clause BSD License|BSD 3-clause</licenseMerge>
                                     <licenseMerge>3-Clause BSD License|BSD 3-Clause</licenseMerge>
                                     <licenseMerge>Eclipse Public License v1.0|Eclipse Public License 1.0</licenseMerge>
-                                    <licenseMerge>Eclipse Public License v1.0|Eclipse Public License - v 1.0</licenseMerge>
+                                    <licenseMerge>Eclipse Public License v1.0|Eclipse Public License - v 1.0
+                                    </licenseMerge>
                                     <licenseMerge>The MIT License|MIT License</licenseMerge>
                                 </licenseMerges>
                             </configuration>
@@ -189,6 +198,8 @@
                             <exclude>.github/**/*</exclude>
                             <exclude>.gitignore</exclude>
                             <exclude>.gitattributes</exclude>
+                            <!-- AI Tools -->
+                            <exclude>.serena/**</exclude>
                             <!-- Intellij -->
                             <exclude>**/*.iml</exclude>
                             <exclude>**/*.iws</exclude>
@@ -197,10 +208,10 @@
                             <!-- Maven -->
                             <exclude>.repository/**</exclude>
                             <exclude>**/.flattened-pom.xml</exclude>
+                            <exclude>**/install-dist/dist.sh</exclude>
                             <!-- Test generated data -->
                             <exclude>**/rocksdb-*/**</exclude>
                             <exclude>**/hbase-*/**</exclude>
-                            <exclude>**/apache-cassandra-*/**</exclude>
                             <exclude>**/pid</exclude>
                             <!-- tmp files generated by store -->
                             <exclude>**/tmp/**</exclude>
@@ -250,6 +261,14 @@
                             <arg>-Xlint:unchecked</arg>
                         </compilerArgs>
                     </configuration>
+                </plugin>
+                <plugin>
+                    <artifactId>maven-remote-resources-plugin</artifactId>
+                    <version>3.3.0</version>
+                </plugin>
+                <plugin>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>3.6.1</version>
                 </plugin>
             </plugins>
         </pluginManagement>

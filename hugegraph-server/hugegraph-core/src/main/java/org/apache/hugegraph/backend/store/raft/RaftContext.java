@@ -198,7 +198,7 @@ public final class RaftContext {
 
     public String group() {
         // Use graph name as group name
-        return this.params.name();
+        return this.params.spaceGraphName();
     }
 
     public void addStore(StoreType type, RaftBackendStore store) {

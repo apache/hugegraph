@@ -25,17 +25,28 @@ import org.apache.hugegraph.util.E;
 
 public class ResourceObject<V> {
 
+    private final String graphSpace;
     private final String graph;
     private final ResourceType type;
     private final V operated;
 
-    public ResourceObject(String graph, ResourceType type, V operated) {
+    public ResourceObject(String graphSpace, String graph,
+                          ResourceType type, V operated) {
+        E.checkNotNull(graphSpace, "graphSpace");
         E.checkNotNull(graph, "graph");
         E.checkNotNull(type, "type");
         E.checkNotNull(operated, "operated");
+        this.graphSpace = graphSpace;
         this.graph = graph;
         this.type = type;
         this.operated = operated;
+    }
+
+    public static ResourceObject<SchemaElement> of(String graphSpace,
+                                                   String graph,
+                                                   SchemaElement elem) {
+        ResourceType resType = ResourceType.from(elem.type());
+        return new ResourceObject<>(graphSpace, graph, resType, elem);
     }
 
     public String graph() {
@@ -50,6 +61,48 @@ public class ResourceObject<V> {
         return this.operated;
     }
 
+    public static ResourceObject<SchemaElement> of(String graph,
+                                                   SchemaElement elem) {
+        return of("DEFAULT", graph, elem);
+    }
+
+    public static ResourceObject<HugeElement> of(String graphSpace,
+                                                 String graph,
+                                                 HugeElement elem) {
+        ResourceType resType = ResourceType.from(elem.type());
+        return new ResourceObject<>(graphSpace, graph, resType, elem);
+    }
+
+    public static ResourceObject<HugeElement> of(String graph,
+                                                 HugeElement elem) {
+        return of("DEFAULT", graph, elem);
+    }
+
+    public static ResourceObject<AuthElement> of(String graphSpace,
+                                                 String graph,
+                                                 AuthElement elem) {
+        return new ResourceObject<>(graphSpace, graph, elem.type(), elem);
+    }
+
+    public static ResourceObject<AuthElement> of(String graph,
+                                                 AuthElement elem) {
+        return of("DEFAULT", graph, elem);
+    }
+
+    public static ResourceObject<?> of(String graphSpace, String graph,
+                                       ResourceType type, Nameable elem) {
+        return new ResourceObject<>(graphSpace, graph, type, elem);
+    }
+
+    public static ResourceObject<?> of(String graph, ResourceType type,
+                                       Nameable elem) {
+        return of("DEFAULT", graph, type, elem);
+    }
+
+    public String graphSpace() {
+        return this.graphSpace;
+    }
+
     @Override
     public String toString() {
         Object operated = this.operated;
@@ -62,32 +115,11 @@ public class ResourceObject<V> {
         int capacity = this.graph.length() + typeStr.length() +
                        operatedStr.length() + 36;
 
-        StringBuilder sb = new StringBuilder(capacity);
-        return sb.append("Resource{graph=").append(this.graph)
-                 .append(",type=").append(typeStr)
-                 .append(",operated=").append(operatedStr)
-                 .append("}").toString();
-    }
-
-    public static ResourceObject<SchemaElement> of(String graph,
-                                                   SchemaElement elem) {
-        ResourceType resType = ResourceType.from(elem.type());
-        return new ResourceObject<>(graph, resType, elem);
-    }
-
-    public static ResourceObject<HugeElement> of(String graph,
-                                                 HugeElement elem) {
-        ResourceType resType = ResourceType.from(elem.type());
-        return new ResourceObject<>(graph, resType, elem);
-    }
-
-    public static ResourceObject<AuthElement> of(String graph,
-                                                 AuthElement elem) {
-        return new ResourceObject<>(graph, elem.type(), elem);
-    }
-
-    public static ResourceObject<?> of(String graph, ResourceType type,
-                                       Nameable elem) {
-        return new ResourceObject<>(graph, type, elem);
+        String sb = "Resource{graphspace=" + this.graphSpace +
+                    ",graph=" + this.graph +
+                    ",type=" + typeStr +
+                    ",operated=" + operatedStr +
+                    "}";
+        return sb;
     }
 }

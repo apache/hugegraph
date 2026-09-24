@@ -24,7 +24,7 @@ import org.apache.hugegraph.pd.meta.MetadataFactory;
 
 public class IdService {
 
-    private final IdMetaStore meta;
+    private IdMetaStore meta;
     private PDConfig pdConfig;
 
     public IdService(PDConfig config) {

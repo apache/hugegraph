@@ -29,7 +29,7 @@
     <artifactId>install-dist</artifactId>
 
     <properties>
-        <final.name>apache-${release.name}-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-${project.version}</final.name>
     </properties>
 
     <build>
@@ -50,21 +50,22 @@
                                     cd $root_path || exit
 
                                     mkdir -p ${final.name}
-                                    cp -r -v $root_path/hugegraph-pd/apache-hugegraph-pd-incubating-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/hugegraph-store/apache-hugegraph-store-incubating-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/hugegraph-server/apache-hugegraph-server-incubating-${project.version} ${final.name}/ || exit
-                                    cp -r -v $root_path/install-dist/release-docs/* $root_path/DISCLAIMER ${final.name}/ || exit
+                                    cp -r -v $root_path/hugegraph-pd/apache-hugegraph-pd-${project.version} ${final.name}/ || exit
+                                    cp -r -v $root_path/hugegraph-store/apache-hugegraph-store-${project.version} ${final.name}/ || exit
+                                    cp -r -v $root_path/hugegraph-server/apache-hugegraph-server-${project.version} ${final.name}/ || exit
+                                    cp -r -v $root_path/install-dist/release-docs/* ${final.name}/ || exit
 
                                     tar zcvf $root_path/target/${final.name}.tar.gz ./${final.name} || exit 1
 
                                     md5sum $root_path/target/${final.name}.tar.gz
                                     echo -n "hugegraph tar.gz available at: "
                                     echo "$root_path/target/${final.name}.tar.gz"
-                                    rm -f ${project.basedir}/dist.sh
                                 </echo>
                                 <exec executable="${shell-executable}" dir="${project.basedir}" failonerror="true">
                                     <arg line="./dist.sh"/>
                                 </exec>
+                                <!-- Ensure dist.sh is always deleted after execution -->
+                                <delete file="${project.basedir}/dist.sh" quiet="true"/>
                             </tasks>
                         </configuration>
                     </execution>
@@ -83,6 +84,14 @@
                         </fileset>
                         <fileset>
                             <directory>${project.basedir}/../${final.name}</directory>
+                        </fileset>
+                        <!-- Clean up dist.sh if it exists -->
+                        <fileset>
+                            <directory>${project.basedir}</directory>
+                            <includes>
+                                <include>dist.sh</include>
+                            </includes>
+                            <followSymlinks>false</followSymlinks>
                         </fileset>
                     </filesets>
                 </configuration>

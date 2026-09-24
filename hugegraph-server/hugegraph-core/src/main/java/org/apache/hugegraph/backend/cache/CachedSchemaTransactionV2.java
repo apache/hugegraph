@@ -19,8 +19,11 @@ package org.apache.hugegraph.backend.cache;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraphParams;
@@ -33,6 +36,7 @@ import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
+import org.apache.hugegraph.meta.MetaManager.SchemaCacheClearEvent;
 import org.apache.hugegraph.perf.PerfUtil;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.type.HugeType;
@@ -42,6 +46,36 @@ import org.apache.hugegraph.util.Events;
 import com.google.common.collect.ImmutableSet;
 
 public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
+
+    /*
+     * V1 and V2 transactions can coexist in the same JVM for graphs with the
+     * same name but different backends. Keep their cache entries isolated:
+     * besides holding different schema data, their attachments use different
+     * SchemaCaches classes and therefore can't be shared safely.
+     */
+    private static final String ID_CACHE_PREFIX = "schema-v2-id";
+    private static final String NAME_CACHE_PREFIX = "schema-v2-name";
+
+    // MetaDriver doesn't expose unlisten, register the meta listener once.
+    // Lifecycle: this JVM-global flag is intentionally never reset by
+    // unlistenChanges() (the underlying gRPC watch is process-wide). The driver
+    // watch self-heals across transport reconnects (PdMetaDriver via KvClient,
+    // EtcdMetaDriver via Watch.Listener re-subscribe), so the subscription stays
+    // live and the flag staying true is correct.
+    private static final AtomicBoolean metaEventListenerRegistered =
+            new AtomicBoolean(false);
+
+    private static final Object META_LISTENER_LOCK = new Object();
+
+    /**
+     * Per-JVM identifier emitted with every schema-cache-clear meta event so
+     * the listener can skip its own echo. Lifecycle: generated once per
+     * classloader at class init, never reused, regenerated on JVM restart.
+     * This is not a stable node identity, only a local self-echo filter.
+     */
+    private static final String SCHEMA_CACHE_CLEAR_SOURCE =
+            UUID.randomUUID().toString();
+
     private final Cache<Id, Object> idCache;
     private final Cache<Id, Object> nameCache;
 
@@ -51,14 +85,14 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     private EventListener cacheEventListener;
 
     public CachedSchemaTransactionV2(MetaDriver metaDriver,
-                                   String cluster,
-                                   HugeGraphParams graphParams) {
+                                     String cluster,
+                                     HugeGraphParams graphParams) {
         super(metaDriver, cluster, graphParams);
 
         final long capacity = graphParams.configuration()
                                          .get(CoreOptions.SCHEMA_CACHE_CAPACITY);
-        this.idCache = this.cache("schema-id", capacity);
-        this.nameCache = this.cache("schema-name", capacity);
+        this.idCache = this.cache(ID_CACHE_PREFIX, capacity);
+        this.nameCache = this.cache(NAME_CACHE_PREFIX, capacity);
 
         SchemaCaches<SchemaElement> attachment = this.idCache.attachment();
         if (attachment == null) {
@@ -85,10 +119,36 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     private Cache<Id, Object> cache(String prefix, long capacity) {
-        // TODO: uncomment later - graph space
-        final String name = prefix + "-" + this.graphName();
+        final String name = cacheName(prefix, this.graph().spaceGraphName());
         // NOTE: must disable schema cache-expire due to getAllSchema()
         return CacheManager.instance().cache(name, capacity);
+    }
+
+    private static String cacheName(String prefix, String spaceGraphName) {
+        return prefix + "-" + spaceGraphName;
+    }
+
+    private static void clearSchemaCache(String spaceGraphName) {
+        Map<String, Cache<Id, Object>> caches = CacheManager.instance().caches();
+
+        // Clear name cache first so the (name -> id -> object) lookup path
+        // fails fast instead of returning a stale object backed by an
+        // already-empty id cache during the TOCTOU window.
+        Cache<Id, Object> nameCache = caches.get(cacheName(NAME_CACHE_PREFIX,
+                                                           spaceGraphName));
+        if (nameCache != null) {
+            nameCache.clear();
+        }
+
+        Cache<Id, Object> idCache = caches.get(cacheName(ID_CACHE_PREFIX,
+                                                         spaceGraphName));
+        if (idCache != null) {
+            SchemaCaches<?> arrayCaches = idCache.attachment();
+            if (arrayCaches != null) {
+                arrayCaches.clear();
+            }
+            idCache.clear();
+        }
     }
 
     private void listenChanges() {
@@ -100,7 +160,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             if (storeEvents.contains(event.name())) {
                 LOG.debug("Graph {} clear schema cache on event '{}'",
                           this.graph(), event.name());
-                this.clearCache(true);
+                boolean notify = !Events.STORE_INIT.equals(event.name());
+                this.clearCache(notify);
                 return true;
             }
             return false;
@@ -145,12 +206,67 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         if (!schemaEventHub.containsListener(Events.CACHE)) {
             schemaEventHub.listen(Events.CACHE, this.cacheEventListener);
         }
+
+        listenSchemaCacheClear();
+    }
+
+    private static void listenSchemaCacheClear() {
+        synchronized (META_LISTENER_LOCK) {
+            if (metaEventListenerRegistered.get()) {
+                return;
+            }
+            try {
+                MetaManager.instance().listenSchemaCacheClear(
+                        CachedSchemaTransactionV2::handleSchemaCacheClearEvent);
+                // Set AFTER the underlying watch is live so a concurrent
+                // caller that observes the flag is guaranteed an active
+                // subscription, and a failure leaves the flag false so the
+                // next caller retries registration.
+                metaEventListenerRegistered.set(true);
+            } catch (Exception e) {
+                throw e instanceof RuntimeException
+                      ? (RuntimeException) e
+                      : new RuntimeException(
+                              "Failed to register schema cache clear listener",
+                              e);
+            }
+        }
+    }
+
+    /**
+     * Consumer invoked by the MetaManager schema-cache-clear watch. Extracted
+     * as a package-private static method so end-to-end tests can drive the
+     * publish -> callback -> {@link #clearSchemaCache(String)} path without
+     * depending on a live etcd/PD watch.
+     */
+    static <T> void handleSchemaCacheClearEvent(T response) {
+        List<SchemaCacheClearEvent> events =
+                MetaManager.instance()
+                           .extractSchemaCacheClearEventsFromResponse(
+                                   response);
+        if (events == null) {
+            return;
+        }
+        for (SchemaCacheClearEvent event : events) {
+            if (SCHEMA_CACHE_CLEAR_SOURCE.equals(event.source())) {
+                continue;
+            }
+            String graphName = event.graph();
+            LOG.debug("Graph {} clear schema cache on meta event", graphName);
+            clearSchemaCache(graphName);
+        }
     }
 
     public void clearCache(boolean notify) {
-        this.idCache.clear();
+        // Same TOCTOU ordering as clearSchemaCache(String): clear nameCache
+        // first, then the array attachment, then idCache last.
         this.nameCache.clear();
         this.arrayCaches.clear();
+        this.idCache.clear();
+
+        if (notify) {
+            this.maybeNotifySchemaCacheClear();
+        }
     }
 
     private void resetCachedAllIfReachedCapacity() {
@@ -202,6 +318,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         super.updateSchema(schema, updateCallback);
 
         this.updateCache(schema);
+        // Status transitions are internal bookkeeping; notifying here causes a
+        // broadcast storm for every updateSchemaStatus() call from background jobs.
     }
 
     @Override
@@ -210,14 +328,9 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.updateCache(schema);
 
-        if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
-            MetaManager.instance()
-                       // TODO: uncomment later - graph space
-                       //.notifySchemaCacheClear(this.graph().graphSpace(),
-                       //                        this.graph().name());
-                       .notifySchemaCacheClear("",
-                                               this.graph().name());
-        }
+        // Schema additions must always propagate to remote nodes regardless
+        // of TASK_SYNC_DELETION (which only gates removal flows).
+        this.notifySchemaCacheClear();
     }
 
     private void updateCache(SchemaElement schema) {
@@ -241,14 +354,23 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
         this.invalidateCache(schema.type(), schema.id());
 
+        this.maybeNotifySchemaCacheClear();
+    }
+
+    private void maybeNotifySchemaCacheClear() {
+        // Only suppress notifications for removal tasks when
+        // TASK_SYNC_DELETION=true: the caller propagates cache invalidation
+        // synchronously, so the meta-event broadcast would be redundant.
         if (!this.graph().option(CoreOptions.TASK_SYNC_DELETION)) {
-            MetaManager.instance()
-                       // TODO: uncomment later - graph space
-                       //.notifySchemaCacheClear(this.graph().graphSpace(),
-                       //                        this.graph().name());
-                       .notifySchemaCacheClear("",
-                                               this.graph().name());
+            this.notifySchemaCacheClear();
         }
+    }
+
+    private void notifySchemaCacheClear() {
+        MetaManager.instance()
+                   .notifySchemaCacheClear(this.graph().graphSpace(),
+                                           this.graph().name(),
+                                           SCHEMA_CACHE_CLEAR_SOURCE);
     }
 
     @Override
@@ -345,6 +467,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         // Clear schema info firstly
         super.clear();
         this.clearCache(false);
+        this.notifySchemaCacheClear();
     }
 
     private static final class SchemaCaches<V extends SchemaElement> {
@@ -481,7 +604,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     private static class CachedTypes
-        extends ConcurrentHashMap<HugeType, Boolean> {
+            extends ConcurrentHashMap<HugeType, Boolean> {
 
         private static final long serialVersionUID = -2215549791679355996L;
     }

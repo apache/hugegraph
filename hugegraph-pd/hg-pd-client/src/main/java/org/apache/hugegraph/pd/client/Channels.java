@@ -24,16 +24,19 @@ import io.grpc.ManagedChannelBuilder;
 
 public class Channels {
 
-    private static final ConcurrentHashMap<String, ManagedChannel> chs = new ConcurrentHashMap<>();
+    private static ConcurrentHashMap<String, ManagedChannel> chs = new ConcurrentHashMap<>();
 
     public static ManagedChannel getChannel(String target) {
 
         ManagedChannel channel;
-        if ((channel = chs.get(target)) == null || channel.isShutdown() || channel.isTerminated()) {
+        if ((channel = chs.get(target)) == null || channel.isShutdown()) {
             synchronized (chs) {
-                if ((channel = chs.get(target)) == null || channel.isShutdown() ||
-                    channel.isTerminated()) {
-                    channel = ManagedChannelBuilder.forTarget(target).usePlaintext().build();
+                if ((channel = chs.get(target)) == null || channel.isShutdown()) {
+                    channel =
+                            ManagedChannelBuilder.forTarget(target)
+                                                 .maxInboundMessageSize(
+                                                         PDConfig.getInboundMessageSize())
+                                                 .usePlaintext().build();
                     chs.put(target, channel);
                 }
             }

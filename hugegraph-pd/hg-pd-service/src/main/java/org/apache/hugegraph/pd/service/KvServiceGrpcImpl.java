@@ -63,7 +63,7 @@ import lombok.extern.slf4j.Slf4j;
 public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implements RaftStateListener,
                                                                                   ServiceGrpc {
 
-    private final ManagedChannel channel = null;
+    private ManagedChannel channel = null;
     KvService kvService;
     AtomicLong count = new AtomicLong();
     String msg = "node is not leader,it is necessary to  redirect to the leader on the client";
@@ -83,7 +83,7 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
             if (isLeader()) {
                 subjects.keepClientAlive();
             }
-        }, 0, KvWatchSubject.WATCH_TTL / 2, TimeUnit.MILLISECONDS);
+        }, 0, KvWatchSubject.WATCH_TTL * 1 / 3, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -92,7 +92,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void put(Kv request, StreamObserver<KvResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getPutMethod(), request, responseObserver);
@@ -124,7 +123,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void get(K request, StreamObserver<KResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getGetMethod(), request, responseObserver);
@@ -156,7 +154,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void delete(K request, StreamObserver<KvResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getDeleteMethod(), request, responseObserver);
@@ -190,7 +187,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void deletePrefix(K request, StreamObserver<KvResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getDeletePrefixMethod(), request,
@@ -228,7 +224,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void scanPrefix(K request, StreamObserver<ScanPrefixResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getScanPrefixMethod(), request,
@@ -273,7 +268,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void watch(WatchRequest request, StreamObserver<WatchResponse> responseObserver) {
         if (!isLeader()) {
             responseObserver.onError(new PDException(-1, msg));
@@ -285,6 +279,7 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
             if (!isLeader()) {
                 try {
                     responseObserver.onError(new PDException(-1, msg));
+                    return;
                 } catch (IllegalStateException ie) {
 
                 } catch (Exception e1) {
@@ -300,7 +295,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void watchPrefix(WatchRequest request, StreamObserver<WatchResponse> responseObserver) {
         if (!isLeader()) {
             responseObserver.onError(new PDException(-1, msg));
@@ -312,6 +306,7 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
             if (!isLeader()) {
                 try {
                     responseObserver.onError(new PDException(-1, msg));
+                    return;
                 } catch (IllegalStateException ie) {
 
                 } catch (Exception e1) {
@@ -363,7 +358,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void lock(LockRequest request, StreamObserver<LockResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getLockMethod(), request, responseObserver);
@@ -392,7 +386,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
         responseObserver.onCompleted();
     }
 
-    @Override
     public void lockWithoutReentrant(LockRequest request,
                                      StreamObserver<LockResponse> responseObserver) {
         if (!isLeader()) {
@@ -425,7 +418,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
         responseObserver.onCompleted();
     }
 
-    @Override
     public void isLocked(LockRequest request, StreamObserver<LockResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getIsLockedMethod(), request, responseObserver);
@@ -455,7 +447,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void unlock(LockRequest request, StreamObserver<LockResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getUnlockMethod(), request, responseObserver);
@@ -489,7 +480,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void keepAlive(LockRequest request, StreamObserver<LockResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getKeepAliveMethod(), request,
@@ -525,7 +515,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void putTTL(TTLRequest request, StreamObserver<TTLResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getPutTTLMethod(), request, responseObserver);
@@ -554,7 +543,6 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
      * @param request
      * @param responseObserver
      */
-    @Override
     public void keepTTLAlive(TTLRequest request, StreamObserver<TTLResponse> responseObserver) {
         if (!isLeader()) {
             redirectToLeader(channel, KvServiceGrpc.getKeepTTLAliveMethod(), request,

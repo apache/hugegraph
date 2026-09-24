@@ -26,7 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 @Suite.SuiteClasses({
         PDClientTest.class,
         KvClientTest.class,
-        StoreRegisterTest.class,
+        DiscoveryClientTest.class
 })
 @Slf4j
 public class PDClientSuiteTest {

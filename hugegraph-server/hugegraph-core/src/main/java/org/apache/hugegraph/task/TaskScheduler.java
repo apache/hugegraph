@@ -49,10 +49,24 @@ public interface TaskScheduler {
 
     <V> HugeTask<V> task(Id id);
 
+    default <V> HugeTask<V> task(Id id, boolean withResult) {
+        return this.task(id);
+    }
+
     <V> Iterator<HugeTask<V>> tasks(List<Id> ids);
+
+    default <V> Iterator<HugeTask<V>> tasks(List<Id> ids,
+                                            boolean withResult) {
+        return this.tasks(ids);
+    }
 
     <V> Iterator<HugeTask<V>> tasks(TaskStatus status,
                                     long limit, String page);
+
+    default <V> Iterator<HugeTask<V>> tasks(TaskStatus status, long limit,
+                                            String page, boolean withResult) {
+        return this.tasks(status, limit, page);
+    }
 
     void init();
 
@@ -76,6 +90,8 @@ public interface TaskScheduler {
     ServerInfoManager serverManager();
 
     String graphName();
+
+    String spaceGraphName();
 
     void taskDone(HugeTask<?> task);
 }

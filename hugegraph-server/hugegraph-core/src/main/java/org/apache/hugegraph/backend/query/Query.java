@@ -180,7 +180,9 @@ public class Query implements Cloneable {
     }
 
     public void offset(long offset) {
-        E.checkArgument(offset >= 0L, "Invalid offset %s", offset);
+        if (offset < 0L) {
+            E.checkArgument(false, "Invalid offset %s", offset);
+        }
         this.offset = offset;
     }
 
@@ -202,7 +204,9 @@ public class Query implements Cloneable {
     }
 
     public long goOffset(long offset) {
-        E.checkArgument(offset >= 0L, "Invalid offset value: %s", offset);
+        if (offset < 0L) {
+            E.checkArgument(false, "Invalid offset value: %s", offset);
+        }
         if (this.originQuery != null) {
             this.goParentOffset(offset);
         }
@@ -247,12 +251,12 @@ public class Query implements Cloneable {
         if (fromIndex < 0L) {
             // Skipping offset is overhead, no need to skip
             fromIndex = 0L;
-        } else if (fromIndex > 0L) {
+        }
+        // An index holder yields ids in batches, only count this batch's ids
+        fromIndex = Math.min(fromIndex, elems.size());
+        if (fromIndex > 0L) {
             this.goOffset(fromIndex);
         }
-        E.checkArgument(fromIndex <= Integer.MAX_VALUE,
-                        "Offset must be <= 0x7fffffff, but got '%s'",
-                        fromIndex);
 
         if (fromIndex >= elems.size()) {
             return ImmutableSet.of();
@@ -287,17 +291,27 @@ public class Query implements Cloneable {
 
     public long limit() {
         if (this.capacity != NO_CAPACITY) {
-            E.checkArgument(this.limit == Query.NO_LIMIT ||
-                            this.limit <= this.capacity,
-                            "Invalid limit %s, must be <= capacity(%s)",
-                            this.limit, this.capacity);
+            if (this.limit == NO_LIMIT) {
+                /*
+                 * TODO: may need to return this.capacity here.
+                 * In most cases, capacity == DEFAULT_CAPACITY, then limit()
+                 * will return NO_LIMIT, thus rely on Query.checkCapacity()
+                 * to check in the next step.
+                 */
+            }
+            if (this.limit != NO_LIMIT && this.limit > this.capacity) {
+                E.checkArgument(false,
+                                "Invalid limit %s, must be <= capacity(%s)",
+                                this.limit, this.capacity);
+            }
         }
         return this.limit;
     }
 
     public void limit(long limit) {
-        E.checkArgument(limit >= 0L || limit == NO_LIMIT,
-                        "Invalid limit %s", limit);
+        if (limit != NO_LIMIT && limit < 0L) {
+            E.checkArgument(false, "Invalid limit %s", limit);
+        }
         this.limit = limit;
     }
 
@@ -337,8 +351,9 @@ public class Query implements Cloneable {
             } else {
                 assert end < Query.NO_LIMIT;
             }
-            E.checkArgument(end >= start,
-                            "Invalid range: [%s, %s)", start, end);
+            if (end < start) {
+                E.checkArgument(false, "Invalid range: [%s, %s)", start, end);
+            }
             this.limit(end - start);
         } else {
             // Keep the origin limit
@@ -349,11 +364,15 @@ public class Query implements Cloneable {
 
     public String page() {
         if (this.page != null) {
-            E.checkState(this.limit() != 0L,
-                         "Can't set limit=0 when using paging");
-            E.checkState(this.offset() == 0L,
-                         "Can't set offset when using paging, but got '%s'",
-                         this.offset());
+            if (this.limit() == 0L) {
+                E.checkState(false,
+                             "Can't set limit=0 when using paging");
+            }
+            if (this.offset() != 0L) {
+                E.checkState(false,
+                             "Can't set offset when using paging, but got '%s'",
+                             this.offset());
+            }
         }
         return this.page;
     }
@@ -409,7 +428,7 @@ public class Query implements Cloneable {
 
     public void checkCapacity(long count) throws LimitExceedException {
         // Throw LimitExceedException if reach capacity
-        if (this.capacity != Query.NO_CAPACITY && count > this.capacity) {
+        if (this.capacity != NO_CAPACITY && count > this.capacity) {
             final int MAX_CHARS = 256;
             String query = this.toString();
             if (query.length() > MAX_CHARS) {
@@ -426,8 +445,10 @@ public class Query implements Cloneable {
     }
 
     public Aggregate aggregateNotNull() {
-        E.checkArgument(this.aggregate != null,
-                        "The aggregate must be set for number query");
+        if (this.aggregate == null) {
+            E.checkArgument(false,
+                            "The aggregate must be set for number query");
+        }
         return this.aggregate;
     }
 

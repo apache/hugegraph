@@ -20,16 +20,18 @@ package org.apache.hugegraph.store.business;
 import java.util.List;
 
 import org.apache.hugegraph.pd.grpc.Metapb;
-import org.apache.hugegraph.store.cmd.BatchPutRequest;
-import org.apache.hugegraph.store.cmd.CleanDataRequest;
 import org.apache.hugegraph.store.cmd.HgCmdClient;
-import org.apache.hugegraph.store.cmd.UpdatePartitionResponse;
+import org.apache.hugegraph.store.cmd.request.BatchPutRequest;
+import org.apache.hugegraph.store.cmd.request.CleanDataRequest;
+import org.apache.hugegraph.store.cmd.response.UpdatePartitionResponse;
 
 import com.alipay.sofa.jraft.Status;
 
 /**
- * Data transfer interface, implementing partition splitting and merging, supporting cross-machine data transfer.
+ * Data transfer interface, implementing partition splitting and merging, supporting
+ * cross-machine data transfer.
  */
+@Deprecated
 public interface DataMover {
 
     void setBusinessHandler(BusinessHandler handler);

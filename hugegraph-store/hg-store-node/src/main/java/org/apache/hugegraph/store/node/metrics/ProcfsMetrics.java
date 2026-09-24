@@ -23,7 +23,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 public class ProcfsMetrics {
 
     public final static String PREFIX = "process_memory";
-    private final static SystemMemoryStats smaps = new SystemMemoryStats();
+    private final static ProcfsSmaps smaps = new ProcfsSmaps();
     private static MeterRegistry registry;
 
     private ProcfsMetrics() {
@@ -42,20 +42,19 @@ public class ProcfsMetrics {
     }
 
     private static void registerProcessGauge() {
-        Gauge.builder(PREFIX + ".rss.bytes",
-                      () -> smaps.getMetric(SystemMemoryStats.MetricKey.RSS)).register(registry);
+        Gauge.builder(PREFIX + ".rss.bytes", () -> smaps.get(ProcfsSmaps.KEY.RSS))
+             .register(registry);
 
-        Gauge.builder(PREFIX + ".pss.bytes",
-                      () -> smaps.getMetric(SystemMemoryStats.MetricKey.PSS)).register(registry);
+        Gauge.builder(PREFIX + ".pss.bytes", () -> smaps.get(ProcfsSmaps.KEY.PSS))
+             .register(registry);
 
-        Gauge.builder(PREFIX + ".vss.bytes",
-                      () -> smaps.getMetric(SystemMemoryStats.MetricKey.VSS)).register(registry);
+        Gauge.builder(PREFIX + ".vss.bytes", () -> smaps.get(ProcfsSmaps.KEY.VSS))
+             .register(registry);
 
-        Gauge.builder(PREFIX + ".swap.bytes",
-                      () -> smaps.getMetric(SystemMemoryStats.MetricKey.SWAP)).register(registry);
+        Gauge.builder(PREFIX + ".swap.bytes", () -> smaps.get(ProcfsSmaps.KEY.SWAP))
+             .register(registry);
 
-        Gauge.builder(PREFIX + ".swappss.bytes",
-                      () -> smaps.getMetric(SystemMemoryStats.MetricKey.SWAPPSS))
+        Gauge.builder(PREFIX + ".swappss.bytes", () -> smaps.get(ProcfsSmaps.KEY.SWAPPSS))
              .register(registry);
     }
 

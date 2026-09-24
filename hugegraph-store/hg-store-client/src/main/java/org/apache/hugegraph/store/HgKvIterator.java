@@ -25,11 +25,16 @@ import java.util.Iterator;
  */
 public interface HgKvIterator<E> extends Iterator<E>, HgSeekAble, Closeable {
 
-    byte[] key();
+    default byte[] key() {
+        return new byte[0];
+    }
 
-    byte[] value();
+    default byte[] value() {
+        return new byte[0];
+    }
 
     @Override
-    void close();
+    default void close() {
+    }
 
 }

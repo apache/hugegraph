@@ -46,7 +46,7 @@ public class IdMetaStore extends MetadataRocksDBStore {
     private static final String CID_DEL_SLOT_PREFIX = "@CID_DEL_SLOT@";
     private static final String SEPARATOR = "@";
     private static final ConcurrentHashMap<String, Object> SEQUENCES = new ConcurrentHashMap<>();
-    private static final long CID_DEL_TIMEOUT = 24 * 3600 * 1000;
+    public static long CID_DEL_TIMEOUT = 24 * 3600 * 1000;
     private final long clusterId;
 
     public IdMetaStore(PDConfig pdConfig) {
@@ -121,8 +121,10 @@ public class IdMetaStore extends MetadataRocksDBStore {
     public long getCId(String key, String name, long max) throws PDException {
         // Check for expired cids to delete. The frequency of deleting graphs is relatively low,
         // so this has little performance impact.
-        byte[] delKeyPrefix = (CID_DEL_SLOT_PREFIX +
-                               key + SEPARATOR).getBytes(Charset.defaultCharset());
+        byte[] delKeyPrefix = new StringBuffer()
+                .append(CID_DEL_SLOT_PREFIX)
+                .append(key).append(SEPARATOR)
+                .toString().getBytes(Charset.defaultCharset());
         synchronized (this) {
             scanPrefix(delKeyPrefix).forEach(kv -> {
                 long[] value = (long[]) deserialize(kv.getValue());
@@ -216,9 +218,11 @@ public class IdMetaStore extends MetadataRocksDBStore {
     }
 
     private byte[] getCIDDelayKey(String key, String name) {
-        byte[] bsKey = (CID_DEL_SLOT_PREFIX +
-                        key + SEPARATOR +
-                        name).getBytes(Charset.defaultCharset());
+        byte[] bsKey = new StringBuffer()
+                .append(CID_DEL_SLOT_PREFIX)
+                .append(key).append(SEPARATOR)
+                .append(name)
+                .toString().getBytes(Charset.defaultCharset());
         return bsKey;
     }
 

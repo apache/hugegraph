@@ -54,17 +54,17 @@ import lombok.extern.slf4j.Slf4j;
 public class StoreNodeService {
 
     private static final Long STORE_HEART_BEAT_INTERVAL = 30000L;
-    private static final String graphSpaceConfPrefix = "HUGEGRAPH/hg/GRAPHSPACE/CONF/";
-    private final List<StoreStatusListener> statusListeners;
-    private final List<ShardGroupStatusListener> shardGroupStatusListeners;
-    private final StoreInfoMeta storeInfoMeta;
-    private final TaskInfoMeta taskInfoMeta;
-    private final Random random = new Random(System.currentTimeMillis());
-    private final KvService kvService;
-    private final ConfigService configService;
-    private final PDConfig pdConfig;
+    private static String graphSpaceConfPrefix = "HUGEGRAPH/hg/GRAPHSPACE/CONF/";
+    private List<StoreStatusListener> statusListeners;
+    private List<ShardGroupStatusListener> shardGroupStatusListeners;
+    private StoreInfoMeta storeInfoMeta;
+    private TaskInfoMeta taskInfoMeta;
+    private Random random = new Random(System.currentTimeMillis());
+    private KvService kvService;
+    private ConfigService configService;
+    private PDConfig pdConfig;
     private PartitionService partitionService;
-    private final Runnable quotaChecker = () -> {
+    private Runnable quotaChecker = () -> {
         try {
             getQuota();
         } catch (Exception e) {
@@ -73,7 +73,7 @@ public class StoreNodeService {
                     e);
         }
     };
-    private Metapb.ClusterStats clusterStats;
+    private volatile Metapb.ClusterStats clusterStats;
 
     public StoreNodeService(PDConfig config) {
         this.pdConfig = config;
@@ -96,16 +96,7 @@ public class StoreNodeService {
             public void onPartitionChanged(Metapb.Partition old, Metapb.Partition partition) {
                 if (old != null && old.getState() != partition.getState()) {
                     try {
-                        List<Metapb.Partition> partitions =
-                                partitionService.getPartitionById(partition.getId());
                         Metapb.PartitionState state = Metapb.PartitionState.PState_Normal;
-                        for (Metapb.Partition pt : partitions) {
-                            if (pt.getState().getNumber() > state.getNumber()) {
-                                state = pt.getState();
-                            }
-                        }
-                        updateShardGroupState(partition.getId(), state);
-
                         for (Metapb.ShardGroup group : getShardGroups()) {
                             if (group.getState().getNumber() > state.getNumber()) {
                                 state = group.getState();
@@ -485,7 +476,7 @@ public class StoreNodeService {
                 // new group
                 storeInfoMeta.updateShardGroup(group);
                 partitionService.updateShardGroupCache(group);
-                onShardGroupStatusChanged(group, group);
+                onShardGroupStatusChanged(null, group);
                 log.info("alloc shard group: id {}", groupId);
             }
         }
@@ -526,7 +517,7 @@ public class StoreNodeService {
             // Need to add shards
             log.info("reallocShards ShardGroup {}, add shards from {} to {}",
                      shardGroup.getId(), shards.size(), shardCount);
-            int storeIdx = shardGroup.getId() % stores.size();
+            int storeIdx = (int) shardGroup.getId() % stores.size();
             for (int addCount = shardCount - shards.size(); addCount > 0; ) {
                 // Check if it already exists
                 if (!isStoreInShards(shards, stores.get(storeIdx).getId())) {
@@ -561,7 +552,7 @@ public class StoreNodeService {
         storeInfoMeta.updateShardGroup(group);
         partitionService.updateShardGroupCache(group);
         // change shard group
-        onShardGroupStatusChanged(shardGroup, group);
+        // onShardGroupStatusChanged(shardGroup, group);
 
         var partitions = partitionService.getPartitionById(shardGroup.getId());
         if (partitions.size() > 0) {
@@ -701,11 +692,25 @@ public class StoreNodeService {
 
     public synchronized void updateShardGroupState(int groupId, Metapb.PartitionState state) throws
                                                                                              PDException {
-        Metapb.ShardGroup shardGroup = storeInfoMeta.getShardGroup(groupId)
-                                                    .toBuilder()
-                                                    .setState(state).build();
-        storeInfoMeta.updateShardGroup(shardGroup);
-        partitionService.updateShardGroupCache(shardGroup);
+        Metapb.ShardGroup shardGroup = storeInfoMeta.getShardGroup(groupId);
+
+        if (state != shardGroup.getState()) {
+            var newShardGroup = shardGroup.toBuilder().setState(state).build();
+            storeInfoMeta.updateShardGroup(newShardGroup);
+            partitionService.updateShardGroupCache(newShardGroup);
+
+            log.debug("update shard group {} state: {}", groupId, state);
+
+            // Check the status of the cluster
+            // todo : A clearer definition of cluster status
+            Metapb.PartitionState clusterState = state;
+            for (Metapb.ShardGroup group : getShardGroups()) {
+                if (group.getState().getNumber() > state.getNumber()) {
+                    clusterState = group.getState();
+                }
+            }
+            updateClusterStatus(clusterState);
+        }
     }
 
     /**
@@ -783,7 +788,10 @@ public class StoreNodeService {
     }
 
     public synchronized Metapb.ClusterStats updateClusterStatus(Metapb.ClusterState state) {
-        this.clusterStats = clusterStats.toBuilder().setState(state).build();
+        if (this.clusterStats.getState() != state) {
+            log.info("update cluster state: {}", state);
+            this.clusterStats = clusterStats.toBuilder().setState(state).build();
+        }
         return this.clusterStats;
     }
 
@@ -882,8 +890,12 @@ public class StoreNodeService {
     }
 
     protected void onShardGroupStatusChanged(Metapb.ShardGroup group, Metapb.ShardGroup newGroup) {
-        log.info("onShardGroupStatusChanged, groupId: {}, from {} to {}", group.getId(), group,
-                 newGroup);
+        if (group == null && newGroup == null) {
+            return;
+        }
+
+        var id = group == null ? newGroup.getId() : group.getId();
+        log.info("onShardGroupStatusChanged, groupId: {}, from {} to {}", id, group, newGroup);
         shardGroupStatusListeners.forEach(e -> e.onShardListChanged(group, newGroup));
     }
 
@@ -954,7 +966,7 @@ public class StoreNodeService {
         for (Metapb.Graph g : graphs) {
             String graphName = g.getGraphName();
             String[] splits = graphName.split(delimiter);
-            if (!graphName.endsWith("/g") || splits.length < 2) {
+            if (splits.length < 2) {
                 continue;
             }
             String graphSpace = splits[0];
@@ -1011,7 +1023,7 @@ public class StoreNodeService {
         for (Metapb.Graph g : graphs) {
             String graphName = g.getGraphName();
             String[] splits = graphName.split(delimiter);
-            if (!graphName.endsWith("/g") || splits.length < 2) {
+            if (splits.length < 2) {
                 continue;
             }
             String graphSpace = splits[0];

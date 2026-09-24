@@ -28,6 +28,9 @@ import org.junit.After;
 import org.junit.BeforeClass;
 
 public class BaseRocksDbTest {
+
+    public static HugeConfig hConfig;
+
     @BeforeClass
     public static void init() {
         OptionSpace.register("org/apache/hugegraph/store/rocksdb",
@@ -38,7 +41,7 @@ public class BaseRocksDbTest {
         configMap.put("rocksdb.write_buffer_size", "1048576");
         configMap.put("rocksdb.bloom_filter_bits_per_key", "10");
 
-        HugeConfig hConfig = new HugeConfig(configMap);
+        hConfig = new HugeConfig(configMap);
         RocksDBFactory rFactory = RocksDBFactory.getInstance();
         rFactory.setHugeConfig(hConfig);
 

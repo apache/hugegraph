@@ -48,6 +48,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Singleton;
@@ -62,7 +64,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/schema/propertykeys")
+@Path("graphspaces/{graphspace}/graphs/{graph}/schema/propertykeys")
 @Singleton
 @Tag(name = "PropertyKeyAPI")
 public class PropertyKeyAPI extends API {
@@ -74,18 +76,22 @@ public class PropertyKeyAPI extends API {
     @Status(Status.ACCEPTED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=property_key_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=property_key_write"})
     @RedirectFilter.RedirectMasterRole
     public String create(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
                          JsonPropertyKey jsonPropertyKey) {
         LOG.debug("Graph [{}] create property key: {}", graph, jsonPropertyKey);
         checkCreatingBody(jsonPropertyKey);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         PropertyKey.Builder builder = jsonPropertyKey.convert2Builder(g);
         SchemaElement.TaskWithSchema pk = builder.createWithTask();
-        return manager.serializer(g).writeTaskWithSchema(pk);
+        return manager.serializer().writeTaskWithSchema(pk);
     }
 
     @PUT
@@ -94,11 +100,21 @@ public class PropertyKeyAPI extends API {
     @Path("{name}")
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=property_key_write"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=property_key_write"})
     @RedirectFilter.RedirectMasterRole
     public String update(@Context GraphManager manager,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The graph name")
                          @PathParam("graph") String graph,
+                         @Parameter(description = "The property key name")
                          @PathParam("name") String name,
+                         @Parameter(
+                                 description =
+                                         "Action to perform: 'append' to add new properties, " +
+                                         "'remove' to delete existing properties, " +
+                                         "'clear' to clear OLAP property data")
                          @QueryParam("action") String action,
                          PropertyKeyAPI.JsonPropertyKey jsonPropertyKey) {
         LOG.debug("Graph [{}] {} property key: {}",
@@ -108,7 +124,7 @@ public class PropertyKeyAPI extends API {
                         "The name in url(%s) and body(%s) are different",
                         name, jsonPropertyKey.name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         if (ACTION_CLEAR.equals(action)) {
             PropertyKey propertyKey = g.propertyKey(name);
             E.checkArgument(propertyKey.olap(),
@@ -117,7 +133,7 @@ public class PropertyKeyAPI extends API {
             Id id = g.clearPropertyKey(propertyKey);
             SchemaElement.TaskWithSchema pk =
                     new SchemaElement.TaskWithSchema(propertyKey, id);
-            return manager.serializer(g).writeTaskWithSchema(pk);
+            return manager.serializer().writeTaskWithSchema(pk);
         }
 
         // Parse action parameter
@@ -129,15 +145,20 @@ public class PropertyKeyAPI extends API {
                                   builder.eliminate();
         SchemaElement.TaskWithSchema pk =
                 new SchemaElement.TaskWithSchema(propertyKey, IdGenerator.ZERO);
-        return manager.serializer(g).writeTaskWithSchema(pk);
+        return manager.serializer().writeTaskWithSchema(pk);
     }
 
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=property_key_read"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=property_key_read"})
     public String list(@Context GraphManager manager,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The graph name")
                        @PathParam("graph") String graph,
+                       @Parameter(description = "Filter property keys by names")
                        @QueryParam("names") List<String> names) {
         boolean listAll = CollectionUtils.isEmpty(names);
         if (listAll) {
@@ -146,7 +167,7 @@ public class PropertyKeyAPI extends API {
             LOG.debug("Graph [{}] get property keys by names {}", graph, names);
         }
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         List<PropertyKey> propKeys;
         if (listAll) {
             propKeys = g.schema().getPropertyKeys();
@@ -156,22 +177,24 @@ public class PropertyKeyAPI extends API {
                 propKeys.add(g.schema().getPropertyKey(name));
             }
         }
-        return manager.serializer(g).writePropertyKeys(propKeys);
+        return manager.serializer().writePropertyKeys(propKeys);
     }
 
     @GET
     @Timed
     @Path("{name}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=property_key_read"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=property_key_read"})
     public String get(@Context GraphManager manager,
+                      @PathParam("graphspace") String graphSpace,
                       @PathParam("graph") String graph,
                       @PathParam("name") String name) {
         LOG.debug("Graph [{}] get property key by name '{}'", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         PropertyKey propertyKey = g.schema().getPropertyKey(name);
-        return manager.serializer(g).writePropertyKey(propertyKey);
+        return manager.serializer().writePropertyKey(propertyKey);
     }
 
     @DELETE
@@ -180,14 +203,19 @@ public class PropertyKeyAPI extends API {
     @Path("{name}")
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RolesAllowed({"admin", "$owner=$graph $action=property_key_delete"})
+    @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
+                                   "$action=property_key_delete"})
     @RedirectFilter.RedirectMasterRole
     public Map<String, Id> delete(@Context GraphManager manager,
+                                  @Parameter(description = "The graph space name")
+                                  @PathParam("graphspace") String graphSpace,
+                                  @Parameter(description = "The graph name")
                                   @PathParam("graph") String graph,
+                                  @Parameter(description = "The property key name to delete")
                                   @PathParam("name") String name) {
         LOG.debug("Graph [{}] remove property key by name '{}'", graph, name);
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         // Throw 404 if not exists
         g.schema().getPropertyKey(name);
         return ImmutableMap.of("task_id",
@@ -198,24 +226,36 @@ public class PropertyKeyAPI extends API {
      * JsonPropertyKey is only used to receive create and append requests
      */
     @JsonIgnoreProperties(value = {"status"})
+    @Schema(description = "Property key creation/update request")
     private static class JsonPropertyKey implements Checkable {
 
+        @Schema(description = "The property key ID (only used in RESTORING mode)")
         @JsonProperty("id")
         public long id;
+        @Schema(description = "The property key name", required = true)
         @JsonProperty("name")
         public String name;
+        @Schema(description = "The cardinality: SINGLE, LIST, or SET")
         @JsonProperty("cardinality")
         public Cardinality cardinality;
+        @Schema(description = "The data type: STRING, TEXT, INT, LONG, FLOAT, " +
+                              "DOUBLE, BLOB, BOOLEAN, DATE, UUID")
         @JsonProperty("data_type")
         public DataType dataType;
+        @Schema(description = "The aggregate type: NONE, SUM, MAX, MIN, SUB, " +
+                              "SET, INC, BIGDECIMAL")
         @JsonProperty("aggregate_type")
         public AggregateType aggregateType;
+        @Schema(description = "The write type: OLTP, OLAP, IMMUTABLE")
         @JsonProperty("write_type")
         public WriteType writeType;
+        @Schema(description = "Parent property keys for meta property")
         @JsonProperty("properties")
         public String[] properties;
+        @Schema(description = "User-defined metadata")
         @JsonProperty("user_data")
         public Userdata userdata;
+        @Schema(description = "Whether to check if property key exists before creation")
         @JsonProperty("check_exist")
         public Boolean checkExist;
 

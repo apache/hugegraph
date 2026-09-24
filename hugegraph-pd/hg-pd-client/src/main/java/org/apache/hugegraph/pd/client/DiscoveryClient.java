@@ -30,6 +30,7 @@ import java.util.function.Function;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.common.Useless;
 import org.apache.hugegraph.pd.grpc.discovery.DiscoveryServiceGrpc;
+import org.apache.hugegraph.pd.grpc.discovery.DiscoveryServiceGrpc.DiscoveryServiceBlockingStub;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfo;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfos;
 import org.apache.hugegraph.pd.grpc.discovery.Query;
@@ -43,18 +44,20 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public abstract class DiscoveryClient implements Closeable, Discoverable {
 
-    private final Timer timer = new Timer("serverHeartbeat", true);
-    private final AtomicBoolean requireResetStub = new AtomicBoolean(false);
+    private Timer timer = new Timer("serverHeartbeat", true);
+    private volatile AtomicBoolean requireResetStub = new AtomicBoolean(false);
     protected int period;
     LinkedList<String> pdAddresses = new LinkedList<>();
     ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
     private volatile int currentIndex;
     private int maxTime = 6;
     private ManagedChannel channel = null;
-    private DiscoveryServiceGrpc.DiscoveryServiceBlockingStub registerStub;
-    private DiscoveryServiceGrpc.DiscoveryServiceBlockingStub blockingStub;
+    private DiscoveryServiceBlockingStub registerStub;
+    private DiscoveryServiceBlockingStub blockingStub;
+    private PDConfig config = PDConfig.of();
+    private long registerTimeout = 30000;
 
-    public DiscoveryClient(String centerAddress, int delay) {
+    public DiscoveryClient(String centerAddress, int delay, PDConfig conf) {
         String[] addresses = centerAddress.split(",");
         for (int i = 0; i < addresses.length; i++) {
             String singleAddress = addresses[i];
@@ -64,14 +67,24 @@ public abstract class DiscoveryClient implements Closeable, Discoverable {
             pdAddresses.add(addresses[i]);
         }
         this.period = delay;
+        if (this.period > 60000) {
+            registerTimeout = this.period / 2;
+        }
         if (maxTime < addresses.length) {
             maxTime = addresses.length;
+        }
+        if (conf != null) {
+            this.config = conf;
         }
     }
 
     private <V, R> R tryWithTimes(Function<V, R> function, V v) {
         R r;
         Exception ex = null;
+        if (registerStub == null || blockingStub == null) {
+            requireResetStub.set(true);
+            resetStub();
+        }
         for (int i = 0; i < maxTime; i++) {
             try {
                 r = function.apply(v);
@@ -83,7 +96,7 @@ public abstract class DiscoveryClient implements Closeable, Discoverable {
             }
         }
         if (ex != null) {
-            log.error("Try discovery method with error: {}", ex.getMessage());
+            log.error("try discovery method with error: ", ex);
         }
         return null;
     }
@@ -123,10 +136,12 @@ public abstract class DiscoveryClient implements Closeable, Discoverable {
                 }
                 channel = ManagedChannelBuilder.forTarget(
                         singleAddress).usePlaintext().build();
-                this.registerStub = DiscoveryServiceGrpc.newBlockingStub(
-                        channel);
-                this.blockingStub = DiscoveryServiceGrpc.newBlockingStub(
-                        channel);
+                this.registerStub =
+                        AbstractClient.setAsyncParams(DiscoveryServiceGrpc.newBlockingStub(channel),
+                                                      config);
+                this.blockingStub =
+                        AbstractClient.setAsyncParams(DiscoveryServiceGrpc.newBlockingStub(channel),
+                                                      config);
                 requireResetStub.set(false);
             }
         } catch (Exception e) {
@@ -148,7 +163,8 @@ public abstract class DiscoveryClient implements Closeable, Discoverable {
             this.readWriteLock.readLock().lock();
             NodeInfos nodes;
             try {
-                nodes = this.blockingStub.getNodes(q);
+                nodes = this.blockingStub.withDeadlineAfter(config.getGrpcTimeOut(),
+                                                            TimeUnit.MILLISECONDS).getNodes(q);
             } catch (Exception e) {
                 throw e;
             } finally {
@@ -163,19 +179,24 @@ public abstract class DiscoveryClient implements Closeable, Discoverable {
      */
     @Override
     public void scheduleTask() {
-        timer.schedule(new TimerTask() {
+        timer.scheduleAtFixedRate(new TimerTask() {
             @Override
             public void run() {
                 NodeInfo nodeInfo = getRegisterNode();
                 tryWithTimes((t) -> {
-                    RegisterInfo register;
+                    RegisterInfo register = null;
                     readWriteLock.readLock().lock();
                     try {
-                        register = registerStub.register(t);
-                        log.debug("Discovery Client work done.");
+                        register = registerStub.withDeadlineAfter(registerTimeout,
+                                                                  TimeUnit.MILLISECONDS)
+                                               .register(t);
                         Consumer<RegisterInfo> consumer = getRegisterConsumer();
                         if (consumer != null) {
-                            consumer.accept(register);
+                            try {
+                                consumer.accept(register);
+                            } catch (Exception e) {
+                                log.warn("run consumer when heartbeat with error:", e);
+                            }
                         }
                     } catch (Exception e) {
                         throw e;

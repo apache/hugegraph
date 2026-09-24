@@ -71,7 +71,9 @@ public class KvBatchScannerMerger implements KvCloseableIterator<HgKvIterator<Hg
             try {
                 // Queue has data, and there are active queryers, tasks not yet allocated.
                 if (queue.size() != 0 || scanners.size() > 0 || !taskSplitter.isFinished()) {
-                    current = queue.poll(1, TimeUnit.SECONDS);  // Regularly check if the client has been closed.
+                    current = queue.poll(1,
+                                         TimeUnit.SECONDS);  // Regularly check if the client has
+                    // been closed.
                 } else {
                     break;
                 }
@@ -179,7 +181,9 @@ public class KvBatchScannerMerger implements KvCloseableIterator<HgKvIterator<Hg
                 try {
                     int waitTime = 0;
                     Supplier<HgKvIterator<HgKvEntry>> current;
-                    current = queue.poll(1, TimeUnit.SECONDS);  // Regularly check if the client has been closed.
+                    current = queue.poll(1,
+                                         TimeUnit.SECONDS);  // Regularly check if the client has
+                    // been closed.
                     if (current == null) {
                         if (++waitTime > maxWaitCount) {
                             break;
@@ -233,7 +237,7 @@ public class KvBatchScannerMerger implements KvCloseableIterator<HgKvIterator<Hg
             super(splitter);
             queue.add(() -> {
                 // Perform merge sort on the store's return result
-                return new HgKvIterator<>() {
+                return new HgKvIterator<HgKvEntry>() {
                     private ScannerDataQueue iterator;
                     private int currentSN = 0;
                     private HgKvEntry entry;

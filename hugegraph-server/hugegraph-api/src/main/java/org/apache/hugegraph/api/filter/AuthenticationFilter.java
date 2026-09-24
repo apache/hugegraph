@@ -30,9 +30,8 @@ import java.util.Set;
 import javax.xml.bind.DatatypeConverter;
 
 import org.apache.hugegraph.auth.HugeAuthenticator;
-import org.apache.hugegraph.auth.HugeAuthenticator.RequiredPerm;
-import org.apache.hugegraph.auth.HugeAuthenticator.RolePerm;
 import org.apache.hugegraph.auth.HugeAuthenticator.User;
+import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
@@ -54,6 +53,8 @@ import jakarta.ws.rs.NotAuthorizedException;
 import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
+import jakarta.ws.rs.container.ContainerResponseContext;
+import jakarta.ws.rs.container.ContainerResponseFilter;
 import jakarta.ws.rs.container.PreMatching;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -64,10 +65,12 @@ import jakarta.ws.rs.ext.Provider;
 @Provider
 @PreMatching
 @Priority(Priorities.AUTHENTICATION)
-public class AuthenticationFilter implements ContainerRequestFilter {
+public class AuthenticationFilter implements ContainerRequestFilter, ContainerResponseFilter {
 
     public static final String BASIC_AUTH_PREFIX = "Basic ";
     public static final String BEARER_TOKEN_PREFIX = "Bearer ";
+
+    public static final String ALL_GRAPH_SPACES = "*";
 
     private static final Logger LOG = Log.logger(AuthenticationFilter.class);
 
@@ -97,9 +100,36 @@ public class AuthenticationFilter implements ContainerRequestFilter {
         if (isWhiteAPI(context)) {
             return;
         }
+        GraphManager manager = this.managerProvider.get();
         User user = this.authenticate(context);
-        Authorizer authorizer = new Authorizer(user, context.getUriInfo());
+
+        // Inject request graph space into AuthContext for permission check
+        // Extract graphspace from path like: /graphspaces/{graphspace}/...
+        String path = context.getUriInfo().getPath();
+        LOG.debug("AuthenticationFilter: path={}", path);
+        if (path != null && path.contains("graphspaces/")) {
+            String[] parts = path.split("/");
+            for (int i = 0; i < parts.length - 1; i++) {
+                if ("graphspaces".equals(parts[i]) && i + 1 < parts.length) {
+                    String requestGraphSpace = parts[i + 1];
+                    HugeGraphAuthProxy.setRequestGraphSpace(requestGraphSpace);
+                    LOG.debug("AuthenticationFilter: set RequestGraphSpace={}", requestGraphSpace);
+                    break;
+                }
+            }
+        }
+
+        Authorizer authorizer = new Authorizer(manager, user, context.getUriInfo());
         context.setSecurityContext(authorizer);
+    }
+
+    @Override
+    public void filter(ContainerRequestContext requestContext,
+                       ContainerResponseContext responseContext) throws IOException {
+        // Clean up ThreadLocal variables after request is processed
+        // This prevents memory leaks in thread pool
+        HugeGraphAuthProxy.resetSpaceContext();
+        LOG.debug("HugeGraphAuthProxy ThreadLocal cleaned up after request");
     }
 
     protected User authenticate(ContainerRequestContext context) {
@@ -188,10 +218,12 @@ public class AuthenticationFilter implements ContainerRequestFilter {
         private final UriInfo uri;
         private final User user;
         private final Principal principal;
+        private final GraphManager manager;
 
-        public Authorizer(final User user, final UriInfo uri) {
+        public Authorizer(GraphManager manager, final User user, final UriInfo uri) {
             E.checkNotNull(user, "user");
             E.checkNotNull(uri, "uri");
+            this.manager = manager;
             this.uri = uri;
             this.user = user;
             this.principal = new UserPrincipal();
@@ -232,19 +264,56 @@ public class AuthenticationFilter implements ContainerRequestFilter {
 
         private boolean matchPermission(String required) {
             boolean valid;
-            RequiredPerm requiredPerm;
+            HugeAuthenticator.RequiredPerm requiredPerm;
 
-            if (!required.startsWith(HugeAuthenticator.KEY_OWNER)) {
-                // Permission format like: "admin"
-                requiredPerm = new RequiredPerm();
+            /*
+             * if request url contains graph space and the corresponding space
+             * does not enable permission check, return true
+             * */
+            if (!isAuth()) {
+                return true;
+            }
+
+            if (!required.startsWith(HugeAuthenticator.KEY_GRAPHSPACE)) {
+                // Permission format like: "admin", "space", "analyst", "space_member"
+                requiredPerm = new HugeAuthenticator.RequiredPerm();
                 requiredPerm.owner(required);
+
+                // For space-level roles, set graphSpace from path parameter
+                if ("space".equals(required) || "space_member".equals(required)) {
+                    // If graphspace parameter is not in path, use DEFAULT
+                    List<String> graphSpaceParams = this.uri.getPathParameters().get("graphspace");
+                    String graphSpace = "DEFAULT";
+                    if (graphSpaceParams != null && !graphSpaceParams.isEmpty()) {
+                        graphSpace = graphSpaceParams.get(0);
+                    }
+                    requiredPerm.graphSpace(graphSpace);
+                }
+
+                // Role inheritance is handled in HugeAuthenticator.matchSpace()
+                valid = HugeAuthenticator.RolePerm.matchApiRequiredPerm(this.role(), requiredPerm);
             } else {
-                // The required like: $owner=graph1 $action=vertex_write
-                requiredPerm = RequiredPerm.fromPermission(required);
+                // The required like:
+                // $graphspace=graphspace $owner=graph1 $action=vertex_write
+                requiredPerm = HugeAuthenticator.RequiredPerm.fromPermission(required);
 
                 /*
-                 * Replace owner value (it may be a variable) if the permission
-                 * format like: "$owner=$graph $action=vertex_write"
+                 * Replace graphspace value (it may be a variable) if the
+                 * permission format like:
+                 * "$graphspace=$graphspace $owner=$graph $action=vertex_write"
+                 */
+                String graphSpace = requiredPerm.graphSpace();
+                if (graphSpace.startsWith(HugeAuthenticator.VAR_PREFIX)) {
+                    int prefixLen = HugeAuthenticator.VAR_PREFIX.length();
+                    assert graphSpace.length() > prefixLen;
+                    graphSpace = graphSpace.substring(prefixLen);
+                    graphSpace = this.getPathParameter(graphSpace);
+                    requiredPerm.graphSpace(graphSpace);
+                }
+
+                /*
+                 * Replace owner value(it may be a variable) if the permission
+                 * format like: "$graphspace=$graphspace $owner=$graph $action=vertex_write"
                  */
                 String owner = requiredPerm.owner();
                 if (owner.startsWith(HugeAuthenticator.VAR_PREFIX)) {
@@ -255,30 +324,46 @@ public class AuthenticationFilter implements ContainerRequestFilter {
                     owner = this.getPathParameter(owner);
                     requiredPerm.owner(owner);
                 }
+                valid = HugeAuthenticator.RolePerm.matchApiRequiredPerm(this.role(), requiredPerm);
             }
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Verify permission {} {} for user '{}' with role {}",
-                          requiredPerm.action().string(), requiredPerm.resourceObject(),
-                          this.user.username(), this.user.role());
-            }
-
-            // verify role permission
-            valid = RolePerm.match(this.role(), requiredPerm);
-
-            if (!valid && LOG.isInfoEnabled() &&
+            if (!valid &&
                 !required.equals(HugeAuthenticator.USER_ADMIN)) {
-                LOG.info("User '{}' is denied to {} {}", this.user.username(),
-                         requiredPerm.action().string(), requiredPerm.resourceObject());
+                LOG.info(
+                        "Permission denied for user '{}', action '{}', resource '{}'",
+                        user.userId().asString(),
+                        requiredPerm.action().string(),
+                        requiredPerm.resourceObject());
             }
             return valid;
         }
 
         private String getPathParameter(String key) {
             List<String> params = this.uri.getPathParameters().get(key);
+            // For graphspace parameter, use "DEFAULT" if not present in path
+            if ("graphspace".equals(key) && (params == null || params.isEmpty())) {
+                return "DEFAULT";
+            }
             E.checkState(params != null && params.size() == 1,
                          "There is no matched path parameter: '%s'", key);
             return params.get(0);
+        }
+
+        private boolean isAuth() {
+            List<String> params = this.uri.getPathParameters().get(
+                    "graphspace");
+            if (params != null && params.size() == 1) {
+                String graphSpace = params.get(0);
+                if (ALL_GRAPH_SPACES.equals(graphSpace)) {
+                    return true;
+                }
+                E.checkArgumentNotNull(this.manager.graphSpace(graphSpace),
+                                       "The graph space '%s' does not exist",
+                                       graphSpace);
+                return this.manager.graphSpace(graphSpace).auth();
+            } else {
+                return true;
+            }
         }
 
         private final class UserPrincipal implements Principal {

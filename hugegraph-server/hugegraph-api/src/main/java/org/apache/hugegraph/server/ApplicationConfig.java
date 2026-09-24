@@ -36,21 +36,20 @@ import org.glassfish.jersey.server.monitoring.ApplicationEvent;
 import org.glassfish.jersey.server.monitoring.ApplicationEventListener;
 import org.glassfish.jersey.server.monitoring.RequestEvent;
 import org.glassfish.jersey.server.monitoring.RequestEventListener;
-import org.glassfish.jersey.servlet.ServletProperties;
 
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.jersey3.InstrumentedResourceMethodApplicationListener;
 
-import io.swagger.v3.oas.integration.OpenApiConfigurationException;
 import io.swagger.v3.jaxrs2.integration.JaxrsOpenApiContextBuilder;
 import io.swagger.v3.jaxrs2.integration.resources.OpenApiResource;
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
+import io.swagger.v3.oas.integration.OpenApiConfigurationException;
 import io.swagger.v3.oas.integration.SwaggerConfiguration;
 import io.swagger.v3.oas.models.OpenAPI;
-import jakarta.servlet.ServletConfig;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
+import jakarta.servlet.ServletConfig;
 import jakarta.ws.rs.ApplicationPath;
 import jakarta.ws.rs.core.Context;
 

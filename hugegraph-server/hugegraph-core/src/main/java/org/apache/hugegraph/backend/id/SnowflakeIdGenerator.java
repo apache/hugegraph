@@ -38,7 +38,7 @@ public class SnowflakeIdGenerator extends IdGenerator {
     private final IdWorker idWorker;
 
     public static SnowflakeIdGenerator init(HugeGraphParams graph) {
-        String graphName = graph.name();
+        String graphName = graph.graph().spaceGraphName();
         SnowflakeIdGenerator generator = INSTANCES.get(graphName);
         if (generator == null) {
             synchronized (INSTANCES) {
@@ -54,7 +54,7 @@ public class SnowflakeIdGenerator extends IdGenerator {
     }
 
     public static SnowflakeIdGenerator instance(HugeGraph graph) {
-        String graphName = graph.name();
+        String graphName = graph.spaceGraphName();
         SnowflakeIdGenerator generator = INSTANCES.get(graphName);
         E.checkState(generator != null,
                      "SnowflakeIdGenerator of graph '%s' is not initialized",

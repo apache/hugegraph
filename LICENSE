@@ -216,3 +216,5 @@ hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/type/define/C
 hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/util/StringEncoding.java from https://github.com/JanusGraph/janusgraph
 hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/opencypher/CypherOpProcessor.java from https://github.com/opencypher/cypher-for-gremlin
 hugegraph-server/hugegraph-api/src/main/java/org/apache/hugegraph/opencypher/CypherPlugin.java from https://github.com/opencypher/cypher-for-gremlin
+hugegraph-struct/src/main/java/org/apache/hugegraph/type/define/Cardinality.java from https://github.com/JanusGraph/janusgraph
+hugegraph-struct/src/main/java/org/apache/hugegraph/type/Namifiable.java from https://github.com/JanusGraph/janusgraph

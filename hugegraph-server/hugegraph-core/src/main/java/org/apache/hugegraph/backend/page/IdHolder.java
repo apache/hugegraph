@@ -35,11 +35,17 @@ import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 public abstract class IdHolder {
 
     protected final Query query;
+    private final boolean keepOrder;
     protected boolean exhausted;
 
     public IdHolder(Query query) {
+        this(query, false);
+    }
+
+    public IdHolder(Query query, boolean keepOrder) {
         E.checkNotNull(query, "query");
         this.query = query;
+        this.keepOrder = keepOrder;
         this.exhausted = false;
     }
 
@@ -48,7 +54,7 @@ public abstract class IdHolder {
     }
 
     public boolean keepOrder() {
-        return false;
+        return this.keepOrder;
     }
 
     @Override
@@ -97,7 +103,13 @@ public abstract class IdHolder {
 
         public PagingIdHolder(ConditionQuery query,
                               Function<ConditionQuery, PageIds> fetcher) {
-            super(query.copy());
+            this(query, fetcher, false);
+        }
+
+        public PagingIdHolder(ConditionQuery query,
+                              Function<ConditionQuery, PageIds> fetcher,
+                              boolean keepOrder) {
+            super(query.copy(), keepOrder);
             E.checkArgument(query.paging(),
                             "Query '%s' must include page info", query);
             this.fetcher = fetcher;
@@ -142,7 +154,14 @@ public abstract class IdHolder {
         public BatchIdHolder(ConditionQuery query,
                              Iterator<BackendEntry> entries,
                              Function<Long, Set<Id>> fetcher) {
-            super(query);
+            this(query, entries, fetcher, false);
+        }
+
+        public BatchIdHolder(ConditionQuery query,
+                             Iterator<BackendEntry> entries,
+                             Function<Long, Set<Id>> fetcher,
+                             boolean keepOrder) {
+            super(query, keepOrder);
             this.entries = entries;
             this.fetcher = fetcher;
             this.count = 0L;

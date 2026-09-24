@@ -20,7 +20,8 @@ package org.apache.hugegraph.store.meta.asynctask;
 public interface AsyncTask {
 
     /**
-     * Need to check the asynchronous task, check the current status, and handle it accordingly based on the status.
+     * Need to check the asynchronous task, check the current status, and handle it accordingly
+     * based on the status.
      */
     void handleTask();
 

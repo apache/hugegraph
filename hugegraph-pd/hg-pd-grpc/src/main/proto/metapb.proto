@@ -306,6 +306,7 @@ message StoreStats {
   int32 cores = 24;
   // system metrics
   repeated RecordPair system_metrics = 25;
+  bool executing_task = 26;
 }
 
 // Partition query criteria
@@ -389,4 +390,22 @@ enum GraphModeReason{
   Empty = 0;
   Initiative = 1; // Active status settings
   Quota = 2; // The limit condition is reached
+}
+message BuildIndex {
+  uint64 taskId = 1;
+  uint32 partition_id = 2;
+  BuildIndexParam param = 11;
+}
+
+message BuildIndexParam {
+  string graph = 1;
+  bytes label_id = 2;
+  bool is_vertex_label = 3;
+  bytes prefix = 4; // query prefix
+
+  oneof request_param_union {
+    bytes index_label = 11; // label id
+    bool all_index = 12; // rebuild all index
+    bool label_index = 13; // rebuild all index
+  }
 }

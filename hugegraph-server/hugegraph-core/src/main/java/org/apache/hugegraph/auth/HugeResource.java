@@ -18,6 +18,10 @@
 package org.apache.hugegraph.auth;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,16 +47,21 @@ import org.apache.tinkerpop.shaded.jackson.databind.deser.std.StdDeserializer;
 import org.apache.tinkerpop.shaded.jackson.databind.module.SimpleModule;
 import org.apache.tinkerpop.shaded.jackson.databind.ser.std.StdSerializer;
 
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 public class HugeResource {
 
     public static final String ANY = "*";
+    public static final String POUND_SEPARATOR = "#";
 
     public static final HugeResource ALL = new HugeResource(ResourceType.ALL,
                                                             ANY, null);
-    public static final List<HugeResource> ALL_RES = ImmutableList.of(ALL);
+    public static final Map<String, List<HugeResource>> ALL_RES =
+            new HashMap<>() {
+                {
+                    put("ALL", List.of(ALL));
+                }
+            };
 
     private static final Set<ResourceType> CHECK_NAME_RESS = ImmutableSet.of(
             ResourceType.META);
@@ -72,8 +81,9 @@ public class HugeResource {
     @JsonProperty("label")
     private String label = ANY;
 
+    // value can be predicate
     @JsonProperty("properties")
-    private Map<String, Object> properties; // value can be predicate
+    private Map<String, Object> properties;
 
     public HugeResource() {
         // pass
@@ -85,6 +95,34 @@ public class HugeResource {
         this.label = label;
         this.properties = properties;
         this.checkFormat();
+    }
+
+    public static Map<String, List<HugeResource>> parseResources(String resources) {
+        TypeReference<?> type = new TypeReference<List<HugeResource>>() {
+        };
+        List<HugeResource> hugeResources = JsonUtil.fromJson(resources, type);
+        Map<String, List<HugeResource>> ress = new LinkedHashMap<>();
+        for (HugeResource hr : hugeResources) {
+            hr.checkFormat();
+            String typeLabel;
+            if (hr.type.isGraphOrSchema()) {
+                typeLabel = hr.type.toString() + POUND_SEPARATOR + hr.label;
+            } else {
+                typeLabel = hr.type.toString();
+            }
+
+            List<HugeResource> ressType = ress.get(typeLabel);
+            if (ressType == null) {
+                ressType = new ArrayList<>();
+                ress.put(typeLabel, ressType);
+            }
+            ressType.add(hr);
+        }
+        return ress;
+    }
+
+    public String label() {
+        return this.label;
     }
 
     public void checkFormat() {
@@ -189,6 +227,10 @@ public class HugeResource {
         return this.label.equals(ANY) || other.matches(this.label);
     }
 
+    public Map<String, Object> getProperties() {
+        return properties;
+    }
+
     private boolean matchProperties(Map<String, Object> other) {
         if (this.properties == null) {
             // Any property is OK
@@ -257,12 +299,9 @@ public class HugeResource {
         return JsonUtil.fromJson(resource, HugeResource.class);
     }
 
-    public static List<HugeResource> parseResources(String resources) {
-        TypeReference<?> type = new TypeReference<List<HugeResource>>() {
-        };
-        return JsonUtil.fromJson(resources, type);
+    public boolean matchProperties(HugeResource other) {
+        return matchProperties(other.properties);
     }
-
     public static class NameObject implements Nameable {
 
         public static final NameObject ANY = new NameObject("*");

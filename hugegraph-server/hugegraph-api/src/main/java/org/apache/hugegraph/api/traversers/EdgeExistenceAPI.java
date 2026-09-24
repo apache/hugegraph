@@ -44,7 +44,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/edgeexist")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/edgeexist")
 @Singleton
 @Tag(name = "EdgeExistenceAPI")
 public class EdgeExistenceAPI extends TraverserAPI {
@@ -57,6 +57,7 @@ public class EdgeExistenceAPI extends TraverserAPI {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @Operation(summary = "get edges from 'source' to 'target' vertex")
     public String get(@Context GraphManager manager,
+                      @PathParam("graphspace") String graphSpace,
                       @PathParam("graph") String graph,
                       @QueryParam("source") String source,
                       @QueryParam("target") String target,
@@ -74,7 +75,7 @@ public class EdgeExistenceAPI extends TraverserAPI {
 
         Id sourceId = VertexAPI.checkAndParseVertexId(source);
         Id targetId = VertexAPI.checkAndParseVertexId(target);
-        HugeGraph hugegraph = graph(manager, graph);
+        HugeGraph hugegraph = graph(manager, graphSpace, graph);
         EdgeExistenceTraverser traverser = new EdgeExistenceTraverser(hugegraph);
         Iterator<Edge> edges = traverser.queryEdgeExistence(sourceId, targetId, edgeLabel,
                                                             sortValues, limit);

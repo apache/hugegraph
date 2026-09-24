@@ -1,10 +1,22 @@
+
 name: "3rd-party"
 
 on:
   push:
     branches:
-      - /^release-.*$/
+      - 'release-*'
   pull_request:
+    # Keep source/resources and shared build inputs; skip named documentation files.
+    paths:
+      - '**/pom.xml'
+      - '.mvn/**'
+      - '.github/configs/**'
+      - 'install-dist/**'
+      - '**/*.jar'
+      - '.github/workflows/check-dependencies.yml'
+      - '!**/README*'
+      - '!**/AGENTS.md'
+      - '!**/CLAUDE.md'
 
 permissions:
   contents: read
@@ -32,7 +44,7 @@ jobs:
 
       - name: mvn install
         run: |
-          mvn install -Dmaven.test.skip=true -ntp
+          mvn install -Dmaven.test.skip=true -ntp --fail-at-end
       - name: generate current dependencies
         run: |
           bash $SCRIPT_DEPENDENCY/regenerate_known_dependencies.sh current-dependencies.txt
@@ -46,7 +58,7 @@ jobs:
       - name: 'Checkout Repository'
         uses: actions/checkout@v4
       - name: 'Dependency Review'
-        uses: actions/dependency-review-action@v3
+        uses: actions/dependency-review-action@v5
         # Refer: https://github.com/actions/dependency-review-action
         with:
           # TODO: reset critical to low before releasing

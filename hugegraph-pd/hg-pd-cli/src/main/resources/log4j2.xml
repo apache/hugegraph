@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  -->
+
+<!-- Config will be auto loaded every 60s -->
+<configuration status="error" monitorInterval="60">
+    <properties>
+        <property name="LOG_PATH">logs</property>
+        <property name="FILE_NAME">hugegraph-pd</property>
+    </properties>
+
+    <appenders>
+        <Console name="console" target="SYSTEM_OUT">
+            <ThresholdFilter level="DEBUG" onMatch="ACCEPT" onMismatch="DENY" />
+            <PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} [%t] [%p] %c{1.} - %m%n" />
+        </Console>
+
+        <!-- Normal server log config -->
+        <RollingRandomAccessFile name="file" fileName="${LOG_PATH}/${FILE_NAME}.log"
+                                 filePattern="${LOG_PATH}/$${date:yyyy-MM}/${FILE_NAME}-%d{yyyy-MM-dd}-%i.log"
+                                 bufferedIO="true" bufferSize="524288" immediateFlush="false">
+            <ThresholdFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY" />
+            <PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} [%t] [%p] %c{1.} - %m%n" />
+            <!--JsonLayout compact="true" eventEol="true" complete="true" locationInfo="true">
+                <KeyValuePair key="timestamp" value="$${date:yyyy-MM-dd HH:mm:ss.SSS}"/>
+            </JsonLayout-->
+            <!-- Trigger after exceeding 1day or 50MB -->
+            <Policies>
+                <SizeBasedTriggeringPolicy size="128MB" />
+                <TimeBasedTriggeringPolicy interval="1" modulate="true" />
+            </Policies>
+            <!-- Keep 5 files per day & auto delete after over 2GB or 100 files -->
+            <DefaultRolloverStrategy max="16">
+                <Delete basePath="${LOG_PATH}" maxDepth="2">
+                    <IfFileName glob="*/*.log" />
+                    <!-- Limit log amount & size -->
+                    <IfAny>
+                        <IfAccumulatedFileSize exceeds="2GB" />
+                        <IfAccumulatedFileCount exceeds="100" />
+                    </IfAny>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingRandomAccessFile>
+
+        <!-- jraft server log config -->
+        <RollingRandomAccessFile name="raft_file" fileName="${LOG_PATH}/${FILE_NAME}_raft.log"
+                                 filePattern="${LOG_PATH}/$${date:yyyy-MM}/${FILE_NAME}-%d{yyyy-MM-dd}-%i.log"
+                                 bufferedIO="true" bufferSize="524288" immediateFlush="false">
+            <ThresholdFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY" />
+            <PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} [%t] [%p] %c{1.} - %m%n" />
+            <!--JsonLayout compact="true" eventEol="true" complete="true" locationInfo="true">
+                <KeyValuePair key="timestamp" value="$${date:yyyy-MM-dd HH:mm:ss.SSS}"/>
+            </JsonLayout-->
+            <!-- Trigger after exceeding 1day or 50MB -->
+            <Policies>
+                <SizeBasedTriggeringPolicy size="128MB" />
+                <TimeBasedTriggeringPolicy interval="1" modulate="true" />
+            </Policies>
+            <!-- Keep 5 files per day & auto Delete after over 2GB or 100 files -->
+            <DefaultRolloverStrategy max="16">
+                <Delete basePath="${LOG_PATH}" maxDepth="2">
+                    <IfFileName glob="*/*.log" />
+                    <!-- Limit log amount & size -->
+                    <IfAny>
+                        <IfAccumulatedFileSize exceeds="2GB" />
+                        <IfAccumulatedFileCount exceeds="100" />
+                    </IfAny>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingRandomAccessFile>
+
+        <!-- Separate & compress audit log, buffer size is 512KB -->
+        <RollingRandomAccessFile name="audit" fileName="${LOG_PATH}/audit-${FILE_NAME}.log"
+                                 filePattern="${LOG_PATH}/$${date:yyyy-MM}/audit-${FILE_NAME}-%d{yyyy-MM-dd-HH}-%i.gz"
+                                 bufferedIO="true" bufferSize="524288" immediateFlush="false">
+            <ThresholdFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY" />
+            <!-- Use simple format for audit log to speed up -->
+            <!-- PatternLayout pattern="%-d{yyyy-MM-dd HH:mm:ss} - %m%n"/ -->
+            <JsonLayout compact="true" eventEol="true" locationInfo="true">
+                <KeyValuePair key="timestamp" value="$${date:yyyy-MM-dd HH:mm:ss.SSS}" />
+            </JsonLayout>
+            <!-- Trigger after exceeding 1hour or 500MB -->
+            <Policies>
+                <SizeBasedTriggeringPolicy size="512MB" />
+                <TimeBasedTriggeringPolicy interval="1" modulate="true" />
+            </Policies>
+            <!-- Keep 2 files per hour & auto delete [after 60 days] or [over 5GB or 500 files] -->
+            <DefaultRolloverStrategy max="16">
+                <Delete basePath="${LOG_PATH}" maxDepth="2">
+                    <IfFileName glob="*/*.gz" />
+                    <IfLastModified age="60d" />
+                    <IfAny>
+                        <IfAccumulatedFileSize exceeds="5GB" />
+                        <IfAccumulatedFileCount exceeds="500" />
+                    </IfAny>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingRandomAccessFile>
+    </appenders>
+
+    <loggers>
+        <root level="INFO">
+            <appender-ref ref="file" />
+            <appender-ref ref="console" />
+        </root>
+        <logger name="com.alipay.sofa" level="INFO" additivity="false">
+            <appender-ref ref="raft_file" />
+            <appender-ref ref="console" />
+        </logger>
+        <logger name="io.netty" level="INFO" additivity="false">
+            <appender-ref ref="file" />
+            <appender-ref ref="console" />
+        </logger>
+        <logger name="org.apache.commons" level="INFO" additivity="false">
+            <appender-ref ref="file" />
+            <appender-ref ref="console" />
+        </logger>
+        <!-- Use mixed async way to output logs -->
+        <AsyncLogger name="org.apache.hugegraph" level="INFO" additivity="false">
+            <appender-ref ref="file" />
+            <appender-ref ref="console" />
+        </AsyncLogger>
+    </loggers>
+</configuration>

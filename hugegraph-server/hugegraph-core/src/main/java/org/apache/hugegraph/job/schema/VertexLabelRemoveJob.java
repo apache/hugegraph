@@ -75,7 +75,7 @@ public class VertexLabelRemoveJob extends SchemaJob {
          * vertexLabel.indexLabels()
          */
         Set<Id> indexLabelIds = ImmutableSet.copyOf(vertexLabel.indexLabels());
-        LockUtil.Locks locks = new LockUtil.Locks(graph.name());
+        LockUtil.Locks locks = new LockUtil.Locks(graph.graph().spaceGraphName());
         try {
             locks.lockWrites(LockUtil.VERTEX_LABEL_DELETE, id);
             schemaTx.updateSchemaStatus(vertexLabel, SchemaStatus.DELETING);

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 #
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -17,45 +18,49 @@
 
 # Dockerfile for HugeGraph PD
 # 1st stage: build source code
-FROM maven:3.9.0-eclipse-temurin-11 AS build
+FROM --platform=$BUILDPLATFORM maven:3.9.0-eclipse-temurin-11 AS build
 
-COPY . /pkg
 WORKDIR /pkg
-ARG MAVEN_ARGS
 
-RUN mvn package $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true && pwd && ls -l && rm \
-    ./hugegraph-server/*.tar.gz && rm ./hugegraph-pd/*.tar.gz && rm ./hugegraph-store/*.tar.gz
+COPY . .
+
+ARG MAVEN_ARGS
+ARG MAVEN_PROJECTS="hugegraph-server/hugegraph-dist,hugegraph-pd/hg-pd-dist,hugegraph-store/hg-store-dist"
+ARG SOURCE_REVISION=local
+
+RUN --mount=type=cache,id=hugegraph-maven-${SOURCE_REVISION},target=/root/.m2,sharing=locked \
+    mvn install -pl "$MAVEN_PROJECTS" \
+        -am $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
+    && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
 
 # 2nd stage: runtime env
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
-FROM openjdk:11-slim
+FROM eclipse-temurin:11-jre-jammy
 
-COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-incubating-*/ /hugegraph-pd/
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
 # TODO: use g1gc or zgc as default
 ENV JAVA_OPTS="-XX:+UnlockExperimentalVMOptions -XX:+UseContainerSupport -XX:MaxRAMPercentage=50 -XshowSettings:vm" \
-    HUGEGRAPH_HOME="hugegraph-pd"
+    HUGEGRAPH_HOME="hugegraph-pd" \
+    STDOUT_MODE="true"
 
-#COPY . /hugegraph/hugegraph-pd
 WORKDIR /hugegraph-pd/
 
-# 1. Install environment and init HugeGraph Sever
-RUN set -x \
-    && rm /var/lib/dpkg/info/libc-bin.* \
-    && apt-get -q clean \
-    && apt-get -q update \
+# 1. Install runtime dependencies
+# Note: lsof is gone because its only consumer was the dead check_port removed
+# from hg-pd-dist bin/util.sh.  PD runs no port preflight, so unlike the server
+# images this needs no socket-table tool in its place.
+ARG RUNTIME_DEPS_EPOCH=1
+RUN apt-get -q update \
     && apt-get -q install -y --no-install-recommends --no-install-suggests \
        dumb-init \
        procps \
        curl \
-       lsof \
        vim \
-       cron \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && service cron start \
-    && pwd && cd /hugegraph-pd/
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-*/ /hugegraph-pd/
 
 # 2. Init docker script
 COPY hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh .
@@ -63,6 +68,9 @@ RUN chmod 755 ./docker-entrypoint.sh
 
 EXPOSE 8620
 VOLUME /hugegraph-pd
+
+HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=3 \
+    CMD curl -fsS http://localhost:8620/v1/health >/dev/null
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["./docker-entrypoint.sh"]

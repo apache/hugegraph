@@ -84,6 +84,38 @@ public class SchemaTransaction extends IndexableTransaction implements ISchemaTr
         this.counter = graph.counter();
     }
 
+    private static void setCreateTimeIfNeeded(SchemaElement schema) {
+        if (!schema.userdata().containsKey(Userdata.CREATE_TIME)) {
+            schema.userdata(Userdata.CREATE_TIME, DateUtil.now());
+        }
+    }
+
+    private static Id asyncRun(HugeGraph graph, SchemaElement schema,
+                               SchemaJob callable) {
+        return asyncRun(graph, schema, callable, ImmutableSet.of());
+    }
+
+    @Watched(prefix = "schema")
+    private static Id asyncRun(HugeGraph graph, SchemaElement schema,
+                               SchemaJob callable, Set<Id> dependencies) {
+        E.checkArgument(schema != null, "Schema can't be null");
+        String name = SchemaJob.formatTaskName(schema.type(),
+                                               schema.id(),
+                                               schema.name());
+
+        JobBuilder<Object> builder = JobBuilder.of(graph).name(name)
+                                               .job(callable)
+                                               .dependencies(dependencies);
+        HugeTask<?> task = builder.schedule();
+
+        // If TASK_SYNC_DELETION is true, wait async thread done before
+        // continue. This is used when running tests.
+        if (graph.option(CoreOptions.TASK_SYNC_DELETION)) {
+            task.syncWait();
+        }
+        return task.id();
+    }
+
     @Override
     protected AbstractTransaction indexTransaction() {
         return this.indexTx;
@@ -426,7 +458,7 @@ public class SchemaTransaction extends IndexableTransaction implements ISchemaTr
     private void saveSchema(SchemaElement schema, boolean update,
                             Consumer<SchemaElement> updateCallback) {
         // Lock for schema update
-        LockUtil.Locks locks = new LockUtil.Locks(this.params().name());
+        LockUtil.Locks locks = new LockUtil.Locks(this.params().graph().spaceGraphName());
         try {
             locks.lockWrites(LockUtil.hugeType2Group(schema.type()), schema.id());
 
@@ -546,7 +578,7 @@ public class SchemaTransaction extends IndexableTransaction implements ISchemaTr
                                             "should not occur");
         }
 
-        LockUtil.Locks locks = new LockUtil.Locks(this.graphName());
+        LockUtil.Locks locks = new LockUtil.Locks(this.graph().spaceGraphName());
         try {
             locks.lockWrites(LockUtil.hugeType2Group(schema.type()),
                              schema.id());
@@ -611,6 +643,11 @@ public class SchemaTransaction extends IndexableTransaction implements ISchemaTr
         }
     }
 
+    @Override
+    public String spaceGraphName() {
+        return this.graph().spaceGraphName();
+    }
+
     @Watched(prefix = "schema")
     public Id validOrGenerateId(HugeType type, Id id, String name) {
         boolean forSystem = Graph.Hidden.isHidden(name);
@@ -662,37 +699,5 @@ public class SchemaTransaction extends IndexableTransaction implements ISchemaTr
         LOG.debug("SchemaTransaction get next system id");
         Id id = this.counter.nextId(HugeType.SYS_SCHEMA);
         return IdGenerator.of(-id.asLong());
-    }
-
-    private static void setCreateTimeIfNeeded(SchemaElement schema) {
-        if (!schema.userdata().containsKey(Userdata.CREATE_TIME)) {
-            schema.userdata(Userdata.CREATE_TIME, DateUtil.now());
-        }
-    }
-
-    private static Id asyncRun(HugeGraph graph, SchemaElement schema,
-                               SchemaJob callable) {
-        return asyncRun(graph, schema, callable, ImmutableSet.of());
-    }
-
-    @Watched(prefix = "schema")
-    private static Id asyncRun(HugeGraph graph, SchemaElement schema,
-                               SchemaJob callable, Set<Id> dependencies) {
-        E.checkArgument(schema != null, "Schema can't be null");
-        String name = SchemaJob.formatTaskName(schema.type(),
-                                               schema.id(),
-                                               schema.name());
-
-        JobBuilder<Object> builder = JobBuilder.of(graph).name(name)
-                                               .job(callable)
-                                               .dependencies(dependencies);
-        HugeTask<?> task = builder.schedule();
-
-        // If TASK_SYNC_DELETION is true, wait async thread done before
-        // continue. This is used when running tests.
-        if (graph.option(CoreOptions.TASK_SYNC_DELETION)) {
-            task.syncWait();
-        }
-        return task.id();
     }
 }

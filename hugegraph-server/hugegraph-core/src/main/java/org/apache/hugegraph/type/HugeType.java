@@ -65,8 +65,13 @@ public enum HugeType implements SerialEnum {
     SHARD_INDEX(175, "HI"),
     UNIQUE_INDEX(178, "UI"),
 
-    TASK(180, "TASK"),
+    TASK(180, "T"),
     SERVER(181, "SERVER"),
+
+    VARIABLE(185, "VA"),
+
+    KV_TYPE(200, "KV"),
+    KV_RAW(201, "KVR"),
 
     // System schema
     SYS_SCHEMA(250, "SS"),
@@ -74,7 +79,7 @@ public enum HugeType implements SerialEnum {
     MAX_TYPE(255, "~");
 
     private byte type = 0;
-    private String name;
+    private final String name;
 
     private static final Map<String, HugeType> ALL_NAME = new HashMap<>();
 
@@ -116,11 +121,16 @@ public enum HugeType implements SerialEnum {
     }
 
     public boolean isVertex() {
-        return this == HugeType.VERTEX || this == HugeType.TASK || this == HugeType.SERVER;
+        return this == HugeType.VERTEX || this == HugeType.TASK || this == HugeType.SERVER ||
+               this == HugeType.VARIABLE;
     }
 
     public boolean isEdge() {
         return this == EDGE || this == EDGE_OUT || this == EDGE_IN;
+    }
+
+    public boolean isEdgeLabel() {
+        return this == EDGE_LABEL;
     }
 
     public boolean isIndex() {
@@ -129,6 +139,10 @@ public enum HugeType implements SerialEnum {
                this == RANGE_INT_INDEX || this == RANGE_FLOAT_INDEX ||
                this == RANGE_LONG_INDEX || this == RANGE_DOUBLE_INDEX ||
                this == SHARD_INDEX || this == UNIQUE_INDEX;
+    }
+
+    public boolean isLabelIndex() {
+        return this == VERTEX_LABEL_INDEX || this == EDGE_LABEL_INDEX;
     }
 
     public boolean isStringIndex() {
@@ -192,9 +206,5 @@ public enum HugeType implements SerialEnum {
 
     public static HugeType fromCode(byte code) {
         return SerialEnum.fromCode(HugeType.class, code);
-    }
-
-    public boolean isLabelIndex() {
-        return this == VERTEX_LABEL_INDEX || this == EDGE_LABEL_INDEX;
     }
 }

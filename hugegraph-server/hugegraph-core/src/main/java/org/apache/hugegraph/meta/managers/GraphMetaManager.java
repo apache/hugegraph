@@ -19,6 +19,7 @@ package org.apache.hugegraph.meta.managers;
 
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_ADD;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_CLEAR;
+import static org.apache.hugegraph.meta.MetaManager.META_PATH_DEFAULT_GS;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_DELIMITER;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_EDGE_LABEL;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_EVENT;
@@ -29,12 +30,15 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_HUGEGRAPH;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_JOIN;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_REMOVE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_SCHEMA;
+import static org.apache.hugegraph.meta.MetaManager.META_PATH_SYS_GRAPH_CONF;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_UPDATE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_VERTEX_LABEL;
+import static org.apache.hugegraph.meta.MetaManager.schemaCacheClearEventValue;
 
 import java.util.Map;
 import java.util.function.Consumer;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.JsonUtil;
@@ -91,8 +95,14 @@ public class GraphMetaManager extends AbstractMetaManager {
     }
 
     public void notifySchemaCacheClear(String graphSpace, String graph) {
+        this.notifySchemaCacheClear(graphSpace, graph, null);
+    }
+
+    public void notifySchemaCacheClear(String graphSpace, String graph,
+                                       String source) {
         this.metaDriver.put(this.schemaCacheClearKey(),
-                            graphName(graphSpace, graph));
+                            schemaCacheClearEventValue(
+                                    graphName(graphSpace, graph), source));
     }
 
     public void notifyGraphCacheClear(String graphSpace, String graph) {
@@ -137,6 +147,22 @@ public class GraphMetaManager extends AbstractMetaManager {
                                   Map<String, Object> configs) {
         this.metaDriver.put(this.graphConfKey(graphSpace, graph),
                             JsonUtil.toJson(configs));
+    }
+
+    public void addSysGraphConfig(Map<String, Object> configs) {
+        this.metaDriver.put(this.sysGraphConfKey(), JsonUtil.toJson(configs));
+    }
+
+    public Map<String, Object> getSysGraphConfig() {
+        String content = this.metaDriver.get(this.sysGraphConfKey());
+        if (StringUtils.isEmpty(content)) {
+            return null;
+        }
+        return configMap(content);
+    }
+
+    public void removeSysGraphConfig() {
+        this.metaDriver.delete(this.sysGraphConfKey());
     }
 
     public <T> void listenGraphAdd(Consumer<T> consumer) {
@@ -184,6 +210,16 @@ public class GraphMetaManager extends AbstractMetaManager {
                            graphSpace,
                            META_PATH_GRAPH_CONF,
                            graph);
+    }
+
+    private String sysGraphConfKey() {
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/DEFAULT/SYS_GRAPH_CONF
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_GRAPHSPACE,
+                           META_PATH_DEFAULT_GS,
+                           META_PATH_SYS_GRAPH_CONF);
     }
 
     private String graphAddKey() {

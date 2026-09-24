@@ -92,7 +92,7 @@ public class IndexLabelRebuildJob extends SchemaJob {
             }
         };
 
-        LockUtil.Locks locks = new LockUtil.Locks(schemaTx.graphName());
+        LockUtil.Locks locks = new LockUtil.Locks(schemaTx.spaceGraphName());
         try {
             locks.lockWrites(LockUtil.INDEX_LABEL_REBUILD, indexLabelIds);
 
@@ -160,7 +160,7 @@ public class IndexLabelRebuildJob extends SchemaJob {
                  */
                 continue;
             }
-            LockUtil.Locks locks = new LockUtil.Locks(schemaTx.graphName());
+            LockUtil.Locks locks = new LockUtil.Locks(schemaTx.spaceGraphName());
             try {
                 locks.lockWrites(LockUtil.INDEX_LABEL_DELETE, indexLabelIds);
                 graphTx.removeIndex(il);

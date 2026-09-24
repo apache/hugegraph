@@ -425,7 +425,6 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         Lock readLock = this.storeLock.readLock();
         readLock.lock();
         try {
-            this.checkOpened();
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Store {} mutation: {}", this.store, mutation);
             }
@@ -490,7 +489,6 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         readLock.lock();
 
         try {
-            this.checkOpened();
             HugeType tableType = RocksDBTable.tableType(query);
             RocksDBTable table;
             RocksDBSessions.Session session;
@@ -525,7 +523,6 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         Lock readLock = this.storeLock.readLock();
         readLock.lock();
         try {
-            this.checkOpened();
             HugeType tableType = RocksDBTable.tableType(query);
             RocksDBTable table = this.table(tableType);
             return table.queryNumber(this.session(tableType), query);
@@ -648,8 +645,6 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         Lock readLock = this.storeLock.readLock();
         readLock.lock();
         try {
-            this.checkOpened();
-
             for (RocksDBSessions.Session session : this.session()) {
                 assert !session.hasChanges();
             }
@@ -663,7 +658,6 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         Lock readLock = this.storeLock.readLock();
         readLock.lock();
         try {
-            this.checkOpened();
             // Unable to guarantee atomicity when committing multi sessions
             for (RocksDBSessions.Session session : this.session()) {
                 Object count = session.commit();
@@ -681,27 +675,12 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         Lock readLock = this.storeLock.readLock();
         readLock.lock();
         try {
-            this.checkOpened();
-
             for (RocksDBSessions.Session session : this.session()) {
                 session.rollback();
             }
         } finally {
             readLock.unlock();
         }
-    }
-
-    @Override
-    protected RocksDBSessions.Session session(HugeType tableType) {
-        this.checkOpened();
-
-        // Optimized disk
-        String disk = this.tableDiskMapping.get(tableType);
-        if (disk != null) {
-            return this.db(disk).session();
-        }
-
-        return this.sessions.session();
     }
 
     @Override
@@ -785,22 +764,6 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         }
     }
 
-    private List<RocksDBSessions.Session> session() {
-        this.checkOpened();
-
-        if (this.tableDiskMapping.isEmpty()) {
-            return Collections.singletonList(this.sessions.session());
-        }
-
-        // Collect session of each table with optimized disk
-        List<RocksDBSessions.Session> list = new ArrayList<>(this.tableDiskMapping.size() + 1);
-        list.add(this.sessions.session());
-        for (String disk : this.tableDiskMapping.values()) {
-            list.add(db(disk).session());
-        }
-        return list;
-    }
-
     private void closeSessions() {
         Iterator<Map.Entry<String, RocksDBSessions>> iter = this.dbs.entrySet().iterator();
         while (iter.hasNext()) {
@@ -813,12 +776,56 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
         }
     }
 
-    private Collection<RocksDBSessions> sessions() {
+    private final Collection<RocksDBSessions> sessions() {
         return this.dbs.values();
     }
 
-    private void parseTableDiskMapping(Map<String, String> disks, String dataPath) {
+    private final List<RocksDBSessions.Session> session() {
+        this.checkDbOpened();
 
+        // Collect session of standard disk
+        RocksDBSessions.Session session = this.sessions.session();
+        if (!session.opened()) {
+            this.checkOpened();
+        }
+
+        if (this.tableDiskMapping.isEmpty()) {
+            return ImmutableList.of(session);
+        }
+
+        // Collect session of each table with optimized disk
+        List<RocksDBSessions.Session> list = new ArrayList<>(this.tableDiskMapping.size() + 1);
+        list.add(session);
+        for (String disk : this.tableDiskMapping.values()) {
+            RocksDBSessions.Session optimizedSession = this.db(disk).session();
+            assert optimizedSession.opened();
+            list.add(optimizedSession);
+        }
+        return list;
+    }
+
+    @Override
+    protected RocksDBSessions.Session session(HugeType tableType) {
+        this.checkDbOpened();
+
+        RocksDBSessions.Session session;
+        String disk = this.tableDiskMapping.get(tableType);
+        if (disk != null) {
+            // Optimized disk
+            session = this.db(disk).session();
+        } else {
+            // Standard disk
+            session = this.sessions.session();
+        }
+
+        if (!session.opened()) {
+            this.checkOpened();
+        }
+        return session;
+    }
+
+    private void parseTableDiskMapping(Map<String, String> disks, String dataPath) {
+        // reset and parse
         this.tableDiskMapping.clear();
         for (Map.Entry<String, String> disk : disks.entrySet()) {
             // The format of `disk` like: `graph/vertex: /path/to/disk1`
@@ -869,7 +876,7 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
     }
 
     protected RocksDBSessions db(HugeType tableType) {
-        this.checkOpened();
+        this.checkDbOpened();
 
         // Optimized disk
         String disk = this.tableDiskMapping.get(tableType);

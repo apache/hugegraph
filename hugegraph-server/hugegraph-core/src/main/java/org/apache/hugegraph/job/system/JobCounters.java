@@ -32,7 +32,7 @@ public class JobCounters {
 
     public JobCounter jobCounter(HugeGraph g) {
         int batch = g.option(CoreOptions.TASK_TTL_DELETE_BATCH);
-        String graph = g.name();
+        String graph = g.spaceGraphName();
         if (!this.jobCounters.containsKey(graph)) {
             this.jobCounters.putIfAbsent(graph, new JobCounter(batch));
         }

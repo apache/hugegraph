@@ -35,9 +35,10 @@ public class DiscoveryClientImpl extends DiscoveryClient {
     private final String address;
     private final Map labels;
     private final Consumer registerConsumer;
+    private PDConfig conf;
 
     private DiscoveryClientImpl(Builder builder) {
-        super(builder.centerAddress, builder.delay);
+        super(builder.centerAddress, builder.delay, builder.conf);
         period = builder.delay;
         id = builder.id;
         type = builder.type;
@@ -78,6 +79,7 @@ public class DiscoveryClientImpl extends DiscoveryClient {
         private String appName;
         private int times;
         private Consumer registerConsumer;
+        private PDConfig conf;
 
         private Builder() {
         }
@@ -124,6 +126,11 @@ public class DiscoveryClientImpl extends DiscoveryClient {
 
         public Builder setTimes(int val) {
             times = val;
+            return this;
+        }
+
+        public Builder setPdConfig(PDConfig val) {
+            this.conf = val;
             return this;
         }
 

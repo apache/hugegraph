@@ -104,18 +104,13 @@
 
     <loggers>
         <root level="INFO">
+            <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </root>
-        <logger name="org.apache.cassandra" level="INFO" additivity="false">
-            <appender-ref ref="file"/>
-        </logger>
         <logger name="org.apache.hadoop" level="INFO" additivity="false">
             <appender-ref ref="file"/>
         </logger>
         <logger name="org.apache.zookeeper" level="WARN" additivity="false">
-            <appender-ref ref="file"/>
-        </logger>
-        <logger name="com.datastax.driver" level="WARN" additivity="false">
             <appender-ref ref="file"/>
         </logger>
         <logger name="com.alipay.sofa" level="WARN" additivity="false">
@@ -129,6 +124,7 @@
         </logger>
         <!-- Use mixed async way to output logs -->
         <AsyncLogger name="org.apache.hugegraph" level="INFO" additivity="false">
+            <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </AsyncLogger>
         <AsyncLogger name="org.apache.hugegraph.auth" level="INFO" additivity="false">

@@ -653,8 +653,20 @@ public class GraphIndexTransaction extends AbstractTransaction {
         } else {
             return new PagingIdHolder(query, q -> {
                 return this.doIndexQueryOnce(indexLabel, q);
-            });
+            }, this.keepBackendIndexOrder(indexLabel, query));
         }
+    }
+
+    private boolean keepBackendIndexOrder(IndexLabel indexLabel,
+                                          ConditionQuery query) {
+        return keepBackendIndexOrder(this.store().provider().isHstore(),
+                                     indexLabel.indexType(), query);
+    }
+
+    static boolean keepBackendIndexOrder(boolean hstore, IndexType indexType,
+                                         ConditionQuery query) {
+        return hstore && indexType.isRange() &&
+               (query.paging() || !query.noLimitAndOffset());
     }
 
     @Watched(prefix = "index")
@@ -662,7 +674,9 @@ public class GraphIndexTransaction extends AbstractTransaction {
                                        ConditionQuery query) {
         Iterator<BackendEntry> entries = super.query(query).iterator();
         return new BatchIdHolder(query, entries, batch -> {
-            LockUtil.Locks locks = new LockUtil.Locks(this.graphName());
+            String spaceGraph = this.params()
+                                    .graph().spaceGraphName();
+            LockUtil.Locks locks = new LockUtil.Locks(spaceGraph);
             try {
                 // Catch lock every batch
                 locks.lockReads(LockUtil.INDEX_LABEL_DELETE, indexLabel.id());
@@ -691,7 +705,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             } finally {
                 locks.unlock();
             }
-        });
+        }, this.keepBackendIndexOrder(indexLabel, query));
     }
 
     private void recordIndexValue(ConditionQuery query, HugeIndex index) {
@@ -712,7 +726,9 @@ public class GraphIndexTransaction extends AbstractTransaction {
                                      ConditionQuery query) {
         // Query all or one page
         Iterator<BackendEntry> entries = null;
-        LockUtil.Locks locks = new LockUtil.Locks(this.graphName());
+        String spaceGraph = this.params()
+                                .graph().spaceGraphName();
+        LockUtil.Locks locks = new LockUtil.Locks(spaceGraph);
         try {
             locks.lockReads(LockUtil.INDEX_LABEL_DELETE, indexLabel.id());
             locks.lockReads(LockUtil.INDEX_LABEL_REBUILD, indexLabel.id());
@@ -1576,8 +1592,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
     private static class MatchedIndex {
 
-        private SchemaLabel schemaLabel;
-        private Set<IndexLabel> indexLabels;
+        private final SchemaLabel schemaLabel;
+        private final Set<IndexLabel> indexLabels;
 
         public MatchedIndex(SchemaLabel schemaLabel,
                             Set<IndexLabel> indexLabels) {
@@ -1740,7 +1756,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         private final ConditionQuery query;
         private final HugeElement element;
         private GraphIndexTransaction tx;
-        private Set<ConditionQuery.LeftIndex> leftIndexes;
+        private final Set<ConditionQuery.LeftIndex> leftIndexes;
 
         private RemoveLeftIndexJob(ConditionQuery query, HugeElement element) {
             E.checkArgumentNotNull(query, "query");

@@ -20,6 +20,7 @@ package org.apache.hugegraph.rocksdb.access;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Random;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBSession.CFHandleLock;
 import org.apache.hugegraph.rocksdb.access.util.Asserts;
@@ -263,9 +264,18 @@ public class SessionOperatorImpl implements SessionOperator {
                 log.info("no find table : {}", tableName);
                 return null;
             }
-            return new RocksDBScanIterator(this.rocksdb().newIterator(handle.get()), null, null,
-                                           ScanIterator.Trait.SCAN_ANY,
-                                           this.session.getRefCounter());
+            String key = getIteratorKey();
+
+            var iterator =
+                    new RocksDBScanIterator(
+                            this.rocksdb().newIterator(handle.get()),
+                            null,
+                            null,
+                            ScanIterator.Trait.SCAN_ANY,
+                            this.session.getRefCounter(),
+                            b -> session.removeIterator(key));
+            this.session.addIterator(key, iterator);
+            return iterator;
         }
     }
 
@@ -282,9 +292,17 @@ public class SessionOperatorImpl implements SessionOperator {
                          new String(prefix));
                 return null;
             }
-            return new RocksDBScanIterator(this.rocksdb().newIterator(handle.get()), prefix, null,
-                                           ScanIterator.Trait.SCAN_PREFIX_BEGIN | scanType,
-                                           this.session.getRefCounter());
+            String key = getIteratorKey();
+            var iterator =
+                    new RocksDBScanIterator(
+                            this.rocksdb().newIterator(handle.get()),
+                            prefix,
+                            null,
+                            ScanIterator.Trait.SCAN_PREFIX_BEGIN | scanType,
+                            this.session.getRefCounter(),
+                            b -> session.removeIterator(key));
+            this.session.addIterator(key, iterator);
+            return iterator;
         }
     }
 
@@ -295,9 +313,17 @@ public class SessionOperatorImpl implements SessionOperator {
                 log.info("no find table: {}  for scantype: {}", tableName, scanType);
                 return null;
             }
-            return new RocksDBScanIterator(this.rocksdb().newIterator(handle.get()), keyFrom, keyTo,
-                                           scanType,
-                                           this.session.getRefCounter());
+            String key = getIteratorKey();
+            var iterator =
+                    new RocksDBScanIterator(
+                            this.rocksdb().newIterator(handle.get()),
+                            keyFrom,
+                            keyTo,
+                            scanType,
+                            this.session.getRefCounter(),
+                            b -> session.removeIterator(key));
+            this.session.addIterator(key, iterator);
+            return iterator;
         }
     }
 
@@ -343,42 +369,14 @@ public class SessionOperatorImpl implements SessionOperator {
                         iterator.seekToFirst();
                     }
                 }
-                if (iterator == null) {
+                //FIXME Is this right？
+                if (iterator == null){
                     return null;
                 }
-                RocksIterator finalIterator = iterator;
-                return (T) new ScanIterator() {
-                    private final ReadOptions holdReadOptions = readOptions;
-
-                    @Override
-                    public boolean hasNext() {
-                        return finalIterator.isValid();
-                    }
-
-                    @Override
-                    public boolean isValid() {
-                        return finalIterator.isValid();
-                    }
-
-                    @Override
-                    public <T> T next() {
-                        byte[] key = finalIterator.key();
-                        if (startSeqNum > 0) {
-                            key = Arrays.copyOfRange(key, 0, key.length - kNumInternalBytes);
-                        }
-                        RocksDBSession.BackendColumn col =
-                                RocksDBSession.BackendColumn.of(key, finalIterator.value());
-                        finalIterator.next();
-                        return (T) col;
-                    }
-
-                    @Override
-                    public void close() {
-                        finalIterator.close();
-                        holdReadOptions.close();
-                    }
-
-                };
+                String key = getIteratorKey();
+                var newIterator = getScanRawIterator(iterator, readOptions, startSeqNum, key);
+                session.addIterator(key, newIterator);
+                return (T) newIterator;
             }
 
             @Override
@@ -386,10 +384,43 @@ public class SessionOperatorImpl implements SessionOperator {
                 rocksdb().releaseSnapshot(snapshot);
             }
 
-            @Override
             public byte[] position() {
                 return cfName.getBytes(StandardCharsets.UTF_8);
+            }
+        };
+    }
 
+    private ScanIterator getScanRawIterator(RocksIterator iterator, ReadOptions readOptions,
+                                            long startSeqNum, String key) {
+        int kNumInternalBytes = 8; // internal key new 8 bytes suffix
+
+        return new ScanIterator() {
+            @Override
+            public boolean hasNext() {
+                return iterator.isValid();
+            }
+
+            @Override
+            public boolean isValid() {
+                return iterator.isValid();
+            }
+
+            @Override
+            public <T> T next() {
+                byte[] key = iterator.key();
+                if (startSeqNum > 0) {
+                    key = Arrays.copyOfRange(key, 0, key.length - kNumInternalBytes);
+                }
+                var col = RocksDBSession.BackendColumn.of(key, iterator.value());
+                iterator.next();
+                return (T) col;
+            }
+
+            @Override
+            public void close() {
+                iterator.close();
+                readOptions.close();
+                session.removeIterator(key);
             }
         };
     }
@@ -415,5 +446,9 @@ public class SessionOperatorImpl implements SessionOperator {
             this.batch = new WriteBatch();
         }
         return this.batch;
+    }
+
+    private String getIteratorKey() {
+        return System.currentTimeMillis() + "-" + (new Random()).nextLong();
     }
 }

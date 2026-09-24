@@ -76,9 +76,11 @@ public final class RocksDBMetricsConst {
             TickerType.GET_HIT_L0, // Level 0 get hits.
             TickerType.GET_HIT_L1, // Level 1 get hits.
             TickerType.GET_HIT_L2_AND_UP, // Level 2 and above get hits.
-            TickerType.COMPACTION_KEY_DROP_NEWER_ENTRY, // Keys dropped due to newer entry during compaction.
+            TickerType.COMPACTION_KEY_DROP_NEWER_ENTRY,
+            // Keys dropped due to newer entry during compaction.
             TickerType.COMPACTION_KEY_DROP_OBSOLETE, // Obsolete keys dropped during compaction.
-            TickerType.COMPACTION_KEY_DROP_RANGE_DEL, // Range deletion keys dropped during compaction.
+            TickerType.COMPACTION_KEY_DROP_RANGE_DEL,
+            // Range deletion keys dropped during compaction.
             TickerType.COMPACTION_KEY_DROP_USER, // User keys dropped during compaction.
             TickerType.COMPACTION_RANGE_DEL_DROP_OBSOLETE, // Obsolete range deletes dropped.
             TickerType.NUMBER_KEYS_WRITTEN, // Total keys written.
@@ -122,7 +124,8 @@ public final class RocksDBMetricsConst {
             TickerType.COMPACT_READ_BYTES, // Bytes read during compaction.
             TickerType.COMPACT_WRITE_BYTES, // Bytes written during compaction.
             TickerType.FLUSH_WRITE_BYTES, // Bytes written during flush.
-            TickerType.NUMBER_DIRECT_LOAD_TABLE_PROPERTIES, // Number of direct load table properties.
+            TickerType.NUMBER_DIRECT_LOAD_TABLE_PROPERTIES,
+            // Number of direct load table properties.
             TickerType.NUMBER_SUPERVERSION_ACQUIRES, // Acquired superversions.
             TickerType.NUMBER_SUPERVERSION_RELEASES, // Released superversions.
             TickerType.NUMBER_SUPERVERSION_CLEANUPS, // Cleanups of superversions.
@@ -133,7 +136,8 @@ public final class RocksDBMetricsConst {
             TickerType.FILTER_OPERATION_TOTAL_TIME, // Time spent in filter operations.
             TickerType.ROW_CACHE_HIT, // Hits in row cache.
             TickerType.ROW_CACHE_MISS, // Misses in row cache.
-            TickerType.READ_AMP_ESTIMATE_USEFUL_BYTES, // Estimated useful bytes read due to read amplification.
+            TickerType.READ_AMP_ESTIMATE_USEFUL_BYTES,
+            // Estimated useful bytes read due to read amplification.
             TickerType.READ_AMP_TOTAL_READ_BYTES, // Total bytes read due to read amplification.
             TickerType.NUMBER_RATE_LIMITER_DRAINS, // Number of times rate limiter is drained.
             TickerType.NUMBER_ITER_SKIP, // Number of iterator skips.
@@ -153,16 +157,19 @@ public final class RocksDBMetricsConst {
             HistogramType.COMPACTION_TIME, // Time spent in compactions.
             HistogramType.SUBCOMPACTION_SETUP_TIME, // Time spent setting up subcompactions.
             HistogramType.TABLE_SYNC_MICROS, // Time spent synchronizing tables.
-            HistogramType.COMPACTION_OUTFILE_SYNC_MICROS, // Time spent syncing compaction output files.
+            HistogramType.COMPACTION_OUTFILE_SYNC_MICROS,
+            // Time spent syncing compaction output files.
             HistogramType.WAL_FILE_SYNC_MICROS, // Time spent syncing WAL files.
             HistogramType.MANIFEST_FILE_SYNC_MICROS, // Time spent syncing manifest files.
             HistogramType.TABLE_OPEN_IO_MICROS, // Time spent opening tables (I/O).
             HistogramType.DB_MULTIGET, // Latency of database multi-get operations.
-            HistogramType.READ_BLOCK_COMPACTION_MICROS, // Time spent reading blocks during compaction.
+            HistogramType.READ_BLOCK_COMPACTION_MICROS,
+            // Time spent reading blocks during compaction.
             HistogramType.READ_BLOCK_GET_MICROS, // Time spent reading blocks during get.
             HistogramType.WRITE_RAW_BLOCK_MICROS, // Time spent writing raw blocks.
             HistogramType.STALL_L0_SLOWDOWN_COUNT, // Count of stalls due to L0 slowdown.
-            HistogramType.STALL_MEMTABLE_COMPACTION_COUNT, // Count of stalls due to memtable compaction.
+            HistogramType.STALL_MEMTABLE_COMPACTION_COUNT,
+            // Count of stalls due to memtable compaction.
             HistogramType.STALL_L0_NUM_FILES_COUNT, // Count of stalls due to number of files at L0.
             HistogramType.HARD_RATE_LIMIT_DELAY_COUNT, // Count of delays due to hard rate limits.
             HistogramType.SOFT_RATE_LIMIT_DELAY_COUNT, // Count of delays due to soft rate limits.

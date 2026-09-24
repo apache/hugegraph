@@ -17,36 +17,26 @@
 
 package org.apache.hugegraph.config;
 
-import static org.apache.hugegraph.backend.tx.GraphTransaction.COMMIT_BATCH;
-import static org.apache.hugegraph.config.OptionChecker.allowValues;
-import static org.apache.hugegraph.config.OptionChecker.disallowEmpty;
-import static org.apache.hugegraph.config.OptionChecker.nonNegativeInt;
-import static org.apache.hugegraph.config.OptionChecker.positiveInt;
-import static org.apache.hugegraph.config.OptionChecker.rangeInt;
-
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.Bytes;
+
+import static org.apache.hugegraph.backend.query.Query.COMMIT_BATCH;
+import static org.apache.hugegraph.config.OptionChecker.*;
 
 public class CoreOptions extends OptionHolder {
 
     public static final int CPUS = Runtime.getRuntime().availableProcessors();
-
-    private CoreOptions() {
-        super();
-    }
-
-    private static volatile CoreOptions instance;
-
-    public static synchronized CoreOptions instance() {
-        if (instance == null) {
-            instance = new CoreOptions();
-            // Should initialize all static members first, then register.
-            instance.registerOptions();
-        }
-        return instance;
-    }
-
+    public static final ConfigOption<Integer> EDGE_TX_CAPACITY =
+            new ConfigOption<>(
+                    "edge.tx_capacity",
+                    "The max size(items) of edges(uncommitted) in " +
+                            "transaction.",
+                    rangeInt(GraphTransaction.COMMIT_BATCH, 1000000),
+                    10000
+            );
     public static final ConfigOption<String> GREMLIN_GRAPH =
             new ConfigOption<>(
                     "gremlin.graph",
@@ -54,7 +44,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "org.apache.hugegraph.HugeFactory"
             );
-
     public static final ConfigOption<String> BACKEND =
             new ConfigOption<>(
                     "backend",
@@ -62,15 +51,21 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "memory"
             );
+    public static final ConfigOption<Boolean> QUERY_TRUST_INDEX =
+            new ConfigOption<>(
+                    "query.trust_index",
+                    "Whether to Trust Index.",
+                    disallowEmpty(),
+                    false
+            );
 
     public static final ConfigOption<String> STORE =
             new ConfigOption<>(
                     "store",
-                    "The database name like Cassandra Keyspace.",
+                    "The backend database namespace.",
                     disallowEmpty(),
                     "hugegraph"
             );
-
     public static final ConfigOption<String> STORE_GRAPH =
             new ConfigOption<>(
                     "store.graph",
@@ -78,15 +73,22 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "g"
             );
-
     public static final ConfigOption<String> SERIALIZER =
             new ConfigOption<>(
                     "serializer",
-                    "The serializer for backend store, like: text/binary/cassandra.",
+                    "The serializer for backend store, like: text/binary.",
                     disallowEmpty(),
                     "text"
             );
-
+    public static final ConfigOption<Integer> SERIALIZER_BUFFER_MAX_CAPACITY =
+            new ConfigOption<>(
+                    "serializer.buffer_max_capacity",
+                    "The process-wide max capacity of one serialization " +
+                    "buffer in bytes.",
+                    rangeInt(BytesBuffer.DEFAULT_CAPACITY,
+                             BytesBuffer.MAX_BUFFER_CAPACITY_UPPER_BOUND),
+                    BytesBuffer.MAX_BUFFER_CAPACITY
+            );
     public static final ConfigOption<Boolean> RAFT_MODE =
             new ConfigOption<>(
                     "raft.mode",
@@ -94,7 +96,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Boolean> RAFT_SAFE_READ =
             new ConfigOption<>(
                     "raft.safe_read",
@@ -102,7 +103,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<String> RAFT_PATH =
             new ConfigOption<>(
                     "raft.path",
@@ -110,7 +110,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "./raftlog"
             );
-
     public static final ConfigOption<Boolean> RAFT_REPLICATOR_PIPELINE =
             new ConfigOption<>(
                     "raft.use_replicator_pipeline",
@@ -121,7 +120,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     true
             );
-
     public static final ConfigOption<Integer> RAFT_ELECTION_TIMEOUT =
             new ConfigOption<>(
                     "raft.election_timeout",
@@ -129,7 +127,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     10000
             );
-
     public static final ConfigOption<Integer> RAFT_SNAPSHOT_INTERVAL =
             new ConfigOption<>(
                     "raft.snapshot_interval",
@@ -137,7 +134,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     3600
             );
-
     public static final ConfigOption<Integer> RAFT_SNAPSHOT_THREADS =
             new ConfigOption<>(
                     "raft.snapshot_threads",
@@ -145,7 +141,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     4
             );
-
     public static final ConfigOption<Boolean> RAFT_SNAPSHOT_PARALLEL_COMPRESS =
             new ConfigOption<>(
                     "raft.snapshot_parallel_compress",
@@ -153,7 +148,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Integer> RAFT_SNAPSHOT_COMPRESS_THREADS =
             new ConfigOption<>(
                     "raft.snapshot_compress_threads",
@@ -161,7 +155,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     4
             );
-
     public static final ConfigOption<Integer> RAFT_SNAPSHOT_DECOMPRESS_THREADS =
             new ConfigOption<>(
                     "raft.snapshot_decompress_threads",
@@ -169,7 +162,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     4
             );
-
     public static final ConfigOption<Integer> RAFT_BACKEND_THREADS =
             new ConfigOption<>(
                     "raft.backend_threads",
@@ -177,7 +169,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     CPUS
             );
-
     public static final ConfigOption<Integer> RAFT_READ_INDEX_THREADS =
             new ConfigOption<>(
                     "raft.read_index_threads",
@@ -185,7 +176,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     8
             );
-
     public static final ConfigOption<String> RAFT_READ_STRATEGY =
             new ConfigOption<>(
                     "raft.read_strategy",
@@ -193,7 +183,6 @@ public class CoreOptions extends OptionHolder {
                     allowValues("ReadOnlyLeaseBased", "ReadOnlySafe"),
                     "ReadOnlyLeaseBased"
             );
-
     public static final ConfigOption<Integer> RAFT_APPLY_BATCH =
             new ConfigOption<>(
                     "raft.apply_batch",
@@ -202,7 +191,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 32
                     1
             );
-
     public static final ConfigOption<Integer> RAFT_QUEUE_SIZE =
             new ConfigOption<>(
                     "raft.queue_size",
@@ -212,7 +200,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 16384
                     16384
             );
-
     public static final ConfigOption<Integer> RAFT_QUEUE_PUBLISH_TIMEOUT =
             new ConfigOption<>(
                     "raft.queue_publish_timeout",
@@ -221,7 +208,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 10(sec)
                     60
             );
-
     public static final ConfigOption<Integer> RAFT_RPC_THREADS =
             new ConfigOption<>(
                     "raft.rpc_threads",
@@ -230,7 +216,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 80
                     Math.max(CPUS * 2, 80)
             );
-
     public static final ConfigOption<Integer> RAFT_RPC_CONNECT_TIMEOUT =
             new ConfigOption<>(
                     "raft.rpc_connect_timeout",
@@ -239,7 +224,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 1000(ms)
                     5000
             );
-
     public static final ConfigOption<Integer> RAFT_RPC_TIMEOUT =
             new ConfigOption<>(
                     "raft.rpc_timeout",
@@ -248,7 +232,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 5s
                     60
             );
-
     public static final ConfigOption<Integer> RAFT_INSTALL_SNAPSHOT_TIMEOUT =
             new ConfigOption<>(
                     "raft.install_snapshot_rpc_timeout",
@@ -257,7 +240,6 @@ public class CoreOptions extends OptionHolder {
                     // jraft default value is 5 minutes
                     10 * 60 * 60
             );
-
     public static final ConfigOption<Integer> RAFT_RPC_BUF_LOW_WATER_MARK =
             new ConfigOption<>(
                     "raft.rpc_buf_low_water_mark",
@@ -268,7 +250,6 @@ public class CoreOptions extends OptionHolder {
                     positiveInt(),
                     10 * 1024 * 1024
             );
-
     public static final ConfigOption<Integer> RAFT_RPC_BUF_HIGH_WATER_MARK =
             new ConfigOption<>(
                     "raft.rpc_buf_high_water_mark",
@@ -281,7 +262,6 @@ public class CoreOptions extends OptionHolder {
                     positiveInt(),
                     20 * 1024 * 1024
             );
-
     public static final ConfigOption<Integer> RATE_LIMIT_WRITE =
             new ConfigOption<>(
                     "rate_limit.write",
@@ -289,7 +269,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     0
             );
-
     public static final ConfigOption<Integer> RATE_LIMIT_READ =
             new ConfigOption<>(
                     "rate_limit.read",
@@ -297,7 +276,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     0
             );
-
     public static final ConfigOption<Long> TASK_SCHEDULE_PERIOD =
             new ConfigOption<>(
                     "task.schedule_period",
@@ -305,7 +283,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Long.MAX_VALUE),
                     10L
             );
-
     public static final ConfigOption<Long> TASK_WAIT_TIMEOUT =
             new ConfigOption<>(
                     "task.wait_timeout",
@@ -315,7 +292,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Long.MAX_VALUE),
                     10L
             );
-
     public static final ConfigOption<Long> TASK_INPUT_SIZE_LIMIT =
             new ConfigOption<>(
                     "task.input_size_limit",
@@ -323,7 +299,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Bytes.GB),
                     16 * Bytes.MB
             );
-
     public static final ConfigOption<Long> TASK_RESULT_SIZE_LIMIT =
             new ConfigOption<>(
                     "task.result_size_limit",
@@ -331,21 +306,12 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Bytes.GB),
                     16 * Bytes.MB
             );
-
     public static final ConfigOption<Integer> TASK_TTL_DELETE_BATCH =
             new ConfigOption<>(
                     "task.ttl_delete_batch",
                     "The batch size used to delete expired data.",
                     rangeInt(1, 500),
                     1
-            );
-
-    public static final ConfigOption<String> SCHEDULER_TYPE =
-            new ConfigOption<>(
-                    "task.scheduler_type",
-                    "The type of scheduler used in distribution system.",
-                    allowValues("local", "distributed"),
-                    "local"
             );
 
     public static final ConfigOption<Boolean> TASK_SYNC_DELETION =
@@ -355,7 +321,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Integer> TASK_RETRY =
             new ConfigOption<>(
                     "task.retry",
@@ -363,7 +328,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, 3),
                     0
             );
-
     public static final ConfigOption<Long> STORE_CONN_DETECT_INTERVAL =
             new ConfigOption<>(
                     "store.connection_detect_interval",
@@ -374,7 +338,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Long.MAX_VALUE),
                     600L
             );
-
     public static final ConfigOption<String> VERTEX_DEFAULT_LABEL =
             new ConfigOption<>(
                     "vertex.default_label",
@@ -382,7 +345,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "vertex"
             );
-
     public static final ConfigOption<Boolean> VERTEX_CHECK_CUSTOMIZED_ID_EXIST =
             new ConfigOption<>(
                     "vertex.check_customized_id_exist",
@@ -391,7 +353,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Boolean> VERTEX_REMOVE_LEFT_INDEX =
             new ConfigOption<>(
                     "vertex.remove_left_index_at_overwrite",
@@ -399,7 +360,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Boolean> VERTEX_ADJACENT_VERTEX_EXIST =
             new ConfigOption<>(
                     "vertex.check_adjacent_vertex_exist",
@@ -407,7 +367,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Boolean> VERTEX_ADJACENT_VERTEX_LAZY =
             new ConfigOption<>(
                     "vertex.lazy_load_adjacent_vertex",
@@ -415,7 +374,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     true
             );
-
     public static final ConfigOption<Integer> VERTEX_PART_EDGE_COMMIT_SIZE =
             new ConfigOption<>(
                     "vertex.part_edge_commit_size",
@@ -424,7 +382,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, (int) Query.DEFAULT_CAPACITY),
                     5000
             );
-
     public static final ConfigOption<Boolean> VERTEX_ENCODE_PK_NUMBER =
             new ConfigOption<>(
                     "vertex.encode_primary_key_number",
@@ -433,23 +390,63 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     true
             );
-
     public static final ConfigOption<Integer> VERTEX_TX_CAPACITY =
             new ConfigOption<>(
                     "vertex.tx_capacity",
                     "The max size(items) of vertices(uncommitted) in " +
                     "transaction.",
-                    rangeInt(COMMIT_BATCH, 1000000),
+                    rangeInt((int) COMMIT_BATCH, 1000000),
+                    10000
+            );
+    public static final ConfigOption<Integer> OLTP_CONCURRENT_THREADS =
+            new ConfigOption<>(
+                    "oltp.concurrent_threads",
+                    "Thread number to concurrently execute oltp algorithm.",
+                    rangeInt(1, Math.max(10, CoreOptions.CPUS * 2)),
+                    Math.max(10, CoreOptions.CPUS / 2)
+            );
+
+    public static final ConfigOption<Integer> OLTP_CONCURRENT_DEPTH =
+            new ConfigOption<>(
+                    "oltp.concurrent_depth",
+                    "The min depth to enable concurrent oltp algorithm.",
+                    rangeInt(0, 65535),
+                    10
+            );
+
+    public static final ConfigConvOption<String, CollectionType> OLTP_COLLECTION_TYPE =
+            new ConfigConvOption<>(
+                    "oltp.collection_type",
+                    "The implementation type of collections " +
+                            "used in oltp algorithm.",
+                    allowValues("JCF", "EC", "FU"),
+                    CollectionType::valueOf,
+                    "EC"
+            );
+
+    public static final ConfigOption<Integer> OLTP_QUERY_BATCH_SIZE =
+            new ConfigOption<>(
+                    "oltp.query_batch_size",
+                    "The size of each batch when executing oltp algorithm.",
+                    rangeInt(0, 65535),
                     10000
             );
 
-    public static final ConfigOption<Integer> EDGE_TX_CAPACITY =
+    public static final ConfigOption<Double> OLTP_QUERY_BATCH_AVG_DEGREE_RATIO =
             new ConfigOption<>(
-                    "edge.tx_capacity",
-                    "The max size(items) of edges(uncommitted) in " +
-                    "transaction.",
-                    rangeInt(COMMIT_BATCH, 1000000),
-                    10000
+                    "oltp.query_batch_avg_degree_ratio",
+                    "The ratio of exponential approximation for " +
+                            "average degree of iterator when executing oltp algorithm.",
+                    rangeDouble(0D, 1D),
+                    0.95D
+            );
+
+    public static final ConfigOption<Long> OLTP_QUERY_BATCH_EXPECT_DEGREE =
+            new ConfigOption<>(
+                    "oltp.query_batch_expect_degree",
+                    "The expect sum of degree in each batch when executing oltp algorithm.",
+                    rangeInt(10 * 1000L, 1000 * 1000 * 1000L),
+                    100 * 1000 * 1000L
             );
 
     public static final ConfigOption<Boolean> QUERY_IGNORE_INVALID_DATA =
@@ -459,7 +456,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     true
             );
-
     public static final ConfigOption<Boolean> QUERY_OPTIMIZE_AGGR_BY_INDEX =
             new ConfigOption<>(
                     "query.optimize_aggregate_by_index",
@@ -467,7 +463,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Integer> QUERY_BATCH_SIZE =
             new ConfigOption<>(
                     "query.batch_size",
@@ -475,7 +470,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(1, (int) Query.DEFAULT_CAPACITY),
                     1000
             );
-
     public static final ConfigOption<Integer> QUERY_PAGE_SIZE =
             new ConfigOption<>(
                     "query.page_size",
@@ -483,7 +477,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(1, (int) Query.DEFAULT_CAPACITY),
                     500
             );
-
     public static final ConfigOption<Integer> QUERY_INDEX_INTERSECT_THRESHOLD =
             new ConfigOption<>(
                     "query.index_intersect_threshold",
@@ -493,7 +486,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(1, (int) Query.DEFAULT_CAPACITY),
                     1000
             );
-
     public static final ConfigOption<Boolean> QUERY_RAMTABLE_ENABLE =
             new ConfigOption<>(
                     "query.ramtable_enable",
@@ -501,7 +493,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<Long> QUERY_RAMTABLE_VERTICES_CAPACITY =
             new ConfigOption<>(
                     "query.ramtable_vertices_capacity",
@@ -510,7 +501,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(1L, Integer.MAX_VALUE * 2L),
                     10000000L
             );
-
     public static final ConfigOption<Integer> QUERY_RAMTABLE_EDGES_CAPACITY =
             new ConfigOption<>(
                     "query.ramtable_edges_capacity",
@@ -519,7 +509,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(1, Integer.MAX_VALUE),
                     20000000
             );
-
     /**
      * The schema name rule:
      * 1. Not allowed end with spaces
@@ -532,7 +521,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     ".*\\s+$|~.*"
             );
-
     public static final ConfigOption<Long> SCHEMA_CACHE_CAPACITY =
             new ConfigOption<>(
                     "schema.cache_capacity",
@@ -541,6 +529,12 @@ public class CoreOptions extends OptionHolder {
                     10000L
             );
 
+    public static final ConfigOption<Boolean> SCHEMA_INDEX_REBUILD_USING_PUSHDOWN =
+            new ConfigOption<>(
+                    "schema.index_rebuild_using_pushdown",
+                    "Whether to use pushdown when to create/rebuid index.",
+                    true
+            );
     public static final ConfigOption<String> VERTEX_CACHE_TYPE =
             new ConfigOption<>(
                     "vertex.cache_type",
@@ -548,7 +542,6 @@ public class CoreOptions extends OptionHolder {
                     allowValues("l1", "l2"),
                     "l2"
             );
-
     public static final ConfigOption<Long> VERTEX_CACHE_CAPACITY =
             new ConfigOption<>(
                     "vertex.cache_capacity",
@@ -556,7 +549,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Long.MAX_VALUE),
                     (1000 * 1000 * 10L)
             );
-
     public static final ConfigOption<Integer> VERTEX_CACHE_EXPIRE =
             new ConfigOption<>(
                     "vertex.cache_expire",
@@ -564,7 +556,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     (60 * 10)
             );
-
     public static final ConfigOption<String> EDGE_CACHE_TYPE =
             new ConfigOption<>(
                     "edge.cache_type",
@@ -572,15 +563,13 @@ public class CoreOptions extends OptionHolder {
                     allowValues("l1", "l2"),
                     "l2"
             );
-
     public static final ConfigOption<Long> EDGE_CACHE_CAPACITY =
             new ConfigOption<>(
                     "edge.cache_capacity",
                     "The max cache size(items) of edge cache.",
                     rangeInt(0L, Long.MAX_VALUE),
-                    (1000 * 1000 * 1L)
+                    ((long) 1000 * 1000)
             );
-
     public static final ConfigOption<Integer> EDGE_CACHE_EXPIRE =
             new ConfigOption<>(
                     "edge.cache_expire",
@@ -588,7 +577,6 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0, Integer.MAX_VALUE),
                     (60 * 10)
             );
-
     public static final ConfigOption<Long> SNOWFLAKE_WORKER_ID =
             new ConfigOption<>(
                     "snowflake.worker_id",
@@ -596,7 +584,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     0L
             );
-
     public static final ConfigOption<Long> SNOWFLAKE_DATACENTER_ID =
             new ConfigOption<>(
                     "snowflake.datacenter_id",
@@ -604,7 +591,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     0L
             );
-
     public static final ConfigOption<Boolean> SNOWFLAKE_FORCE_STRING =
             new ConfigOption<>(
                     "snowflake.force_string",
@@ -612,7 +598,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     public static final ConfigOption<String> TEXT_ANALYZER =
             new ConfigOption<>(
                     "search.text_analyzer",
@@ -623,7 +608,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "ikanalyzer"
             );
-
     public static final ConfigOption<String> TEXT_ANALYZER_MODE =
             new ConfigOption<>(
                     "search.text_analyzer_mode",
@@ -641,7 +625,6 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "smart"
             );
-
     public static final ConfigOption<String> COMPUTER_CONFIG =
             new ConfigOption<>(
                     "computer.config",
@@ -649,65 +632,117 @@ public class CoreOptions extends OptionHolder {
                     disallowEmpty(),
                     "./conf/computer.yaml"
             );
-
-    public static final ConfigOption<Integer> OLTP_CONCURRENT_THREADS =
+    public static final ConfigOption<String> K8S_OPERATOR_TEMPLATE =
             new ConfigOption<>(
-                    "oltp.concurrent_threads",
-                    "Thread number to concurrently execute oltp algorithm.",
-                    rangeInt(0, 65535),
-                    10
+                    "k8s.operator_template",
+                    "the path of operator container template.",
+                    disallowEmpty(),
+                    "./conf/operator-template.yaml"
             );
-
-    public static final ConfigOption<Integer> OLTP_CONCURRENT_DEPTH =
+    public static final ConfigOption<String> K8S_QUOTA_TEMPLATE =
             new ConfigOption<>(
-                    "oltp.concurrent_depth",
-                    "The min depth to enable concurrent oltp algorithm.",
-                    rangeInt(0, 65535),
-                    10
+                    "k8s.quota_template",
+                    "the path of resource quota template.",
+                    disallowEmpty(),
+                    "./conf/resource-quota-template.yaml"
             );
-
-    public static final ConfigConvOption<String, CollectionType> OLTP_COLLECTION_TYPE =
-            new ConfigConvOption<>(
-                    "oltp.collection_type",
-                    "The implementation type of collections " +
-                    "used in oltp algorithm.",
-                    allowValues("JCF", "EC", "FU"),
-                    CollectionType::valueOf,
-                    "EC"
-            );
-
     public static final ConfigOption<String> PD_PEERS = new ConfigOption<>(
             "pd.peers",
             "The addresses of pd nodes, separated with commas.",
             disallowEmpty(),
             "127.0.0.1:8686"
     );
-
+    public static final ConfigOption<String> PD_CLUSTER = new ConfigOption<>(
+            "pd.cluster",
+            "The cluster name prefixing the meta keys in PD " +
+            "('HUGEGRAPH/<cluster>/...') when the graph itself connects the " +
+            "MetaManager, i.e. the server runs with usePD=false. The prefix " +
+            "is bound once per process: with usePD=true the server binds its " +
+            "own 'cluster' option first, otherwise the first hstore graph " +
+            "opened wins, and a different value on a later graph is ignored " +
+            "with a warning.",
+            disallowEmpty(),
+            "hg"
+    );
     public static final ConfigOption<String> MEMORY_MODE = new ConfigOption<>(
             "memory.mode",
             "The memory mode used for query in HugeGraph.",
             disallowEmpty(),
             "off-heap"
     );
-
     public static final ConfigOption<Long> MAX_MEMORY_CAPACITY = new ConfigOption<>(
             "memory.max_capacity",
             "The maximum memory capacity that can be managed for all queries in HugeGraph.",
             nonNegativeInt(),
             Bytes.GB
     );
-
     public static final ConfigOption<Long> ONE_QUERY_MAX_MEMORY_CAPACITY = new ConfigOption<>(
             "memory.one_query_max_capacity",
             "The maximum memory capacity that can be managed for a query in HugeGraph.",
             nonNegativeInt(),
             Bytes.MB * 100
     );
-
     public static final ConfigOption<Long> MEMORY_ALIGNMENT = new ConfigOption<>(
             "memory.alignment",
             "The alignment used for round memory size.",
             nonNegativeInt(),
             8L
     );
+    public static final ConfigOption<String> GRAPH_SPACE =
+            new ConfigOption<>(
+                    "graphspace",
+                    "The graph space name.",
+                    null,
+                    "DEFAULT"
+            );
+    public static final ConfigOption<String> ALIAS_NAME =
+            new ConfigOption<>(
+                    "alias.graph.id",
+                    "The graph alias id.",
+                    ""
+            );
+    public static final ConfigOption<String> GRAPH_READ_MODE =
+            new ConfigOption<>(
+                    "graph.read_mode",
+                    "The graph read mode, which could be ALL | OLTP_ONLY | OLAP_ONLY.",
+                    disallowEmpty(),
+                    "OLTP_ONLY"
+            );
+    public static final ConfigOption<String> SCHEMA_INIT_TEMPLATE =
+            new ConfigOption<>(
+                    "schema.init_template",
+                    "The template schema used to init graph",
+                    null,
+                    ""
+            );
+
+    public static final ConfigOption<Integer> QUERY_MAX_INDEXES_AVAILABLE =
+            new ConfigOption<>(
+                    "query.max_indexes_available",
+                    "The upper limit of the number of indexes that can be " +
+                            "used to query",
+                    rangeInt(1, Integer.MAX_VALUE),
+                    1
+            );
+    public static final ConfigOption<String> QUERY_DEDUP_OPTION =
+            new ConfigOption<>(
+                    "query.dedup_option",
+                    "The way to dedup data",
+                    allowValues("limit", "global"),
+                    "limit"
+            );
+    private static volatile CoreOptions instance;
+
+    private CoreOptions() {
+        super();
+    }
+
+    public static synchronized CoreOptions instance() {
+        if (instance == null) {
+            instance = new CoreOptions();
+            // Should initialize all static members first, then register.
+            instance.registerOptions();
+        }
+        return instance;
+    }
 }

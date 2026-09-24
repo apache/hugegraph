@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.api;
 
+import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -29,6 +30,9 @@ import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.metrics.MetricsUtil;
+import org.apache.hugegraph.space.GraphSpace;
+import org.apache.hugegraph.space.SchemaTemplate;
+import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.apache.hugegraph.util.JsonUtil;
@@ -55,7 +59,17 @@ public class API {
             .getSubtype();
     public static final String ACTION_APPEND = "append";
     public static final String ACTION_ELIMINATE = "eliminate";
+    public static final String ACTION_UPDATE = "update";
     public static final String ACTION_CLEAR = "clear";
+    public static final String USER_NAME_PATTERN = "^[0-9a-zA-Z_.-]{2,64}$";
+    public static final String USER_PASSWORD_PATTERN = "[a-zA-Z0-9~!@#$%^&*()" +
+                                                       "_+|<>,.?/:;" +
+                                                       "'`\"\\[\\]{}\\\\]{5," +
+                                                       "16}";
+    public static final String USER_NICKNAME_PATTERN = "^(?!_)(?!.*?_$)" +
+                                                       "[a-zA-Z0-9\u4e00-\u9fa5~!@#$" +
+                                                       "%^&*()_+|<>,.?/:;" +
+                                                       "'`\"\\[\\]{}\\\\]{1,16}$";
     protected static final Logger LOG = Log.logger(API.class);
     private static final Meter SUCCEED_METER =
             MetricsUtil.registerMeter(API.class, "commit-succeed");
@@ -65,17 +79,67 @@ public class API {
             MetricsUtil.registerMeter(API.class, "expected-error");
     private static final Meter UNKNOWN_ERROR_METER =
             MetricsUtil.registerMeter(API.class, "unknown-error");
+    private static final Meter succeedMeter =
+            MetricsUtil.registerMeter(API.class, "commit-succeed");
+    private static final Meter illegalArgErrorMeter =
+            MetricsUtil.registerMeter(API.class, "illegal-arg");
+    private static final Meter expectedErrorMeter =
+            MetricsUtil.registerMeter(API.class, "expected-error");
+    private static final Meter unknownErrorMeter =
+            MetricsUtil.registerMeter(API.class, "unknown-error");
+    protected static final String STANDALONE_ERROR =
+            "GraphSpace management is not supported in standalone mode";
 
-    public static HugeGraph graph(GraphManager manager, String graph) {
-        HugeGraph g = manager.graph(graph);
+    /**
+     * Shared date formatter for API response timestamps (thread-safe, reusable).
+     * Example output: {@code "2024-05-01 12:30:00"}
+     */
+    protected static final DateTimeFormatter DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    public static HugeGraph graph(GraphManager manager, String graphSpace,
+                                  String graph) {
+        HugeGraph g = manager.graph(graphSpace, graph);
         if (g == null) {
-            throw new NotFoundException(String.format("Graph '%s' does not exist", graph));
+            throw new NotFoundException(String.format(
+                    "Graph '%s' does not exist", graph));
         }
         return g;
     }
 
-    public static HugeGraph graph4admin(GraphManager manager, String graph) {
-        return graph(manager, graph).hugegraph();
+    public static GraphSpace space(GraphManager manager, String space) {
+        GraphSpace s = manager.graphSpace(space);
+        if (s == null) {
+            throw new NotFoundException(String.format(
+                    "Graph space '%s' does not exist", space));
+        }
+        return s;
+    }
+
+    public static Service service(GraphManager manager, String graphSpace,
+                                  String service) {
+        Service s = manager.service(graphSpace, service);
+        if (s == null) {
+            throw new NotFoundException(String.format(
+                    "Service '%s' does not exist", service));
+        }
+        return s;
+    }
+
+    public static SchemaTemplate schemaTemplate(GraphManager manager,
+                                                String graphSpace,
+                                                String schemaTemplate) {
+        SchemaTemplate st = manager.schemaTemplate(graphSpace, schemaTemplate);
+        if (st == null) {
+            throw new NotFoundException(String.format(
+                    "Schema template '%s' does not exist", schemaTemplate));
+        }
+        return st;
+    }
+
+    public static HugeGraph graph4admin(GraphManager manager, String graphSpace,
+                                        String graph) {
+        return graph(manager, graphSpace, graph).hugegraph();
     }
 
     public static <R> R commit(HugeGraph g, Callable<R> callable) {
@@ -185,6 +249,67 @@ public class API {
         } else {
             throw new NotSupportedException(String.format("Not support action '%s'", action));
         }
+    }
+
+    /**
+     * Ensures the graph manager is available and PD mode is enabled.
+     *
+     * @param manager the graph manager of current request
+     * @throws IllegalArgumentException if the graph manager is null
+     * @throws HugeException if PD mode is disabled
+     */
+    protected static void ensurePdModeEnabled(GraphManager manager) {
+        E.checkArgumentNotNull(manager, "Graph manager can't be null");
+        if (!manager.isPDEnabled()) {
+            throw new HugeException(STANDALONE_ERROR);
+        }
+    }
+
+    public static boolean hasAdminPerm(GraphManager manager, String user) {
+        return manager.authManager().isAdminManager(user);
+    }
+
+    public static boolean hasSpaceManagerPerm(GraphManager manager,
+                                              String graphSpace,
+                                              String user) {
+        return manager.authManager().isSpaceManager(graphSpace, user);
+    }
+
+    public static boolean hasAdminOrSpaceManagerPerm(GraphManager manager,
+                                                     String graphSpace,
+                                                     String user) {
+        return hasAdminPerm(manager, user) ||
+               hasSpaceManagerPerm(manager, graphSpace, user);
+    }
+
+    public static void validPermission(boolean hasPermission, String user,
+                                       String action) {
+        if (!hasPermission) {
+            throw new jakarta.ws.rs.ForbiddenException(
+                    String.format("The user [%s] has no permission to [%s].", user, action));
+        }
+    }
+
+    /**
+     * Returns {@code true} if the profile's {@code "name"} or {@code "nickname"}
+     * field starts with the given prefix.  Returns {@code true} when prefix is
+     * null or empty (i.e. no filtering).
+     *
+     * <p>Used by {@code GraphsAPI.listProfile} and {@code GraphSpaceAPI.listProfile}
+     * to filter results by a user-supplied prefix string.
+     *
+     * @param profile a map containing at least a {@code "name"} key
+     * @param prefix  the prefix to match against; ignored when blank
+     * @return whether the entry matches the prefix filter
+     */
+    protected static boolean isPrefix(Map<String, Object> profile, String prefix) {
+        if (prefix == null || prefix.isEmpty()) {
+            return true;
+        }
+        String name = profile.get("name").toString();
+        Object nicknameObj = profile.get("nickname");
+        String nickname = nicknameObj != null ? nicknameObj.toString() : "";
+        return name.startsWith(prefix) || nickname.startsWith(prefix);
     }
 
     public static class ApiMeasurer {

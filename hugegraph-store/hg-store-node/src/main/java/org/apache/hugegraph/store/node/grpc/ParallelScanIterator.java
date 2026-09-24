@@ -107,7 +107,9 @@ public class ParallelScanIterator implements ScanIterator {
         while (current == null && tryTimes < waitDataMaxTryTimes) {
             try {
                 if (queue.size() != 0 || !finished) {
-                    current = queue.poll(100, TimeUnit.MILLISECONDS);  // Regularly check if the client has been closed.
+                    current = queue.poll(100,
+                                         TimeUnit.MILLISECONDS);  // Regularly check if the
+                    // client has been closed.
                     if (current == null && !finished) {
                         wakeUpScanner();
                     }
@@ -343,7 +345,8 @@ public class ParallelScanIterator implements ScanIterator {
                     if ((entriesSize >= batchSize || bodySize >= maxBodySize) ||
                         (orderEdge && bodySize >= maxBodySize / 2)) {
                         if (orderEdge) {
-                            // Sort the edges, ensure all edges of one point are consecutive, prevent other points from inserting.
+                            // Sort the edges, ensure all edges of one point are consecutive,
+                            // prevent other points from inserting.
                             canNext = putData(dataList, iterator != null && iterator.hasNext());
                         } else {
                             canNext = putData(dataList);

@@ -55,7 +55,7 @@ public class MemoryArbitratorImpl implements MemoryArbitrator {
             if (memoryPool.equals(queryPool)) {
                 continue;
             }
-            LOG.info("Global reclaim triggerred by {} select {} to reclaim", queryPool,
+            LOG.info("Global reclaim triggered by {} select {} to reclaim", queryPool,
                      memoryPool);
             long res = memoryPool.tryToReclaimLocalMemory(currentNeededBytes, queryPool);
             totalReclaimedBytes += res;

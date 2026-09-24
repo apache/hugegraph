@@ -19,8 +19,12 @@ package org.apache.hugegraph.store;
 
 import java.util.List;
 
+import org.apache.hugegraph.HugeGraphSupplier;
+import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.store.client.grpc.KvCloseableIterator;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
+import org.apache.hugegraph.store.query.StoreQueryParam;
+import org.apache.hugegraph.structure.BaseElement;
 
 /**
  * @version 0.2.0
@@ -91,6 +95,19 @@ public interface HgKvStore {
     HgKvIterator<HgKvEntry> scanIterator(String table, HgOwnerKey startKey, HgOwnerKey endKey,
                                          long limit, int scanType, byte[] query);
 
+    /**
+     * Scan a range in global key order across all partitions.
+     *
+     * Low-level node sessions don't provide cross-partition ordering. The
+     * multi-node session proxy overrides this capability.
+     */
+    default HgKvIterator<HgKvEntry> scanIteratorOrdered(
+            String table, HgOwnerKey startKey, HgOwnerKey endKey, long limit,
+            int scanType, byte[] query) {
+        throw new UnsupportedOperationException(
+                "Global ordered scan is not supported");
+    }
+
     HgKvIterator<HgKvEntry> scanIterator(String table, int codeFrom, int codeTo, int scanType,
                                          byte[] query);
 
@@ -98,7 +115,8 @@ public interface HgKvStore {
 
     HgKvIterator<HgKvEntry> scanIterator(ScanStreamReq.Builder scanReqBuilder);
 
-    long count(String table);
+    List<HgKvIterator<BaseElement>> query(StoreQueryParam query, HugeGraphSupplier supplier) throws
+                                                                                             PDException;
 
     boolean truncate();
 

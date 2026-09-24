@@ -57,7 +57,7 @@ public class EdgeLabelRemoveJob extends SchemaJob {
         }
         // Remove index related data(include schema) of this edge label
         Set<Id> indexIds = ImmutableSet.copyOf(edgeLabel.indexLabels());
-        LockUtil.Locks locks = new LockUtil.Locks(graph.name());
+        LockUtil.Locks locks = new LockUtil.Locks(graph.graph().spaceGraphName());
         try {
             locks.lockWrites(LockUtil.EDGE_LABEL_DELETE, id);
             schemaTx.updateSchemaStatus(edgeLabel, SchemaStatus.DELETING);

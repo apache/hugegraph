@@ -17,15 +17,25 @@
 
 package org.apache.hugegraph.store.rocksdb;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+
 import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.SessionOperator;
 import org.junit.Test;
 
 public class RocksDBFactoryTest extends BaseRocksDbTest {
+
     @Test
-    public void testCreateSession() {
-        RocksDBFactory factory = RocksDBFactory.getInstance();
+    public void testCreateSession() throws NoSuchMethodException, InvocationTargetException,
+                                           InstantiationException, IllegalAccessException {
+        Constructor<RocksDBFactory> constructor =
+                RocksDBFactory.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        RocksDBFactory factory = constructor.newInstance();
+        factory.setHugeConfig(hConfig);
+
         try (RocksDBSession dbSession = factory.createGraphDB("./tmp", "test1")) {
             SessionOperator op = dbSession.sessionOp();
             op.prepare();

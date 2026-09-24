@@ -51,7 +51,7 @@ public class IndexLabelRemoveJob extends SchemaJob {
                      "please check if it's expected to delete it again",
                      indexLabel, indexLabel.status());
         }
-        LockUtil.Locks locks = new LockUtil.Locks(graph.name());
+        LockUtil.Locks locks = new LockUtil.Locks(graph.graph().spaceGraphName());
         try {
             locks.lockWrites(LockUtil.INDEX_LABEL_DELETE, id);
             // TODO add update lock

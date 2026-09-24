@@ -25,19 +25,31 @@ import java.util.regex.Pattern;
 
 import org.apache.hugegraph.pd.ConfigService;
 import org.apache.hugegraph.pd.IdService;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 
 import lombok.Data;
+import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * PD profile
  */
+@Slf4j
 @Data
 @Component
-public class PDConfig {
+public class PDConfig implements InitializingBean {
+
+    /**
+     * The secret that earlier revisions carried as the placeholder default for
+     * `auth.secret-key`. It is published in this repository, so a deployment
+     * still using it authenticates anyone who can read the source. Refuse to
+     * start rather than let a well-known string look like authentication.
+     */
+    private static final String PUBLISHED_SECRET_KEY = "FXQXbJtbCLxODc6tGci732pkH1cyf8Qg";
 
     // cluster ID
     @Value("${pd.cluster_id:1}")
@@ -63,7 +75,19 @@ public class PDConfig {
     @Value("${license.license-path}")
     private String licensePath;
     @Autowired
+    private JobConfig jobConfig;
+
+    @Autowired
     private ThreadPoolGrpc threadPoolGrpc;
+
+    // No default: Spring takes the text after the first ':' literally, so a
+    // quoted default would resolve to a value including the quotes and the
+    // leading space, and no client would ever match it. An absent key must
+    // yield "" so the REST interceptor can refuse every request and say why.
+    @Value("${auth.secret-key:}")
+    @ToString.Exclude
+    private String secretKey;
+
     @Autowired
     private Raft raft;
     @Autowired
@@ -75,6 +99,25 @@ public class PDConfig {
     private Map<String, String> initialStoreMap = null;
     private ConfigService configService;
     private IdService idService;
+
+    @Override
+    public void afterPropertiesSet() {
+        if (PUBLISHED_SECRET_KEY.equals(this.secretKey)) {
+            throw new IllegalStateException(
+                    "auth.secret-key is set to the value published in the HugeGraph source " +
+                    "tree, which authenticates anyone who can read it. Set a " +
+                    "deployment-specific secret in conf/application.yml, or through the " +
+                    "HG_PD_AUTH_SECRET_KEY environment variable for the Docker image.");
+        }
+        // The shipped configs leave this empty on purpose. Say so in the boot log:
+        // the REST interceptor also logs it, but only on the first refused request,
+        // and /v1/health keeps answering 200 in the meantime.
+        if (this.secretKey == null || this.secretKey.isEmpty()) {
+            log.error("auth.secret-key is not configured, so every authenticated REST " +
+                      "request will be refused. Add it to conf/application.yml (or set " +
+                      "HG_PD_AUTH_SECRET_KEY) and give every REST client the same value.");
+        }
+    }
 
     public Map<String, String> getInitialStoreMap() {
         if (initialStoreMap == null) {
@@ -131,6 +174,8 @@ public class PDConfig {
 
         @Value("${raft.enable:true }")
         private boolean enable;
+        @Value("${raft.ip-whitelist.enabled:true}")
+        private boolean ipWhitelistEnabled = true;
         @Value("${raft.address}")
         private String address;
         @Value("${pd.data-path}")
@@ -166,8 +211,8 @@ public class PDConfig {
         @Value("${store.max-down-time:1800}")
         private long maxDownTime = 1800;
 
-        @Value("${store.monitor_data_enabled:true}")
-        private boolean monitorDataEnabled = true;
+        @Value("${store.monitor_data_enabled:false}")
+        private boolean monitorDataEnabled = false;
 
         @Value("${store.monitor_data_interval: 1 minute}")
         private String monitorDataInterval = "1 minute";
@@ -281,4 +326,23 @@ public class PDConfig {
         private int heartbeatOutTimes = 3;
     }
 
+    @Data
+    @Configuration
+    public class JobConfig {
+
+        @Value("${job.interruptableThreadPool.core:0}")
+        private int core;
+        @Value("${job.interruptableThreadPool.max:256}")
+        private int max;
+        @Value("${job.interruptableThreadPool.queue:" + Integer.MAX_VALUE + "}")
+        private int queueSize;
+        @Value("${job.start-time:19}")
+        private int startTime;
+        @Value("${job.uninterruptibleThreadPool.core:0}")
+        private int uninterruptibleCore;
+        @Value("${job.uninterruptibleThreadPool.max:256}")
+        private int uninterruptibleMax;
+        @Value("${job.uninterruptibleThreadPool.queue:" + Integer.MAX_VALUE + "}")
+        private int uninterruptibleQueueSize;
+    }
 }

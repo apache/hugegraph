@@ -28,6 +28,7 @@ import org.apache.tinkerpop.shaded.jackson.core.type.TypeReference;
 import org.apache.tinkerpop.shaded.jackson.databind.Module;
 import org.apache.tinkerpop.shaded.jackson.databind.ObjectMapper;
 import org.apache.tinkerpop.shaded.jackson.databind.ObjectReader;
+import org.apache.tinkerpop.shaded.jackson.databind.SerializationFeature;
 import org.apache.tinkerpop.shaded.jackson.databind.SerializerProvider;
 import org.apache.tinkerpop.shaded.jackson.databind.module.SimpleModule;
 import org.apache.tinkerpop.shaded.jackson.databind.ser.std.StdSerializer;
@@ -48,9 +49,13 @@ public final class JsonUtil {
         HugeGraphSONModule.registerCommonSerializers(module);
         HugeGraphSONModule.registerIdSerializers(module);
         HugeGraphSONModule.registerSchemaSerializers(module);
+        HugeGraphSONModule.registerServiceSerializers(module);
+        HugeGraphSONModule.registerGraphSpaceSerializers(module);
         HugeGraphSONModule.registerGraphSerializers(module);
 
         MAPPER.registerModule(module);
+
+        MAPPER.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     public static void registerModule(Module module) {

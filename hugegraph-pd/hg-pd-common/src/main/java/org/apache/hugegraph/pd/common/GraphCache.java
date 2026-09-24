@@ -17,22 +17,27 @@
 
 package org.apache.hugegraph.pd.common;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 
-import com.google.common.collect.Range;
-
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.hugegraph.pd.grpc.Metapb.Graph;
 import org.apache.hugegraph.pd.grpc.Metapb.Partition;
 
+import com.google.common.collect.Range;
 import com.google.common.collect.RangeMap;
 import com.google.common.collect.TreeRangeMap;
 
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 
 @Data
+@Slf4j
 public class GraphCache {
 
     private Graph graph;
@@ -41,13 +46,30 @@ public class GraphCache {
     private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private Map<Integer, AtomicBoolean> state = new ConcurrentHashMap<>();
     private Map<Integer, Partition> partitions = new ConcurrentHashMap<>();
-    private RangeMap<Long, Integer> range = new SynchronizedRangeMap<Long, Integer>().rangeMap;
+    private volatile RangeMap<Long, Integer> range = TreeRangeMap.create();
 
     public GraphCache(Graph graph) {
         this.graph = graph;
     }
 
-    public GraphCache() {
+    public void init(List<Partition> ps) {
+        Map<Integer, Partition> gps = new ConcurrentHashMap<>(ps.size(), 1);
+        if (!CollectionUtils.isEmpty(ps)) {
+            WriteLock lock = getLock().writeLock();
+            try {
+                lock.lock();
+                for (Partition p : ps) {
+                    gps.put(p.getId(), p);
+                    range.put(Range.closedOpen(p.getStartKey(), p.getEndKey()), p.getId());
+                }
+            } catch (Exception e) {
+                log.warn("init graph with error:", e);
+            } finally {
+                lock.unlock();
+            }
+        }
+        setPartitions(gps);
+
     }
 
     public Partition getPartition(Integer id) {
@@ -59,58 +81,87 @@ public class GraphCache {
     }
 
     public Partition removePartition(Integer id) {
+        Partition p = partitions.get(id);
+        if (p != null) {
+            RangeMap<Long, Integer> range = getRange();
+            if (Objects.equals(p.getId(), range.get(p.getStartKey())) &&
+                Objects.equals(p.getId(), range.get(p.getEndKey() - 1))) {
+                WriteLock lock = getLock().writeLock();
+                lock.lock();
+                try {
+                    range.remove(range.getEntry(p.getStartKey()).getKey());
+                } catch (Exception e) {
+                    log.warn("remove partition with error:", e);
+                } finally {
+                    lock.unlock();
+                }
+            }
+        }
         return partitions.remove(id);
     }
 
-    public class SynchronizedRangeMap<K extends Comparable<K>, V> {
-
-        private final RangeMap<K, V> rangeMap = TreeRangeMap.create();
-        private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
-
-        public void put(Range<K> range, V value) {
-            lock.writeLock().lock();
-            try {
-                rangeMap.put(range, value);
-            } finally {
-                lock.writeLock().unlock();
+    public void removePartitions() {
+        getState().clear();
+        RangeMap<Long, Integer> range = getRange();
+        WriteLock lock = getLock().writeLock();
+        try {
+            lock.lock();
+            if (range != null) {
+                range.clear();
             }
+        } catch (Exception e) {
+            log.warn("remove partition with error:", e);
+        } finally {
+            lock.unlock();
         }
+        getPartitions().clear();
+        getInitialized().set(false);
+    }
 
-        public V get(K key) {
-            lock.readLock().lock();
-            try {
-                return rangeMap.get(key);
-            } finally {
-                lock.readLock().unlock();
-            }
-        }
+    /*
+     * Requires external write lock
+     * */
+    public void reset() {
+        partitions.clear();
+        try {
+            range.clear();
+        } catch (Exception e) {
 
-        public void remove(Range<K> range) {
-            lock.writeLock().lock();
-            try {
-                rangeMap.remove(range);
-            } finally {
-                lock.writeLock().unlock();
-            }
         }
+    }
 
-        public Map.Entry<Range<K>, V> getEntry(K key) {
-            lock.readLock().lock();
-            try {
-                return rangeMap.getEntry(key);
-            } finally {
-                lock.readLock().unlock();
-            }
+    public boolean updatePartition(Partition partition) {
+        int partId = partition.getId();
+        Partition p = getPartition(partId);
+        if (p != null && p.equals(partition)) {
+            return false;
         }
-
-        public void clear() {
-            lock.writeLock().lock();
+        WriteLock lock = getLock().writeLock();
+        try {
+            lock.lock();
+            RangeMap<Long, Integer> range = getRange();
+            addPartition(partId, partition);
             try {
-                rangeMap.clear();
-            } finally {
-                lock.writeLock().unlock();
+                if (p != null) {
+                    // The old [1-3) is overwritten by [2-3). When [1-3) becomes [1-2), the
+                    // original [1-3) should not be deleted.
+                    // Only when it is confirmed that the old start and end are both your own can
+                    // the old be deleted (i.e., before it is overwritten).
+                    if (Objects.equals(partId, range.get(partition.getStartKey())) &&
+                        Objects.equals(partId, range.get(partition.getEndKey() - 1))) {
+                        range.remove(range.getEntry(partition.getStartKey()).getKey());
+                    }
+                }
+                range.put(Range.closedOpen(partition.getStartKey(), partition.getEndKey()), partId);
+            } catch (Exception e) {
+                log.warn("update partition with error:", e);
             }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            lock.unlock();
         }
+        return true;
     }
 
 }

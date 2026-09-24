@@ -34,11 +34,11 @@ import org.apache.hugegraph.store.grpc.stream.KvPageRes;
 import org.apache.hugegraph.store.grpc.stream.ScanCondition;
 import org.apache.hugegraph.store.grpc.stream.ScanQueryRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamBatchReq;
-import org.apache.hugegraph.store.util.Base58Encoder;
 import org.apache.hugegraph.store.node.util.HgAssert;
 import org.apache.hugegraph.store.node.util.HgGrpc;
 import org.apache.hugegraph.store.node.util.HgStoreConst;
 import org.apache.hugegraph.store.node.util.HgStoreNodeUtil;
+import org.apache.hugegraph.store.util.Base58Encoder;
 
 import com.google.protobuf.ByteString;
 
@@ -184,10 +184,6 @@ public class ScanBatchResponse3 {
             if (log.isDebugEnabled()) {
                 log.debug("Receiving finished request.");
             }
-/*            if (this.state.value > OrderState.NEW.value
-                    && this.state.value < OrderState.COMPLETE.value) {
-                this.state = OrderState.COMPLETE;
-            }*/
             this.breakdown();
         }
 

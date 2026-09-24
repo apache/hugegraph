@@ -26,6 +26,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.auth.SchemaDefine;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.lock.LockResult;
@@ -76,6 +77,23 @@ public class AbstractMetaManager {
         } else {
             this.metaDriver.put(key, val);
         }
+    }
+
+    public LockResult lock(String... keys) {
+        return this.lock(LOCK_DEFAULT_LEASE, keys);
+    }
+
+    public LockResult lock(long ttl, String... keys) {
+        String key = String.join(META_PATH_DELIMITER, keys);
+        return this.lock(key, ttl);
+    }
+
+    public LockResult lock(String key, long ttl) {
+        LockResult lockResult = this.metaDriver.tryLock(key, ttl, LOCK_DEFAULT_TIMEOUT);
+        if (!lockResult.lockSuccess()) {
+            throw new HugeException("Failed to lock '%s'", key);
+        }
+        return lockResult;
     }
 
     public LockResult tryLock(String key) {

@@ -18,7 +18,6 @@
 package org.apache.hugegraph.auth;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -40,10 +39,14 @@ import org.apache.tinkerpop.shaded.jackson.databind.ser.std.StdSerializer;
 
 public class RolePermission {
 
-    public static final RolePermission NONE = RolePermission.role(
-            "none", HugePermission.NONE);
-    public static final RolePermission ADMIN = RolePermission.role(
-            "admin", HugePermission.ANY);
+    public static final String ALL = "*";
+    public static final RolePermission NONE =
+            RolePermission.role(ALL, ALL, HugePermission.NONE);
+    public static final RolePermission ADMIN =
+            RolePermission.role(ALL, ALL, HugePermission.ADMIN);
+    public static final String ANY_LABEL = "*";
+    public static final String POUND_SEPARATOR = "#";
+    private final String defaultGraphSpace = "DEFAULT";
 
     static {
         SimpleModule module = new SimpleModule();
@@ -54,73 +57,52 @@ public class RolePermission {
         JsonUtil.registerModule(module);
     }
 
-    // Mapping of: graph -> action -> resource
+    // Mapping of: graphSpace -> graph -> action -> resource
     @JsonProperty("roles")
-    private final Map<String, Map<HugePermission, List<HugeResource>>> roles;
+    private final Map<String, Map<String, Map<HugePermission,
+            Map<String, List<HugeResource>>>>> roles;
 
     public RolePermission() {
         this(new TreeMap<>());
     }
 
-    private RolePermission(Map<String, Map<HugePermission,
-            List<HugeResource>>> roles) {
+    RolePermission(Map<String, Map<String, Map<HugePermission,
+            Map<String, List<HugeResource>>>>> roles) {
         this.roles = roles;
     }
 
-    protected void add(String graph, String action,
-                       List<HugeResource> resources) {
-        this.add(graph, HugePermission.valueOf(action), resources);
+    public static RolePermission all(String graph) {
+        return role("*", "*", HugePermission.ADMIN);
     }
 
-    protected void add(String graph, HugePermission action,
-                       List<HugeResource> resources) {
-        Map<HugePermission, List<HugeResource>> permissions =
-                this.roles.get(graph);
-        if (permissions == null) {
-            permissions = new TreeMap<>();
-            this.roles.put(graph, permissions);
+    public static RolePermission role(String graphSpace, String graph,
+                                      HugePermission perm) {
+        RolePermission role = new RolePermission();
+        if (perm.ordinal() <= HugePermission.EXECUTE.ordinal() &&
+            perm.ordinal() >= HugePermission.READ.ordinal()) {
+            role.add(graphSpace, graph, perm, HugeResource.ALL_RES);
+        } else {
+            // if perm is not read, write, delete or execute, set resources null
+            role.add(graphSpace, graph, perm, null);
         }
-        List<HugeResource> mergedResources = permissions.get(action);
-        if (mergedResources == null) {
-            mergedResources = new ArrayList<>();
-            permissions.put(action, mergedResources);
-        }
-        mergedResources.addAll(resources);
+        return role;
     }
 
-    public Map<String, Map<HugePermission, List<HugeResource>>> map() {
-        return Collections.unmodifiableMap(this.roles);
+    public static RolePermission role(String graph,
+                                      HugePermission perm) {
+        return role(admin().defaultGraphSpace, graph, perm);
     }
 
-    public boolean contains(RolePermission other) {
-        for (Map.Entry<String, Map<HugePermission, List<HugeResource>>> e1 :
-                other.roles.entrySet()) {
-            String g = e1.getKey();
-            Map<HugePermission, List<HugeResource>> perms = this.roles.get(g);
-            if (perms == null) {
-                return false;
-            }
-            for (Map.Entry<HugePermission, List<HugeResource>> e2 :
-                    e1.getValue().entrySet()) {
-                List<HugeResource> ress = perms.get(e2.getKey());
-                if (ress == null) {
-                    return false;
-                }
-                for (HugeResource r : e2.getValue()) {
-                    boolean contains = false;
-                    for (HugeResource res : ress) {
-                        if (res.contains(r)) {
-                            contains = true;
-                            break;
-                        }
-                    }
-                    if (!contains) {
-                        return false;
-                    }
-                }
-            }
-        }
-        return true;
+    public static RolePermission none() {
+        return role(ALL, ALL, HugePermission.NONE);
+    }
+
+    public static RolePermission admin() {
+        return role(ALL, ALL, HugePermission.ADMIN);
+    }
+
+    public static boolean isAdmin(RolePermission role) {
+        return role.isAdmin();
     }
 
     @Override
@@ -158,22 +140,172 @@ public class RolePermission {
         return role;
     }
 
-    public static RolePermission all(String graph) {
-        return role(graph, HugePermission.ANY);
+    public Map<String, Map<String, Map<HugePermission,
+            Map<String, List<HugeResource>>>>> roles() {
+        return this.roles;
     }
 
-    public static RolePermission role(String graph, HugePermission perm) {
-        RolePermission role = new RolePermission();
-        role.add(graph, perm, HugeResource.ALL_RES);
-        return role;
+    protected Map<String, Map<String, Map<HugePermission,
+            Map<String, List<HugeResource>>>>> map() {
+        return Collections.unmodifiableMap(this.roles);
     }
 
-    public static RolePermission none() {
-        return NONE;
+    protected void add(String graphSpace, String graph, String action,
+                       Map<String, List<HugeResource>> resources) {
+        this.add(graphSpace, graph, HugePermission.valueOf(action), resources);
     }
 
-    public static RolePermission admin() {
-        return ADMIN;
+    protected void add(String graph, HugePermission action,
+                       Map<String, List<HugeResource>> resources) {
+        this.add(defaultGraphSpace, graph, action, resources);
+    }
+
+    protected void add(String graphSpace, String graph, HugePermission action,
+                       Map<String, List<HugeResource>> resources) {
+        if (!(action == HugePermission.ADMIN ||
+              action == HugePermission.SPACE) &&
+            (resources == null || resources == HugeTarget.EMPTY)) {
+            return;
+        }
+
+        Map<String, Map<HugePermission, Map<String, List<HugeResource>>>> graphPermissions =
+                this.roles.get(graphSpace);
+        if (graphPermissions == null) {
+            graphPermissions = new TreeMap<>();
+        }
+
+        Map<HugePermission, Map<String, List<HugeResource>>> permissions =
+                graphPermissions.get(graph);
+        if (permissions == null) {
+            permissions = new TreeMap<>();
+            // Ensure resources maintain order even on first add
+            Map<String, List<HugeResource>> orderedResources = new java.util.LinkedHashMap<>();
+            if (resources != null) {
+                orderedResources.putAll(resources);
+            }
+            permissions.put(action, orderedResources);
+            graphPermissions.put(graph, permissions);
+        } else {
+            Map<String, List<HugeResource>> mergedResources = permissions.get(action);
+            if (mergedResources == null) {
+                mergedResources = new java.util.LinkedHashMap<>();
+                permissions.put(action, mergedResources);
+            }
+
+            for (Map.Entry<String, List<HugeResource>> entry : resources.entrySet()) {
+                String typeLabel = entry.getKey();
+                List<HugeResource> resourcesList =
+                        mergedResources.get(typeLabel);
+                if (resourcesList != null) {
+                    resourcesList.addAll(entry.getValue());
+                } else {
+                    mergedResources.put(typeLabel, entry.getValue());
+                }
+            }
+
+            if (mergedResources.isEmpty()) {
+                permissions.put(action, null);
+            }
+        }
+
+        this.roles.put(graphSpace, graphPermissions);
+    }
+
+    protected boolean contains(RolePermission other) {
+        if (this.isAdmin()) {
+            return true;
+        }
+
+        for (Map.Entry<String, Map<String, Map<HugePermission, Map<String,
+                List<HugeResource>>>>> e1 : other.roles.entrySet()) {
+            String graphSpace = e1.getKey();
+            Map<String, Map<HugePermission, Map<String, List<HugeResource>>>>
+                    resGraph = this.roles.get(graphSpace);
+            if (resGraph == null) {
+                return false;
+            }
+            for (Map.Entry<String, Map<HugePermission,
+                    Map<String, List<HugeResource>>>> e2 :
+                    e1.getValue().entrySet()) {
+                Map<HugePermission, Map<String, List<HugeResource>>>
+                        resPerm = resGraph.get(e2.getKey());
+                if (resPerm == null) {
+                    return false;
+                }
+
+                for (Map.Entry<HugePermission, Map<String, List<HugeResource>>>
+                        e3 : e2.getValue().entrySet()) {
+                    Map<String, List<HugeResource>> resType =
+                            resPerm.get(e3.getKey());
+                    if (resType == null) {
+                        return false;
+                    }
+
+                    for (Map.Entry<String, List<HugeResource>> e4 :
+                            e3.getValue().entrySet()) {
+                        // Just check whether resType contains e4
+                        String[] typeAndLabel =
+                                e4.getKey().split(POUND_SEPARATOR);
+                        ResourceType requiredType =
+                                ResourceType.valueOf(typeAndLabel[0]);
+                        boolean checkLabel = requiredType.isGraphOrSchema();
+
+                        for (HugeResource r : e4.getValue()) {
+                            // for every r, resType must contain r
+                            boolean contains = false;
+
+                            for (Map.Entry<String, List<HugeResource>> ressMap :
+                                    resType.entrySet()) {
+                                String[] key = ressMap.getKey().
+                                                      split(POUND_SEPARATOR);
+                                ResourceType ressType =
+                                        ResourceType.valueOf(key[0]);
+                                if (!ressType.match(requiredType)) {
+                                    continue;
+                                }
+
+                                List<HugeResource> ress = ressMap.getValue();
+                                if (ress == null) {
+                                    continue;
+                                } else if (!checkLabel) {
+                                    contains = true;
+                                    break;
+                                }
+
+                                // check label
+                                if (!(key[1].equals(ANY_LABEL) ||
+                                      typeAndLabel[1].matches(key[1]))) {
+                                    continue;
+                                }
+
+                                if (!requiredType.isGraph()) {
+                                    contains = true;
+                                    break;
+                                }
+                                // check properties
+                                for (HugeResource res : ress) {
+                                    if (res.matchProperties(r)) {
+                                        contains = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (!contains) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    public boolean isAdmin() {
+        return this.roles.containsKey(ALL) &&
+               this.roles.get(ALL).containsKey(ALL) &&
+               this.roles.get(ALL).get(ALL).containsKey(HugePermission.ADMIN);
     }
 
     public static RolePermission builtin(RolePermission role) {
@@ -219,8 +351,9 @@ public class RolePermission {
         public RolePermission deserialize(JsonParser parser,
                                           DeserializationContext ctxt)
                 throws IOException {
-            TypeReference<?> type = new TypeReference<TreeMap<String,
-                    TreeMap<HugePermission, List<HugeResource>>>>() {
+            TypeReference<?> type = new TypeReference<TreeMap<String, TreeMap<String,
+                    TreeMap<HugePermission, TreeMap<String,
+                            List<HugeResource>>>>>>() {
             };
             if ("roles".equals(parser.nextFieldName())) {
                 parser.nextValue();

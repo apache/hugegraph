@@ -56,6 +56,15 @@ public class PartitionAPI extends API {
     @Autowired
     PDRestService pdRestService;
 
+
+
+    /**
+     * Get advanced partition information
+     * <p>
+     * This interface is used to obtain advanced partition information in the system, including graph information, key-value count, data size, etc. for each partition.
+     *
+     * @return RestApiResponse object containing advanced partition information
+     */
     @GetMapping(value = "/highLevelPartitions", produces = MediaType.APPLICATION_JSON_VALUE)
     public RestApiResponse getHighLevelPartitions() {
         // Information about multiple graphs under the partition
@@ -90,6 +99,7 @@ public class PartitionAPI extends API {
                                        partition2DataSize.getOrDefault(graphStats.getPartitionId(),
                                                                        0L)
                                        + graphStats.getApproximateSize());
+                // Graph information under the structure partition
                 if (partitions2GraphsMap.get(graphStats.getPartitionId()) == null) {
                     partitions2GraphsMap.put(graphStats.getPartitionId(),
                                              new HashMap<String, GraphStats>());
@@ -132,13 +142,12 @@ public class PartitionAPI extends API {
                         partition2DataSize.getOrDefault(resultPartition.partitionId, 0L);
                 for (ShardStats shard : resultPartition.shards) {
                     // Assign values to the address and partition information of the replica
-                    shard.address = storesMap.get(shard.storeId).getAddress();
-                    shard.partitionId = partition.getId();
-                }
-                if ((partitionStats != null) && (partitionStats.getLeader() != null)) {
-                    long storeId = partitionStats.getLeader().getStoreId();
-                    resultPartition.leaderAddress =
-                            storesMap.get(storeId).getAddress();
+                    Metapb.Store s = storesMap.get(shard.storeId);
+                    shard.address = (s != null) ? s.getAddress() : "";
+                    if (s == null) {
+                        log.error("store not found for shard storeId={}, partitionId={}",
+                                 shard.storeId, partition.getId());
+                    }
                 }
                 resultPartitionsMap.put(partition.getId(), resultPartition);
             }
@@ -163,7 +172,7 @@ public class PartitionAPI extends API {
                                                                      postfixLength);
                 graphsList.add(tmpGraph);
             }
-            graphsList.sort((o1, o2) -> o1.graphName.compareTo(o2.graphName));
+            graphsList.sort(Comparator.comparing(o -> o.graphName));
             currentPartition.graphs = graphsList;
         }
         List<HighLevelPartition> resultPartitionList = new ArrayList<>();
@@ -179,6 +188,17 @@ public class PartitionAPI extends API {
         return new RestApiResponse(dataMap, Pdpb.ErrorType.OK, Pdpb.ErrorType.OK.name());
     }
 
+    /**
+     * Get partition information
+     * <p>
+     * Retrieve all partition information, as well as the Raft node status and shard index information for each partition, by calling the pdRestService service.
+     * Then iterate through each partition to construct a partition object, including the partition name, ID, shard list, etc.
+     * For each shard, retrieve its status, progress, role, and other information via the pdRestService service, and populate the shard object with this data.
+     * Finally, add the constructed partition objects to the list and sort them by partition name and ID.
+     *
+     * @return A RestApiResponse object containing partition information
+     * @throws PDException If an exception occurs while retrieving partition information, a PDException exception is thrown
+     */
     @GetMapping(value = "/partitions", produces = MediaType.APPLICATION_JSON_VALUE)
     public RestApiResponse getPartitions() {
         try {
@@ -236,7 +256,6 @@ public class PartitionAPI extends API {
                         role = shard.getRole();
                         address = pdRestService.getStore(
                                 shard.getStoreId()).getAddress();
-                        partitionId = partition.getId();
                         if (finalShardStats.containsKey(shard.getStoreId())) {
                             state = finalShardStats.get(shard.getStoreId()).getState().toString();
                             progress = finalShardStats.get(shard.getStoreId()).getProgress();
@@ -269,6 +288,14 @@ public class PartitionAPI extends API {
         }
     }
 
+    /**
+     * Get partitions and their statistics
+     * <p>
+     * This interface is used to get all partitions corresponding to the graph and their statistics, and returns them in JSON format.
+     *
+     * @return JSON string containing partitions and their statistics
+     * @throws PDException If an exception occurs while getting partitions or statistics, a PDException exception is thrown.
+     */
     @GetMapping(value = "/partitionsAndStats", produces = MediaType.APPLICATION_JSON_VALUE)
     public String getPartitionsAndStats() {
         //for debug use, return partition && partitionStats
@@ -288,9 +315,10 @@ public class PartitionAPI extends API {
                 graph2Partitions.put(graph.getGraphName(), partitionList);
                 graph2PartitionStats.put(graph.getGraphName(), partitionStatsList);
             }
-            String builder = "{\"partitions\":" + toJSON(graph2Partitions) +
-                             ",\"partitionStats\":" + toJSON(graph2PartitionStats) + "}";
-            return builder;
+            StringBuilder builder = new StringBuilder();
+            builder.append("{\"partitions\":").append(toJSON(graph2Partitions));
+            builder.append(",\"partitionStats\":").append(toJSON(graph2PartitionStats)).append("}");
+            return builder.toString();
         } catch (PDException e) {
             log.error("PD exception:" + e);
             return toJSON(e);
@@ -307,6 +335,14 @@ public class PartitionAPI extends API {
         return stats;
     }
 
+    /**
+     * Get partition log
+     * Request log records for a specified time range and return a JSON-formatted response.
+     *
+     * @param request Request body containing the requested time range, including start and end times
+     * @return Returns a JSON string containing partition log records. If no records are found, returns a JSON string containing error information
+     * @throws PDException If an exception occurs while retrieving partition logs, captures and returns a JSON string containing exception information
+     */
     @PostMapping(value = "/partitions/log", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -329,6 +365,35 @@ public class PartitionAPI extends API {
         }
     }
 
+    /**
+     * Reset all partition states
+     * Access the “/resetPartitionState” path via a GET request to reset all partition states
+     *
+     * @return If the operation is successful, returns the string “OK”; if an exception occurs, returns a JSON string containing the exception information
+     * @throws PDException If an exception occurs while resetting the partition state, it is caught and a JSON string containing the exception information is returned
+     */
+    @GetMapping(value = "/resetPartitionState", produces = MediaType.APPLICATION_JSON_VALUE)
+    public String resetPartitionState() {
+        try {
+            for (Metapb.Partition partition : pdRestService.getPartitions("")) {
+                pdRestService.resetPartitionState(partition);
+            }
+        } catch (PDException e) {
+            return toJSON(e);
+        }
+        return "OK";
+    }
+
+    /**
+     * Retrieve system statistics
+     * This interface obtains system statistics via a GET request and returns a Statistics object containing the statistical data
+     * The URL path is ‘/’, with the response data type being application/json
+     *
+     * @return A Statistics object containing system statistics
+     * @throws PDException          Throws a PDException if an exception occurs while retrieving statistics
+     * @throws ExecutionException   Throws an ExecutionException if a task execution exception occurs
+     * @throws InterruptedException Throws an InterruptedException if the thread is interrupted while waiting
+     */
     @GetMapping(value = "/", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public Statistics getStatistics() throws PDException, ExecutionException, InterruptedException {

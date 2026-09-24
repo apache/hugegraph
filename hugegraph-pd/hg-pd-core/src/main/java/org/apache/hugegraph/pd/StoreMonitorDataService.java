@@ -41,13 +41,13 @@ import lombok.extern.slf4j.Slf4j;
 public class StoreMonitorDataService {
 
     private static final String MONITOR_DATA_PREFIX = "SMD";
-    private final PDConfig pdConfig;
-    private final KvService kvService;
+    private PDConfig pdConfig;
+    private KvService kvService;
     /**
      * the last timestamp of the store monitor data,
      * used for determine the gap of store's heartbeat.
      */
-    private final Map<Long, Long> lastStoreStateTimestamp;
+    private Map<Long, Long> lastStoreStateTimestamp;
 
     public StoreMonitorDataService(PDConfig pdConfig) {
         this.pdConfig = pdConfig;
@@ -247,12 +247,13 @@ public class StoreMonitorDataService {
     }
 
     private String getMonitorDataKey(long storeId, long ts) {
-        String builder = MONITOR_DATA_PREFIX +
-                         MetadataKeyHelper.getDelimiter() +
-                         storeId +
-                         MetadataKeyHelper.getDelimiter() +
-                         ts;
-        return builder;
+        StringBuilder builder = new StringBuilder();
+        builder.append(MONITOR_DATA_PREFIX)
+               .append(MetadataKeyHelper.getDelimiter())
+               .append(storeId)
+               .append(MetadataKeyHelper.getDelimiter())
+               .append(String.format("%010d", ts));
+        return builder.toString();
     }
 
     private String extractMetricsFromStoreStatus(Metapb.StoreStats storeStats) {

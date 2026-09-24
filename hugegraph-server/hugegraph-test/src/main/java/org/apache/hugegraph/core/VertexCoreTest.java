@@ -19,6 +19,7 @@ package org.apache.hugegraph.core;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.Id.IdType;
 import org.apache.hugegraph.backend.id.IdGenerator;
@@ -69,6 +71,7 @@ import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.CollectionUtil;
+import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -824,6 +827,63 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals("Movie", vertex.value("fav"));
         Assert.assertEquals(123, vertex.value("cnt"));
         Assert.assertFalse(vertex.values("age").hasNext());
+    }
+
+    @Test
+    public void testAddVertexWithDateDefaultValue() {
+        SchemaManager schema = graph().schema();
+
+        Date joined = DateUtil.parse("2026-05-14 10:11:12.345");
+        schema.propertyKey("joinDate").asDate()
+              .userdata(Userdata.DEFAULT_VALUE, joined).create();
+        schema.vertexLabel("person")
+              .properties("joinDate")
+              .nullableKeys("joinDate").append();
+
+        // No 'joinDate' supplied
+        Vertex vertex = graph().addVertex(T.label, "person",
+                                          "name", "Baby", "city", "Shanghai");
+
+        this.commitTx();
+
+        // Reload from backend then query: the typed default must survive the
+        // JSON serialize/reload round-trip as a Date, not a String (#3028).
+        vertex = graph().vertex(vertex.id());
+        Object value = vertex.value("joinDate");
+        Assert.assertTrue("default 'joinDate' should be a Date, was " +
+                          (value == null ? "null" : value.getClass()),
+                          value instanceof Date);
+        Assert.assertEquals(joined, value);
+    }
+
+    @Test
+    public void testAddVertexWithDateSetDefaultValue() {
+        SchemaManager schema = graph().schema();
+
+        String dateStr = "2026-05-14 10:11:12.345";
+        Date expected = DateUtil.parse(dateStr);
+
+        // Simulate JSON-deserialized default: ArrayList of Strings with duplicates
+        schema.propertyKey("joinDates").asDate().valueSet()
+              .userdata(Userdata.DEFAULT_VALUE, Arrays.asList(dateStr, dateStr))
+              .create();
+        schema.vertexLabel("person")
+              .properties("joinDates")
+              .nullableKeys("joinDates").append();
+
+        Vertex vertex = graph().addVertex(T.label, "person",
+                                          "name", "Baby", "city", "Shanghai");
+        this.commitTx();
+
+        vertex = graph().vertex(vertex.id());
+        Object raw = vertex.value("joinDates");
+
+        Assert.assertTrue("joinDates should be a Set, was " +
+                          (raw == null ? "null" : raw.getClass()),
+                          raw instanceof Set);
+        Set<?> values = (Set<?>) raw;
+        Assert.assertEquals("duplicates must be collapsed", 1, values.size());
+        Assert.assertTrue(values.contains(expected));
     }
 
     @Test
@@ -2182,7 +2242,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testAddOlapSecondaryProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2273,7 +2334,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testAddOlapRangeProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2399,7 +2461,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testAddOlapRangeAndOlapSecondaryProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2573,7 +2636,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOlapRangeAndRegularSecondaryProperties() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -2702,7 +2766,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOlapWithUpdates() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -3282,6 +3347,62 @@ public class VertexCoreTest extends BaseCoreTest {
         vertices = graph.traversal().V().hasLabel("author")
                         .has("id", 1).has("name", "fake-name").toList();
         Assert.assertEquals(0, vertices.size());
+    }
+
+    @Test
+    public void testQueryByPrimaryValuesInPageWithVertexCache() {
+        Assume.assumeTrue("Not support paging", storeFeatures().supportsQueryByPage());
+        HugeGraph graph = graph();
+        Vertex vertex = graph.addVertex(T.label, "person", "name", "marko",
+                                        "age", 29, "city", "Beijing");
+        this.commitTx();
+        CachedGraphTransaction cache = (CachedGraphTransaction) this.params().graphTransaction();
+        cache.clearCache(HugeType.VERTEX, false);
+
+        for (int i = 0; i < 2; i++) {
+            if (i == 1) {
+                Assert.assertEquals(vertex.id(), graph.vertices(vertex.id()).next().id());
+            }
+            GraphTraversal<Vertex, Vertex> results = graph.traversal().V()
+                    .hasLabel("person").has("name", "marko").has("~page", "").limit(2);
+            List<Vertex> vertices = results.toList();
+            Assert.assertEquals(1, vertices.size());
+            Assert.assertEquals(vertex.id(), vertices.get(0).id());
+            Assert.assertNull(TraversalUtil.page(results));
+            CloseableIterator.closeIterator(results);
+        }
+
+        GraphTraversal<Vertex, Vertex> filtered = graph.traversal().V()
+                .hasLabel("person").has("name", "marko").has("age", 30)
+                .has("~page", "").limit(2);
+        Assert.assertFalse(filtered.hasNext());
+        Assert.assertNull(TraversalUtil.page(filtered));
+        CloseableIterator.closeIterator(filtered);
+
+        GraphTraversal<Vertex, Vertex> missing = graph.traversal().V()
+                .hasLabel("person").has("name", "missing").has("~page", "").limit(2);
+        Assert.assertFalse(missing.hasNext());
+        Assert.assertNull(TraversalUtil.page(missing));
+        CloseableIterator.closeIterator(missing);
+    }
+
+    @Test
+    public void testQueryByPrimaryValuesAndPropsWithCachedVertex() {
+        HugeGraph graph = graph();
+        Vertex vertex = graph.addVertex(T.label, "person",
+                                        "name", "marko", "age", 29,
+                                        "city", "Beijing");
+        this.commitTx();
+
+        Vertex cached = graph.vertices(vertex.id()).next();
+        Assert.assertEquals(vertex.id(), cached.id());
+
+        long count = graph.traversal().V().hasLabel("person")
+                          .has("name", "marko")
+                          .has("age", 30)
+                          .count()
+                          .next();
+        Assert.assertEquals(0L, count);
     }
 
     @Test
@@ -4139,8 +4260,7 @@ public class VertexCoreTest extends BaseCoreTest {
 
         /*
          * The double precision type typically has a range of around 1E-307 to
-         * 1E+308 with a precision of at least 15 digits. (postgresql)
-         * https://www.postgresql.org/docs/9.5/datatype-numeric.html#DATATYPE-NUMERIC-TABLE
+         * 1E+308 with a precision of at least 15 digits.
          */
         final double max15 = new BigDecimal(Double.MAX_VALUE)
                 .movePointLeft(308)
@@ -5361,8 +5481,12 @@ public class VertexCoreTest extends BaseCoreTest {
         graph.addVertex(T.label, "test", "name", "诚信文明",
                         "confirmType", 3, "type", 1, "kid", 3);
 
-        this.mayCommitTx();
+        this.assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin();
+        this.commitTx();
+        this.assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin();
+    }
 
+    private void assertQueryByJointIndexesWithSearchAndTwoRangeIndexesAndWithin() {
         List<Vertex> vertices;
         vertices = graph().traversal().V()
                           .has("type", 1)
@@ -5370,6 +5494,9 @@ public class VertexCoreTest extends BaseCoreTest {
                           .has("name", Text.contains("诚信"))
                           .toList();
         Assert.assertEquals(3, vertices.size());
+        assertContains(vertices, T.label, "test", "kid", 1);
+        assertContains(vertices, T.label, "test", "kid", 2);
+        assertContains(vertices, T.label, "test", "kid", 3);
 
         vertices = graph().traversal().V()
                           .has("type", 1)
@@ -5377,6 +5504,8 @@ public class VertexCoreTest extends BaseCoreTest {
                           .has("name", Text.contains("文明"))
                           .toList();
         Assert.assertEquals(2, vertices.size());
+        assertContains(vertices, T.label, "test", "kid", 2);
+        assertContains(vertices, T.label, "test", "kid", 3);
 
         vertices = graph().traversal().V()
                           .has("type", 0)
@@ -5384,6 +5513,7 @@ public class VertexCoreTest extends BaseCoreTest {
                           .has("name", Text.contains("诚信"))
                           .toList();
         Assert.assertEquals(1, vertices.size());
+        assertContains(vertices, T.label, "test", "kid", 0);
     }
 
     @Test
@@ -6275,8 +6405,7 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals("3", vertices.get(0).value("name"));
 
         String backend = graph.backend();
-        Set<String> nonZeroBackends = ImmutableSet.of("postgresql",
-                                                      "rocksdb", "hbase", "hstore");
+        Set<String> nonZeroBackends = ImmutableSet.of("rocksdb", "hbase", "hstore");
         if (nonZeroBackends.contains(backend)) {
             Assert.assertThrows(Exception.class, () -> {
                 graph.addVertex(T.label, "person", "name", "0",
@@ -6468,6 +6597,87 @@ public class VertexCoreTest extends BaseCoreTest {
         Vertex vertex = graph.traversal().V().has("city", "").next();
         Assert.assertEquals("Baby", vertex.value("name"));
         Assert.assertEquals("", vertex.value("city"));
+    }
+
+    @Test
+    public void testQueryVertexByBooleanPredicate() {
+        HugeGraph graph = graph();
+        Assume.assumeFalse("skip this test for hstore",
+                           Objects.equals("hstore", graph.backend()));
+
+        graph.schema().indexLabel("languageByDynamic").onV("language")
+             .secondary().by("dynamic").create();
+
+        graph.addVertex(T.label, "language", "name", "java",
+                        "dynamic", true);
+        graph.addVertex(T.label, "language", "name", "rust",
+                        "dynamic", false);
+        graph.addVertex(T.label, "language", "name", "c");
+        this.commitTx();
+
+        List<Vertex> neqTrueVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .has("dynamic", P.neq(true))
+                                             .toList();
+        Assert.assertEquals(1, neqTrueVertices.size());
+        Assert.assertEquals("rust", neqTrueVertices.get(0).value("name"));
+
+        List<Vertex> neqFalseVertices = graph.traversal().V()
+                                               .hasLabel("language")
+                                               .has("dynamic", P.neq(false))
+                                               .toList();
+        Assert.assertEquals(1, neqFalseVertices.size());
+        Assert.assertEquals("java", neqFalseVertices.get(0).value("name"));
+
+        List<Vertex> hasLtVertices = graph.traversal().V()
+                                           .hasLabel("language")
+                                           .has("dynamic", P.lt(true))
+                                           .toList();
+        Assert.assertEquals(1, hasLtVertices.size());
+        Assert.assertEquals("rust", hasLtVertices.get(0).value("name"));
+
+        List<Vertex> whereLtVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .where(__.has("dynamic",
+                                                           P.lt(true)))
+                                             .toList();
+        Assert.assertEquals(1, whereLtVertices.size());
+        Assert.assertEquals("rust", whereLtVertices.get(0).value("name"));
+
+        List<Vertex> matchLtVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .match(__.as("start")
+                                                      .where(__.has("dynamic",
+                                                                    P.lt(true)))
+                                                      .as("matched"))
+                                             .<Vertex>select("matched")
+                                             .toList();
+        Assert.assertEquals(1, matchLtVertices.size());
+        Assert.assertEquals("rust", matchLtVertices.get(0).value("name"));
+
+        List<Vertex> compoundOrVertices = graph.traversal().V()
+                                                .hasLabel("language")
+                                                .has("dynamic",
+                                                     P.gt(true).or(P.eq(true)))
+                                                .toList();
+        Assert.assertEquals(1, compoundOrVertices.size());
+        Assert.assertEquals("java", compoundOrVertices.get(0).value("name"));
+
+        Assert.assertEquals(0, graph.traversal().V()
+                                    .hasLabel("language")
+                                    .has("dynamic", P.lt(false))
+                                    .toList().size());
+
+        List<Vertex> gteFalseVertices = graph.traversal().V()
+                                             .hasLabel("language")
+                                             .has("dynamic", P.gte(false))
+                                             .toList();
+        Assert.assertEquals(2, gteFalseVertices.size());
+        Set<String> gteFalseNames = new HashSet<>();
+        for (Vertex vertex : gteFalseVertices) {
+            gteFalseNames.add(vertex.value("name"));
+        }
+        Assert.assertEquals(ImmutableSet.of("java", "rust"), gteFalseNames);
     }
 
     @Test
@@ -7594,7 +7804,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testScanVertexInPaging() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -7608,13 +7819,8 @@ public class VertexCoreTest extends BaseCoreTest {
         ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
 
         String backend = graph.backend();
-        if (backend.equals("cassandra") || backend.equals("scylladb")) {
-            query.scan(String.valueOf(Long.MIN_VALUE),
-                       String.valueOf(Long.MAX_VALUE));
-        } else {
-            query.scan(BackendTable.ShardSplitter.START,
-                       BackendTable.ShardSplitter.END);
-        }
+        query.scan(BackendTable.ShardSplitter.START,
+                   BackendTable.ShardSplitter.END);
 
         query.limit(1);
         String page = PageInfo.PAGE_NONE;
@@ -8339,8 +8545,57 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByRangeIndexKeepsOrderAcrossStorePages() {
+        Assume.assumeTrue("Not support paging",
+                          storeFeatures().supportsQueryByPage());
+
+        initRangeIndexOrderTestData();
+
+        GraphTraversalSource g = graph().traversal();
+        List<Vertex> vertices = g.V().hasLabel("ranked")
+                                 .has("rank", P.between(0, 130))
+                                 .limit(70)
+                                 .toList();
+        assertRanks(vertices, 0, 70);
+
+        GraphTraversal<Vertex, Vertex> firstPage =
+                g.V().hasLabel("ranked")
+                 .has("rank", P.between(0, 130))
+                 .has("~page", "")
+                 .limit(70);
+        vertices = firstPage.toList();
+        assertRanks(vertices, 0, 70);
+
+        String page = TraversalUtil.page(firstPage);
+        Assert.assertNotNull(page);
+        Assert.assertFalse(page.isEmpty());
+
+        vertices = g.V().hasLabel("ranked")
+                    .has("rank", P.between(0, 130))
+                    .has("~page", page)
+                    .limit(70)
+                    .toList();
+        assertRanks(vertices, 70, 60);
+    }
+
+    @Test
+    public void testQueryByRangeIndexKeepsOffsetOrderInHstore() {
+        Assume.assumeTrue("Only run for hstore",
+                          Objects.equals("hstore", graph().backend()));
+
+        initRangeIndexOrderTestData();
+
+        List<Vertex> vertices = graph().traversal().V().hasLabel("ranked")
+                                       .has("rank", P.between(0, 130))
+                                       .range(65, 75)
+                                       .toList();
+        assertRanks(vertices, 65, 10);
+    }
+
+    @Test
     public void testQueryByPropertyInPageWithLimitGtPageSize() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -8420,7 +8675,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryBySingleRangePropertyInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -8569,7 +8825,8 @@ public class VertexCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryByRangeIndexInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -8986,13 +9243,11 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(vertex3, g.V().hasLabel("person")
                                       .has("name", "xyz\u0003abc").next());
 
-        if (!graph.backend().equals("postgresql")) {
-            Vertex vertex0 = graph.addVertex(T.label, "person", "name",
-                                             "xyz\u0000abc", "city", "Hongkong",
-                                             "age", 10);
-            Assert.assertEquals(vertex0, g.V().hasLabel("person")
-                                          .has("name", "xyz\u0000abc").next());
-        }
+        Vertex vertex0 = graph.addVertex(T.label, "person", "name",
+                                         "xyz\u0000abc", "city", "Hongkong",
+                                         "age", 10);
+        Assert.assertEquals(vertex0, g.V().hasLabel("person")
+                                      .has("name", "xyz\u0000abc").next());
 
         Assert.assertThrows(IllegalArgumentException.class, () -> {
             graph.addVertex(T.label, "person", "name",
@@ -9117,18 +9372,6 @@ public class VertexCoreTest extends BaseCoreTest {
             }, e -> {
                 Assert.assertContains("can't contains byte '0x00'",
                                       e.getMessage());
-            });
-        } else if (backend.equals("postgresql")) {
-            Assert.assertThrows(BackendException.class, () -> {
-                graph.addVertex(T.label, "person", "name", "7",
-                                "city", "xyz\u0000efg",
-                                "age", 15);
-                graph.tx().commit();
-            }, e -> {
-                graph.tx().rollback();
-                Assert.assertContains("invalid byte sequence for encoding " +
-                                      "\"UTF8\": 0x00",
-                                      e.getCause().getMessage());
             });
         } else {
             graph.addVertex(T.label, "person", "name", "8",
@@ -9376,12 +9619,45 @@ public class VertexCoreTest extends BaseCoreTest {
         this.commitTx();
     }
 
+    private void initRangeIndexOrderTestData() {
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("rank").asInt().create();
+        schema.vertexLabel("ranked")
+              .properties("rank")
+              .useCustomizeStringId()
+              .create();
+        schema.indexLabel("rankedByRank")
+              .onV("ranked")
+              .by("rank")
+              .range()
+              .create();
+
+        for (int rank = 129; rank >= 0; rank--) {
+            graph().addVertex(T.label, "ranked", T.id, "ranked-" + rank,
+                              "rank", rank);
+        }
+        this.commitTx();
+    }
+
     private Vertex vertex(String label, String pkName, Object pkValue) {
         List<Vertex> vertices = graph().traversal().V()
                                        .hasLabel(label).has(pkName, pkValue)
                                        .toList();
         Assert.assertTrue(vertices.size() <= 1);
         return vertices.size() == 1 ? vertices.get(0) : null;
+    }
+
+    private static void assertRanks(List<Vertex> vertices, int firstRank,
+                                    int expectedSize) {
+        List<Integer> actualRanks = new ArrayList<>(vertices.size());
+        for (Vertex vertex : vertices) {
+            actualRanks.add(vertex.value("rank"));
+        }
+        Assert.assertEquals(expectedSize, vertices.size());
+        for (int i = 0; i < expectedSize; i++) {
+            Assert.assertEquals("Unexpected ranks: " + actualRanks,
+                                firstRank + i, (int) actualRanks.get(i));
+        }
     }
 
     private static void assertContains(List<Vertex> vertices,

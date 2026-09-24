@@ -29,6 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
@@ -58,11 +59,28 @@ public final class RocksDBFactory {
     private final ReentrantReadWriteLock operateLock;
     ScheduledExecutorService scheduledExecutor;
     private HugeConfig hugeConfig;
+    private AtomicBoolean closing = new AtomicBoolean(false);
 
     private RocksDBFactory() {
         this.operateLock = new ReentrantReadWriteLock();
         scheduledExecutor = Executors.newScheduledThreadPool(2);
         scheduledExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                dbSessionMap.forEach((k, session) -> {
+                    for (var entry : session.getIteratorMap().entrySet()) {
+                        String key = entry.getKey();
+                        var ts = Long.parseLong(key.split("-")[0]);
+                        // output once per 10min
+                        var passed = (System.currentTimeMillis() - ts) / 1000 - 600;
+                        if (passed > 0 && passed % 10 == 0) {
+                            log.info("iterator not close, stack: {}", entry.getValue());
+                        }
+                    }
+                });
+            } catch (Exception e) {
+                log.error("got error, ", e);
+            }
+
             try {
                 Iterator<DBSessionWatcher> itr = destroyGraphDBs.listIterator();
                 while (itr.hasNext()) {
@@ -146,12 +164,30 @@ public final class RocksDBFactory {
         }
         return null;
     }
+    //TODO is this necessary?
+    class RocksdbEventListener extends AbstractEventListener {
+        @Override
+        public void onCompactionCompleted(RocksDB db, CompactionJobInfo compactionJobInfo) {
+            super.onCompactionCompleted(db, compactionJobInfo);
+            rocksdbChangedListeners.forEach(listener -> {
+                listener.onCompacted(db.getName());
+            });
+        }
+
+        @Override
+        public void onCompactionBegin(final RocksDB db, final CompactionJobInfo compactionJobInfo) {
+            log.info("RocksdbEventListener onCompactionBegin");
+        }
+    }
 
     public RocksDBSession createGraphDB(String dbPath, String dbName) {
         return createGraphDB(dbPath, dbName, 0);
     }
 
     public RocksDBSession createGraphDB(String dbPath, String dbName, long version) {
+        if (closing.get()) {
+            throw new RuntimeException("db closed");
+        }
         operateLock.writeLock().lock();
         try {
             RocksDBSession dbSession = dbSessionMap.get(dbName);
@@ -231,7 +267,8 @@ public final class RocksDBFactory {
     }
 
     public void releaseAllGraphDB() {
-        log.info("close all rocksdb.");
+        closing.set(true);
+        log.info("closing all rocksdb....");
         operateLock.writeLock().lock();
         try {
             dbSessionMap.forEach((k, v) -> {
@@ -292,24 +329,7 @@ public final class RocksDBFactory {
         }
     }
 
-    class RocksdbEventListener extends AbstractEventListener {
-
-        @Override
-        public void onCompactionCompleted(RocksDB db, CompactionJobInfo compactionJobInfo) {
-            super.onCompactionCompleted(db, compactionJobInfo);
-            rocksdbChangedListeners.forEach(listener -> {
-                listener.onCompacted(db.getName());
-            });
-        }
-
-        @Override
-        public void onCompactionBegin(final RocksDB db, final CompactionJobInfo compactionJobInfo) {
-            log.info("RocksdbEventListener onCompactionBegin");
-        }
-    }
-
     class DBSessionWatcher {
-
         public RocksDBSession dbSession;
         public Long timestamp;
 

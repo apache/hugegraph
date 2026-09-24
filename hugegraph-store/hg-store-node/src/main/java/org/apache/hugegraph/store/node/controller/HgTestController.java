@@ -31,6 +31,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.alipay.sofa.jraft.entity.PeerId;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -60,8 +62,12 @@ public class HgTestController {
     @GetMapping(value = "/raftRestart/{groupId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public String restartRaftNode(@PathVariable(value = "groupId") int groupId) {
         PartitionEngine engine = nodeService.getStoreEngine().getPartitionEngine(groupId);
-        engine.restartRaftNode();
-        return "OK";
+        if (engine != null) {
+            engine.restartRaftNode();
+            return "OK";
+        } else {
+            return "partition engine not found";
+        }
     }
 
     @GetMapping(value = "/raftDelete/{groupId}", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -113,4 +119,61 @@ public class HgTestController {
         });
         return "snapshot OK!";
     }
+
+    @GetMapping(value = "/pulse/reset", produces = MediaType.APPLICATION_JSON_VALUE)
+    public String resetPulse() {
+        try {
+            nodeService.getStoreEngine().getHeartbeatService().connectNewPulse();
+            return "OK";
+        } catch (Exception e) {
+            log.error("pulse reset error: ", e);
+            return e.getMessage();
+        }
+    }
+
+    @GetMapping(value = "/transferLeaders", produces = MediaType.APPLICATION_JSON_VALUE)
+    public String transferLeaders() {
+        try {
+            nodeService.getStoreEngine().getLeaderPartition().forEach(engine -> {
+                try {
+                    engine.getRaftNode().transferLeadershipTo(PeerId.ANY_PEER);
+                } catch (Exception e) {
+                    log.error("transfer leader error: ", e);
+                }
+            });
+            return "OK";
+        } catch (Exception e) {
+            log.error("transfer leaders error: ", e);
+            return e.getMessage();
+        }
+    }
+
+    @GetMapping(value = "/restart_raft", produces = MediaType.APPLICATION_JSON_VALUE)
+    public String restartRaft() {
+        try {
+            nodeService.getStoreEngine().getPartitionEngines().values()
+                       .forEach(PartitionEngine::restartRaftNode);
+            return "OK";
+        } catch (Exception e) {
+            log.error("restart raft error: ", e);
+            return e.getMessage();
+        }
+    }
+
+    @GetMapping(value = "/all_raft_start", produces = MediaType.APPLICATION_JSON_VALUE)
+    public String isRaftAllStarted() {
+        try {
+            var engine = nodeService.getStoreEngine();
+            var storeId = engine.getPartitionManager().getStore().getId();
+            var flag = nodeService.getStoreEngine().getPdProvider().getPartitionsByStore(storeId)
+                                  .stream()
+                                  .mapToInt(Partition::getId)
+                                  .allMatch(i -> engine.getPartitionEngine(i) != null);
+            return flag ? "OK" : "NO";
+        } catch (Exception e) {
+            log.error("raft status check error: ", e);
+            return e.getMessage();
+        }
+    }
+
 }

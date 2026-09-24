@@ -23,8 +23,6 @@ import static org.apache.hugegraph.config.OptionChecker.inValues;
 import static org.apache.hugegraph.config.OptionChecker.rangeDouble;
 import static org.apache.hugegraph.config.OptionChecker.rangeInt;
 
-import java.util.Map;
-
 import org.apache.hugegraph.config.ConfigConvOption;
 import org.apache.hugegraph.config.ConfigListConvOption;
 import org.apache.hugegraph.config.ConfigOption;
@@ -32,7 +30,6 @@ import org.apache.hugegraph.config.OptionHolder;
 import org.apache.hugegraph.util.Bytes;
 import org.rocksdb.CompactionStyle;
 import org.rocksdb.CompressionType;
-import org.rocksdb.InfoLogLevel;
 
 public class RocksDBOptions extends OptionHolder {
 
@@ -91,13 +88,6 @@ public class RocksDBOptions extends OptionHolder {
                     allowValues("DEBUG", "INFO", "WARN", "ERROR", "FATAL", "HEADER"),
                     "INFO"
             );
-    public static final Map<String, InfoLogLevel> LOG_LEVEL_MAPPING =
-            Map.of("DEBUG", InfoLogLevel.DEBUG_LEVEL,
-                   "INFO", InfoLogLevel.INFO_LEVEL,
-                   "WARN", InfoLogLevel.WARN_LEVEL,
-                   "ERROR", InfoLogLevel.ERROR_LEVEL,
-                   "FATAL", InfoLogLevel.FATAL_LEVEL,
-                   "HEADER", InfoLogLevel.HEADER_LEVEL);
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             new ConfigOption<>(
@@ -106,27 +96,7 @@ public class RocksDBOptions extends OptionHolder {
                     rangeInt(1, Integer.MAX_VALUE),
                     7
             );
-    public static final ConfigOption<Long> BLOCK_CACHE_CAPACITY =
-            new ConfigOption<>(
-                    "rocksdb.block_cache_capacity",
-                    "The amount of block cache in bytes that will be used by all RocksDBs",
-                    rangeInt(0L, Long.MAX_VALUE),
-                    16L * Bytes.GB
-            );
-    public static final ConfigOption<String> SNAPSHOT_PATH =
-            new ConfigOption<>(
-                    "rocksdb.snapshot_path",
-                    "The path for storing snapshot of RocksDB.",
-                    disallowEmpty(),
-                    "rocksdb-snapshot"
-            );
-    public static final ConfigOption<Boolean> DISABLE_AUTO_COMPACTION =
-            new ConfigOption<>(
-                    "rocksdb.disable_auto_compaction",
-                    "Set disable auto compaction.",
-                    disallowEmpty(),
-                    false
-            );
+
     public static final ConfigConvOption<String, CompactionStyle> COMPACTION_STYLE =
             new ConfigConvOption<>(
                     "rocksdb.compaction_style",

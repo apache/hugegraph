@@ -70,7 +70,7 @@ public final class ZipUtils {
         }
     }
 
-    public static void decompress(final String sourceFile, final File outputDir,
+    public static void decompress(final String sourceFile, final String outputDir,
                                   final Checksum checksum) throws IOException {
         try (final FileInputStream fis = new FileInputStream(sourceFile);
              final CheckedInputStream cis = new CheckedInputStream(fis, checksum);
@@ -78,9 +78,12 @@ public final class ZipUtils {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
                 final String fileName = entry.getName();
-                final File entryFile = new File(outputDir, fileName);
-                if (!entryFile.toPath().normalize().startsWith(outputDir.toPath())) {
-                    throw new IOException("Bad zip entry");
+                final File entryFile = new File(Paths.get(outputDir, fileName).toString());
+                // Path traversal (zip slip) protection
+                if (!entryFile.toPath().normalize()
+                              .startsWith(new File(outputDir).toPath().normalize())) {
+                    log.warn("Skipped extracting entry '{}' due to zip slip attempt", fileName);
+                    continue;
                 }
                 FileUtils.forceMkdir(entryFile.getParentFile());
                 try (final FileOutputStream fos = new FileOutputStream(entryFile);

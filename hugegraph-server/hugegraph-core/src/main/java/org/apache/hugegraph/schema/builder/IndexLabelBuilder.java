@@ -30,7 +30,6 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.tx.ISchemaTransaction;
-import org.apache.hugegraph.backend.tx.SchemaTransaction;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NotAllowException;
@@ -56,12 +55,12 @@ public class IndexLabelBuilder extends AbstractBuilder
         implements IndexLabel.Builder {
 
     private Id id;
-    private String name;
+    private final String name;
     private HugeType baseType;
     private String baseValue;
     private IndexType indexType;
-    private List<String> indexFields;
-    private Userdata userdata;
+    private final List<String> indexFields;
+    private final Userdata userdata;
     private boolean checkExist;
     private boolean rebuild;
 

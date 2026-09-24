@@ -27,7 +27,7 @@ import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
 import org.apache.hugegraph.store.HgStoreEngine;
-import org.apache.hugegraph.store.business.DefaultDataMover;
+import org.apache.hugegraph.store.business.DataManagerImpl;
 import org.apache.hugegraph.store.grpc.session.BatchReq;
 import org.apache.hugegraph.store.grpc.session.CleanReq;
 import org.apache.hugegraph.store.grpc.session.GraphReq;
@@ -51,7 +51,7 @@ import com.google.protobuf.CodedOutputStream;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * @projectName: raft task executor
+ * raft task executor
  */
 @Slf4j
 @Service
@@ -61,7 +61,7 @@ public class HgStoreNodeService implements RaftTaskHandler {
     public static final byte TABLE_OP = 0x13;
     public static final byte GRAPH_OP = 0x14;
     public static final byte CLEAN_OP = 0x15;
-
+    public static final byte TTL_CLEAN_OP = 0x16;
     public static final byte MAX_OP = 0x59;
     private final AppConfig appConfig;
     @Autowired
@@ -109,6 +109,14 @@ public class HgStoreNodeService implements RaftTaskHandler {
                 setPartitionCount(appConfig.getFakePdConfig().getPartitionCount());
                 setShardCount(appConfig.getFakePdConfig().getShardCount());
             }});
+            setQueryPushDownOption(new QueryPushDownOption(){{
+                setThreadPoolSize(appConfig.getQueryPushDownConfig().getThreadPoolSize());
+                setFetchBatchSize(appConfig.getQueryPushDownConfig().getFetchBatchSize());
+                setFetchTimeout(appConfig.getQueryPushDownConfig().getFetchTimeOut());
+                setMemoryLimitCount(appConfig.getQueryPushDownConfig().getMemoryLimitCount());
+                setIndexSizeLimitCount(appConfig.getQueryPushDownConfig().getIndexSizeLimitCount());
+            }});
+            setJobConfig(appConfig.getJobOptions());
         }};
 
         RaftRocksdbOptions.initRocksdbGlobalConfig(options.getRocksdbConfig());
@@ -116,7 +124,7 @@ public class HgStoreNodeService implements RaftTaskHandler {
         options.getLabels().put("rest.port", Integer.toString(appConfig.getRestPort()));
         log.info("HgStoreEngine init {}", options);
         options.setTaskHandler(this);
-        options.setDataTransfer(new DefaultDataMover());
+        options.setDataTransfer(new DataManagerImpl());
         storeEngine = HgStoreEngine.getInstance();
         storeEngine.init(options);
 
@@ -129,7 +137,8 @@ public class HgStoreNodeService implements RaftTaskHandler {
     /**
      * Add raft task, forward data to raft
      *
-     * @return true means the data has been submitted, false means not submitted, used to reduce batch splitting for single-replica storage
+     * @return true means the data has been submitted, false means not submitted, used to reduce
+     * batch splitting for single-replica storage
      */
     public <Req extends com.google.protobuf.GeneratedMessageV3>
     void addRaftTask(byte methodId, String graphName, Integer partitionId, Req req,

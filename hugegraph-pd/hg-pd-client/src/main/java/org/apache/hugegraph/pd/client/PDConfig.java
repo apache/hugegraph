@@ -17,6 +17,14 @@
 
 package org.apache.hugegraph.pd.client;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import java.util.Base64;
+
+import org.apache.commons.lang3.StringUtils;
+
+import org.apache.hugegraph.pd.client.interceptor.AuthenticationException;
+
 public final class PDConfig {
 
     // TODO: multi-server
@@ -29,6 +37,13 @@ public final class PDConfig {
     private boolean enablePDNotify = false;
 
     private boolean enableCache = false;
+    // FIXME: need to add AuthCheck
+    private String authority = "DEFAULT";
+    private String userName = "store";
+    private static final int GRPC_DEFAULT_MAX_INBOUND_MESSAGE_SIZE = 1024 * 1024 * 1024;
+    private static final int GRPC_DEFAULT_MAX_OUTBOUND_MESSAGE_SIZE = 1024 * 1024 * 1024;
+    private static int inboundMessageSize = GRPC_DEFAULT_MAX_INBOUND_MESSAGE_SIZE;
+    private static int outboundMessageSize = GRPC_DEFAULT_MAX_OUTBOUND_MESSAGE_SIZE;
 
     private PDConfig() {
     }
@@ -58,6 +73,10 @@ public final class PDConfig {
         return grpcTimeOut;
     }
 
+    public void setGrpcTimeOut(long grpcTimeOut) {
+        this.grpcTimeOut = grpcTimeOut;
+    }
+
     @Deprecated
     public PDConfig setEnablePDNotify(boolean enablePDNotify) {
         this.enablePDNotify = enablePDNotify;
@@ -79,5 +98,43 @@ public final class PDConfig {
         return "PDConfig{" +
                "serverHost='" + serverHost + '\'' +
                '}';
+    }
+
+    public PDConfig setAuthority(String userName, String pwd) {
+        // If userName is null or empty, keep default values for test environment
+        if (StringUtils.isEmpty(userName)) {
+            return this;
+        }
+        this.userName = userName;
+        String auth = userName + ':' + pwd;
+        this.authority = Base64.getEncoder().encodeToString(auth.getBytes(UTF_8));
+        return this;
+    }
+
+    public String getUserName() {
+        return userName;
+    }
+
+    public String getAuthority() {
+        if (StringUtils.isEmpty(this.authority)) {
+            throw new AuthenticationException("invalid basic authentication info");
+        }
+        return authority;
+    }
+
+    public static int getInboundMessageSize() {
+        return inboundMessageSize;
+    }
+
+    public static void setInboundMessageSize(int inboundMessageSize) {
+        PDConfig.inboundMessageSize = inboundMessageSize;
+    }
+
+    public static int getOutboundMessageSize() {
+        return outboundMessageSize;
+    }
+
+    public static void setOutboundMessageSize(int outboundMessageSize) {
+        PDConfig.outboundMessageSize = outboundMessageSize;
     }
 }

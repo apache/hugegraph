@@ -30,9 +30,6 @@ import com.google.protobuf.Empty;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 
-/**
- *
- */
 @ThreadSafe
 public final class GrpcNodeHealthyClient {
 
@@ -63,8 +60,7 @@ public final class GrpcNodeHealthyClient {
         return stub;
     }
 
-
-/*    boolean isHealthy(GrpcStoreNodeImpl node) {
+    boolean isHealthy(GrpcStoreNodeImpl node) {
         String target = node.getAddress();
 
         HealthyOuterClass.StringReply response = getStub(target).isOk(Empty.newBuilder().build());
@@ -76,7 +72,7 @@ public final class GrpcNodeHealthyClient {
             System.out.printf("gRPC-res-msg: %s%n", res);
             return false;
         }
-    }*/
+    }
 
     public boolean isHealthy() {
         String target = "localhost:9080";

@@ -19,10 +19,11 @@ package org.apache.hugegraph.api.auth;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
-import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
+import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
@@ -36,6 +37,8 @@ import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -50,7 +53,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/auth/targets")
+@Path("graphspaces/{graphspace}/auth/targets")
 @Singleton
 @Tag(name = "TargetAPI")
 public class TargetAPI extends API {
@@ -63,15 +66,16 @@ public class TargetAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
-                         @PathParam("graph") String graph,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
                          JsonTarget jsonTarget) {
-        LOG.debug("Graph [{}] create target: {}", graph, jsonTarget);
+        LOG.debug("GraphSpace [{}] create target: {}", graphSpace, jsonTarget);
+        GraphSpaceGroupAPI.ensureAuthManager(manager, graphSpace);
         checkCreatingBody(jsonTarget);
 
-        HugeGraph g = graph(manager, graph);
-        HugeTarget target = jsonTarget.build();
-        target.id(manager.authManager().createTarget(target));
-        return manager.serializer(g).writeAuthElement(target);
+        HugeTarget target = jsonTarget.build(graphSpace);
+        target.id(manager.authManager().createTarget(graphSpace, target));
+        return manager.serializer().writeAuthElement(target);
     }
 
     @PUT
@@ -80,35 +84,53 @@ public class TargetAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String update(@Context GraphManager manager,
-                         @PathParam("graph") String graph,
+                         @Parameter(description = "The graph space name")
+                         @PathParam("graphspace") String graphSpace,
+                         @Parameter(description = "The target id")
                          @PathParam("id") String id,
                          JsonTarget jsonTarget) {
-        LOG.debug("Graph [{}] update target: {}", graph, jsonTarget);
+        LOG.debug("GraphSpace [{}] update target: {}", graphSpace, jsonTarget);
+        GraphSpaceGroupAPI.ensureAuthManager(manager, graphSpace);
         checkUpdatingBody(jsonTarget);
 
-        HugeGraph g = graph(manager, graph);
         HugeTarget target;
         try {
-            target = manager.authManager().getTarget(UserAPI.parseId(id));
+            target = manager.authManager().getTarget(graphSpace,
+                                                     UserAPI.parseId(id));
         } catch (NotFoundException e) {
             throw new IllegalArgumentException("Invalid target id: " + id);
         }
+        checkGraphSpace(graphSpace, target);
         target = jsonTarget.build(target);
-        manager.authManager().updateTarget(target);
-        return manager.serializer(g).writeAuthElement(target);
+        manager.authManager().updateTarget(graphSpace, target);
+        return manager.serializer().writeAuthElement(target);
     }
 
     @GET
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String list(@Context GraphManager manager,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The limit of results to return")
                        @QueryParam("limit") @DefaultValue("100") long limit) {
-        LOG.debug("Graph [{}] list targets", graph);
+        LOG.debug("GraphSpace [{}] list targets", graphSpace);
+        GraphSpaceGroupAPI.ensureAuthManager(manager, graphSpace);
 
-        HugeGraph g = graph(manager, graph);
-        List<HugeTarget> targets = manager.authManager().listAllTargets(limit);
-        return manager.serializer(g).writeAuthElements("targets", targets);
+        List<HugeTarget> targets = listScopedTargets(manager.authManager(),
+                                                     graphSpace, limit);
+        return manager.serializer().writeAuthElements("targets", targets);
+    }
+
+    static List<HugeTarget> listScopedTargets(AuthManager authManager,
+                                               String graphSpace,
+                                               long limit) {
+        List<HugeTarget> targets = authManager.listAllTargets(graphSpace, -1L);
+        targets = targets.stream()
+                         .filter(target -> graphSpace.equals(
+                                 target.graphSpace()))
+                         .collect(Collectors.toList());
+        return GraphSpaceGroupAPI.applyLimit(targets, limit);
     }
 
     @GET
@@ -116,13 +138,17 @@ public class TargetAPI extends API {
     @Path("{id}")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
-                      @PathParam("graph") String graph,
+                      @Parameter(description = "The graph space name")
+                      @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The target id")
                       @PathParam("id") String id) {
-        LOG.debug("Graph [{}] get target: {}", graph, id);
+        LOG.debug("GraphSpace [{}] get target: {}", graphSpace, id);
+        GraphSpaceGroupAPI.ensureAuthManager(manager, graphSpace);
 
-        HugeGraph g = graph(manager, graph);
-        HugeTarget target = manager.authManager().getTarget(UserAPI.parseId(id));
-        return manager.serializer(g).writeAuthElement(target);
+        HugeTarget target = manager.authManager().getTarget(
+                graphSpace, UserAPI.parseId(id));
+        checkGraphSpace(graphSpace, target);
+        return manager.serializer().writeAuthElement(target);
     }
 
     @DELETE
@@ -130,30 +156,50 @@ public class TargetAPI extends API {
     @Path("{id}")
     @Consumes(APPLICATION_JSON)
     public void delete(@Context GraphManager manager,
-                       @PathParam("graph") String graph,
+                       @Parameter(description = "The graph space name")
+                       @PathParam("graphspace") String graphSpace,
+                       @Parameter(description = "The target id")
                        @PathParam("id") String id) {
-        LOG.debug("Graph [{}] delete target: {}", graph, id);
+        LOG.debug("GraphSpace [{}] delete target: {}", graphSpace, id);
+        GraphSpaceGroupAPI.ensureAuthManager(manager, graphSpace);
 
-        @SuppressWarnings("unused") // just check if the graph exists
-        HugeGraph g = graph(manager, graph);
         try {
-            manager.authManager().deleteTarget(UserAPI.parseId(id));
+            HugeTarget target = manager.authManager().getTarget(
+                    graphSpace, UserAPI.parseId(id));
+            checkGraphSpace(graphSpace, target);
+            manager.authManager().deleteTarget(graphSpace,
+                                               UserAPI.parseId(id));
         } catch (NotFoundException e) {
             throw new IllegalArgumentException("Invalid target id: " + id);
         }
     }
 
+    static void checkGraphSpace(String graphSpace, HugeTarget target) {
+        E.checkArgumentNotNull(target, "The target can't be null");
+        if (!graphSpace.equals(target.graphSpace())) {
+            throw new jakarta.ws.rs.ForbiddenException(
+                    "Permission denied: target belongs to another graphspace");
+        }
+    }
+
     @JsonIgnoreProperties(value = {"id", "target_creator",
                                    "target_create", "target_update"})
-    private static class JsonTarget implements Checkable {
+    static class JsonTarget implements Checkable {
 
         @JsonProperty("target_name")
+        @Schema(description = "The target name", required = true)
         private String name;
         @JsonProperty("target_graph")
+        @Schema(description = "The target graph name", required = true)
         private String graph;
         @JsonProperty("target_url")
+        @Schema(description = "The target URL")
         private String url;
+        @JsonProperty("target_description")
+        @Schema(description = "The target description")
+        private String description;
         @JsonProperty("target_resources") // error when List<HugeResource>
+        @Schema(description = "The target resources")
         private List<Map<String, Object>> resources;
 
         public HugeTarget build(HugeTarget target) {
@@ -169,15 +215,32 @@ public class TargetAPI extends API {
             if (this.resources != null) {
                 target.resources(JsonUtil.toJson(this.resources));
             }
+            if (this.description != null) {
+                target.description(this.description);
+            }
             return target;
         }
 
-        public HugeTarget build() {
-            HugeTarget target = new HugeTarget(this.name, this.graph, this.url);
+        public HugeTarget build(String graphSpace) {
+            String targetUrl = this.url == null ? "" : this.url;
+            HugeTarget target = new HugeTarget(this.name, this.graph,
+                                               targetUrl);
+            target.graphSpace(graphSpace);
+            target.description(this.description);
             if (this.resources != null) {
                 target.resources(JsonUtil.toJson(this.resources));
             }
             return target;
+        }
+
+        @Override
+        public String toString() {
+            return "JsonTarget{" +
+                   "name='" + name + '\'' +
+                   ", graph='" + graph + '\'' +
+                   ", url='" + url + '\'' +
+                   ", resources=" + resources +
+                   '}';
         }
 
         @Override
@@ -186,15 +249,13 @@ public class TargetAPI extends API {
                                    "The name of target can't be null");
             E.checkArgumentNotNull(this.graph,
                                    "The graph of target can't be null");
-            E.checkArgumentNotNull(this.url,
-                                   "The url of target can't be null");
         }
 
         @Override
         public void checkUpdate() {
-            E.checkArgument(this.url != null ||
-                            this.resources != null,
-                            "Expect one of target url/resources");
+            E.checkArgument(this.url != null || this.resources != null ||
+                            this.description != null,
+                            "Expect one of target url/resources/description");
 
         }
     }

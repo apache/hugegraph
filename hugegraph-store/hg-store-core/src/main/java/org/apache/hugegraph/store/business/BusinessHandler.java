@@ -19,6 +19,9 @@ package org.apache.hugegraph.store.business;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -26,13 +29,16 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.hugegraph.pd.grpc.pulse.CleanType;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
+import org.apache.hugegraph.store.constant.HugeServerTables;
 import org.apache.hugegraph.store.grpc.Graphpb;
 import org.apache.hugegraph.store.grpc.common.Key;
 import org.apache.hugegraph.store.grpc.common.OpType;
+import org.apache.hugegraph.store.grpc.query.DeDupOption;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
 import org.apache.hugegraph.store.meta.base.DBSessionBuilder;
 import org.apache.hugegraph.store.metric.HgStoreMetric;
-import org.apache.hugegraph.store.raft.HgStoreStateMachine;
+import org.apache.hugegraph.store.query.QueryTypeParam;
+import org.apache.hugegraph.store.raft.PartitionStateMachine;
 import org.apache.hugegraph.store.term.HgPair;
 import org.apache.hugegraph.store.util.HgStoreException;
 import org.rocksdb.Cache;
@@ -40,20 +46,14 @@ import org.rocksdb.MemoryUsageType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.protobuf.ByteString;
+
 public interface BusinessHandler extends DBSessionBuilder {
 
-    Logger log = LoggerFactory.getLogger(HgStoreStateMachine.class);
-    String tableUnknown = "unknown";
-    String tableVertex = "g+v";
-    String tableOutEdge = "g+oe";
-    String tableInEdge = "g+ie";
-    String tableIndex = "g+index";
-    String tableTask = "g+task";
-    String tableOlap = "g+olap";
-    String tableServer = "g+server";
-
-    String[] tables = new String[]{tableUnknown, tableVertex, tableOutEdge, tableInEdge, tableIndex,
-                                   tableTask, tableOlap, tableServer};
+    Logger log = LoggerFactory.getLogger(PartitionStateMachine.class);
+    int compactionCanStart = 0;
+    int compactionDone = 1;
+    int doing = -1;
 
     void doPut(String graph, int code, String table, byte[] key, byte[] value) throws
                                                                                HgStoreException;
@@ -66,8 +66,22 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     ScanIterator scan(String graph, String table, int codeFrom, int codeTo) throws HgStoreException;
 
-    ScanIterator scan(String graph, int code, String table, byte[] start, byte[] end,
-                      int scanType) throws HgStoreException;
+    ScanIterator scan(String graph, int code, String table, byte[] start,
+                      byte[] end, int scanType) throws HgStoreException;
+
+    default ScanIterator scanOrdered(String graph, String table, byte[] start,
+                                     byte[] end, int scanType)
+                                     throws HgStoreException {
+        throw new UnsupportedOperationException(
+                "Ordered scan is not supported");
+    }
+
+    /**
+     * primary index scan
+     */
+    ScanIterator scan(String graph, String table, List<QueryTypeParam> params,
+                      DeDupOption dedupOption)
+            throws HgStoreException;
 
     ScanIterator scan(String graph, int code, String table, byte[] start, byte[] end, int scanType,
                       byte[] conditionQuery) throws HgStoreException;
@@ -82,6 +96,15 @@ public interface BusinessHandler extends DBSessionBuilder {
     ScanIterator scanPrefix(String graph, int code, String table, byte[] prefix) throws
                                                                                  HgStoreException;
 
+    ScanIterator scanIndex(String graph, List<List<QueryTypeParam>> param,
+                           DeDupOption dedupOption, boolean transElement, boolean filterTTL) throws
+                                                                                             HgStoreException;
+
+    ScanIterator scanIndex(String graph, String table, List<List<QueryTypeParam>> params,
+                           DeDupOption dedupOption, boolean lookupBack, boolean transKey,
+                           boolean filterTTL, int limit)
+            throws HgStoreException;
+
     HgStoreMetric.Partition getPartitionMetric(String graph, int partId,
                                                boolean accurateCount) throws HgStoreException;
 
@@ -92,12 +115,15 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     void flushAll();
 
+    void closeDB(int partId);
+
     void closeAll();
 
-    //
     Map<MemoryUsageType, Long> getApproximateMemoryUsageByType(List<Cache> caches);
 
     List<Integer> getLeaderPartitionIds(String graph);
+
+    Set<Integer> getLeaderPartitionIdSet();
 
     HgStoreMetric.Graph getGraphMetric(String graph, int partId);
 
@@ -129,12 +155,15 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     TxBuilder txBuilder(String graph, int partId);
 
+    boolean cleanTtl(String graph, int partId, String table, List<ByteString> ids);
+
     default void doBatch(String graph, int partId, List<BatchEntry> entryList) {
         BusinessHandler.TxBuilder builder = txBuilder(graph, partId);
+        BusinessHandler.Tx transaction = builder.build();
         try {
             for (BatchEntry b : entryList) {
                 Key start = b.getStartKey();
-                String table = tables[b.getTable()];
+                String table = HugeServerTables.TABLES[b.getTable()];
                 byte[] startKey = start.getKey().toByteArray();
                 int number = b.getOpType().getNumber();
                 if (number == OpType.OP_TYPE_PUT_VALUE) {
@@ -164,12 +193,16 @@ public interface BusinessHandler extends DBSessionBuilder {
                     }
                 }
             }
-            builder.build().commit();
+            transaction.commit();
         } catch (Throwable e) {
             String msg =
                     String.format("graph data %s-%s do batch insert with error:", graph, partId);
             log.error(msg, e);
-            builder.build().rollback();
+            try {
+                transaction.rollback();
+            } catch (Throwable rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         }
     }
@@ -186,9 +219,55 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     boolean dbCompaction(String graphName, int partitionId, String tableName);
 
+    boolean blockingCompact(String graphName, int partitionId);
+
     void destroyGraphDB(String graphName, int partId) throws HgStoreException;
 
     long count(String graphName, String table);
+
+    void lock(String path) throws InterruptedException,
+                                  TimeoutException;
+
+    void unlock(String path);
+
+    /**
+     * Non-blocking attempt to reserve the compactRange() window for partition {@code id}.
+     * Returns false if a compaction is actively running for that partition right now.
+     * Default throws, like {@link #scanOrdered}, so adding this compaction-lock helper does
+     * not break downstream implementations of this public interface that predate it.
+     */
+    default boolean tryLockCompactionRange(int id) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
+    default void unlockCompactionRange(int id) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
+    void awaitAndSetLock(int id, int expectedValue, int value) throws InterruptedException,
+                                                                      TimeoutException;
+
+    void setAndNotifyState(int id, int state);
+
+    AtomicInteger getState(int id);
+
+    String getLockPath(int partitionId);
+
+    /**
+     * The path lock state for {@code path} as set by {@link #lock} / {@link #unlock}
+     * ({@link #compactionCanStart} or {@link #doing}), or {@code null} if {@code path} has
+     * never been locked. Default throws, like {@link #scanOrdered}, so adding this
+     * compaction-lock helper does not break downstream implementations of this public
+     * interface that predate it.
+     */
+    default AtomicInteger getPathLockState(String path) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
+    List<Integer> getPartitionIds(String graph);
 
     @NotThreadSafe
     interface TxBuilder {

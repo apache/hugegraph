@@ -118,8 +118,8 @@ public class HgStoreEngineTest extends StoreEngineTestBase {
     }
 
     @Test
-    public void testGetDataMover() {
-        assertNotNull(engine.getDataMover());
+    public void testGetDataManager() {
+        assertNotNull(engine.getDataManager());
     }
 
     @Test

@@ -28,7 +28,7 @@ import com.google.common.collect.ImmutableMap;
 
 public class SchemaTemplate {
 
-    public static SimpleDateFormat FORMATTER = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+    public static SimpleDateFormat FORMATTER = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     protected Date createTime;
     protected Date updateTime;
     protected String creator;

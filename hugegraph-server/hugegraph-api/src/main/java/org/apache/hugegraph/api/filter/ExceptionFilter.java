@@ -89,7 +89,7 @@ public class ExceptionFilter {
         @GET
         @Timed
         @Produces(APPLICATION_JSON_WITH_CHARSET)
-        @RolesAllowed({"admin"})
+        @RolesAllowed({"space_member"})
         public Object get() {
             return ImmutableMap.of("trace", TracedExceptionMapper.forcedTrace);
         }
@@ -98,7 +98,7 @@ public class ExceptionFilter {
         @Timed
         @Consumes(APPLICATION_JSON)
         @Produces(APPLICATION_JSON_WITH_CHARSET)
-        @RolesAllowed({"admin"})
+        @RolesAllowed({"space_member"})
         public Object trace(boolean trace) {
             TracedExceptionMapper.forcedTrace = trace;
             return ImmutableMap.of("trace", TracedExceptionMapper.forcedTrace);

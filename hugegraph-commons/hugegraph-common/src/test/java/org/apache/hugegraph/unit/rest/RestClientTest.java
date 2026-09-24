@@ -112,7 +112,7 @@ public class RestClientTest {
 
     @Test
     public void testPostHttpsWithAllParams() {
-        String url = "https://github.com/apache/incubator-hugegraph-doc/" +
+        String url = "https://github.com/apache/hugegraph-doc/" +
                      "raw/master/dist/commons/cacerts.jks";
         String trustStoreFile = "src/test/resources/cacerts.jks";
         BaseUnitTest.downloadFileByUrl(url, trustStoreFile);
@@ -129,7 +129,7 @@ public class RestClientTest {
 
     @Test
     public void testPostHttpsWithTokenAndAllParams() {
-        String url = "https://github.com/apache/incubator-hugegraph-doc/" +
+        String url = "https://github.com/apache/hugegraph-doc/" +
                      "raw/master/dist/commons/cacerts.jks";
         String trustStoreFile = "src/test/resources/cacerts.jks";
         BaseUnitTest.downloadFileByUrl(url, trustStoreFile);

@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.store.client;
 
+import java.util.List;
+
+import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 
 /**
@@ -63,4 +66,17 @@ public interface HgStoreNodePartitioner {
                 , HgStoreClientConst.ALL_PARTITION_OWNER
                 , HgStoreClientConst.ALL_PARTITION_OWNER);
     }
+
+    default String partition(String graphName, byte[] startKey) throws PDException {
+        return null;
+    }
+
+    default String partition(String graphName, int code) throws PDException {
+        return null;
+    }
+
+    default List<String> getStores(String graphName) throws PDException {
+        return null;
+    }
+
 }

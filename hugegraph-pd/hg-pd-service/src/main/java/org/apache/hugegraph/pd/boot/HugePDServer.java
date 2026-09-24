@@ -37,7 +37,7 @@ public class HugePDServer {
             System.setProperty("logging.path", "logs");
             System.setProperty("com.alipay.remoting.client.log.level", "error");
         }
-
+        Runtime.getRuntime().addShutdownHook(new ShutdownHook(Thread.currentThread()));
         SpringApplication.run(HugePDServer.class);
         System.out.println("Hugegraph-pd started.");
     }

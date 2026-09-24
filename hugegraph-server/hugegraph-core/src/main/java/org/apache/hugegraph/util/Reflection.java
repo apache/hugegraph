@@ -33,49 +33,36 @@ public class Reflection {
     private static final Method REGISTER_FILEDS_TO_FILTER_METHOD;
     private static final Method REGISTER_METHODS_TO_FILTER_METHOD;
 
-    public static final String JDK_INTERNAL_REFLECT_REFLECTION = "jdk.internal.reflect.Reflection";
-    public static final String SUN_REFLECT_REFLECTION = "sun.reflect.Reflection";
-
     static {
         Method registerFieldsToFilterMethodTemp = null;
         Method registerMethodsToFilterMethodTemp = null;
         Class<?> reflectionClazzTemp = null;
         try {
-            reflectionClazzTemp = Class.forName(JDK_INTERNAL_REFLECT_REFLECTION);
+            reflectionClazzTemp = Class.forName("jdk.internal.reflect.Reflection");
+
+            registerFieldsToFilterMethodTemp =
+                    reflectionClazzTemp.getMethod("registerFieldsToFilter",
+                                                  Class.class, String[].class);
+
+            registerMethodsToFilterMethodTemp =
+                    reflectionClazzTemp.getMethod("registerMethodsToFilter",
+                                                  Class.class, String[].class);
         } catch (ClassNotFoundException e) {
-            try {
-                reflectionClazzTemp = Class.forName(SUN_REFLECT_REFLECTION);
-            } catch (ClassNotFoundException ex) {
-                LOG.error("Can't find Reflection class", ex);
-            }
+            LOG.error("Can't find jdk.internal.reflect.Reflection class, " +
+                      "please ensure you are using Java 11", e);
+        } catch (NoSuchMethodException e) {
+            LOG.error("Can't find reflection filter methods", e);
         }
 
         REFLECTION_CLAZZ = reflectionClazzTemp;
-
-        if (REFLECTION_CLAZZ != null) {
-            try {
-                registerFieldsToFilterMethodTemp =
-                        REFLECTION_CLAZZ.getMethod("registerFieldsToFilter",
-                                                   Class.class, String[].class);
-            } catch (Throwable e) {
-                LOG.error("Can't find registerFieldsToFilter method", e);
-            }
-
-            try {
-                registerMethodsToFilterMethodTemp =
-                        REFLECTION_CLAZZ.getMethod("registerMethodsToFilter",
-                                                   Class.class, String[].class);
-            } catch (NoSuchMethodException e) {
-                LOG.error("Can't find registerMethodsToFilter method", e);
-            }
-        }
         REGISTER_FILEDS_TO_FILTER_METHOD = registerFieldsToFilterMethodTemp;
         REGISTER_METHODS_TO_FILTER_METHOD = registerMethodsToFilterMethodTemp;
     }
 
     public static void registerFieldsToFilter(Class<?> containingClass, String... fieldNames) {
         if (REGISTER_FILEDS_TO_FILTER_METHOD == null) {
-            throw new NotSupportException("Reflection.registerFieldsToFilter()");
+            throw new NotSupportException("Reflection.registerFieldsToFilter() - " +
+                                          "requires Java 11 or higher");
         }
 
         try {
@@ -89,7 +76,8 @@ public class Reflection {
 
     public static void registerMethodsToFilter(Class<?> containingClass, String... methodNames) {
         if (REGISTER_METHODS_TO_FILTER_METHOD == null) {
-            throw new NotSupportException("Reflection.registerMethodsToFilterMethod()");
+            throw new NotSupportException("Reflection.registerMethodsToFilter() - " +
+                                          "requires Java 11 or higher");
         }
 
         try {

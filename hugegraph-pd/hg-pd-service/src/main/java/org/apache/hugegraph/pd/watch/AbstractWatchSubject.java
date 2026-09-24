@@ -20,6 +20,7 @@ package org.apache.hugegraph.pd.watch;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import javax.annotation.concurrent.ThreadSafe;
@@ -37,7 +38,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 abstract class AbstractWatchSubject {
 
-    private final Map<Long, StreamObserver<WatchResponse>> watcherHolder = new HashMap<>(1024);
+    private final Map<Long, StreamObserver<WatchResponse>> watcherHolder =
+            new ConcurrentHashMap<>(1024);
     private final byte[] lock = new byte[0];
     private final WatchResponse.Builder builder = WatchResponse.newBuilder();
     private final WatchType watchType;

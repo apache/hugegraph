@@ -50,6 +50,15 @@ public class IndexAPI extends API {
     @Autowired
     PDRestService pdRestService;
 
+    /**
+     * Get brief system statistics
+     * This interface uses a GET request to obtain brief system statistics, including leader addresses, cluster status, storage size, number of graphs, and number of partitions.
+     *
+     * @return A BriefStatistics object containing the system's brief statistical information
+     * @throws PDException If an exception occurs while retrieving statistical information, a PDException exception is thrown
+     * @throws ExecutionException If a task execution exception occurs, an ExecutionException exception is thrown
+     * @throws InterruptedException If a thread is interrupted while waiting, an InterruptedException exception is thrown
+     */
     @GetMapping(value = "/", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public BriefStatistics index() throws PDException, ExecutionException, InterruptedException {
@@ -57,13 +66,49 @@ public class IndexAPI extends API {
         BriefStatistics statistics = new BriefStatistics();
         statistics.leader = RaftEngine.getInstance().getLeaderGrpcAddress();
         statistics.state = pdService.getStoreNodeService().getClusterStats().getState().toString();
+
+        // Use pdService (consistent with cluster()) rather than RaftEngine directly
+        CallStreamObserverWrap<Pdpb.GetMembersResponse> membersResp =
+                new CallStreamObserverWrap<>();
+        pdService.getMembers(Pdpb.GetMembersRequest.newBuilder().build(), membersResp);
+        statistics.memberSize = membersResp.get().get(0).getMembersList().size();
+
         statistics.storeSize = pdService.getStoreNodeService().getActiveStores().size();
-        statistics.graphSize = pdService.getPartitionService().getGraphs().size();
+        // Filter to user-facing graphs only (consistent with cluster())
+        List<Metapb.Graph> graphs = pdRestService.getGraphs();
+        statistics.graphSize = (int) graphs.stream()
+                                           .filter(g -> g.getGraphName() != null &&
+                                                        g.getGraphName().endsWith("/g"))
+                                           .count();
         statistics.partitionSize = pdService.getStoreNodeService().getShardGroups().size();
+
+        // Derive worst partition health state across all graphs
+        Metapb.PartitionState dataState = Metapb.PartitionState.PState_Normal;
+        for (Metapb.Graph graph : graphs) {
+            if (graph.getState() == Metapb.PartitionState.UNRECOGNIZED) {
+                continue;
+            }
+            if (graph.getState() != null &&
+                graph.getState().getNumber() > dataState.getNumber()) {
+                dataState = graph.getState();
+            }
+        }
+        statistics.dataState = dataState.name();
+
         return statistics;
 
     }
 
+    /**
+     * Get cluster statistics
+     * Obtain various statistics about the cluster by calling related services, including node status, member list, storage information, graph information, etc.,
+     * and return them as a Statistics object.
+     *
+     * @return A RestApiResponse object containing cluster statistics
+     * @throws InterruptedException If the thread is interrupted while waiting, this exception is thrown
+     * @throws ExecutionException If an exception occurs during task execution, this exception is thrown
+     * @throws PDException If an exception occurs while processing cluster statistics, such as service call failure or data processing errors, a PDException exception is thrown
+     */
     @GetMapping(value = "/v1/cluster", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public RestApiResponse cluster() throws InterruptedException, ExecutionException {
@@ -138,9 +183,13 @@ public class IndexAPI extends API {
     class BriefStatistics {
 
         String state;
+        /** Worst partition health state across all graphs (mirrors cluster().dataState) */
+        String dataState;
         String leader;
         int memberSize;
+        /** Active (online) store count only */
         int storeSize;
+        /** User-facing graphs count (graphName ending with /g) */
         int graphSize;
         int partitionSize;
     }

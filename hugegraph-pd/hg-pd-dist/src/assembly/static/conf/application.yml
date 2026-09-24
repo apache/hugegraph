@@ -27,7 +27,10 @@ management:
   endpoints:
     web:
       exposure:
-        include: "*"
+        # Allowlist, not "*": actuator has its own handler mapping, which
+        # the REST auth interceptor is not attached to, so anything exposed
+        # here is anonymous on this port. This list is what bounds it.
+        include: "health,metrics,prometheus"
 
 logging:
   config: 'file:./conf/log4j2.xml'
@@ -43,6 +46,22 @@ grpc:
 server:
   # REST service port number
   port: 8620
+
+auth:
+  # Shared secret checked against the password of the Basic credential on every
+  # authenticated REST request. Clients send one of the internal service names
+  # (hg, store, hubble, vermeer) with this value as the password.
+  #
+  # REQUIRED, and deliberately empty: a secret shipped in the source tree is
+  # published to everyone, so there is no safe default to give you. Generate
+  # one per deployment, for example with `openssl rand -hex 24`, and set the
+  # same value on every client that calls the PD REST API (the Server's
+  # PD_AUTH_PASSWORD, Hubble's operations.pd.password).
+  #
+  # While this is empty PD refuses every authenticated REST request and logs
+  # an error naming this key. Do not expose port 8620 outside a trusted
+  # network even once it is set.
+  secret-key:
 
 pd:
   # Storage path

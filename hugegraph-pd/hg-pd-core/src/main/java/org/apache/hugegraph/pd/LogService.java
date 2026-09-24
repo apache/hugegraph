@@ -40,7 +40,7 @@ public class LogService {
     public static final String TASK = "TASK";
     public static final String NODE_CHANGE = "NODE_CHANGE";
     public static final String PARTITION_CHANGE = "PARTITION_CHANGE";
-    private final LogMeta logMeta;
+    private LogMeta logMeta;
 
     public LogService(PDConfig pdConfig) {
         logMeta = MetadataFactory.newLogMeta(pdConfig);

@@ -20,6 +20,7 @@ package org.apache.hugegraph.store.util;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
@@ -29,21 +30,13 @@ import java.util.concurrent.TimeUnit;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import org.jetbrains.annotations.NotNull;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
 
     // Scheduled executor service for periodically clearing the cache.
-    private ScheduledExecutorService scheduledExecutor;
+    private final ScheduledExecutorService scheduledExecutor;
 
     // The underlying map used to store key-value pairs in this cache.
     private volatile Map<K, V> map;
@@ -59,8 +52,8 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
         // Create a single-threaded scheduled executor to manage cache clearing.
         scheduledExecutor = Executors.newScheduledThreadPool(1);
         // Schedule the clear task to run at fixed intervals defined by effectiveTime.
-        scheduledExecutor.scheduleWithFixedDelay(
-                this::clear, effectiveTime, effectiveTime, TimeUnit.MILLISECONDS);
+        scheduledExecutor.scheduleWithFixedDelay(this::clear, effectiveTime, effectiveTime,
+                                                 TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -163,7 +156,8 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
      *
      * @param k The key with which the specified value is to be associated.
      * @param v The value to be associated with the specified key.
-     * @return the previous value associated with the key, or null if there was no mapping for the key.
+     * @return the previous value associated with the key, or null if there was no mapping for
+     * the key.
      */
     @Override
     public synchronized V put(K k, V v) {
@@ -189,7 +183,8 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
      * Removes the mapping for the specified key from this cache if present.
      *
      * @param key The key whose mapping is to be removed from the cache.
-     * @return the previous value associated with the key, or null if there was no mapping for the key.
+     * @return the previous value associated with the key, or null if there was no mapping for
+     * the key.
      */
     @Override
     public synchronized V remove(Object key) {
@@ -200,12 +195,14 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
     }
 
     /**
-     * If the specified key is not already associated with a value, associates it with the given value.
+     * If the specified key is not already associated with a value, associates it with the given
+     * value.
      * Otherwise, returns the current value associated with the key.
      *
      * @param k The key with which the specified value is to be associated.
      * @param v The value to be associated with the specified key.
-     * @return the previous value associated with the key, or null if there was no mapping for the key.
+     * @return the previous value associated with the key, or null if there was no mapping for
+     * the key.
      */
     @Override
     public synchronized V putIfAbsent(K k, V v) {
@@ -217,7 +214,8 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
     }
 
     /**
-     * Removes the entry for the specified key only if it is currently mapped to the specified value.
+     * Removes the entry for the specified key only if it is currently mapped to the specified
+     * value.
      *
      * @param k The key whose mapping is to be removed.
      * @param v The value expected to be associated with the key.
@@ -234,10 +232,11 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
     }
 
     /**
-     * Replaces the entry for the specified key only if it is currently mapped to the specified original value.
+     * Replaces the entry for the specified key only if it is currently mapped to the specified
+     * original value.
      *
-     * @param k          The key whose mapping is to be replaced.
-     * @param original   The expected value to be associated with the key.
+     * @param k           The key whose mapping is to be replaced.
+     * @param original    The expected value to be associated with the key.
      * @param replacement The value to be associated with the key if the original value is present.
      * @return true if the mapping was replaced; otherwise, false.
      */
@@ -256,7 +255,8 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
      *
      * @param k The key whose mapping is to be replaced.
      * @param v The new value to be associated with the key.
-     * @return the previous value associated with the key, or null if there was no mapping for the key.
+     * @return the previous value associated with the key, or null if there was no mapping for
+     * the key.
      */
     @Override
     public synchronized V replace(K k, V v) {
@@ -264,6 +264,25 @@ public class CopyOnWriteCache<K, V> implements ConcurrentMap<K, V> {
             return put(k, v);
         } else {
             return null;
+        }
+    }
+
+    public void close(){
+        scheduledExecutor.shutdown();
+        try {
+            boolean isTerminated = scheduledExecutor.awaitTermination(30, TimeUnit.SECONDS);
+            if (!isTerminated) {
+                List<Runnable> runnables = scheduledExecutor.shutdownNow();
+                log.info("CopyOnWriteCache shutting down with {} tasks left", runnables.size());
+
+                boolean isNowTerminated = scheduledExecutor.awaitTermination(30, TimeUnit.SECONDS);
+                if (!isNowTerminated) {
+                    log.warn("Failed to shutdown CopyOnWriteCache thread pool");
+                }
+            }
+        }catch (InterruptedException e) {
+            scheduledExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 }

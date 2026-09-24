@@ -24,6 +24,7 @@ import org.apache.hugegraph.store.node.entry.RestResult;
 import org.apache.hugegraph.store.node.grpc.HgStoreNodeState;
 import org.apache.hugegraph.store.node.grpc.HgStoreStreamImpl;
 import org.apache.hugegraph.store.node.model.HgNodeStatus;
+import org.apache.hugegraph.store.node.task.TTLCleaner;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +43,8 @@ public class HgStoreStatusController {
 
     @Autowired
     HgStoreStreamImpl streamImpl;
+    @Autowired
+    TTLCleaner cleaner;
 
     @GetMapping("/-/echo")
     public HgNodeStatus greeting(
@@ -89,6 +92,28 @@ public class HgStoreStatusController {
             result.setMessage(e.getMessage());
             return result;
         }
+    }
+
+    @GetMapping(value = "/-/cleaner",
+                produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public Serializable ttlClean() {
+        RestResult result = new RestResult();
+        try {
+            cleaner.submit();
+            result.setState(RestResult.OK);
+            result.setMessage("");
+            return result;
+        } catch (Exception e) {
+            result.setState(RestResult.ERR);
+            result.setMessage(e.getMessage());
+            return result;
+        }
+    }
+
+    @GetMapping(value = "/v1/health", produces = MediaType.TEXT_PLAIN_VALUE)
+    public Serializable checkHealthy() {
+        return "";
     }
 
 }

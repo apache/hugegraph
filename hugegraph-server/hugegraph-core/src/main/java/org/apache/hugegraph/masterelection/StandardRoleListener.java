@@ -36,7 +36,6 @@ public class StandardRoleListener implements RoleListener {
     public StandardRoleListener(TaskManager taskManager,
                                 GlobalMasterInfo roleInfo) {
         this.taskManager = taskManager;
-        this.taskManager.enableRoleElection();
         this.roleInfo = roleInfo;
         this.selfIsMaster = false;
     }

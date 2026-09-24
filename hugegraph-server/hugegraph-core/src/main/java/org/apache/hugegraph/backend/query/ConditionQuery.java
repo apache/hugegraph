@@ -288,11 +288,13 @@ public class ConditionQuery extends IdQuery {
             return value;
         }
 
+        boolean initialized = false;
         Set<Object> intersectValues = InsertionOrderUtil.newSet();
         for (Object value : valuesEQ) {
             List<Object> valueAsList = ImmutableList.of(value);
-            if (intersectValues.isEmpty()) {
+            if (!initialized) {
                 intersectValues.addAll(valueAsList);
+                initialized = true;
             } else {
                 CollectionUtil.intersectWithModify(intersectValues,
                                                    valueAsList);
@@ -301,8 +303,9 @@ public class ConditionQuery extends IdQuery {
         for (Object value : valuesIN) {
             @SuppressWarnings("unchecked")
             List<Object> valueAsList = (List<Object>) value;
-            if (intersectValues.isEmpty()) {
+            if (!initialized) {
                 intersectValues.addAll(valueAsList);
+                initialized = true;
             } else {
                 CollectionUtil.intersectWithModify(intersectValues,
                                                    valueAsList);
@@ -608,6 +611,10 @@ public class ConditionQuery extends IdQuery {
 
     @Override
     public boolean test(HugeElement element) {
+        return this.test(element, this.resultsFilter);
+    }
+
+    public boolean test(HugeElement element, ResultsFilter filter) {
         if (!this.ids().isEmpty() && !super.test(element)) {
             return false;
         }
@@ -619,19 +626,25 @@ public class ConditionQuery extends IdQuery {
          * We can't use sub-query results-filter here for fresh element which is
          * not committed to backend store, because it's not from a sub-query.
          */
-        if (this.resultsFilter != null && !element.fresh()) {
-            return this.resultsFilter.test(element);
+        if (filter != null && !element.fresh()) {
+            return filter.test(element);
         }
 
         /*
          * NOTE: seems need to keep call checkRangeIndex() for each condition,
          * so don't break early even if test() return false.
-         */
+        */
         boolean valid = true;
+        Map<Id, Boolean> rangeIndexMatches = null;
+        if (this.element2IndexValueMap != null) {
+            rangeIndexMatches = new HashMap<>();
+        }
         for (Condition cond : this.conditions) {
             valid &= cond.test(element);
-            valid &= this.element2IndexValueMap == null ||
-                     this.element2IndexValueMap.checkRangeIndex(element, cond);
+            if (this.element2IndexValueMap != null) {
+                valid &= this.element2IndexValueMap.checkRangeIndex(
+                         element, cond, rangeIndexMatches);
+            }
         }
         return valid;
     }
@@ -696,25 +709,8 @@ public class ConditionQuery extends IdQuery {
         this.resultsFilter = filter;
     }
 
-    public void updateResultsFilter() {
-        Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery originCQ = ((ConditionQuery) originQuery);
-            if (this.resultsFilter != null) {
-                originCQ.updateResultsFilter(this.resultsFilter);
-            } else {
-                originCQ.updateResultsFilter();
-            }
-        }
-    }
-
-    protected void updateResultsFilter(ResultsFilter filter) {
-        this.resultsFilter = filter;
-        Query originQuery = this.originQuery();
-        if (originQuery instanceof ConditionQuery) {
-            ConditionQuery originCQ = ((ConditionQuery) originQuery);
-            originCQ.updateResultsFilter(filter);
-        }
+    ResultsFilter resultsFilter() {
+        return this.resultsFilter;
     }
 
     public ConditionQuery originConditionQuery() {
@@ -856,7 +852,8 @@ public class ConditionQuery extends IdQuery {
             this.leftIndexMap.remove(elementId);
         }
 
-        public boolean checkRangeIndex(HugeElement element, Condition cond) {
+        public boolean checkRangeIndex(HugeElement element, Condition cond,
+                                       Map<Id, Boolean> rangeIndexMatches) {
             // Not UserpropRelation
             if (!(cond instanceof Condition.UserpropRelation)) {
                 return true;
@@ -872,11 +869,16 @@ public class ConditionQuery extends IdQuery {
                 return true;
             }
 
+            if (rangeIndexMatches.containsKey(propId)) {
+                return rangeIndexMatches.get(propId);
+            }
+
             HugeProperty<Object> property = element.getProperty(propId);
             if (property == null) {
                 // Property value has been deleted, so it's not matched
                 this.addLeftIndex(element.id(), propId, fieldValues);
-                return false;
+                return this.cacheRangeIndexMatch(rangeIndexMatches, propId,
+                                                 false);
             }
 
             /*
@@ -897,10 +899,19 @@ public class ConditionQuery extends IdQuery {
              * the element is valid or not.
              */
             if (this.selectedIndexField != null) {
-                return !propId.equals(this.selectedIndexField) || hasRightValue;
+                hasRightValue = !propId.equals(this.selectedIndexField) ||
+                                hasRightValue;
             }
 
-            return hasRightValue;
+            return this.cacheRangeIndexMatch(rangeIndexMatches, propId,
+                                             hasRightValue);
+        }
+
+        private boolean cacheRangeIndexMatch(Map<Id, Boolean> rangeIndexMatches,
+                                             Id propertyId,
+                                             boolean matched) {
+            rangeIndexMatches.put(propertyId, matched);
+            return matched;
         }
 
         private static boolean removeFieldValue(Set<Object> values,

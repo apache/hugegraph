@@ -17,14 +17,18 @@
 
 package org.apache.hugegraph.auth;
 
+import static org.apache.hugegraph.auth.HugeAccess.P.GRAPHSPACE;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.auth.SchemaDefine.Relationship;
 import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.schema.EdgeLabel;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.util.E;
@@ -36,16 +40,31 @@ public class HugeAccess extends Relationship {
 
     private static final long serialVersionUID = -7644007602408729385L;
 
-    private final Id group;
-    private final Id target;
+    private String graphSpace;
+    private Id group;
+    //FIXME: the group also serves as the role in AuthManagerV2
+    private Id target;
     private HugePermission permission;
     private String description;
 
     public HugeAccess(Id group, Id target) {
-        this(group, target, null);
+        this("DEFAULT", group, target, null);
+    }
+
+    public HugeAccess(String graphSpace, Id group, Id target) {
+        this(graphSpace, group, target, null);
     }
 
     public HugeAccess(Id group, Id target, HugePermission permission) {
+        this.graphSpace = "DEFAULT";
+        this.group = group;
+        this.target = target;
+        this.permission = permission;
+        this.description = null;
+    }
+
+    public HugeAccess(String graphSpace, Id group, Id target, HugePermission permission) {
+        this.graphSpace = graphSpace;
         this.group = group;
         this.target = target;
         this.permission = permission;
@@ -70,6 +89,13 @@ public class HugeAccess extends Relationship {
     @Override
     public String targetLabel() {
         return P.TARGET;
+    }
+
+    // only use in non-pd
+    public static HugeAccess fromEdge(Edge edge) {
+        HugeAccess access = new HugeAccess("DEFAULT", (Id) edge.outVertex().id(),
+                                           (Id) edge.inVertex().id());
+        return fromEdge(edge, access);
     }
 
     @Override
@@ -104,22 +130,12 @@ public class HugeAccess extends Relationship {
                              this.group, this.target, this.asMap());
     }
 
-    @Override
-    protected boolean property(String key, Object value) {
-        if (super.property(key, value)) {
-            return true;
-        }
-        switch (key) {
-            case P.PERMISSION:
-                this.permission = HugePermission.fromCode((Byte) value);
-                break;
-            case P.DESCRIPTION:
-                this.description = (String) value;
-                break;
-            default:
-                throw new AssertionError("Unsupported key: " + key);
-        }
-        return true;
+    public static String accessId(String roleName, String targetName, String code) {
+        E.checkArgument(StringUtils.isNotEmpty(roleName) &&
+                        StringUtils.isNotEmpty(targetName),
+                        "The role name '%s' or target name '%s' is empty",
+                        roleName, targetName);
+        return String.join("->", roleName, code, targetName);
     }
 
     @Override
@@ -143,6 +159,49 @@ public class HugeAccess extends Relationship {
         return super.asArray(list);
     }
 
+    public static HugeAccess fromMap(Map<String, Object> map) {
+        HugeAccess access = new HugeAccess(null, null);
+        return fromMap(map, access);
+    }
+
+    @Override
+    public String graphSpace() {
+        return this.graphSpace;
+    }
+
+    @Override
+    protected boolean property(String key, Object value) {
+        if (super.property(key, value)) {
+            return true;
+        }
+        switch (key) {
+            case GRAPHSPACE:
+                this.graphSpace = (String) value;
+                break;
+            case "~group":
+                this.group = IdGenerator.of(value);
+                break;
+            case "~target":
+                this.target = IdGenerator.of(value);
+                break;
+            case P.PERMISSION:
+                //FIXME: Unified
+                if (value instanceof Byte) {
+                    this.permission = HugePermission.fromCode((Byte) value);
+                } else {
+                    this.permission = HugePermission.valueOf(value.toString());
+                }
+
+                break;
+            case P.DESCRIPTION:
+                this.description = (String) value;
+                break;
+            default:
+                throw new AssertionError("Unsupported key: " + key);
+        }
+        return true;
+    }
+
     @Override
     public Map<String, Object> asMap() {
         E.checkState(this.permission != null,
@@ -150,6 +209,7 @@ public class HugeAccess extends Relationship {
 
         Map<String, Object> map = new HashMap<>();
 
+        map.put(Hidden.unHide(P.GRAPHSPACE), this.graphSpace);
         map.put(Hidden.unHide(P.GROUP), this.group);
         map.put(Hidden.unHide(P.TARGET), this.target);
 
@@ -162,35 +222,17 @@ public class HugeAccess extends Relationship {
         return super.asMap(map);
     }
 
-    public static HugeAccess fromEdge(Edge edge) {
-        HugeAccess access = new HugeAccess((Id) edge.outVertex().id(),
-                                           (Id) edge.inVertex().id());
-        return fromEdge(edge, access);
-    }
-
     public static Schema schema(HugeGraphParams graph) {
         return new Schema(graph);
     }
 
-    public static final class P {
-
-        public static final String ACCESS = Hidden.hide("access");
-
-        public static final String LABEL = T.label.getAccessor();
-
-        public static final String GROUP = HugeGroup.P.GROUP;
-        public static final String TARGET = HugeTarget.P.TARGET;
-
-        public static final String PERMISSION = "~access_permission";
-        public static final String DESCRIPTION = "~access_description";
-
-        public static String unhide(String key) {
-            final String prefix = Hidden.hide("access_");
-            if (key.startsWith(prefix)) {
-                return key.substring(prefix.length());
-            }
-            return key;
-        }
+    @Override
+    public void setId() {
+        String opCode = String.valueOf(this.permission.code());
+        String accessId = accessId(this.source().asString(),
+                                   this.target.asString(),
+                                   opCode);
+        this.id(IdGenerator.of(accessId));
     }
 
     public static final class Schema extends SchemaDefine {
@@ -229,8 +271,26 @@ public class HugeAccess extends Relationship {
         }
     }
 
-    public static HugeAccess fromMap(Map<String, Object> map) {
-        HugeAccess access = new HugeAccess(null, null, null);
-        return fromMap(map, access);
+    public static final class P {
+
+        public static final String ACCESS = Hidden.hide("access");
+
+        public static final String LABEL = T.label.getAccessor();
+
+        public static final String GRAPHSPACE = "~graphspace";
+
+        public static final String GROUP = HugeGroup.P.GROUP;
+        public static final String TARGET = HugeTarget.P.TARGET;
+
+        public static final String PERMISSION = "~access_permission";
+        public static final String DESCRIPTION = "~access_description";
+
+        public static String unhide(String key) {
+            final String prefix = Hidden.hide("access_");
+            if (key.startsWith(prefix)) {
+                return key.substring(prefix.length());
+            }
+            return key;
+        }
     }
 }

@@ -20,6 +20,7 @@ package org.apache.hugegraph.store.client;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.common.KVPair;
@@ -140,6 +141,18 @@ public class HgStoreNodePartitionerImpl implements HgStoreNodePartitioner,
         return 0;
     }
 
+    @Override
+    public String partition(String graphName, byte[] startKey) throws PDException {
+        var shard = pdClient.getPartition(graphName, startKey).getValue();
+        return pdClient.getStore(shard.getStoreId()).getAddress();
+    }
+
+    @Override
+    public String partition(String graphName, int code) throws PDException {
+        var shard = pdClient.getPartitionByCode(graphName, code).getValue();
+        return pdClient.getStore(shard.getStoreId()).getAddress();
+    }
+
     /**
      * Query hgstore information
      *
@@ -196,4 +209,17 @@ public class HgStoreNodePartitionerImpl implements HgStoreNodePartitioner,
     public void setNodeManager(HgStoreNodeManager nodeManager) {
         this.nodeManager = nodeManager;
     }
+
+    @Override
+    public List<String> getStores(String graphName) throws PDException {
+        var list = pdClient.getCache().getLeaderStoreAddresses();
+        if (list.isEmpty()) {
+            // Cache is being cleared
+            return pdClient.getActiveStores(graphName).stream()
+                           .map(Metapb.Store::getAddress)
+                           .collect(Collectors.toList());
+        }
+        return list;
+    }
 }
+

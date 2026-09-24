@@ -99,6 +99,10 @@ public enum ResourceType {
         return PROPERTY_KEY.ordinal() <= ord && ord <= SCHEMA.ordinal();
     }
 
+    public boolean isGraphOrSchema() {
+        return this.isSchema() || this.isGraph();
+    }
+
     public boolean isAuth() {
         int ord = this.ordinal();
         return GRANT.ordinal() <= ord && ord <= TARGET.ordinal();

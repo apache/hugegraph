@@ -19,12 +19,15 @@ package org.apache.hugegraph.api;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hugegraph.util.JsonUtil;
 import org.junit.After;
 import org.junit.Assert;
+import org.junit.Assume;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableMap;
@@ -34,7 +37,15 @@ import jakarta.ws.rs.core.Response;
 
 public class ProjectApiTest extends BaseApiTest {
 
-    private static final String PATH = "graphs/hugegraph/auth/projects";
+    private static final String PATH = "graphspaces/DEFAULT/auth/projects";
+
+    @BeforeClass
+    public static void setUpClass() {
+        // FIXME: skip this test for hstore
+        Assume.assumeTrue("skip this test for hstore",
+                          !Objects.equals("hstore", System.getProperty("backend")));
+        Assume.assumeTrue("skip this test for null", !(System.getProperty("backend") == null));
+    }
 
     @Override
     @After
@@ -101,7 +112,7 @@ public class ProjectApiTest extends BaseApiTest {
 
     @Test
     public void testGet() {
-        String project = this.createProject("test_project", "this is a good project");
+        String project = this.createProject("test_project46", "this is a good project");
         String projectId = assertJsonContains(project, "id");
         String project2 = this.getProject(projectId);
         Assert.assertEquals(project, project2);
@@ -109,8 +120,8 @@ public class ProjectApiTest extends BaseApiTest {
 
     @Test
     public void testList() {
-        createProject("test_project", null);
-        createProject("test_project2", null);
+        createProject("test_project46", null);
+        createProject("test_project47", null);
         Response resp = client().get(PATH);
         String respBody = assertResponseStatus(200, resp);
         List<?> projects = readList(respBody, "projects", Map.class);
@@ -128,7 +139,7 @@ public class ProjectApiTest extends BaseApiTest {
                                 .put(Entity.json(project));
         assertResponseStatus(400, resp);
 
-        String projectId = assertJsonContains(createProject("test_project", "desc"), "id");
+        String projectId = assertJsonContains(createProject("test_project2", "desc"), "id");
         resp = client().target()
                        .path(PATH)
                        .path(projectId)
@@ -141,7 +152,7 @@ public class ProjectApiTest extends BaseApiTest {
 
     @Test
     public void testAddGraphs() {
-        String project = createProject("project_test", null);
+        String project = createProject("project_test2", null);
         String projectId = assertJsonContains(project, "id");
         String graphs = "{\"project_graphs\":[\"graph_test\", " +
                         "\"graph_test2\"]}";

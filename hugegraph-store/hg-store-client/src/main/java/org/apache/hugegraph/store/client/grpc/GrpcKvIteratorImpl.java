@@ -74,11 +74,6 @@ class GrpcKvIteratorImpl implements HgKvPagingIterator<HgKvEntry>, HgKvOrderedIt
 
     @Override
     public boolean hasNext() {
-        // if (log.isDebugEnabled()) {
-        //    if (!this.iterator.hasNext() && !nodeSession.getGraphName().endsWith("/s")) {
-        //        log.debug("[ANALYSIS GrpcKv hasNext-> FALSE] ");
-        //    }
-        // }
         return this.iterator.hasNext();
     }
 

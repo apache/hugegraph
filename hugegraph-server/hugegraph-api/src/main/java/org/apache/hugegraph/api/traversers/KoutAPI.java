@@ -50,6 +50,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.Consumes;
@@ -62,7 +63,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/kout")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/kout")
 @Singleton
 @Tag(name = "KoutAPI")
 public class KoutAPI extends TraverserAPI {
@@ -73,19 +74,31 @@ public class KoutAPI extends TraverserAPI {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @Parameter(description = "The graph space name")
+                      @PathParam("graphspace") String graphSpace,
+                      @Parameter(description = "The graph name")
                       @PathParam("graph") String graph,
+                      @Parameter(description = "The source vertex ID")
                       @QueryParam("source") String source,
+                      @Parameter(description = "The direction of traversal")
                       @QueryParam("direction") String direction,
+                      @Parameter(description = "The edge label to traverse")
                       @QueryParam("label") String edgeLabel,
+                      @Parameter(description = "The maximum depth of traversal")
                       @QueryParam("max_depth") int depth,
+                      @Parameter(description = "Whether to find nearest vertices first")
                       @QueryParam("nearest")
                       @DefaultValue("true") boolean nearest,
+                      @Parameter(description = "Whether to return only count")
                       @QueryParam("count_only")
                       @DefaultValue("false") boolean count_only,
+                      @Parameter(description = "The maximum degree of vertices")
                       @QueryParam("max_degree")
                       @DefaultValue(DEFAULT_MAX_DEGREE) long maxDegree,
+                      @Parameter(description = "The capacity of the traversal")
                       @QueryParam("capacity")
                       @DefaultValue(DEFAULT_CAPACITY) long capacity,
+                      @Parameter(description = "The maximum number of results")
                       @QueryParam("limit")
                       @DefaultValue(DEFAULT_ELEMENTS_LIMIT) int limit) {
         LOG.debug("Graph [{}] get k-out from '{}' with " +
@@ -99,7 +112,7 @@ public class KoutAPI extends TraverserAPI {
         Id sourceId = VertexAPI.checkAndParseVertexId(source);
         Directions dir = Directions.convert(EdgeAPI.parseDirection(direction));
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
 
         Set<Id> ids;
         try (KoutTraverser traverser = new KoutTraverser(g)) {
@@ -121,6 +134,7 @@ public class KoutAPI extends TraverserAPI {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String post(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        Request request) {
         E.checkArgumentNotNull(request, "The request body can't be null");
@@ -145,7 +159,7 @@ public class KoutAPI extends TraverserAPI {
 
         ApiMeasurer measure = new ApiMeasurer();
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         Id sourceId = HugeVertex.getIdValue(request.source);
 
         Steps steps = steps(g, request.steps);

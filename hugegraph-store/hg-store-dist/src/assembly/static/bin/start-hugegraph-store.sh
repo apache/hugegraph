@@ -46,8 +46,8 @@ if [[ $arch == "aarch64" || $arch == "arm64" ]]; then
     lib_file="$TOP/bin/libjemalloc_aarch64.so"
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc_aarch64.so"
     expected_md5="2a631d2f81837f9d5864586761c5e380"
-    if download_and_verify $download_url $lib_file $expected_md5; then
-        export LD_PRELOAD=$lib_file
+    if download_and_verify "$download_url" "$lib_file" "$expected_md5"; then
+        export LD_PRELOAD="$lib_file"
     else
         echo "Failed to verify or download $lib_file, skip it"
     fi
@@ -55,8 +55,8 @@ elif [[ $arch == "x86_64" ]]; then
     lib_file="$TOP/bin/libjemalloc.so"
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc.so"
     expected_md5="fd61765eec3bfea961b646c269f298df"
-    if download_and_verify $download_url $lib_file $expected_md5; then
-        export LD_PRELOAD=$lib_file
+    if download_and_verify "$download_url" "$lib_file" "$expected_md5"; then
+        export LD_PRELOAD="$lib_file"
     else
         echo "Failed to verify or download $lib_file, skip it"
     fi
@@ -73,7 +73,8 @@ export FILE_LIMITN=1024
 #export FILE_LIMITN=1024000
 
 function check_evn_limit() {
-    local limit_check=$(ulimit -n)
+    local limit_check
+    limit_check=$(ulimit -n)
     if [[ ${limit_check} != "unlimited" && ${limit_check} -lt ${FILE_LIMITN} ]]; then
         echo -e "${BASH_SOURCE[0]##*/}:${LINENO}:\E[1;32m ulimit -n can open too few maximum file descriptors, need (${FILE_LIMITN})!! \E[0m"
         return 1
@@ -100,14 +101,18 @@ fi
 if [ -z "$OPEN_TELEMETRY" ];then
   OPEN_TELEMETRY="false"
 fi
+if [ -z "$DAEMON" ]; then
+    DAEMON="true"
+fi
 
-while getopts "g:j:y:" arg; do
+while getopts "d:g:j:y:" arg; do
     case ${arg} in
         g) GC_OPTION="$OPTARG" ;;
         j) USER_OPTION="$OPTARG" ;;
         # Telemetry is used to collect metrics, traces and logs
         y) OPEN_TELEMETRY="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        d) DAEMON="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
     esac
 done
 
@@ -214,18 +219,41 @@ fi
 #  JAVA_OPTIONS="${JAVA_OPTIONS} -javaagent:${LIB}/jmx_prometheus_javaagent-0.16.1.jar=${JMX_EXPORT_PORT}:${CONF}/jmx_exporter.yml"
 #fi
 
-if [ $(ps -ef|grep -v grep| grep java|grep -cE ${CONF}) -ne 0 ]; then
+if [ "$(ps -ef | grep -v grep | grep java | grep -cE "${CONF}")" -ne 0 ]; then
    echo "HugeGraphStoreServer is already running..."
    exit 0
 fi
 
 echo "Starting HG-StoreServer..."
 
-exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-    -Dspring.config.location=${CONF}/application.yml \
-    ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
-
-PID="$!"
-# Write pid to file
-echo "$PID" > "$PID_FILE"
-echo "[+pid] $PID"
+# Turn on security check
+if [[ $DAEMON == "true" ]]; then
+    echo "Starting HugeGraphStoreServer in daemon mode..."
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar &
+    else
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+    fi
+    PID="$!"
+    # Write pid to file
+    echo "$PID" > "$PID_FILE"
+    echo "[+pid] $PID"
+else
+    echo "Starting HugeGraphStoreServer in foreground mode..."
+    # Write $$ before exec — exec replaces this shell with Java, so $$ becomes Java's PID
+    echo "$$" > "$PID_FILE"
+    echo "[+pid] $$"
+    if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar
+    else
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+            -Dspring.config.location=${CONF}/application.yml \
+            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1
+    fi
+fi

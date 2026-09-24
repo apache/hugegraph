@@ -99,36 +99,41 @@ if [[ $PRELOAD == "true" ]]; then
     sed -i -e '/registerBackends/d; /serverStarted/d' "${SCRIPTS}/${EXAMPLE_SCRIPT}"
 fi
 
-# TODO: show the output message in hugegraph-server.sh when start the server
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphServer in daemon mode..."
     "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" \
-    >>"${LOGS}"/hugegraph-server.log 2>&1 &
+    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" &
+
+    PID="$!"
+    # Write pid to file
+    echo "$PID" > "$PID_FILE"
+
+    trap 'kill $PID; exit' SIGHUP SIGINT SIGQUIT SIGTERM
+
+    wait_for_startup ${PID} 'HugeGraphServer' "$REST_SERVER_URL/graphs" "${SERVER_STARTUP_TIMEOUT_S}" || {
+        if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
+            echo "See 'docker logs' for HugeGraphServer log output." >&2
+        else
+            echo "See $LOGS/hugegraph-server.log for HugeGraphServer log output." >&2
+        fi
+        exit 1
+    }
+    disown
+
+    if [ "$OPEN_MONITOR" == "true" ]; then
+        if ! "$BIN"/start-monitor.sh; then
+            echo "Failed to open monitor, please start it manually"
+        fi
+        echo "An HugeGraphServer monitor task has been append to crontab"
+    fi
 else
     echo "Starting HugeGraphServer in foreground mode..."
     "${BIN}"/hugegraph-server.sh "${CONF}/${GREMLIN_SERVER_CONF}" "${CONF}"/rest-server.properties \
-    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" \
-    >>"${LOGS}"/hugegraph-server.log 2>&1
-fi
-
-PID="$!"
-# Write pid to file
-echo "$PID" > "$PID_FILE"
-
-trap 'kill $PID; exit' SIGHUP SIGINT SIGQUIT SIGTERM
-
-wait_for_startup ${PID} 'HugeGraphServer' "$REST_SERVER_URL/graphs" "${SERVER_STARTUP_TIMEOUT_S}" || {
-    echo "See $LOGS/hugegraph-server.log for HugeGraphServer log output." >&2
-    if [[ $DAEMON == "true" ]]; then
-        exit 1
-    fi
-}
-disown
-
-if [ "$OPEN_MONITOR" == "true" ]; then
-    if ! "$BIN"/start-monitor.sh; then
-        echo "Failed to open monitor, please start it manually"
-    fi
-    echo "An HugeGraphServer monitor task has been append to crontab"
+    "${OPEN_SECURITY_CHECK}" "${USER_OPTION}" "${GC_OPTION}" "${OPEN_TELEMETRY}" &
+    PID="$!"
+    # Write pid to file
+    echo "$PID" > "$PID_FILE"
+    trap 'kill $PID; wait $PID; exit $?' SIGHUP SIGINT SIGQUIT SIGTERM
+    wait $PID
+    exit $?
 fi

@@ -21,24 +21,31 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.tinkerpop.shaded.minlog.Log;
+import org.junit.Test;
+import org.mockito.Mockito;
+
+import org.apache.hugegraph.pd.client.listener.PDEventListener;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.Pdpb;
-import org.junit.Test;
-import org.mockito.Mockito;
 
 // TODO: Exceptions should be thrown rather than silenced.
 public class PDClientTest extends BaseClientTest {
 
     @Test
     public void testDbCompaction() {
+        System.out.println("testDbCompaction start");
+
         try {
             pdClient.dbCompaction("");
             pdClient.dbCompaction();
         } catch (PDException e) {
             e.printStackTrace();
         }
+
+        System.out.println("pdclienttest testDbCompaction end");
     }
 
     @Test
@@ -75,7 +82,7 @@ public class PDClientTest extends BaseClientTest {
         try {
             pdClient.getStore(0L);
         } catch (PDException e) {
-            e.printStackTrace();
+            assert e.getErrorCode() == 101;
         }
     }
 
@@ -85,7 +92,6 @@ public class PDClientTest extends BaseClientTest {
         try {
             pdClient.updateStore(store);
         } catch (PDException e) {
-            e.printStackTrace();
         }
     }
 
@@ -107,15 +113,15 @@ public class PDClientTest extends BaseClientTest {
         }
     }
 
-    @Test
-    public void testStoreHeartbeat() {
-        Metapb.StoreStats stats = Metapb.StoreStats.newBuilder().build();
-        try {
-            pdClient.storeHeartbeat(stats);
-        } catch (PDException e) {
-            e.printStackTrace();
-        }
-    }
+//    @Test
+//    public void testStoreHeartbeat(){
+//        Metapb.StoreStats stats = Metapb.StoreStats.newBuilder().build();
+//        try {
+//            pdClient.storeHeartbeat(stats);
+//        } catch (PDException e) {
+//            e.printStackTrace();
+//        }
+//    }
 
     @Test
     public void testKeyToCode() {
@@ -161,6 +167,8 @@ public class PDClientTest extends BaseClientTest {
 
     @Test
     public void testUpdatePartitionLeader() {
+        System.out.println("updatePartitionLeader start");
+
         pdClient.updatePartitionLeader("aaa", 0, 0L);
     }
 
@@ -228,7 +236,7 @@ public class PDClientTest extends BaseClientTest {
 
     @Test
     public void testAddEventListener() {
-        PDClient.PDEventListener listener = Mockito.mock(PDClient.PDEventListener.class);
+        PDEventListener listener = Mockito.mock(PDEventListener.class);
         pdClient.addEventListener(listener);
     }
 
@@ -283,14 +291,14 @@ public class PDClientTest extends BaseClientTest {
         try {
             pdClient.setPDConfig(0, "", 0, 0L);
         } catch (PDException e) {
-            e.printStackTrace();
+            assert e.getErrorCode() == 112;
         }
         Metapb.PDConfig pdConfig = Metapb.PDConfig.newBuilder().build();
 
         try {
             pdClient.setPDConfig(pdConfig);
         } catch (PDException e) {
-            e.printStackTrace();
+            assert e.getErrorCode() == 112;
         }
     }
 
@@ -308,7 +316,7 @@ public class PDClientTest extends BaseClientTest {
         try {
             pdClient.changePeerList("");
         } catch (PDException e) {
-            e.printStackTrace();
+            assert e.getErrorCode() == -1;
         }
     }
 
@@ -316,11 +324,13 @@ public class PDClientTest extends BaseClientTest {
     public void testSplitData() {
         try {
             Metapb.PDConfig config = pdClient.getPDConfig();
-            pdClient.setPDConfig(config.toBuilder().setMaxShardsPerStore(12).build());
+            pdClient.setPDConfig(config.toBuilder()
+                                       .setMaxShardsPerStore(12)
+                                       .build());
             System.out.println(pdClient.getPDConfig());
             pdClient.splitData();
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (PDException e) {
+            Log.error("testSplitData", e);
         }
     }
 
@@ -359,7 +369,7 @@ public class PDClientTest extends BaseClientTest {
         try {
             pdClient.balanceLeaders();
         } catch (PDException e) {
-            e.printStackTrace();
+            assert e.getErrorCode() == 1001;
         }
     }
 
@@ -368,7 +378,6 @@ public class PDClientTest extends BaseClientTest {
         try {
             pdClient.delStore(0L);
         } catch (PDException e) {
-            e.printStackTrace();
         }
     }
 

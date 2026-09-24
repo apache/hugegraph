@@ -14,9 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hugegraph.store.node.metrics;
 
-import static org.apache.hugegraph.store.node.metrics.ProcFileHandler.ReadResult;
+package org.apache.hugegraph.store.node.metrics;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -25,39 +24,38 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-abstract class ProcfsRecord {
+abstract class ProcfsEntry {
 
-    private static final Logger logger = LoggerFactory.getLogger(ProcfsRecord.class);
+    private static final Logger log = LoggerFactory.getLogger(ProcfsEntry.class);
 
-    private final Object syncLock = new Object();
+    private final Object lock = new Object();
 
-    private final ProcFileHandler fileReader;
+    private final ProcfsReader reader;
 
-    private long lastProcessedTime = -1;
+    private long lastHandle = -1;
 
-    protected ProcfsRecord(ProcFileHandler fileReader) {
-        this.fileReader = Objects.requireNonNull(fileReader);
+    protected ProcfsEntry(ProcfsReader reader) {
+        this.reader = Objects.requireNonNull(reader);
     }
 
-    protected final void gatherData() {
-        synchronized (syncLock) {
+    protected final void collect() {
+        synchronized (lock) {
             try {
-                final ReadResult readResult = fileReader.readFile();
-                if (readResult != null &&
-                    (lastProcessedTime == -1 || lastProcessedTime != readResult.getReadTime())) {
-                    clear();
-                    process(readResult.getLines());
-                    lastProcessedTime = readResult.getReadTime();
+                final ProcfsReader.ReadResult result = reader.read();
+                if (result != null && (lastHandle == -1 || lastHandle != result.getReadTime())) {
+                    reset();
+                    handle(result.getLines());
+                    lastHandle = result.getReadTime();
                 }
             } catch (IOException e) {
-                clear();
-                logger.warn("Failed reading '" + fileReader.getFilePath() + "'!", e);
+                reset();
+                log.warn("Failed reading '" + reader.getEntryPath() + "'!", e);
             }
         }
     }
 
-    protected abstract void clear();
+    protected abstract void reset();
 
-    protected abstract void process(Collection<String> lines);
+    protected abstract void handle(Collection<String> lines);
 
 }

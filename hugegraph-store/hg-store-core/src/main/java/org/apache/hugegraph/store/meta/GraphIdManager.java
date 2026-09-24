@@ -17,49 +17,38 @@
 
 package org.apache.hugegraph.store.meta;
 
+import static org.apache.hugegraph.store.constant.HugeServerTables.VERTEX_TABLE;
+
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import org.apache.hugegraph.store.meta.base.DBSessionBuilder;
 import org.apache.hugegraph.store.meta.base.PartitionMetaStore;
+import org.apache.hugegraph.store.term.Bits;
 import org.apache.hugegraph.store.util.HgStoreException;
 
 import com.google.protobuf.Int64Value;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
- * GraphId Manager, maintains a self-incrementing circular ID, responsible for managing the mapping between GraphName and GraphId.
+ * GraphId Manager, maintains a self-incrementing circular ID, responsible for managing the
+ * mapping between GraphName and GraphId.
  */
+@Slf4j
 public class GraphIdManager extends PartitionMetaStore {
 
     protected static final String GRAPH_ID_PREFIX = "@GRAPH_ID@";
-    protected static int maxGraphID = 65535;
+    // FIXME: we need to ensure the right num & proper logic for it (IMPORTANT)
+    protected static int maxGraphID = 65535 - 1;
     static Object graphIdLock = new Object();
     static Object cidLock = new Object();
     final DBSessionBuilder sessionBuilder;
     final int partitionId;
-    // public long getGraphId(String graphName) {
-    //    if (!graphIdCache.containsKey(graphName)) {
-    //        synchronized (graphIdLock) {
-    //            if (!graphIdCache.containsKey(graphName)) {
-    //                byte[] key = MetadataKeyHelper.getGraphIDKey(graphName);
-    //                Int64Value id = get(Int64Value.parser(), key);
-    //                if (id == null) {
-    //                    id = Int64Value.of(getCId(GRAPH_ID_PREFIX, maxGraphID));
-    //                    if (id.getValue() == -1) {
-    //                        throw new HgStoreException(HgStoreException.EC_FAIL,
-    //                                "The number of graphs exceeds the maximum 65535");
-    //                    }
-    //                    put(key, id);
-    //                    flush();
-    //                }
-    //                graphIdCache.put(graphName, id.getValue());
-    //            }
-    //        }
-    //    }
-    //    return graphIdCache.get(graphName);
-    // }
     private final Map<String, Long> graphIdCache = new ConcurrentHashMap<>();
 
     public GraphIdManager(DBSessionBuilder sessionBuilder, int partitionId) {
@@ -79,12 +68,34 @@ public class GraphIdManager extends PartitionMetaStore {
                     byte[] key = MetadataKeyHelper.getGraphIDKey(graphName);
                     Int64Value id = get(Int64Value.parser(), key);
                     if (id == null) {
-                        id = Int64Value.of(getCId(GRAPH_ID_PREFIX, maxGraphID));
+                        id = Int64Value.of(maxGraphID);
+                    }
+                    l = id.getValue();
+                    graphIdCache.put(graphName, l);
+                }
+            }
+        }
+        return l;
+    }
+
+    public long getGraphIdOrCreate(String graphName) {
+
+        Long l = graphIdCache.get(graphName);
+        if (l == null || l == maxGraphID) {
+            synchronized (graphIdLock) {
+                if ((l = graphIdCache.get(graphName)) == null || l == maxGraphID) {
+                    byte[] key = MetadataKeyHelper.getGraphIDKey(graphName);
+                    Int64Value id = get(Int64Value.parser(), key);
+                    if (id == null) {
+                        id = Int64Value.of(getCId(GRAPH_ID_PREFIX, maxGraphID - 1));
                         if (id.getValue() == -1) {
                             throw new HgStoreException(HgStoreException.EC_FAIL,
                                                        "The number of graphs exceeds the maximum " +
                                                        "65535");
                         }
+                        log.info("partition: {}, Graph ID {} is allocated for graph {}, stack: {}",
+                                 this.partitionId, id.getValue(), graphName,
+                                 Arrays.toString(Thread.currentThread().getStackTrace()));
                         put(key, id);
                         flush();
                     }
@@ -112,10 +123,29 @@ public class GraphIdManager extends PartitionMetaStore {
     }
 
     /**
-     * Get auto-increment non-repetitive id, start from 0 after reaching the limit.
+     * To maintain compatibility with affected graphs, ensure the g+v table contains no data
+     *
+     * @return Returns false if data exists, true if no data
+     */
+    private boolean checkCount(long l) {
+        var start = new byte[2];
+        Bits.putShort(start, 0, (short) l);
+        try (var session = sessionBuilder.getSession(partitionId)) {
+            if (!session.tableIsExist(VERTEX_TABLE)) {
+                return true;
+            }
+            try (var itr = session.sessionOp().scan(VERTEX_TABLE, start)) {
+                return itr == null || !itr.hasNext();
+            }
+        }
+    }
+
+    /**
+     * Generate auto-incrementing cyclic unique IDs that reset to 0 upon reaching the upper limit
      *
      * @param key key
-     * @param max max id limit, after reaching this value, it will reset to 0 and start incrementing again.
+     * @param max max id limit, after reaching this value, it will reset to 0 and start
+     *            incrementing again.
      * @return id
      */
     protected long getCId(String key, long max) {
@@ -127,24 +157,19 @@ public class GraphIdManager extends PartitionMetaStore {
             // Find an unused cid
             List<Int64Value> ids =
                     scan(Int64Value.parser(), genCIDSlotKey(key, current), genCIDSlotKey(key, max));
-            for (Int64Value id : ids) {
-                if (current == id.getValue()) {
-                    current++;
-                } else {
-                    break;
-                }
+            var idSet = ids.stream().map(Int64Value::getValue).collect(Collectors.toSet());
+
+            while (idSet.contains(current) || !checkCount(current)) {
+                current++;
             }
 
-            if (current == max) {
+            if (current == max - 1) {
                 current = 0;
                 ids = scan(Int64Value.parser(), genCIDSlotKey(key, current),
                            genCIDSlotKey(key, last));
-                for (Int64Value id : ids) {
-                    if (current == id.getValue()) {
-                        current++;
-                    } else {
-                        break;
-                    }
+                idSet = ids.stream().map(Int64Value::getValue).collect(Collectors.toSet());
+                while (idSet.contains(current) || !checkCount(current)) {
+                    current++;
                 }
             }
 
@@ -162,7 +187,7 @@ public class GraphIdManager extends PartitionMetaStore {
     /**
      * Return key with used Cid
      */
-    private byte[] genCIDSlotKey(String key, long value) {
+    public byte[] genCIDSlotKey(String key, long value) {
         byte[] keySlot = MetadataKeyHelper.getCidSlotKeyPrefix(key);
         ByteBuffer buf = ByteBuffer.allocate(keySlot.length + Long.SIZE);
         buf.put(keySlot);

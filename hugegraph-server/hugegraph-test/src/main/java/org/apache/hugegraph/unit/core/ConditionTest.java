@@ -294,6 +294,38 @@ public class ConditionTest extends BaseUnitTest {
     }
 
     @Test
+    public void testConditionBooleanRange() {
+        Condition lt = Condition.lt(HugeKeys.ID, true);
+        Assert.assertTrue(lt.test(false));
+        Assert.assertFalse(lt.test(true));
+
+        Condition lte = Condition.lte(HugeKeys.ID, false);
+        Assert.assertTrue(lte.test(false));
+        Assert.assertFalse(lte.test(true));
+
+        Condition gt = Condition.gt(HugeKeys.ID, false);
+        Assert.assertTrue(gt.test(true));
+        Assert.assertFalse(gt.test(false));
+
+        Condition gte = Condition.gte(HugeKeys.ID, true);
+        Assert.assertTrue(gte.test(true));
+        Assert.assertFalse(gte.test(false));
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            Condition.lt(HugeKeys.ID, true).test(1);
+        }, e -> {
+            String err = "Can't compare between 1(Integer) and true(Boolean)";
+            Assert.assertEquals(err, e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            Condition.lt(HugeKeys.ID, true).test((Object) null);
+        }, e -> {
+            String err = "Can't compare between null(null) and true(Boolean)";
+            Assert.assertEquals(err, e.getMessage());
+        });
+    }
+
+    @Test
     public void testConditionNeq() {
         Condition c1 = Condition.neq(HugeKeys.ID, 123);
         Assert.assertTrue(c1.test(124));

@@ -61,17 +61,28 @@ public class MemberAPI extends API {
     @Autowired
     PDService pdService;
 
+    /**
+     * Get member information
+     * <p>
+     * Retrieves all member information for the current PD cluster via an HTTP GET request and returns it in JSON format.
+     *
+     * @return A RestApiResponse object containing member information
+     * @throws InterruptedException If the thread is interrupted while waiting, this exception is thrown
+     * @throws ExecutionException If the task execution fails, this exception is thrown
+     */
     @GetMapping(value = "/members", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public RestApiResponse getMembers() throws InterruptedException, ExecutionException {
 
         String leaderGrpcAddress = RaftEngine.getInstance().getLeaderGrpcAddress();
-        CallStreamObserverWrap<Pdpb.GetMembersResponse> response = new CallStreamObserverWrap<>();
-        pdService.getMembers(Pdpb.GetMembersRequest.newBuilder().build(), response);
+        CallStreamObserverWrap<Pdpb.MembersAndClusterState> response =
+                new CallStreamObserverWrap<>();
+        pdService.getMembersAndClusterState(Pdpb.GetMembersRequest.newBuilder().build(), response);
         List<Member> members = new ArrayList<>();
         Member leader = null;
         Map<String, Integer> stateCountMap = new HashMap<>();
-        for (Metapb.Member member : response.get().get(0).getMembersList()) {
+        Pdpb.MembersAndClusterState membersAndClusterState = response.get().get(0);
+        for (Metapb.Member member : membersAndClusterState.getMembersList()) {
             String stateKey = member.getState().name();
             stateCountMap.put(stateKey, stateCountMap.getOrDefault(stateKey, 0) + 1);
             Member member1 = new Member(member);
@@ -81,7 +92,7 @@ public class MemberAPI extends API {
             member1.role = member.getRole().name();
             members.add(member1);
         }
-        String state = pdService.getStoreNodeService().getClusterStats().getState().toString();
+        String state = membersAndClusterState.getState().toString();
         HashMap<String, Object> resultMap = new HashMap<>();
         resultMap.put("state", state);
         resultMap.put("pdList", members);
@@ -93,6 +104,18 @@ public class MemberAPI extends API {
         return new RestApiResponse(resultMap, Pdpb.ErrorType.OK, Pdpb.ErrorType.OK.name());
     }
 
+    /**
+     * Change the Peer list in the PD cluster
+     * Receive a request body containing the Peer list to be changed via an HTTP POST request, and call the corresponding service to change the Peer list in the PD cluster
+     *
+     * @param body    Request body containing the list of Peers to be modified, of type PeerRestRequest
+     * @param request HTTP request object, of type HttpServletRequest
+     * @return Returns a JSON string containing the modification results
+     * @throws Exception If an exception occurs during request processing, service invocation, or Peer list modification, it is captured and returned as the JSON representation of the exception
+     */
+    // TODO: this endpoint has no authentication check — any caller with network
+    // access to the management port can trigger a peer list change.
+    // Wire authentication here as part of the planned auth refactor.
     @PostMapping(value = "/members/change", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody

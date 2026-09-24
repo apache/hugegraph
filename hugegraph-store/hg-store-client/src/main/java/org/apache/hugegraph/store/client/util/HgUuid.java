@@ -20,15 +20,13 @@ package org.apache.hugegraph.store.client.util;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-import org.apache.hugegraph.store.util.Base58Encoder;
-
 public final class HgUuid {
 
     private static String encode(UUID uuid) {
         ByteBuffer bb = ByteBuffer.wrap(new byte[16]);
         bb.putLong(uuid.getMostSignificantBits());
         bb.putLong(uuid.getLeastSignificantBits());
-        return Base58Encoder.convertToBase58(bb.array());
+        return Base58.encode(bb.array());
     }
 
     /**

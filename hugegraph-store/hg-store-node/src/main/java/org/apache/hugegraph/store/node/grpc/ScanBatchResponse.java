@@ -40,7 +40,8 @@ import lombok.extern.slf4j.Slf4j;
  * Batch query processor, batch query data, stream back data.
  * 1. Server-side streaming data to the client
  * 2. The client returns the batch number to the server after consuming each batch of data.
- * 3. The server decides how much data to send based on the batch number, ensuring the uninterrupted transmission of data,
+ * 3. The server decides how much data to send based on the batch number, ensuring the
+ * uninterrupted transmission of data,
  */
 @Slf4j
 public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
@@ -50,8 +51,9 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
     static ByteBufferAllocator alloc =
             new ByteBufferAllocator(ParallelScanIterator.maxBodySize * 3 / 2, 1000);
     private final int maxInFlightCount = PropertyUtil.getInt("app.scan.stream.inflight", 16);
-    private final int activeTimeout = PropertyUtil.getInt("app.scan.stream.timeout", 60); // unit: second
     private final StreamObserver<KvStream> sender;
+    // unit: second
+    private final int activeTimeout = PropertyUtil.getInt("app.scan.stream.timeout", 60);
     private final HgStoreWrapperEx wrapper;
     private final ThreadPoolExecutor executor;
     private final Object stateLock = new Object();
@@ -222,7 +224,7 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
                     try {
                         this.sender.onError(e);
                     } catch (Exception ex) {
-
+                        log.warn("Error when call sender.onError {}", e.getMessage());
                     }
                 }
             }
@@ -255,7 +257,8 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
     }
 
     /**
-     * Check for activity, if the client does not request data for a certain period of time, it is considered inactive, close the connection to release resources.
+     * Check for activity, if the client does not request data for a certain period of time, it
+     * is considered inactive, close the connection to release resources.
      */
     public void checkActiveTimeout() {
         if ((System.currentTimeMillis() - activeTime) > activeTimeout * 1000L) {

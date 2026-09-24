@@ -431,6 +431,7 @@ public class PDPulseSubject {
 
         @Override
         public void onError(Throwable throwable) {
+            log.error("cancelObserver : ", throwable);
             this.cancelObserver();
         }
 

@@ -56,7 +56,7 @@ public class OlapPropertyKeyClearJob extends IndexLabelRemoveJob {
         if (indexLabel == null) {
             return;
         }
-        LockUtil.Locks locks = new LockUtil.Locks(graph.name());
+        LockUtil.Locks locks = new LockUtil.Locks(graph.graph().spaceGraphName());
         try {
             locks.lockWrites(LockUtil.INDEX_LABEL_DELETE, olapIndexLabel);
             // Set index label to "rebuilding" status

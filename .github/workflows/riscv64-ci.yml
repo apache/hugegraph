@@ -1,0 +1,126 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: "RISC-V Server CI"
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  BINFMT_IMAGE: >-
+    tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+  RISCV64_BASE_IMAGE: >-
+    ubuntu@sha256:4edded5722eb644868b7b976033d241d2ab3fff0a170924df69b200a59a2b994
+  DRAGONWELL_RISCV64_ARCHIVE: >-
+    Alibaba_Dragonwell_Extended_11.0.31.28.11_riscv64_linux.tar.gz
+  DRAGONWELL_RISCV64_SHA256: >-
+    7df2d308f0dca7a779d2854e6da19214f99cd77aa6d4982c3bf981a77266a79b
+  DRAGONWELL_RISCV64_URL: >-
+    https://github.com/dragonwell-project/dragonwell11/releases/download/dragonwell-extended-11.0.31.28_jdk-11.0.31-ga/Alibaba_Dragonwell_Extended_11.0.31.28.11_riscv64_linux.tar.gz
+  RISCV64_CONTAINER: >-
+    hugegraph-riscv64-ci-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  build-server-riscv64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Start isolated RISC-V environment
+        run: |
+          docker run --privileged --rm "$BINFMT_IMAGE" --install riscv64
+          docker run --detach --init --platform linux/riscv64 \
+            --name "$RISCV64_CONTAINER" "$RISCV64_BASE_IMAGE" sleep infinity
+          test "$(docker exec "$RISCV64_CONTAINER" uname -m)" = riscv64
+
+      - name: Prepare source and Java 11
+        run: |
+          ARCHIVE_PATH="$RUNNER_TEMP/$DRAGONWELL_RISCV64_ARCHIVE"
+          curl --fail --location --retry 3 --show-error \
+            "$DRAGONWELL_RISCV64_URL" --output "$ARCHIVE_PATH"
+          echo "$DRAGONWELL_RISCV64_SHA256  $ARCHIVE_PATH" | sha256sum -c -
+
+          docker exec "$RISCV64_CONTAINER" mkdir -p /workspace /opt/dragonwell
+          git ls-files -z | tar --null --files-from=- -cf - | \
+            docker exec -i "$RISCV64_CONTAINER" tar -xf - -C /workspace
+          docker cp "$ARCHIVE_PATH" \
+            "$RISCV64_CONTAINER:/tmp/$DRAGONWELL_RISCV64_ARCHIVE"
+
+      - name: Build and smoke test on RISC-V
+        run: |
+          docker exec \
+            --env DRAGONWELL_RISCV64_ARCHIVE="$DRAGONWELL_RISCV64_ARCHIVE" \
+            --env DRAGONWELL_RISCV64_SHA256="$DRAGONWELL_RISCV64_SHA256" \
+            "$RISCV64_CONTAINER" bash -euo pipefail -c '
+              test "$(uname -m)" = riscv64
+              apt-get -q update
+              apt-get -q install -y --no-install-recommends \
+                ca-certificates curl jq libatomic1 libgcc-s1 libstdc++6 \
+                lsof maven procps \
+                protobuf-compiler protobuf-compiler-grpc-java-plugin
+
+              ARCHIVE_PATH="/tmp/$DRAGONWELL_RISCV64_ARCHIVE"
+              echo "$DRAGONWELL_RISCV64_SHA256  $ARCHIVE_PATH" | sha256sum -c -
+              tar -xzf "$ARCHIVE_PATH" --strip-components=1 -C /opt/dragonwell
+              rm "$ARCHIVE_PATH"
+              export JAVA_HOME=/opt/dragonwell
+              export PATH="$JAVA_HOME/bin:$PATH"
+
+              java -XshowSettings:vm -version
+              test -x /usr/bin/protoc
+              test -x /usr/bin/grpc_java_plugin
+
+              cd /workspace
+              MAVEN_OPTS="-XX:TieredStopAtLevel=1 -XX:ActiveProcessorCount=2" \
+                mvn clean package -B -ntp -Drocksdb-only \
+                  -P riscv64-protobuf-tools \
+                  -pl hugegraph-server/hugegraph-dist -am \
+                  -Dmaven.test.skip=true -Dmaven.javadoc.skip=true
+              hugegraph-server/hugegraph-dist/src/assembly/travis/check-rocksdb-only-dist.sh \
+                hugegraph-server/apache-hugegraph-server-*/
+              hugegraph-server/hugegraph-dist/src/assembly/travis/run-native-runtime-smoke-test.sh \
+                hugegraph-server/apache-hugegraph-server-*/
+            '
+
+      - name: Show server log on failure
+        if: failure()
+        run: |
+          if docker container inspect "$RISCV64_CONTAINER" >/dev/null 2>&1; then
+            docker exec "$RISCV64_CONTAINER" bash -c '
+              find /workspace -path "*/logs/hugegraph-server.log" \
+                -exec tail -n 200 {} \;
+            ' || true
+          fi
+
+      - name: Clean up RISC-V environment
+        if: always()
+        run: |
+          if docker container inspect "$RISCV64_CONTAINER" >/dev/null 2>&1; then
+            docker rm --force --volumes "$RISCV64_CONTAINER"
+          fi
+          if docker container inspect "$RISCV64_CONTAINER" >/dev/null 2>&1; then
+            echo "RISC-V CI container still exists: $RISCV64_CONTAINER" >&2
+            exit 1
+          fi

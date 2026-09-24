@@ -19,7 +19,7 @@ package org.apache.hugegraph.store.options;
 
 import java.util.Map;
 
-import org.apache.hugegraph.store.business.DataMover;
+import org.apache.hugegraph.store.business.DataManager;
 import org.apache.hugegraph.store.pd.PdProvider;
 import org.apache.hugegraph.store.raft.RaftTaskHandler;
 
@@ -33,6 +33,7 @@ import lombok.Data;
 @Data
 public class HgStoreEngineOptions {
 
+    public static final String PLACE_HOLDER_PREFIX = "placeholder";
     public static String Raft_Path_Prefix = "raft";
     public static String DB_Path_Prefix = "db";
     public static String Snapshot_Path_Prefix = "snapshot";
@@ -42,12 +43,14 @@ public class HgStoreEngineOptions {
     private final int partitionHBInterval = 5;
     // Waiting for leader timeout, in seconds
     private final int waitLeaderTimeout = 30;
-    private final int raftRpcThreadPoolSize = Utils.cpus() * 6;
+    private int raftRpcThreadPoolSize = Utils.cpus() * 6;
+    private int raftRpcThreadPoolSizeOfBasic = 256;
     // No PD mode, for development and debugging use only
     private boolean fakePD = false;
     // fakePd configuration items
     private FakePdOptions fakePdOptions = new FakePdOptions();
     private RaftOptions raftOptions = new RaftOptions();
+    private QueryPushDownOption queryPushDownOption = new QueryPushDownOption();
     // pd server address
     private String pdAddress;
     // External service address
@@ -64,9 +67,9 @@ public class HgStoreEngineOptions {
     private RaftTaskHandler taskHandler;
 
     private PdProvider pdProvider;
-
     // Data Migration Service
-    private DataMover dataTransfer;
+    private DataManager dataTransfer;
+    private JobOptions jobConfig;
 
     @Data
     public static class FakePdOptions {
@@ -120,6 +123,7 @@ public class HgStoreEngineOptions {
         //
         // Default: 3600 (1 hour)
         private int snapshotIntervalSecs = 3600;
+        private int snapshotDownloadingThreads = 4;
         // A snapshot saving would be triggered every |snapshot_interval_s| seconds,
         // and at this moment when state machine's lastAppliedIndex value
         // minus lastSnapshotId value is greater than snapshotLogIndexMargin value,
@@ -148,5 +152,30 @@ public class HgStoreEngineOptions {
         private double aveLogEntrySizeRatio = 0.95;
         private boolean useRocksDBSegmentLogStorage = true;
         private int maxSegmentFileSize = 64 * 1024 * 1024;
+    }
+
+    @Data
+    public static class QueryPushDownOption {
+
+        /**
+         * thread pool size
+         */
+        private int threadPoolSize;
+        /**
+         * the batch size that each request gets
+         */
+        private int fetchBatchSize;
+
+        private long fetchTimeout;
+
+        /**
+         * the limit count of memory operations, like sort etc.
+         */
+        private int memoryLimitCount;
+
+        /**
+         * sst file size limit using for sort
+         */
+        private int indexSizeLimitCount;
     }
 }

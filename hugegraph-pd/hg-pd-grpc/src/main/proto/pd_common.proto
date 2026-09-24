@@ -49,3 +49,7 @@ message Error {
   ErrorType type = 1;
   string message = 2;
 }
+
+message NoArg{
+    RequestHeader header = 1;
+}

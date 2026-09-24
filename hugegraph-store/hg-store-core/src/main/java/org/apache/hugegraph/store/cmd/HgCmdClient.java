@@ -23,6 +23,18 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import org.apache.hugegraph.store.cmd.request.BatchPutRequest;
+import org.apache.hugegraph.store.cmd.request.CleanDataRequest;
+import org.apache.hugegraph.store.cmd.request.CreateRaftRequest;
+import org.apache.hugegraph.store.cmd.request.DestroyRaftRequest;
+import org.apache.hugegraph.store.cmd.request.GetStoreInfoRequest;
+import org.apache.hugegraph.store.cmd.request.RedirectRaftTaskRequest;
+import org.apache.hugegraph.store.cmd.request.UpdatePartitionRequest;
+import org.apache.hugegraph.store.cmd.response.BatchPutResponse;
+import org.apache.hugegraph.store.cmd.response.CleanDataResponse;
+import org.apache.hugegraph.store.cmd.response.GetStoreInfoResponse;
+import org.apache.hugegraph.store.cmd.response.RedirectRaftTaskResponse;
+import org.apache.hugegraph.store.cmd.response.UpdatePartitionResponse;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.Store;
 
@@ -137,6 +149,10 @@ public class HgCmdClient {
         return (UpdatePartitionResponse) tryInternalCallSyncWithRpc(request);
     }
 
+    public RedirectRaftTaskResponse redirectRaftTask(RedirectRaftTaskRequest request) {
+        return (RedirectRaftTaskResponse) tryInternalCallSyncWithRpc(request);
+    }
+
     /**
      * Find Leader, retry on error, handle Leader redirection
      *
@@ -164,7 +180,9 @@ public class HgCmdClient {
                     } else if (HgCmdProcessor.Status.LEADER_REDIRECT == response.getStatus()
                                && response.partitionLeaders != null
                     ) {
-                        // When returning leader drift, and partitionLeaders is not empty, need to reset the leader.
+                        // When returning leader drift, and partitionLeaders is not empty, need
+                        // to reset the leader.
+                        Thread.sleep(i * 1000L);
                     } else {
                         log.error(
                                 "HgCmdClient tryInternalCallSyncWithRpc error msg {} leaders is {}",

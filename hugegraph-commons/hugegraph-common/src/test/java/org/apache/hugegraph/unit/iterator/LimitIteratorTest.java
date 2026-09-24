@@ -178,4 +178,24 @@ public class LimitIteratorTest extends BaseUnitTest {
         results.close();
         Assert.assertTrue(vals.closed());
     }
+
+    @Test
+    public void testCloseOnlyOnceWhenReachLimit() throws Exception {
+        AtomicInteger closeCount = new AtomicInteger();
+        CloseableItor<Integer> vals =
+                new CloseableItor<Integer>(DATA.iterator()) {
+            @Override
+            public void close() throws Exception {
+                closeCount.incrementAndGet();
+                super.close();
+            }
+        };
+        LimitIterator<Integer> results = new LimitIterator<>(vals,
+                                                             val -> true);
+
+        Assert.assertFalse(results.hasNext());
+        results.close();
+
+        Assert.assertEquals(1, closeCount.get());
+    }
 }

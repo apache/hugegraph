@@ -28,10 +28,12 @@ public enum HugePermission implements SerialEnum {
     DELETE(0x04, "delete"),
     EXECUTE(0x08, "execute"),
 
-    ANY(0x7f, "any");
+    SPACE(0x1f, "space"),
+    SPACE_MEMBER(0x2f, "space_member"),
+    ADMIN(0x7f, "admin");
 
-    private byte code;
-    private String name;
+    private final byte code;
+    private final String name;
 
     static {
         SerialEnum.register(HugePermission.class);
@@ -53,8 +55,8 @@ public enum HugePermission implements SerialEnum {
     }
 
     public boolean match(HugePermission other) {
-        if (other == ANY) {
-            return this == ANY;
+        if (other == ADMIN) {
+            return this == ADMIN;
         }
         return (this.code & other.code) != 0;
     }

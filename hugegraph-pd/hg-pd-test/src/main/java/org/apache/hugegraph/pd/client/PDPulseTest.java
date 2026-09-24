@@ -17,61 +17,85 @@
 
 package org.apache.hugegraph.pd.client;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
 import org.apache.hugegraph.pd.common.Useless;
+import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.pulse.PartitionHeartbeatRequest;
 import org.apache.hugegraph.pd.pulse.PulseServerNotice;
 import org.junit.BeforeClass;
 import org.junit.Test;
+// import org.junit.Test;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Useless("used for development")
 public class PDPulseTest {
 
     private static PDClient pdClient;
 
+    private static PDConfig pdConfig;
+
+    private long storeId = 0;
+    private String storeAddress = "localhost";
+    private String graphName = "graph1";
+
+    private static final String SERVICE_NAME = "store";
+    private static final String AUTHORITY = "";
+
     @BeforeClass
     public static void beforeClass() throws Exception {
-        PDConfig pdConfig = PDConfig.of("localhost:8686");
-        pdConfig.setEnableCache(true);
+        pdConfig = PDConfig.of("localhost:8686").setAuthority(SERVICE_NAME, AUTHORITY);
+//        pdConfig.setEnableCache(true);
+//        pdClient = PDClient.create(pdConfig);
+//        pdClient.getLeader();
+
         pdClient = PDClient.create(pdConfig);
-        pdClient.getLeader();
     }
 
     @Test
     public void listen() {
-        PDPulse pulse = new PDPulseImpl(pdClient.getLeaderIp());
-        CountDownLatch latch = new CountDownLatch(60);
+
+        PDPulse pulse = pdClient.getPulse();
+        CountDownLatch latch = new CountDownLatch(100);
 
         PDPulse.Notifier<PartitionHeartbeatRequest.Builder> notifier1 =
-                pulse.connectPartition(new PulseListener<>(latch, "listener1"));
-        PDPulse.Notifier<PartitionHeartbeatRequest.Builder> notifier2 =
-                pulse.connectPartition(new PulseListener<>(latch, "listener2"));
-        PDPulse.Notifier<PartitionHeartbeatRequest.Builder> notifier3 =
-                pulse.connectPartition(new PulseListener<>(latch, "listener3"));
+                pulse.connectPartition(new PulseListener(latch, "test-listener"));
+        Executors.newScheduledThreadPool(1).scheduleAtFixedRate(() -> {
+            pdClient.forceReconnect();
+        }, 1, 2, TimeUnit.SECONDS);
 
         try {
-            latch.await(120, TimeUnit.SECONDS);
+            latch.await(12000, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-
         PartitionHeartbeatRequest.Builder builder = PartitionHeartbeatRequest.newBuilder();
 
         notifier1.notifyServer(builder);
-        notifier2.notifyServer(builder);
-        notifier3.notifyServer(builder);
-
         notifier1.close();
-        notifier2.close();
-        notifier3.close();
+
     }
 
-    private static class PulseListener<T> implements PDPulse.Listener<T> {
+    //@Test
+    public void notifyServer() {
+        CountDownLatch latch = new CountDownLatch(100);
+        PDPulse pulse = pdClient.getPulse();
+        PDPulse.Notifier<PartitionHeartbeatRequest.Builder> notifier =
+                pulse.connectPartition(new PulseListener<>(latch, "test-listener"));
+        for (int i = 0; i < 100; i++) {
+            HgPDTestUtil.println("Notifying server [" + i + "] times.");
+            notifier.notifyServer(PartitionHeartbeatRequest.newBuilder().setStates(
+                    Metapb.PartitionStats.newBuilder().setId(i)
+            ));
+        }
 
-        private final String listenerName;
-        private final CountDownLatch latch;
+    }
+
+    private class PulseListener<T> implements PDPulse.Listener<T> {
+
+        CountDownLatch latch = new CountDownLatch(10);
+        private String listenerName;
 
         private PulseListener(CountDownLatch latch, String listenerName) {
             this.latch = latch;
@@ -80,25 +104,26 @@ public class PDPulseTest {
 
         @Override
         public void onNext(T response) {
-            System.out.println(this.listenerName + " ---> res: " + response);
-            this.latch.countDown();
+            // println(this.listenerName+" res: "+response);
+            // this.latch.countDown();
         }
 
         @Override
         public void onNotice(PulseServerNotice<T> notice) {
-            System.out.println(this.listenerName + " ---> res: " + notice.getContent());
+            //println("=> " + this.listenerName + " noticeId: " + notice.getNoticeId());
             notice.ack();
+            //println("  => " + this.listenerName + " ack: " + notice.getNoticeId());
             this.latch.countDown();
         }
 
         @Override
         public void onError(Throwable throwable) {
-            System.out.println(this.listenerName + " error: " + throwable.toString());
+            HgPDTestUtil.println(this.listenerName + " error: " + throwable.toString());
         }
 
         @Override
         public void onCompleted() {
-            System.out.println(this.listenerName + " is completed");
+            HgPDTestUtil.println(this.listenerName + " is completed");
         }
     }
 }

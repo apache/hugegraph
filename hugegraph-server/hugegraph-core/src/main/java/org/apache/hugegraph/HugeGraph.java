@@ -19,6 +19,7 @@ package org.apache.hugegraph;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -30,9 +31,11 @@ import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
+import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.raft.RaftGroupManager;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.TypedOption;
+import org.apache.hugegraph.kvstore.KvStore;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
@@ -46,6 +49,8 @@ import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeFeatures;
 import org.apache.hugegraph.task.TaskScheduler;
+import org.apache.hugegraph.traversal.optimize.HugeConnectiveLabelStepStrategy;
+import org.apache.hugegraph.traversal.optimize.HugeCountStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeCountStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugeGraphStepStrategy;
 import org.apache.hugegraph.traversal.optimize.HugePrimaryKeyStrategy;
@@ -54,6 +59,7 @@ import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
+import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.CountStrategy;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -69,7 +75,13 @@ public interface HugeGraph extends Graph {
 
     HugeGraph hugegraph();
 
+    void kvStore(KvStore kvStore);
+
+    KvStore kvStore();
+
     SchemaManager schema();
+
+    BackendStoreProvider storeProvider();
 
     Id getNextId(HugeType type);
 
@@ -186,7 +198,13 @@ public interface HugeGraph extends Graph {
 
     Number queryNumber(Query query);
 
+    String graphSpace();
+
+    void graphSpace(String graphSpace);
+
     String name();
+
+    String spaceGraphName();
 
     String backend();
 
@@ -206,7 +224,27 @@ public interface HugeGraph extends Graph {
 
     void serverStarted(GlobalMasterInfo nodeInfo);
 
+    String nickname();
+
+    void nickname(String nickname);
+
+    String creator();
+
+    void creator(String creator);
+
+    Date createTime();
+
+    void createTime(Date createTime);
+
+    Date updateTime();
+
+    void updateTime(Date updateTime);
+
+    void waitStarted();
+
     boolean started();
+
+    void started(boolean started);
 
     boolean closed();
 
@@ -343,7 +381,10 @@ public interface HugeGraph extends Graph {
         TraversalStrategies strategies = TraversalStrategies.GlobalCache
                 .getStrategies(Graph.class)
                 .clone();
-        strategies.addStrategies(HugeVertexStepStrategy.instance(),
+        strategies.removeStrategies(CountStrategy.class);
+        strategies.addStrategies(HugeConnectiveLabelStepStrategy.instance(),
+                                 HugeCountStrategy.instance(),
+                                 HugeVertexStepStrategy.instance(),
                                  HugeGraphStepStrategy.instance(),
                                  HugeCountStepStrategy.instance(),
                                  HugePrimaryKeyStrategy.instance());

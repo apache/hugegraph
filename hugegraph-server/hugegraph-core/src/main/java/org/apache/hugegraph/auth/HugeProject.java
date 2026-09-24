@@ -57,7 +57,10 @@ public class HugeProject extends Entity {
     }
 
     public HugeProject(String name, String description) {
-        this(null, name, description, null, null, null, null);
+        this(StringUtils.isNotEmpty(name) ? IdGenerator.of(name) : null, name, description, null,
+             null,
+             null,
+             null);
     }
 
     public HugeProject(Id id, String name, String description, Id adminGroupId,
@@ -232,6 +235,11 @@ public class HugeProject extends Entity {
     public static HugeProject fromVertex(Vertex vertex) {
         HugeProject target = new HugeProject((Id) vertex.id());
         return fromVertex(vertex, target);
+    }
+
+    public static HugeProject fromMap(Map<String, Object> map) {
+        HugeProject project = new HugeProject("");
+        return fromMap(map, project);
     }
 
     @Override

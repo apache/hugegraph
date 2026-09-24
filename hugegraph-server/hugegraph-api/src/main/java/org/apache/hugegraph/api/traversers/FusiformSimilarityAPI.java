@@ -50,7 +50,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/fusiformsimilarity")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/fusiformsimilarity")
 @Singleton
 @Tag(name = "FusiformSimilarityAPI")
 public class FusiformSimilarityAPI extends API {
@@ -62,6 +62,7 @@ public class FusiformSimilarityAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String post(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        FusiformSimilarityRequest request) {
         E.checkArgumentNotNull(request, "The fusiform similarity " +
@@ -96,7 +97,7 @@ public class FusiformSimilarityAPI extends API {
                   request.groupProperty, request.minGroups);
 
         ApiMeasurer measure = new ApiMeasurer();
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         Iterator<Vertex> sources = request.sources.vertices(g);
         E.checkArgument(sources != null && sources.hasNext(),
                         "The source vertices can't be empty");

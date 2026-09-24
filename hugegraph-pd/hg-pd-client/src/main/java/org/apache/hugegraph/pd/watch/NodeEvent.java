@@ -23,9 +23,9 @@ import org.apache.hugegraph.pd.grpc.watch.NodeEventType;
 
 public class NodeEvent {
 
-    private final String graph;
-    private final long nodeId;
-    private final EventType eventType;
+    private String graph;
+    private long nodeId;
+    private EventType eventType;
 
     public NodeEvent(String graph, long nodeId, EventType eventType) {
         this.graph = graph;

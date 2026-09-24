@@ -27,8 +27,8 @@ import java.util.function.Supplier;
  */
 public class HgMapCache<K, V> {
 
-    private final Map<K, V> cache = new ConcurrentHashMap<K, V>();
-    private final Supplier<Boolean> expiry;
+    private Map<K, V> cache = new ConcurrentHashMap<K, V>();
+    private Supplier<Boolean> expiry;
 
     private HgMapCache(Supplier<Boolean> expiredPolicy) {
         this.expiry = expiredPolicy;

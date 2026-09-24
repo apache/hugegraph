@@ -20,37 +20,52 @@ package org.apache.hugegraph.pd.client;
 import static org.apache.hugegraph.pd.watch.NodeEvent.EventType.NODE_PD_LEADER_CHANGE;
 
 import java.util.ArrayList;
-import java.util.LinkedList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.hugegraph.pd.client.impl.PDPulseImpl2;
+import org.apache.hugegraph.pd.client.interceptor.Authentication;
+import org.apache.hugegraph.pd.client.listener.PDEventListener;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Metapb.Partition;
+import org.apache.hugegraph.pd.grpc.Metapb.Shard;
 import org.apache.hugegraph.pd.grpc.Metapb.ShardGroup;
 import org.apache.hugegraph.pd.grpc.PDGrpc;
+import org.apache.hugegraph.pd.grpc.PDGrpc.PDBlockingStub;
 import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.grpc.Pdpb.CachePartitionResponse;
 import org.apache.hugegraph.pd.grpc.Pdpb.CacheResponse;
+import org.apache.hugegraph.pd.grpc.Pdpb.ErrorType;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetGraphRequest;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetPartitionByCodeRequest;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetPartitionRequest;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetPartitionResponse;
+import org.apache.hugegraph.pd.grpc.Pdpb.GraphStatsResponse;
 import org.apache.hugegraph.pd.grpc.watch.WatchResponse;
 import org.apache.hugegraph.pd.watch.NodeEvent;
 import org.apache.hugegraph.pd.watch.PartitionEvent;
+import org.apache.hugegraph.pd.watch.PartitionEvent.ChangeType;
 
 import com.google.protobuf.ByteString;
 
 import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.grpc.MethodDescriptor;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.AbstractBlockingStub;
 import lombok.extern.slf4j.Slf4j;
+
+import org.apache.hugegraph.pd.watch.NodeEvent.EventType;
 
 /**
  * PD client implementation class
@@ -58,23 +73,31 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PDClient {
 
+    private static Map<String, ManagedChannel> channels = new ConcurrentHashMap();
+    private static ManagedChannel channel = null;
     private final PDConfig config;
     private final Pdpb.RequestHeader header;
     private final ClientCache cache;
-    private final StubProxy stubProxy;
-    private final List<PDEventListener> eventListeners;
+    private final StubProxy proxy;
+    private final List<PDEventListener> listeners;
+    private final PDPulse pulse;
+    private final PDConnectionManager connectionManager;
     private PDWatch.Watcher partitionWatcher;
     private PDWatch.Watcher storeWatcher;
     private PDWatch.Watcher graphWatcher;
     private PDWatch.Watcher shardGroupWatcher;
     private PDWatch pdWatch;
+    private Authentication auth;
 
     private PDClient(PDConfig config) {
         this.config = config;
         this.header = Pdpb.RequestHeader.getDefaultInstance();
-        this.stubProxy = new StubProxy(config.getServerHost().split(","));
-        this.eventListeners = new CopyOnWriteArrayList<>();
+        this.proxy = new StubProxy(config.getServerHost().split(","));
+        this.listeners = new CopyOnWriteArrayList<>();
         this.cache = new ClientCache(this);
+        this.auth = new Authentication(config.getUserName(), config.getAuthority());
+        this.connectionManager = new PDConnectionManager(config, this::getLeaderIp);
+        this.pulse = new PDPulseImpl2(this.connectionManager);
     }
 
     /**
@@ -84,25 +107,47 @@ public class PDClient {
      * @return
      */
     public static PDClient create(PDConfig config) {
-        return new PDClient(config);
+        PDClient client = new PDClient(config);
+        return client;
+    }
+
+    public static void setChannel(ManagedChannel mc) {
+        channel = mc;
+    }
+
+    /**
+     * Return the PD pulse client.
+     *
+     * @return
+     */
+    public PDPulse getPulse() {
+        return this.pulse;
+    }
+
+    /**
+     * Force a reconnection to the PD leader, regardless of whether the current connection is
+     * alive or not.
+     */
+    public void forceReconnect() {
+        this.connectionManager.forceReconnect();
     }
 
     private synchronized void newBlockingStub() throws PDException {
-        if (stubProxy.get() != null) {
+        if (proxy.get() != null) {
             return;
         }
 
         String host = newLeaderStub();
         if (host.isEmpty()) {
-            throw new PDException(Pdpb.ErrorType.PD_UNREACHABLE_VALUE,
+            throw new PDException(ErrorType.PD_UNREACHABLE_VALUE,
                                   "PD unreachable, pd.peers=" + config.getServerHost());
         }
-
         log.info("PDClient enable cache, init PDWatch object");
-        connectPdWatch(host);
+        startWatch(host);
+        this.connectionManager.forceReconnect();
     }
 
-    public void connectPdWatch(String leader) {
+    public void startWatch(String leader) {
 
         if (pdWatch != null && Objects.equals(pdWatch.getCurrentHost(), leader) &&
             pdWatch.checkChannel()) {
@@ -110,22 +155,17 @@ public class PDClient {
         }
 
         log.info("PDWatch client connect host:{}", leader);
-        pdWatch = new PDWatchImpl(leader);
-
+        pdWatch = new PDWatchImpl(leader, this.config);
         partitionWatcher = pdWatch.watchPartition(new PDWatch.Listener<>() {
             @Override
             public void onNext(PartitionEvent response) {
                 // log.info("PDClient receive partition event {}-{} {}",
                 //        response.getGraph(), response.getPartitionId(), response.getChangeType());
                 invalidPartitionCache(response.getGraph(), response.getPartitionId());
-
-                if (response.getChangeType() == PartitionEvent.ChangeType.DEL) {
+                if (response.getChangeType() == ChangeType.DEL) {
                     cache.removeAll(response.getGraph());
                 }
-
-                eventListeners.forEach(listener -> {
-                    listener.onPartitionChanged(response);
-                });
+                listeners.forEach(listener -> listener.onPartitionChanged(response));
             }
 
             @Override
@@ -141,19 +181,26 @@ public class PDClient {
                 log.info("PDClient receive store event {} {}",
                          response.getEventType(), Long.toHexString(response.getNodeId()));
 
-                if (response.getEventType() == NODE_PD_LEADER_CHANGE) {
+                if (response.getEventType() == EventType.NODE_PD_LEADER_CHANGE) {
                     // pd raft change
                     var leaderIp = response.getGraph();
                     log.info("watchNode: pd leader changed to {}, current watch:{}",
                              leaderIp, pdWatch.getCurrentHost());
                     closeStub(!Objects.equals(pdWatch.getCurrentHost(), leaderIp));
-                    connectPdWatch(leaderIp);
+                    startWatch(leaderIp);
+                    PDClient.this.connectionManager.forceReconnect();
+                }
+                if (response.getEventType() == EventType.NODE_OFFLINE) {
+                    invalidStoreCache(response.getNodeId());
+                } else {
+                    try {
+                        getStore(response.getNodeId());
+                    } catch (PDException e) {
+                        log.error("getStore exception", e);
+                    }
                 }
 
-                invalidStoreCache(response.getNodeId());
-                eventListeners.forEach(listener -> {
-                    listener.onStoreChanged(response);
-                });
+                listeners.forEach(listener -> listener.onStoreChanged(response));
             }
 
             @Override
@@ -167,9 +214,7 @@ public class PDClient {
         graphWatcher = pdWatch.watchGraph(new PDWatch.Listener<>() {
             @Override
             public void onNext(WatchResponse response) {
-                eventListeners.forEach(listener -> {
-                    listener.onGraphChanged(response);
-                });
+                listeners.forEach(listener -> listener.onGraphChanged(response));
             }
 
             @Override
@@ -191,6 +236,8 @@ public class PDClient {
                             cache.deleteShardGroup(shardResponse.getShardGroupId());
                             break;
                         case WATCH_CHANGE_TYPE_ALTER:
+                            // fall through to case WATCH_CHANGE_TYPE_ADD
+                        case WATCH_CHANGE_TYPE_ADD:
                             cache.updateShardGroup(
                                     response.getShardGroupResponse().getShardGroup());
                             break;
@@ -198,7 +245,7 @@ public class PDClient {
                             break;
                     }
                 }
-                eventListeners.forEach(listener -> listener.onShardGroupChanged(response));
+                listeners.forEach(listener -> listener.onShardGroupChanged(response));
             }
 
             @Override
@@ -210,7 +257,8 @@ public class PDClient {
     }
 
     private synchronized void closeStub(boolean closeWatcher) {
-        stubProxy.set(null);
+        // TODO ManagedChannel  Did not close properly
+        proxy.set(null);
         cache.reset();
 
         if (closeWatcher) {
@@ -236,43 +284,42 @@ public class PDClient {
         }
     }
 
-    private PDGrpc.PDBlockingStub getStub() throws PDException {
-        if (stubProxy.get() == null) {
+    private PDBlockingStub getStub() throws PDException {
+        if (proxy.get() == null) {
             newBlockingStub();
         }
-        return stubProxy.get().withDeadlineAfter(config.getGrpcTimeOut(), TimeUnit.MILLISECONDS);
+        return getStub(proxy.get());
     }
 
-    private PDGrpc.PDBlockingStub newStub() throws PDException {
-        if (stubProxy.get() == null) {
+    private PDBlockingStub getStub(PDBlockingStub stub) {
+        return stub.withDeadlineAfter(config.getGrpcTimeOut(), TimeUnit.MILLISECONDS)
+                   .withInterceptors(auth)
+                   .withMaxInboundMessageSize(PDConfig.getInboundMessageSize());
+    }
+
+    private PDBlockingStub newStub() throws PDException {
+        if (proxy.get() == null) {
             newBlockingStub();
         }
-        return PDGrpc.newBlockingStub(stubProxy.get().getChannel())
-                     .withDeadlineAfter(config.getGrpcTimeOut(),
-                                        TimeUnit.MILLISECONDS);
+        return getStub(PDGrpc.newBlockingStub(proxy.get().getChannel()));
     }
 
     private String newLeaderStub() {
         String leaderHost = "";
-        for (int i = 0; i < stubProxy.getHostCount(); i++) {
-            String host = stubProxy.nextHost();
-            ManagedChannel channel = Channels.getChannel(host);
-
-            PDGrpc.PDBlockingStub stub = PDGrpc.newBlockingStub(channel)
-                                               .withDeadlineAfter(config.getGrpcTimeOut(),
-                                                                  TimeUnit.MILLISECONDS);
+        for (int i = 0; i < proxy.getHostCount(); i++) {
+            String host = proxy.nextHost();
+            ManagedChannel channel = getChannel(host);
+            PDBlockingStub stub = getStub(PDGrpc.newBlockingStub(channel));
             try {
                 var leaderIp = getLeaderIp(stub);
                 if (!leaderIp.equalsIgnoreCase(host)) {
                     leaderHost = leaderIp;
-                    stubProxy.set(PDGrpc.newBlockingStub(channel)
-                                        .withDeadlineAfter(config.getGrpcTimeOut(),
-                                                           TimeUnit.MILLISECONDS));
+                    proxy.set(getStub(PDGrpc.newBlockingStub(channel)));
                 } else {
-                    stubProxy.set(stub);
+                    proxy.set(stub);
                     leaderHost = host;
                 }
-                stubProxy.setLeader(leaderIp);
+                proxy.setLeader(leaderIp);
 
                 log.info("PDClient connect to host = {} success", leaderHost);
                 break;
@@ -284,16 +331,37 @@ public class PDClient {
         return leaderHost;
     }
 
-    public String getLeaderIp() {
-
-        return getLeaderIp(stubProxy.get());
+    private ManagedChannel getChannel(String host) {
+        ManagedChannel c;
+        if ((c = channels.get(host)) == null || c.isTerminated()) {
+            synchronized (channels) {
+                if ((c = channels.get(host)) == null || c.isTerminated()) {
+                    channel = ManagedChannelBuilder.forTarget(host)
+                                                   .maxInboundMessageSize(
+                                                           PDConfig.getInboundMessageSize())
+                                                   .usePlaintext().build();
+                    c = channel;
+                    channels.put(host, channel);
+                }
+            }
+        }
+        channel = c;
+        return channel;
     }
 
-    private String getLeaderIp(PDGrpc.PDBlockingStub stub) {
+    public String getLeaderIp() {
+        try {
+            return getLeaderIp(getStub());
+        } catch (PDException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String getLeaderIp(PDBlockingStub stub) {
         if (stub == null) {
             try {
                 getStub();
-                return stubProxy.getLeader();
+                return proxy.getLeader();
             } catch (PDException e) {
                 throw new RuntimeException(e);
             }
@@ -374,8 +442,8 @@ public class PDClient {
      * @return
      */
     public List<Metapb.Store> getActiveStores(String graphName) throws PDException {
-        List<Metapb.Store> stores = new ArrayList<>();
-        KVPair<Metapb.Partition, Metapb.Shard> ptShard = this.getPartitionByCode(graphName, 0);
+        Set<Metapb.Store> stores = new HashSet<>();
+        KVPair<Partition, Shard> ptShard = this.getPartitionByCode(graphName, 0);
         while (ptShard != null) {
             stores.add(this.getStore(ptShard.getValue().getStoreId()));
             if (ptShard.getKey().getEndKey() < PartitionUtils.MAX_VALUE) {
@@ -384,7 +452,7 @@ public class PDClient {
                 ptShard = null;
             }
         }
-        return stores;
+        return new ArrayList<>(stores);
     }
 
     public List<Metapb.Store> getActiveStores() throws PDException {
@@ -459,11 +527,8 @@ public class PDClient {
      * @return
      * @throws PDException
      */
-    public KVPair<Metapb.Partition, Metapb.Shard> getPartition(String graphName, byte[] key) throws
-                                                                                             PDException {
-
-        KVPair<Metapb.Partition, Metapb.Shard> partShard =
-                this.getPartitionByCode(graphName, PartitionUtils.calcHashcode(key));
+    public KVPair<Partition, Shard> getPartition(String graphName, byte[] key) throws PDException {
+        KVPair<Partition, Shard> partShard = cache.getPartitionByKey(graphName, key);
         partShard = getKvPair(graphName, key, partShard);
         return partShard;
     }
@@ -574,19 +639,23 @@ public class PDClient {
     public ShardGroup getShardGroup(int partId) throws PDException {
         ShardGroup group = cache.getShardGroup(partId);
         if (group == null) {
-            Pdpb.GetShardGroupRequest request = Pdpb.GetShardGroupRequest.newBuilder()
-                                                                         .setHeader(header)
-                                                                         .setGroupId(partId)
-                                                                         .build();
-            Pdpb.GetShardGroupResponse response =
-                    blockingUnaryCall(PDGrpc.getGetShardGroupMethod(), request);
-            handleResponseError(response.getHeader());
-            group = response.getShardGroup();
+            group = getShardGroupDirect(partId);
             if (config.isEnableCache()) {
                 cache.updateShardGroup(group);
             }
         }
         return group;
+    }
+
+    public ShardGroup getShardGroupDirect(int partId) throws PDException {
+        Pdpb.GetShardGroupRequest request = Pdpb.GetShardGroupRequest.newBuilder()
+                                                                     .setHeader(header)
+                                                                     .setGroupId(partId)
+                                                                     .build();
+        Pdpb.GetShardGroupResponse response =
+                blockingUnaryCall(PDGrpc.getGetShardGroupMethod(), request);
+        handleResponseError(response.getHeader());
+        return response.getShardGroup();
     }
 
     public void updateShardGroup(ShardGroup shardGroup) throws PDException {
@@ -809,6 +878,8 @@ public class PDClient {
                 if (config.isEnableCache()) {
                     if (shard == null) {
                         cache.removePartition(graphName, partId);
+                    } else {
+                        cache.updateLeader(partId, shard);
                     }
                 }
             }
@@ -894,7 +965,8 @@ public class PDClient {
         } catch (Exception e) {
             log.error(method.getFullMethodName() + " exception, {}", e.getMessage());
             if (e instanceof StatusRuntimeException) {
-                if (retry < stubProxy.getHostCount()) {
+                StatusRuntimeException se = (StatusRuntimeException) e;
+                if (retry < proxy.getHostCount()) {
                     closeStub(true);
                     return blockingUnaryCall(method, req, ++retry);
                 }
@@ -917,11 +989,11 @@ public class PDClient {
     }
 
     public void addEventListener(PDEventListener listener) {
-        eventListeners.add(listener);
+        listeners.add(listener);
     }
 
     public PDWatch getWatchClient() {
-        return new PDWatchImpl(stubProxy.getHost());
+        return new PDWatchImpl(proxy.getHost(), config);
     }
 
     /**
@@ -1284,61 +1356,41 @@ public class PDClient {
         handleResponseError(response.getHeader());
     }
 
-    public interface PDEventListener {
-
-        void onStoreChanged(NodeEvent event);
-
-        void onPartitionChanged(PartitionEvent event);
-
-        void onGraphChanged(WatchResponse event);
-
-        default void onShardGroupChanged(WatchResponse event) {
-        }
-
+    public GraphStatsResponse getGraphStats(String graphName) throws PDException {
+        GetGraphRequest request =
+                GetGraphRequest.newBuilder().setHeader(header).setGraphName(graphName).build();
+        GraphStatsResponse graphStats = getStub().getGraphStats(request);
+        handleResponseError(graphStats.getHeader());
+        return graphStats;
     }
 
-    static class StubProxy {
+    public long submitBuildIndexTask(Metapb.BuildIndexParam param) throws PDException {
+        Pdpb.IndexTaskCreateRequest request = Pdpb.IndexTaskCreateRequest.newBuilder()
+                                                                         .setHeader(header)
+                                                                         .setParam(param)
+                                                                         .build();
+        var response = getStub().submitTask(request);
+        handleResponseError(response.getHeader());
+        return response.getTaskId();
+    }
 
-        private final LinkedList<String> hostList = new LinkedList<>();
-        private volatile PDGrpc.PDBlockingStub stub;
-        private String leader;
+    public Pdpb.IndexTaskQueryResponse queryBuildIndexTaskStatus(long taskId) throws PDException {
+        Pdpb.IndexTaskQueryRequest request = Pdpb.IndexTaskQueryRequest.newBuilder()
+                                                                       .setHeader(header)
+                                                                       .setTaskId(taskId)
+                                                                       .build();
+        var response = getStub().queryTaskState(request);
+        handleResponseError(response.getHeader());
+        return response;
+    }
 
-        public StubProxy(String[] hosts) {
-            for (String host : hosts) {
-                if (!host.isEmpty()) {
-                    hostList.offer(host);
-                }
-            }
-        }
-
-        public String nextHost() {
-            String host = hostList.poll();
-            hostList.offer(host);
-            return host;
-        }
-
-        public void set(PDGrpc.PDBlockingStub stub) {
-            this.stub = stub;
-        }
-
-        public PDGrpc.PDBlockingStub get() {
-            return this.stub;
-        }
-
-        public String getHost() {
-            return hostList.peek();
-        }
-
-        public int getHostCount() {
-            return hostList.size();
-        }
-
-        public String getLeader() {
-            return leader;
-        }
-
-        public void setLeader(String leader) {
-            this.leader = leader;
-        }
+    public Pdpb.IndexTaskQueryResponse retryBuildIndexTask(long taskId) throws PDException {
+        Pdpb.IndexTaskQueryRequest request = Pdpb.IndexTaskQueryRequest.newBuilder()
+                                                                       .setHeader(header)
+                                                                       .setTaskId(taskId)
+                                                                       .build();
+        var response = getStub().retryIndexTask(request);
+        handleResponseError(response.getHeader());
+        return response;
     }
 }

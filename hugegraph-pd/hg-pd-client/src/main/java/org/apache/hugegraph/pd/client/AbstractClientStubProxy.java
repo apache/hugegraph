@@ -24,7 +24,7 @@ import io.grpc.stub.AbstractStub;
 
 public class AbstractClientStubProxy {
 
-    private final LinkedList<String> hostList = new LinkedList<>();
+    private LinkedList<String> hostList = new LinkedList<>();
     private AbstractBlockingStub blockingStub;
     private AbstractStub stub;
 

@@ -51,7 +51,7 @@ public abstract class PerfExampleBase {
     public static final int SOFTWARE_NUM = 30;
     public static final int EDGE_NUM = 100;
 
-    protected static final Logger LOG = Log.logger(PerfExampleBase.class);
+    private static final Logger LOG = Log.logger(PerfExampleBase.class);
 
     protected Set<Object> vertices = Collections.newSetFromMap(new ConcurrentHashMap<>());
     protected boolean profile = false;
@@ -66,6 +66,8 @@ public abstract class PerfExampleBase {
         int times = Integer.parseInt(args[1]);
         int multiple = Integer.parseInt(args[2]);
         this.profile = Boolean.parseBoolean(args[3]);
+        System.out.printf("Run: threads=%s times=%s multiple=%s profile=%s\n",
+                          threadCount, times, multiple, this.profile);
 
         // NOTE: this test with HugeGraph is for local,
         // change it into a client if test with restful server from remote
@@ -118,7 +120,7 @@ public abstract class PerfExampleBase {
             this.testQueryVertex(graph, threadCount, i, multiple);
         }, threadCount);
 
-        final long size = (long) (PERSON_NUM + SOFTWARE_NUM) * threadCount * times;
+        final long size = this.vertices.size();
         LOG.info("Query rate with threads: {} vertices/s, " +
                  "query total vertices {}, cost time: {}ms",
                  size * 1000 / cost, size, cost);
@@ -130,7 +132,7 @@ public abstract class PerfExampleBase {
             this.testQueryEdge(graph, threadCount, i, multiple);
         }, threadCount);
 
-        final long size = (long) (PERSON_NUM + SOFTWARE_NUM) * threadCount * times;
+        final long size = this.vertices.size();
         LOG.info("Query rate with threads: {} vedges/s, " +
                  "query total vedges {}, cost time: {}ms",
                  size * 1000 / cost, size, cost);
@@ -188,26 +190,29 @@ public abstract class PerfExampleBase {
 
     protected abstract void testInsert(GraphManager graph, int times, int multiple);
 
-    protected void testQueryVertex(GraphManager graph, int threads, int thread, int multiple) {
-        int i = 0;
-        int j = 0;
-        int total = 0;
-        for (Object id : this.vertices) {
-            if (i++ % multiple != 0) {
-                continue;
+    protected void testQueryVertex(GraphManager graph,
+                                   int threads,
+                                   int thread,
+                                   int multiple) {
+        int totalV = 0;
+        long start = System.currentTimeMillis();
+        for (int i = 0; i < multiple; i++) {
+            int j = 0;
+            for (Object id : this.vertices) {
+                if (j++ % threads != thread) {
+                    continue;
+                }
+                LOG.debug("Query vertex {}: {}", i, id);
+                Vertex vertex = graph.queryVertex(id);
+                if (!vertex.id().equals(id)) {
+                    LOG.warn("Query vertex by id {} returned {}", id, vertex);
+                }
+                totalV++;
             }
-            if (j++ % threads != thread) {
-                continue;
-            }
-
-            LOG.debug("Query vertex {}: {}", i, id);
-            Vertex vertex = graph.queryVertex(id);
-            if (!vertex.id().equals(id)) {
-                LOG.warn("Query vertex by id {} returned {}", id, vertex);
-            }
-            total++;
         }
-        LOG.debug("Query vertices with thread({}): {}", thread, total);
+        long cost = elapsed(start);
+        LOG.info("Query {} vertices with thread({}): {} vertices/s",
+                 totalV, thread, totalV * 1000 / cost);
     }
 
     protected void testQueryEdge(GraphManager graph, int threads, int thread, int multiple) {
@@ -233,6 +238,11 @@ public abstract class PerfExampleBase {
         }
         LOG.debug("Query edges of vertices({}) with thread({}): {}",
                   totalV, thread, totalE);
+    }
+
+    protected static long elapsed(long start) {
+        long current = System.currentTimeMillis();
+        return current - start;
     }
 
     protected static class GraphManager {

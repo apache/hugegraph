@@ -20,12 +20,13 @@ package org.apache.hugegraph.store.client.grpc;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import javax.annotation.concurrent.NotThreadSafe;
 
+import org.apache.hugegraph.HugeGraphSupplier;
+import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgKvStore;
@@ -39,6 +40,7 @@ import org.apache.hugegraph.store.client.util.HgStoreClientConfig;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
 import org.apache.hugegraph.store.client.util.HgStoreClientUtil;
 import org.apache.hugegraph.store.client.util.HgUuid;
+import org.apache.hugegraph.store.constant.HugeServerTables;
 import org.apache.hugegraph.store.grpc.common.GraphMethod;
 import org.apache.hugegraph.store.grpc.common.Key;
 import org.apache.hugegraph.store.grpc.common.OpType;
@@ -46,6 +48,8 @@ import org.apache.hugegraph.store.grpc.common.TableMethod;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
 import org.apache.hugegraph.store.grpc.stream.HgStoreStreamGrpc.HgStoreStreamStub;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
+import org.apache.hugegraph.store.query.StoreQueryParam;
+import org.apache.hugegraph.structure.BaseElement;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnsafeByteOperations;
@@ -62,16 +66,6 @@ import lombok.extern.slf4j.Slf4j;
 class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
 
     private static final HgStoreClientConfig hgStoreClientConfig = HgStoreClientConfig.of();
-    private static final ConcurrentHashMap<String, Integer> tables = new ConcurrentHashMap<>() {{
-        put("unknown", 0);
-        put("g+v", 1);
-        put("g+oe", 2);
-        put("g+ie", 3);
-        put("g+index", 4);
-        put("g+task", 5);
-        put("g+olap", 6);
-        put("g+server", 7);
-    }};
     private final HgStoreNode storeNode;
     private final String graphName;
     private final GrpcStoreSessionClient storeSessionClient;
@@ -220,10 +214,7 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
     private boolean prepareBatchEntry(OpType opType, String table
             , HgOwnerKey startKey, HgOwnerKey endKey, byte[] value) {
         this.batchEntryBuilder.clear().setOpType(opType);
-        Integer tableCode = tables.get(table);
-        if (tableCode != null) {
-            this.batchEntryBuilder.setTable(tableCode);
-        }
+        this.batchEntryBuilder.setTable(HugeServerTables.TABLES_MAP.get(table));
         if (startKey != null) {
             this.batchEntryBuilder.setStartKey(toKey(startKey));
         }
@@ -369,11 +360,6 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
                                                   stub,
                                                   builder);
         return GrpcKvIteratorImpl.of(this, scanner);
-    }
-
-    @Override
-    public long count(String table) {
-        return this.storeSessionClient.count(this, table);
     }
 
     @Override
@@ -544,5 +530,11 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
     @Override
     public String toString() {
         return "storeNodeSession: {" + storeNode + ", graphName: \"" + graphName + "\"}";
+    }
+
+    @Override
+    public List<HgKvIterator<BaseElement>> query(StoreQueryParam query,
+                                                 HugeGraphSupplier supplier) throws PDException {
+        throw new UnsupportedOperationException("query() not supported yet");
     }
 }

@@ -26,7 +26,8 @@ import lombok.Data;
 @Data
 public class Partition implements Cloneable {
 
-    private int id;                                             // region id
+    // region id
+    private int id;
     private String graphName;
     // Region key range [startKey, endKey)
     private long startKey;

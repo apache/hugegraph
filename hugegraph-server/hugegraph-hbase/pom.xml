@@ -27,21 +27,106 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>hugegraph-hbase</artifactId>
-
+    <properties>
+        <hbase.version>2.6.5</hbase.version>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-core</artifactId>
             <version>${revision}</version>
         </dependency>
+        <!--
+            hbase-endpoint must come before hbase-shaded-client so that the
+            unshaded LongColumnInterpreter (using com.google.protobuf) is on
+            the classpath ahead of the shaded variant, allowing AggregationClient
+            rowCount() generic bounds to resolve correctly.
+
+            Exclude hbase-server (server-side coprocessor implementations run on the
+            RegionServer, not on the HugeGraph client node) and the heavyweight
+            mapreduce/hadoop chain that hbase-endpoint pulls transitively but that the
+            HugeGraph HBase client runtime does not use. Exclusions verified against a
+            live HBase cluster including count/aggregation end-to-end path.
+        -->
         <dependency>
-            <groupId>com.baidu.hugegraph</groupId>
-            <artifactId>hbase-shaded-endpoint</artifactId>
-            <version>2.0.6</version>
+            <groupId>org.apache.hbase</groupId>
+            <artifactId>hbase-endpoint</artifactId>
+            <version>${hbase.version}</version>
             <exclusions>
+                <!-- hbase-server runs only on RegionServer nodes, not needed in client -->
+                <exclusion>
+                    <groupId>org.apache.hbase</groupId>
+                    <artifactId>hbase-server</artifactId>
+                </exclusion>
+                <!-- hbase-mapreduce (+ its chain: hbase-asyncfs, hbase-replication)
+                     and the heavyweight hadoop-client/YARN/MapReduce stack are not
+                     needed by HugeGraph HBase client operations -->
+                <exclusion>
+                    <groupId>org.apache.hbase</groupId>
+                    <artifactId>hbase-mapreduce</artifactId>
+                </exclusion>
+                <!-- hadoop-auth pulled by hbase-client, brings kerberos, nimbus,
+                     apacheds, curator — exclude; HugeGraph uses ZooKeeper registry
+                     directly and does not rely on Hadoop auth stack -->
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-auth</artifactId>
+                </exclusion>
+                <!-- hadoop-client brings the entire YARN/MapReduce/HDFS API surface -->
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client</artifactId>
+                </exclusion>
+                <!-- slf4j-api pulled by hbase-endpoint directly; the project already
+                     has a higher version from other modules, exclude to avoid
+                     adding a redundant older version to known-dependencies -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+                <!-- snappy-java from hbase-zookeeper; HugeGraph does not use
+                     HBase-side snappy compression so this is safe to exclude -->
+                <exclusion>
+                    <groupId>org.xerial.snappy</groupId>
+                    <artifactId>snappy-java</artifactId>
+                </exclusion>
+                <!-- Legacy log4j 1.x adapters pulled via older Hadoop shims -->
                 <exclusion>
                     <groupId>log4j</groupId>
                     <artifactId>log4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>apache-log4j-extras</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-log4j12</artifactId>
+                </exclusion>
+                <!-- Hadoop FS APIs pulled transitively; not used by client -->
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-hdfs</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-mapreduce-client-core</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hbase</groupId>
+            <artifactId>hbase-shaded-client</artifactId>
+            <version>${hbase.version}</version>
+            <exclusions>
+                <!-- Project already provides a newer slf4j-api via other modules -->
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>

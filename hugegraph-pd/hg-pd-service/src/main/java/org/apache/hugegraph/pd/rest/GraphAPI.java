@@ -31,6 +31,7 @@ import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.model.GraphRestRequest;
+import org.apache.hugegraph.pd.model.GraphStatistics;
 import org.apache.hugegraph.pd.model.RestApiResponse;
 import org.apache.hugegraph.pd.service.PDRestService;
 import org.apache.hugegraph.pd.service.PDService;
@@ -43,7 +44,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 @RestController
@@ -56,6 +56,14 @@ public class GraphAPI extends API {
     @Autowired
     PDService pdService;
 
+    /**
+     * Get partition size range
+     * <p>
+     * This interface is used to obtain the minimum and maximum values of partition sizes in the current system.
+     *
+     * @return RestApiResponse object containing the partition size range
+     * @throws PDException If an exception occurs while obtaining the partition size range, a PDException exception is thrown.
+     */
     @GetMapping(value = "/graph/partitionSizeRange", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public RestApiResponse getPartitionSizeRange() {
@@ -72,6 +80,15 @@ public class GraphAPI extends API {
         }
     }
 
+    /**
+     * Get all graph information
+     * This interface uses a GET request to obtain all graph information and filters out graphs whose names end with “/g”.
+     * The information of these graphs is encapsulated in a RestApiResponse object and returned.
+     *
+     * @return A RestApiResponse object containing the filtered graph information
+     * The returned object includes a “graphs” field, whose value is a list containing GraphStatistics objects
+     * @throws PDException If an exception occurs while retrieving graph information, a PDException exception is thrown
+     */
     @GetMapping(value = "/graphs", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public RestApiResponse getGraphs() {
@@ -81,7 +98,7 @@ public class GraphAPI extends API {
             List<GraphStatistics> resultGraphs = new ArrayList<>();
             for (Metapb.Graph graph : graphs) {
                 if ((graph.getGraphName() != null) && (graph.getGraphName().endsWith("/g"))) {
-                    resultGraphs.add(new GraphStatistics(graph));
+                    resultGraphs.add(new GraphStatistics(graph, pdRestService, pdService));
                 }
             }
             HashMap<String, Object> dataMap = new HashMap<>();
@@ -99,6 +116,21 @@ public class GraphAPI extends API {
         return response;
     }
 
+    /**
+     * Set graph information
+     * <p>
+     * Receive a GraphRestRequest object via an HTTP POST request, parse the graph name from the request URL,
+     * and use the pdRestService service to obtain the current graph information.
+     * If the current graph does not exist, create a new graph object;
+     * if it exists, update the current graph object information (such as the number of partitions).
+     * Finally, use the pdRestService service to update the graph information and return the updated graph information in JSON format.
+     *
+     * @param body GraphRestRequest object containing graph information
+     * @param request HTTP request object used to obtain the graph name from the request URL
+     * @return A JSON string containing the updated graph information
+     * @throws PDException If a PD exception occurs while retrieving or updating the graph information, a PDException exception is thrown
+     * @throws Exception If other exceptions occur while processing the request, an Exception exception is thrown
+     */
     @PostMapping(value = "/graph/**", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -126,12 +158,21 @@ public class GraphAPI extends API {
         }
     }
 
+    /**
+     * Get graph information
+     * <p>
+     * Retrieves information about a specified graph via an HTTP GET request and returns it in JSON format.
+     *
+     * @param request HTTP request object used to retrieve the graph name from the request URL
+     * @return RestApiResponse object containing graph information
+     * @throws UnsupportedEncodingException Thrown if an unsupported encoding exception occurs during URL decoding
+     */
     @GetMapping(value = "/graph/**", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public RestApiResponse getGraph(HttpServletRequest request) throws
                                                                 UnsupportedEncodingException {
         RestApiResponse response = new RestApiResponse();
-        GraphStatistics statistics = null;
+        GraphStatistics statistics;
         String requestURL = request.getRequestURL().toString();
         final String prefix = "/graph/";
         final int limit = 2;
@@ -140,7 +181,7 @@ public class GraphAPI extends API {
         try {
             Metapb.Graph graph = pdRestService.getGraph(graphName);
             if (graph != null) {
-                statistics = new GraphStatistics(graph);
+                statistics = new GraphStatistics(graph, pdRestService, pdService);
                 response.setData(statistics);
             } else {
                 response.setData(new HashMap<String, Object>());
@@ -154,137 +195,5 @@ public class GraphAPI extends API {
             response.setMessage(e.getMessage());
         }
         return response;
-    }
-
-    @Data
-    class Shard {
-
-        long partitionId;
-        long storeId;
-        String state;
-        String role;
-        int progress;
-
-        public Shard(Metapb.ShardStats shardStats, long partitionId) {
-            this.role = String.valueOf(shardStats.getRole());
-            this.storeId = shardStats.getStoreId();
-            this.state = String.valueOf(shardStats.getState());
-            this.partitionId = partitionId;
-            this.progress = shardStats.getProgress();
-        }
-
-        public Shard(Metapb.Shard shard, long partitionId) {
-            this.role = String.valueOf(shard.getRole());
-            this.storeId = shard.getStoreId();
-            this.state = Metapb.ShardState.SState_Normal.name();
-            this.progress = 0;
-            this.partitionId = partitionId;
-        }
-
-    }
-
-    @Data
-    class Partition {
-
-        int partitionId;
-        String graphName;
-        String workState;
-        long startKey;
-        long endKey;
-        List<Shard> shards;
-        long dataSize;
-
-        public Partition(Metapb.Partition pt, Metapb.PartitionStats partitionStats) {
-            if (pt != null) {
-                partitionId = pt.getId();
-                startKey = pt.getStartKey();
-                endKey = pt.getEndKey();
-                workState = String.valueOf(pt.getState());
-                graphName = pt.getGraphName();
-                final int postfixLength = 2;
-                graphName = graphName.substring(0, graphName.length() - postfixLength);
-                if (partitionStats != null) {
-                    List<Metapb.ShardStats> shardStatsList = partitionStats.getShardStatsList();
-                    List<Shard> shardsList = new ArrayList<>();
-                    for (Metapb.ShardStats shardStats : shardStatsList) {
-                        Shard shard = new Shard(shardStats, partitionId);
-                        shardsList.add(shard);
-                    }
-                    this.shards = shardsList;
-                } else {
-                    List<Shard> shardsList = new ArrayList<>();
-                    try {
-                        var shardGroup = pdService.getStoreNodeService().getShardGroup(pt.getId());
-                        if (shardGroup != null) {
-                            for (Metapb.Shard shard1 : shardGroup.getShardsList()) {
-                                shardsList.add(new Shard(shard1, partitionId));
-                            }
-                        } else {
-                            log.error("GraphAPI.Partition(), get shard group: {} returns null",
-                                      pt.getId());
-                        }
-                    } catch (PDException e) {
-                        log.error("Partition init failed, error: {}", e.getMessage());
-                    }
-                    this.shards = shardsList;
-                }
-
-            }
-        }
-    }
-
-    @Data
-    class GraphStatistics {
-
-        // Graph statistics
-        String graphName;
-        long partitionCount;
-        String state;
-        List<Partition> partitions;
-        long dataSize;
-        //todo
-        int nodeCount;
-        int edgeCount;
-        long keyCount;
-
-        public GraphStatistics(Metapb.Graph graph) throws PDException {
-            if (graph == null) {
-                return;
-            }
-            Map<Integer, Long> partition2DataSize = new HashMap<>();
-            graphName = graph.getGraphName();
-            partitionCount = graph.getPartitionCount();
-            state = String.valueOf(graph.getState());
-            // The amount of data and the number of keys
-            List<Metapb.Store> stores = pdRestService.getStores(graphName);
-            for (Metapb.Store store : stores) {
-                List<Metapb.GraphStats> graphStatsList = store.getStats().getGraphStatsList();
-                for (Metapb.GraphStats graphStats : graphStatsList) {
-                    if ((graphName.equals(graphStats.getGraphName()))
-                        && (Metapb.ShardRole.Leader.equals(graphStats.getRole()))) {
-                        keyCount += graphStats.getApproximateKeys();
-                        dataSize += graphStats.getApproximateSize();
-                        partition2DataSize.put(graphStats.getPartitionId(),
-                                               graphStats.getApproximateSize());
-                    }
-                }
-            }
-            List<Partition> resultPartitionList = new ArrayList<>();
-            List<Metapb.Partition> tmpPartitions = pdRestService.getPartitions(graphName);
-            if ((tmpPartitions != null) && (!tmpPartitions.isEmpty())) {
-                // The partition information to be returned
-                for (Metapb.Partition partition : tmpPartitions) {
-                    Metapb.PartitionStats partitionStats = pdRestService
-                            .getPartitionStats(graphName, partition.getId());
-                    Partition pt = new Partition(partition, partitionStats);
-                    pt.dataSize = partition2DataSize.getOrDefault(partition.getId(), 0L);
-                    resultPartitionList.add(pt);
-                }
-            }
-            partitions = resultPartitionList;
-            // Hide /g /m /s after the title of the graph
-            final int postfixLength = 2;
-            graphName = graphName.substring(0, graphName.length() - postfixLength);
-        }
     }
 }

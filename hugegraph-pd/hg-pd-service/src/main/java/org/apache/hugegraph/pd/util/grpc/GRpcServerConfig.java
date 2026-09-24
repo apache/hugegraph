@@ -29,17 +29,24 @@ import io.grpc.ServerBuilder;
 public class GRpcServerConfig extends GRpcServerBuilderConfigurer {
 
     public static final String EXECUTOR_NAME = "hg-grpc";
+    public static final int MAX_INBOUND_MESSAGE_SIZE = 1024 * 1024 * 1024;
     @Autowired
     private PDConfig pdConfig;
 
     @Override
     public void configure(ServerBuilder<?> serverBuilder) {
+        PDConfig.ThreadPoolGrpc poolGrpc = pdConfig.getThreadPoolGrpc();
         serverBuilder.executor(
-                HgExecutorUtil.createExecutor(EXECUTOR_NAME,
-                                              pdConfig.getThreadPoolGrpc().getCore(),
-                                              pdConfig.getThreadPoolGrpc().getMax(),
-                                              pdConfig.getThreadPoolGrpc().getQueue())
-        );
+                HgExecutorUtil.createExecutor(EXECUTOR_NAME, poolGrpc.getCore(), poolGrpc.getMax(),
+                                              poolGrpc.getQueue()));
+        serverBuilder.maxInboundMessageSize(MAX_INBOUND_MESSAGE_SIZE);
+        // TODO: GrpcAuthentication is instantiated as a Spring bean but never registered
+        // here - add serverBuilder.intercept(grpcAuthentication) once auth is refactored.
+        // It extends Authentication, which now also checks the Basic password against
+        // auth.secret-key. Registering it therefore requires giving that value to every
+        // gRPC client first: ServiceConstant.AUTHORITY (Server) and DefaultPdProvider
+        // .authority (Store) are "" and "default" today, and hg-pd-cli sends "".
+        // Otherwise no store can register once the interceptor is enabled.
     }
 
 }

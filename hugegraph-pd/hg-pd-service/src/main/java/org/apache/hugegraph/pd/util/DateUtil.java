@@ -26,21 +26,21 @@ import org.apache.hugegraph.pd.grpc.Pdpb;
 
 public class DateUtil {
 
-    private static final String DATE = "yyyy-MM-dd";
-    private static final String DATETIME = "yyyy-MM-dd HH:mm:ss";
-    private static final String DATETIME_MM = "yyyy-MM-dd HH:mm";
-    private static final String DATETIME_SSS = "yyyy-MM-dd HH:mm:ss.SSS";
-    private static final String TIME = "HH:mm";
-    private static final String TIME_SS = "HH:mm:ss";
-    private static final String SYS_DATE = "yyyy/MM/dd";
-    private static final String SYS_DATETIME = "yyyy/MM/dd HH:mm:ss";
-    private static final String SYS_DATETIME_MM = "yyyy/MM/dd HH:mm";
-    private static final String SYS_DATETIME_SSS = "yyyy/MM/dd HH:mm:ss.SSS";
-    private static final String NONE_DATE = "yyyyMMdd";
-    private static final String NONE_DATETIME = "yyyyMMddHHmmss";
-    private static final String NONE_DATETIME_MM = "yyyyMMddHHmm";
-    private static final String NONE_DATETIME_SSS = "yyyyMMddHHmmssSSS";
-    private static final String[] PATTERNS = new String[]{
+    private static String DATE = "yyyy-MM-dd";
+    private static String DATETIME = "yyyy-MM-dd HH:mm:ss";
+    private static String DATETIME_MM = "yyyy-MM-dd HH:mm";
+    private static String DATETIME_SSS = "yyyy-MM-dd HH:mm:ss.SSS";
+    private static String TIME = "HH:mm";
+    private static String TIME_SS = "HH:mm:ss";
+    private static String SYS_DATE = "yyyy/MM/dd";
+    private static String SYS_DATETIME = "yyyy/MM/dd HH:mm:ss";
+    private static String SYS_DATETIME_MM = "yyyy/MM/dd HH:mm";
+    private static String SYS_DATETIME_SSS = "yyyy/MM/dd HH:mm:ss.SSS";
+    private static String NONE_DATE = "yyyyMMdd";
+    private static String NONE_DATETIME = "yyyyMMddHHmmss";
+    private static String NONE_DATETIME_MM = "yyyyMMddHHmm";
+    private static String NONE_DATETIME_SSS = "yyyyMMddHHmmssSSS";
+    private static String[] PATTERNS = new String[]{
             DATE,
             DATETIME,
             DATETIME_MM,

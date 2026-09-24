@@ -23,6 +23,7 @@ import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.PartitionRole;
 
+@Deprecated
 public interface PartitionStateListener {
 
     // Partition role changed

@@ -101,9 +101,6 @@ public class HgStoreStateMachine extends StateMachineAdapter {
                               done.op.getReq());
                     //    done.run(new Status(RaftError.EINTERNAL, t.getMessage()));
                 }
-                inter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
-                // Do not publish the failed entry as applied.
-                return;
             }
             committedIndex = inter.getIndex();
 

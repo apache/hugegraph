@@ -33,6 +33,7 @@ import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.pd.grpc.Pdpb.GetMembersResponse;
 import org.apache.hugegraph.pd.grpc.discovery.NodeInfo;
 import org.apache.hugegraph.pd.grpc.discovery.Query;
+import org.apache.hugegraph.pd.license.LicenseVerifierService;
 import org.apache.hugegraph.pd.model.RegistryQueryRestRequest;
 import org.apache.hugegraph.pd.model.RegistryRestRequest;
 import org.apache.hugegraph.pd.model.RegistryRestResponse;
@@ -60,6 +61,18 @@ public class RegistryAPI extends API {
     @Autowired
     PDService pdService;
 
+    /**
+     * Register nodes with the registry center
+     * <p>
+     * Registers node information with the registry center via a POST request and returns the registration result.
+     * The request's Content-Type is application/json, and the response's Content-Type is also application/json.
+     *
+     * @param body    The request body containing registration information, including application name, version, address, tags, and registration interval, etc.
+     * @param request The HTTP request object used to obtain request-related information
+     * @return Returns the response information from the registration center, including whether the registration was successful and any error messages.
+     * @throws PDException If an exception occurs during registration (such as parameter errors), it is captured and handled, and the corresponding error message is returned.
+     * @throws PDRuntimeException If an exception occurs during runtime (such as license verification failure), it is captured and handled, and the corresponding error message is returned.
+     */
     @PostMapping(value = "/registry", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -85,6 +98,15 @@ public class RegistryAPI extends API {
         return registryResponse;
     }
 
+    /**
+     * Get registration information
+     * Get registration information that matches the query conditions via an HTTP POST request
+     *
+     * @param body    Request body containing query conditions, including application name, tags, version, and other information
+     * @param request HTTP request object used to receive request-related information
+     * @return Returns a response object containing registration information RegistryRestResponse
+     * @throws Exception If an exception occurs during request processing, the exception will be caught and a warning log will be recorded, and the response object will contain error information
+     */
     @PostMapping(value = "/registryInfo", consumes = MediaType.APPLICATION_JSON_VALUE,
                  produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -111,6 +133,18 @@ public class RegistryAPI extends API {
         return response;
     }
 
+    /**
+     * Retrieve all registration information
+     * This interface retrieves all registration information via a GET request, including
+     * standard registration details, PD member information, and Store member information.
+     * It encapsulates this information within a RegistryRestResponse object for return.
+     *
+     * @param request HTTP request object
+     * @return RegistryRestResponse object containing all registration information and response
+     * data such as error types
+     * @throws Exception If an exception occurs during request processing, it will be caught and
+     * a warning log recorded, while the response error type will be set to UNRECOGNIZED
+     */
     @GetMapping(value = "/allInfo", consumes = MediaType.APPLICATION_JSON_VALUE,
                 produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -164,6 +198,19 @@ public class RegistryAPI extends API {
         return members;
     }
 
+    /**
+     * Retrieve licence information
+     * Obtains the licence context information via an HTTP GET request and returns it
+     * encapsulated within a response object.
+     *
+     * @param request HTTP request object
+     * @return RegistryRestResponse Response object containing licence information.
+     * If licence information is successfully retrieved, errorType is OK and the data field
+     * contains the licence context;
+     * If an exception occurs, errorType is UNRECOGNIZED and includes the exception message.
+     * @throws Exception If an exception occurs while processing the request or retrieving
+     * licence information, it is caught and a warning log is recorded.
+     */
     @GetMapping(value = "/license", consumes = MediaType.APPLICATION_JSON_VALUE,
                 produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -171,9 +218,8 @@ public class RegistryAPI extends API {
         RegistryRestResponse response = new RegistryRestResponse();
         try {
             response.setErrorType(Pdpb.ErrorType.OK);
-            // TODO: uncomment later
-            //LicenseVerifierService licenseVerifierService = pdService.getLicenseVerifierService();
-            //response.setData(licenseVerifierService.getContext());
+            LicenseVerifierService licenseVerifierService = pdService.getLicenseVerifierService();
+            response.setData(licenseVerifierService.getContext());
         } catch (Exception e) {
             log.warn(e.getMessage());
             response.setErrorType(Pdpb.ErrorType.UNRECOGNIZED);
@@ -182,6 +228,18 @@ public class RegistryAPI extends API {
         return response;
     }
 
+    /**
+     * Retrieve Licence Machine Information
+     * This interface obtains machine information related to the licence via a GET request,
+     * returning the data in JSON format.
+     *
+     * @param request HTTP request object to receive client request information
+     * @return RegistryRestResponse Response object containing licence machine information.
+     * Returns machine details upon successful retrieval; otherwise returns error information.
+     * @throws Exception If an exception occurs during request processing or licence machine
+     * information retrieval, it will be caught and a warning log recorded, whilst returning a
+     * response object containing exception details.
+     */
     @GetMapping(value = "/license/machineInfo", consumes = MediaType.APPLICATION_JSON_VALUE,
                 produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
@@ -189,9 +247,8 @@ public class RegistryAPI extends API {
         RegistryRestResponse response = new RegistryRestResponse();
         try {
             response.setErrorType(Pdpb.ErrorType.OK);
-            // TODO: uncomment later
-            //LicenseVerifierService licenseVerifierService = pdService.getLicenseVerifierService();
-            //response.setData(licenseVerifierService.getIpAndMac());
+            LicenseVerifierService licenseVerifierService = pdService.getLicenseVerifierService();
+            response.setData(licenseVerifierService.getIpAndMac());
         } catch (Exception e) {
             log.warn(e.getMessage());
             response.setErrorType(Pdpb.ErrorType.UNRECOGNIZED);

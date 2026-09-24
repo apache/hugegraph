@@ -49,7 +49,7 @@ public class KvService {
     private static final String LOCK_PREFIX = "L";
     private static final String KV_PREFIX_DELIMITER = KV_PREFIX + KV_DELIMITER;
     private static final byte[] EMPTY_VALUE = new byte[0];
-    private final MetadataRocksDBStore meta;
+    private MetadataRocksDBStore meta;
     private PDConfig pdConfig;
 
     public KvService(PDConfig config) {
@@ -223,13 +223,13 @@ public class KvService {
 
     public boolean locked(String key) throws PDException {
         String lockKey = KvService.getKeyWithoutPrefix(KvService.LOCK_PREFIX, key);
-        Map<String, String> allLock = scanWithPrefix(lockKey);
+        Map<String, String> allLock = scanWithPrefix(lockKey + KV_DELIMITER);
         return allLock != null && allLock.size() != 0;
     }
 
     private boolean owned(String key, long clientId) throws PDException {
         String lockKey = KvService.getKeyWithoutPrefix(KvService.LOCK_PREFIX, key);
-        Map<String, String> allLock = scanWithPrefix(lockKey);
+        Map<String, String> allLock = scanWithPrefix(lockKey + KV_DELIMITER);
         if (allLock.size() == 0) {
             return true;
         }

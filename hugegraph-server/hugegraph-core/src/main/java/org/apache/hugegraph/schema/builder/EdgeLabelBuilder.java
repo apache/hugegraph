@@ -61,7 +61,7 @@ public class EdgeLabelBuilder extends AbstractBuilder
     private Set<String> properties;
     private List<String> sortKeys;
     private Set<String> nullableKeys;
-    private long ttl;
+    private Long ttl;
     private String ttlStartTime;
     private Boolean enableLabelIndex;
     private Userdata userdata;
@@ -80,7 +80,7 @@ public class EdgeLabelBuilder extends AbstractBuilder
         this.properties = new HashSet<>();
         this.sortKeys = new ArrayList<>();
         this.nullableKeys = new HashSet<>();
-        this.ttl = 0L;
+        this.ttl = null;
         this.ttlStartTime = null;
         this.enableLabelIndex = null;
         this.userdata = new Userdata();
@@ -122,11 +122,7 @@ public class EdgeLabelBuilder extends AbstractBuilder
         }
         edgeLabel.frequency(this.frequency == Frequency.DEFAULT ?
                             Frequency.SINGLE : this.frequency);
-        edgeLabel.ttl(this.ttl);
-        if (this.ttlStartTime != null) {
-            edgeLabel.ttlStartTime(this.graph().propertyKey(
-                    this.ttlStartTime).id());
-        }
+        this.updateTTL(edgeLabel);
         edgeLabel.enableLabelIndex(this.enableLabelIndex == null ||
                                    this.enableLabelIndex);
         for (String key : this.properties) {
@@ -209,7 +205,7 @@ public class EdgeLabelBuilder extends AbstractBuilder
             this.checkSortKeys();
             this.checkNullableKeys(Action.INSERT);
             Userdata.check(this.userdata, Action.INSERT);
-            this.checkTtl();
+            this.checkTTL();
             this.checkUserdata(Action.INSERT);
 
             edgeLabel = this.build();
@@ -312,6 +308,7 @@ public class EdgeLabelBuilder extends AbstractBuilder
             PropertyKey propertyKey = this.graph().propertyKey(key);
             edgeLabel.nullableKey(propertyKey.id());
         }
+        this.updateTTL(edgeLabel);
         edgeLabel.userdata(this.userdata);
         this.graph().updateEdgeLabel(edgeLabel);
         return edgeLabel;
@@ -670,7 +667,35 @@ public class EdgeLabelBuilder extends AbstractBuilder
         }
     }
 
-    private void checkTtl() {
+    /**
+     * Update TTL in two cases:
+     * 1) ttl > 0L: set or change a positive TTL
+     * 2) ttl == 0L and existing ttl > 0L: explicitly clear an existing TTL
+     * This allows removing TTL from a label that previously had TTL configured.
+     * Note: ttl == null means not set, so we skip the update.
+     */
+    private void updateTTL(EdgeLabel edgeLabel) {
+        if (this.ttl == null) {
+            return;
+        }
+        if (this.ttl > 0L) {
+            edgeLabel.ttl(this.ttl);
+            if (this.ttlStartTime != null) {
+                edgeLabel.ttlStartTime(this.graph().propertyKey(this.ttlStartTime).id());
+            }
+        } else if (this.ttl == 0L && edgeLabel.ttl() > 0L) {
+            // Clear TTL and ttlStartTime
+            edgeLabel.ttl(0L);
+            edgeLabel.ttlStartTime(IdGenerator.ZERO);
+        }
+    }
+
+    private void checkTTL() {
+        if (this.ttl == null) {
+            E.checkArgument(this.ttlStartTime == null,
+                            "Can't set ttl start time if ttl is not set");
+            return;
+        }
         E.checkArgument(this.ttl >= 0,
                         "The ttl must be >= 0, but got: %s", this.ttl);
         if (this.ttl == 0L) {

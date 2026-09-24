@@ -107,19 +107,11 @@
             <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </root>
-        <logger name="org.apache.cassandra" level="INFO" additivity="false">
-            <appender-ref ref="console"/>
-            <appender-ref ref="file"/>
-        </logger>
         <logger name="org.apache.hadoop" level="INFO" additivity="false">
             <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </logger>
         <logger name="org.apache.zookeeper" level="WARN" additivity="false">
-            <appender-ref ref="console"/>
-            <appender-ref ref="file"/>
-        </logger>
-        <logger name="com.datastax.driver" level="WARN" additivity="false">
             <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </logger>

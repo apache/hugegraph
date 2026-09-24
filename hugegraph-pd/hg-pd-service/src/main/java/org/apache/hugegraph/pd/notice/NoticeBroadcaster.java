@@ -28,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class NoticeBroadcaster {
 
-    private final Supplier<Long> noticeSupplier;
+    private Supplier<Long> noticeSupplier;
     private long noticeId;
     private String durableId;
     private Supplier<String> durableSupplier;

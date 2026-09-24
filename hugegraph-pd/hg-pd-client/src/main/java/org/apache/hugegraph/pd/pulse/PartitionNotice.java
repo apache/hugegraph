@@ -22,10 +22,9 @@ import java.util.function.Consumer;
 import org.apache.hugegraph.pd.grpc.pulse.PulseResponse;
 
 public class PartitionNotice implements PulseServerNotice<PulseResponse> {
-
-    private final long noticeId;
-    private final Consumer<Long> ackConsumer;
-    private final PulseResponse content;
+    private long noticeId;
+    private Consumer<Long> ackConsumer;
+    private PulseResponse content;
 
     public PartitionNotice(long noticeId, Consumer<Long> ackConsumer, PulseResponse content) {
         this.noticeId = noticeId;

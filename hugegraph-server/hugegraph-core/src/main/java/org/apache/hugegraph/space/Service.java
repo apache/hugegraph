@@ -35,8 +35,9 @@ public class Service {
     public static final int DEFAULT_CPU_LIMIT = 4;
     public static final int DEFAULT_MEMORY_LIMIT = 8;
     public static final int DEFAULT_STORAGE_LIMIT = 100;
+
     private final String creator;
-    private String name;
+    private final String name;
     private ServiceType type;
     private DeploymentType deploymentType;
     private String description;

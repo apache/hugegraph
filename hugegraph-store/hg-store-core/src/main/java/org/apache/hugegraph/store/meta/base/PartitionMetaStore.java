@@ -44,7 +44,7 @@ public class PartitionMetaStore extends MetaStoreBase {
         return DEFAULT_CF_NAME;
     }
 
-    protected void flush() {
+    public void flush() {
         try (RocksDBSession dbSession = getRocksDBSession()) {
             dbSession.flush(true);
         }

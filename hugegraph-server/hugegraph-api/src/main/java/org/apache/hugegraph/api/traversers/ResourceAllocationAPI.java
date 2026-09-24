@@ -49,7 +49,7 @@ import jakarta.ws.rs.core.Context;
  * more info and definition in:
  * https://arxiv.org/pdf/0901.0553.pdf
  */
-@Path("graphs/{graph}/traversers/resourceallocation")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/resourceallocation")
 @Singleton
 @Tag(name = "ResourceAllocationAPI")
 public class ResourceAllocationAPI extends API {
@@ -58,6 +58,7 @@ public class ResourceAllocationAPI extends API {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String create(@Context GraphManager manager,
+                         @PathParam("graphspace") String graphSpace,
                          @PathParam("graph") String graph,
                          @QueryParam("vertex") String current,
                          @QueryParam("other") String other,
@@ -78,7 +79,7 @@ public class ResourceAllocationAPI extends API {
                         "The source and target vertex id can't be same");
         Directions dir = Directions.convert(EdgeAPI.parseDirection(direction));
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         try (PredictionTraverser traverser = new PredictionTraverser(g)) {
             double score = traverser.resourceAllocation(sourceId, targetId, dir,
                                                         edgeLabel, maxDegree,

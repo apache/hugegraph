@@ -52,7 +52,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 
-@Path("graphs/{graph}/traversers/jaccardsimilarity")
+@Path("graphspaces/{graphspace}/graphs/{graph}/traversers/jaccardsimilarity")
 @Singleton
 @Tag(name = "JaccardSimilarityAPI")
 public class JaccardSimilarityAPI extends TraverserAPI {
@@ -63,6 +63,7 @@ public class JaccardSimilarityAPI extends TraverserAPI {
     @Timed
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String get(@Context GraphManager manager,
+                      @PathParam("graphspace") String graphSpace,
                       @PathParam("graph") String graph,
                       @QueryParam("vertex") String vertex,
                       @QueryParam("other") String other,
@@ -80,7 +81,7 @@ public class JaccardSimilarityAPI extends TraverserAPI {
         Id targetId = VertexAPI.checkAndParseVertexId(other);
         Directions dir = Directions.convert(EdgeAPI.parseDirection(direction));
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         double similarity;
         try (JaccardSimilarTraverser traverser =
                      new JaccardSimilarTraverser(g)) {
@@ -99,6 +100,7 @@ public class JaccardSimilarityAPI extends TraverserAPI {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     public String post(@Context GraphManager manager,
+                       @PathParam("graphspace") String graphSpace,
                        @PathParam("graph") String graph,
                        Request request) {
         E.checkArgumentNotNull(request, "The request body can't be null");
@@ -116,7 +118,7 @@ public class JaccardSimilarityAPI extends TraverserAPI {
 
         ApiMeasurer measure = new ApiMeasurer();
 
-        HugeGraph g = graph(manager, graph);
+        HugeGraph g = graph(manager, graphSpace, graph);
         Id sourceId = HugeVertex.getIdValue(request.vertex);
 
         EdgeStep step = step(g, request.step);

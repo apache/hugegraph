@@ -55,33 +55,55 @@ import lombok.extern.slf4j.Slf4j;
 public class TaskScheduleService {
 
     private static final String BALANCE_SHARD_KEY = "BALANCE_SHARD_KEY";
+    private static final String KEY_ENABLE_AUTO_BALANCE = "key/ENABLE_AUTO_BALANCE";
     // The dynamic balancing can only be carried out after the machine is offline for 30 minutes
     private final long TurnOffAndBalanceInterval = 30 * 60 * 1000;
     // leader balances the time interval
     private final long BalanceLeaderInterval = 30 * 1000;
     private final PDConfig pdConfig;
-    private final long clusterStartTime;    //
-    private final StoreNodeService storeService;
-    private final PartitionService partitionService;
-    private final ScheduledExecutorService executor;
-    private final TaskInfoMeta taskInfoMeta;
-    private final StoreMonitorDataService storeMonitorDataService;
-    private final KvService kvService;
-    private final LogService logService;
-    private final Comparator<KVPair<Long, Integer>> kvPairComparatorAsc = (o1, o2) -> {
-        if (o1.getValue() == o2.getValue()) {
-            return o1.getKey().compareTo(o2.getKey());
+    private final long clusterStartTime;
+    private StoreNodeService storeService;
+    private PartitionService partitionService;
+    private ScheduledExecutorService executor;
+    private TaskInfoMeta taskInfoMeta;
+    private StoreMonitorDataService storeMonitorDataService;
+    private KvService kvService;
+    private LogService logService;
+    private long lastStoreTurnoffTime = 0;
+    private long lastBalanceLeaderTime = 0;
+
+
+    /**
+     * Sort by value, then sort by key if values are the same.
+     *
+     * @param <K>
+     * @param <V>
+     */
+    private static class KvPairComparator<K extends Comparable<K>, V extends Comparable<V>>
+            implements Comparator<KVPair<K, V>> {
+
+        private boolean ascend;
+
+        public KvPairComparator(boolean ascend) {
+            this.ascend = ascend;
         }
-        return o1.getValue().compareTo(o2.getValue());
-    };
-    private final Comparator<KVPair<Long, Integer>> kvPairComparatorDesc = (o1, o2) -> {
+
+        @Override
+        public int compare(KVPair<K, V> o1, KVPair<K, V> o2) {
+            if (Objects.equals(o1.getValue(), o2.getValue())) {
+                return o1.getKey().compareTo(o2.getKey()) * (ascend ? 1 : -1);
+            }
+            return (o1.getValue().compareTo(o2.getValue())) * (ascend ? 1 : -1);
+        }
+    }
+
+    // First sort by value (in reverse order), then sort by key (in ascending order).
+    private Comparator<KVPair<Long, Integer>> kvPairComparatorDesc = (o1, o2) -> {
         if (o1.getValue() == o2.getValue()) {
             return o2.getKey().compareTo(o1.getKey());
         }
         return o2.getValue().compareTo(o1.getValue());
     };
-    private long lastStoreTurnoffTime = 0;
-    private long lastBalanceLeaderTime = 0;
 
     public TaskScheduleService(PDConfig config, StoreNodeService storeService,
                                PartitionService partitionService) {
@@ -106,23 +128,18 @@ public class TaskScheduleService {
 
         }, 60, 60, TimeUnit.SECONDS);
         executor.scheduleWithFixedDelay(() -> {
-            try {
-                patrolPartitions();
-                balancePartitionLeader(false);
-                balancePartitionShard();
-            } catch (Throwable e) {
-                log.error("patrolPartitions exception: ", e);
-            }
-        }, pdConfig.getPatrolInterval(), pdConfig.getPatrolInterval(), TimeUnit.SECONDS);
-        executor.scheduleWithFixedDelay(() -> {
             if (isLeader()) {
                 kvService.clearTTLData();
             }
         }, 1000, 1000, TimeUnit.MILLISECONDS);
         executor.scheduleWithFixedDelay(
                 () -> {
-                    if (isLeader()) {
-                        storeService.getQuotaChecker();
+                    try {
+                        if (isLeader()) {
+                            storeService.getQuota();
+                        }
+                    } catch (Exception e) {
+                        log.warn("get quota with error:", e);
                     }
                 }, 2, 30,
                 TimeUnit.SECONDS);
@@ -154,17 +171,6 @@ public class TaskScheduleService {
                                              Metapb.StoreState status) {
                 if (status == Metapb.StoreState.Tombstone) {
                     lastStoreTurnoffTime = System.currentTimeMillis();
-                }
-
-                if (status == Metapb.StoreState.Up) {
-                    executor.schedule(() -> {
-                        try {
-                            balancePartitionLeader(false);
-                        } catch (PDException e) {
-                            log.error("exception {}", e);
-                        }
-                    }, BalanceLeaderInterval, TimeUnit.MILLISECONDS);
-
                 }
             }
 
@@ -213,23 +219,6 @@ public class TaskScheduleService {
                 changeStore = Metapb.Store.newBuilder(store)
                                           .setState(Metapb.StoreState.Offline)
                                           .build();
-
-            } else if ((store.getState() == Metapb.StoreState.Exiting &&
-                        !activeStores.containsKey(store.getId())) ||
-                       (store.getState() == Metapb.StoreState.Offline &&
-                        (System.currentTimeMillis() - store.getLastHeartbeat() >
-                         pdConfig.getStore().getMaxDownTime() * 1000) &&
-                        (System.currentTimeMillis() - clusterStartTime >
-                         pdConfig.getStore().getMaxDownTime() * 1000))) {
-                // Manually change the parameter to Offline or Offline Duration
-                // Modify the status to shut down and increase checkStoreCanOffline detect
-                if (storeService.checkStoreCanOffline(store)) {
-                    changeStore = Metapb.Store.newBuilder(store)
-                                              .setState(Metapb.StoreState.Tombstone).build();
-                    this.logService.insertLog(LogService.NODE_CHANGE,
-                                              LogService.TASK, changeStore);
-                    log.info("patrolStores store {} Offline", changeStore.getId());
-                }
             }
             if (changeStore != null) {
                 storeService.updateStore(changeStore);
@@ -299,6 +288,9 @@ public class TaskScheduleService {
             return null;
         }
 
+        // Avoid frequent calls. (When changing the number of replicas, you need to adjust the shard list, which in turn requires balancing the partitions.)
+        // This will send duplicate commands and cause unpredictable results.
+        // Serious cases will result in the deletion of the partition.
         if (Objects.equals(kvService.get(BALANCE_SHARD_KEY), "DOING")) {
             return null;
         }
@@ -314,12 +306,14 @@ public class TaskScheduleService {
             partitionMap.put(store.getId(), new HashMap<>());
         });
 
+        // If it says “leaner,” it means the migration is in progress. Don't submit the task again.
         AtomicReference<Boolean> isLeaner = new AtomicReference<>(false);
         partitionService.getPartitions().forEach(partition -> {
 
             try {
                 storeService.getShardList(partition.getId()).forEach(shard -> {
                     Long storeId = shard.getStoreId();
+                    // Determine whether each shard is leaner or in an abnormal state.
                     if (shard.getRole() == Metapb.ShardRole.Learner
                         || partition.getState() != Metapb.PartitionState.PState_Normal) {
                         isLeaner.set(true);
@@ -500,25 +494,39 @@ public class TaskScheduleService {
         log.info("balancePartitionLeader, shard group size: {}, by store: {}", shardGroups.size(),
                  storeShardCount);
 
-        PriorityQueue<KVPair<Long, Integer>> targetCount =
-                new PriorityQueue<>(kvPairComparatorDesc);
-
-        var sortedGroups = storeShardCount.entrySet().stream()
-                                          .map(entry -> new KVPair<>(entry.getKey(),
-                                                                     entry.getValue()))
-                                          .sorted(kvPairComparatorAsc)
-                                          .collect(Collectors.toList());
+        // Calculate the leader count for each store, divided into integer and remainder parts.
+        var tmpCountMap = new HashMap<Long, Integer>();
+        PriorityQueue<KVPair<Long, Integer>> countReminder =
+                new PriorityQueue<>(new KvPairComparator<>(false));
         int sum = 0;
 
-        for (int i = 0; i < sortedGroups.size() - 1; i++) {
-            // at least one
-            int v = Math.max(
-                    sortedGroups.get(i).getValue() / pdConfig.getPartition().getShardCount(), 1);
-            targetCount.add(new KVPair<>(sortedGroups.get(i).getKey(), v));
+        for (var entry : storeShardCount.entrySet()) {
+            var storeId = entry.getKey();
+            var count = entry.getValue();
+            // First, allocate the integer part.
+            int v = count / pdConfig.getPartition().getShardCount();
             sum += v;
+            var remainder = count % pdConfig.getPartition().getShardCount();
+            tmpCountMap.put(storeId, v);
+            if (remainder != 0) {
+                countReminder.add(new KVPair<>(storeId, remainder));
+            }
         }
-        targetCount.add(new KVPair<>(sortedGroups.get(sortedGroups.size() - 1).getKey(),
-                                     shardGroups.size() - sum));
+
+        int reminderCount = shardGroups.size() - sum;
+
+        // Then, according to the distribution of reminders
+        while (!countReminder.isEmpty() && reminderCount > 0) {
+            var pair = countReminder.poll();
+            tmpCountMap.put(pair.getKey(), tmpCountMap.getOrDefault(pair.getKey(), 0) + 1);
+            reminderCount -= 1;
+        }
+
+        PriorityQueue<KVPair<Long, Integer>> targetCount =
+                new PriorityQueue<>(new KvPairComparator<>(true));
+        targetCount.addAll(tmpCountMap.entrySet().stream()
+                                      .map(e -> new KVPair<>(e.getKey(), e.getValue()))
+                                      .collect(Collectors.toList()));
         log.info("target count: {}", targetCount);
 
         for (var group : shardGroups) {
@@ -621,6 +629,10 @@ public class TaskScheduleService {
             }
         }
 
+        //For TEST
+        //   pdConfig.getPartition().setMaxShardsPerStore(pdConfig.getPartition()
+        //   .getMaxShardsPerStore()*2);
+
         // The maximum split count that a compute cluster can support
         int splitCount = pdConfig.getPartition().getMaxShardsPerStore() *
                          storeService.getActiveStores().size() /
@@ -669,6 +681,9 @@ public class TaskScheduleService {
                     break;
                 case Clean_Partition:
                     partitionService.handleCleanPartitionTask(task);
+                    break;
+                case Build_Index:
+                    partitionService.handleBuildIndexTask(task);
                     break;
                 default:
                     break;
@@ -819,7 +834,11 @@ public class TaskScheduleService {
                 remainPartitions.add(partId);
             }
         });
-        if (remainPartitions.size() > 0) {
+
+        boolean isExecutingTasks =
+                storeService.getStore(sourceStore.getId()).getStats().getExecutingTask();
+
+        if (remainPartitions.size() > 0 || isExecutingTasks) {
             resultMap.put("flag", false);
             resultMap.put("movedPartitions", null);
         } else {

@@ -37,7 +37,7 @@
 
     <properties>
         <top.level.dir>${project.basedir}/..</top.level.dir>
-        <final.name>apache-${release.name}-server-incubating-${project.version}</final.name>
+        <final.name>apache-${release.name}-server-${project.version}</final.name>
         <slf4j.version>1.7.5</slf4j.version>
         <log4j.version>1.2.17</log4j.version>
         <log4j2.version>2.17.1</log4j2.version>
@@ -64,13 +64,8 @@
         <module>hugegraph-example</module>
         <module>hugegraph-dist</module>
         <module>hugegraph-test</module>
-        <module>hugegraph-cassandra</module>
-        <module>hugegraph-scylladb</module>
         <module>hugegraph-rocksdb</module>
-        <module>hugegraph-mysql</module>
-        <module>hugegraph-palo</module>
         <module>hugegraph-hbase</module>
-        <module>hugegraph-postgresql</module>
         <module>hugegraph-hstore</module>
     </modules>
 
@@ -80,12 +75,12 @@
             <dependency>
                 <groupId>org.apache.hugegraph</groupId>
                 <artifactId>hugegraph-rpc</artifactId>
-                <version>${hugegraph-commons.version}</version>
+                <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.hugegraph</groupId>
                 <artifactId>hugegraph-common</artifactId>
-                <version>${hugegraph-commons.version}</version>
+                <version>${project.version}</version>
             </dependency>
 
             <!-- logging -->

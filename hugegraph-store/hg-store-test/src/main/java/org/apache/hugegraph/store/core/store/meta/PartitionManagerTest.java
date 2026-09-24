@@ -27,7 +27,7 @@ import java.util.List;
 
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
-import org.apache.hugegraph.store.cmd.UpdatePartitionRequest;
+import org.apache.hugegraph.store.cmd.request.UpdatePartitionRequest;
 import org.apache.hugegraph.store.core.StoreEngineTestBase;
 import org.apache.hugegraph.store.meta.Graph;
 import org.apache.hugegraph.store.meta.GraphManager;

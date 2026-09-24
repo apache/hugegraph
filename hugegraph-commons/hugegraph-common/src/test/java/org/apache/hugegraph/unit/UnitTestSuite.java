@@ -59,6 +59,7 @@ import org.apache.hugegraph.unit.util.EcheckTest;
 import org.apache.hugegraph.unit.util.HashUtilTest;
 import org.apache.hugegraph.unit.util.InsertionOrderUtilTest;
 import org.apache.hugegraph.unit.util.LogTest;
+import org.apache.hugegraph.unit.util.LongEncodingGoldenTest;
 import org.apache.hugegraph.unit.util.LongEncodingTest;
 import org.apache.hugegraph.unit.util.NumericUtilTest;
 import org.apache.hugegraph.unit.util.OrderLimitMapTest;
@@ -110,6 +111,7 @@ import org.apache.hugegraph.unit.util.VersionUtilTest;
     TimeUtilTest.class,
     VersionUtilTest.class,
     LongEncodingTest.class,
+    LongEncodingGoldenTest.class,
     OrderLimitMapTest.class,
     DateUtilTest.class,
     UnitUtilTest.class,

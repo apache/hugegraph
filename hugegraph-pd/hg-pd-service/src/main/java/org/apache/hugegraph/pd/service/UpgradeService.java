@@ -35,9 +35,9 @@ public class UpgradeService {
 
     private static final String RUN_LOG_PREFIX = "SCRIPT_RUN_LOG";
 
-    private final PDConfig pdConfig;
+    private PDConfig pdConfig;
 
-    private final KvService kvService;
+    private KvService kvService;
 
     public UpgradeService(PDConfig pdConfig) {
         this.pdConfig = pdConfig;

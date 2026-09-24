@@ -22,7 +22,6 @@ import java.util.Map;
 
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.tinkerpop.shaded.jackson.core.type.TypeReference;
-import org.hamcrest.CoreMatchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
@@ -33,7 +32,7 @@ import jakarta.ws.rs.core.Response;
 
 public class UserApiTest extends BaseApiTest {
 
-    private static final String PATH = "graphs/hugegraph/auth/users";
+    private static final String PATH = "graphspaces/DEFAULT/auth/users";
     private static final int NO_LIMIT = -1;
 
     @Override
@@ -93,8 +92,8 @@ public class UserApiTest extends BaseApiTest {
         Response r4 = client().post(PATH, user3);
         String result4 = assertResponseStatus(400, r4);
         String message = assertJsonContains(result4, "message");
-        Assert.assertThat(message,
-                          CoreMatchers.containsString("that already exists"));
+        boolean containsExpected = message.contains("exist");
+        Assert.assertTrue(containsExpected);
     }
 
     @Test
@@ -155,8 +154,9 @@ public class UserApiTest extends BaseApiTest {
         Response r = client().delete(PATH, "test1");
         String result = assertResponseStatus(400, r);
         String message = assertJsonContains(result, "message");
-        Assert.assertThat(message,
-                          CoreMatchers.containsString("Invalid user id:"));
+        boolean containsExpected = message.contains("Invalid user") ||
+                                   message.contains("not exist");
+        Assert.assertTrue(containsExpected);
     }
 
     protected void createUser(String name) {

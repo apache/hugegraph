@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.variables;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -28,13 +29,18 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.apache.commons.collections.iterators.EmptyIterator;
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.SplicingIdGenerator;
 import org.apache.hugegraph.backend.query.Condition;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
+import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.VertexLabel;
@@ -102,6 +108,17 @@ public class HugeVariables implements Graph.Variables {
 
     public HugeVariables(HugeGraphParams params) {
         this.params = params;
+    }
+
+    private static Object extractSingleObject(Object value) {
+        if (value instanceof List || value instanceof Set) {
+            Collection<?> collection = (Collection<?>) value;
+            if (collection.isEmpty()) {
+                return null;
+            }
+            value = collection.iterator().next();
+        }
+        return value;
     }
 
     public synchronized void initSchemaIfNeeded() {
@@ -273,6 +290,103 @@ public class HugeVariables implements Graph.Variables {
         }
     }
 
+    public <R> List<Optional<R>> mget(String... keys) {
+        Query.checkForceCapacity(keys.length);
+        List<String> nameList = new ArrayList<>();
+
+        for (String key : keys) {
+            if (!StringUtils.isEmpty(key)) {
+                nameList.add(key);
+            }
+        }
+
+        Map<String, Optional<R>> map = new HashMap<>();
+        Iterator<Vertex> vertices = EmptyIterator.INSTANCE;
+        try {
+            vertices = this.batchQueryVariableVertices(nameList);
+            while (vertices.hasNext()) {
+                Vertex v = vertices.next();
+                String type = v.value(Hidden.hide(VARIABLE_TYPE));
+                map.put(v.value(Hidden.hide(VARIABLE_KEY)),
+                        Optional.of(v.value(Hidden.hide(type))));
+            }
+        } finally {
+            CloseableIterator.closeIterator(vertices);
+        }
+
+        List<Optional<R>> list = new ArrayList<>();
+        for (String key : keys) {
+            Optional<R> value = map.get(key);
+            if (value == null) {
+                list.add(Optional.empty());
+            } else {
+                list.add(value);
+            }
+        }
+        return list;
+    }
+
+    public Number count() {
+        ConditionQuery cq = new ConditionQuery(HugeType.TASK);
+        cq.eq(HugeKeys.LABEL, this.variableVertexLabel().id());
+        return this.params.graph().queryNumber(cq);
+    }
+
+    public Iterator<Vertex> queryVariablesByShard(String start, String end, String page,
+                                                  long pageLimit) {
+        ConditionQuery query = this.createVariableShardQuery(start, end, page, pageLimit);
+        GraphTransaction tx = this.params.graphTransaction();
+        Iterator<Vertex> vertices = EmptyIterator.INSTANCE;
+        Iterator filter = EmptyIterator.INSTANCE;
+        try {
+            vertices = tx.queryVertices(query);
+            VertexLabel vl = this.variableVertexLabel();
+            filter = new FilterIterator(vertices, (v) -> {
+                if (((HugeVertex) v).schemaLabel().id() == vl.id()) {
+                    return true;
+                }
+                return false;
+            });
+
+            return filter;
+        } catch (Exception e) {
+            LOG.error("Failed to query variables by shard", e);
+            throw e;
+        } finally {
+            CloseableIterator.closeIterator(vertices);
+            CloseableIterator.closeIterator(filter);
+        }
+    }
+
+    private ConditionQuery createVariableShardQuery(String start, String end, String page,
+                                                    long pageLimit) {
+        ConditionQuery query = new ConditionQuery(HugeType.TASK);
+        query.scan(start, end);
+        query.page(page);
+        if (query.paging()) {
+            query.limit(pageLimit);
+        }
+        query.showHidden(true);
+        return query;
+    }
+
+    private Iterator<Vertex> batchQueryVariableVertices(List<String> nameList) {
+        GraphTransaction tx = this.params.graphTransaction();
+        List<Id> query = this.constructId(nameList);
+        Iterator<Vertex> vertices = tx.queryTaskInfos(query.toArray());
+        return vertices;
+    }
+
+    private List<Id> constructId(List<String> nameList) {
+        VertexLabel vl = this.variableVertexLabel();
+        List<Id> queryIdList = new ArrayList<>();
+        for (String name : nameList) {
+            queryIdList.add(
+                    SplicingIdGenerator.splicing(vl.id().asString(), name));
+        }
+        return queryIdList;
+    }
+
     @Override
     public String toString() {
         return StringFactory.graphVariablesString(this);
@@ -375,16 +489,5 @@ public class HugeVariables implements Graph.Variables {
 
     private VertexLabel variableVertexLabel() {
         return this.params.graph().vertexLabel(Hidden.hide(VARIABLES));
-    }
-
-    private static Object extractSingleObject(Object value) {
-        if (value instanceof List || value instanceof Set) {
-            Collection<?> collection = (Collection<?>) value;
-            if (collection.isEmpty()) {
-                return null;
-            }
-            value = collection.iterator().next();
-        }
-        return value;
     }
 }

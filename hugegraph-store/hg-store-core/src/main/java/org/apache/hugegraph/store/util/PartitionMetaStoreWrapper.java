@@ -52,6 +52,10 @@ public class PartitionMetaStoreWrapper {
         return store.scan(parser, prefix);
     }
 
+    public void close(int partitionId) {
+        HgStoreEngine.getInstance().getBusinessHandler().getSession(partitionId).close();
+    }
+
     private static class InnerMetaStore extends MetaStoreBase {
 
         private int partitionId;

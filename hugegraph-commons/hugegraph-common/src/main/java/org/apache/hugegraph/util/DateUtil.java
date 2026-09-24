@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.hugegraph.date.SafeDateFormat;
+
 import com.google.common.collect.ImmutableMap;
 
 public final class DateUtil {
@@ -46,7 +47,7 @@ public final class DateUtil {
             }
         }
         throw new IllegalArgumentException(String.format(
-                  "Expected date format is: %s, but got '%s'", VALID_DFS.values(), value));
+                "Expected date format is: %s, but got '%s'", VALID_DFS.values(), value));
     }
 
     public static Date parse(String value, String df) {

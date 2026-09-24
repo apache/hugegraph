@@ -22,7 +22,7 @@ import org.apache.hugegraph.rocksdb.access.ScanIterator;
 /**
  * 2021/11/29
  */
-final class EmptyIterator implements ScanIterator {
+public final class EmptyIterator implements ScanIterator {
 
     @Override
     public boolean hasNext() {

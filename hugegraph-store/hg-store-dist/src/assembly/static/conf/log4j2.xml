@@ -117,6 +117,7 @@
 
     <loggers>
         <root level="INFO">
+            <appender-ref ref="console"/>
             <appender-ref ref="file"/>
         </root>
         <logger name="com.alipay.sofa" level="INFO" additivity="false">

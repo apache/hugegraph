@@ -28,6 +28,7 @@ import org.apache.hugegraph.pd.grpc.pulse.SplitPartition;
 import org.apache.hugegraph.pd.grpc.pulse.TransferLeader;
 import org.apache.hugegraph.store.meta.Partition;
 
+@Deprecated
 public interface PartitionInstructionListener {
 
     void onChangeShard(long taskId, Partition partition, ChangeShard changeShard,

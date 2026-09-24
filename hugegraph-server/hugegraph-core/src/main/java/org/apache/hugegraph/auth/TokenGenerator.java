@@ -44,6 +44,10 @@ public class TokenGenerator {
         this.key = Keys.hmacShaKeyFor(secretKey.getBytes(StandardCharsets.UTF_8));
     }
 
+    public TokenGenerator(String secretKey) {
+        this.key = Keys.hmacShaKeyFor(secretKey.getBytes(StandardCharsets.UTF_8));
+    }
+
     public String create(Map<String, ?> payload, long expire) {
         return Jwts.builder()
                    .setClaims(payload)

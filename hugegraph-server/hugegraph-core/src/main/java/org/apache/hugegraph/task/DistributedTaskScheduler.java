@@ -18,8 +18,10 @@
 package org.apache.hugegraph.task;
 
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -48,8 +50,9 @@ import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.slf4j.Logger;
 
 public class DistributedTaskScheduler extends TaskAndResultScheduler {
-    private final long schedulePeriod;
+
     private static final Logger LOG = Log.logger(DistributedTaskScheduler.class);
+    private final long schedulePeriod;
     private final ExecutorService taskDbExecutor;
     private final ExecutorService schemaTaskExecutor;
     private final ExecutorService olapTaskExecutor;
@@ -64,6 +67,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
     private final AtomicBoolean closed = new AtomicBoolean(true);
 
     private final ConcurrentHashMap<Id, HugeTask<?>> runningTasks = new ConcurrentHashMap<>();
+    private final Set<Id> deletingTasks = ConcurrentHashMap.newKeySet();
 
     public DistributedTaskScheduler(HugeGraphParams graph,
                                     ScheduledThreadPoolExecutor schedulerExecutor,
@@ -89,25 +93,20 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                                         .get(CoreOptions.TASK_SCHEDULE_PERIOD);
 
         this.cronFuture = this.schedulerExecutor.scheduleWithFixedDelay(
-            () -> {
-                // TODO: uncomment later - graph space
-                // LockUtil.lock(this.graph().spaceGraphName(), LockUtil.GRAPH_LOCK);
-                LockUtil.lock("", LockUtil.GRAPH_LOCK);
-                try {
-                    // TODO: Use super administrator privileges to query tasks.
-                    // TaskManager.useAdmin();
-                    this.cronSchedule();
-                } catch (Throwable t) {
-                    // TODO: log with graph space
-                    LOG.info("cronScheduler exception graph: {}", this.graphName(), t);
-                } finally {
-                    // TODO: uncomment later - graph space
-                    LockUtil.unlock("", LockUtil.GRAPH_LOCK);
-                    // LockUtil.unlock(this.graph().spaceGraphName(), LockUtil.GRAPH_LOCK);
-                }
-            },
-            10L, schedulePeriod,
-            TimeUnit.SECONDS);
+                () -> {
+                    LockUtil.lock(this.graph().spaceGraphName(), LockUtil.GRAPH_LOCK);
+                    try {
+                        // TODO: Use super administrator privileges to query tasks.
+                        // TaskManager.useAdmin();
+                        this.cronSchedule();
+                    } catch (Throwable t) {
+                        LOG.info("cronScheduler exception graph: {}", this.spaceGraphName(), t);
+                    } finally {
+                        LockUtil.unlock(this.graph().spaceGraphName(), LockUtil.GRAPH_LOCK);
+                    }
+                },
+                10L, schedulePeriod,
+                TimeUnit.SECONDS);
     }
 
     private static boolean sleep(long ms) {
@@ -123,13 +122,18 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
     public void cronSchedule() {
         // Perform periodic scheduling tasks
 
+        // Check closed flag first to exit early
+        if (this.closed.get()) {
+            return;
+        }
+
         if (!this.graph.started() || this.graph.closed()) {
             return;
         }
 
         // Handle tasks in NEW status
         Iterator<HugeTask<Object>> news = queryTaskWithoutResultByStatus(
-            TaskStatus.NEW);
+                TaskStatus.NEW);
 
         while (!this.closed.get() && news.hasNext()) {
             HugeTask<?> newTask = news.next();
@@ -143,7 +147,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         // Handling tasks in RUNNING state
         Iterator<HugeTask<Object>> runnings =
-            queryTaskWithoutResultByStatus(TaskStatus.RUNNING);
+                queryTaskWithoutResultByStatus(TaskStatus.RUNNING);
 
         while (!this.closed.get() && runnings.hasNext()) {
             HugeTask<?> running = runnings.next();
@@ -165,7 +169,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         // Handle tasks in FAILED/HANGING state
         Iterator<HugeTask<Object>> faileds =
-            queryTaskWithoutResultByStatus(TaskStatus.FAILED);
+                queryTaskWithoutResultByStatus(TaskStatus.FAILED);
 
         while (!this.closed.get() && faileds.hasNext()) {
             HugeTask<?> failed = faileds.next();
@@ -180,18 +184,21 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         // Handling tasks in CANCELLING state
         Iterator<HugeTask<Object>> cancellings = queryTaskWithoutResultByStatus(
-            TaskStatus.CANCELLING);
+                TaskStatus.CANCELLING);
 
         while (!this.closed.get() && cancellings.hasNext()) {
             Id cancellingId = cancellings.next().id();
-            if (runningTasks.containsKey(cancellingId)) {
-                HugeTask<?> cancelling = runningTasks.get(cancellingId);
+            HugeTask<?> cancelling = runningTasks.get(cancellingId);
+            if (cancelling != null) {
                 initTaskParams(cancelling);
                 LOG.info("Try to cancel task({})@({}/{})",
                          cancelling.id(), this.graphSpace, this.graphName);
-                cancelling.cancel(true);
-
-                runningTasks.remove(cancellingId);
+                if (!cancelling.cancel(true)) {
+                    // Task already completed normally; force CANCELLED so
+                    // it doesn't stay stuck in CANCELLING forever.
+                    updateStatusWithLock(cancellingId, TaskStatus.CANCELLING,
+                                         TaskStatus.CANCELLED);
+                }
             } else {
                 // Local no execution task, but the current task has no nodes executing.
                 if (!isLockedTask(cancellingId.toString())) {
@@ -203,19 +210,14 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         // Handling tasks in DELETING status
         Iterator<HugeTask<Object>> deletings = queryTaskWithoutResultByStatus(
-            TaskStatus.DELETING);
+                TaskStatus.DELETING);
 
         while (!this.closed.get() && deletings.hasNext()) {
             Id deletingId = deletings.next().id();
-            if (runningTasks.containsKey(deletingId)) {
-                HugeTask<?> deleting = runningTasks.get(deletingId);
-                initTaskParams(deleting);
+            HugeTask<?> deleting = runningTasks.get(deletingId);
+            if (deleting != null) {
+                this.markTaskDeleting(deleting);
                 deleting.cancel(true);
-
-                // Delete storage information
-                deleteFromDB(deletingId);
-
-                runningTasks.remove(deletingId);
             } else {
                 // Local has no task execution, but the current task has no nodes executing anymore.
                 if (!isLockedTask(deletingId.toString())) {
@@ -258,6 +260,10 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             return this.ephemeralTaskExecutor.submit(task);
         }
 
+        // Validate task state before saving to ensure correct exception type
+        E.checkState(task.type() != null, "Task type can't be null");
+        E.checkState(task.name() != null, "Task name can't be null");
+
         // Process schema task
         // Handle gremlin task
         // Handle OLAP calculation tasks
@@ -289,14 +295,63 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         }
     }
 
+    /**
+     * Note: This method will update the status of the input task.
+     *
+     * @param task
+     * @param <V>
+     */
     @Override
     public <V> void cancel(HugeTask<V> task) {
-        // Update status to CANCELLING
-        if (!task.completed()) {
-            // Task not completed, can only execute status not CANCELLING
-            this.updateStatus(task.id(), null, TaskStatus.CANCELLING);
+        E.checkArgumentNotNull(task, "Task can't be null");
+
+        if (task.completed() || task.cancelling()) {
+            return;
+        }
+
+        LOG.info("Cancel task '{}' in status {}", task.id(), task.status());
+
+        // Check if task is running locally, cancel it directly if so
+        HugeTask<?> runningTask = this.runningTasks.get(task.id());
+        if (runningTask != null) {
+            boolean cancelled = runningTask.cancel(true);
+            if (cancelled) {
+                task.overwriteStatus(TaskStatus.CANCELLED);
+                this.save(runningTask);
+            }
+            LOG.info("Cancel local running task '{}' result: {}", task.id(), cancelled);
+            return;
+        }
+
+        // Task not running locally, update status to CANCELLING
+        // for cronSchedule() or other nodes to handle
+        TaskStatus currentStatus = task.status();
+        if (this.updateStatus(task.id(), currentStatus, TaskStatus.CANCELLING)) {
+            task.overwriteStatus(TaskStatus.CANCELLING);
         } else {
-            LOG.info("cancel task({}) error, task has completed", task.id());
+            // Status race: re-read from DB and retry with fresh status
+            HugeTask<Object> reloaded;
+            try {
+                reloaded = this.taskWithoutResult(task.id());
+            } catch (NotFoundException e) {
+                LOG.info("Task '{}' already deleted, skip cancel", task.id());
+                return;
+            }
+            TaskStatus stored = reloaded.status();
+            if (stored != TaskStatus.CANCELLING &&
+                !TaskStatus.COMPLETED_STATUSES.contains(stored)) {
+                if (this.updateStatus(task.id(), stored, TaskStatus.CANCELLING)) {
+                    task.overwriteStatus(TaskStatus.CANCELLING);
+                    LOG.info("Retry cancel task '{}' succeeded (stored was {})",
+                             task.id(), stored);
+                } else {
+                    LOG.warn("Failed to cancel task '{}', re-read status {} changed again",
+                             task.id(), stored);
+                }
+            } else {
+                LOG.info("Task '{}' already {}/terminal, skip cancel",
+                         task.id(), stored);
+            }
         }
     }
 
@@ -307,27 +362,166 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
     protected <V> HugeTask<V> deleteFromDB(Id id) {
         // Delete Task from DB, without checking task status
-        return this.call(() -> {
-            Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
-            HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
-            if (vertex == null) {
+        try {
+            return this.call(() -> {
+                Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
+                HugeVertex vertex = (HugeVertex) QueryResults.one(vertices);
+                if (vertex == null) {
+                    this.deleteTaskResultFromTx(id);
+                    return null;
+                }
+                HugeTask<V> result = HugeTask.fromVertex(vertex, false);
+                // Keep the task vertex as a retryable tombstone until its result
+                // vertex is removed; cronSchedule() can rediscover DELETING tasks.
+                this.deleteTaskResultFromTx(id);
+                this.tx().removeTaskVertex(vertex);
+                return result;
+            });
+        } finally {
+            if (!this.runningTasks.containsKey(id)) {
+                this.deletingTasks.remove(id);
+            }
+        }
+    }
+
+    @Override
+    public <V> void save(HugeTask<V> task) {
+        E.checkArgumentNotNull(task, "Task can't be null");
+        if (this.deletingTasks.contains(task.id())) {
+            LOG.info("Skip saving task({})@({}/{}) because it is deleting",
+                     task.id(), this.graphSpace, this.graphName);
+            return;
+        }
+
+        String rawResult = task.result();
+        Boolean saved = this.call(() -> {
+            if (task.status() != TaskStatus.DELETING &&
+                this.storedTaskDeleting(task.id())) {
+                LOG.info("Skip saving task({})@({}/{}) because stored status " +
+                         "is DELETING", task.id(), this.graphSpace,
+                         this.graphName);
+                return false;
+            }
+            HugeVertex vertex = this.tx().constructTaskVertex(task);
+            this.tx().deleteIndex(vertex);
+            this.tx().addVertex(vertex);
+            return true;
+        });
+
+        if (!saved || rawResult == null) {
+            return;
+        }
+
+        this.call(() -> {
+            if (this.deletingTasks.contains(task.id()) ||
+                !this.storedTaskAllowsResultSave(task.id())) {
+                LOG.info("Skip saving task({}) result@({}/{}) because it is " +
+                         "deleting or missing", task.id(), this.graphSpace,
+                         this.graphName);
                 return null;
             }
-            HugeTask<V> result = HugeTask.fromVertex(vertex);
-            this.tx().removeVertex(vertex);
-            return result;
+            HugeTaskResult result =
+                    new HugeTaskResult(HugeTaskResult.genId(task.id()));
+            result.result(rawResult);
+
+            HugeVertex vertex = this.tx().constructTaskResultVertex(result);
+            return this.tx().addVertex(vertex);
+        });
+    }
+
+    private void markTaskDeleting(HugeTask<?> task) {
+        this.deletingTasks.add(task.id());
+        initTaskParams(task);
+        HugeTask<?> deleting;
+        synchronized (task) {
+            task.overwriteStatus(TaskStatus.DELETING);
+            deleting = task.copyWithoutResult();
+        }
+        this.saveTaskWithoutResult(deleting);
+    }
+
+    private boolean storedTaskDeleting(Id id) {
+        Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
+        Vertex vertex = QueryResults.one(vertices);
+        if (vertex == null) {
+            return false;
+        }
+        HugeTask<?> task = HugeTask.fromVertex(vertex, false);
+        return task.status() == TaskStatus.DELETING;
+    }
+
+    private boolean storedTaskAllowsResultSave(Id id) {
+        Iterator<Vertex> vertices = this.tx().queryTaskInfos(id);
+        Vertex vertex = QueryResults.one(vertices);
+        if (vertex == null) {
+            return false;
+        }
+        HugeTask<?> task = HugeTask.fromVertex(vertex, false);
+        return task.status() != TaskStatus.DELETING;
+    }
+
+    private void saveTaskWithoutResult(HugeTask<?> task) {
+        this.call(() -> {
+            HugeVertex vertex = this.tx().constructTaskVertex(task);
+            this.tx().deleteIndex(vertex);
+            return this.tx().addVertex(vertex);
         });
     }
 
     @Override
     public <V> HugeTask<V> delete(Id id, boolean force) {
-        if (!force) {
-            // Change status to DELETING, perform the deletion operation through automatic scheduling.
-            this.updateStatus(id, null, TaskStatus.DELETING);
-            return null;
-        } else {
-            return this.deleteFromDB(id);
+        HugeTask<?> task = this.taskWithoutResult(id);
+        HugeTask<?> running = this.runningTasks.get(id);
+
+        if (running != null) {
+            this.markTaskDeleting(running);
+            running.cancel(true);
+            @SuppressWarnings("unchecked")
+            HugeTask<V> result = (HugeTask<V>) running;
+            return result;
         }
+
+        if (!force && !task.completed()) {
+            // Can't safely mark a remotely running task without owning its
+            // lock; the owner may otherwise overwrite DELETING on final save.
+            LockResult lockResult = tryLockTask(id.asString());
+            checkDeleteLock(id, lockResult);
+            try {
+                this.markTaskDeleting(task);
+            } finally {
+                unlockTask(id.asString(), lockResult);
+            }
+            @SuppressWarnings("unchecked")
+            HugeTask<V> result = (HugeTask<V>) task;
+            return result;
+        }
+
+        if (!task.completed()) {
+            LockResult lockResult = tryLockTask(id.asString());
+            checkDeleteLock(id, lockResult);
+            try {
+                if (task.status() != TaskStatus.DELETING) {
+                    this.markTaskDeleting(task);
+                }
+                return this.deleteFromDB(id);
+            } finally {
+                unlockTask(id.asString(), lockResult);
+            }
+        }
+
+        // Write DELETING status before attempting physical delete so that a
+        // failed result deletion is recoverable via cronSchedule().
+        if (task.status() != TaskStatus.DELETING) {
+            this.markTaskDeleting(task);
+        }
+
+        return this.deleteFromDB(id);
+    }
+
+    private static void checkDeleteLock(Id id, LockResult lockResult) {
+        E.checkState(lockResult.lockSuccess(),
+                     "Can't delete task '%s' because it is locked by another " +
+                     "server, please retry later", id);
     }
 
     @Override
@@ -338,6 +532,26 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         // set closed
         this.closed.set(true);
+
+        // cancel cron thread
+        if (!cronFuture.isDone() && !cronFuture.isCancelled()) {
+            cronFuture.cancel(false);
+        }
+
+        // Wait behind the scheduler thread to ensure any running cron task is completed
+        try {
+            Future<?> barrier = this.schedulerExecutor.submit(() -> {
+                // pass
+            });
+            barrier.get(schedulePeriod + 5, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            LOG.warn("Cron task did not complete in time when closing scheduler");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warn("Interrupted while waiting for cron task to complete", e);
+        } catch (ExecutionException e) {
+            LOG.warn("Exception while waiting for cron task to complete", e);
+        }
 
         // cancel all running tasks
         for (HugeTask<?> task : this.runningTasks.values()) {
@@ -350,11 +564,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             this.waitUntilAllTasksCompleted(10);
         } catch (TimeoutException e) {
             LOG.warn("Tasks not completed when close distributed task scheduler", e);
-        }
-
-        // cancel cron thread
-        if (!cronFuture.isDone() && !cronFuture.isCancelled()) {
-            cronFuture.cancel(false);
+            return false;
         }
 
         if (!this.taskDbExecutor.isShutdown()) {
@@ -367,18 +577,20 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                 this.graph.closeTx();
             });
         }
-        return true;
+
+        // TODO: serverInfoManager section should be removed in the future.
+        return this.serverManager().close();
     }
 
     @Override
     public <V> HugeTask<V> waitUntilTaskCompleted(Id id, long seconds)
-        throws TimeoutException {
+            throws TimeoutException {
         return this.waitUntilTaskCompleted(id, seconds, QUERY_INTERVAL);
     }
 
     @Override
     public <V> HugeTask<V> waitUntilTaskCompleted(Id id)
-        throws TimeoutException {
+            throws TimeoutException {
         // This method is just used by tests
         long timeout = this.graph.configuration()
                                  .get(CoreOptions.TASK_WAIT_TIMEOUT);
@@ -387,7 +599,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
     private <V> HugeTask<V> waitUntilTaskCompleted(Id id, long seconds,
                                                    long intervalMs)
-        throws TimeoutException {
+            throws TimeoutException {
         long passes = seconds * 1000 / intervalMs;
         HugeTask<V> task = null;
         for (long pass = 0; ; pass++) {
@@ -414,12 +626,12 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             sleep(intervalMs);
         }
         throw new TimeoutException(String.format(
-            "Task '%s' was not completed in %s seconds", id, seconds));
+                "Task '%s' was not completed in %s seconds", id, seconds));
     }
 
     @Override
     public void waitUntilAllTasksCompleted(long seconds)
-        throws TimeoutException {
+            throws TimeoutException {
         long passes = seconds * 1000 / QUERY_INTERVAL;
         int taskSize = 0;
         for (long pass = 0; ; pass++) {
@@ -434,16 +646,14 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             sleep(QUERY_INTERVAL);
         }
         throw new TimeoutException(String.format(
-            "There are still %s incomplete tasks after %s seconds",
-            taskSize, seconds));
+                "There are still %s incomplete tasks after %s seconds",
+                taskSize, seconds));
 
     }
 
     @Override
     public void checkRequirement(String op) {
-        if (!this.serverManager().selfIsMaster()) {
-            throw new HugeException("Can't %s task on non-master server", op);
-        }
+        // Distributed scheduler uses task locks to coordinate workers.
     }
 
     @Override
@@ -463,7 +673,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         } catch (Exception e) {
             throw new HugeException("Failed to update/query TaskStore for " +
                                     "graph(%s/%s): %s", e, this.graphSpace,
-                                    this.graph.name(), e.toString());
+                                    this.graph.spaceGraphName(), e.toString());
         }
     }
 
@@ -552,17 +762,17 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
     protected void logCurrentState() {
         int gremlinActive =
-            ((ThreadPoolExecutor) gremlinTaskExecutor).getActiveCount();
+                ((ThreadPoolExecutor) gremlinTaskExecutor).getActiveCount();
         int schemaActive =
-            ((ThreadPoolExecutor) schemaTaskExecutor).getActiveCount();
+                ((ThreadPoolExecutor) schemaTaskExecutor).getActiveCount();
         int ephemeralActive =
-            ((ThreadPoolExecutor) ephemeralTaskExecutor).getActiveCount();
+                ((ThreadPoolExecutor) ephemeralTaskExecutor).getActiveCount();
         int olapActive =
-            ((ThreadPoolExecutor) olapTaskExecutor).getActiveCount();
+                ((ThreadPoolExecutor) olapTaskExecutor).getActiveCount();
 
-        LOG.info("Current State: gremlinTaskExecutor({}), schemaTaskExecutor" +
-                 "({}), ephemeralTaskExecutor({}), olapTaskExecutor({})",
-                 gremlinActive, schemaActive, ephemeralActive, olapActive);
+        LOG.debug("Current State: gremlinTaskExecutor({}), schemaTaskExecutor" +
+                  "({}), ephemeralTaskExecutor({}), olapTaskExecutor({})",
+                  gremlinActive, schemaActive, ephemeralActive, olapActive);
     }
 
     private LockResult tryLockTask(String taskId) {
@@ -571,8 +781,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
         try {
             lockResult =
-                MetaManager.instance().tryLockTask(graphSpace, graphName,
-                                                   taskId);
+                    MetaManager.instance().tryLockTask(graphSpace, graphName,
+                                                       taskId);
         } catch (Throwable t) {
             LOG.warn(String.format("try to lock task(%s) error", taskId), t);
         }
@@ -591,9 +801,24 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
         }
     }
 
-    private boolean isLockedTask(String taskId) {
+    protected boolean isLockedTask(String taskId) {
         return MetaManager.instance().isLockedTask(graphSpace,
                                                    graphName, taskId);
+    }
+
+    @Override
+    public String graphName() {
+        return this.graph.name();
+    }
+
+    @Override
+    public String spaceGraphName() {
+        return this.graphSpace + "-" + this.graphName;
+    }
+
+    @Override
+    public void taskDone(HugeTask<?> task) {
+        // DO Nothing
     }
 
     private class TaskRunner<V> implements Runnable {
@@ -618,7 +843,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                     // 1. start task can be from schedule() & cronSchedule()
                     // 2. recheck the status of task, in case one same task
                     // called by both methods at same time;
-                    HugeTask<Object> queryTask = task(this.task.id());
+                    HugeTask<Object> queryTask = task(this.task.id(), false);
                     if (queryTask != null &&
                         !TaskStatus.NEW.equals(queryTask.status())) {
                         return;
@@ -626,27 +851,19 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
                     runningTasks.put(task.id(), task);
 
-                    // Task execution will not throw exceptions, HugeTask will catch exceptions during execution and store them in the DB.
+                    // Task execution will not throw exceptions, HugeTask will catch exceptions
+                    // during execution and store them in the DB.
                     task.run();
                 } catch (Throwable t) {
                     LOG.warn("exception when execute task", t);
                 } finally {
                     runningTasks.remove(task.id());
+                    deletingTasks.remove(task.id());
                     unlockTask(task.id().asString(), lockResult);
 
                     LOG.info("task({}) finished.", task.id().toString());
                 }
             }
         }
-    }
-
-    @Override
-    public String graphName() {
-        return this.graph.name();
-    }
-
-    @Override
-    public void taskDone(HugeTask<?> task) {
-        // DO Nothing
     }
 }

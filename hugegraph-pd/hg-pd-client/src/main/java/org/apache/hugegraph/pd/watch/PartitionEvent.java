@@ -23,9 +23,9 @@ import org.apache.hugegraph.pd.grpc.watch.WatchChangeType;
 
 public class PartitionEvent {
 
-    private final String graph;
-    private final int partitionId;
-    private final ChangeType changeType;
+    private String graph;
+    private int partitionId;
+    private ChangeType changeType;
 
     public PartitionEvent(String graph, int partitionId, ChangeType changeType) {
         this.graph = graph;

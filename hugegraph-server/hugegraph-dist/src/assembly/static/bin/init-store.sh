@@ -33,6 +33,7 @@ PLUGINS="$TOP/plugins"
 
 . "${BIN}"/util.sh
 
+configure_riscv64_libatomic || exit 1
 ensure_path_writable "${PLUGINS}"
 
 if [[ -n "$JAVA_HOME" ]]; then
@@ -45,17 +46,19 @@ fi
 
 cd "${TOP}" || exit
 
-DEFAULT_JAVA_OPTIONS=""
-JAVA_VERSION=$($JAVA -version 2>&1 | awk 'NR==1{gsub(/"/,""); print $3}' | awk -F'_' '{print $1}')
-# TODO: better not string number compare, use `bc` like github.com/koalaman/shellcheck/wiki/SC2072
-if [[ $? -eq 0 && $JAVA_VERSION >  "1.9" ]]; then
-      DEFAULT_JAVA_OPTIONS="--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED"
-fi
+DEFAULT_JAVA_OPTIONS="--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED"
 
 echo "Initializing HugeGraph Store..."
 
-CP=$(find "${LIB}" "${PLUGINS}" -name "*.jar"  | tr "\n" ":")
+# Build classpath with hugegraph*.jar first to avoid class loading conflicts
+CP=$(find -L "${LIB}" -name 'hugegraph*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find -L "${LIB}" -name '*.jar' \! -name 'hugegraph*' | sort | tr '\n' ':')
+CP="$CP":$(find -L "${PLUGINS}" -name '*.jar' | sort | tr '\n' ':')
 $JAVA -cp $CP ${DEFAULT_JAVA_OPTIONS} \
 org.apache.hugegraph.cmd.InitStore "${CONF}"/rest-server.properties
+INIT_STORE_STATUS=$?
+if [[ ${INIT_STORE_STATUS} -ne 0 ]]; then
+    exit "${INIT_STORE_STATUS}"
+fi
 
 echo "Initialization finished."

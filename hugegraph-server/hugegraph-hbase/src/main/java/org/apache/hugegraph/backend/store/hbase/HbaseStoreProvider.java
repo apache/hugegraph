@@ -24,7 +24,9 @@ import org.apache.hugegraph.config.HugeConfig;
 public class HbaseStoreProvider extends AbstractBackendStoreProvider {
 
     protected String namespace() {
-        return this.graph().toLowerCase();
+        // HBase namespace names can only contain alphanumeric characters and underscores
+        // Replace '/' with '_' to make it compatible with HBase naming rules
+        return this.graph().toLowerCase().replace('/', '_');
     }
 
     @Override

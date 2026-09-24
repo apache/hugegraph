@@ -37,6 +37,8 @@ public final class HgStoreClient {
     private final HgSessionProvider sessionProvider;
     private PDClient pdClient;
 
+    private HgSessionConfig sessionConfig;
+
     public HgStoreClient() {
         this.sessionProvider = new HgStoreSessionProvider();
     }
@@ -69,6 +71,10 @@ public final class HgStoreClient {
         setPdClient(pdClient);
     }
 
+    public void setSessionConfig(HgSessionConfig sessionConfig) {
+        this.sessionConfig = sessionConfig;
+    }
+
     /**
      * Retrieve or create a HgStoreSession.
      *
@@ -76,7 +82,7 @@ public final class HgStoreClient {
      * @return
      */
     public HgStoreSession openSession(String graphName) {
-        return this.sessionProvider.createSession(graphName);
+        return this.sessionProvider.createSession(graphName, this.sessionConfig);
     }
 
     public PDClient getPdClient() {

@@ -63,6 +63,13 @@ public class HgStoreWrapperEx {
         return FilterIterator.of(scanIterator, query);
     }
 
+    public ScanIterator scanOrdered(String graph, String table, byte[] start,
+                                    byte[] end, int scanType, byte[] query) {
+        ScanIterator scanIterator =
+                this.handler.scanOrdered(graph, table, start, end, scanType);
+        return FilterIterator.of(scanIterator, query);
+    }
+
     public void batchGet(String graph, String table, Supplier<HgPair<Integer, byte[]>> s,
                          Consumer<HgPair<byte[], byte[]>> c) {
         this.handler.batchGet(graph, table, s, (pair -> {

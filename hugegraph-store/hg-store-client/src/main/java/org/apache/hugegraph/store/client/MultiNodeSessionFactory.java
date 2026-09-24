@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.client;
 
 import javax.annotation.concurrent.ThreadSafe;
 
+import org.apache.hugegraph.store.HgSessionConfig;
 import org.apache.hugegraph.store.HgStoreSession;
 
 /**
@@ -42,13 +43,21 @@ public final class MultiNodeSessionFactory {
     }
 
     HgStoreSession createStoreSession(String graphName) {
-        return buildProxy(graphName);
+        return buildProxy(graphName, null);
     }
 
-    private HgStoreSession buildProxy(String graphName) {
+    HgStoreSession createStoreSession(String graphName, HgSessionConfig config) {
+        return buildProxy(graphName, config);
+    }
+
+    private HgStoreSession buildProxy(String graphName, HgSessionConfig config) {
         //return new MultiNodeSessionProxy(graphName, nodeManager, storeNodeDispatcher);
         //return new NodePartitionSessionProxy(graphName,nodeManager);
         //return new NodeRetrySessionProxy(graphName,nodeManager);
-        return new NodeTxSessionProxy(graphName, nodeManager);
+        if (config == null) {
+            return new NodeTxSessionProxy(graphName, nodeManager);
+        }
+
+        return new NodeTxSessionProxy(graphName, nodeManager, config);
     }
 }

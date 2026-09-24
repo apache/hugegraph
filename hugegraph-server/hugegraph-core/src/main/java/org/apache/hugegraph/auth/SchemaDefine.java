@@ -18,11 +18,15 @@
 package org.apache.hugegraph.auth;
 
 import java.io.Serializable;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.auth.HugeTarget.P;
 import org.apache.hugegraph.backend.id.Id;
@@ -34,7 +38,9 @@ import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.SafeDateUtil;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Graph.Hidden;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -42,6 +48,8 @@ import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 
 public abstract class SchemaDefine {
+
+    public static String FORMATTER = "yyyy-MM-dd HH:mm:ss.SSS";
 
     protected final HugeGraphParams graph;
     protected final String label;
@@ -118,6 +126,7 @@ public abstract class SchemaDefine {
 
         private static final long serialVersionUID = 8746691160192814973L;
 
+        protected static final String HIDE_ID = "~id";
         protected static final String CREATE = "create";
         protected static final String UPDATE = "update";
         protected static final String CREATOR = "creator";
@@ -194,19 +203,70 @@ public abstract class SchemaDefine {
 
         protected boolean property(String key, Object value) {
             E.checkNotNull(key, "property key");
-            if (key.equals(hideField(this.label(), CREATE))) {
-                this.create = (Date) value;
-                return true;
-            }
-            if (key.equals(hideField(this.label(), UPDATE))) {
-                this.update = (Date) value;
-                return true;
-            }
-            if (key.equals(hideField(this.label(), CREATOR))) {
-                this.creator = (String) value;
-                return true;
+            try {
+                if (key.equals(hideField(this.label(), CREATE))) {
+                    this.create = parseFlexibleDate(value);
+                    return true;
+                }
+                if (key.equals(hideField(this.label(), UPDATE))) {
+                    this.update = parseFlexibleDate(value);
+                    return true;
+                }
+                if (key.equals(hideField(this.label(), CREATOR))) {
+                    this.creator = (String) value;
+                    return true;
+                }
+                if (key.equals(HIDE_ID)) {
+                    this.id = IdGenerator.of(value.toString());
+                    return true;
+                }
+            } catch (ParseException e) {
+                throw new HugeException("Failed to parse date property '%s' with value '%s': %s",
+                                        key, value, e.getMessage());
             }
             return false;
+        }
+
+        //FIXME: Unify the date format instead of using this method
+        private Date parseFlexibleDate(Object value) throws ParseException {
+            if (value instanceof Date) {
+                // If it's already a Date object, return it directly
+                return (Date) value;
+            }
+
+            String dateStr = value.toString();
+
+            // Try multiple date formats - millisecond precision format first
+            String[] dateFormats = {
+                    FORMATTER,
+                    // "yyyy-MM-dd HH:mm:ss.SSS" (primary format with milliseconds)
+                    "yyyy-MM-dd HH:mm:ss",
+                    // "yyyy-MM-dd HH:mm:ss" (compatible with legacy format)
+                    "EEE MMM dd HH:mm:ss zzz yyyy",    // "Fri Sep 26 11:04:47 CST 2025"
+                    "yyyy-MM-dd'T'HH:mm:ss.SSSZ",     // ISO format with timezone
+                    "yyyy-MM-dd'T'HH:mm:ss'Z'",       // ISO format UTC
+                    "yyyy-MM-dd"                       // Date only
+            };
+
+            for (String format : dateFormats) {
+                try {
+                    if (format.equals("EEE MMM dd HH:mm:ss zzz yyyy")) {
+                        SimpleDateFormat sdf = new SimpleDateFormat(format, Locale.ENGLISH);
+                        return sdf.parse(dateStr);
+                    } else {
+                        return SafeDateUtil.parse(dateStr, format);
+                    }
+                } catch (ParseException e) {
+                }
+            }
+
+            try {
+                return DateUtil.parse(dateStr);
+            } catch (Exception e) {
+                throw new ParseException("Unable to parse date: " + dateStr +
+                                         ", tried formats: " +
+                                         java.util.Arrays.toString(dateFormats), 0);
+            }
         }
 
         protected Object[] asArray(List<Object> list) {
@@ -252,6 +312,10 @@ public abstract class SchemaDefine {
             return entity;
         }
 
+        protected static String hideField(String label, String key) {
+            return label + "_" + key;
+        }
+
         public static <T extends Entity> T fromVertex(Vertex vertex, T entity) {
             E.checkArgument(vertex.label().equals(entity.label()),
                             "Illegal vertex label '%s' for entity '%s'",
@@ -269,16 +333,15 @@ public abstract class SchemaDefine {
         public String idString() {
             String label = Hidden.unHide(this.label());
             String name = this.name();
-            StringBuilder sb = new StringBuilder(label.length() +
-                                                 name.length() + 2);
-            sb.append(label).append("(").append(name).append(")");
-            return sb.toString();
+            return label + "(" + name + ")";
         }
     }
 
     public abstract static class Relationship extends AuthElement {
 
         private static final long serialVersionUID = -1406157381685832493L;
+
+        public abstract String graphSpace();
 
         public abstract String sourceLabel();
 
@@ -318,12 +381,9 @@ public abstract class SchemaDefine {
         @Override
         public String idString() {
             String label = Hidden.unHide(this.label());
-            StringBuilder sb = new StringBuilder(label.length() +
-                                                 this.source().length() +
-                                                 this.target().length() + 4);
-            sb.append(label).append("(").append(this.source())
-              .append("->").append(this.target()).append(")");
-            return sb.toString();
+            String sb = label + "(" + this.source() +
+                        "->" + this.target() + ")";
+            return sb;
         }
     }
 }

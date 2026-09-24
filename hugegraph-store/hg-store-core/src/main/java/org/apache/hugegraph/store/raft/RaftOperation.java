@@ -44,10 +44,14 @@ public class RaftOperation {
     public static final byte IN_CLEAN_OP = 0x65;
     public static final byte RAFT_UPDATE_PARTITION = 0x66;
     public static final byte DB_COMPACTION = 0x67;
+    public static final byte DO_SYNC_SNAPSHOT = 0x68;
+    public static final byte SYNC_BLANK_TASK = 0x69;
+
     final static byte[] EMPTY_Bytes = new byte[0];
     private static final Logger LOG = LoggerFactory.getLogger(RaftOperation.class);
     private byte[] values;     // req serialized result, used for transmitting to other raft nodes
-    private Object req;        // Original object, used for native processing, reducing one deserialization operation
+    private Object req;
+    // Original object, used for native processing, reducing one deserialization operation
     private byte op;         // operation type
 
     public static RaftOperation create(final byte op) {

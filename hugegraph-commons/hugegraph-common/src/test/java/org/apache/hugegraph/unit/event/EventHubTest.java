@@ -31,6 +31,7 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.event.Event;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.event.EventHub.NotifyResult;
 import org.apache.hugegraph.event.EventListener;
 
 public class EventHubTest extends BaseUnitTest {
@@ -386,6 +387,82 @@ public class EventHubTest extends BaseUnitTest {
         this.wait100ms();
 
         Assert.assertEquals(1, count.get());
+    }
+
+    @Test
+    public void testEventNotifySync() {
+        final String notify = "event-notify-sync";
+        AtomicInteger count = new AtomicInteger();
+
+        this.eventHub.listen(notify, event -> {
+            count.incrementAndGet();
+            return null;
+        });
+        this.eventHub.listen(notify, event -> {
+            throw new RuntimeException("fake exception");
+        });
+        this.eventHub.listen(EventHub.ANY_EVENT, event -> {
+            count.incrementAndGet();
+            return null;
+        });
+
+        NotifyResult result = this.eventHub.notifySync(notify);
+        Assert.assertEquals(3, result.attempted());
+        Assert.assertEquals(2, result.succeeded());
+        Assert.assertFalse(result.success());
+        Assert.assertEquals(2, count.get());
+    }
+
+    @Test
+    public void testEventNotifySyncUsesSingleListenerSnapshot() {
+        final String notify = "event-notify-sync-snapshot";
+        this.eventHub.listen(notify, event -> {
+            this.eventHub.listen(notify, ignored -> null);
+            return null;
+        });
+
+        NotifyResult result = this.eventHub.notifySync(notify);
+
+        Assert.assertEquals(1, result.attempted());
+        Assert.assertEquals(1, result.succeeded());
+        Assert.assertTrue(result.success());
+    }
+
+    @Test
+    public void testNotifyExcept() throws Exception {
+        final String notify = "event-notify";
+        AtomicInteger listenerACount = new AtomicInteger();
+        AtomicInteger listenerBCount = new AtomicInteger();
+        AtomicInteger listenerCCount = new AtomicInteger();
+
+        EventListener listenerA = event -> {
+            event.checkArgs(String.class);
+            Assert.assertEquals("fake-arg", event.args()[0]);
+            listenerACount.incrementAndGet();
+            return true;
+        };
+        EventListener listenerB = event -> {
+            listenerBCount.incrementAndGet();
+            return true;
+        };
+        EventListener listenerC = event -> {
+            event.checkArgs(String.class);
+            Assert.assertEquals("fake-arg", event.args()[0]);
+            listenerCCount.incrementAndGet();
+            return true;
+        };
+
+        this.eventHub.listen(notify, listenerA);
+        this.eventHub.listen(notify, listenerB);
+        this.eventHub.listen(EventHub.ANY_EVENT, listenerC);
+
+        Assert.assertEquals(2, (int) this.eventHub
+                                          .notifyExcept(notify, listenerB,
+                                                        "fake-arg")
+                                          .get());
+        Assert.assertEquals(1, listenerACount.get());
+        Assert.assertEquals(0, listenerBCount.get());
+        Assert.assertEquals(1, listenerCCount.get());
     }
 
     @Test

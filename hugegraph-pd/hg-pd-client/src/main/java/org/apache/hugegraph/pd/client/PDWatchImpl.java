@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.pd.client;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 import org.apache.hugegraph.pd.grpc.watch.HgPdWatchGrpc;
@@ -34,14 +35,15 @@ import io.grpc.stub.StreamObserver;
 
 final class PDWatchImpl implements PDWatch {
 
-    private final HgPdWatchGrpc.HgPdWatchStub stub;
+    private HgPdWatchGrpc.HgPdWatchStub stub;
 
-    private final String pdServerAddress;
+    private String pdServerAddress;
+    private static ConcurrentHashMap<String, ManagedChannel> chs = new ConcurrentHashMap<>();
 
     // TODO: support several servers.
-    PDWatchImpl(String pdServerAddress) {
+    PDWatchImpl(String pdServerAddress, PDConfig config) {
         this.pdServerAddress = pdServerAddress;
-        this.stub = HgPdWatchGrpc.newStub(Channels.getChannel(pdServerAddress));
+        this.stub = AbstractClient.setAsyncParams(HgPdWatchGrpc.newStub(Channels.getChannel(pdServerAddress)), config);
     }
 
     @Override
@@ -51,7 +53,7 @@ final class PDWatchImpl implements PDWatch {
 
     @Override
     public boolean checkChannel() {
-        return stub != null && !((ManagedChannel) stub.getChannel()).isShutdown();
+        return stub != null && ! Channels.getChannel(this.pdServerAddress).isShutdown();
     }
 
     /**

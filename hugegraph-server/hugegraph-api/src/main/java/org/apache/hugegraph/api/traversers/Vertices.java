@@ -36,13 +36,18 @@ import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 public class Vertices {
 
     @JsonProperty("ids")
+    @Schema(description = "The vertex IDs", example = "[\"1:Tom\", \"2:Mary\"]")
     public Set<Object> ids;
     @JsonProperty("label")
+    @Schema(description = "The vertex label", example = "person")
     public String label;
     @JsonProperty("properties")
+    @Schema(description = "The vertex properties in key-value format")
     public Map<String, Object> properties;
 
     public Iterator<Vertex> vertices(HugeGraph g) {

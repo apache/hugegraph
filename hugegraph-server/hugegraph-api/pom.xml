@@ -36,6 +36,12 @@
         </dependency>
 
         <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-client</artifactId>
+            <version>${fabric8.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty-shaded</artifactId>
             <!-- Keep consistent with grpc dependency version (pd/store) -->
@@ -64,7 +70,7 @@
                     <groupId>com.alipay.sofa</groupId>
                     <artifactId>hessian</artifactId>
                 </exclusion>
-                <!-- conflict with cassandra-netty/tinkerpop-server  -->
+                <!-- avoid netty version conflicts with tinkerpop-server -->
                 <exclusion>
                     <groupId>io.netty</groupId>
                     <artifactId>netty-all</artifactId>
@@ -195,8 +201,8 @@
                             </addDefaultSpecificationEntries>
                         </manifest>
                         <manifestEntries>
-                            <!-- TODO: update it -->
-                            <Implementation-Version>0.71.0.0</Implementation-Version>
+                            <!-- Bump when the public REST API contract changes -->
+                            <Implementation-Version>0.72.0.0</Implementation-Version>
                         </manifestEntries>
                     </archive>
                 </configuration>

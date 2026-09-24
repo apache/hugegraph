@@ -18,6 +18,7 @@
 package org.apache.hugegraph.util;
 
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 
 import org.apache.hugegraph.rest.SerializeException;
 
@@ -25,6 +26,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.Module;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 /**
  * Utility class for JSON operations.
@@ -35,6 +37,12 @@ public final class JsonUtilCommon {
      * ObjectMapper instance used for JSON operations.
      */
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    static {
+        MAPPER.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        // NOTE: jackson will synchronize DateFormat
+        MAPPER.setDateFormat(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS"));
+    }
 
     /**
      * Registers a module with the ObjectMapper.

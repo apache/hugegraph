@@ -36,8 +36,8 @@ import org.apache.hugegraph.pd.grpc.pulse.MovePartition;
 import org.apache.hugegraph.pd.grpc.pulse.PartitionKeyRange;
 import org.apache.hugegraph.pd.grpc.pulse.SplitPartition;
 import org.apache.hugegraph.pd.grpc.pulse.TransferLeader;
-import org.apache.hugegraph.store.cmd.CleanDataRequest;
-import org.apache.hugegraph.store.cmd.DbCompactionRequest;
+import org.apache.hugegraph.store.cmd.request.CleanDataRequest;
+import org.apache.hugegraph.store.cmd.request.DbCompactionRequest;
 import org.apache.hugegraph.store.meta.MetadataKeyHelper;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.pd.PartitionInstructionListener;
@@ -53,6 +53,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder;
 /**
  * PD sends partition instruction processor to Store
  */
+@Deprecated
 public class PartitionInstructionProcessor implements PartitionInstructionListener {
 
     private static final Logger LOG = Log.logger(PartitionInstructionProcessor.class);
@@ -309,10 +310,9 @@ public class PartitionInstructionProcessor implements PartitionInstructionListen
                                    });
                 LOG.info("onPartitionKeyRangeChanged: {}, update to pd", newPartition);
                 partitionManager.updatePartitionToPD(List.of(newPartition));
-            } catch (IOException e) {
-                LOG.error("Partition {}-{} onPartitionKeyRangeChanged exception {}",
-                          newPartition.getGraphName(), newPartition.getId(), e);
             } catch (PDException e) {
+                throw new RuntimeException(e);
+            } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }

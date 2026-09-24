@@ -22,6 +22,7 @@ import java.util.Map;
 
 import javax.annotation.PostConstruct;
 
+import org.apache.hugegraph.store.options.JobOptions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -33,6 +34,8 @@ import lombok.Data;
 @Data
 @Component
 public class AppConfig {
+
+    private static int cpus = Runtime.getRuntime().availableProcessors();
 
     @Value("${pdserver.address}")
     private String pdServerAddress;
@@ -52,6 +55,9 @@ public class AppConfig {
     // Built-in pd mode, for standalone deployment
     @Value("${app.data-path: store}")
     private String dataPath;
+
+    @Value("${app.placeholder-size: 10}")
+    private Integer placeholderSize;
 
     @Value("${app.raft-path:}")
     private String raftPath;
@@ -73,6 +79,12 @@ public class AppConfig {
     private ThreadPoolGrpc threadPoolGrpc;
     @Autowired
     private ThreadPoolScan threadPoolScan;
+
+    @Autowired
+    private JobConfig jobConfig;
+
+    @Autowired
+    private QueryPushDownConfig queryPushDownConfig;
 
     public String getRaftPath() {
         if (raftPath == null || raftPath.length() == 0) {
@@ -222,6 +234,70 @@ public class AppConfig {
 
     @Data
     @Configuration
+    public class JobConfig {
+
+        @Value("${job.interruptableThreadPool.core:128}")
+        private int core;
+
+        @Value("${job.interruptableThreadPool.max:256}")
+        private int max;
+
+        @Value("${job.interruptableThreadPool.queue:" + Integer.MAX_VALUE + "}")
+        private int queueSize;
+
+        @Value("${job.cleaner.batch.size:10000}")
+        private int batchSize;
+
+        @Value("${job.start-time:0}")
+        private int startTime;
+
+        @Value("${job.uninterruptibleThreadPool.core:0}")
+        private int uninterruptibleCore;
+
+        @Value("${job.uninterruptibleThreadPool.max:256}")
+        private int uninterruptibleMax;
+
+        @Value("${job.uninterruptibleThreadPool.queue:" + Integer.MAX_VALUE + "}")
+        private int uninterruptibleQueueSize;
+    }
+
+    @Data
+    @Configuration
+    public class QueryPushDownConfig {
+
+        /**
+         * query v2 thread pool size
+         */
+        @Value("${query.push-down.threads:1500}")
+        private int threadPoolSize;
+
+        /**
+         * the batch size that each request gets
+         */
+        @Value("${query.push-down.fetch_batch:20000}")
+        private int fetchBatchSize;
+
+        /**
+         * the timeout of request fetch (ms)
+         */
+        @Value("${query.push-down.fetch_timeout:300000}")
+        private long fetchTimeOut;
+
+        /**
+         * the limit of memory operations, like sort etc.
+         */
+        @Value("${query.push-down.memory_limit_count:50000}")
+        private int memoryLimitCount;
+
+        /**
+         * limit size of index sst file size (kB)
+         */
+        @Value("${query.push-down.index_size_limit_count:50000}")
+        private int indexSizeLimitCount;
+    }
+
+    @Data
+    @Configuration
     @ConfigurationProperties(prefix = "app")
     public class LabelConfig {
 
@@ -233,7 +309,20 @@ public class AppConfig {
     @ConfigurationProperties(prefix = "")
     public class RocksdbConfig {
 
-        private final Map<String, String> rocksdb = new HashMap<>();
+        private Map<String, String> rocksdb = new HashMap<>();
     }
 
+    public JobOptions getJobOptions() {
+        JobOptions jobOptions = new JobOptions();
+        jobOptions.setCore(jobConfig.getCore() == 0 ? cpus : jobConfig.getCore());
+        jobOptions.setMax(jobConfig.getMax() == 0 ? cpus * 4 : jobConfig.getMax());
+        jobOptions.setQueueSize(jobConfig.getQueueSize());
+        jobOptions.setBatchSize(jobConfig.getBatchSize());
+        int uninterruptibleCore = jobOptions.getUninterruptibleCore();
+        jobOptions.setUninterruptibleCore(uninterruptibleCore == 0 ? cpus : uninterruptibleCore);
+        int uninterruptibleMax = jobOptions.getUninterruptibleMax();
+        jobOptions.setUninterruptibleMax(uninterruptibleMax == 0 ? cpus * 4 : uninterruptibleMax);
+        jobOptions.setUninterruptibleQueueSize(jobConfig.getUninterruptibleQueueSize());
+        return jobOptions;
+    }
 }

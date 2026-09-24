@@ -25,9 +25,11 @@ import org.apache.hugegraph.pd.grpc.Metapb;
 
 public class LogMeta extends MetadataRocksDBStore {
 
+    private PDConfig pdConfig;
 
     public LogMeta(PDConfig pdConfig) {
         super(pdConfig);
+        this.pdConfig = pdConfig;
     }
 
     public void insertLog(Metapb.LogRecord record) throws PDException {

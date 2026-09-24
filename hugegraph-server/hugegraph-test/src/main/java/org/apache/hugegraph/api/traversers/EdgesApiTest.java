@@ -48,7 +48,7 @@ public class EdgesApiTest extends BaseApiTest {
     @Test
     public void testList() {
         Map<String, String> name2Ids = listAllVertexName2Ids();
-        final String edgeGetPath = "graphs/hugegraph/graph/edges";
+        final String edgeGetPath = "graphspaces/DEFAULT/graphs/hugegraph/graph/edges";
         String vadasId = name2Ids.get("vadas");
         Map<String, Object> params = ImmutableMap.of(
                 "vertex_id", id2Json(vadasId),

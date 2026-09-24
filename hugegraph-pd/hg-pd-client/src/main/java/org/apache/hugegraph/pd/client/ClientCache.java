@@ -17,26 +17,29 @@
 
 package org.apache.hugegraph.pd.client;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
+import java.util.stream.Collectors;
+
+import org.apache.commons.collections4.CollectionUtils;
 
 import org.apache.hugegraph.pd.common.GraphCache;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.pd.grpc.Metapb;
+import org.apache.hugegraph.pd.grpc.Metapb.Graph;
+import org.apache.hugegraph.pd.grpc.Metapb.Graph.Builder;
 import org.apache.hugegraph.pd.grpc.Metapb.Partition;
 import org.apache.hugegraph.pd.grpc.Metapb.Shard;
 import org.apache.hugegraph.pd.grpc.Metapb.ShardGroup;
 import org.apache.hugegraph.pd.grpc.Pdpb.CachePartitionResponse;
 import org.apache.hugegraph.pd.grpc.Pdpb.CacheResponse;
 
-import com.google.common.collect.Range;
 import com.google.common.collect.RangeMap;
 
 import lombok.extern.slf4j.Slf4j;
@@ -44,8 +47,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ClientCache {
 
-    private final AtomicBoolean initialized = new AtomicBoolean(false);
-    private final org.apache.hugegraph.pd.client.PDClient client;
+    private AtomicBoolean initialized = new AtomicBoolean(false);
+    private PDClient client;
     private volatile Map<Integer, KVPair<ShardGroup, Shard>> groups;
     private volatile Map<Long, Metapb.Store> stores;
     private volatile Map<String, GraphCache> caches = new ConcurrentHashMap<>();
@@ -56,12 +59,14 @@ public class ClientCache {
         client = pdClient;
     }
 
-    private GraphCache getGraphCache(String graphName) {
+    private GraphCache getGraphCache(String graphName) { 
         GraphCache graph;
         if ((graph = caches.get(graphName)) == null) {
             synchronized (caches) {
                 if ((graph = caches.get(graphName)) == null) {
-                    graph = new GraphCache();
+                    Builder builder = Graph.newBuilder().setGraphName(graphName);
+                    Graph g = builder.build();
+                    graph = new GraphCache(g);
                     caches.put(graphName, graph);
                 }
             }
@@ -112,6 +117,35 @@ public class ClientCache {
             Integer pId = range.get(code);
             if (pId != null) {
                 return getPair(pId, graph);
+            } else {
+                ReadLock readLock = graph.getLock().readLock();
+                try {
+                    readLock.lock();
+                    pId = range.get(code);
+                } catch (Exception e) {
+                    log.info("get range with error:", e);
+                } finally {
+                    readLock.unlock();
+                }
+                if (pId == null) {
+                    WriteLock writeLock = graph.getLock().writeLock();
+                    try {
+                        writeLock.lock();
+                        if ((pId = range.get(code)) == null) {
+                            graph.reset();
+                            initGraph(graph);
+                            pId = range.get(code);
+                        }
+                    } catch (Exception e) {
+                        log.info("reset with error:", e);
+                    } finally {
+                        writeLock.unlock();
+                    }
+
+                }
+                if (pId != null) {
+                    return getPair(pId, graph);
+                }
             }
             return null;
         } catch (PDException e) {
@@ -125,20 +159,20 @@ public class ClientCache {
         if (!graph.getInitialized().get()) {
             synchronized (graph) {
                 if (!graph.getInitialized().get()) {
-                    CachePartitionResponse pc = client.getPartitionCache(graphName);
-                    RangeMap<Long, Integer> range = graph.getRange();
-                    List<Partition> ps = pc.getPartitionsList();
-                    HashMap<Integer, Partition> gps = new HashMap<>(ps.size(), 1);
-                    for (Partition p : ps) {
-                        gps.put(p.getId(), p);
-                        range.put(Range.closedOpen(p.getStartKey(), p.getEndKey()), p.getId());
-                    }
-                    graph.setPartitions(gps);
+                    initGraph(graph);
                     graph.getInitialized().set(true);
                 }
             }
         }
         return graph;
+    }
+
+    private void initGraph(GraphCache graph) throws PDException {
+        CachePartitionResponse pc = client.getPartitionCache(graph.getGraph().getGraphName());
+        List<Partition> ps = pc.getPartitionsList();
+        if (!CollectionUtils.isEmpty(ps)) {
+            graph.init(ps);
+        }
     }
 
     private void initCache() throws PDException {
@@ -148,7 +182,7 @@ public class ClientCache {
                     CacheResponse cache = client.getClientCache();
                     List<ShardGroup> shardGroups = cache.getShardsList();
                     for (ShardGroup s : shardGroups) {
-                        this.groups.put(s.getId(), new KVPair<>(s, getLeader(s.getId())));
+                        this.groups.put(s.getId(), new KVPair<>(s, getLeader(s)));
                     }
                     List<Metapb.Store> stores = cache.getStoresList();
                     for (Metapb.Store store : stores) {
@@ -172,50 +206,37 @@ public class ClientCache {
 
     public boolean update(String graphName, int partId, Partition partition) {
         GraphCache graph = getGraphCache(graphName);
-        try {
-            Partition p = graph.getPartition(partId);
-            if (p != null && p.equals(partition)) {
-                return false;
-            }
-            RangeMap<Long, Integer> range = graph.getRange();
-            graph.addPartition(partId, partition);
-            if (p != null) {
-                if (Objects.equals(partition.getId(), range.get(partition.getStartKey())) &&
-                    Objects.equals(partition.getId(), range.get(partition.getEndKey() - 1))) {
-                    range.remove(range.getEntry(partition.getStartKey()).getKey());
-                }
-            }
-            range.put(Range.closedOpen(partition.getStartKey(), partition.getEndKey()), partId);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        return true;
+        return graph.updatePartition(partition);
     }
 
     public void removePartition(String graphName, int partId) {
         GraphCache graph = getGraphCache(graphName);
-        Partition p = graph.removePartition(partId);
-        if (p != null) {
-            RangeMap<Long, Integer> range = graph.getRange();
-            if (Objects.equals(p.getId(), range.get(p.getStartKey())) &&
-                Objects.equals(p.getId(), range.get(p.getEndKey() - 1))) {
-                range.remove(range.getEntry(p.getStartKey()).getKey());
-            }
-        }
+        graph.removePartition(partId);
     }
 
     /**
      * remove all partitions
      */
     public void removePartitions() {
-        for (Entry<String, GraphCache> entry : caches.entrySet()) {
-            removePartitions(entry.getValue());
+        try {
+            groups.clear();
+            stores.clear();
+            caches.clear();
+            initialized.set(false);
+            initCache();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
     private void removePartitions(GraphCache graph) {
-        graph.getState().clear();
-        graph.getRange().clear();
+        try {
+            graph.removePartitions();
+            initGraph(graph.getGraph().getGraphName());
+        } catch (Exception e) {
+            log.warn("remove partitions with error:", e);
+        } finally {
+        }
     }
 
     /**
@@ -228,6 +249,15 @@ public class ClientCache {
         if (graph != null) {
             removePartitions(graph);
         }
+    }
+
+    private StringBuffer getStack(StackTraceElement[] stackTrace) {
+        StringBuffer sb = new StringBuffer();
+        for (int i = 0; i < stackTrace.length; i++) {
+            StackTraceElement element = stackTrace[i];
+            sb.append(element.toString() + "\n");
+        }
+        return sb;
     }
 
     public boolean updateShardGroup(ShardGroup shardGroup) {
@@ -272,10 +302,13 @@ public class ClientCache {
     }
 
     public void reset() {
-        groups = new ConcurrentHashMap<>();
-        stores = new ConcurrentHashMap<>();
-        caches = new ConcurrentHashMap<>();
-        initialized.set(false);
+        try {
+            groups = new ConcurrentHashMap<>();
+            stores = new ConcurrentHashMap<>();
+            caches = new ConcurrentHashMap<>();
+            initialized.set(false);
+        } finally {
+        }
     }
 
     public Shard getLeader(int partitionId) {
@@ -327,5 +360,29 @@ public class ClientCache {
                 pair.setValue(leader);
             }
         }
+    }
+
+    public List<String> getLeaderStoreAddresses() throws PDException {
+        initCache();
+        var storeIds = this.groups.values().stream()
+                                  .map(KVPair::getValue)
+                                  .filter(java.util.Objects::nonNull)
+                                  .map(Shard::getStoreId)
+                                  .collect(Collectors.toSet());
+        return this.stores.values().stream()
+                          .filter(store -> storeIds.contains(store.getId()))
+                          .map(Metapb.Store::getAddress)
+                          .collect(Collectors.toList());
+    }
+
+    public Map<Integer, String> getLeaderPartitionStoreAddress(String graphName) throws
+                                                                                 PDException {
+        initCache();
+        return this.groups.values()
+                          .stream()
+                          .collect(Collectors.toMap(
+                                  pair -> pair.getKey().getId(),
+                                  pair -> this.stores.get(pair.getValue().getStoreId()).getAddress()
+                          ));
     }
 }

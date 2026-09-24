@@ -28,7 +28,8 @@ import jakarta.ws.rs.core.Response;
 
 public class VertexLabelApiTest extends BaseApiTest {
 
-    private static final String PATH = "/graphs/hugegraph/schema/vertexlabels/";
+    private static final String PATH =
+            "/graphspaces/DEFAULT/graphs/hugegraph/schema/vertexlabels/";
 
     @Before
     public void prepareSchema() {

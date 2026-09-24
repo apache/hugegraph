@@ -43,6 +43,8 @@ public interface HugeGraphParams {
 
     String name();
 
+    String spaceGraphName();
+
     GraphMode mode();
 
     GraphReadMode readMode();

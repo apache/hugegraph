@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.pd.client.PDClient;
@@ -29,11 +28,11 @@ import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
-import org.apache.hugegraph.pd.grpc.Pdpb;
 import org.apache.hugegraph.store.meta.GraphManager;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.Store;
 import org.apache.hugegraph.store.options.HgStoreEngineOptions;
+import org.apache.hugegraph.store.processor.Processors;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -43,11 +42,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class FakePdServiceProvider implements PdProvider {
 
+    private static long specifyStoreId = -1L;
     private final Map<Long, Store> stores;
-    private final int shardCount = 0;
-    private final Map<String, Metapb.Partition> partitions = new ConcurrentHashMap<>();
     private int partitionCount = 0;
     private GraphManager graphManager = null;
+    private List<Partition> partitions;
+    /**
+     * Store for register storage
+     */
+    private Store registerStore;
 
     public FakePdServiceProvider(HgStoreEngineOptions.FakePdOptions options) {
         stores = new LinkedHashMap<>();
@@ -64,21 +67,11 @@ public class FakePdServiceProvider implements PdProvider {
     }
 
     public static long makeStoreId(String storeAddress) {
-        return storeAddress.hashCode();
+        return specifyStoreId != -1L ? specifyStoreId : storeAddress.hashCode();
     }
 
-    /**
-     * For unit test
-     *
-     * @return
-     */
-    public static Store getDefaultStore() {
-        Store store = new Store();
-        store.setId(1);
-        store.setStoreAddress("127.0.0.1:8501");
-        store.setRaftAddress("127.0.0.1:8511");
-        store.setPartitionCount(1);
-        return store;
+    public static void setSpecifyStoreId(long specifyStoreId) {
+        FakePdServiceProvider.specifyStoreId = specifyStoreId;
     }
 
     private void addStore(String storeAddr, String raftAddr) {
@@ -86,11 +79,9 @@ public class FakePdServiceProvider implements PdProvider {
             setId(makeStoreId(storeAddr));
             setRaftAddress(raftAddr);
             setStoreAddress(storeAddr);
+            setDeployPath("");
+            setDataPath("");
         }};
-        stores.put(store.getId(), store);
-    }
-
-    public void addStore(Store store) {
         stores.put(store.getId(), store);
     }
 
@@ -99,56 +90,74 @@ public class FakePdServiceProvider implements PdProvider {
         log.info("registerStore storeId:{}, storeAddress:{}", store.getId(),
                  store.getStoreAddress());
 
-        // id does not match, login prohibited
-        if (store.getId() != 0 && store.getId() != makeStoreId(store.getStoreAddress())) {
-            throw new PDException(Pdpb.ErrorType.STORE_ID_NOT_EXIST_VALUE,
-                                  "Store id does not matched");
+        var storeId = makeStoreId(store.getStoreAddress());
+        if (store.getId() == 0) {
+            store.setId(storeId);
         }
 
-        if (!stores.containsKey(makeStoreId(store.getStoreAddress()))) {
-            store.setId(makeStoreId(store.getStoreAddress()));
+        if (!stores.containsKey(store.getId())) {
             stores.put(store.getId(), store);
         }
-        Store s = stores.get(makeStoreId(store.getStoreAddress()));
-        store.setId(s.getId());
+
+        registerStore = store;
 
         return store.getId();
     }
 
     @Override
-    public Partition getPartitionByID(String graph, int partId) {
-        List<Store> storeList = new ArrayList(stores.values());
-        int shardCount = this.shardCount;
-        if (shardCount == 0 || shardCount >= stores.size()) {
-            shardCount = stores.size();
+    public Metapb.ShardGroup getShardGroup(int partitionId) {
+        Long storeId;
+        if (registerStore != null) {
+            storeId = registerStore.getId();
+        } else {
+            storeId = (Long) stores.keySet().toArray()[0];
         }
 
-        int storeIdx = partId % storeList.size();
-        List<Metapb.Shard> shards = new ArrayList<>();
-        for (int i = 0; i < shardCount; i++) {
-            Metapb.Shard shard =
-                    Metapb.Shard.newBuilder().setStoreId(storeList.get(storeIdx).getId())
-                                .setRole(i == 0 ? Metapb.ShardRole.Leader :
-                                         Metapb.ShardRole.Follower) //
+        return Metapb.ShardGroup.newBuilder()
+                                .setId(partitionId)
+                                .setConfVer(0)
+                                .setVersion(0)
+                                .addAllShards(List.of(Metapb.Shard.newBuilder()
+                                                                  .setRole(Metapb.ShardRole.Leader)
+                                                                  .setStoreId(storeId).build()))
+                                .setState(Metapb.PartitionState.PState_Normal)
                                 .build();
-            shards.add(shard);
-            storeIdx = (storeIdx + 1) >= storeList.size() ? 0 : ++storeIdx; // Sequential selection
-        }
+    }
 
+    @Override
+    public Metapb.ShardGroup getShardGroupDirect(int partitionId) {
+        return getShardGroup(partitionId);
+    }
+
+    @Override
+    public void updateShardGroup(Metapb.ShardGroup shardGroup) throws PDException {
+        PdProvider.super.updateShardGroup(shardGroup);
+    }
+
+    /**
+     * Retrieve partition information for the specified chart and obtain partition object by
+     * partition ID
+     *
+     * @param graph  Graph name
+     * @param partId Partition ID
+     * @return partition object
+     */
+    @Override
+    public Partition getPartitionByID(String graph, int partId) {
         int partLength = getPartitionLength();
         Metapb.Partition partition = Metapb.Partition.newBuilder()
                                                      .setGraphName(graph)
                                                      .setId(partId)
-                                                     .setStartKey(partLength * partId)
-                                                     .setEndKey(partLength * (partId + 1))
-                                                     //.addAllShards(shards)
+                                                     .setStartKey((long) partLength * partId)
+                                                     .setEndKey((long) partLength * (partId + 1))
+                                                     .setState(Metapb.PartitionState.PState_Normal)
                                                      .build();
         return new Partition(partition);
     }
 
     @Override
     public Metapb.Shard getPartitionLeader(String graph, int partId) {
-        return null;
+        return getShardGroup(partId).getShardsList().get(0);
     }
 
     private int getPartitionLength() {
@@ -193,13 +202,23 @@ public class FakePdServiceProvider implements PdProvider {
     }
 
     @Override
-    public boolean addPartitionInstructionListener(PartitionInstructionListener listener) {
-        return false;
+    public boolean setCommandProcessors(Processors processors) {
+        return true;
     }
+
+    //@Override
+    //public boolean addPartitionInstructionListener(PartitionInstructionListener listener) {
+    //    return false;
+    //}
 
     @Override
     public boolean partitionHeartbeat(List<Metapb.PartitionStats> statsList) {
         return true;
+    }
+
+    @Override
+    public boolean partitionHeartbeat(Metapb.PartitionStats stats) {
+        return false;
     }
 
     @Override
@@ -210,7 +229,8 @@ public class FakePdServiceProvider implements PdProvider {
     @Override
     public Metapb.Graph getGraph(String graphName) {
         return Metapb.Graph.newBuilder().setGraphName(graphName)
-                           //.setId(PartitionUtils.calcHashcode(graphName.getBytes()))
+                           .setPartitionCount(partitionCount)
+                           .setState(Metapb.PartitionState.PState_Normal)
                            .build();
     }
 
@@ -260,5 +280,23 @@ public class FakePdServiceProvider implements PdProvider {
     @Override
     public void deleteShardGroup(int groupId) {
 
+    }
+
+    public List<Store> getStores() {
+        return List.copyOf(stores.values());
+    }
+
+    public void setPartitionCount(int partitionCount) {
+        this.partitionCount = partitionCount;
+    }
+
+    @Override
+    public String getPdServerAddress() {
+        return null;
+    }
+
+    @Override
+    public void resetPulseClient() {
+        PdProvider.super.resetPulseClient();
     }
 }

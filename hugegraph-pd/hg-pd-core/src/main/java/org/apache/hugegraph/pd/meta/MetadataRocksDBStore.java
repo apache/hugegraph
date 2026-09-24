@@ -126,7 +126,7 @@ public class MetadataRocksDBStore extends MetadataStoreBase {
         try {
             List<KV> kvs = this.scanRange(start, end);
             for (KV keyValue : kvs) {
-                stores.add(parser.parseFrom(keyValue.getValue()));
+                stores.add(parser.parseFrom((byte[]) keyValue.getValue()));
             }
         } catch (Exception e) {
             throw new PDException(Pdpb.ErrorType.ROCKSDB_READ_ERROR_VALUE, e);
@@ -140,7 +140,7 @@ public class MetadataRocksDBStore extends MetadataStoreBase {
         try {
             List<KV> kvs = this.scanPrefix(prefix);
             for (KV keyValue : kvs) {
-                stores.add(parser.parseFrom(keyValue.getValue()));
+                stores.add(parser.parseFrom((byte[]) keyValue.getValue()));
             }
         } catch (Exception e) {
             throw new PDException(Pdpb.ErrorType.ROCKSDB_READ_ERROR_VALUE, e);

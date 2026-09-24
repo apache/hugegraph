@@ -256,5 +256,127 @@ public class ConditionQueryFlattenTest extends BaseUnitTest {
         Collection<Condition> actual = queries.iterator().next().conditions();
         Assert.assertEquals(expect, actual);
     }
+
+    @Test
+    public void testFlattenWithBooleanRangeUpperBound() {
+        Id key = IdGenerator.of("c1");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.lt(key, true));
+        query.query(Condition.lt(key, false));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(Condition.lt(key, false)), actual);
+    }
+
+    @Test
+    public void testFlattenWithBooleanRangeWindow() {
+        Id key = IdGenerator.of("c1");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.gte(key, false));
+        query.query(Condition.lt(key, true));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(Condition.gte(key, false),
+                                             Condition.lt(key, true)), actual);
+    }
+
+    @Test
+    public void testFlattenWithConflictingBooleanRange() {
+        Id key = IdGenerator.of("c1");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.gt(key, false).and(Condition.lt(key, true)));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(0, queries.size());
+    }
+
+    @Test
+    public void testFlattenWithImpossibleInInsideAnd() {
+        Id key = IdGenerator.of("c1");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.in(key, ImmutableList.of())
+                             .and(Condition.eq(key, true)));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(0, queries.size());
+    }
+
+    @Test
+    public void testFlattenWithImpossibleInInsideOr() {
+        Id key = IdGenerator.of("c1");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        Condition eq = Condition.eq(key, true);
+        query.query(Condition.in(key, ImmutableList.of()).or(eq));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(eq), actual);
+    }
+
+    @Test
+    public void testFlattenWithImpossibleInInsideOrRight() {
+        Id key = IdGenerator.of("c1");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        Condition eq = Condition.eq(key, true);
+        query.query(eq.or(Condition.in(key, ImmutableList.of())));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(eq), actual);
+    }
+
+    @Test
+    public void testFlattenWithImpossibleInInsideNestedAndOverOr() {
+        Id leftKey = IdGenerator.of("c1");
+        Id rightKey = IdGenerator.of("c2");
+
+        Condition left = Condition.in(leftKey, ImmutableList.of())
+                                  .or(Condition.eq(leftKey, "a"));
+        Condition right = Condition.eq(rightKey, "b");
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(left.and(right));
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(Condition.eq(leftKey, "a"),
+                                             right), actual);
+    }
+
+    @Test
+    public void testFlattenWithConflictingNumericRangeKeepsQuery() {
+        Id key = IdGenerator.of("c1");
+
+        Condition gt = Condition.gt(key, 10);
+        Condition eq = Condition.eq(key, 9);
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(gt);
+        query.query(eq);
+
+        List<ConditionQuery> queries = ConditionQueryFlatten.flatten(query);
+        Assert.assertEquals(1, queries.size());
+
+        Collection<Condition> actual = queries.iterator().next().conditions();
+        Assert.assertEquals(ImmutableList.of(gt, eq), actual);
+    }
 }
 
