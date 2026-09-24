@@ -743,7 +743,7 @@ HugeGraph uses a **Service Provider Interface (SPI)** pattern to discover and lo
 1. **CloudStorageProvider interface**: Located in `hugegraph-store/hg-store-common`, defines the contract all providers must implement.
 2. **ServiceLoader discovery**: Store node uses `java.util.ServiceLoader` to find all `CloudStorageProvider` implementations on the classpath.
 3. **SPI selection**: At Store startup, `CloudStorageProviderFactory` loads the provider specified in `cloud.storage.provider` config.
-4. **Plugin packaging/runtime classpath**: Provider implementations are packaged as separate JAR modules and must be available on Store runtime classpath.
+4. **Plugin packaging/runtime classpath**: Provider implementations are packaged as separate JAR modules and must be discoverable by Store at startup — either bundled into the distribution (Option A) or dropped into the `plugins/` directory, which `CloudStorageProviderFactory` itself scans on the Java side at class-init time (Option B). See [Step 5](#step-5-package-for-runtime-classpath) below.
 
 ### CloudStorageProvider Interface
 
@@ -968,7 +968,14 @@ Use one of these runtime models:
 Notes:
 
 - Simply copying a provider jar without its runtime dependencies can cause `ClassNotFoundException` during SPI loading.
-- The exact classpath injection method depends on your launch model (custom startup script, container image, or JVM args).
+- Drop the provider jar and its runtime dependency jars into the `plugins/` directory (relative to
+  the Store install root, `$TOP/plugins`) and set `cloud.storage.provider` in configuration. No
+  shell script or JVM flag is involved: `CloudStorageProviderFactory` itself locates `$TOP/plugins`
+  (by resolving the running `hg-store-node` fat jar's own directory via
+  `java.class.path`), builds a `URLClassLoader` over any jars found there, and runs the same
+  `ServiceLoader` scan against it that it runs against the ambient classpath — so the provider is
+  discovered automatically as soon as the JVM starts. This only happens once, at class-init time,
+  so a jar dropped in after the process has started requires a restart to be picked up.
 
 ### Step 6: Configure and Activate
 

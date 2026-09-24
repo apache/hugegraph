@@ -238,12 +238,12 @@ prepare_artifacts() {
     }
     store_src="$(find_dist_dir "${REPO_ROOT}/hugegraph-store/apache-hugegraph-store-*")" || {
         echo "ERROR: Store dist not found under ${REPO_ROOT}/hugegraph-store/apache-hugegraph-store-*" >&2
-        echo "Run: mvn clean package -DskipTests" >&2
+        echo "Run: mvn clean package -DskipTests -Ps3-cloud-storage" >&2
         exit 2
     }
     plugin_jar="$(find_plugin_jar)" || {
         echo "ERROR: S3 plugin jar not found under ${REPO_ROOT}/hugegraph-store/hg-store-cloud-s3/target/" >&2
-        echo "Run: mvn clean package -DskipTests" >&2
+        echo "Run: mvn clean package -DskipTests -Ps3-cloud-storage" >&2
         exit 2
     }
 

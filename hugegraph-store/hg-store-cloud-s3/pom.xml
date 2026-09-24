@@ -110,6 +110,39 @@
 
     <build>
         <plugins>
+            <!--
+              Stages this plugin's own runtime dependencies (AWS SDK v2, CRT client, etc.) under
+              target/dependency, for anything that copies this jar into a plugins/ directory
+              (e.g. docker/cloud-storage/scripts/test-graph-queries-and-sst.sh) — a provider jar
+              without its dependency jars alongside it will fail with ClassNotFoundException/
+              NoClassDefFoundError once actually used.
+              -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-plugin-runtime-deps</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <!-- Already ships inside hg-store-node's fat jar; don't duplicate. -->
+                            <excludeGroupIds>org.apache.hugegraph</excludeGroupIds>
+                            <!--
+                              rocksdbjni: kept off the plugin jar's own dependency set — it's
+                              already on Store's runtime classpath independent of cloud storage.
+                              log4j-slf4j-impl/slf4j-log4j12: avoid duplicate SLF4J binding
+                              warnings when staged alongside Store's own logging jars.
+                              -->
+                            <excludeArtifactIds>
+                                rocksdbjni,log4j-slf4j-impl,slf4j-log4j12
+                            </excludeArtifactIds>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Allow long-running benchmarks with sufficient heap -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

@@ -121,10 +121,6 @@
             <artifactId>hg-store-core</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hg-store-cloud-s3</artifactId>
-        </dependency>
-        <dependency>
             <groupId>com.taobao.arthas</groupId>
             <artifactId>arthas-agent-attach</artifactId>
             <version>3.6.4</version>
@@ -176,5 +172,24 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+          Opt-in: bundles S3 cloud storage support (hg-store-cloud-s3 + AWS SDK) directly
+          into this module's fat jar as a normal compile dependency. Inactive by default so
+          plain `mvn clean package`/CI builds never resolve the AWS SDK. Activate with
+          `-Ps3-cloud-storage` (see hugegraph-store/pom.xml, which gates the hg-store-cloud-s3
+          module itself behind the same profile id).
+          -->
+        <profile>
+            <id>s3-cloud-storage</id>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.hugegraph</groupId>
+                    <artifactId>hg-store-cloud-s3</artifactId>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
 
 </project>

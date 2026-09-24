@@ -40,7 +40,6 @@
         <module>hg-store-node</module>
         <module>hg-store-dist</module>
         <module>hg-store-cli</module>
-        <module>hg-store-cloud-s3</module>
     </modules>
 
     <properties>
@@ -315,6 +314,18 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+        <!--
+          Opt-in: bundles S3 cloud storage support (hg-store-cloud-s3 + AWS SDK) into
+          hg-store-node's fat jar. Inactive by default so plain `mvn clean package`/CI
+          builds never touch this module or its AWS SDK dependencies. Activate with
+          `-Ps3-cloud-storage`. See hg-store-node/pom.xml for the matching dependency.
+          -->
+        <profile>
+            <id>s3-cloud-storage</id>
+            <modules>
+                <module>hg-store-cloud-s3</module>
+            </modules>
         </profile>
     </profiles>
 </project>
