@@ -37,6 +37,9 @@ public class CypherModel {
     @Schema(description = "The query result")
     public Result result = new Result();
 
+    @Schema(description = "Structured errors, empty on success")
+    public List<CypherError> errors = Collections.emptyList();
+
     public static CypherModel dataOf(String requestId, List<Object> data) {
         CypherModel res = new CypherModel();
         res.requestId = requestId;
@@ -45,11 +48,15 @@ public class CypherModel {
         return res;
     }
 
-    public static CypherModel failOf(String requestId, String message) {
+    public static CypherModel failOf(String requestId, String message,
+                                     CypherError error) {
         CypherModel res = new CypherModel();
         res.requestId = requestId;
         res.status.code = 400;
         res.status.message = message;
+        if (error != null) {
+            res.errors = Collections.singletonList(error);
+        }
         return res;
     }
 
@@ -75,6 +82,24 @@ public class CypherModel {
 
         @Schema(description = "The result metadata")
         public Map<String, Object> meta = Collections.EMPTY_MAP;
+    }
+
+    public static class CypherError {
+
+        @Schema(description = "Stable error classification code")
+        public String code;
+
+        @Schema(description = "The error message")
+        public String message;
+
+        @Schema(description = "Actionable hint, empty when unavailable")
+        public String hint = "";
+
+        public CypherError(String code, String message, String hint) {
+            this.code = code;
+            this.message = message;
+            this.hint = hint;
+        }
     }
 
 }

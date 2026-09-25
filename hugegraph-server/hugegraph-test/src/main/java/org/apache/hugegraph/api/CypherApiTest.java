@@ -72,6 +72,24 @@ public class CypherApiTest extends BaseApiTest {
         this.testCypherQueryAndContains(cypher, "friend");
     }
 
+    @Test
+    public void testSyntaxErrorHasStructuredErrorWithHint() {
+        Response r = client().post(PATH,
+                                   "MATCH (n:person) RETURN not_defined_var");
+        String content = assertResponseStatus(200, r);
+        assertContains("\"errors\"", content);
+        assertContains("SyntaxError", content);
+        assertContains("Declare the variable", content);
+    }
+
+    @Test
+    public void testUndefinedLabelHasSchemaHint() {
+        Response r = client().post(PATH, "MATCH (n:robot) RETURN n");
+        String content = assertResponseStatus(200, r);
+        assertContains("ExecutionError", content);
+        assertContains("Create the schema element", content);
+    }
+
     private void testCypherQueryAndContains(String cypher, String containsText) {
         Response r = client().post(PATH, cypher);
         this.validStatusAndTextContains(containsText, r);
