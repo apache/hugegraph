@@ -21,10 +21,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.query.Condition.Relation;
@@ -35,13 +35,8 @@ import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.apache.hugegraph.util.NumericUtil;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
 
 public final class ConditionQueryFlatten {
-
-    private static final Set<HugeKeys> SPECIAL_KEYS = ImmutableSet.of(
-            HugeKeys.LABEL
-    );
 
     public static List<ConditionQuery> flatten(ConditionQuery query) {
         return flatten(query, false);
@@ -49,8 +44,12 @@ public final class ConditionQueryFlatten {
 
     public static List<ConditionQuery> flatten(ConditionQuery query,
                                                boolean supportIn) {
-        if (query.isFlattened() && !query.mayHasDupKeys(SPECIAL_KEYS)) {
+        if (query.isFlattened()) {
             return flattenRelations(query);
+        }
+
+        if (query.canFlatten()) {
+            return query.flatten();
         }
 
         List<ConditionQuery> queries = new ArrayList<>();
@@ -282,8 +281,10 @@ public final class ConditionQueryFlatten {
     private static Relations optimizeRelations(Relations relations) {
         // Optimize and-relations in one query
         // e.g. (age>1 and age>2) -> (age>2)
-        Set<Object> keys = relations.stream().map(Relation::key)
-                                    .collect(Collectors.toSet());
+        Set<Object> keys = new HashSet<>(relations.size());
+        for (Relation r : relations) {
+            keys.add(r.key());
+        }
 
         // No duplicated keys
         if (keys.size() == relations.size()) {

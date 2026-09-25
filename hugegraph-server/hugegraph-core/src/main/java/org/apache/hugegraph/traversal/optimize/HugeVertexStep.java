@@ -133,7 +133,7 @@ public class HugeVertexStep<E extends Element>
 
         Id vertex = (Id) traverser.get().id();
         Directions direction = Directions.convert(this.getDirection());
-        EdgeLabel[] els = graph.mapElName2El(this.getEdgeLabels());
+        Id[] els = graph.mapElName2Id(this.getEdgeLabels());
 
         LOG.debug("HugeVertexStep.edges(): vertex={}, direction={}, " +
                   "edgeLabels={}, has={}",
