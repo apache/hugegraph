@@ -1131,6 +1131,10 @@ public class StandardHugeGraph implements HugeGraph {
             this.closeTx();
         } finally {
             this.closed = true;
+            if (this.isHstore()) {
+                // After closed is set, so no new reconciler can be created
+                CachedSchemaTransactionV2.stopReconciler(this.spaceGraphName());
+            }
             this.storeProvider.close();
             LockUtil.destroy(this.spaceGraphName());
         }
@@ -1161,6 +1165,17 @@ public class StandardHugeGraph implements HugeGraph {
     @Override
     public void drop() {
         this.clearBackend();
+        // Not this.option(): it only allows the options in ALLOWED_CONFIGS
+        if (this.isHstore() &&
+            this.configuration().get(CoreOptions.SCHEMA_SYNC_ENABLED)) {
+            try {
+                MetaManager.instance().deleteSchemaVersion(this.graphSpace(),
+                                                           this.name());
+            } catch (Exception e) {
+                LOG.warn("Failed to delete the schema version of graph {}: {}",
+                         this.spaceGraphName(), e.toString());
+            }
+        }
 
         HugeConfig config = this.configuration();
         this.storeProvider.onDeleteConfig(config);

@@ -30,6 +30,7 @@ import static org.apache.hugegraph.meta.MetaManager.META_PATH_HUGEGRAPH;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_JOIN;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_REMOVE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_SCHEMA;
+import static org.apache.hugegraph.meta.MetaManager.META_PATH_SCHEMA_VERSION;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_SYS_GRAPH_CONF;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_UPDATE;
 import static org.apache.hugegraph.meta.MetaManager.META_PATH_VERTEX_LABEL;
@@ -103,6 +104,25 @@ public class GraphMetaManager extends AbstractMetaManager {
         this.metaDriver.put(this.schemaCacheClearKey(),
                             schemaCacheClearEventValue(
                                     graphName(graphSpace, graph), source));
+    }
+
+    /**
+     * Returns the schema version of the graph, or "" if it was never written.
+     * The value is opaque and only compared for equality.
+     */
+    public String getSchemaVersion(String graphSpace, String graph) {
+        String version = this.metaDriver.get(
+                this.schemaVersionKey(graphSpace, graph));
+        return version == null ? "" : version;
+    }
+
+    public void putSchemaVersion(String graphSpace, String graph,
+                                 String version) {
+        this.metaDriver.put(this.schemaVersionKey(graphSpace, graph), version);
+    }
+
+    public void deleteSchemaVersion(String graphSpace, String graph) {
+        this.metaDriver.delete(this.schemaVersionKey(graphSpace, graph));
     }
 
     public void notifyGraphCacheClear(String graphSpace, String graph) {
@@ -271,6 +291,18 @@ public class GraphMetaManager extends AbstractMetaManager {
                            META_PATH_GRAPH,
                            META_PATH_SCHEMA,
                            META_PATH_CLEAR);
+    }
+
+    private String schemaVersionKey(String graphSpace, String graph) {
+        // HUGEGRAPH/{cluster}/SCHEMA_VERSION/{graphspace}/{graph}
+        // Not under GRAPHSPACE/{graphspace}/{graph}/SCHEMA: clearAllSchema()
+        // deletes that prefix, which would also match this key.
+        return String.join(META_PATH_DELIMITER,
+                           META_PATH_HUGEGRAPH,
+                           this.cluster,
+                           META_PATH_SCHEMA_VERSION,
+                           graphSpace,
+                           graph);
     }
 
     private String graphCacheClearKey() {

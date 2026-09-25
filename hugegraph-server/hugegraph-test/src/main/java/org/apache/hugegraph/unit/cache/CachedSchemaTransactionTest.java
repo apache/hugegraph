@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
@@ -39,13 +40,17 @@ import org.apache.hugegraph.backend.cache.CacheNotifier;
 import org.apache.hugegraph.backend.cache.CacheManager;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
+import org.apache.hugegraph.backend.cache.SchemaVersionReconciler;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.managers.GraphMetaManager;
+import org.apache.hugegraph.meta.managers.SchemaMetaManager;
+import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaElement;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
@@ -608,15 +613,317 @@ public class CachedSchemaTransactionTest extends BaseUnitTest {
         }
     }
 
-    // TASK_SYNC_DELETION gating of removeSchema notifications and the
-    // unconditional addSchema notification require an initialised
-    // CachedSchemaTransactionV2 instance, which in turn needs an hstore
-    // backend and a connected MetaManager. Both prerequisites are out of
-    // scope for this unit test class. They are exercised end-to-end by the
-    // hstore integration tests in CoreTestSuite. TODO(#2617): port these
-    // assertions into a dedicated CachedSchemaTransactionV2IT once
-    // mockito-inline becomes available so MetaManager.instance() can be
-    // stubbed without an hstore cluster.
+    // The schema version reconciler and the guarded cache updates are covered
+    // by SchemaVersionReconcilerTest and the V2 tests below. The call sites that
+    // write the version (add/update/remove/clear), the TASK_SYNC_DELETION
+    // gating of removeSchema notifications and the unconditional addSchema
+    // notification need an initialised CachedSchemaTransactionV2, so an
+    // hstore backend and a connected MetaManager; they are exercised by the
+    // hstore integration tests in CoreTestSuite.
+
+    @Test
+    public void testClearV2SchemaCacheBumpsGeneration() {
+        String graphName = "DEFAULT-generation-v2";
+        Cache<Id, Object> idCache = v2IdCache(graphName);
+        Object arrayCaches = idCache.attachment(newV2SchemaCaches(10));
+        try {
+            long before = generation(arrayCaches);
+            Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
+                                  new Class<?>[]{String.class},
+                                  "clearSchemaCache", graphName);
+            Assert.assertEquals(before + 1L, generation(arrayCaches));
+
+            // SchemaCaches.clear() alone doesn't change the generation
+            clearV2SchemaCaches(arrayCaches);
+            Assert.assertEquals(before + 1L, generation(arrayCaches));
+        } finally {
+            clearV2SchemaCaches(arrayCaches);
+            idCache.clear();
+        }
+    }
+
+    @Test
+    public void testV2IdCacheHitIsNotPromotedAcrossRemoteClear() {
+        Id id = IdGenerator.of(1);
+        PropertyKey pk = new FakeObjects("unit-test-v2").newPropertyKey(id,
+                                                                        "pk");
+        CachedSchemaTransactionV2 tx = v2Tx();
+        Object arrayCaches = Whitebox.getInternalState(tx, "arrayCaches");
+        Cache<Id, Object> idCache = Whitebox.getInternalState(tx, "idCache");
+
+        // Without a clear the id cache hit is promoted to the array cache
+        Mockito.when(idCache.get(Mockito.any())).thenReturn(pk);
+        Assert.assertSame(pk, getV2Schema(tx, id));
+        Assert.assertSame(pk, getV2SchemaCache(arrayCaches,
+                                               HugeType.PROPERTY_KEY, id));
+
+        // A remote clear between the id cache read and the promotion
+        clearV2SchemaCaches(arrayCaches);
+        Mockito.when(idCache.get(Mockito.any())).thenAnswer(invocation -> {
+            nextGeneration(arrayCaches);
+            return pk;
+        });
+        Assert.assertSame(pk, getV2Schema(tx, id));
+        Assert.assertNull(getV2SchemaCache(arrayCaches,
+                                           HugeType.PROPERTY_KEY, id));
+    }
+
+    @Test
+    public void testV2StorageReadIsNotCachedAcrossRemoteClear() {
+        Id id = IdGenerator.of(1);
+        PropertyKey pk = new FakeObjects("unit-test-v2").newPropertyKey(id,
+                                                                        "pk");
+        CachedSchemaTransactionV2 tx = v2Tx();
+        Object arrayCaches = Whitebox.getInternalState(tx, "arrayCaches");
+        Cache<Id, Object> idCache = Whitebox.getInternalState(tx, "idCache");
+        SchemaMetaManager meta = Whitebox.getInternalState(tx,
+                                                           "schemaMetaManager");
+
+        Mockito.when(meta.getPropertyKey(Mockito.any(), Mockito.any(),
+                                         Mockito.eq(id)))
+               .thenAnswer(invocation -> {
+                   nextGeneration(arrayCaches);
+                   return pk;
+               });
+        Assert.assertSame(pk, getV2Schema(tx, id));
+        Mockito.verify(idCache, Mockito.never()).update(Mockito.any(),
+                                                        Mockito.any());
+        Assert.assertNull(getV2SchemaCache(arrayCaches,
+                                           HugeType.PROPERTY_KEY, id));
+
+        // Without a clear the storage read is cached
+        Mockito.when(meta.getPropertyKey(Mockito.any(), Mockito.any(),
+                                         Mockito.eq(id)))
+               .thenReturn(pk);
+        Assert.assertSame(pk, getV2Schema(tx, id));
+        Mockito.verify(idCache).update(Mockito.any(), Mockito.eq(pk));
+        Assert.assertSame(pk, getV2SchemaCache(arrayCaches,
+                                               HugeType.PROPERTY_KEY, id));
+    }
+
+    @Test
+    public void testV2AllSchemaIsNotCachedAcrossRemoteClear()
+            throws Exception {
+        PropertyKey pk = new FakeObjects("unit-test-v2").newPropertyKey(
+                         IdGenerator.of(1), "pk");
+        CachedSchemaTransactionV2 tx = v2Tx();
+        Object arrayCaches = Whitebox.getInternalState(tx, "arrayCaches");
+        Cache<Id, Object> idCache = Whitebox.getInternalState(tx, "idCache");
+        SchemaMetaManager meta = Whitebox.getInternalState(tx,
+                                                           "schemaMetaManager");
+        Map<HugeType, Boolean> cachedTypes = readField(arrayCaches,
+                                                       "cachedTypes");
+
+        Mockito.when(meta.getPropertyKeys(Mockito.any(), Mockito.any()))
+               .thenAnswer(invocation -> {
+                   nextGeneration(arrayCaches);
+                   return Collections.singletonList(pk);
+               });
+        Assert.assertEquals(1, getV2AllSchema(tx).size());
+        Mockito.verify(idCache, Mockito.never()).update(Mockito.any(),
+                                                        Mockito.any());
+        Assert.assertNull(cachedTypes.get(HugeType.PROPERTY_KEY));
+
+        Mockito.when(meta.getPropertyKeys(Mockito.any(), Mockito.any()))
+               .thenReturn(Collections.singletonList(pk));
+        Assert.assertEquals(1, getV2AllSchema(tx).size());
+        Mockito.verify(idCache).update(Mockito.any(), Mockito.eq(pk));
+        Assert.assertEquals(true, cachedTypes.get(HugeType.PROPERTY_KEY));
+    }
+
+    @Test
+    public void testV2LocalWriteIsDroppedAcrossRemoteClear()
+            throws Exception {
+        Id id = IdGenerator.of(1);
+        PropertyKey pk = new FakeObjects("unit-test-v2").newPropertyKey(id,
+                                                                        "pk");
+        CachedSchemaTransactionV2 tx = v2Tx();
+        Object arrayCaches = Whitebox.getInternalState(tx, "arrayCaches");
+        Cache<Id, Object> idCache = Whitebox.getInternalState(tx, "idCache");
+        Map<HugeType, Boolean> cachedTypes = readField(arrayCaches,
+                                                       "cachedTypes");
+
+        // Without a clear the written element is cached
+        updateV2Cache(tx, pk, generation(arrayCaches));
+        Mockito.verify(idCache).update(Mockito.any(), Mockito.eq(pk));
+        Assert.assertSame(pk, getV2SchemaCache(arrayCaches,
+                                               HugeType.PROPERTY_KEY, id));
+
+        /*
+         * A remote clear between the start of the write and the cache update:
+         * a reader may have cached an older copy since, so the element is
+         * dropped instead of skipped or overwritten
+         */
+        cachedTypes.put(HugeType.PROPERTY_KEY, true);
+        long generation = generation(arrayCaches);
+        nextGeneration(arrayCaches);
+        updateV2Cache(tx, pk, generation);
+        Mockito.verify(idCache).update(Mockito.any(), Mockito.eq(pk));
+        Mockito.verify(idCache).invalidate(Mockito.any());
+        Assert.assertNull(getV2SchemaCache(arrayCaches,
+                                           HugeType.PROPERTY_KEY, id));
+        Assert.assertEquals(false, cachedTypes.get(HugeType.PROPERTY_KEY));
+    }
+
+    @Test
+    public void testV2LocalClearKeepsGeneration() {
+        CachedSchemaTransactionV2 tx = v2Tx();
+        Object arrayCaches = Whitebox.getInternalState(tx, "arrayCaches");
+        long before = generation(arrayCaches);
+
+        // Only a clear caused by another server changes the generation, so a
+        // local clear (e.g. the name miss reload) can't drop other readers
+        tx.clearCache(false);
+        Assert.assertEquals(before, generation(arrayCaches));
+    }
+
+    @Test
+    public void testV2ReconcilerStartsOnceAndStopsOnGraphClose() {
+        HugeGraphParams params = mockV2Params("DEFAULT-registry-v2",
+                                              syncConfig(true, 3600));
+        try {
+            SchemaVersionReconciler first = ensureReconciler(params);
+            Assert.assertNotNull(first);
+            Assert.assertSame(first, ensureReconciler(params));
+
+            CachedSchemaTransactionV2.stopReconciler("DEFAULT-registry-v2");
+            Assert.assertTrue(first.stopped());
+
+            SchemaVersionReconciler second = ensureReconciler(params);
+            Assert.assertNotSame(first, second);
+            Assert.assertFalse(second.stopped());
+
+            // A closed graph gets no new reconciler
+            CachedSchemaTransactionV2.stopReconciler("DEFAULT-registry-v2");
+            Mockito.when(params.closed()).thenReturn(true);
+            Assert.assertNull(ensureReconciler(params));
+        } finally {
+            CachedSchemaTransactionV2.stopReconciler("DEFAULT-registry-v2");
+        }
+    }
+
+    @Test
+    public void testV2ReconcilerHonoursSyncOptions() throws Exception {
+        HugeGraphParams disabled = mockV2Params("DEFAULT-disabled-v2",
+                                                syncConfig(false, 10));
+        Assert.assertNull(ensureReconciler(disabled));
+
+        MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
+        Object previous = swapGraphMetaManager(
+                          new GraphMetaManager(mockDriver, "c"));
+        HugeGraphParams noPolling = mockV2Params("DEFAULT-nopoll-v2",
+                                                 syncConfig(true, 0));
+        try {
+            SchemaVersionReconciler reconciler = ensureReconciler(noPolling);
+            Assert.assertNotNull(reconciler);
+            Assert.assertNull(Whitebox.invoke(SchemaVersionReconciler.class,
+                                              "future", reconciler));
+
+            // The version is still written for the other servers
+            reconciler.bump();
+            Mockito.verify(mockDriver).put(
+                    Mockito.eq("HUGEGRAPH/c/SCHEMA_VERSION/DEFAULT/nopoll-v2"),
+                    Mockito.anyString());
+            Assert.assertFalse(reconciler.pendingWrite());
+        } finally {
+            CachedSchemaTransactionV2.stopReconciler("DEFAULT-nopoll-v2");
+            swapGraphMetaManager(previous);
+        }
+    }
+
+    @Test
+    public void testSchemaVersionKeyAndValue() {
+        MetaDriver mockDriver = Mockito.mock(MetaDriver.class);
+        GraphMetaManager manager = new GraphMetaManager(mockDriver, "c");
+        String key = "HUGEGRAPH/c/SCHEMA_VERSION/DEFAULT/g";
+
+        manager.putSchemaVersion("DEFAULT", "g", "v1");
+        Mockito.verify(mockDriver).put(key, "v1");
+
+        Mockito.when(mockDriver.get(key)).thenReturn(null);
+        Assert.assertEquals("", manager.getSchemaVersion("DEFAULT", "g"));
+        Mockito.when(mockDriver.get(key)).thenReturn("v2");
+        Assert.assertEquals("v2", manager.getSchemaVersion("DEFAULT", "g"));
+
+        manager.deleteSchemaVersion("DEFAULT", "g");
+        Mockito.verify(mockDriver).delete(key);
+    }
+
+    private static long generation(Object arrayCaches) {
+        Long generation = Whitebox.invoke(arrayCaches.getClass(),
+                                          "generation", arrayCaches);
+        return generation;
+    }
+
+    private static void nextGeneration(Object arrayCaches) {
+        Whitebox.invoke(arrayCaches.getClass(), "nextGeneration", arrayCaches);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static CachedSchemaTransactionV2 v2Tx() {
+        // The constructor needs an hstore backend: build the instance without
+        // it and set only the fields the read paths use
+        CachedSchemaTransactionV2 tx = Mockito.mock(
+                CachedSchemaTransactionV2.class,
+                Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS));
+        Cache<Id, Object> idCache = Mockito.mock(Cache.class);
+        Mockito.when(idCache.capacity()).thenReturn(100L);
+        Whitebox.setInternalState(tx, "idCache", idCache);
+        Whitebox.setInternalState(tx, "nameCache", Mockito.mock(Cache.class));
+        Whitebox.setInternalState(tx, "arrayCaches", newV2SchemaCaches(10));
+        Whitebox.setInternalState(tx, "schemaMetaManager",
+                                  Mockito.mock(SchemaMetaManager.class));
+        return tx;
+    }
+
+    private static SchemaElement getV2Schema(CachedSchemaTransactionV2 tx,
+                                             Id id) {
+        return Whitebox.invoke(CachedSchemaTransactionV2.class,
+                               new Class<?>[]{HugeType.class, Id.class},
+                               "getSchema", tx, HugeType.PROPERTY_KEY, id);
+    }
+
+    private static void updateV2Cache(CachedSchemaTransactionV2 tx,
+                                      SchemaElement schema, long generation) {
+        Whitebox.invoke(CachedSchemaTransactionV2.class,
+                        new Class<?>[]{SchemaElement.class, long.class},
+                        "updateCache", tx, schema, generation);
+    }
+
+    private static List<SchemaElement> getV2AllSchema(
+            CachedSchemaTransactionV2 tx) {
+        return Whitebox.invoke(CachedSchemaTransactionV2.class,
+                               new Class<?>[]{HugeType.class},
+                               "getAllSchema", tx, HugeType.PROPERTY_KEY);
+    }
+
+    private static HugeConfig syncConfig(boolean enabled, int interval) {
+        PropertiesConfiguration conf = new PropertiesConfiguration();
+        conf.setProperty("schema.sync.enabled", enabled);
+        conf.setProperty("schema.sync.reconcile_interval", interval);
+        return new HugeConfig(conf);
+    }
+
+    private static HugeGraphParams mockV2Params(String spaceGraphName,
+                                                HugeConfig config) {
+        String[] parts = spaceGraphName.split("-", 2);
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.spaceGraphName()).thenReturn(spaceGraphName);
+        Mockito.when(graph.graphSpace()).thenReturn(parts[0]);
+        Mockito.when(graph.name()).thenReturn(parts[1]);
+        HugeGraphParams params = Mockito.mock(HugeGraphParams.class);
+        Mockito.when(params.graph()).thenReturn(graph);
+        Mockito.when(params.configuration()).thenReturn(config);
+        Mockito.when(params.closed()).thenReturn(false);
+        return params;
+    }
+
+    private static SchemaVersionReconciler ensureReconciler(
+            HugeGraphParams params) {
+        return Whitebox.invokeStatic(CachedSchemaTransactionV2.class,
+                                     new Class<?>[]{HugeGraphParams.class},
+                                     "ensureReconciler", params);
+    }
 
     @Test
     public void testHandleSchemaCacheClearEventSkipsLocalSource()

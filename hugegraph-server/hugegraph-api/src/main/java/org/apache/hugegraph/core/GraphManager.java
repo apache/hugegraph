@@ -2350,6 +2350,13 @@ public final class GraphManager {
 
             g.clearBackend();
             try {
+                // The schema version kept in PD for the schema cache sync
+                this.metaManager.deleteSchemaVersion(graphSpace, name);
+            } catch (Exception e) {
+                LOG.warn("Failed to delete the schema version of graph {}",
+                         graphName, e);
+            }
+            try {
                 g.close();
             } catch (Exception e) {
                 LOG.warn("Failed to close graph", e);
