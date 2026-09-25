@@ -257,7 +257,7 @@ public class PartitionStateMachineTest {
             private boolean apply(int value) {
                 invoked.add(value);
                 if (fail && value == 2) {
-                    throw new IllegalStateException("injected apply failure");
+                    throw new IllegalStateException("injected apply failure: %s, 100%");
                 }
                 return true;
             }

@@ -106,7 +106,7 @@ public class PartitionStateMachine extends StateMachineAdapter {
                               done.getOperation().getOp(),
                               done.getOperation().getReq());
                 }
-                iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, t.getMessage()));
+                iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, "%s", t.getMessage()));
                 // Do not publish the failed entry as applied.
                 return;
             }

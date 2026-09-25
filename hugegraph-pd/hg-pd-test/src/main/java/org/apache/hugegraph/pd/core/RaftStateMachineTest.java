@@ -79,7 +79,7 @@ public class RaftStateMachineTest {
         stateMachine.addTaskHandler((operation, done) -> {
             int key = operation.getKey()[0];
             if (fail && key == 2) {
-                throw new IllegalStateException("injected apply failure");
+                throw new IllegalStateException("injected apply failure: %s, 100%");
             }
             applied.add(key);
             return true;
