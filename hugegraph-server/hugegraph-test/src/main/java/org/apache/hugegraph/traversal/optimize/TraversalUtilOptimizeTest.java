@@ -789,9 +789,16 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
-    public void testLabelAfterElementChangeKeepsSourceIndexPlan() {
+    public void testVertexAdjacencyKeepsSourcePropertyLocal() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        Traversal.Admin<?, ?> propertyTraversal = traversal(
+                __.V().has("city", "Beijing").properties().hasLabel(P.neq("author")), graph);
+        HugeGraphStep<?, ?> propertySource = replaceGraphStep(propertyTraversal);
+        TraversalUtil.extractHasContainer(propertySource, propertyTraversal);
+        Assert.assertTrue(hasContainer(propertySource, "city"));
+        Assert.assertFalse(hasStepExists(propertyTraversal, "city"));
+
         for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).count(),
@@ -800,14 +807,6 @@ public class TraversalUtilOptimizeTest {
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).values("age").sum(),
                 __.V().has("city", "Beijing").out().where(__.not(__.hasLabel("author"))).count(),
                 __.V().has("city", "Beijing").out().where(__.not(__.hasLabel("author"))),
-                __.V().has("city", "Beijing").properties().hasLabel(P.neq("author"))}) {
-            Traversal.Admin<?, ?> admin = traversal(query, graph);
-            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
-            TraversalUtil.extractHasContainer(source, admin);
-            Assert.assertTrue(hasContainer(source, "city"));
-            Assert.assertFalse(hasStepExists(admin, "city"));
-        }
-        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
                 __.V().has("city", "Beijing").as("a").out().select("a").hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().path().unfold().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().filter(__.select("a").hasLabel(P.neq("author")))}) {
@@ -820,21 +819,14 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
-    public void testChildElementChangeKeepsSourceIndexPlan() {
+    public void testChildVertexAdjacencyKeepsSourcePropertyLocal() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         Mockito.when(graph.propertyKey("city"))
                .thenReturn(propertyKey(2L, "city", DataType.TEXT));
         for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
                 __.V().has("city", "Beijing").where(__.out().hasLabel(P.neq("author"))),
                 __.V().has("city", "Beijing").filter(__.out().hasLabel(P.neq("author"))),
-                __.V().has("city", "Beijing").not(__.out().hasLabel("author"))}) {
-            Traversal.Admin<?, ?> admin = traversal(query, graph);
-            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
-            TraversalUtil.extractHasContainer(source, admin);
-            Assert.assertTrue(hasContainer(source, "city"));
-            Assert.assertFalse(hasStepExists(admin, "city"));
-        }
-        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").not(__.out().hasLabel("author")),
                 __.V().has("city", "Beijing").where(__.hasLabel(P.neq("author"))),
                 __.V().has("city", "Beijing").as("a")
                   .where(__.out().select("a").hasLabel(P.neq("author"))),
@@ -865,12 +857,13 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
-    public void testEdgeEndpointsKeepSourceLabelFallback() {
+    public void testAdjacencyAndEdgeEndpointsKeepSourceLabelFallback() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         Mockito.when(graph.propertyKey("city"))
                .thenReturn(propertyKey(2L, "city", DataType.TEXT));
         for (boolean child : new boolean[]{false, true}) {
             for (GraphTraversal<?, ?> suffix : new GraphTraversal<?, ?>[]{
+                    __.out(), __.out().in(), __.both().both(),
                     __.outE().outV(), __.inE().inV(), __.bothE().bothV(),
                     __.outE().inV(), __.inE().outV(),
                     __.outE().barrier().outV(),
