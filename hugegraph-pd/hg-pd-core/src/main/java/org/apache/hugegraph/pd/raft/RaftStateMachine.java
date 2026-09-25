@@ -351,7 +351,12 @@ public class RaftStateMachine extends StateMachineAdapter {
 
         @Override
         public void run(Status status) {
-            closure.run(status);
+            try {
+                closure.run(status);
+            } catch (Throwable t) {
+                // Response delivery must not turn an applied entry into an apply failure.
+                log.error("Raft completion callback failed", t);
+            }
         }
 
         @Override

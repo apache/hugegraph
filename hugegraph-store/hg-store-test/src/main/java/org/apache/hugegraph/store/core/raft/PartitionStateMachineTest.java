@@ -182,6 +182,7 @@ public class PartitionStateMachineTest {
         field.setAccessible(true);
         return (Lock) field.get(stateMachine);
     }
+
     @Test
     public void testLeaderApplySuccess() throws Exception {
         assertApply(false, true);
@@ -202,7 +203,38 @@ public class PartitionStateMachineTest {
         assertApply(true, false);
     }
 
+    @Test
+    public void testStateMachineErrorNotifiesListenerSynchronously() {
+        PartitionStateMachine stateMachine = new PartitionStateMachine(0, mock(SnapshotHandler.class));
+        RaftStateListener listener = mock(RaftStateListener.class);
+        AtomicReference<Thread> notifiedOn = new AtomicReference<>();
+        doAnswer(invocation -> {
+            notifiedOn.set(Thread.currentThread());
+            return null;
+        }).when(listener).onError(any(RaftException.class));
+        stateMachine.addStateListener(listener);
+
+        stateMachine.onError(new RaftException(EnumOutter.ErrorType.ERROR_TYPE_STATE_MACHINE));
+
+        assertEquals(Thread.currentThread(), notifiedOn.get());
+    }
+
+    @Test
+    public void testCompletionFailureDoesNotStopApply() throws Exception {
+        assertApply(false, true, true, false);
+    }
+
+    @Test
+    public void testHandlerCallbackFailureDoesNotStopApply() throws Exception {
+        assertApply(false, true, true, true);
+    }
+
     private void assertApply(boolean fail, boolean leader) throws Exception {
+        assertApply(fail, leader, false, false);
+    }
+
+    private void assertApply(boolean fail, boolean leader, boolean throwFromCallback,
+                             boolean completeInHandler) throws Exception {
         PartitionStateMachine stateMachine = new PartitionStateMachine(0, mock(SnapshotHandler.class));
         List<Integer> invoked = new ArrayList<>();
         List<Long> notified = new ArrayList<>();
@@ -214,7 +246,12 @@ public class PartitionStateMachineTest {
 
             @Override
             public boolean invoke(int groupId, byte methodId, Object req, RaftClosure response) {
-                return apply(methodId);
+                boolean handled = apply(methodId);
+                if (completeInHandler) {
+                    response.run(Status.OK());
+                    return false;
+                }
+                return handled;
             }
 
             private boolean apply(int value) {
@@ -260,6 +297,9 @@ public class PartitionStateMachineTest {
                         codes.set(slot, status.getCode());
                         calls.incrementAndGet(slot);
                         completed.countDown();
+                        if (throwFromCallback && slot == 1 && status.isOk()) {
+                            throw new IllegalStateException("injected callback failure");
+                        }
                     }) : null);
         }
         when(logs.getTerm(anyLong())).thenReturn(1L);
@@ -309,6 +349,9 @@ public class PartitionStateMachineTest {
         assertEquals(fail ? 1L : 3L, stateMachine.getCommittedIndex());
         assertEquals(fail ? 1L : 3L, caller.getLastAppliedIndex());
         verify(logs).setAppliedId(new LogId(fail ? 1 : 3, 1));
+        if (!fail) {
+            verify(node, never()).onError(any(RaftException.class));
+        }
         assertTrue(completed.await(5, TimeUnit.SECONDS));
         for (int i = 0; i < 3; i++) {
             assertEquals(leader ? 1 : 0, calls.get(i));

@@ -42,6 +42,7 @@ import com.alipay.sofa.jraft.entity.EnumOutter;
 import com.alipay.sofa.jraft.entity.LogEntry;
 import com.alipay.sofa.jraft.entity.LogId;
 import com.alipay.sofa.jraft.error.RaftError;
+import com.alipay.sofa.jraft.error.RaftException;
 import com.alipay.sofa.jraft.option.FSMCallerOptions;
 import com.alipay.sofa.jraft.storage.LogManager;
 
@@ -62,7 +63,17 @@ public class RaftStateMachineTest {
         assertApply(false, true);
     }
 
+    @Test
+    public void testCompletionFailureDoesNotStopApply() throws Exception {
+        assertApply(true, false, true);
+    }
+
     private void assertApply(boolean leader, boolean fail) throws Exception {
+        assertApply(leader, fail, false);
+    }
+
+    private void assertApply(boolean leader, boolean fail, boolean throwFromCallback)
+            throws Exception {
         RaftStateMachine stateMachine = new RaftStateMachine();
         List<Integer> applied = new ArrayList<>();
         stateMachine.addTaskHandler((operation, done) -> {
@@ -88,8 +99,12 @@ public class RaftStateMachineTest {
             Mockito.when(logManager.getTerm(index)).thenReturn(1L);
             if (leader && index <= 3) {
                 KVStoreClosure callback = Mockito.mock(KVStoreClosure.class);
+                boolean failCallback = throwFromCallback && index == 2;
                 Mockito.doAnswer(invocation -> {
                     completed.countDown();
+                    if (failCallback && ((Status) invocation.getArgument(0)).isOk()) {
+                        throw new IllegalStateException("injected callback failure");
+                    }
                     return null;
                 }).when(callback).run(Mockito.any(Status.class));
                 callbacks.add(callback);
@@ -144,6 +159,10 @@ public class RaftStateMachineTest {
         Assert.assertEquals(fail ? Arrays.asList(1) : Arrays.asList(1, 2, 3), applied);
         Assert.assertEquals(fail ? 1 : 3, caller.getLastAppliedIndex());
         Mockito.verify(logManager).setAppliedId(new LogId(fail ? 1 : 3, 1));
+        if (!fail) {
+            Mockito.verify(node, Mockito.never())
+                   .onError(Mockito.any(RaftException.class));
+        }
         if (leader) {
             for (int index = 0; index < callbacks.size(); index++) {
                 int expectedCode = fail && index > 0 ? RaftError.ESTATEMACHINE.getNumber() : 0;

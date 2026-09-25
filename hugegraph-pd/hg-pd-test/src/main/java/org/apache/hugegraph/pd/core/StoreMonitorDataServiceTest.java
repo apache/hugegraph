@@ -50,8 +50,9 @@ public class StoreMonitorDataServiceTest extends PDCoreTestBase {
             now = System.currentTimeMillis() / 1000;
             Thread.sleep(1100);
         }
-        assertTrue(this.service.getLatestStoreMonitorDataTimeStamp(1) == 0 ||
-                   this.service.getLatestStoreMonitorDataTimeStamp(1) == now);
+        // The one-second lookup window can expire between two reads.
+        long latest = this.service.getLatestStoreMonitorDataTimeStamp(1);
+        assertTrue(latest == 0 || latest == now);
 
         var data = this.service.getStoreMonitorData(1);
         assertEquals(5, data.size());
