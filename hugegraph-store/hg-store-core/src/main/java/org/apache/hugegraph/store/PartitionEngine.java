@@ -83,6 +83,7 @@ import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.DefaultJRaftServiceFactory;
 import com.alipay.sofa.jraft.core.NodeMetrics;
 import com.alipay.sofa.jraft.core.Replicator;
+import com.alipay.sofa.jraft.entity.EnumOutter.ErrorType;
 import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.entity.Task;
 import com.alipay.sofa.jraft.error.RaftException;
@@ -125,6 +126,9 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
     private SnapshotHandler snapshotHandler;
     private Node raftNode;
     private volatile boolean started;
+    private volatile boolean stateMachineError;
+    // FSM callbacks may need the engine monitor while restart waits for them to drain.
+    private final Object restartLock = new Object();
 
     public PartitionEngine(HgStoreEngine storeEngine, ShardGroup shardGroup) {
         this.storeEngine = storeEngine;
@@ -577,15 +581,28 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
      * Restart raft engine
      */
     public void restartRaftNode() {
-        shutdown();
-        log.error("Raft {} is restarting !!!", getGroupId());
-        this.init(this.options);
+        synchronized (this.restartLock) {
+            if (this.stateMachineError) {
+                return;
+            }
+            shutdown();
+            // shutdown joins the old FSM, including its synchronous error notifications.
+            // An error while it drained must prevent reopening the same logs.
+            if (this.stateMachineError) {
+                return;
+            }
+            log.error("Raft {} is restarting !!!", getGroupId());
+            this.init(this.options);
+        }
     }
 
     /**
      * Check if it is active, if not, restart it.
      */
     public void checkActivity() {
+        if (this.stateMachineError) {
+            return;
+        }
         Utils.runInThread(() -> {
             if (!this.raftNode.getNodeState().isActive()) {
                 log.error("Raft {} is not activity state is {} ",
@@ -821,6 +838,13 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
 
     @Override
     public void onError(RaftException e) {
+        if (e.getType() == ErrorType.ERROR_TYPE_STATE_MACHINE) {
+            // Do not acquire restartLock here: shutdown may be joining this FSM thread.
+            this.stateMachineError = true;
+            log.error("Raft {} stopped after a state machine error; repair the cause and " +
+                      "restart the Store process before resuming", getGroupId(), e);
+            return;
+        }
         this.restartRaftNode();
     }
 

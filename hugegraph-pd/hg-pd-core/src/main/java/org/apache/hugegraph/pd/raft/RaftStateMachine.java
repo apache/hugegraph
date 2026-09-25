@@ -125,10 +125,10 @@ public class RaftStateMachine extends StateMachineAdapter {
                     done.run(Status.OK());
                 }
             } catch (Throwable t) {
-                log.error("StateMachine meet critical error: {}.", t);
-                if (done != null) {
-                    done.run(new Status(RaftError.EINTERNAL, t.getMessage()));
-                }
+                log.error("StateMachine encountered critical error", t);
+                // JRaft completes the failed and remaining closures with the state machine error.
+                iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, "%s", t.getMessage()));
+                return;
             }
             iter.next();
         }
@@ -351,7 +351,12 @@ public class RaftStateMachine extends StateMachineAdapter {
 
         @Override
         public void run(Status status) {
-            closure.run(status);
+            try {
+                closure.run(status);
+            } catch (Throwable t) {
+                // Response delivery must not turn an applied entry into an apply failure.
+                log.error("Raft completion callback failed", t);
+            }
         }
 
         @Override

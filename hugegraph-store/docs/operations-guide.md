@@ -448,6 +448,15 @@ df -h
 
 ---
 
+### State Machine Apply Failures
+
+A partition that reports a Raft state machine error stops applying logs and is
+not automatically restarted, including by the activity check. Inspect the Store
+error log and repair the underlying storage or apply failure before manually
+restarting the Store process. Restarting without repairing the cause may replay
+the same failing entry. This protection does not undo writes already performed
+by the failed entry.
+
 ## Backup and Recovery
 
 ### Backup Strategies

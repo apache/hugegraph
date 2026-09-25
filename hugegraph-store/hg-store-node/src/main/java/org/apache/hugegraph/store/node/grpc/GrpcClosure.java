@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.store.grpc.session.FeedbackRes;
+import org.apache.hugegraph.store.raft.DefaultRaftClosure;
 import org.apache.hugegraph.store.raft.RaftClosure;
 
 import io.grpc.stub.StreamObserver;
@@ -35,6 +36,9 @@ public abstract class GrpcClosure<V> implements RaftClosure {
      * Set the output result to raftClosure, for Follower, raftClosure is empty.
      */
     public static <V> void setResult(RaftClosure raftClosure, V result) {
+        while (raftClosure instanceof DefaultRaftClosure) {
+            raftClosure = ((DefaultRaftClosure) raftClosure).getClosure();
+        }
         GrpcClosure closure = (GrpcClosure) raftClosure;
         if (closure != null) {
             closure.setResult(result);
