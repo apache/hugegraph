@@ -163,29 +163,63 @@ append_lines() {
 
 AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
 
-# Does the Gremlin config already carry a top-level `authentication` mapping?
-# This is the same question check_auth_sides answers, so it has to go to the same
-# reader: a mapping is the server's only at column 0, comment text is not
-# content, and the key may be quoted.  grep asks it differently -- it sees only
-# the bare spelling, so an operator's `"authentication":` block read as absent
-# and a second default block was appended beside it, after which the two servers
-# can resolve the key in opposite directions while REST keeps its existing
-# authenticator.  Anything other than `none` means a mapping is there and the
-# append is not this script's to make.
-gremlin_has_auth_block() {
-    local file="$1" state
-    [[ -f "${file}" ]] || return 1
+# Does the Gremlin config carry a top-level `authentication` mapping, and does
+# that mapping name an authenticator?  This is the same question
+# check_auth_sides answers, so it has to go to the same reader: a mapping is
+# the server's only at column 0, comment text is not content, and the key may
+# be quoted.  grep asks it differently -- it sees only the bare spelling, so an
+# operator's `"authentication":` block read as absent and a second default
+# block was appended beside it, after which the two servers can resolve the key
+# in opposite directions while REST keeps its existing authenticator.
+#
+# The answer lands in GREMLIN_AUTH, and there are three of them because two
+# were not enough: whether a mapping exists says nothing about whether it
+# names a class, and only the second one decides what is safe to write.
+#   none          no mapping, so the default block below is ours to append;
+#   named         the operator's mapping names a class;
+#   nameless      a mapping that names none, or a document the reader refuses
+#                 rather than guess about -- yamlscan.awk reports both as
+#                 nameless and check_auth_sides stops the boot on them.
+#   unverifiable  only the tarball fallback can produce this: grep saw the key
+#                 but has no reader to tell the three cases apart.
+GREMLIN_AUTH=""
+gremlin_auth_state() {
+    local file="$1"
+    GREMLIN_AUTH="none"
+    [[ -f "${file}" ]] || return 0
     if [[ -n "${YAMLSCAN}" ]]; then
-        state=$(awk -f "${YAMLSCAN}" "${file}") || fail "cannot read ${file}"
-        [[ "${state}" != "none" ]]
-        return
+        GREMLIN_AUTH=$(awk -f "${YAMLSCAN}" "${file}") || fail "cannot read ${file}"
+        return 0
     fi
     # No parser in this layout (the plain release tarball).  Match what grep can
     # honestly answer here: a column-0 key in either quote style or none.  The
     # nested-mapping and comment cases are the ones that need the real reader,
     # and the image, where the entrypoint runs this script, always has it.
-    grep -Eq "^[\"']?authentication[\"']?[[:blank:]]*:" "${file}"
+    if grep -Eq "^[\"']?authentication[\"']?[[:blank:]]*:" "${file}"; then
+        GREMLIN_AUTH="unverifiable"
+    fi
 }
+
+# Writing `auth.authenticator` is the one-way door: REST starts enforcing on
+# the next boot, and TinkerPop 3.5.1 resolves a mapping that names no
+# authenticator to AllowAllAuthenticator, so Gremlin keeps answering without
+# credentials.  That is the same one-sided state this script exists to avoid,
+# arrived at by a route the entrypoint does not guard -- enable-auth.sh ships
+# in the release tarball, where nothing calls check_auth_sides first, so the
+# refusal has to live here rather than lean on the caller.
+gremlin_auth_state "${CONF}/${GREMLIN_SERVER_CONF}"
+
+if [[ "${GREMLIN_AUTH}" == "nameless" ]]; then
+    fail "${GREMLIN_SERVER_CONF} carries an authentication mapping that names no authenticator, or a shape the reader refuses; writing ${REST_SERVER_CONF} beside it would enforce on REST and leave Gremlin on its default. Name authentication.authenticator in that mapping, or drop the mapping and let this script write both sides."
+fi
+
+if [[ "${GREMLIN_AUTH}" == "unverifiable" ]] &&
+    [[ -z "$(props_get "auth.authenticator" "${CONF}/${REST_SERVER_CONF}")" ]]; then
+    # The operator already naming a class on the REST side is the one answer
+    # this layout can act on without a reader: ensure_rest_prop then has
+    # nothing to write, so both sides stay as the operator left them.
+    fail "${GREMLIN_SERVER_CONF} has a top-level authentication mapping and this layout has no yaml reader to tell whether it names an authenticator, while ${REST_SERVER_CONF} names none. Set auth.authenticator there yourself, or run this from the server image, which ships the reader."
+fi
 
 # Only a column-0 `authentication` mapping is the Gremlin server's, which is the
 # rule yamlscan.awk applies to decide the same thing for check_auth_sides.  With
@@ -193,7 +227,7 @@ gremlin_has_auth_block() {
 # parity held and it called this script, but the guard saw the nested key and
 # skipped the append, writing the REST side only -- StandardAuthenticator on
 # REST, TinkerPop's AllowAllAuthenticator on Gremlin.
-if ! gremlin_has_auth_block "${CONF}/${GREMLIN_SERVER_CONF}"; then
+if [[ "${GREMLIN_AUTH}" == "none" ]]; then
     append_lines "${CONF}/${GREMLIN_SERVER_CONF}" \
         'authentication: {' \
         "  authenticator: ${AUTHENTICATOR_CLASS}," \

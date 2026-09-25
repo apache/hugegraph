@@ -397,39 +397,73 @@ mkdir -p "${sides_dir}/conf"
     must_refuse "the yaml mapping names no authenticator and REST does"
 )
 
-# The refusal above is what keeps enable-auth.sh from writing one side:
-# against the same ambiguous layout, enable-auth.sh on its own writes only
-# the REST file (its yaml guard already sees an `authentication:` line),
-# leaving REST on StandardAuthenticator and Gremlin on TinkerPop's
-# AllowAllAuthenticator default.  The entrypoint never lets it run there
-# because check_auth_sides fails first under set -e.
-onesided_dir="${test_dir}/yaml-onesided"
-mkdir -p "${onesided_dir}/bin" "${onesided_dir}/conf/graphs"
-install_enable_auth "${onesided_dir}"
-(
-    cd "${onesided_dir}" || exit 1
-    REST_SERVER_CONF="./conf/rest-server.properties"
-    : > conf/rest-server.properties
-    printf '%s\n' \
-        'gremlin.graph=org.apache.hugegraph.HugeFactory' \
-        > conf/graphs/hugegraph.properties
+# The entrypoint refuses this tree before enable-auth.sh is ever reached, but
+# the script also runs on its own: the release tarball ships it with no
+# yamlscan.awk at all, so there is no check_auth_sides in front of it.  Left to
+# itself it used to answer a mapping that names no authenticator by writing the
+# REST side alone -- StandardAuthenticator on REST beside TinkerPop's
+# AllowAllAuthenticator on Gremlin -- which is the one-sided boot this whole
+# guard exists to prevent.  It has to refuse and change nothing, both with the
+# reader it shares with the entrypoint and on the grep fallback.
+nameless_tree() {
+    local dir="$1"
+    rm -rf "${dir}"
+    mkdir -p "${dir}/conf/graphs"
+    install_enable_auth "${dir}"
+    if [[ "${2:-}" == "no-yamlscan" ]]; then
+        rm -f "${dir}/yamlscan.awk"
+    fi
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+        > "${dir}/conf/graphs/hugegraph.properties"
+    : > "${dir}/conf/rest-server.properties"
     printf '%s\n' \
         'authentication:' \
         '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
-        > conf/gremlin-server.yaml
+        > "${dir}/conf/gremlin-server.yaml"
+}
+
+# A mapping that names no class: refused by the entrypoint, so the script never
+# sees this tree through it.
+onesided_dir="${test_dir}/yaml-onesided"
+nameless_tree "${onesided_dir}"
+(
+    cd "${onesided_dir}" || exit 1
+    REST_SERVER_CONF="./conf/rest-server.properties"
     if check_auth_sides; then
         echo "check_auth_sides must refuse a yaml mapping without an authenticator" >&2
         exit 1
     fi
-    ./bin/enable-auth.sh
-    grep -q '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
-        conf/rest-server.properties
-    grep -q 'HugeFactoryAuthProxy' conf/graphs/hugegraph.properties
-    if grep -Eq '^[[:blank:]]*authenticator[[:blank:]]*:' conf/gremlin-server.yaml; then
-        echo "enable-auth.sh must not add an authenticator to the yaml block" >&2
-        exit 1
-    fi
 )
+
+# refuse_nameless <dir> <desc>: the script must stop before touching any config.
+refuse_nameless() {
+    local dir="$1" desc="$2"
+    (
+        cd "${dir}" || exit 1
+        if ./bin/enable-auth.sh; then
+            echo "${desc}: enable-auth.sh must refuse a mapping that names no authenticator" >&2
+            exit 1
+        fi
+        if [[ -s conf/rest-server.properties ]]; then
+            echo "${desc}: a refused run still wrote rest-server.properties" >&2
+            exit 1
+        fi
+        if grep -Eq '^[[:blank:]]*authenticator[[:blank:]]*:' conf/gremlin-server.yaml; then
+            echo "${desc}: a refused run still edited the yaml mapping" >&2
+            exit 1
+        fi
+        if grep -q 'HugeFactoryAuthProxy' conf/graphs/hugegraph.properties; then
+            echo "${desc}: a refused run still wrapped the graph factory" >&2
+            exit 1
+        fi
+    )
+}
+
+refuse_nameless "${onesided_dir}" "image layout (yamlscan.awk present)"
+
+nameless_dir="${test_dir}/yaml-onesided-tarball"
+nameless_tree "${nameless_dir}" no-yamlscan
+refuse_nameless "${nameless_dir}" "release tarball (no yamlscan.awk)"
 
 # CRLF (Windows-saved) configs parse the way java.util.Properties reads
 # them: one trailing CR is a line terminator, not part of the value, and
