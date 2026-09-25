@@ -167,7 +167,7 @@ public class VertexAPI extends BatchAPI {
             req.jsonVertices.forEach(newVertex -> {
                 Id newVertexId = getVertexId(g, newVertex);
                 JsonVertex oldVertex = map.get(newVertexId);
-                this.updateExistElement(oldVertex, newVertex, req.updateStrategies);
+                this.updateExistElement(g, oldVertex, newVertex, req.updateStrategies);
                 map.put(newVertexId, newVertex);
             });
 

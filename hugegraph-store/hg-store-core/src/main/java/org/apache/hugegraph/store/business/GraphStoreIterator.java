@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.business;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
@@ -254,6 +255,10 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
                 case DOUBLE:
                     variant.setType(VariantType.VT_DOUBLE)
                            .setValueDouble((Double) v);
+                    break;
+                case DECIMAL:
+                    variant.setType(VariantType.VT_STRING)
+                           .setValueString(((BigDecimal) v).toPlainString());
                     break;
                 case OBJECT:
                 case UNKNOWN:

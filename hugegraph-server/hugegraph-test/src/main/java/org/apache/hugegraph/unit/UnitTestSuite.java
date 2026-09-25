@@ -86,6 +86,7 @@ import org.apache.hugegraph.unit.serializer.BinaryBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.BinaryScatterSerializerTest;
 import org.apache.hugegraph.unit.serializer.BinarySerializerTest;
 import org.apache.hugegraph.unit.serializer.BytesBufferTest;
+import org.apache.hugegraph.unit.serializer.HugeGraphSONModuleTest;
 import org.apache.hugegraph.unit.serializer.SerializerFactoryTest;
 import org.apache.hugegraph.unit.serializer.StoreSerializerTest;
 import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
@@ -199,6 +200,7 @@ import org.junit.runners.Suite;
         BinaryScatterSerializerTest.class,
         StoreSerializerTest.class,
         TextSerializerTest.class,
+        HugeGraphSONModuleTest.class,
 
         /* rocksdb */
         RocksDBSessionsTest.class,

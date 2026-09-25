@@ -113,7 +113,8 @@ public final class JsonUtil {
             } else if (clazz == Float.class) {
                 object = number.floatValue();
             } else if (clazz == Double.class) {
-                assert object instanceof Double : object;
+                // A JSON fraction may arrive as BigDecimal, see ObjectMapperResolver
+                object = number.doubleValue();
             } else {
                 assert clazz == Date.class : clazz;
             }

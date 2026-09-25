@@ -19,6 +19,8 @@
 
 package org.apache.hugegraph.type.define;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.Date;
 import java.util.List;
@@ -46,7 +48,12 @@ public enum DataType implements SerialEnum {
     TEXT(8, "text", String.class),
     BLOB(9, "blob", Blob.class),
     DATE(10, "date", Date.class),
-    UUID(11, "uuid", UUID.class);
+    UUID(11, "uuid", UUID.class),
+    /*
+     * Arbitrary-precision decimal (java.math.BigDecimal), see the server copy
+     * of this enum: exact, but not a sort key / index / OLAP range type.
+     */
+    DECIMAL(12, "decimal", BigDecimal.class);
 
     private final byte code;
     private final String name;
@@ -109,6 +116,10 @@ public enum DataType implements SerialEnum {
         return this == DataType.UUID;
     }
 
+    public boolean isDecimal() {
+        return this == DataType.DECIMAL;
+    }
+
     public <V> Number valueToNumber(V value) {
         if (!(this.isNumber() && value instanceof Number) &&
             !(value instanceof String && SPECIAL_FLOATS.contains(value))) {
@@ -147,6 +158,55 @@ public enum DataType implements SerialEnum {
                       value, this.name, e.getMessage()));
         }
         return number;
+    }
+
+    /*
+     * Bounds for a DECIMAL value: at most DECIMAL_MAX_PRECISION significant
+     * digits and an absolute scale of at most DECIMAL_MAX_SCALE. uint256
+     * with 18 fraction digits is 96 digits, so both fit with room to spare,
+     * while "1E+999999999" (a few bytes on disk, a billion characters from
+     * toPlainString() on every read) is rejected before it is stored.
+     */
+    public static final int DECIMAL_MAX_PRECISION = 128;
+    public static final int DECIMAL_MAX_SCALE = 128;
+
+    public <V> BigDecimal valueToDecimal(V value) {
+        if (!this.isDecimal()) {
+            return null;
+        }
+        BigDecimal decimal;
+        if (value instanceof BigDecimal) {
+            decimal = (BigDecimal) value;
+        } else if (value instanceof BigInteger) {
+            decimal = new BigDecimal((BigInteger) value);
+        } else if (value instanceof Byte || value instanceof Short ||
+                   value instanceof Integer || value instanceof Long) {
+            decimal = BigDecimal.valueOf(((Number) value).longValue());
+        } else if (!(value instanceof Number) && !(value instanceof String)) {
+            return null;
+        } else {
+            String text = value.toString().trim();
+            try {
+                decimal = new BigDecimal(text);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException(String.format(
+                        "Can't read '%s' as decimal", value));
+            }
+        }
+        return checkDecimalBounds(decimal);
+    }
+
+    public static BigDecimal checkDecimalBounds(BigDecimal decimal) {
+        int scale = Math.abs(decimal.scale());
+        int precision = decimal.precision();
+        if (precision > DECIMAL_MAX_PRECISION || scale > DECIMAL_MAX_SCALE) {
+            throw new IllegalArgumentException(String.format(
+                    "Decimal value out of bounds: precision %d, scale %d " +
+                    "(at most %d significant digits and a scale of at most " +
+                    "%d in either direction)", precision, decimal.scale(),
+                    DECIMAL_MAX_PRECISION, DECIMAL_MAX_SCALE));
+        }
+        return decimal;
     }
 
     public <V> Date valueToDate(V value) {

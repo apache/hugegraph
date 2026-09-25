@@ -201,7 +201,7 @@ public class EdgeAPI extends BatchAPI {
                 Id newEdgeId = getEdgeId(graph(manager, graphSpace, graph),
                                          newEdge);
                 JsonEdge oldEdge = map.get(newEdgeId);
-                this.updateExistElement(oldEdge, newEdge, req.updateStrategies);
+                this.updateExistElement(g, oldEdge, newEdge, req.updateStrategies);
                 map.put(newEdgeId, newEdge);
             });
 

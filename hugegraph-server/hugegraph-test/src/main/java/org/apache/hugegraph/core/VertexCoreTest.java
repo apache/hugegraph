@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.core;
 
+import java.math.BigInteger;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -9668,5 +9669,91 @@ public class VertexCoreTest extends BaseCoreTest {
     private static void assertNotContains(List<Vertex> vertices,
                                           Object... keyValues) {
         Assert.assertFalse(Utils.contains(vertices, new FakeObjects.FakeVertex(keyValues)));
+    }
+
+    @Test
+    public void testAddVertexWithPropertyValueOfDecimal() {
+        HugeGraph graph = graph();
+
+        SchemaManager schema = graph.schema();
+        schema.propertyKey("balance").asDecimal().create();
+        schema.vertexLabel("account").properties("balance").create();
+
+        // 2^256 - 1: exact through the write path, the backend and the read path
+        String uint256Max = "115792089237316195423570985008687907853" +
+                            "269984665640564039457584007913129639935";
+        BigDecimal expected = new BigDecimal(uint256Max);
+        Vertex vertex = graph.addVertex(T.label, "account",
+                                        "balance", uint256Max);
+        Assert.assertEquals(expected, vertex.value("balance"));
+        graph.tx().commit();
+
+        Vertex loaded = graph.vertex(vertex.id());
+        Assert.assertEquals(expected, loaded.value("balance"));
+        Assert.assertEquals(BigDecimal.class, loaded.value("balance").getClass());
+
+        // a wei above an ether, in ether: 18 fraction digits kept
+        BigDecimal wei = new BigDecimal("1.000000000000000001");
+        Vertex v2 = graph.addVertex(T.label, "account", "balance", wei);
+        Vertex v3 = graph.addVertex(T.label, "account", "balance", 42L);
+        Vertex v4 = graph.addVertex(T.label, "account",
+                                    "balance", new BigInteger(uint256Max));
+        graph.tx().commit();
+        Assert.assertEquals(wei, graph.vertex(v2.id()).value("balance"));
+        Assert.assertEquals(new BigDecimal("42"),
+                            graph.vertex(v3.id()).value("balance"));
+        Assert.assertEquals(expected, graph.vertex(v4.id()).value("balance"));
+
+        // equality is exact, not through double: the neighbouring value
+        // (2^256 - 2) is a different number. Filter by id so no index is
+        // needed; the condition is evaluated on the server
+        BigDecimal neighbour = expected.subtract(BigDecimal.ONE);
+        Object[] ids = {vertex.id(), v2.id(), v3.id(), v4.id()};
+        Assert.assertEquals(2L, graph.traversal().V(ids)
+                                     .has("balance", expected)
+                                     .count().next().longValue());
+        Assert.assertEquals(0L, graph.traversal().V(ids)
+                                     .has("balance", neighbour)
+                                     .count().next().longValue());
+        // ranges: 42 and both uint256 values are above 1.000000000000000001
+        Assert.assertEquals(3L, graph.traversal().V(ids)
+                                     .has("balance", P.gt(wei))
+                                     .count().next().longValue());
+        Assert.assertEquals(0L, graph.traversal().V(ids)
+                                     .has("balance", P.lt(wei))
+                                     .count().next().longValue());
+        Assert.assertEquals(1L, graph.traversal().V(ids)
+                                     .has("balance", P.lt(new BigDecimal("42")))
+                                     .count().next().longValue());
+        Assert.assertEquals(2L, graph.traversal().V(ids)
+                                     .has("balance", P.gte(neighbour))
+                                     .count().next().longValue());
+
+        // updates keep the exact value
+        loaded.property("balance", neighbour);
+        graph.tx().commit();
+        Assert.assertEquals(neighbour, graph.vertex(vertex.id()).value("balance"));
+    }
+
+    @Test
+    public void testAddVertexWithInvalidPropertyValueOfDecimal() {
+        HugeGraph graph = graph();
+
+        SchemaManager schema = graph.schema();
+        schema.propertyKey("balance").asDecimal().create();
+        schema.vertexLabel("account").properties("balance").create();
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            graph.addVertex(T.label, "account", "balance", "12abc");
+        }, e -> {
+            Assert.assertContains("Can't read '12abc' as decimal",
+                                  e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            graph.addVertex(T.label, "account", "balance", true);
+        }, e -> {
+            Assert.assertContains("Invalid property value 'true' " +
+                                  "for key 'balance'", e.getMessage());
+        });
     }
 }
