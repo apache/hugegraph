@@ -262,6 +262,81 @@ mkdir -p "${yaml_dir}/conf"
         > "${state_file}"
     want_state named "$(yaml_auth_state)"
 
+    # A flow mapping spread over several lines closes at the root indentation.
+    # Taking that brace for a root sibling stopped the mapping one entry early,
+    # so a config naming a class answered nameless and the boot was refused.
+    printf '%s\n' \
+        'authentication: {' \
+        '  authenticator: com.example.SpreadAuth' \
+        '}' \
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
+
+    # The same form with no direct authenticator still has to be nameless, which
+    # is what keeps the fix from turning the refusal into a blanket pass.
+    printf '%s\n' \
+        'authentication: {' \
+        '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+        '}' \
+        > "${state_file}"
+    want_state nameless "$(yaml_auth_state)"
+
+    # A double quoted key resolves its escapes before it is a key, so this is
+    # the authentication mapping.  Comparing the raw bytes called it absent,
+    # which is the answer that lets REST start open beside a Gremlin that
+    # authenticates.  The value is spelled out in hex below to keep the backslash.
+    printf '%s\n' \
+        '"authentic\u0061tion":' \
+        '  authenticator: com.example.EscapedAuth' \
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
+
+    # Same for the direct child key.
+    printf '%s\n' \
+        'authentication:' \
+        '  "authentic\u0061tor": com.example.EscapedChildAuth' \
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
+
+    # An escape this reader does not implement has to be refused, not missed.
+    printf '%s\n' \
+        '"authentic\q0061tion":' \
+        '  authenticator: com.example.UnresolvableAuth' \
+        > "${state_file}"
+    want_state nameless "$(yaml_auth_state)"
+
+    # A block scalar carries its content on the deeper lines.  The indicator on
+    # its own is an empty string, which names no class, while the form with a
+    # class under it does name one.
+    printf '%s\n' 'authentication:' '  authenticator: |' > "${state_file}"
+    want_state nameless "$(yaml_auth_state)"
+
+    printf '%s\n' \
+        'authentication:' \
+        '  authenticator: |' \
+        '    com.example.BlockAuth' \
+        > "${state_file}"
+    want_state named "$(yaml_auth_state)"
+
+    # The whole document as one flow mapping is a shape this reader does not
+    # walk.  Answering none for it reported an authenticating Gremlin as
+    # unauthenticated, so it is refused until it is written the block way.
+    printf '%s\n' \
+        '{ host: 8182, authentication: { authenticator: org.example.Auth } }' \
+        > "${state_file}"
+    want_state nameless "$(yaml_auth_state)"
+
+    # YAML ends a line at a bare CR as much as at an LF.  Gated on the host
+    # probe above because a reader that drops the CR byte is not observing the
+    # scanner here.
+    if [[ "${awk_sees_lone_cr}" == "1" ]]; then
+        printf 'host: 1\rauthentication:\r  authenticator: com.example.CrAuth\r' \
+            > "${state_file}"
+        want_state named "$(yaml_auth_state)"
+    else
+        skip "the bare-CR yaml check -- this host eats the CR byte; it runs under CI"
+    fi
+
     rm -f "${state_file}"
     want_state none "$(yaml_auth_state)"
 )

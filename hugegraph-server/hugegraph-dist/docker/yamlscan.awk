@@ -103,13 +103,83 @@ function indent_of(s,    i, n, c) {
     return i - 1
 }
 
+# Hex without strtonum, which is not POSIX awk.
+function hexval(h,    i, n, c, v) {
+    v = 0
+    n = length(h)
+    for (i = 1; i <= n; i++) {
+        c = substr(h, i, 1)
+        if (c >= "0" && c <= "9") v = v * 16 + (c - 0)
+        else if (c == "a" || c == "A") v = v * 16 + 10
+        else if (c == "b" || c == "B") v = v * 16 + 11
+        else if (c == "c" || c == "C") v = v * 16 + 12
+        else if (c == "d" || c == "D") v = v * 16 + 13
+        else if (c == "e" || c == "E") v = v * 16 + 14
+        else if (c == "f" || c == "F") v = v * 16 + 15
+        else return -1
+    }
+    return v
+}
+
+# Resolve the escapes a double quoted scalar carries, which snakeyaml does
+# before the text ever becomes a key.  `"\u0061uthentication"` is the
+# authentication key, and `authentic\u0061tion` is the same key spelled out.
+# An escape this cannot resolve sets UNRESOLVED instead of being skipped: being
+# wrong about a key toward "absent" is what leaves REST open beside an
+# authenticating Gremlin, so an unresolved form has to be refused.
+function unescape(s,    out, i, n, c, h, k, v) {
+    n = length(s)
+    out = ""
+    i = 1
+    while (i <= n) {
+        c = substr(s, i, 1)
+        if (c != "\\") { out = out c; i++; continue }
+        i++
+        if (i > n) { UNRESOLVED = 1; return s }
+        c = substr(s, i, 1)
+        if (c == "u" || c == "U") k = (c == "u" ? 4 : 8)
+        else if (c == "x") k = 2
+        else k = 0
+        if (k > 0) {
+            h = substr(s, i + 1, k)
+            v = (length(h) == k ? hexval(h) : -1)
+            if (v < 0) { UNRESOLVED = 1; return s }
+            out = out sprintf("%c", v)
+            i = i + k + 1
+            continue
+        }
+        if (c == "0") { out = out sprintf("%c", 0); i++; continue }
+        if (c == "a") { out = out sprintf("%c", 7); i++; continue }
+        if (c == "e") { out = out sprintf("%c", 27); i++; continue }
+        if (c == "N") { out = out sprintf("%c", 133); i++; continue }
+        if (c == "L") { out = out sprintf("%c", 8232); i++; continue }
+        if (c == "P") { out = out sprintf("%c", 8233); i++; continue }
+        if (c == "b") { out = out "\b"; i++; continue }
+        if (c == "t") { out = out "\t"; i++; continue }
+        if (c == "n") { out = out "\n"; i++; continue }
+        if (c == "v") { out = out "\v"; i++; continue }
+        if (c == "f") { out = out "\f"; i++; continue }
+        if (c == "r") { out = out "\r"; i++; continue }
+        if (c == " " || c == dquo() || c == "\\" || c == "/") {
+            out = out c
+            i++
+            continue
+        }
+        UNRESOLVED = 1
+        return s
+    }
+    return out
+}
+
 # One layer of matching quotes off a key or scalar.
-function unquote(s,    f) {
+function unquote(s,    f, body) {
     s = trim(s)
     if (length(s) >= 2) {
         f = substr(s, 1, 1)
-        if ((f == apos() || f == dquo()) && substr(s, length(s), 1) == f)
-            return substr(s, 2, length(s) - 2)
+        if ((f == apos() || f == dquo()) && substr(s, length(s), 1) == f) {
+            body = substr(s, 2, length(s) - 2)
+            return (f == dquo() ? unescape(body) : body)
+        }
     }
     return s
 }
@@ -305,6 +375,31 @@ function commit_val(    k) {
     }
 }
 
+# Refuse a document whose shape this reader cannot resolve, through the same
+# nameless state that makes check_auth_sides stop the boot and that
+# duplicate_root() uses above.  Guessing `none` here is the unsafe answer: it
+# tells the entrypoint that Gremlin configures nothing, so an operator whose
+# mounted file does authenticate gets REST started open beside it.
+function refuse(what,    msg) {
+    msg = "yamlscan.awk: " what
+    print msg > "/dev/stderr"
+    print "cannot be classified by this reader, so it is refused rather than" > "/dev/stderr"
+    print "called unauthenticated. Rewrite gremlin-server.yaml in the plain" > "/dev/stderr"
+    print "block form, or fix the spelling above, then restart." > "/dev/stderr"
+    return "nameless"
+}
+
+# `|` and `>` open a block scalar, whose content is on the following, deeper
+# lines rather than on the key line.  Reading the indicator itself as the value
+# answered `named` for `authenticator: |` with nothing behind it, and snakeyaml
+# hands the server an empty string there, which is no authenticator at all.
+function is_block_scalar(v) {
+    v = trim(v)
+    if (v == "") return 0
+    if (substr(v, 1, 1) != "|" && substr(v, 1, 1) != ">") return 0
+    return substr(v, 2) ~ /^[0-9]*[-+]?$/
+}
+
 BEGIN {
     DEPTH = 0
     FST = "key"
@@ -319,16 +414,37 @@ BEGIN {
     child = -1
     flow = 0
     RESULT = ""
+    UNRESOLVED = 0
+    ROOT_FLOW = 0
+    BLOCK = 0
+    BLOCK_IND = 0
+    BLOCK_TXT = ""
 }
 
-{
-    # A CR here is the terminator of a CRLF line, not content: YAML ends a line
-    # at either byte, so `authentication:\r` is the key line and leaving the CR
-    # on it made split_pair see no colon followed by end of line, which reported
-    # a whole mapping as absent.
-    line = strip_comment($0)
-    sub(/[ \t\r]+$/, "", line)
-    if (trim(line) == "") next
+# Close out the block scalar whose lines were being collected.
+function finish_block() {
+    BLOCK = 0
+    AUTH_NAMED = names_class(BLOCK_TXT)
+    BLOCK_TXT = ""
+}
+
+function handle_line(raw,    line, ind) {
+    if (BLOCK) {
+        # Deeper than the key means the line is still scalar content; anything
+        # else ends the scalar and is ordinary content again.
+        if (indent_of(raw) > BLOCK_IND) {
+            if (BLOCK_TXT != "") BLOCK_TXT = BLOCK_TXT " "
+            BLOCK_TXT = BLOCK_TXT trim(strip_comment(raw))
+            return
+        }
+        finish_block()
+    }
+
+    # A CR that survived the comment being stripped is line noise, not part of
+    # a key or a value.
+    line = strip_comment(raw)
+    sub(/[ \t]+$/, "", line)
+    if (trim(line) == "") return
 
     ind = indent_of(line)
 
@@ -339,10 +455,21 @@ BEGIN {
     # valid to Settings.read() -- is recognized, while an `authentication:`
     # nested under some other key is still not mistaken for the Gremlin one.
     if (ROOT_IND < 0) {
-        if (!split_pair(line)) next
+        # A document written as one flow mapping is a shape this reader does not
+        # walk, and its authenticator sits behind a root key rather than at the
+        # root indentation.  Answering `none` for it is what left REST open
+        # beside a Gremlin that authenticates, so it is refused.
+        if (substr(trim(line), 1, 1) == "{") {
+            ROOT_FLOW = 1
+            return
+        }
+        if (!split_pair(line)) return
         ROOT_IND = ind
-    } else if (ind == ROOT_IND && in_auth) {
-        # A root-level sibling closes the mapping being read.
+    } else if (ind == ROOT_IND && in_auth && !flow) {
+        # A root-level sibling closes the mapping being read -- but not while a
+        # flow collection is still open, or the closing brace of a flow mapping
+        # spread over several lines was taken for a sibling and the direct
+        # authenticator it did name was never committed.
         in_auth = 0
         flow = 0
         child = -1
@@ -371,34 +498,57 @@ BEGIN {
         # Anything else on the key line -- a scalar, a sequence, nothing -- is
         # not a mapping that names a class.  Reading `authentication: some.Name`
         # as named would accept a config the server cannot use.
-        next
+        return
     }
 
-    if (!in_auth) next
+    if (!in_auth) return
 
     if (flow) {
         if (scan_flow(line)) {
             in_auth = 0
             flow = 0
         }
-        next
+        return
     }
 
     # Inside a block mapping: the first child sets the child indentation, and
     # only a direct child at that indentation counts.  A line reaching here is
     # never at the root indentation (the sibling case above consumed those),
     # so `child` is always deeper than the root, as a real child must be.
-    if (!split_pair(line)) next
+    if (!split_pair(line)) return
     if (child < 0) child = ind
-    if (ind != child) next
+    if (ind != child) return
     if (names_authenticator(K_TXT)) {
         AUTH_SEEN++
+        if (is_block_scalar(V_TXT)) {
+            # The class, if this names one at all, is on the deeper lines that
+            # follow rather than on the key line.
+            BLOCK = 1
+            BLOCK_IND = ind
+            BLOCK_TXT = ""
+            return
+        }
         AUTH_NAMED = names_class(V_TXT)
     }
 }
 
+{
+    # YAML ends a line at CR, LF or CRLF, but awk splits records on LF alone, so
+    # a file written with bare CR terminators arrives as one long record whose
+    # root `authentication:` key is never met.  Splitting each record on CR
+    # gives every spelling its own line; the CR that a Linux reader leaves at
+    # the end of a CRLF record simply yields the empty segment that the blank
+    # check drops.
+    seg_n = split($0, seg, /\r/)
+    for (seg_i = 1; seg_i <= seg_n; seg_i++) handle_line(seg[seg_i])
+}
+
 END {
-    if (AUTH_BLOCKS == 0) RESULT = "none"
+    if (BLOCK) finish_block()
+    if (ROOT_FLOW) RESULT = refuse("a document written as a root flow mapping")
+    else if (UNRESOLVED)
+        RESULT = refuse("a quoted key or value carrying an escape that is not resolvable here")
+    else if (AUTH_BLOCKS == 0) RESULT = "none"
     else if (AUTH_BLOCKS > 1) RESULT = duplicate_root()
     else RESULT = auth_state()
     print RESULT
