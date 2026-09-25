@@ -26,6 +26,45 @@ mkdir -p "${DOCKER_FOLDER}"
 
 log() { echo "[hugegraph-server-entrypoint] $*"; }
 
+# Property reading/writing goes through props.awk, which implements the
+# java.util.Properties grammar HugeConfig applies (escapes, `:`/whitespace
+# separators, CR/CRLF/LF line terminators, continuations, first-definition-wins
+# duplicates).  grep/sed rewrites disagree with it on mounted or upgraded
+# configs, silently producing two definitions of one key.  Values move through
+# environment variables rather than argv so a PASSWORD never shows up in `ps`
+# output.
+#
+# props.awk lives in the packaged bin/ directory because bin/enable-auth.sh
+# reads properties with it too, and that assembly fileSet is what both the
+# release tarball and this image are built from.  Beside the entrypoint is only
+# where the source tree and the tests put it.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+props_from_env="${PROPS_AWK:-}"
+yaml_from_env="${YAMLSCAN_AWK:-}"
+PROPS_AWK=""
+for candidate in "${props_from_env}" "${HERE}/props.awk" "${HERE}/bin/props.awk"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+        PROPS_AWK="${candidate}"
+        break
+    fi
+done
+if [[ -z "${PROPS_AWK}" ]]; then
+    log "ERROR: props.awk not found beside the entrypoint or in bin/"
+    exit 1
+fi
+
+YAMLSCAN=""
+for candidate in "${yaml_from_env}" "${HERE}/yamlscan.awk"; do
+    if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+        YAMLSCAN="${candidate}"
+        break
+    fi
+done
+if [[ -z "${YAMLSCAN}" ]]; then
+    log "ERROR: yamlscan.awk not found beside the entrypoint"
+    exit 1
+fi
+
 encode_prop_value() {
     local value="$1" encoded="" char
     local i
@@ -35,7 +74,13 @@ encode_prop_value() {
         char="${value:i:1}"
         case "${char}" in
             "\\") encoded+="\\\\" ;;
-            " ") encoded+="\\ " ;;
+            # \u0020 and not `\ `: both readers turn it back into a space, but
+            # a line right-trimmed before the continuation check -- which is how
+            # commons-configuration reads it -- leaves the backslash of `\ `
+            # behind at the end of the line, and that swallows the property
+            # written under it.  A secret ending in a space used to move
+            # auth.authenticator inside the password value.
+            " ") encoded+="\\u0020" ;;
             $'\t') encoded+="\\t" ;;
             $'\n') encoded+="\\n" ;;
             $'\r') encoded+="\\r" ;;
@@ -48,18 +93,10 @@ encode_prop_value() {
 
 set_prop_encoded() {
     local key="$1" encoded_val="$2" file="$3"
-    local esc_key esc_val key_re
 
-    esc_key=$(printf '%s' "$key" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g')
-    esc_val=$(printf '%s' "$encoded_val" | sed -e 's/[&|\\~]/\\&/g')
-    key_re="^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+|[[:space:]]*$)"
-
-    if grep -qE "${key_re}" "${file}"; then
-        sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}"
-        sed -ri "0,/${key_re}/s~${key_re}.*~${key}=${esc_val}~" "${file}"
-    else
-        printf '%s=%s\n' "$key" "$encoded_val" >> "${file}"
-    fi
+    PROPS_MODE=set PROPS_KEY="${key}" \
+        PROPS_VALUE_ENCODED="${encoded_val}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
 }
 
 set_prop() {
@@ -70,12 +107,82 @@ set_prop() {
 
 get_prop_encoded() {
     local key="$1" file="$2"
-    local esc_key
 
-    esc_key=$(printf '%s' "$key" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g')
-    sed -nE \
-        "s~^[[:space:]]*${esc_key}([[:space:]]*[:=][[:space:]]*|[[:space:]]+)(.*)$~\\2~p" \
-        "${file}" | head -n 1
+    PROPS_MODE=get PROPS_KEY="${key}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
+}
+
+# The value as java.util.Properties hands it to the server, escapes resolved.
+# Compare against this, not the on-disk bytes: `backend=h\u0073tore` is a legal
+# spelling of hstore that the JVM reads as hstore and a string compare against
+# the raw text does not.
+get_prop_decoded() {
+    local key="$1" file="$2"
+
+    PROPS_MODE=get PROPS_DECODED=1 PROPS_KEY="${key}" PROPS_FILE="${file}" \
+        awk -f "${PROPS_AWK}" /dev/null
+}
+
+# What the top-level authentication mapping of gremlin-server.yaml says about
+# authentication, as one of three states: none, named, nameless.
+#
+# The question and its answer live in yamlscan.awk, which reads the mapping the
+# way snakeyaml presents it to the server: only a column-0 `authentication`
+# mapping counts, only its direct `authenticator` child names a class, comment
+# text never counts as content, and a nested `config.authenticator` belongs to
+# the config map rather than to the server.  Those distinctions are the whole
+# decision -- an earlier grep-shaped version of this function reported `named`
+# for `authentication: {} # authenticator: X` and for a class nested under
+# `config:`, which passed the REST/Gremlin parity check while Gremlin was
+# running on AllowAllAuthenticator.
+yaml_auth_state() {
+    local yaml="./conf/gremlin-server.yaml"
+
+    [[ -f "${yaml}" ]] || { echo "none"; return 0; }
+    awk -f "${YAMLSCAN}" "${yaml}"
+}
+
+# Authentication has to be configured on both sides or on neither.  A mounted
+# config carrying only one is refused rather than completed: the entrypoint
+# cannot know which class the operator means, and finishing the other side from
+# a guessed default is how Gremlin ends up on AllowAllAuthenticator while REST
+# enforces StandardAuthenticator.  A mapping that names no authenticator is
+# refused by itself, because enable-auth.sh guards on the presence of that
+# mapping and would otherwise write only the REST side.
+check_auth_sides() {
+    local rest=0 yaml=0 state rest_value
+
+    state=$(yaml_auth_state)
+    if [[ "${state}" == "nameless" ]]; then
+        log "ERROR: gremlin-server.yaml carries a top-level authentication" \
+            "mapping that names no authenticator; add an authenticator entry" \
+            "to it or remove the mapping, then restart."
+        return 1
+    fi
+    # A nonzero status here means the reader could not answer at all -- props.awk
+    # exits 2 rather than guess, e.g. for a file that splices another one with an
+    # commons-configuration `include`.  Calling that "configured on one side"
+    # would send the operator to the wrong file, and calling it absent is the
+    # direction that lets REST start open beside a Gremlin that authenticates.
+    if ! rest_value=$(get_prop_encoded "auth.authenticator" "${REST_SERVER_CONF}"); then
+        log "ERROR: cannot read auth.authenticator from ${REST_SERVER_CONF};" \
+            "see the reason above, fix it, then restart."
+        return 1
+    fi
+    if [[ -n "${rest_value}" ]]; then
+        rest=1
+    fi
+    if [[ "${state}" == "named" ]]; then
+        yaml=1
+    fi
+    if (( rest == yaml )); then
+        return 0
+    fi
+    log "ERROR: authentication is configured in only one of" \
+        "rest-server.properties (auth.authenticator) and" \
+        "gremlin-server.yaml (authentication.authenticator);" \
+        "configure both or neither, then restart."
+    return 1
 }
 
 migrate_env() {
@@ -168,6 +275,14 @@ elif [[ -n "${AUTH_TOKEN_SECRET_ENCODED}" ]]; then
     set_prop_encoded "auth.token_secret" "${AUTH_TOKEN_SECRET_ENCODED}" \
         "${GRAPH_CONF}"
 fi
+# Both sides have to agree whether authentication is on, whatever the reason
+# the container was started for.  Running this only inside the PASSWORD branch
+# below left a mounted rest-server.properties that carried auth.authenticator
+# with no matching yaml mapping completely unvalidated: with no PASSWORD the
+# entrypoint skipped the check, enable-auth.sh never ran, and the server came
+# up with REST enforcing and Gremlin open.  A refusal exits under set -e.
+check_auth_sides
+
 if [[ -n "${PASSWORD:-}" ]]; then
     set_prop "auth.admin_pa" "${PASSWORD}" "${REST_SERVER_CONF}"
     # This script is idempotent and must run outside the initialization guard:
@@ -243,7 +358,15 @@ fi
 ./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t "${SERVER_STARTUP_TIMEOUT_S}"
 
 # Post-startup cluster stabilization check (hstore only — rocksdb has no partitions)
-ACTUAL_BACKEND=$(grep -E '^[[:space:]]*backend[[:space:]]*=' "${GRAPH_CONF}" | head -n 1 | sed 's/.*=//' | tr -d '[:space:]' || true)
+# Read through props.awk so a mounted config using the `:` or bare-whitespace
+# separator is seen at all, and first-definition-wins matches HugeConfig; the
+# grep this replaces only ever accepted `=`.  Decoded, because this is compared
+# against a literal: the JVM reads `backend=h\u0073tore` as hstore while the
+# on-disk bytes are not that string, and the comparison deciding to skip
+# wait-partition.sh is how startup continued before partitions were assigned.
+# Trailing whitespace is dropped here rather than in the reader, which reports
+# the value verbatim apart from the escapes java.util.Properties resolves.
+ACTUAL_BACKEND=$(get_prop_decoded "backend" "${GRAPH_CONF}" | tr -d '[:space:]' || true)
 if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
     STORE_REST="${STORE_REST:-store:8520}"
     export STORE_REST
