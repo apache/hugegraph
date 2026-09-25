@@ -21,6 +21,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.AuthManager;
@@ -88,6 +89,30 @@ public class HugeGraphAuthProxyTest extends BaseUnitTest {
         // When context is null, username() should return "anonymous"
         String username = HugeGraphAuthProxy.username();
         Assert.assertEquals("anonymous", username);
+    }
+
+    @Test
+    public void testSearchPredicateDoesNotRequireAdminConfigAccess() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        HugeConfig config = Mockito.mock(HugeConfig.class);
+        Mockito.when(graph.name()).thenReturn("hugegraph");
+        Mockito.when(graph.graphSpace()).thenReturn("DEFAULT");
+        Mockito.when(graph.spaceGraphName()).thenReturn("hugegraph");
+        Mockito.when(graph.configuration()).thenReturn(config);
+        Mockito.when(graph.authManager()).thenReturn(Mockito.mock(AuthManager.class));
+        Mockito.when(graph.taskScheduler()).thenReturn(Mockito.mock(TaskScheduler.class));
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_EXPIRE)).thenReturn(3600L);
+        Mockito.when(config.get(AuthOptions.AUTH_CACHE_CAPACITY)).thenReturn(100L);
+        Mockito.when(config.get(AuthOptions.AUTH_AUDIT_LOG_RATE)).thenReturn(1000D);
+        Predicate<Object> matcher = "alpha"::equals;
+        Mockito.when(graph.searchPredicate("(alpha)")).thenReturn(matcher);
+        HugeGraphAuthProxy proxy = new HugeGraphAuthProxy(graph);
+        setContext(new HugeGraphAuthProxy.Context(new HugeAuthenticator.User(
+                "reader", RolePermission.all("hugegraph"))));
+        Mockito.clearInvocations(graph);
+
+        Assert.assertSame(matcher, proxy.searchPredicate("(alpha)"));
+        Mockito.verify(graph, Mockito.never()).configuration();
     }
 
     @Test

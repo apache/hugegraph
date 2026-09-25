@@ -35,6 +35,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import javax.security.sasl.AuthenticationException;
@@ -761,6 +762,12 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     public <K, V> V option(TypedOption<K, V> option) {
         this.verifyAnyPermission();
         return this.hugegraph.option(option);
+    }
+
+    @Override
+    public Predicate<Object> searchPredicate(String text) {
+        this.verifyAnyPermission();
+        return this.hugegraph.searchPredicate(text);
     }
 
     @Override

@@ -31,6 +31,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
@@ -53,6 +54,7 @@ import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.Consumers;
+import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
@@ -269,7 +271,18 @@ public final class RamTable {
         int conditionsSize = cq.conditionsSize();
         Object owner = cq.condition(HugeKeys.OWNER_VERTEX);
         Directions direction = cq.condition(HugeKeys.DIRECTION);
-        Id label = cq.condition(HugeKeys.LABEL);
+        // query() expands one nonempty LABEL IN relation into EQ branches.
+        // Do not mistake an empty/conflicting set for the wildcard label zero.
+        Set<Object> labels = cq.conditionValues(HugeKeys.LABEL);
+        for (Object value : labels) {
+            if (!(value instanceof Id)) {
+                return false;
+            }
+            Id label = (Id) value;
+            if (!label.number() || label.asLong() <= 0L || label.asLong() > Integer.MAX_VALUE) {
+                return false;
+            }
+        }
 
         if (direction == null && conditionsSize > 1) {
             for (Condition cond : cq.conditions()) {
@@ -289,7 +302,7 @@ public final class RamTable {
         if (direction != null) {
             matchedConds++;
         }
-        if (label != null) {
+        if (!labels.isEmpty()) {
             matchedConds++;
         }
         return matchedConds == cq.conditionsSize();
@@ -316,9 +329,12 @@ public final class RamTable {
         if (dir == null) {
             dir = Directions.BOTH;
         }
-        Id label = query.condition(HugeKeys.LABEL);
-        if (label == null) {
-            label = IdGenerator.ZERO;
+        Id label = IdGenerator.ZERO;
+        if (query.containsConditionValues(HugeKeys.LABEL)) {
+            // Only an absent EQ/IN label condition means all labels. Each
+            // flattened branch must otherwise resolve to exactly one label.
+            label = query.conditionValue(HugeKeys.LABEL);
+            E.checkState(label != null, "Expect one label value for query: %s", query);
         }
         return this.query(owner.asLong(), dir, (int) label.asLong());
     }
