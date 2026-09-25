@@ -127,6 +127,8 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
     private Node raftNode;
     private volatile boolean started;
     private volatile boolean stateMachineError;
+    // FSM callbacks may need the engine monitor while restart waits for them to drain.
+    private final Object restartLock = new Object();
 
     public PartitionEngine(HgStoreEngine storeEngine, ShardGroup shardGroup) {
         this.storeEngine = storeEngine;
@@ -579,12 +581,19 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
      * Restart raft engine
      */
     public void restartRaftNode() {
-        if (this.stateMachineError) {
-            return;
+        synchronized (this.restartLock) {
+            if (this.stateMachineError) {
+                return;
+            }
+            shutdown();
+            // shutdown joins the old FSM, including its synchronous error notifications.
+            // An error while it drained must prevent reopening the same logs.
+            if (this.stateMachineError) {
+                return;
+            }
+            log.error("Raft {} is restarting !!!", getGroupId());
+            this.init(this.options);
         }
-        shutdown();
-        log.error("Raft {} is restarting !!!", getGroupId());
-        this.init(this.options);
     }
 
     /**
@@ -830,6 +839,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
     @Override
     public void onError(RaftException e) {
         if (e.getType() == ErrorType.ERROR_TYPE_STATE_MACHINE) {
+            // Do not acquire restartLock here: shutdown may be joining this FSM thread.
             this.stateMachineError = true;
             log.error("Raft {} stopped after a state machine error; repair the cause and " +
                       "restart the Store process before resuming", getGroupId(), e);
