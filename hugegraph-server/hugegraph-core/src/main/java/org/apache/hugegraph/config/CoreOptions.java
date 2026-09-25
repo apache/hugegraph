@@ -306,6 +306,19 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(0L, Bytes.GB),
                     16 * Bytes.MB
             );
+    /**
+     * The chunk size for task results in bytes.
+     * When the compressed result exceeds this size, it will be split into
+     * multiple properties (task_result_0, task_result_1, ...).
+     * Set to 0 to disable chunking.
+     */
+    public static final ConfigOption<Integer> TASK_RESULT_CHUNK_SIZE =
+            new ConfigOption<>(
+                    "task.result_chunk_size",
+                    "The chunk size for task results in bytes. Set 0 to disable chunking.",
+                    rangeInt(0, BytesBuffer.BYTES_LEN_MAX),
+                    1048576
+            );
     public static final ConfigOption<Integer> TASK_TTL_DELETE_BATCH =
             new ConfigOption<>(
                     "task.ttl_delete_batch",
