@@ -1,0 +1,913 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: NetworkPolicy
+templates:
+  - networkpolicy.yaml
+tests:
+  - it: renders nothing with the base values
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing with the single preset as shipped
+    values:
+      - ../values-single.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders pd, store and server policies on the cluster preset
+    values:
+      - ../values-cluster.yaml
+    asserts:
+      - hasDocuments:
+          count: 3
+      - isKind:
+          of: NetworkPolicy
+
+  - it: renders pd, store and server policies on the single preset when enabled
+    values:
+      - ../values-single.yaml
+    set:
+      networkPolicy.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 3
+
+  - it: adds a Hubble policy when Hubble is enabled
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 4
+
+  - it: isolates PD in both directions and admits only its peers and clients
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-pd
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: hugegraph
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: pd
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - equal:
+          path: spec.ingress[0]
+          value:
+            from:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: hugegraph
+                    app.kubernetes.io/instance: RELEASE-NAME
+                    app.kubernetes.io/component: pd
+            ports:
+              - protocol: TCP
+                port: 8610
+              - protocol: TCP
+                port: 8686
+      - lengthEqual:
+          path: spec.ingress[1].from
+          count: 3
+      - equal:
+          path: spec.ingress[1].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: store
+      - equal:
+          path: spec.ingress[1].from[1].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: server
+      - equal:
+          path: spec.ingress[1].from[2].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: hubble
+      - equal:
+          path: spec.ingress[1].ports
+          value:
+            - protocol: TCP
+              port: 8686
+            - protocol: TCP
+              port: 8620
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: pd
+      - equal:
+          path: spec.egress[0].ports
+          value:
+            - protocol: TCP
+              port: 8610
+            - protocol: TCP
+              port: 8686
+      - equal:
+          path: spec.egress[1]
+          value:
+            ports:
+              - protocol: UDP
+                port: 53
+              - protocol: TCP
+                port: 53
+      - lengthEqual:
+          path: spec.egress
+          count: 2
+
+  - it: lets Store peers use raft only and admits Server and Hubble on their ports
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-store
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 3
+      - lengthEqual:
+          path: spec.ingress[0].from
+          count: 1
+      - lengthEqual:
+          path: spec.ingress[1].from
+          count: 1
+      - lengthEqual:
+          path: spec.ingress[2].from
+          count: 1
+      - lengthEqual:
+          path: spec.egress[0].to
+          count: 1
+      - lengthEqual:
+          path: spec.egress[1].to
+          count: 1
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: store
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - protocol: TCP
+              port: 8510
+      - equal:
+          path: spec.ingress[1].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: server
+      - equal:
+          path: spec.ingress[1].ports
+          value:
+            - protocol: TCP
+              port: 8500
+            - protocol: TCP
+              port: 8520
+      - equal:
+          path: spec.ingress[2].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: hubble
+      - equal:
+          path: spec.ingress[2].ports
+          value:
+            - protocol: TCP
+              port: 8520
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: pd
+      - equal:
+          path: spec.egress[0].ports
+          value:
+            - protocol: TCP
+              port: 8686
+            - protocol: TCP
+              port: 8620
+      - equal:
+          path: spec.egress[1].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: store
+      - equal:
+          path: spec.egress[1].ports
+          value:
+            - protocol: TCP
+              port: 8510
+      - equal:
+          path: spec.egress[2].ports
+          value:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53
+
+  - it: admits the test hook and Hubble to the Server and lets it reach PD and Store
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-server
+    asserts:
+      - lengthEqual:
+          path: spec.egress[0].to
+          count: 1
+      - lengthEqual:
+          path: spec.egress[1].to
+          count: 1
+      - lengthEqual:
+          path: spec.egress
+          count: 3
+      - lengthEqual:
+          path: spec.ingress
+          count: 1
+      - lengthEqual:
+          path: spec.ingress[0].from
+          count: 2
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: test
+      - equal:
+          path: spec.ingress[0].from[1].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: hubble
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - protocol: TCP
+              port: 8080
+      - equal:
+          path: spec.egress[0].ports
+          value:
+            - protocol: TCP
+              port: 8686
+            - protocol: TCP
+              port: 8620
+      - equal:
+          path: spec.egress[1].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: store
+      - equal:
+          path: spec.egress[1].ports
+          value:
+            - protocol: TCP
+              port: 8500
+            - protocol: TCP
+              port: 8520
+      - equal:
+          path: spec.egress[2].ports
+          value:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53
+
+  - it: lets PD-mode Hubble reach Server, PD and Store REST and nothing reach it
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-hubble
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 4
+      - notExists:
+          path: spec.ingress
+      - contains:
+          path: spec.policyTypes
+          content: Ingress
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: server
+      - equal:
+          path: spec.egress[0].ports
+          value:
+            - protocol: TCP
+              port: 8080
+      - equal:
+          path: spec.egress[1].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: pd
+      - equal:
+          path: spec.egress[1].ports
+          value:
+            - protocol: TCP
+              port: 8686
+            - protocol: TCP
+              port: 8620
+      - equal:
+          path: spec.egress[2].to[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: store
+      - equal:
+          path: spec.egress[2].ports
+          value:
+            - protocol: TCP
+              port: 8520
+      - equal:
+          path: spec.egress[3].ports
+          value:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53
+
+  - it: keeps direct-mode Hubble to the Server only
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+      hubble.mode: direct
+    asserts:
+      - lengthEqual:
+          path: spec.egress
+          count: 2
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-hubble
+      - lengthEqual:
+          path: spec.ingress[1].from
+          count: 2
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-pd
+      - equal:
+          path: spec.ingress[1].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: store
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-pd
+      - equal:
+          path: spec.ingress[1].from[1].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: server
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-pd
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-store
+
+  - it: leaves every Hubble peer out when Hubble is disabled
+    values:
+      - ../values-cluster.yaml
+    asserts:
+      - hasDocuments:
+          count: 3
+      - notContains:
+          path: spec.egress
+          content:
+            to:
+              - podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: hugegraph
+                    app.kubernetes.io/instance: RELEASE-NAME
+                    app.kubernetes.io/component: hubble
+      - notContains:
+          path: spec.ingress[1].from
+          content:
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: hugegraph
+                app.kubernetes.io/instance: RELEASE-NAME
+                app.kubernetes.io/component: hubble
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-pd
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-store
+      - lengthEqual:
+          path: spec.ingress[0].from
+          count: 1
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-server
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: test
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-server
+
+  - it: follows port overrides in ingress and egress
+    values:
+      - ../values-cluster.yaml
+    set:
+      pd.ports.raft: 9610
+      store.ports.rest: 9520
+      server.port: 9080
+    asserts:
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - protocol: TCP
+              port: 9610
+            - protocol: TCP
+              port: 8686
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-pd
+      - equal:
+          path: spec.egress[1].ports
+          value:
+            - protocol: TCP
+              port: 8500
+            - protocol: TCP
+              port: 9520
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-server
+      - equal:
+          path: spec.ingress[0].ports
+          value:
+            - protocol: TCP
+              port: 9080
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-server
+
+  - it: appends the PD extraIngress when PD is exposed and adds nothing open
+    values:
+      - ../values-cluster.yaml
+    set:
+      pd.service.type: NodePort
+      pd.service.allowInsecureExposure: true
+      networkPolicy.pd.extraIngress:
+        - from:
+            - ipBlock:
+                cidr: 10.0.0.0/8
+          ports:
+            - port: 8620
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-pd
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 3
+      - exists:
+          path: spec.ingress[0].from
+      - exists:
+          path: spec.ingress[1].from
+      - equal:
+          path: spec.ingress[2]
+          value:
+            from:
+              - ipBlock:
+                  cidr: 10.0.0.0/8
+            ports:
+              - port: 8620
+
+  - it: appends the Server extraIngress for a LoadBalancer Service and adds nothing open
+    values:
+      - ../values-cluster.yaml
+    set:
+      server.service.type: LoadBalancer
+      networkPolicy.server.extraIngress:
+        - from:
+            - ipBlock:
+                cidr: 192.168.0.0/16
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-server
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - exists:
+          path: spec.ingress[0].from
+      - equal:
+          path: spec.ingress[1].from[0].ipBlock.cidr
+          value: 192.168.0.0/16
+
+  - it: appends the Server extraIngress for an Ingress and keeps the test peer first
+    values:
+      - ../values-cluster.yaml
+    set:
+      server.ingress.enabled: true
+      server.ingress.allowPlainHttp: true
+      networkPolicy.server.extraIngress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: ingress-nginx
+              podSelector:
+                matchLabels:
+                  app.kubernetes.io/name: ingress-nginx
+          ports:
+            - port: 8080
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-server
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/component"]
+          value: test
+      - equal:
+          path: spec.ingress[1]
+          value:
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: ingress-nginx
+                podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: ingress-nginx
+            ports:
+              - port: 8080
+
+  - it: appends the Server extraIngress for an advertised URL and adds nothing open
+    values:
+      - ../values-cluster.yaml
+    set:
+      server.advertiseUrl: http://hg.example.com:8080
+      networkPolicy.server.extraIngress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: proxy
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-server
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 2
+      - exists:
+          path: spec.ingress[1].from
+
+  - it: gives an exposed Hubble exactly the listed ingress rules
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+      hubble.service.type: NodePort
+      networkPolicy.hubble.extraIngress:
+        - from:
+            - ipBlock:
+                cidr: 172.18.0.0/16
+          ports:
+            - port: 8088
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-hubble
+    asserts:
+      - equal:
+          path: spec.ingress
+          value:
+            - from:
+                - ipBlock:
+                    cidr: 172.18.0.0/16
+              ports:
+                - port: 8088
+
+  - it: renders no rule without a peer on any document when every exposure is set
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+      pd.service.type: LoadBalancer
+      pd.service.allowInsecureExposure: true
+      server.service.type: NodePort
+      server.advertiseUrl: http://hg.example.com:8080
+      hubble.service.type: NodePort
+      networkPolicy.pd.extraIngress:
+        - from:
+            - ipBlock:
+                cidr: 10.0.0.0/8
+      networkPolicy.server.extraIngress:
+        - from:
+            - ipBlock:
+                cidr: 10.0.0.0/8
+      networkPolicy.hubble.extraIngress:
+        - from:
+            - ipBlock:
+                cidr: 10.0.0.0/8
+    asserts:
+      - hasDocuments:
+          count: 4
+      - notContains:
+          path: spec.ingress
+          content:
+            ports:
+              - protocol: TCP
+                port: 8686
+              - protocol: TCP
+                port: 8620
+      - notContains:
+          path: spec.ingress
+          content:
+            ports:
+              - protocol: TCP
+                port: 8080
+      - notContains:
+          path: spec.ingress
+          content:
+            ports:
+              - protocol: TCP
+                port: 8088
+
+  - it: selects a component on every document and renders no default-deny object
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 4
+      - exists:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/component"]
+      - exists:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/instance"]
+
+  - it: follows nameOverride in every selector and fullnameOverride in names
+    values:
+      - ../values-cluster.yaml
+    set:
+      nameOverride: graphdb
+      fullnameOverride: x
+    asserts:
+      - equal:
+          path: metadata.name
+          value: x-pd
+        documentIndex: 0
+      - equal:
+          path: metadata.name
+          value: x-store
+        documentIndex: 1
+      - equal:
+          path: metadata.name
+          value: x-server
+        documentIndex: 2
+      - equal:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/name"]
+          value: graphdb
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels["app.kubernetes.io/name"]
+          value: graphdb
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["app.kubernetes.io/name"]
+          value: graphdb
+
+  - it: keeps names within 63 characters and the full release name in selectors
+    release:
+      name: abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    asserts:
+      - matchRegex:
+          path: metadata.name
+          pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+      - equal:
+          path: spec.podSelector.matchLabels["app.kubernetes.io/instance"]
+          value: abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["app.kubernetes.io/instance"]
+          value: abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc
+
+  - it: keeps two extraIngress rules in order after the chart rules
+    values:
+      - ../values-cluster.yaml
+    set:
+      networkPolicy.pd.extraIngress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: monitoring
+          ports:
+            - port: 8620
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: vermeer
+          ports:
+            - port: 8686
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-pd
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 4
+      - equal:
+          path: spec.ingress[2].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: monitoring
+      - equal:
+          path: spec.ingress[3].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: vermeer
+
+  - it: ignores Hubble extra rules while Hubble is disabled
+    values:
+      - ../values-cluster.yaml
+    set:
+      networkPolicy.hubble.extraIngress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: ops
+      networkPolicy.hubble.extraEgress:
+        - to:
+            - ipBlock:
+                cidr: 10.0.0.10/32
+    asserts:
+      - hasDocuments:
+          count: 3
+      - notContains:
+          path: spec.ingress
+          content:
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: ops
+
+  - it: treats a whitespace-only advertiseUrl as unset
+    values:
+      - ../values-cluster.yaml
+    set:
+      server.advertiseUrl: "   "
+    documentSelector:
+      path: metadata.name
+      value: RELEASE-NAME-hugegraph-server
+    asserts:
+      - lengthEqual:
+          path: spec.ingress
+          count: 1
+
+  - it: renders a component whose networkPolicy key was removed
+    values:
+      - ../values-cluster.yaml
+    set:
+      networkPolicy.pd: null
+    asserts:
+      - hasDocuments:
+          count: 3
+
+  - it: matches the reviewed cluster plus Hubble render
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+    asserts:
+      - matchSnapshot: {}
+
+  - it: appends extra rules verbatim
+    values:
+      - ../values-cluster.yaml
+    set:
+      hubble.enabled: true
+      networkPolicy.store.extraIngress:
+        - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: monitoring
+          ports:
+            - port: 8520
+      networkPolicy.hubble.extraEgress:
+        - to:
+            - ipBlock:
+                cidr: 10.0.0.10/32
+          ports:
+            - port: 9200
+    asserts:
+      - contains:
+          path: spec.ingress
+          content:
+            from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: monitoring
+            ports:
+              - port: 8520
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-store
+      - contains:
+          path: spec.egress
+          content:
+            to:
+              - ipBlock:
+                  cidr: 10.0.0.10/32
+            ports:
+              - port: 9200
+        documentSelector:
+          path: metadata.name
+          value: RELEASE-NAME-hugegraph-hubble
+
+  - it: rejects a non-boolean enabled flag through the schema
+    set:
+      networkPolicy.enabled: "yes"
+    asserts:
+      - failedTemplate:
+          errorPattern: "networkPolicy"
+
+  - it: rejects egress rules on components that take none
+    set:
+      networkPolicy.store.extraEgress:
+        - to:
+            - ipBlock:
+                cidr: 10.0.0.0/8
+    asserts:
+      - failedTemplate:
+          errorPattern: "(additional properties 'extraEgress' not allowed|Additional property extraEgress is not allowed)"
+
+  - it: rejects a non-list extraIngress
+    set:
+      networkPolicy.pd.extraIngress: "abc"
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraIngress"
+
+  - it: rejects a null extraIngress rule
+    set:
+      networkPolicy.pd.extraIngress:
+        - null
+    asserts:
+      - failedTemplate:
+          errorPattern: "extraIngress"
+
+  - it: rejects an unknown networkPolicy key
+    set:
+      networkPolicy.unknown: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "(additional properties 'unknown' not allowed|Additional property unknown is not allowed)"
+
+  - it: rejects the removed ingressControllers key
+    set:
+      networkPolicy.ingressControllers: []
+    asserts:
+      - failedTemplate:
+          errorPattern: "(additional properties 'ingressControllers' not allowed|Additional property ingressControllers is not allowed)"
+
+  - it: rejects a string enabled flag
+    set:
+      networkPolicy.enabled: "true"
+    asserts:
+      - failedTemplate:
+          errorPattern: "networkPolicy[./]enabled"
+
+  - it: rejects an extraIngress rule without from
+    set:
+      networkPolicy.server.extraIngress:
+        - ports:
+            - port: 8080
+    asserts:
+      - failedTemplate:
+          errorPattern: "(missing property 'from'|from is required)"
+
+  - it: rejects an extraIngress rule with an empty from
+    set:
+      networkPolicy.server.extraIngress:
+        - from: []
+    asserts:
+      - failedTemplate:
+          errorPattern: "(minItems|at least 1 items)"
+
+  - it: rejects an empty extraIngress rule
+    set:
+      networkPolicy.pd.extraIngress:
+        - {}
+    asserts:
+      - failedTemplate:
+          errorPattern: "(missing property 'from'|from is required)"
+
+  - it: rejects an empty peer
+    set:
+      networkPolicy.pd.extraIngress:
+        - from:
+            - {}
+    asserts:
+      - failedTemplate:
+          errorPattern: "(minProperties|at least 1 properties)"
+
+  - it: rejects a Hubble egress rule without to
+    set:
+      networkPolicy.hubble.extraEgress:
+        - ports:
+            - port: 9200
+    asserts:
+      - failedTemplate:
+          errorPattern: "(missing property 'to'|to is required)"

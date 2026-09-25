@@ -1,0 +1,255 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: "Helm Chart CI"
+
+on:
+  push:
+    branches: [ master, 'release-*' ]
+    paths: [ 'helm/**', '.github/workflows/helm-chart-ci.yml' ]
+  pull_request:
+    paths: [ 'helm/**', '.github/workflows/helm-chart-ci.yml' ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # azure/setup-helm is not on the ASF-approved actions allowlist, which
+      # fails the workflow at startup; install the pinned release directly.
+      - name: install helm
+        run: |
+          curl -fsSLo /tmp/helm.tgz https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz
+          echo "9318379b847e333460d33d291d4c088156299a26cd93d570a7f5d0c36e50b5bb  /tmp/helm.tgz" | sha256sum -c -
+          tar -xzf /tmp/helm.tgz -C /tmp
+          sudo install -m 0755 /tmp/linux-amd64/helm /usr/local/bin/helm
+          helm version
+
+      - name: helm lint
+        run: |
+          helm lint helm/hugegraph
+          helm lint helm/hugegraph -f helm/hugegraph/values-single.yaml
+          helm lint helm/hugegraph -f helm/hugegraph/values-cluster.yaml
+
+      - name: helm unittest
+        run: |
+          # v1.0.0 is the newest helm-unittest whose plugin.yaml Helm 3.16.2 can
+          # parse (v1.1.x adds a platformHooks field that 3.16.2 rejects).
+          # Pinned by the tag's commit so a moved tag cannot change what runs.
+          helm plugin install https://github.com/helm-unittest/helm-unittest.git \
+            --version ddd5feaa9465e7a3591792524ce7f441d4c5157e
+          helm unittest helm/hugegraph
+
+      - name: helm template
+        run: |
+          for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
+            # shellcheck disable=SC2086 # $preset intentionally splits into flags
+            helm template ci helm/hugegraph $preset > /dev/null
+          done
+          # Positive coverage for every hubble wrapper branch: pd mode with
+          # auth, direct mode with a custom port, and a TLS-less ingress with
+          # the explicit opt-in.
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set server.auth.enabled=true \
+            --set server.auth.admin.existingSecret=ci-auth > /dev/null
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set hubble.allowWithoutServerAuth=true \
+            --set hubble.mode=direct \
+            --set hubble.port=9090 \
+            --set hubble.persistence.enabled=true \
+            --set hubble.ingress.enabled=true \
+            --set hubble.ingress.allowPlainHttp=true > /dev/null
+          # PD sharding knobs rendered as -D system properties, including
+          # the values-file shape where the count arrives as a numeric string
+          helm template ci helm/hugegraph \
+            --set pd.partition.defaultShardCount=3 \
+            --set pd.partition.storeMaxShardCount=12 > /dev/null
+          helm template ci helm/hugegraph \
+            --set-string pd.partition.defaultShardCount=3 > /dev/null
+          # The derived shard count and the raft whitelist and RPC-timeout flags must land in
+          # the PD JAVA_OPTS verbatim: shard count 3 on the default topology,
+          # 1 on the single-node preset, whitelist disabled in both.
+          helm template ci helm/hugegraph \
+            | grep -qF 'value: "-Dpartition.default-shard-count=3 -Draft.ip-whitelist.enabled=false -Draft.rpc-timeout=3000"'
+          helm template ci helm/hugegraph -f helm/hugegraph/values-single.yaml \
+            | grep -qF 'value: "-Dpartition.default-shard-count=1 -Draft.ip-whitelist.enabled=false -Draft.rpc-timeout=3000"'
+          # The stock distributed install must put every Server replica on
+          # the shared PD graph catalog, even without Hubble. Auth is on by
+          # default, so the chart-managed admin Secret must render too.
+          DEFAULT=$(helm template ci helm/hugegraph)
+          grep -qF "printf 'usePD=true\\n'" <<<"$DEFAULT"
+          grep -qF "printf 'pd.peers=%s\\n' \"\${HG_SERVER_PD_PEERS}\"" \
+            <<<"$DEFAULT"
+          grep -qF 'value: "ci-hugegraph-pd-0.ci-hugegraph-pd.default.svc:8686,ci-hugegraph-pd-1.ci-hugegraph-pd.default.svc:8686,ci-hugegraph-pd-2.ci-hugegraph-pd.default.svc:8686"' \
+            <<<"$DEFAULT"
+          grep -qE '^kind: Secret$' <<<"$DEFAULT"
+          grep -qF 'name: ci-admin' <<<"$DEFAULT"
+          grep -qF 'name: ci-auth-token' <<<"$DEFAULT"
+          # A YAML-coercible Secret key must render quoted, or the API
+          # server stores the key as a boolean and the pods cannot find it.
+          helm template ci helm/hugegraph --set-string server.auth.admin.key=on \
+            | grep -qF '"on":'
+
+      - name: reject invalid values
+        run: |
+          # Each case must fail to render; the schema and helpers are the
+          # contract. `! cmd` alone is NOT enforced under `set -e` (errexit
+          # ignores inverted commands), so every case checks explicitly.
+          must_fail() {
+            if helm template ci helm/hugegraph "$@" >/dev/null 2>&1; then
+              echo "expected render failure for: $*" >&2
+              exit 1
+            fi
+          }
+          # Kubernetes permits successThreshold > 1 only for readiness.
+          for component in pd store server hubble; do
+            for probe in startup liveness; do
+              must_fail --set "${component}.probes.${probe}.successThreshold=2"
+            done
+            helm template ci helm/hugegraph \
+              --set "${component}.probes.readiness.successThreshold=2" > /dev/null
+          done
+          must_fail --set pd.replicas=100
+          must_fail --set pd.pdb.minAvailable=3
+          must_fail --set server.hpa.enabled=true
+          must_fail \
+            --set server.hpa.enabled=true \
+            --set server.hpa.minReplicas=2 \
+            --set server.resources.requests.cpu=100m \
+            --set server.pdb.enabled=true \
+            --set server.pdb.minAvailable=2
+          must_fail --set server.auth.enabled=true --set server.auth.admin.autoGenerate=false --set server.auth.token.autoGenerate=false
+          # pd.auth with every source disabled fails the schema anyOf; the
+          # unit framework at v1.0.0 cannot match schema aborts, so the case
+          # lives here.
+          must_fail --set pd.auth.autoGenerate=false
+          # Commons Configuration trims a properties value, so a credential
+          # with surrounding whitespace would be stored in the Secret and
+          # applied to the account without it. The schema rejects both ends;
+          # these are schema aborts, so they live here rather than in the
+          # unit suite. --set-string keeps the value a string.
+          must_fail --set-string "server.auth.admin.password=review-secret "
+          must_fail --set-string "$(printf 'server.auth.admin.password=review-secret\t')"
+          must_fail --set-string "pd.auth.value=review-secret "
+          # An inner space stays legal: only the trimmed ends are the problem.
+          helm template ci helm/hugegraph \
+            --set-string "server.auth.admin.password=review secret" >/dev/null
+          # Auth defaults to on, so Hubble alone is valid; refuse Hubble only
+          # when authentication is explicitly disabled.
+          must_fail --set hubble.enabled=true --set server.auth.enabled=false
+          A=(--set hubble.enabled=true --set hubble.allowWithoutServerAuth=true)
+          must_fail "${A[@]}" --set hubble.port=0
+          must_fail "${A[@]}" \
+            --set hubble.persistence.enabled=true \
+            --set hubble.persistence.size=""
+          must_fail "${A[@]}" --set hubble.service.nodePort=30080
+          must_fail "${A[@]}" --set hubble.mode=bogus
+          must_fail "${A[@]}" --set hubble.image.tag=""
+          must_fail "${A[@]}" --set hubble.ingress.enabled=true
+          # A TLS-less Server Ingress needs the explicit plain-HTTP opt-in
+          must_fail --set server.ingress.enabled=true
+          helm template ci helm/hugegraph \
+            --set server.ingress.enabled=true \
+            --set server.ingress.allowPlainHttp=true > /dev/null
+          # Kubernetes refuses a StatefulSet that carries rollingUpdate
+          # options with updateStrategy OnDelete; the schema rejects the
+          # combination up front (a schema abort, so it lives here).
+          for component in pd store; do
+            must_fail \
+              --set "${component}.updateStrategy.type=OnDelete" \
+              --set "${component}.updateStrategy.rollingUpdate.partition=1"
+            helm template ci helm/hugegraph \
+              --set "${component}.updateStrategy.type=OnDelete" > /dev/null
+          done
+          # PD PDB must keep the Raft majority: floor(replicas/2)+1
+          must_fail --set pd.replicas=5 --set pd.pdb.minAvailable=2
+          must_fail --set pd.replicas=4 --set pd.pdb.minAvailable=2
+          helm template ci helm/hugegraph \
+            --set pd.replicas=5 --set pd.pdb.minAvailable=3 > /dev/null
+          helm template ci helm/hugegraph \
+            --set pd.replicas=5 --set pd.pdb.minAvailable=4 > /dev/null
+          # PD sharding knobs: empty or a positive integer; an explicit
+          # shard count must be odd and stay within the store count
+          must_fail --set pd.partition.defaultShardCount=0
+          must_fail --set pd.partition.defaultShardCount=-1
+          must_fail --set-string pd.partition.defaultShardCount=abc
+          must_fail --set pd.partition.defaultShardCount=2
+          must_fail --set pd.partition.defaultShardCount=5
+          must_fail --set pd.partition.storeMaxShardCount=0
+          # extraEnv must not override chart-managed variables
+          must_fail --set 'server.extraEnv[0].name=HG_SERVER_INIT_STORE_ENABLED' \
+            --set 'server.extraEnv[0].value=true'
+          must_fail --set 'pd.extraEnv[0].name=HG_PD_RAFT_PEERS_LIST' \
+            --set 'pd.extraEnv[0].value=x'
+          must_fail --set 'store.extraEnv[0].name=HG_STORE_PD_ADDRESS' \
+            --set 'store.extraEnv[0].value=x'
+          # JAVA_OPTIONS is reserved: a preset value makes the start scripts
+          # skip auto heap sizing and drop the chart's JAVA_OPTS entirely
+          must_fail --set 'pd.extraEnv[0].name=JAVA_OPTIONS' \
+            --set 'pd.extraEnv[0].value=-Xmx1g'
+
+      - name: kubeconform
+        shell: bash
+        run: |
+          set -o pipefail
+          curl -sSLo /tmp/kc.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kc.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/kc.tar.gz -C /tmp
+          for preset in "" "-f helm/hugegraph/values-single.yaml" "-f helm/hugegraph/values-cluster.yaml"; do
+            # shellcheck disable=SC2086 # $preset intentionally splits into flags
+            helm template ci helm/hugegraph $preset | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+          done
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set hubble.allowWithoutServerAuth=true \
+            --set hubble.mode=direct \
+            --set hubble.port=9090 \
+            --set hubble.persistence.enabled=true \
+            --set hubble.ingress.enabled=true \
+            --set hubble.ingress.allowPlainHttp=true \
+            | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+          helm template ci helm/hugegraph \
+            --set hubble.enabled=true \
+            --set server.auth.enabled=true \
+            --set server.auth.admin.existingSecret=ci-auth \
+            | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+          helm template ci helm/hugegraph \
+            --set pd.partition.defaultShardCount=3 \
+            --set pd.partition.storeMaxShardCount=12 \
+            | /tmp/kubeconform -strict -summary -kubernetes-version 1.23.0
+
+      - name: legacy --reuse-values compatibility
+        run: |
+          # A release created before a field existed must still render. This has
+          # regressed five times, so it is guarded here rather than by review.
+          # `-f` is NOT equivalent: it merges over the new defaults, whereas
+          # --reuse-values discards them, so the fixture must become values.yaml.
+          cp -R helm/hugegraph /tmp/legacy
+          cp helm/hugegraph/testdata/values-pre-hardening.yaml /tmp/legacy/values.yaml
+          helm template legacy /tmp/legacy > /dev/null
+          helm template legacy /tmp/legacy --is-upgrade > /dev/null
+
+      - name: helm package
+        run: helm package helm/hugegraph -d /tmp/chart

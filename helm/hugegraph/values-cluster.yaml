@@ -1,0 +1,138 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Production starting point: 3 Server + 3 PD + 3 Store.
+# Size this profile again for the real graph, traffic, and failure budget.
+# Usage: helm install hg ./helm/hugegraph -f values-cluster.yaml
+
+pd:
+  replicas: 3
+  javaOpts: >-
+    -Xms256m -Xmx512m
+    -XX:MaxMetaspaceSize=256m
+    -XX:MaxDirectMemorySize=256m
+    -XX:+UseContainerSupport
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # Pinned to "required": production must not co-locate PD quorum members.
+  antiAffinity: required
+  pdb:
+    enabled: true
+    minAvailable: 2
+  storage:
+    size: 10Gi
+
+store:
+  replicas: 3
+  javaOpts: >-
+    -Xms512m -Xmx1024m
+    -XX:MaxMetaspaceSize=256m
+    -XX:MaxDirectMemorySize=512m
+    -XX:+UseContainerSupport
+  # The Store commits far more than its heap. conf/application-pd.yml, which
+  # the shipped conf/application.yml includes as a Spring profile, sets
+  # rocksdb.total_memory_size to 32000000000, and RaftRocksdbOptions splits
+  # that value into a RocksDB write cache and block cache, so those native
+  # caches are bounded by 32 GB rather than by the container. On top of that
+  # the jraft log storage registers its own 1 GiB LRU block cache once per
+  # process, plus heap, direct memory, metaspace and about a thousand threads.
+  # A 4Gi limit was below the steady state and OOM-killed all three Stores
+  # after roughly 1 GB of data; 8Gi holds, with 4.42 GiB anonymous RSS
+  # measured on k3s (2026-09-19). The limit bounds the damage, it does not
+  # bound RocksDB: the chart cannot set rocksdb.total_memory_size today,
+  # because the Store entrypoint rebuilds SPRING_APPLICATION_JSON from its
+  # own variables and no conf file is mounted. Raise both numbers together
+  # with the data size, or lower the RocksDB budget in a custom image.
+  resources:
+    requests:
+      cpu: "1"
+      memory: 5Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  waitResources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 250m
+      memory: 64Mi
+  # Pinned to "required": production must not co-locate shard replicas.
+  antiAffinity: required
+  pdb:
+    enabled: true
+    minAvailable: 2
+  storage:
+    size: 50Gi
+
+server:
+  replicas: 3
+  javaOpts: >-
+    -Xms512m -Xmx1024m
+    -XX:MaxMetaspaceSize=256m
+    -XX:MaxDirectMemorySize=256m
+    -XX:+UseContainerSupport
+  resources:
+    requests:
+      cpu: "1"
+      memory: 1Gi
+    limits:
+      cpu: "4"
+      memory: 2Gi
+  hpa:
+    enabled: false
+  # Keep at least two Servers through voluntary evictions such as node
+  # drains; the default leaves the PDB off because Server holds no quorum.
+  pdb:
+    enabled: true
+    minAvailable: 2
+  # Auth is on by default (chart-managed admin Secret). Pin it here so a
+  # production overlay cannot accidentally drop authentication.
+  auth:
+    enabled: true
+    admin:
+      autoGenerate: true
+    token:
+      autoGenerate: true
+
+# The optional Hubble UI is not enabled here: authentication is already on
+# by default, so turn Hubble on with --set hubble.enabled=true (or the
+# snippet below) when the browser UI is wanted. Current Hubble images still
+# refuse to render if server.auth is explicitly disabled.
+#
+# hubble:
+#   enabled: true
+#   persistence:
+#     enabled: true
+#     size: 1Gi
+#   resources:
+#     requests:
+#       cpu: 250m
+#       memory: 768Mi
+#     limits:
+#       cpu: "1"
+#       memory: 1536Mi
+
+# Production-shaped installs isolate the release; list outside clients in
+# networkPolicy.<component>.extraIngress (see README, NetworkPolicy).
+networkPolicy:
+  enabled: true

@@ -1,0 +1,89 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Each rollout checksum picks its revision input by credential source. These
+# cases pin the exact digest, so they fail if the parts list changes at all,
+# not merely if it stops being 64 hex characters. Each expected value is
+# sha256 of the parts joined with "|", computed outside Helm:
+#
+#   inline PD value   sha256("t-pd-auth|secret-key|" + sha256(value))
+#   PD existingSecret sha256("byo-pd-secret|secret-key")
+#
+# The existingSecret cases are the ones that prove the selection: the inline
+# value is set there too, and it must not reach the annotation, because the
+# Pods do not read it.
+#
+# A render has no live Secret, so these cases cover the inline half only. The
+# lookup half, where mixing a live resourceVersion into an inline rotation
+# caused a second rollout on the following no-change upgrade, is observable
+# only against a cluster and belongs to the lifecycle run.
+suite: Rollout checksum revision source
+release:
+  name: t
+tests:
+  - it: hashes the inline PD value with the Secret name and key, and nothing else
+    template: pd-statefulset.yaml
+    set:
+      pd.auth.value: pd-secret-steady
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/pd-auth"]
+          value: c3e18a4d518ea495ef75e4fec03a68675b23ef0be93714e7a777fbb50a5957c1
+
+  - it: drops the inline PD digest once an existingSecret supplies the credential
+    template: pd-statefulset.yaml
+    set:
+      pd.auth.existingSecret: byo-pd-secret
+      pd.auth.value: ignored-by-the-pods
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/pd-auth"]
+          value: 86fdc89040752c37324032343cd1d9a53ca23a46f724689dd61c2f5f829c0d33
+
+  - it: hashes both inline Server credentials with their Secret names and keys
+    template: server-deployment.yaml
+    set:
+      server.auth.admin.password: admin-after
+      server.auth.token.value: 0123456789abcdef0123456789abcdef
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          value: d6ce6518e8b740a46bbacf0b55e4094580048c87912c85f21448b701f972fd72
+
+  - it: selects the admin and token sources independently
+    template: server-deployment.yaml
+    set:
+      server.auth.admin.existingSecret: byo-admin
+      server.auth.admin.password: ignored-by-the-pods
+      server.auth.token.value: 0123456789abcdef0123456789abcdef
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          value: 7f13191bccb01ef3b2c6ffcce2fc6b6a73a6c6416583dcc4c593a5cfde1a24a0
+
+  - it: keeps credential plaintext out of the annotation
+    template: server-deployment.yaml
+    set:
+      server.auth.admin.password: admin-plaintext-value
+      server.auth.token.value: 0123456789abcdef0123456789abcdef
+    asserts:
+      - notMatchRegex:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          pattern: admin-plaintext-value
+      - notMatchRegex:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          pattern: 0123456789abcdef0123456789abcdef
