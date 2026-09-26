@@ -89,13 +89,18 @@ props_get() {
     printf '%s' "${value}"
 }
 
-props_set() {
-    # The only values written here are Java class names, whose characters need
-    # no properties escaping; anything else would have to go through the
-    # entrypoint's encoder first.
-    case "$2" in
-        *[!A-Za-z0-9_\.\$]*) fail "refusing to write an unescaped value: $2" ;;
+# The character check for every class this script writes.  Java class names need
+# no properties escaping; anything else would have to go through the entrypoint's
+# encoder first.  It is one function rather than a pattern at each call site so
+# the early refusal below and the write cannot drift apart.
+check_class_name() {
+    case "$1" in
+        *[!A-Za-z0-9_\.\$]*) fail "refusing to write an unescaped value: $1" ;;
     esac
+}
+
+props_set() {
+    check_class_name "$2"
     PROPS_MODE=set PROPS_KEY="$1" PROPS_VALUE_ENCODED="$2" PROPS_FILE="$3" \
         awk -f "${PROPS_AWK}" /dev/null || fail "cannot update $3"
 }
@@ -162,6 +167,17 @@ append_lines() {
 }
 
 AUTHENTICATOR_CLASS="${AUTHENTICATOR_CLASS:-org.apache.hugegraph.auth.StandardAuthenticator}"
+
+# Refused here, before the first write, rather than at props_set's check when the
+# value reaches rest-server.properties.  That check ran one statement after the
+# yaml block below carried the same class into gremlin-server.yaml, so a value
+# with a space in it left the yaml naming a class no server can load beside an
+# untouched REST config -- the one-sided tree the entrypoint's check_auth_sides
+# then stops the next boot on.  It did not self-repair either: once the yaml
+# reads as `named` the append is skipped, so re-running with the variable fixed
+# or unset wrote the default to REST only, exited 0, and left the two servers
+# authenticating to different classes.
+check_class_name "${AUTHENTICATOR_CLASS}"
 
 # Does the Gremlin config carry a top-level `authentication` mapping, and does
 # that mapping name an authenticator?  This is the same question

@@ -622,6 +622,78 @@ class_dir="${test_dir}/authenticator-class"
         "${class_dir}/default/conf/rest-server.properties"
     grep -q '^  authenticator: org\.apache\.hugegraph\.auth\.StandardAuthenticator,$' \
         "${class_dir}/default/conf/gremlin-server.yaml"
+
+    # refused_class <dir> <desc>: a class the writer would reject has to be
+    # rejected before any config is touched, and the tree has to still be
+    # workable afterwards.  The character check used to sit only in props_set,
+    # which runs at the rest-server.properties write one statement after the
+    # yaml block was appended with that same class, so a refused value left
+    # gremlin-server.yaml naming a class no server can load beside an empty
+    # REST config -- the one-sided tree check_auth_sides stops the next boot on.
+    # It did not self-repair: the yaml then reads as `named`, so the append was
+    # skipped and a rerun with the variable fixed wrote the default to REST only
+    # and exited 0, leaving the two servers on different authenticators.
+    refused_class() {
+        local dir="$1" desc="$2"
+        (
+            cd "${dir}" || exit 1
+            if AUTHENTICATOR_CLASS='com.example.My Auth' ./bin/enable-auth.sh; then
+                echo "${desc}: enable-auth.sh must refuse a class its writer rejects" >&2
+                exit 1
+            fi
+            if [[ -s conf/rest-server.properties ]]; then
+                echo "${desc}: a refused class still wrote rest-server.properties" >&2
+                exit 1
+            fi
+            if grep -Eq '^[[:blank:]]*authenticator[[:blank:]]*:' conf/gremlin-server.yaml; then
+                echo "${desc}: a refused class still edited gremlin-server.yaml" >&2
+                exit 1
+            fi
+            if grep -q 'HugeFactoryAuthProxy' conf/graphs/hugegraph.properties; then
+                echo "${desc}: a refused class still wrapped the graph factory" >&2
+                exit 1
+            fi
+            # Nothing was left behind, so the corrected run arms both sides with
+            # one class rather than adopting the half-written tree.
+            unset AUTHENTICATOR_CLASS
+            if ! ./bin/enable-auth.sh; then
+                echo "${desc}: enable-auth.sh failed on the tree a refused run left" >&2
+                exit 1
+            fi
+            if ! grep -q \
+                '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+                conf/rest-server.properties; then
+                echo "${desc}: the corrected run wrote no class to REST" >&2
+                exit 1
+            fi
+            if ! grep -q \
+                '^  authenticator: org\.apache\.hugegraph\.auth\.StandardAuthenticator,$' \
+                conf/gremlin-server.yaml; then
+                echo "${desc}: the corrected run named no class in the yaml" >&2
+                exit 1
+            fi
+        )
+    }
+
+    refused_tree() {
+        local dir="$1" with_scan="$2"
+        mkdir -p "${dir}/conf/graphs"
+        install_enable_auth "${dir}"
+        if [[ "${with_scan}" == "no-yamlscan" ]]; then
+            rm -f "${dir}/yamlscan.awk"
+        fi
+        printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+            > "${dir}/conf/graphs/hugegraph.properties"
+        : > "${dir}/conf/rest-server.properties"
+        : > "${dir}/conf/gremlin-server.yaml"
+    }
+
+    # Both layouts, because the append happens in both: the image has the real
+    # reader, the plain tarball answers `none` from grep on an empty file.
+    refused_tree "${class_dir}/refused-image" yes
+    refused_class "${class_dir}/refused-image" "image layout (yamlscan.awk present)"
+    refused_tree "${class_dir}/refused-tarball" no-yamlscan
+    refused_class "${class_dir}/refused-tarball" "release tarball (no yamlscan.awk)"
 )
 
 # An empty mounted config still gets its definitions.  GNU sed's `$`
