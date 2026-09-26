@@ -30,6 +30,7 @@ import org.apache.hugegraph.store.node.util.HgStoreNodeUtil;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +55,9 @@ public class ScanBatchOneShotResponse {
 
         String graph = request.getHeader().getGraph();
         ScanQueryRequest queryRequest = request.getQueryRequest();
+        if (Context.current().isCancelled()) {
+            return;
+        }
         ScanIterator iterator = getIterator(graph, queryRequest, wrapper);
 
         KvPageRes.Builder resBuilder = KvPageRes.newBuilder();
@@ -70,7 +74,8 @@ public class ScanBatchOneShotResponse {
         int count = 0;
 
         try {
-            while (iterator.hasNext()) {
+            while (!Context.current().isCancelled() &&
+                   !Thread.currentThread().isInterrupted() && iterator.hasNext()) {
 
                 if (++count > limit) {
                     break;
@@ -86,6 +91,9 @@ public class ScanBatchOneShotResponse {
 
             }
 
+            if (Context.current().isCancelled()) {
+                return;
+            }
             responseObserver.onNext(resBuilder.build());
             responseObserver.onCompleted();
 

@@ -40,6 +40,7 @@ import java.util.function.Supplier;
 import javax.security.sasl.AuthenticationException;
 
 import org.apache.commons.configuration2.Configuration;
+import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.HugeAuthenticator.RolePerm;
 import org.apache.hugegraph.auth.HugeAuthenticator.User;
@@ -1296,11 +1297,17 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     static class ContextTask implements Runnable {
 
         private final Runnable runner;
+        private final Runnable cleanup;
         private final Context context;
 
         public ContextTask(Runnable runner) {
+            this(runner, HugeFactory::closeCurrentThreadTransactions);
+        }
+
+        ContextTask(Runnable runner, Runnable cleanup) {
             this.context = getContext();
             this.runner = runner;
+            this.cleanup = cleanup;
         }
 
         @Override
@@ -1309,7 +1316,13 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             try {
                 this.runner.run();
             } finally {
-                resetContext();
+                try {
+                    this.cleanup.run();
+                } catch (Throwable e) {
+                    LOG.error("Failed to close Gremlin worker transactions", e);
+                } finally {
+                    resetContext();
+                }
             }
         }
     }

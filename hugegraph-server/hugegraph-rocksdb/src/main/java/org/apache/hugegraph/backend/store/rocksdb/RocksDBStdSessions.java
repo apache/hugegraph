@@ -18,6 +18,8 @@
 package org.apache.hugegraph.backend.store.rocksdb;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -83,23 +85,28 @@ public class RocksDBStdSessions extends RocksDBSessions {
     private final AtomicInteger refCount;
 
     public RocksDBStdSessions(HugeConfig config, String database, String store,
-                              String dataPath, String walPath) throws RocksDBException {
+                              String dataPath, String walPath) throws
+                                                               RocksDBException {
         super(config, database, store);
         this.config = config;
         this.dataPath = dataPath;
         this.walPath = walPath;
+
         this.rocksdb = RocksDBStdSessions.openRocksDB(config, dataPath, walPath);
         this.refCount = new AtomicInteger(1);
     }
 
     public RocksDBStdSessions(HugeConfig config, String database, String store,
                               String dataPath, String walPath,
-                              List<String> cfNames) throws RocksDBException {
+                              List<String> cfNames) throws
+                                                    RocksDBException {
         super(config, database, store);
         this.config = config;
         this.dataPath = dataPath;
         this.walPath = walPath;
-        this.rocksdb = RocksDBStdSessions.openRocksDB(config, cfNames, dataPath, walPath);
+
+        this.rocksdb =
+                RocksDBStdSessions.openRocksDB(config, cfNames, dataPath, walPath);
         this.refCount = new AtomicInteger(1);
 
         this.ingestExternalFile();
@@ -275,6 +282,13 @@ public class RocksDBStdSessions extends RocksDBSessions {
             // Move snapshot directory to origin data directory
             FileUtils.moveDirectory(snapshotDir, originDataDir);
             LOG.info("Move snapshot directory {} to {}", snapshotDir, originDataDir);
+            /*
+             * Checkpoint copies a trimmed WAL tail into the data directory.
+             * Recovery reads only a separate WAL directory, so install that
+             * tail there. The live directory is moved aside first; failing
+             * to delete the retired copy must not restore its logs.
+             */
+            this.replaceSeparateWalDirectory();
             // Reload rocksdb instance
             this.reloadRocksDB();
         } catch (Exception e) {
@@ -334,6 +348,144 @@ public class RocksDBStdSessions extends RocksDBSessions {
         E.checkState(this.rocksdb.isOwningHandle(), "It seems RocksDB has been closed");
     }
 
+    private void replaceSeparateWalDirectory() throws IOException {
+        if (this.walPath == null || this.walPath.isEmpty()) {
+            return;
+        }
+        File walDir = new File(this.walPath);
+        File dataDir = new File(this.dataPath);
+        String walCanonical = walDir.getCanonicalPath();
+        String dataCanonical = dataDir.getCanonicalPath();
+        if (walCanonical.equals(dataCanonical)) {
+            return;
+        }
+        if (!dataDir.isDirectory()) {
+            throw new IOException("Snapshot data directory is missing: " +
+                                  dataDir);
+        }
+        File[] dataChildren = dataDir.listFiles();
+        if (dataChildren == null) {
+            throw new IOException("Cannot list snapshot directory " + dataDir);
+        }
+        List<File> checkpointLogs = new ArrayList<>();
+        for (File child : dataChildren) {
+            if (child.isFile() && isWalLogName(child.getName())) {
+                checkpointLogs.add(child);
+            }
+        }
+        if (dataCanonical.startsWith(walCanonical + File.separator)) {
+            this.replaceLogsWithoutMovingWal(walDir, checkpointLogs);
+            return;
+        }
+        String token = Long.toString(System.nanoTime());
+        File retired = new File(walDir.getPath() + ".resume-aside-" + token);
+        File staging = new File(walDir.getPath() + ".resume-staging-" + token);
+        if (walDir.exists() && !walDir.renameTo(retired)) {
+            throw new IOException("Failed to move WAL directory " + walDir +
+                                  " aside to " + retired);
+        }
+        try {
+            FileUtils.forceMkdir(staging);
+            for (File log : checkpointLogs) {
+                FileUtils.copyFile(log, new File(staging, log.getName()));
+            }
+            if (walDir.exists() || !staging.renameTo(walDir)) {
+                throw new IOException("Failed to publish WAL directory " +
+                                      staging);
+            }
+        } catch (IOException e) {
+            this.deleteRetiredWal(staging);
+            throw e;
+        }
+        for (File log : checkpointLogs) {
+            if (!log.delete()) {
+                LOG.warn("Failed to remove checkpoint WAL {}", log);
+            }
+        }
+        LOG.info("Replaced separate WAL directory {} with {} checkpoint log(s)",
+                 walDir, checkpointLogs.size());
+        this.deleteRetiredWal(retired);
+    }
+
+
+    private void replaceLogsWithoutMovingWal(File walDir,
+                                              List<File> checkpointLogs)
+                                              throws IOException {
+        String token = Long.toString(System.nanoTime());
+        File retired = new File(walDir.getPath() + ".resume-aside-" + token);
+        File staging = new File(walDir.getPath() + ".resume-staging-" + token);
+        FileUtils.forceMkdir(staging);
+        try {
+            for (File log : checkpointLogs) {
+                FileUtils.copyFile(log, new File(staging, log.getName()));
+            }
+            File[] liveChildren = walDir.listFiles();
+            if (liveChildren == null) {
+                throw new IOException("Cannot list WAL directory " + walDir);
+            }
+            FileUtils.forceMkdir(retired);
+            for (File child : liveChildren) {
+                if (!child.isFile() || !isWalLogName(child.getName())) {
+                    continue;
+                }
+                File dest = new File(retired, child.getName());
+                if (!child.renameTo(dest)) {
+                    throw new IOException("Failed to retire WAL log " + child);
+                }
+            }
+            File[] staged = staging.listFiles();
+            if (staged == null) {
+                throw new IOException("Cannot list staging WAL " + staging);
+            }
+            for (File stagedLog : staged) {
+                File dest = new File(walDir, stagedLog.getName());
+                if (!stagedLog.renameTo(dest)) {
+                    throw new IOException("Failed to publish WAL log " +
+                                          stagedLog);
+                }
+            }
+        } catch (IOException e) {
+            this.deleteRetiredWal(staging);
+            throw e;
+        }
+        for (File log : checkpointLogs) {
+            if (!log.delete()) {
+                LOG.warn("Failed to remove checkpoint WAL {}", log);
+            }
+        }
+        LOG.info("Replaced WAL logs in {} with {} checkpoint log(s)",
+                 walDir, checkpointLogs.size());
+        this.deleteRetiredWal(retired);
+        this.deleteRetiredWal(staging);
+    }
+
+    private static boolean isWalLogName(String name) {
+        int dot = name.lastIndexOf('.');
+        if (dot <= 0 || !".log".equals(name.substring(dot))) {
+            return false;
+        }
+        for (int i = 0; i < dot; i++) {
+            if (!Character.isDigit(name.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void deleteRetiredWal(File retired) {
+        try {
+            if (Files.isSymbolicLink(retired.toPath())) {
+                Files.delete(retired.toPath());
+                return;
+            }
+            if (retired.exists()) {
+                FileUtils.deleteDirectory(retired);
+            }
+        } catch (IOException e) {
+            LOG.warn("Failed to delete retired WAL directory {}", retired, e);
+        }
+    }
+
     private RocksDB rocksdb() {
         this.checkValid();
         return this.rocksdb.rocksdb();
@@ -366,25 +518,25 @@ public class RocksDBStdSessions extends RocksDBSessions {
     }
 
     private static OpenedRocksDB openRocksDB(HugeConfig config, String dataPath,
-                                             String walPath) throws RocksDBException {
+                                             String walPath) throws
+                                                             RocksDBException {
         // Init options
         Options options = new Options();
         RocksDBStdSessions.initOptions(config, options, options, options, options);
         options.setWalDir(walPath);
         SstFileManager sstFileManager = new SstFileManager(Env.getDefault());
         options.setSstFileManager(sstFileManager);
-        /*
-         * Open RocksDB at the first time
-         * Don't merge old CFs, we expect a clear DB when using this one
-         */
+
         RocksDB rocksdb = RocksDB.open(options, dataPath);
+
         Map<String, OpenedRocksDB.CFHandle> cfs = new ConcurrentHashMap<>();
         return new OpenedRocksDB(rocksdb, cfs, sstFileManager);
     }
 
     private static OpenedRocksDB openRocksDB(HugeConfig config,
                                              List<String> cfNames, String dataPath,
-                                             String walPath) throws RocksDBException {
+                                             String walPath) throws
+                                                             RocksDBException {
         // Old CFs should always be opened
         Set<String> mergedCFs = RocksDBStdSessions.mergeOldCFs(dataPath,
                                                                cfNames);
@@ -407,9 +559,9 @@ public class RocksDBStdSessions extends RocksDBSessions {
         }
         SstFileManager sstFileManager = new SstFileManager(Env.getDefault());
         options.setSstFileManager(sstFileManager);
-
         // Open RocksDB with CFs
         List<ColumnFamilyHandle> cfhs = new ArrayList<>();
+
         RocksDB rocksdb = RocksDB.open(options, dataPath, cfds, cfhs);
 
         E.checkState(cfhs.size() == cfs.size(),

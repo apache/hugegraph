@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
+import org.apache.hugegraph.pd.StoreNodeService;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.Pdpb;
@@ -65,7 +66,7 @@ public class IndexAPI extends API {
 
         BriefStatistics statistics = new BriefStatistics();
         statistics.leader = RaftEngine.getInstance().getLeaderGrpcAddress();
-        statistics.state = pdService.getStoreNodeService().getClusterStats().getState().toString();
+        statistics.state = this.clusterState();
 
         // Use pdService (consistent with cluster()) rather than RaftEngine directly
         CallStreamObserverWrap<Pdpb.GetMembersResponse> membersResp =
@@ -100,6 +101,19 @@ public class IndexAPI extends API {
     }
 
     /**
+     * Recompute cluster state from the replicated store list. Registration and
+     * heartbeats update the cache only on the raft leader, so a follower can
+     * keep either the constructor value {@code Cluster_Not_Ready} or a stale
+     * {@code Cluster_OK} from an earlier term. {@code /v1/ready} stays the raft
+     * probe and does not call this method.
+     */
+    String clusterState() {
+        StoreNodeService stores = this.pdService.getStoreNodeService();
+        stores.checkStoreStatus();
+        return stores.getClusterStats().getState().toString();
+    }
+
+    /**
      * Get cluster statistics
      * Obtain various statistics about the cluster by calling related services, including node status, member list, storage information, graph information, etc.,
      * and return them as a Statistics object.
@@ -109,13 +123,13 @@ public class IndexAPI extends API {
      * @throws ExecutionException If an exception occurs during task execution, this exception is thrown
      * @throws PDException If an exception occurs while processing cluster statistics, such as service call failure or data processing errors, a PDException exception is thrown
      */
+
     @GetMapping(value = "/v1/cluster", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public RestApiResponse cluster() throws InterruptedException, ExecutionException {
         Statistics statistics = new Statistics();
         try {
-            statistics.state =
-                    String.valueOf(pdService.getStoreNodeService().getClusterStats().getState());
+            statistics.state = this.clusterState();
             String leaderGrpcAddress = RaftEngine.getInstance().getLeaderGrpcAddress();
             CallStreamObserverWrap<Pdpb.GetMembersResponse> response =
                     new CallStreamObserverWrap<>();

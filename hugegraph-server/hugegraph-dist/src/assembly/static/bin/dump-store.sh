@@ -51,5 +51,5 @@ echo "Dumping HugeGraph Store($conf)..."
 
 dump_store_ext_jar_path=$LIB/hugegraph-dist-*.jar
 for i in $LIB/*.jar; do dump_store_ext_jar_path=$dump_store_ext_jar_path:$i;  export dump_store_ext_jar_path; done
-exec "$JAVA" -cp "$dump_store_ext_jar_path" \
+exec "$JAVA" "-Dlog4j.configurationFile=${CONF}/log4j2.xml" -cp "$dump_store_ext_jar_path" \
 org.apache.hugegraph.cmd.StoreDumper "$@"

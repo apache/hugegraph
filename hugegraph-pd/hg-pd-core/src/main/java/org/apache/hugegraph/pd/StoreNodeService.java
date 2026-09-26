@@ -858,6 +858,10 @@ public class StoreNodeService {
 
         } catch (PDException e) {
             log.error("StoreNodeService updateClusterStatus exception {}", e);
+            // A failed read must not replace the previous state with the
+            // builder's initial Cluster_OK. REST refreshes a stale
+            // Cluster_Not_Ready from this method.
+            return;
         }
         this.clusterStats = builder.setTimestamp(System.currentTimeMillis()).build();
         if (this.clusterStats.getState() != Metapb.ClusterState.Cluster_OK) {

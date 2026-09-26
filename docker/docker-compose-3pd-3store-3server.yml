@@ -23,17 +23,23 @@ networks:
 
 volumes:
   hg-pd0-data:
+  hg-pd0-topling-data:
   hg-pd1-data:
+  hg-pd1-topling-data:
   hg-pd2-data:
+  hg-pd2-topling-data:
   hg-store0-data:
+  hg-store0-topling-data:
   hg-store1-data:
+  hg-store1-topling-data:
   hg-store2-data:
+  hg-store2-topling-data:
   hubble-data:
 
 # ── Shared service defaults ──────────────────────────────────────────
 x-pd-common: &pd-common
-  image: hugegraph/pd:${HUGEGRAPH_VERSION:-latest}
-  pull_policy: missing
+  image: ${HUGEGRAPH_PD_IMAGE:-hugegraph/pd:${HUGEGRAPH_VERSION:-latest}}
+  pull_policy: ${HUGEGRAPH_PD_PULL_POLICY:-${HUGEGRAPH_PULL_POLICY:-missing}}
   restart: unless-stopped
   networks: [hg-net]
   healthcheck:
@@ -44,8 +50,8 @@ x-pd-common: &pd-common
     start_period: 120s
 
 x-store-common: &store-common
-  image: hugegraph/store:${HUGEGRAPH_VERSION:-latest}
-  pull_policy: missing
+  image: ${HUGEGRAPH_STORE_IMAGE:-hugegraph/store:${HUGEGRAPH_VERSION:-latest}}
+  pull_policy: ${HUGEGRAPH_STORE_PULL_POLICY:-${HUGEGRAPH_PULL_POLICY:-missing}}
   restart: unless-stopped
   networks: [hg-net]
   depends_on:
@@ -77,8 +83,8 @@ x-server-environment: &server-environment
   PD_AUTH_PASSWORD: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
 
 x-server-common: &server-common
-  image: hugegraph/server:${HUGEGRAPH_VERSION:-latest}
-  pull_policy: missing
+  image: ${HUGEGRAPH_SERVER_IMAGE:-hugegraph/server:${HUGEGRAPH_VERSION:-latest}}
+  pull_policy: ${HUGEGRAPH_SERVER_PULL_POLICY:-missing}
   restart: unless-stopped
   networks: [hg-net]
   depends_on:
@@ -110,12 +116,14 @@ services:
       HG_PD_RAFT_ADDRESS: pd0:8610
       HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
-      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_DATA_PATH: ${HG_PD_DATA_PATH:-/hugegraph-pd/pd_data}
+      HG_PD_ROCKSDB_PROVIDER: ${HG_PD_ROCKSDB_PROVIDER:-rocksdb}
+      HG_PD_ENFORCE_PROVIDER_MARKER: ${HG_PD_ENFORCE_PROVIDER_MARKER:-false}
       HG_PD_INITIAL_STORE_COUNT: 3
       HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
     ports: ["8620:8620", "8686:8686"]
     volumes:
-      - hg-pd0-data:/hugegraph-pd/pd_data
+      - ${HUGEGRAPH_PD0_VOLUME:-hg-pd0-data}:${HG_PD_DATA_PATH:-/hugegraph-pd/pd_data}
 
   pd1:
     <<: *pd-common
@@ -129,12 +137,14 @@ services:
       HG_PD_RAFT_ADDRESS: pd1:8610
       HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
-      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_DATA_PATH: ${HG_PD_DATA_PATH:-/hugegraph-pd/pd_data}
+      HG_PD_ROCKSDB_PROVIDER: ${HG_PD_ROCKSDB_PROVIDER:-rocksdb}
+      HG_PD_ENFORCE_PROVIDER_MARKER: ${HG_PD_ENFORCE_PROVIDER_MARKER:-false}
       HG_PD_INITIAL_STORE_COUNT: 3
       HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
     ports: ["8621:8620", "8687:8686"]
     volumes:
-      - hg-pd1-data:/hugegraph-pd/pd_data
+      - ${HUGEGRAPH_PD1_VOLUME:-hg-pd1-data}:${HG_PD_DATA_PATH:-/hugegraph-pd/pd_data}
 
   pd2:
     <<: *pd-common
@@ -148,12 +158,14 @@ services:
       HG_PD_RAFT_ADDRESS: pd2:8610
       HG_PD_RAFT_PEERS_LIST: pd0:8610,pd1:8610,pd2:8610
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
-      HG_PD_DATA_PATH: /hugegraph-pd/pd_data
+      HG_PD_DATA_PATH: ${HG_PD_DATA_PATH:-/hugegraph-pd/pd_data}
+      HG_PD_ROCKSDB_PROVIDER: ${HG_PD_ROCKSDB_PROVIDER:-rocksdb}
+      HG_PD_ENFORCE_PROVIDER_MARKER: ${HG_PD_ENFORCE_PROVIDER_MARKER:-false}
       HG_PD_INITIAL_STORE_COUNT: 3
       HG_PD_AUTH_SECRET_KEY: ${HG_PD_AUTH_SECRET_KEY:?set HG_PD_AUTH_SECRET_KEY in .env; see docker/README.md}
     ports: ["8622:8620", "8688:8686"]
     volumes:
-      - hg-pd2-data:/hugegraph-pd/pd_data
+      - ${HUGEGRAPH_PD2_VOLUME:-hg-pd2-data}:${HG_PD_DATA_PATH:-/hugegraph-pd/pd_data}
 
   # --- Store cluster (3 nodes) ---
   store0:
@@ -166,10 +178,12 @@ services:
       HG_STORE_GRPC_PORT: "8500"
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store0:8510
-      HG_STORE_DATA_PATH: /hugegraph-store/storage
+      HG_STORE_DATA_PATH: ${HG_STORE_DATA_PATH:-/hugegraph-store/storage}
+      HG_STORE_ROCKSDB_PROVIDER: ${HG_STORE_ROCKSDB_PROVIDER:-rocksdb}
+      HG_STORE_ENFORCE_PROVIDER_MARKER: ${HG_STORE_ENFORCE_PROVIDER_MARKER:-false}
     ports: ["8500:8500", "8510:8510", "8520:8520"]
     volumes:
-      - hg-store0-data:/hugegraph-store/storage
+      - ${HUGEGRAPH_STORE0_VOLUME:-hg-store0-data}:${HG_STORE_DATA_PATH:-/hugegraph-store/storage}
 
   store1:
     <<: *store-common
@@ -181,10 +195,12 @@ services:
       HG_STORE_GRPC_PORT: "8500"
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store1:8510
-      HG_STORE_DATA_PATH: /hugegraph-store/storage
+      HG_STORE_DATA_PATH: ${HG_STORE_DATA_PATH:-/hugegraph-store/storage}
+      HG_STORE_ROCKSDB_PROVIDER: ${HG_STORE_ROCKSDB_PROVIDER:-rocksdb}
+      HG_STORE_ENFORCE_PROVIDER_MARKER: ${HG_STORE_ENFORCE_PROVIDER_MARKER:-false}
     ports: ["8501:8500", "8511:8510", "8521:8520"]
     volumes:
-      - hg-store1-data:/hugegraph-store/storage
+      - ${HUGEGRAPH_STORE1_VOLUME:-hg-store1-data}:${HG_STORE_DATA_PATH:-/hugegraph-store/storage}
 
   store2:
     <<: *store-common
@@ -196,10 +212,12 @@ services:
       HG_STORE_GRPC_PORT: "8500"
       HG_STORE_REST_PORT: "8520"
       HG_STORE_RAFT_ADDRESS: store2:8510
-      HG_STORE_DATA_PATH: /hugegraph-store/storage
+      HG_STORE_DATA_PATH: ${HG_STORE_DATA_PATH:-/hugegraph-store/storage}
+      HG_STORE_ROCKSDB_PROVIDER: ${HG_STORE_ROCKSDB_PROVIDER:-rocksdb}
+      HG_STORE_ENFORCE_PROVIDER_MARKER: ${HG_STORE_ENFORCE_PROVIDER_MARKER:-false}
     ports: ["8502:8500", "8512:8510", "8522:8520"]
     volumes:
-      - hg-store2-data:/hugegraph-store/storage
+      - ${HUGEGRAPH_STORE2_VOLUME:-hg-store2-data}:${HG_STORE_DATA_PATH:-/hugegraph-store/storage}
 
   # --- Server cluster (3 nodes) ---
   server0:

@@ -9,6 +9,121 @@ on:
   pull_request:
 
 jobs:
+  server-rocksdb-runtime:
+    name: server-rocksdb-runtime (${{ matrix.check_name }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            provider: rocksdb
+            check_name: rocksdb
+            experimental: false
+          - os: ubuntu-24.04
+            provider: topling
+            check_name: topling
+            experimental: false
+          - os: ubuntu-26.04
+            provider: topling
+            check_name: topling, ubuntu-26.04
+            experimental: true
+    env:
+      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Java 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'zulu'
+
+      - name: Use staged maven repo settings
+        run: |
+          mkdir -p "$HOME/.m2"
+          cp -vf .github/configs/settings.xml "$HOME/.m2/settings.xml"
+
+      - name: Package Server
+        run: |
+          mvn clean package -pl hugegraph-server/hugegraph-dist -am \
+              -Dmaven.test.skip=true -ntp
+
+      - name: Select ${{ matrix.provider }} distribution
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR="hugegraph-server/apache-hugegraph-server-$VERSION"
+          if [ "${{ matrix.provider }}" = "topling" ]; then
+            touch "$SERVER_DIR/bin/pid"
+            mkdir -p "$SERVER_DIR/logs"
+            touch "$SERVER_DIR/logs/topling-ci-marker"
+            install-dist/scripts/build-topling-distribution.sh server "$VERSION"
+            SERVER_DIR="$SERVER_DIR-topling"
+          else
+            GRAPH_CONF="$SERVER_DIR/conf/graphs/hugegraph.properties"
+            sed -i '/^[#]*rocksdb\.provider=/d' "$GRAPH_CONF"
+            echo "rocksdb.provider=rocksdb" >> "$GRAPH_CONF"
+          fi
+          echo "STANDARD_SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION" \
+            >> "$GITHUB_ENV"
+          echo "SERVER_DIR=$SERVER_DIR" >> "$GITHUB_ENV"
+
+      - name: Verify clean ToplingDB distribution
+        if: matrix.provider == 'topling'
+        env:
+          TOPLING_EXPECT_DIRTY_STANDARD: 'true'
+        run: |
+          "$TRAVIS_DIR/test-topling-distribution.sh" \
+            server "$STANDARD_SERVER_DIR" "$SERVER_DIR"
+
+      - name: Test standard RocksDB runtime
+        if: matrix.provider == 'rocksdb'
+        run: |
+          source "$SERVER_DIR/bin/preload-topling.sh"
+          "$TRAVIS_DIR/test-rocksdb-runtime.sh" \
+              rocksdb "$SERVER_DIR"
+
+      - name: Run Topling native lifecycle diagnostic
+        id: topling-native-diagnostic
+        if: matrix.provider == 'topling'
+        continue-on-error: true
+        run: |
+          source "$SERVER_DIR/bin/preload-topling.sh"
+          "$TRAVIS_DIR/test-rocksdb-runtime.sh" \
+              topling "$SERVER_DIR"
+
+      - name: Report Topling native lifecycle diagnostic
+        if: >-
+          matrix.provider == 'topling' &&
+          steps.topling-native-diagnostic.outcome == 'failure'
+        run: |
+          {
+            echo "### Topling native lifecycle diagnostic"
+            echo
+            echo "The synthetic CF lifecycle reproducer hit the known native"
+            echo "assertion tracked by hugegraph/hugegraph#212."
+            echo "Image-backed service lifecycle tests remain required."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  topling-runtime-shell-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test strict component-local runtime selection
+        run: |
+          hugegraph-server/hugegraph-dist/src/assembly/travis/test-topling-runtime-selection.sh
+          hugegraph-server/hugegraph-dist/src/assembly/travis/test-topling-docker-entrypoints.sh
+
   wait-storage-shell-test:
     permissions:
       contents: read
@@ -24,8 +139,11 @@ jobs:
 
   build-server:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
     env:
-      USE_STAGE: 'false' # Whether to include the stage repository.
+      USE_STAGE: 'true' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
       BACKEND: ${{ matrix.BACKEND }}
@@ -35,6 +153,8 @@ jobs:
       TARGET_BRANCH_NAME: ${{ github.base_ref != '' && github.base_ref || github.ref_name }}
       RELEASE_BRANCH: ${{ startsWith(github.ref_name, 'release-') || startsWith(github.ref_name, 'test-') }}
       RAFT_MODE: ${{ startsWith(github.head_ref, 'test') || startsWith(github.head_ref, 'raft') }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
 
     strategy:
       fail-fast: false
@@ -55,15 +175,15 @@ jobs:
           java-version: '8'
           distribution: 'zulu'
 
-      - name: Prepare backend environment
-        run: |
-          $TRAVIS_DIR/install-backend.sh $BACKEND && jps -l
-
       - name: Install Java ${{ matrix.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ matrix.JAVA_VERSION }}
           distribution: 'zulu'
+
+      - name: Install deps
+        run: |
+          ${TRAVIS_DIR}/install-deps.sh
 
       - name: Cache Maven packages
         uses: actions/cache@v4
@@ -78,9 +198,14 @@ jobs:
           cp $HOME/.m2/settings.xml /tmp/settings.xml
           cp -vf .github/configs/settings.xml $HOME/.m2/settings.xml && cat $HOME/.m2/settings.xml
 
-      - name: Compile
+      - name: Package
         run: |
-          mvn clean compile -U -Dmaven.javadoc.skip=true -ntp
+          mvn clean package -Dmaven.test.skip=true -ntp
+          source "$TRAVIS_DIR/install-rocksdb.sh" server
+
+      - name: Prepare backend environment
+        run: |
+          $TRAVIS_DIR/install-backend.sh $BACKEND && jps -l
 
       - name: Validate Docker integration
         if: ${{ env.BACKEND == 'rocksdb' }}
@@ -132,6 +257,8 @@ jobs:
       - name: Run start-hugegraph.sh foreground mode tests
         if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'true' }}
         run: |
+          mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
+          source "$TRAVIS_DIR/install-rocksdb.sh" server
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR

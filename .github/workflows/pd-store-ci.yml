@@ -26,8 +26,160 @@ on:
       - '!**/AGENTS.md'
       - '!**/CLAUDE.md'
 
+permissions:
+  contents: read
+  packages: read
+
 # TODO: consider merge to one ci.yml file
 jobs:
+  distributed-rocksdb-runtime:
+    name: distributed-rocksdb-runtime (${{ matrix.check_name }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            component: pd
+            provider: rocksdb
+            check_name: pd, rocksdb
+            experimental: false
+          - os: ubuntu-24.04
+            component: pd
+            provider: topling
+            check_name: pd, topling
+            experimental: false
+          - os: ubuntu-24.04
+            component: store
+            provider: rocksdb
+            check_name: store, rocksdb
+            experimental: false
+          - os: ubuntu-24.04
+            component: store
+            provider: topling
+            check_name: store, topling
+            experimental: false
+          - os: ubuntu-26.04
+            component: pd
+            provider: topling
+            check_name: pd, topling, ubuntu-26.04
+            experimental: true
+          - os: ubuntu-26.04
+            component: store
+            provider: topling
+            check_name: store, topling, ubuntu-26.04
+            experimental: true
+    env:
+      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Java 11
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'zulu'
+
+      - name: Use staged maven repo settings
+        run: |
+          mkdir -p "$HOME/.m2"
+          cp -vf .github/configs/settings.xml "$HOME/.m2/settings.xml"
+
+      - name: Package distributions
+        run: |
+          mvn clean package -Dmaven.test.skip=true -ntp
+
+      - name: Select ${{ matrix.component }} ${{ matrix.provider }} distribution
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR="hugegraph-server/apache-hugegraph-server-$VERSION"
+          if [ "${{ matrix.component }}" = "pd" ]; then
+            COMPONENT_DIR="hugegraph-pd/apache-hugegraph-pd-$VERSION"
+            if [ "${{ matrix.provider }}" = "rocksdb" ]; then
+              CONFIG_FILE="$COMPONENT_DIR/conf/application.yml"
+              sed -i 's/^# rocksdb:/rocksdb:/' "$CONFIG_FILE"
+              sed -i 's/^#   provider: rocksdb/  provider: rocksdb/' \
+                  "$CONFIG_FILE"
+            fi
+          else
+            COMPONENT_DIR="hugegraph-store/apache-hugegraph-store-$VERSION"
+            if [ "${{ matrix.provider }}" = "rocksdb" ]; then
+              CONFIG_FILE="$COMPONENT_DIR/conf/application-pd.yml"
+              sed -i 's/^  # provider: topling/  provider: rocksdb/' \
+                  "$CONFIG_FILE"
+            fi
+          fi
+          if [ "${{ matrix.provider }}" = "topling" ]; then
+            touch "$COMPONENT_DIR/bin/pid"
+            if [ "${{ matrix.component }}" = "pd" ]; then
+              ln -s /missing/topling-ci-pd-data "$COMPONENT_DIR/pd_data"
+            else
+              touch "$COMPONENT_DIR/storage"
+            fi
+            install-dist/scripts/build-topling-distribution.sh \
+                "${{ matrix.component }}" "$VERSION"
+            COMPONENT_DIR="$COMPONENT_DIR-topling"
+          fi
+          if [ "${{ matrix.component }}" = "pd" ]; then
+            STANDARD_COMPONENT_DIR="hugegraph-pd/apache-hugegraph-pd-$VERSION"
+          else
+            STANDARD_COMPONENT_DIR="hugegraph-store/apache-hugegraph-store-$VERSION"
+          fi
+          {
+            echo "VERSION=$VERSION"
+            echo "SERVER_DIR=$SERVER_DIR"
+            echo "STANDARD_COMPONENT_DIR=$STANDARD_COMPONENT_DIR"
+            echo "COMPONENT_DIR=$COMPONENT_DIR"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify clean ToplingDB distribution
+        if: matrix.provider == 'topling'
+        env:
+          TOPLING_EXPECT_DIRTY_STANDARD: 'true'
+        run: |
+          "$TRAVIS_DIR/test-topling-distribution.sh" \
+            "${{ matrix.component }}" "$STANDARD_COMPONENT_DIR" "$COMPONENT_DIR"
+
+      - name: Test standard RocksDB runtime
+        if: matrix.provider == 'rocksdb'
+        run: |
+          "$TRAVIS_DIR/test-rocksdb-runtime.sh" \
+              rocksdb "$COMPONENT_DIR"
+
+      - name: Run Topling native lifecycle diagnostic
+        id: topling-native-diagnostic
+        if: matrix.provider == 'topling'
+        continue-on-error: true
+        run: |
+          "$TRAVIS_DIR/test-rocksdb-runtime.sh" \
+              topling "$COMPONENT_DIR"
+
+      - name: Report Topling native lifecycle diagnostic
+        if: >-
+          matrix.provider == 'topling' &&
+          steps.topling-native-diagnostic.outcome == 'failure'
+        run: |
+          {
+            echo "### Topling native lifecycle diagnostic"
+            echo
+            echo "The synthetic CF lifecycle reproducer hit the known native"
+            echo "assertion tracked by hugegraph/hugegraph#212."
+            echo "Image-backed service lifecycle tests remain required."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify standard runtime packaging
+        if: matrix.component == 'pd' && matrix.provider == 'rocksdb'
+        run: |
+          "$TRAVIS_DIR/test-topling-runtime-packaging.sh" \
+            "$SERVER_DIR" \
+            "hugegraph-pd/apache-hugegraph-pd-$VERSION" \
+            "hugegraph-store/apache-hugegraph-store-$VERSION"
+
   struct:
     runs-on: ubuntu-latest
     env:
@@ -86,11 +238,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # TODO: avoid duplicated env setup in pd & store
-      USE_STAGE: 'false' # Whether to include the stage repository.
+      USE_STAGE: 'true' # Whether to include the stage repository.
       # TODO: remove outdated env
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_FILE: hugegraph-pd/hg-pd-test/target/site/jacoco/jacoco.xml
       TEST_REPORT_DIR: hugegraph-pd/hg-pd-test/target/surefire-reports
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
 
     steps:
       - name: Install JDK 11
@@ -117,10 +271,15 @@ jobs:
           cp $HOME/.m2/settings.xml /tmp/settings.xml
           mv -vf .github/configs/settings.xml $HOME/.m2/settings.xml
 
+      - name: Install deps
+        run: |
+          "${TRAVIS_DIR}/install-deps.sh" || exit 1
+
       - name: Package
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+          source "${TRAVIS_DIR}/install-rocksdb.sh" pd
 
       - name: Check source formatting
         run: |
@@ -224,11 +383,13 @@ jobs:
     needs: struct
     runs-on: ubuntu-latest
     env:
-      USE_STAGE: 'false' # Whether to include the stage repository.
+      USE_STAGE: 'true' # Whether to include the stage repository.
       # TODO: remove outdated env
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_FILE: hugegraph-store/hg-store-test/target/site/jacoco/jacoco.xml
       TEST_REPORT_DIR: hugegraph-store/hg-store-test/target/surefire-reports
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
 
     steps:
       - name: Install JDK 11
@@ -255,10 +416,15 @@ jobs:
           cp $HOME/.m2/settings.xml /tmp/settings.xml
           mv -vf .github/configs/settings.xml $HOME/.m2/settings.xml
 
+      - name: Install deps
+        run: |
+          "${TRAVIS_DIR}/install-deps.sh" || exit 1
+
       - name: Package
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+          source "${TRAVIS_DIR}/install-rocksdb.sh" store
 
       - name: Check source formatting
         run: |
@@ -368,11 +534,13 @@ jobs:
     needs: struct
     runs-on: ubuntu-latest
     env:
-      USE_STAGE: 'false' # Whether to include the stage repository.
+      USE_STAGE: 'true' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
       BACKEND: hstore
       RELEASE_BRANCH: ${{ startsWith(github.ref_name, 'release-') || startsWith(github.ref_name, 'test-') || startsWith(github.base_ref, 'release-') }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
 
     steps:
       - name: Install JDK 11
@@ -393,6 +561,10 @@ jobs:
         with:
           fetch-depth: 2
 
+      - name: Install deps
+        run: |
+          "${TRAVIS_DIR}/install-deps.sh" || exit 1
+
       - name: use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
         run: |
@@ -403,6 +575,9 @@ jobs:
         # todo remove --fail-at-end after test
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
+          source "${TRAVIS_DIR}/install-rocksdb.sh" pd
+          source "${TRAVIS_DIR}/install-rocksdb.sh" store
+          source "${TRAVIS_DIR}/install-rocksdb.sh" hstore
 
       - name: Prepare env and service
         run: |

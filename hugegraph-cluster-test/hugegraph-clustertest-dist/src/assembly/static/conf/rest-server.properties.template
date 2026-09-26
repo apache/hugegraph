@@ -19,9 +19,12 @@
 # could use '0.0.0.0' or specified (real)IP to expose external network access
 restserver.url=http://$REST_SERVER_ADDRESS$
 # gremlin server url, need to be consistent with host and port in gremlin-server.yaml
-#gremlinserver.url=http://$REST_SERVER_ADDRESS$
+gremlinserver.url=http://$GREMLIN_SERVER_ADDRESS$
 
 graphs=./conf/graphs
+
+# Server metadata and graph storage must use the same test PD cluster.
+pd.peers=$PD_PEERS_LIST$
 
 # The maximum thread ratio for batch writing, only take effect if the batch.max_write_threads is 0
 batch.max_write_ratio=80

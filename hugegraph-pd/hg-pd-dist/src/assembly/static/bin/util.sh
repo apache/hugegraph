@@ -394,3 +394,21 @@ function kill_process_and_wait() {
     kill_process "$process_name" "$pid"
     wait_for_shutdown "$process_name" "$pid" "$timeout_s"
 }
+
+# Find HugeGraph server directory in parent path using prefix glob.
+# Usage: find_hugegraph_server_dir "/path/to/parent"
+# Returns: first matching directory path or empty string
+function find_hugegraph_server_dir() {
+    local parent_dir="$1"
+    if [ -z "$parent_dir" ]; then
+        parent_dir="$(cd "${TOP:-$(pwd)}"/.. && pwd)"
+    fi
+    local found=""
+    for d in "$parent_dir"/apache-hugegraph-server*; do
+        if [ -d "$d" ]; then
+            found="$d"
+            break
+        fi
+    done
+    echo "$found"
+}

@@ -39,7 +39,7 @@ public class StoreNodeWrapper extends AbstractNodeWrapper {
         super();
         this.fileNames = new ArrayList<>(List.of(LOG4J_FILE));
         this.workPath = STORE_LIB_PATH;
-        this.startLine = "o.a.h.s.n.StoreNodeApplication - Starting StoreNodeApplication";
+        this.startLine = "StoreNodeApplication started.";
         createNodeDir(Paths.get(STORE_TEMPLATE_PATH), getNodePath() + CONF_DIR + File.separator);
         createLogDir();
     }
@@ -48,7 +48,7 @@ public class StoreNodeWrapper extends AbstractNodeWrapper {
         super(clusterId, index);
         this.fileNames = new ArrayList<>(List.of(LOG4J_FILE));
         this.workPath = STORE_LIB_PATH;
-        this.startLine = "o.a.h.s.n.StoreNodeApplication - Starting StoreNodeApplication";
+        this.startLine = "StoreNodeApplication started.";
         createNodeDir(Paths.get(STORE_TEMPLATE_PATH), getNodePath() + CONF_DIR + File.separator);
         createLogDir();
     }

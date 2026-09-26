@@ -51,7 +51,8 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>2.0.9</version>
+            <!-- Match the existing Log4j SLF4J 1.x binding used by cluster tests. -->
+            <version>1.7.25</version>
             <scope>compile</scope>
         </dependency>
         <dependency>

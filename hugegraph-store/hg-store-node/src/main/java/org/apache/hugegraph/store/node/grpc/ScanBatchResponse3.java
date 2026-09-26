@@ -160,16 +160,19 @@ public class ScanBatchResponse3 {
         OrderState state = OrderState.NEW;
         OrderWorker worker;
         OrderDeliverer deliverer;
+        boolean cancelled;
 
         synchronized void deal(OrderWorker worker, OrderDeliverer deliverer) {
             if (log.isDebugEnabled()) {
                 log.debug("Receiving query request.");
             }
-            if (this.state == OrderState.NEW) {
+            if (!this.cancelled && this.state == OrderState.NEW) {
                 this.worker = worker;
                 this.deliverer = deliverer;
                 this.worker.hereWeGo();
                 this.state = OrderState.WORKING;
+            } else {
+                worker.iterator.close();
             }
         }
 
@@ -177,7 +180,9 @@ public class ScanBatchResponse3 {
             if (log.isDebugEnabled()) {
                 log.debug("Receiving receipt request.");
             }
-            this.worker.setReceipt(receiptTimes);
+            if (this.worker != null) {
+                this.worker.setReceipt(receiptTimes);
+            }
         }
 
         synchronized void finished() {
@@ -188,6 +193,7 @@ public class ScanBatchResponse3 {
         }
 
         synchronized void breakdown() {
+            this.cancelled = true;
             if (this.worker != null) {
                 this.worker.breakdown();
             }
@@ -297,7 +303,12 @@ public class ScanBatchResponse3 {
                 return;
             }
 
-            executor.execute(() -> working());
+            try {
+                executor.execute(this::working);
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                this.iterator.close();
+                throw e;
+            }
             Thread.yield();
         }
 
@@ -338,7 +349,8 @@ public class ScanBatchResponse3 {
                     Kv.Builder kvBuilder = Kv.newBuilder();
                     long packageCount = 0;
 
-                    while (iterator.hasNext()) {
+                    while (!this.breakdown.get() && !Thread.currentThread().isInterrupted() &&
+                           iterator.hasNext()) {
                         if (++this.counter > limit) {
                             this.completeFlag.set(true);
                             break;
@@ -353,7 +365,7 @@ public class ScanBatchResponse3 {
                             deliverer.deliver(dataBuilder, curTimes.incrementAndGet(), false);
                             Thread.yield();
 
-                            if (!this.checkContinue()) {
+                            if (!this.breakdown.get() && !this.checkContinue()) {
                                 long start = System.currentTimeMillis();
                                 iterator.wait(
                                         HgStoreConst.SCAN_WAIT_CLIENT_TAKING_TIME_OUT_SECONDS *

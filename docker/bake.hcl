@@ -31,6 +31,10 @@ variable "SOURCE_REVISION" {
   default = "local"
 }
 
+variable "SOURCE_URL" {
+  default = "https://github.com/apache/hugegraph"
+}
+
 variable "IMAGE_TAG" {
   default = "local"
 }
@@ -43,6 +47,14 @@ variable "EXPORT_CACHE" {
   default = false
 }
 
+variable "RUNTIME_VARIANT" {
+  default = "standard"
+  validation {
+    condition     = contains(["standard", "topling"], RUNTIME_VARIANT)
+    error_message = "RUNTIME_VARIANT must be standard or topling"
+  }
+}
+
 target "_common" {
   context = "."
   args = {
@@ -50,8 +62,11 @@ target "_common" {
     MAVEN_PROJECTS     = MAVEN_PROJECTS
     RUNTIME_DEPS_EPOCH = RUNTIME_DEPS_EPOCH
     SOURCE_REVISION    = SOURCE_REVISION
+    SOURCE_REPOSITORY = SOURCE_URL
   }
-  platforms = [
+  platforms = RUNTIME_VARIANT == "topling" ? [
+    "linux/amd64",
+  ] : [
     "linux/amd64",
     "linux/arm64",
   ]
@@ -77,6 +92,7 @@ target "build-cache" {
 target "pd" {
   inherits   = ["_common"]
   dockerfile = "hugegraph-pd/Dockerfile"
+  target     = RUNTIME_VARIANT
   tags       = ["hugegraph/pd:${IMAGE_TAG}"]
   output     = ["type=docker"]
   cache-from = [
@@ -91,6 +107,7 @@ target "pd" {
 target "store" {
   inherits   = ["_common"]
   dockerfile = "hugegraph-store/Dockerfile"
+  target     = RUNTIME_VARIANT
   tags       = ["hugegraph/store:${IMAGE_TAG}"]
   output     = ["type=docker"]
   cache-from = [
@@ -119,6 +136,7 @@ target "server-hstore" {
 target "server-standalone" {
   inherits   = ["_common"]
   dockerfile = "hugegraph-server/Dockerfile"
+  target     = RUNTIME_VARIANT
   tags       = ["hugegraph/hugegraph:${IMAGE_TAG}"]
   output     = ["type=docker"]
   cache-from = [

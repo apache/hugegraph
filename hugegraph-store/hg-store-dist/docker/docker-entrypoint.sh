@@ -53,11 +53,33 @@ require_env "HG_STORE_RAFT_ADDRESS"
 # ── Defaults ──────────────────────────────────────────────────────────
 : "${HG_STORE_GRPC_PORT:=8500}"
 : "${HG_STORE_REST_PORT:=8520}"
-: "${HG_STORE_DATA_PATH:=/hugegraph-store/storage}"
+: "${HG_STORE_ROCKSDB_PROVIDER:=rocksdb}"
+
+case "${HG_STORE_ROCKSDB_PROVIDER}" in
+    rocksdb | topling) ;;
+    *)
+        log "ERROR: HG_STORE_ROCKSDB_PROVIDER must be rocksdb or topling"
+        exit 2
+        ;;
+esac
+if [[ -z "${HG_STORE_DATA_PATH:-}" ]]; then
+    if [[ "${HG_STORE_ROCKSDB_PROVIDER}" == "topling" ]]; then
+        HG_STORE_DATA_PATH="$(pwd)/topling-storage"
+    else
+        HG_STORE_DATA_PATH="$(pwd)/storage"
+    fi
+fi
+export TOPLINGDB_ROCKSDB_PROVIDER="${HG_STORE_ROCKSDB_PROVIDER}"
+./bin/verify-rocksdb-provider.sh \
+    store \
+    "${HG_STORE_ROCKSDB_PROVIDER}" \
+    "${HG_STORE_DATA_PATH}" \
+    "${HG_STORE_ENFORCE_PROVIDER_MARKER:-false}"
 
 # ── Build SPRING_APPLICATION_JSON ─────────────────────────────────────
 SPRING_APPLICATION_JSON="$(cat <<JSON
 {
+  "rocksdb":  { "provider": "$(json_escape "${HG_STORE_ROCKSDB_PROVIDER}")" },
   "pdserver": { "address": "$(json_escape "${HG_STORE_PD_ADDRESS}")" },
   "grpc":     { "host": "$(json_escape "${HG_STORE_GRPC_HOST}")",
                 "port": "$(json_escape "${HG_STORE_GRPC_PORT}")" },
@@ -76,5 +98,6 @@ log "  grpc.port=${HG_STORE_GRPC_PORT}"
 log "  raft.address=${HG_STORE_RAFT_ADDRESS}"
 log "  server.port=${HG_STORE_REST_PORT}"
 log "  app.data-path=${HG_STORE_DATA_PATH}"
+log "  rocksdb.provider=${HG_STORE_ROCKSDB_PROVIDER}"
 
 ./bin/start-hugegraph-store.sh -d false -j "${JAVA_OPTS:-}"

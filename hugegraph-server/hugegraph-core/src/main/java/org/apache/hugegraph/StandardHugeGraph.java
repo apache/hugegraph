@@ -425,6 +425,10 @@ public class StandardHugeGraph implements HugeGraph {
         }
     }
 
+    void closeCurrentThreadTransaction() {
+        this.closeTx();
+    }
+
     @Override
     public GraphMode mode() {
         return this.mode;

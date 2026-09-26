@@ -299,7 +299,7 @@ public class TTLCleaner implements Runnable {
                 LinkedList<ByteString> all = new LinkedList<>();
                 AtomicBoolean state = new AtomicBoolean(true);
                 AtomicLong partitionCounter = pc.get(id);
-                while (filter.hasNext() && state.get()) {
+                while (!Thread.currentThread().isInterrupted() && state.get() && filter.hasNext()) {
                     RocksDBSession.BackendColumn current = filter.next();
                     byte[] realKey =
                             Arrays.copyOfRange(current.name, 0, current.name.length - Short.BYTES);
@@ -313,7 +313,7 @@ public class TTLCleaner implements Runnable {
                         all = new LinkedList<>();
                     }
                 }
-                if (all.size() > 0 && state.get()) {
+                if (!Thread.currentThread().isInterrupted() && all.size() > 0 && state.get()) {
                     submitter.submitClean(id, graph, table, all, state, tableCounter,
                                           partitionCounter);
                 }

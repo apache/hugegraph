@@ -17,8 +17,10 @@
 
 package org.apache.hugegraph.unit;
 
+import org.apache.hugegraph.HugeFactoryTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
+import org.apache.hugegraph.auth.ContextTaskTest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
 import org.apache.hugegraph.backend.page.QueryListTest;
@@ -61,6 +63,7 @@ import org.apache.hugegraph.unit.core.HstoreSessionsTest;
 import org.apache.hugegraph.unit.core.IdHolderTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
+import org.apache.hugegraph.unit.core.ConfigPathTest;
 import org.apache.hugegraph.unit.core.QueryResultsTest;
 import org.apache.hugegraph.unit.core.QueryTest;
 import org.apache.hugegraph.unit.core.RangeTest;
@@ -92,6 +95,7 @@ import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.TextBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.TextSerializerTest;
 import org.apache.hugegraph.unit.store.RamIntObjectMapTest;
+import org.apache.hugegraph.unit.traversal.OltpTraverserTest;
 import org.apache.hugegraph.unit.traversal.ShortestPathTraverserTest;
 import org.apache.hugegraph.unit.util.CompressUtilTest;
 import org.apache.hugegraph.unit.util.JsonUtilTest;
@@ -121,6 +125,8 @@ import org.junit.runners.Suite;
         GraphSpaceGroupAPITest.class,
         GraphSpaceAuthPayloadTest.class,
         StandardAuthManagerV2Test.class,
+        ContextTaskTest.class,
+        HugeFactoryTest.class,
         AuthMetaManagerTest.class,
 
         /* api space */
@@ -163,6 +169,7 @@ import org.junit.runners.Suite;
         GraphIndexTransactionTest.class,
         GraphTransactionTest.class,
         QueryTest.class,
+        ConfigPathTest.class,
         QueryResultsTest.class,
         QueryListTest.class,
         RangeTest.class,
@@ -184,6 +191,7 @@ import org.junit.runners.Suite;
         RoleElectionStateMachineTest.class,
         HugeGraphAuthProxyTest.class,
         SchemaElementTest.class,
+        OltpTraverserTest.class,
         ShortestPathTraverserTest.class,
 
         /* cmd */

@@ -88,7 +88,12 @@ public class ParallelScanIterator implements ScanIterator {
         this.maxInQueue = maxWorkThreads * 2;
         // Edge sorted requires a larger queue
         queue = new LinkedBlockingQueue<>(maxInQueue * 2);
-        createScanner();
+        try {
+            createScanner();
+        } catch (RuntimeException e) {
+            close();
+            throw e;
+        }
     }
 
     public static ParallelScanIterator of(
@@ -144,18 +149,21 @@ public class ParallelScanIterator implements ScanIterator {
         return t;
     }
 
+    void requestStop() {
+        this.finished = true;
+    }
+
     @Override
     public void close() {
-        finished = true;
+        requestStop();
+        List<KVScanner> pending;
         synchronized (scanners) {
-            scanners.forEach(scanner -> {
-                scanner.close();
-            });
+            pending = new ArrayList<>(scanners);
         }
+        // Never hold a registry lock while waiting for a scanner's iterator lock.
+        pending.forEach(KVScanner::close);
         synchronized (pauseScanners) {
-            pauseScanners.forEach(s -> {
-                s.close();
-            });
+            pauseScanners.clear();
         }
         queue.clear();
     }
@@ -179,10 +187,15 @@ public class ParallelScanIterator implements ScanIterator {
      */
     private void wakeUpScanner() {
         synchronized (pauseScanners) {
-            if (!pauseScanners.isEmpty()) {
+            if (!finished && !pauseScanners.isEmpty()) {
                 KVScanner scanner = pauseScanners.poll();
                 if (scanner != null) {
-                    executor.execute(() -> scanner.scanKV());
+                    try {
+                        executor.execute(() -> scanner.scanKV());
+                    } catch (java.util.concurrent.RejectedExecutionException e) {
+                        scanner.close();
+                        throw e;
+                    }
                 }
             }
         }
@@ -195,7 +208,11 @@ public class ParallelScanIterator implements ScanIterator {
      */
     private void suspendScanner(KVScanner scanner) {
         synchronized (pauseScanners) {
-            pauseScanners.add(scanner);
+            if (!finished) {
+                pauseScanners.add(scanner);
+            } else {
+                scanner.close();
+            }
         }
     }
 
@@ -218,30 +235,43 @@ public class ParallelScanIterator implements ScanIterator {
      */
     private boolean putData(List<KV> data) {
         try {
-            this.queue.put(data);
+            while (!finished && !this.queue.offer(data, 100, TimeUnit.MILLISECONDS)) {
+                // Cancellation must release a producer whose client stopped consuming.
+            }
         } catch (InterruptedException e) {
             log.error("exception ", e);
             this.finished = true;
             return false;
         }
-        return this.queue.size() < maxInQueue;
+        return !finished && this.queue.size() < maxInQueue;
     }
 
     private boolean putData(List<KV> data, boolean hasNext) {
+        boolean locked = false;
         try {
-            queueLock.lock();
-            this.queue.put(data);
+            while (!finished && !(locked = queueLock.tryLock(100, TimeUnit.MILLISECONDS))) {
+                // An ordered producer may be waiting behind a cancelled scanner.
+            }
+            if (!locked) {
+                return false;
+            }
+            while (!finished && !this.queue.offer(data, 100, TimeUnit.MILLISECONDS)) {
+                // Recheck cancellation while the output queue is full.
+            }
         } catch (InterruptedException e) {
-            log.error("exception ", e);
+            Thread.currentThread().interrupt();
             this.finished = true;
             return false;
         } finally {
-            if (!hasNext) {
+            if (locked && finished) {
+                while (queueLock.isHeldByCurrentThread()) {
+                    queueLock.unlock();
+                }
+            } else if (locked && !hasNext) {
                 queueLock.unlock();
             }
         }
-        // Data not ended, thread continues to execute
-        return hasNext || this.queue.size() < maxInQueue;
+        return !finished && (hasNext || this.queue.size() < maxInQueue);
     }
 
     private synchronized KVPair<QueryCondition, ScanIterator> getIterator() {
@@ -328,12 +358,12 @@ public class ParallelScanIterator implements ScanIterator {
             iteratorLock.lock();
             try {
                 long entriesSize = 0, bodySize = 0;
-                while (canNext && !closed) {
+                while (canNext && !closed && !finished) {
                     iterator = this.getIterator();
                     if (iterator == null) {
                         break;
                     }
-                    while (iterator.hasNext() && entriesSize < batchSize &&
+                    while (!closed && !finished && iterator.hasNext() && entriesSize < batchSize &&
                            bodySize < maxBodySize &&
                            counter < limit && !closed) {
                         KV kv = KV.of(iterator.next());
@@ -366,8 +396,14 @@ public class ParallelScanIterator implements ScanIterator {
             } catch (Exception e) {
                 log.error("exception {}", e);
             } finally {
+                // putData(..., true) intentionally keeps this lock across batches to
+                // serialize ordered output. The scanner must always release it before
+                // suspending or quitting, including when the next iterator is empty.
+                while (queueLock.isHeldByCurrentThread()) {
+                    queueLock.unlock();
+                }
                 iteratorLock.unlock();
-                if (iterator != null && counter < limit && !closed) {
+                if (iterator != null && counter < limit && !closed && !finished) {
                     suspendScanner(this);
                 } else {
                     quitScanner(this);
@@ -381,6 +417,7 @@ public class ParallelScanIterator implements ScanIterator {
             try {
                 if (iterator != null) {
                     iterator.close();
+                    iterator = null;
                 }
             } finally {
                 iteratorLock.unlock();

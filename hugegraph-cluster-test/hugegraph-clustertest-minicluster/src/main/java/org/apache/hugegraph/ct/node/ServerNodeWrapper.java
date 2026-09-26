@@ -40,6 +40,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -49,17 +51,46 @@ import java.util.List;
 public class ServerNodeWrapper extends AbstractNodeWrapper {
 
     private static List<String> hgJars = loadHgJarsOnce();
-    public ServerNodeWrapper(int clusterIndex, int index) {
+    public ServerNodeWrapper(int clusterIndex, int index, int gremlinPort) {
         super(clusterIndex, index);
         this.fileNames = new ArrayList<>(
                 List.of(LOG4J_FILE, GREMLIN_SERVER_FILE, GREMLIN_DRIVER_SETTING_FILE,
                         REMOTE_SETTING_FILE, REMOTE_OBJECTS_SETTING_FILE));
         this.workPath = SERVER_LIB_PATH;
         createNodeDir(Paths.get(SERVER_TEMPLATE_PATH), getNodePath() + CONF_DIR + File.separator);
+        configureGremlinPort(gremlinPort);
         this.fileNames = new ArrayList<>(List.of(EMPTY_SAMPLE_GROOVY_FILE, EXAMPLE_GROOVY_FILE));
-        this.startLine = "INFO: [HttpServer] Started.";
         createNodeDir(Paths.get(SERVER_PACKAGE_PATH), getNodePath());
         createLogDir();
+    }
+
+    @Override
+    public boolean isStarted() {
+        try {
+            List<String> lines = Files.readAllLines(Paths.get(this.getLogPath()));
+            boolean gremlinStarted = lines.stream().anyMatch(
+                    line -> line.contains("Channel started at port"));
+            boolean restStarted = lines.stream().anyMatch(
+                    line -> line.contains("RestServer started"));
+            return gremlinStarted && restStarted;
+        } catch (IOException ignored) {
+            return false;
+        }
+    }
+
+    private void configureGremlinPort(int gremlinPort) {
+        Path path = Paths.get(getNodePath(), CONF_DIR, GREMLIN_SERVER_FILE);
+        try {
+            String config = Files.readString(path);
+            String updated = config.replace("#port: 8182",
+                                            "port: " + gremlinPort);
+            if (updated.equals(config)) {
+                throw new IllegalStateException("Missing default Gremlin port");
+            }
+            Files.writeString(path, updated);
+        } catch (IOException e) {
+            throw new AssertionError("Failed to configure Gremlin port", e);
+        }
     }
 
     private static void addJarsToClasspath(File directory, List<String> classpath) {

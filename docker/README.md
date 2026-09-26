@@ -18,6 +18,15 @@ cd docker
 
 Standalone uses `hugegraph/hugegraph:${HUGEGRAPH_VERSION:-latest}`. The HStore topologies use the matching `hugegraph/pd`, `hugegraph/store`, and `hugegraph/server` tags. Hubble is selected independently with `${HUBBLE_IMAGE:-hugegraph/hubble:latest}`.
 
+ToplingDB is selected by injecting the documented image, provider, data-root,
+marker, volume, and pull-policy variables in the Developers section. Its
+published images target Linux x86_64 (`linux/amd64`); on macOS, use Docker
+Desktop or OrbStack container mode and set `--platform linux/amd64` when the
+engine does not select it automatically. Native macOS execution, including
+Intel, is outside this ToplingDB matrix. Standalone selects Topling for the
+Server, while HStore selects it only for PD and Store. The HStore Server
+remains the standard image and never loads a local ToplingDB runtime.
+
 ### Create the authentication environment
 
 Create `.env` once. Replace `replace-with-your-password` with an administrator password that you choose; the command generates and persists a random 32-byte JWT secret. For this simple single-quoted format, do not use a password that contains a single quote or newline.
@@ -206,6 +215,147 @@ HUGEGRAPH_VERSION=1.7.0 \
 docker compose -f docker-compose-hstore.yml up -d
 ```
 
+---
+
+## Environment Variable Reference
+
+Configuration is injected via environment variables. The old `docker/configs/application-pd*.yml` and `docker/configs/application-store*.yml` files are no longer used.
+
+The generic Compose files pass explicit `rocksdb` defaults to each local
+RocksDB owner. Selecting a `:topling` image therefore requires setting its
+provider, data-root, marker, and provider-specific volume together; changing
+only the image tag is intentionally not a provider switch.
+
+### PD Environment Variables
+
+| Variable | Required | Default | Maps To (`application.yml`) | Description |
+|----------|----------|---------|-----------------------------|-------------|
+| `HG_PD_GRPC_HOST` | Yes | — | `grpc.host` | This node's hostname/IP for gRPC |
+| `HG_PD_RAFT_ADDRESS` | Yes | — | `raft.address` | This node's Raft address (e.g. `pd0:8610`) |
+| `HG_PD_RAFT_PEERS_LIST` | Yes | — | `raft.peers-list` | All PD peers (e.g. `pd0:8610,pd1:8610,pd2:8610`) |
+| `HG_PD_INITIAL_STORE_LIST` | Yes | — | `pd.initial-store-list` | Expected stores (e.g. `store0:8500,store1:8500,store2:8500`) |
+| `HG_PD_GRPC_PORT` | No | `8686` | `grpc.port` | gRPC server port |
+| `HG_PD_REST_PORT` | No | `8620` | `server.port` | REST API port |
+| `HG_PD_ROCKSDB_PROVIDER` | No | `rocksdb` | `rocksdb.provider` | `rocksdb` or `topling`; set `topling` explicitly with a Topling image |
+| `HG_PD_DATA_PATH` | No | Provider-specific path | `pd.data-path` | `/hugegraph-pd/pd_data` for RocksDB or `/hugegraph-pd/topling-pd-data` for ToplingDB |
+| `HG_PD_ENFORCE_PROVIDER_MARKER` | No | `false` | Startup safety gate | Rejects an unmarked non-empty data path when `true`; enabled by Topling images |
+| `HG_PD_INITIAL_STORE_COUNT` | No | `1` | `pd.initial-store-count` | Min stores for cluster availability |
+
+**Deprecated aliases** (still work but log a warning):
+
+| Deprecated | Use Instead |
+|------------|-------------|
+| `GRPC_HOST` | `HG_PD_GRPC_HOST` |
+| `RAFT_ADDRESS` | `HG_PD_RAFT_ADDRESS` |
+| `RAFT_PEERS` | `HG_PD_RAFT_PEERS_LIST` |
+| `PD_INITIAL_STORE_LIST` | `HG_PD_INITIAL_STORE_LIST` |
+
+### Store Environment Variables
+
+| Variable | Required | Default | Maps To (`application.yml`) | Description |
+|----------|----------|---------|-----------------------------|-------------|
+| `HG_STORE_PD_ADDRESS` | Yes | — | `pdserver.address` | PD gRPC addresses (e.g. `pd0:8686,pd1:8686,pd2:8686`) |
+| `HG_STORE_GRPC_HOST` | Yes | — | `grpc.host` | This node's hostname (e.g. `store0`) |
+| `HG_STORE_RAFT_ADDRESS` | Yes | — | `raft.address` | This node's Raft address (e.g. `store0:8510`) |
+| `HG_STORE_GRPC_PORT` | No | `8500` | `grpc.port` | gRPC server port |
+| `HG_STORE_REST_PORT` | No | `8520` | `server.port` | REST API port |
+| `HG_STORE_ROCKSDB_PROVIDER` | No | `rocksdb` | `rocksdb.provider` | `rocksdb` or `topling`; set `topling` explicitly with a Topling image |
+| `HG_STORE_DATA_PATH` | No | Provider-specific path | `app.data-path` | `/hugegraph-store/storage` for RocksDB or `/hugegraph-store/topling-storage` for ToplingDB |
+| `HG_STORE_ENFORCE_PROVIDER_MARKER` | No | `false` | Startup safety gate | Rejects an unmarked non-empty data path when `true`; enabled by Topling images |
+
+**Deprecated aliases** (still work but log a warning):
+
+| Deprecated | Use Instead |
+|------------|-------------|
+| `PD_ADDRESS` | `HG_STORE_PD_ADDRESS` |
+| `GRPC_HOST` | `HG_STORE_GRPC_HOST` |
+| `RAFT_ADDRESS` | `HG_STORE_RAFT_ADDRESS` |
+
+### Server Environment Variables
+
+| Variable | Required | Default | Maps To | Description |
+|----------|----------|---------|-----------------------------|-------------|
+| `HG_SERVER_BACKEND` | Yes | — | `backend` in `hugegraph.properties` | Storage backend (e.g. `hstore`) |
+| `HG_SERVER_ROCKSDB_PROVIDER` | No | `rocksdb` | `rocksdb.provider` | RocksDB JNI provider (`rocksdb` or `topling`); set `topling` explicitly with a Topling image |
+| `HG_SERVER_DATA_PATH` | No | Provider-specific image path | `rocksdb.data_path`, `rocksdb.wal_path` | RocksDB data root; standard uses `/hugegraph-server/rocksdb-data`, Topling uses `/hugegraph-server/topling-data` |
+| `HG_SERVER_ENFORCE_PROVIDER_MARKER` | No | `false` | Startup safety gate | Rejects an unmarked non-empty data root when `true`; enabled by the Topling image |
+| `HG_SERVER_PD_PEERS` | Yes | — | `pd.peers` | PD cluster addresses (e.g. `pd0:8686,pd1:8686,pd2:8686`) |
+| `HG_SERVER_CLUSTER` | No | — | `cluster` in `rest-server.properties` | PD discovery application name; single-node Compose uses `hg` to match Hubble |
+| `HG_SERVER_USE_PD` | No | — | `usePD` in `rest-server.properties` | Enables Server PD registration and discovery |
+| `HG_SERVER_REST_URL` | No | — | `restserver.url` | Address registered with PD and used by clients |
+| `HG_SERVER_MIN_FREE_MEMORY` | No | — | `restserver.min_free_memory` | Minimum free-memory guard in MB; local Compose uses `0` |
+| `HG_SERVER_AUTH_TOKEN_SECRET` | No | generated in auth mode | `auth.token_secret` | Shared JWT secret for REST and embedded Gremlin authentication; explicit values must be at least 32 bytes |
+| `STORE_REST` | No | — | Used by `wait-partition.sh` | Store REST endpoint for partition verification (e.g. `store0:8520`) |
+| `PASSWORD` | No | — | Enables auth and sets `auth.admin_pa` | Initial administrator password; disabled init-store does not read it from stdin, but the entrypoint still applies it to the PD bootstrap path |
+| `HG_SERVER_INIT_STORE_ENABLED` | No | `true` | `init_store.enabled` in `rest-server.properties` | Set `false` in PD/HStore deployments so init-store skips local backend and admin initialization |
+
+> **The built-in authenticator with `HG_SERVER_INIT_STORE_ENABLED=false` requires `usePD=true` and an HStore-backed `auth.graph_store`, unless `auth.remote_url` delegates auth elsewhere.** With init-store skipped, the server creates the built-in admin in PD metadata, and only an HStore auth graph uses the PD-backed auth manager that can read that account. init-store exits non-zero when the combination is unusable, rather than leaving a server nobody can log in to. A custom `auth.authenticator` is exempt because it manages its own identities.
+>
+> For a local RocksDB backend, init-store writes its completion marker below the provider data root at `.hugegraph-state/init_complete`. The marker therefore survives container recreation with the data volume. A standard RocksDB deployment migrates the legacy `docker/init_complete` marker once. HStore keeps the existing container-local marker behavior. A skipped run records nothing, so a later re-enable can still initialize.
+>
+> The entrypoint maps **`PASSWORD` to `auth.admin_pa`** before init-store runs. A disabled init-store does not read the password from standard input, but the PD startup path uses the explicit `auth.admin_pa` value when it first creates the administrator. Changing it later does not rotate an existing password.
+
+The single-node Compose files also accept these deployment-level overrides:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HUGEGRAPH_SERVER_IMAGE` | `hugegraph/hugegraph:<version>` (standalone); `hugegraph/server:<version>` (HStore) | Server image reference |
+| `HUGEGRAPH_SERVER_PULL_POLICY` | `missing` (`build` for dev) | Server pull policy |
+| `HUBBLE_IMAGE` | `hugegraph/hubble:latest` | Complete Hubble image reference |
+| `HUBBLE_PULL_POLICY` | `missing` | Hubble pull policy |
+| `HUBBLE_PUBLISH_HOST` | `127.0.0.1` | Hubble host bind address; remote access requires an HTTPS reverse proxy |
+| `HUGEGRAPH_ADMIN_PASSWORD` | required (`docker/.env`) | Initial admin password; no public default is provided |
+| `HUGEGRAPH_AUTH_TOKEN_SECRET` | generated | JWT signing secret; explicit values must be at least 32 bytes |
+
+When authentication is enabled and no token secret is supplied, the Server entrypoint generates a random secret and writes it to both authentication configurations. The value is reused on container restart while the container filesystem is preserved. To preserve tokens across container recreation, generate a compatible secret once and add it to the mode-600 `docker/.env`:
+
+```bash
+(
+  set -euo pipefail
+  cd docker
+  secret_pattern='^[[:space:]]*(export[[:space:]]+)?HUGEGRAPH_AUTH_TOKEN_SECRET[[:space:]]*='
+  secret_count="$(grep -Ec "${secret_pattern}" .env || true)"
+  case "${secret_count}" in
+    0)
+      command -v openssl >/dev/null 2>&1
+      token_secret="$(openssl rand -hex 32)"
+      if (( ${#token_secret} != 64 )); then
+        echo "Failed to generate a 64-character token secret" >&2
+        exit 1
+      fi
+      printf "HUGEGRAPH_AUTH_TOKEN_SECRET='%s'\n" "${token_secret}" >> .env
+      unset token_secret
+      echo "Generated HUGEGRAPH_AUTH_TOKEN_SECRET"
+      ;;
+    1)
+      token_secret="$(sed -nE "s/${secret_pattern}'([^']*)'[[:space:]]*$/\\2/p" .env)"
+      if (( ${#token_secret} < 32 )); then
+        echo "Existing token secret must contain at least 32 bytes" >&2
+        exit 1
+      fi
+      unset token_secret
+      echo "HUGEGRAPH_AUTH_TOKEN_SECRET already exists; reusing it"
+      ;;
+    *)
+      echo "Duplicate HUGEGRAPH_AUTH_TOKEN_SECRET entries; repair .env" >&2
+      exit 1
+      ;;
+  esac
+  chmod 600 .env
+)
+```
+
+The entrypoint rejects shorter explicit values before changing either Server configuration file.
+
+**Deprecated aliases** (still work but log a warning):
+
+| Deprecated | Use Instead |
+|------------|-------------|
+| `BACKEND` | `HG_SERVER_BACKEND` |
+| `PD_PEERS` | `HG_SERVER_PD_PEERS` |
+
+---
+
 Select Hubble independently:
 
 ```bash
@@ -272,6 +422,75 @@ HUBBLE_IMAGE=local/hugegraph-hubble:test \
 HUBBLE_PULL_POLICY=never \
 docker compose -f docker-compose-hstore.yml up -d --wait
 ```
+
+### ToplingDB variants
+
+Build the Linux x86_64 Topling images from the shared Bake graph:
+
+```bash
+RUNTIME_VARIANT=topling IMAGE_TAG=topling \
+  docker buildx bake --file docker/bake.hcl
+```
+
+Run standalone HugeGraph with its isolated Topling data volume:
+
+```bash
+HUGEGRAPH_SERVER_IMAGE=hugegraph/hugegraph:topling \
+HUGEGRAPH_SERVER_PULL_POLICY=always \
+HG_SERVER_ROCKSDB_PROVIDER=topling \
+HG_SERVER_DATA_PATH=/hugegraph-server/topling-data \
+HG_SERVER_ENFORCE_PROVIDER_MARKER=true \
+HUGEGRAPH_SERVER_VOLUME=server-topling-data \
+docker compose -f docker-compose.yml \
+  up -d --wait
+```
+
+The same parameters work with a published image or a locally built image. The
+standard `server-data` volume is not used; Topling data is stored in the
+provider-specific `server-topling-data` volume.
+
+Run the minimal distributed 1+1+1 topology from source with Topling PD and
+Store runtimes. The HStore Server remains standard:
+
+```bash
+HUGEGRAPH_PD_IMAGE=local/hugegraph-pd:topling \
+HUGEGRAPH_PD_PULL_POLICY=never \
+HUGEGRAPH_PD_BUILD_TARGET=topling \
+HUGEGRAPH_PD_VOLUME=pd-topling-data \
+HG_PD_ROCKSDB_PROVIDER=topling \
+HG_PD_DATA_PATH=/hugegraph-pd/topling-pd-data \
+HG_PD_ENFORCE_PROVIDER_MARKER=true \
+HUGEGRAPH_STORE_IMAGE=local/hugegraph-store:topling \
+HUGEGRAPH_STORE_PULL_POLICY=never \
+HUGEGRAPH_STORE_BUILD_TARGET=topling \
+HUGEGRAPH_STORE_VOLUME=store-topling-data \
+HG_STORE_ROCKSDB_PROVIDER=topling \
+HG_STORE_DATA_PATH=/hugegraph-store/topling-storage \
+HG_STORE_ENFORCE_PROVIDER_MARKER=true \
+HUGEGRAPH_SERVER_IMAGE=hugegraph/server:dev \
+HUGEGRAPH_SERVER_PULL_POLICY=build \
+docker compose -f docker-compose-hstore.yml -f docker-compose.dev.yml \
+  up -d --build --wait
+```
+
+For published images, replace the two local image values and `never` policies
+with `hugegraph/{pd,store}:topling` and `always`. Set
+`HUGEGRAPH_SERVER_IMAGE=hugegraph/server:topling` and
+`HUGEGRAPH_SERVER_PULL_POLICY=always` for the matching HStore Server. The
+standard `pd-data` and `store-data` volumes are not mounted.
+
+The HA reference uses the same parameters with
+`docker-compose-3pd-3store-3server.yml`; set
+`HUGEGRAPH_PD0_VOLUME`, `HUGEGRAPH_PD1_VOLUME`, `HUGEGRAPH_PD2_VOLUME`,
+`HUGEGRAPH_STORE0_VOLUME`, `HUGEGRAPH_STORE1_VOLUME`, and
+`HUGEGRAPH_STORE2_VOLUME` to their `*-topling-data` names.
+
+The generic Compose files inject image, provider, data-root, and volume
+parameters; no Topling-specific Compose file is maintained. Each Topling owner
+uses a provider-specific named volume and marker. Do not reuse a standard
+RocksDB volume with a Topling image. See
+[`docs/toplingdb/README.md`](../docs/toplingdb/README.md) for distribution
+configuration, provider markers, restart checks, and troubleshooting.
 
 ### Image build arguments and cache refresh
 

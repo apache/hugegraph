@@ -185,7 +185,7 @@ public final class HugeFactoryAuthProxy {
                                           "this$0");
         Reflection.registerFieldsToFilter(HugeGraphAuthProxy.Context.class, "ADMIN", "user");
         Reflection.registerFieldsToFilter(HugeGraphAuthProxy.ContextTask.class, "runner",
-                                          "context");
+                                          "cleanup", "context");
         Reflection.registerFieldsToFilter(StandardHugeGraph.class, "LOG", "started", "closed",
                                           "mode", "variables", "name", "params", "configuration",
                                           "schemaEventHub", "graphEventHub", "indexEventHub",
@@ -203,7 +203,8 @@ public final class HugeFactoryAuthProxy {
                                            "access$14", "access$15", "access$16", "access$17",
                                            "access$18", "serializer", "loadSchemaStore",
                                            "loadSystemStore", "loadGraphStore", "closeTx",
-                                           "analyzer", "serverInfoManager", "reloadRamtable",
+                                           "closeCurrentThreadTransaction", "analyzer",
+                                           "serverInfoManager", "reloadRamtable",
                                            "reloadRamtable", "access$19", "access$20", "access$21");
         Reflection.registerFieldsToFilter(
                 loadClass("org.apache.hugegraph.StandardHugeGraph$StandardHugeGraphParams"),
@@ -298,8 +299,10 @@ public final class HugeFactoryAuthProxy {
                                            "autoCommit", "beforeRead", "afterWrite", "afterRead",
                                            "commitMutation2Backend", "checkOwnerThread", "doAction",
                                            "store", "reset");
-        Reflection.registerFieldsToFilter(HugeFactory.class, "LOG", "NAME_REGEX", "graphs");
-        Reflection.registerMethodsToFilter(HugeFactory.class, "lambda$0");
+        Reflection.registerFieldsToFilter(HugeFactory.class, "LOG", "NAME_REGEX", "graphs",
+                                          "GRAPHS");
+        Reflection.registerMethodsToFilter(HugeFactory.class, "lambda$0",
+                                           "closeCurrentThreadTransactions");
         Reflection.registerFieldsToFilter(SchemaElement.class, "graph", "id", "name", "userdata",
                                           "status");
         Reflection.registerFieldsToFilter(HugeVertex.class, "EMPTY_SET", "id", "label", "edges",

@@ -41,6 +41,41 @@
         </fileSet>
     </fileSets>
 
+    <files>
+        <file>
+            <source>
+                ${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/common-topling.sh
+            </source>
+            <outputDirectory>bin</outputDirectory>
+            <destName>common-topling.sh</destName>
+            <fileMode>0755</fileMode>
+        </file>
+        <file>
+            <source>
+                ${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/prepare-topling.sh
+            </source>
+            <outputDirectory>bin</outputDirectory>
+            <destName>prepare-topling.sh</destName>
+            <fileMode>0755</fileMode>
+        </file>
+        <file>
+            <source>
+                ${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/preload-topling.sh
+            </source>
+            <outputDirectory>bin</outputDirectory>
+            <destName>preload-topling.sh</destName>
+            <fileMode>0755</fileMode>
+        </file>
+        <file>
+            <source>
+                ${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/verify-rocksdb-provider.sh
+            </source>
+            <outputDirectory>bin</outputDirectory>
+            <destName>verify-rocksdb-provider.sh</destName>
+            <fileMode>0755</fileMode>
+        </file>
+    </files>
+
     <dependencySets>
         <!-- code jars -->
         <dependencySet>

@@ -61,6 +61,14 @@ public class RocksDBOptions extends OptionHolder {
                     "rocksdb-data/data"
             );
 
+    public static final ConfigOption<String> PROVIDER =
+            new ConfigOption<>(
+                    "rocksdb.provider",
+                    "The RocksDB-compatible runtime provider.",
+                    allowValues("rocksdb", "topling"),
+                    "rocksdb"
+            );
+
     public static final ConfigListOption<String> DATA_DISKS =
             new ConfigListOption<>(
                     "rocksdb.data_disks",

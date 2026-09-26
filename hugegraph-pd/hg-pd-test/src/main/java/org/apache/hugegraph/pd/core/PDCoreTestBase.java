@@ -44,7 +44,8 @@ import org.junit.BeforeClass;
 
 public class PDCoreTestBase {
 
-    private static final String DATA_PATH = "/tmp/pd_data";
+    private static final String DATA_PATH = System.getProperty("pd.test.data_path",
+                                                              "tmp/pd-core-data");
     private static PDConfig pdConfig;
     private static StoreNodeService storeNodeService;
     private static PartitionService partitionService;

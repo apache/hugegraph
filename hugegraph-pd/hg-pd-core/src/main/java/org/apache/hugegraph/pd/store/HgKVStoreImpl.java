@@ -67,7 +67,7 @@ public class HgKVStoreImpl implements HgKVStore {
         final Lock writeLock = this.readWriteLock.writeLock();
         writeLock.lock();
         try {
-            this.dbPath = config.getDataPath() + "/rocksdb/";
+            this.dbPath = config.getDataPath() + "/rocksdb";
             File file = new File(this.dbPath);
             if (!file.exists()) {
                 try {

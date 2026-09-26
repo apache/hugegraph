@@ -56,7 +56,6 @@ public class RocksDBOptions extends OptionHolder {
                     disallowEmpty(),
                     false
             );
-
     //    public static final ConfigListOption<String> DATA_DISKS =
 //            new ConfigListOption<>(
 //                    "rocksdb.data_disks",

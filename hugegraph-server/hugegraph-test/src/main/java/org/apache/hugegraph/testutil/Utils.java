@@ -38,6 +38,10 @@ public class Utils {
     public static final String CONF_PATH = "hugegraph.properties";
 
     public static HugeGraph open() {
+        return HugeFactory.open(getConf());
+    }
+
+    private static String configPath() {
         String confPath = System.getProperty("config_path");
         if (confPath == null || confPath.isEmpty()) {
             confPath = CONF_PATH;
@@ -49,7 +53,7 @@ public class Utils {
             // ignored Exception
         }
 
-        return HugeFactory.open(getLocalConfig(confPath));
+        return confPath;
     }
 
     private static PropertiesConfiguration getLocalConfig(String path) {
@@ -97,21 +101,7 @@ public class Utils {
     }
 
     public static PropertiesConfiguration getConf() {
-        String confFile = Utils.class.getClassLoader()
-                                     .getResource(CONF_PATH).getPath();
-        File file = new File(confFile);
-        E.checkArgument(file.exists() && file.isFile() && file.canRead(),
-                        "Need to specify a readable config file rather than:" +
-                        " %s", file.toString());
-
-        PropertiesConfiguration config;
-        try {
-            config = new Configurations().properties(file);
-        } catch (ConfigurationException e) {
-            throw new HugeException("Unable to load config file: %s",
-                                    e, confFile);
-        }
-        return config;
+        return getLocalConfig(configPath());
     }
 
     public static void println(String message) {

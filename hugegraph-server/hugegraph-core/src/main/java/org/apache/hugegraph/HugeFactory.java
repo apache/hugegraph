@@ -19,7 +19,10 @@ package org.apache.hugegraph;
 
 import java.io.File;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -104,9 +107,37 @@ public class HugeFactory {
         return open(getRemoteConfig(url));
     }
 
-    public static void remove(HugeGraph graph) {
+    public static synchronized void remove(HugeGraph graph) {
         String spaceGraphName = graph.spaceGraphName();
         GRAPHS.remove(spaceGraphName);
+    }
+
+    public static void closeCurrentThreadTransactions() {
+        List<HugeGraph> graphs;
+        synchronized (HugeFactory.class) {
+            graphs = new ArrayList<>(GRAPHS.values());
+        }
+        closeCurrentThreadTransactions(graphs);
+    }
+
+    static void closeCurrentThreadTransactions(
+                Collection<? extends HugeGraph> graphs) {
+        Throwable failure = null;
+        for (HugeGraph graph : graphs) {
+            try {
+                ((StandardHugeGraph) graph).closeCurrentThreadTransaction();
+            } catch (Throwable e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw new HugeException("Failed to close current thread " +
+                                    "transactions", failure);
+        }
     }
 
     public static void checkGraphName(String name, String configFile) {

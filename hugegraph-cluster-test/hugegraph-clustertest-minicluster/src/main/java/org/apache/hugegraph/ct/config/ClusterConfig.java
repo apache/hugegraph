@@ -59,6 +59,7 @@ public class ClusterConfig {
 
         for (int i = 0; i < serverCnt; i++) {
             ServerConfig serverConfig = new ServerConfig();
+            serverConfig.setPDPeersList(pdGrpcList);
             serverConfigs.add(serverConfig);
             GraphConfig graphConfig = new GraphConfig();
             graphConfig.setPDPeersList(pdGrpcList);

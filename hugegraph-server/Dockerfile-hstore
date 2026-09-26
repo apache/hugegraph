@@ -61,6 +61,12 @@ RUN apt-get -q update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+ARG SOURCE_REPOSITORY=https://github.com/apache/hugegraph
+ARG SOURCE_REVISION=local
+LABEL org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}" \
+      org.apache.hugegraph.rocksdb-runtime="hstore"
+
 COPY --from=build /pkg/hugegraph-server/apache-hugegraph-server-*/ /hugegraph-server/
 # Configure the default HStore backend and REST listen address
 RUN cd /hugegraph-server/conf/graphs \

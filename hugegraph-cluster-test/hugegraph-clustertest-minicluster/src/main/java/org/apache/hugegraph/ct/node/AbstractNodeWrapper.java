@@ -28,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
@@ -158,29 +159,61 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
     }
 
     public void stop() {
+        this.stop(true);
+    }
+
+    public void stop(boolean deleteData) {
         if (this.instance == null) {
             return;
         }
         this.instance.destroy();
-        try {
-            if (!this.instance.waitFor(20, TimeUnit.SECONDS)) {
-                this.instance.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+        if (!waitForExit(this.instance, 20)) {
+            this.instance.destroyForcibly();
+            if (!waitForExit(this.instance, 10)) {
+                throw new IllegalStateException("Node " + this.getID() +
+                                                " survived forced stop; log: " + this.getLogPath());
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            LOG.error("Waiting node to shutdown error.", e);
         }
-        deleteDir();
+        if (deleteData) {
+            deleteDir();
+        }
+    }
+
+    private static boolean waitForExit(Process process, long seconds) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+        boolean interrupted = false;
+        try {
+            while (true) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0L) {
+                    return !process.isAlive();
+                }
+                try {
+                    return process.waitFor(remaining, TimeUnit.NANOSECONDS);
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     public boolean isAlive() {
-        return this.instance.isAlive();
+        return this.instance != null && this.instance.isAlive();
     }
 
     protected ProcessBuilder runCmd(List<String> startCmd, File stdoutFile) throws IOException {
+        if (stdoutFile.exists()) {
+            Path previous = Files.createTempFile(stdoutFile.toPath().toAbsolutePath().getParent(),
+                                                 stdoutFile.getName() + ".previous-", ".log");
+            Files.move(stdoutFile.toPath(), previous, StandardCopyOption.REPLACE_EXISTING);
+        }
         FileUtils.write(stdoutFile,
                         String.join(" ", startCmd) + System.lineSeparator() + System.lineSeparator(),
-                        StandardCharsets.UTF_8, true);
+                        StandardCharsets.UTF_8, false);
         ProcessBuilder processBuilder = new ProcessBuilder(startCmd)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(stdoutFile))
                 .redirectError(ProcessBuilder.Redirect.appendTo(stdoutFile));

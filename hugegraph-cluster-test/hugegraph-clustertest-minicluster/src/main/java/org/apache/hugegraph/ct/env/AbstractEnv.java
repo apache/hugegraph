@@ -21,6 +21,7 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.CONF_DIR;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.ct.base.HGTestLogger;
 import org.apache.hugegraph.ct.config.ClusterConfig;
@@ -28,6 +29,8 @@ import org.apache.hugegraph.ct.config.GraphConfig;
 import org.apache.hugegraph.ct.config.PDConfig;
 import org.apache.hugegraph.ct.config.ServerConfig;
 import org.apache.hugegraph.ct.config.StoreConfig;
+import org.apache.hugegraph.ct.node.AbstractNodeWrapper;
+import org.apache.hugegraph.ct.node.BaseNodeWrapper;
 import org.apache.hugegraph.ct.node.PDNodeWrapper;
 import org.apache.hugegraph.ct.node.ServerNodeWrapper;
 import org.apache.hugegraph.ct.node.StoreNodeWrapper;
@@ -40,6 +43,8 @@ import lombok.extern.slf4j.Slf4j;
 public abstract class AbstractEnv implements BaseEnv {
 
     private static final Logger LOG = HGTestLogger.ENV_LOG;
+
+    private boolean startupFailed;
 
     protected ClusterConfig clusterConfig;
     protected List<PDNodeWrapper> pdNodeWrappers;
@@ -71,9 +76,11 @@ public abstract class AbstractEnv implements BaseEnv {
         }
 
         for (int i = 0; i < serverCnt; i++) {
-            ServerNodeWrapper serverNodeWrapper = new ServerNodeWrapper(cluster_id, i);
-            serverNodeWrappers.add(serverNodeWrapper);
             ServerConfig serverConfig = clusterConfig.getServerConfig(i);
+            int gremlinPort = serverConfig.getGremlinPort();
+            ServerNodeWrapper serverNodeWrapper = new ServerNodeWrapper(cluster_id, i,
+                                                                         gremlinPort);
+            serverNodeWrappers.add(serverNodeWrapper);
             serverConfig.setServerID(serverNodeWrapper.getID());
             GraphConfig graphConfig = clusterConfig.getGraphConfig(i);
             if (i == 0) {
@@ -87,47 +94,94 @@ public abstract class AbstractEnv implements BaseEnv {
     }
 
     public void startCluster() {
-        for (PDNodeWrapper pdNodeWrapper : pdNodeWrappers) {
-            pdNodeWrapper.start();
-            while (!pdNodeWrapper.isStarted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+        try {
+            for (PDNodeWrapper node : this.pdNodeWrappers) {
+                startNode(node);
             }
-        }
-        for (StoreNodeWrapper storeNodeWrapper : storeNodeWrappers) {
-            storeNodeWrapper.start();
-            while (!storeNodeWrapper.isStarted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+            for (StoreNodeWrapper node : this.storeNodeWrappers) {
+                startNode(node);
             }
-        }
-        for (ServerNodeWrapper serverNodeWrapper : serverNodeWrappers) {
-            serverNodeWrapper.start();
-            while (!serverNodeWrapper.isStarted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+            for (ServerNodeWrapper node : this.serverNodeWrappers) {
+                startNode(node);
             }
+        } catch (RuntimeException | Error failure) {
+            this.startupFailed = true;
+            try {
+                this.stopCluster();
+            } catch (RuntimeException | Error cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
         }
     }
 
+    private static void startNode(AbstractNodeWrapper node) {
+        node.start();
+        awaitStarted(node, TimeUnit.MINUTES.toMillis(5));
+    }
+
+    static void awaitStarted(BaseNodeWrapper node, long timeoutMillis) {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        try {
+            while (true) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new InterruptedException();
+                }
+                if (!node.isAlive()) {
+                    throw startupFailure(node, "process exited before becoming ready");
+                }
+                if (node.isStarted()) {
+                    return;
+                }
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0L) {
+                    throw startupFailure(node, "startup timed out after " + timeoutMillis + " ms");
+                }
+                TimeUnit.NANOSECONDS.sleep(Math.min(remaining, TimeUnit.SECONDS.toNanos(1)));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while starting " + node.getID() +
+                                            "; log: " + node.getLogPath(), e);
+        }
+    }
+
+    private static IllegalStateException startupFailure(BaseNodeWrapper node, String reason) {
+        return new IllegalStateException("Node " + node.getID() + " " + reason +
+                                         "; log: " + node.getLogPath());
+    }
+
     public void stopCluster() {
-        for (ServerNodeWrapper serverNodeWrapper : serverNodeWrappers) {
-            serverNodeWrapper.stop();
+        List<AbstractNodeWrapper> nodes = new ArrayList<>();
+        nodes.addAll(this.serverNodeWrappers);
+        nodes.addAll(this.storeNodeWrappers);
+        nodes.addAll(this.pdNodeWrappers);
+        stopNodes(nodes, !this.startupFailed);
+    }
+
+    static void stopNodes(List<? extends AbstractNodeWrapper> nodes, boolean deleteData) {
+        boolean interrupted = Thread.interrupted();
+        IllegalStateException failure = null;
+        try {
+            for (AbstractNodeWrapper node : nodes) {
+                try {
+                    node.stop(deleteData);
+                } catch (RuntimeException | Error e) {
+                    if (failure == null) {
+                        failure = new IllegalStateException("Failed to stop cluster nodes");
+                    }
+                    failure.addSuppressed(e);
+                } finally {
+                    interrupted |= Thread.interrupted();
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
-        for (StoreNodeWrapper storeNodeWrapper : storeNodeWrappers) {
-            storeNodeWrapper.stop();
-        }
-        for (PDNodeWrapper pdNodeWrapper : pdNodeWrappers) {
-            pdNodeWrapper.stop();
+        if (failure != null) {
+            throw failure;
         }
     }
 

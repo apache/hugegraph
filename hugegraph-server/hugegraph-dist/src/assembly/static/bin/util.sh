@@ -24,6 +24,75 @@ function command_available() {
     return 1
 }
 
+# Resolve a path before comparing it with an excluded runtime directory.  The
+# fallback keeps the launcher usable on macOS hosts where `realpath` may not be
+# installed, while the depth limit prevents malformed symlink loops from
+# hanging startup.
+function canonical_path() {
+    local path="$1"
+    local depth="${2:-0}"
+    local target
+    local dir
+
+    (( depth < 40 )) || return 1
+    if command_available "realpath"; then
+        realpath "$path"
+        return
+    fi
+    if [[ -L "$path" ]]; then
+        target=$(readlink "$path") || return 1
+        if [[ "$target" = /* ]]; then
+            canonical_path "$target" "$((depth + 1))"
+        else
+            canonical_path "$(dirname "$path")/$target" "$((depth + 1))"
+        fi
+        return
+    fi
+    dir=$(cd -P "$(dirname "$path")" 2>/dev/null && pwd) || return 1
+    printf '%s/%s\n' "$dir" "$(basename "$path")"
+}
+
+# Print JAR paths below a component's lib directory except anything whose
+# canonical target lives below its optional Topling subtree. `find -P` keeps
+# directory aliases from being traversed, while direct file aliases are
+# resolved and emitted canonically after the exclusion check.
+function find_standard_lib_jars() {
+    local lib_dir="$1"
+    local pattern="$2"
+    local -a excluded_patterns=("${@:3}")
+    local top_dir="$lib_dir/topling"
+    local canonical_top
+    local jar
+    local canonical_jar
+    local name
+    local excluded
+
+    if [[ -d "$top_dir" ]]; then
+        canonical_top=$(canonical_path "$top_dir") || canonical_top="$top_dir"
+    else
+        canonical_top="$top_dir"
+    fi
+    while IFS= read -r -d '' jar; do
+        name=$(basename "$jar")
+        for excluded in "${excluded_patterns[@]}"; do
+            # shellcheck disable=SC2254 # exclusion arguments are glob patterns
+            case "$name" in
+                $excluded) continue 2 ;;
+            esac
+        done
+        canonical_jar=$(canonical_path "$jar") || continue
+        [[ -f "$canonical_jar" ]] || continue
+        if [[ "$canonical_top" = "/" ]]; then
+            continue
+        fi
+        case "$canonical_jar" in
+            "$canonical_top" | "$canonical_top"/*) continue ;;
+        esac
+        printf '%s\n' "$canonical_jar"
+    done < <(find -P "$lib_dir" -name "$pattern" \
+        ! -path "$top_dir/*" -print0)
+}
+
 function configure_riscv64_libatomic() {
     if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "riscv64" ]]; then
         return 0

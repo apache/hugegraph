@@ -55,8 +55,25 @@ set_prop_encoded() {
     key_re="^[[:space:]]*${esc_key}([[:space:]]*[:=]|[[:space:]]+|[[:space:]]*$)"
 
     if grep -qE "${key_re}" "${file}"; then
-        sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}"
-        sed -ri "0,/${key_re}/s~${key_re}.*~${key}=${esc_val}~" "${file}"
+        if sed --version >/dev/null 2>&1; then
+            # GNU sed supports the 0,/regexp/ address used by the Linux
+            # images. Keep the first property and remove later duplicates.
+            sed -ri "0,/${key_re}/!{/${key_re}/d;}" "${file}"
+            sed -ri "0,/${key_re}/s~${key_re}.*~${key}=${esc_val}~" "${file}"
+        else
+            # BSD sed (macOS) has neither -r nor the GNU line-0 address. Find
+            # the matching lines explicitly, delete duplicates from the end,
+            # then replace the first line in place.
+            first_line=$(grep -nE "${key_re}" "${file}" | head -n 1 | cut -d: -f1)
+            duplicate_lines=$(grep -nE "${key_re}" "${file}" |
+                              cut -d: -f1 | tail -n +2 | sort -rn)
+            while IFS= read -r duplicate; do
+                [[ -z "${duplicate}" ]] || \
+                    sed -E -i '' "${duplicate}d" "${file}"
+            done <<< "${duplicate_lines}"
+            sed -E -i '' "${first_line}s~${key_re}.*~${key}=${esc_val}~" \
+                "${file}"
+        fi
     else
         printf '%s=%s\n' "$key" "$encoded_val" >> "${file}"
     fi
@@ -89,6 +106,56 @@ migrate_env() {
 
 migrate_env "BACKEND"  "HG_SERVER_BACKEND"
 migrate_env "PD_PEERS" "HG_SERVER_PD_PEERS"
+
+ROCKSDB_PROVIDER="${HG_SERVER_ROCKSDB_PROVIDER:-rocksdb}"
+case "${ROCKSDB_PROVIDER}" in
+    rocksdb | topling) ;;
+    *) log "ERROR: HG_SERVER_ROCKSDB_PROVIDER must be rocksdb or topling"
+       exit 1 ;;
+esac
+
+REQUESTED_BACKEND="${HG_SERVER_BACKEND:-$(get_prop_encoded "backend" "${GRAPH_CONF}")}"
+if [[ "${REQUESTED_BACKEND}" == "hstore" ]]; then
+    TOPLING_JAR=$(find ./lib -path '*/topling/rocksdbjni*.jar' \
+                       -print -quit 2>/dev/null || true)
+    if [[ "${ROCKSDB_PROVIDER}" == "topling" ]]; then
+        log "ERROR: an HStore Server cannot select a local ToplingDB runtime"
+        exit 1
+    fi
+    if [[ -n "${TOPLING_JAR}" ||
+          -e ./library/librocksdbjni-linux64.so ]]; then
+        log "ERROR: an HStore Server image must not contain a local" \
+            "ToplingDB runtime"
+        exit 1
+    fi
+fi
+
+if [[ -n "${HG_SERVER_DATA_PATH:-}" ]]; then
+    ROCKSDB_DATA_ROOT="${HG_SERVER_DATA_PATH}"
+elif [[ "${ROCKSDB_PROVIDER}" == "topling" ]]; then
+    ROCKSDB_DATA_ROOT="$(pwd)/topling-data"
+else
+    ROCKSDB_DATA_ROOT="$(pwd)/rocksdb-data"
+fi
+ENFORCE_PROVIDER_MARKER="${HG_SERVER_ENFORCE_PROVIDER_MARKER:-false}"
+case "${ENFORCE_PROVIDER_MARKER}" in
+    true | false) ;;
+    *) log "ERROR: HG_SERVER_ENFORCE_PROVIDER_MARKER must be true or false"
+       exit 1 ;;
+esac
+if [[ "${REQUESTED_BACKEND}" == "rocksdb" ]]; then
+    ./bin/verify-rocksdb-provider.sh server "${ROCKSDB_PROVIDER}" \
+        "${ROCKSDB_DATA_ROOT}" "${ENFORCE_PROVIDER_MARKER}"
+    LEGACY_INIT_MARKER="${DOCKER_FOLDER}/${INIT_FLAG_FILE}"
+    DOCKER_FOLDER="${ROCKSDB_DATA_ROOT}/.hugegraph-state"
+    mkdir -p "${DOCKER_FOLDER}"
+    if [[ "${ROCKSDB_PROVIDER}" == "rocksdb" &&
+          -f "${LEGACY_INIT_MARKER}" &&
+          ! -e "${DOCKER_FOLDER}/${INIT_FLAG_FILE}" ]]; then
+        cp "${LEGACY_INIT_MARKER}" "${DOCKER_FOLDER}/${INIT_FLAG_FILE}"
+        log "migrated the legacy RocksDB initialization marker"
+    fi
+fi
 
 if [[ -n "${HG_SERVER_AUTH_TOKEN_SECRET:-}" ]]; then
     LC_ALL=C
@@ -147,6 +214,11 @@ fi
 
 # ── Map env → properties file ─────────────────────────────────────────
 [[ -n "${HG_SERVER_BACKEND:-}"  ]] && set_prop "backend"  "${HG_SERVER_BACKEND}"  "${GRAPH_CONF}"
+set_prop "rocksdb.provider" "${ROCKSDB_PROVIDER}" "${GRAPH_CONF}"
+if [[ "${REQUESTED_BACKEND}" == "rocksdb" ]]; then
+    set_prop "rocksdb.data_path" "${ROCKSDB_DATA_ROOT}/data" "${GRAPH_CONF}"
+    set_prop "rocksdb.wal_path" "${ROCKSDB_DATA_ROOT}/wal" "${GRAPH_CONF}"
+fi
 [[ -n "${HG_SERVER_PD_PEERS:-}" ]] && set_prop "pd.peers" "${HG_SERVER_PD_PEERS}" "${GRAPH_CONF}"
 [[ -n "${HG_SERVER_USE_PD:-}" ]] && \
     set_prop "usePD" "${HG_SERVER_USE_PD}" "${REST_SERVER_CONF}"
@@ -240,7 +312,56 @@ else
     ./bin/init-store.sh
 fi
 
-./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t "${SERVER_STARTUP_TIMEOUT_S}"
+PID_FILE="./bin/pid"
+START_PID=""
+PID=""
+
+read_server_pid() {
+    local candidate
+
+    candidate=$(cat "$PID_FILE" 2>/dev/null || true)
+    if [[ "$candidate" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s' "$candidate"
+    fi
+}
+
+# A restarted container can retain the previous process id in its writable
+# layer. Only trust a pid file created by the startup launched below.
+rm -f "$PID_FILE"
+
+# shellcheck disable=SC2329  # Invoked by the TERM/INT trap below.
+shutdown_server() {
+    local server_pid="${PID:-}"
+
+    if [[ -z "$server_pid" ]]; then
+        server_pid=$(read_server_pid)
+    fi
+    if [[ -n "$server_pid" ]]; then
+        kill -TERM -- "$server_pid" 2>/dev/null || true
+    fi
+    if [[ -n "${START_PID:-}" ]]; then
+        kill -TERM -- "$START_PID" 2>/dev/null || true
+    fi
+    while [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; do
+        # kill -0 remains true for an unreaped zombie. Do not keep the
+        # container alive after the JVM has already completed shutdown.
+        if [[ -r "/proc/$server_pid/stat" ]]; then
+            PROCESS_STATE=$(awk '{ print $3 }' "/proc/$server_pid/stat" \
+                            2>/dev/null || true)
+            if [[ "$PROCESS_STATE" == "Z" ]]; then
+                break
+            fi
+        fi
+        sleep 1
+    done
+    exit 0
+}
+trap shutdown_server TERM INT
+
+./bin/start-hugegraph.sh -j "${JAVA_OPTS:-}" -t "${SERVER_STARTUP_TIMEOUT_S}" &
+START_PID=$!
+wait "$START_PID"
+START_PID=""
 
 # Post-startup cluster stabilization check (hstore only — rocksdb has no partitions)
 ACTUAL_BACKEND=$(grep -E '^[[:space:]]*backend[[:space:]]*=' "${GRAPH_CONF}" | head -n 1 | sed 's/.*=//' | tr -d '[:space:]' || true)
@@ -250,9 +371,8 @@ if [[ "${ACTUAL_BACKEND}" == "hstore" ]]; then
     ./bin/wait-partition.sh || log "WARN: partitions not assigned yet"
 fi
 
-PID=$(cat ./bin/pid 2>/dev/null || true)
+PID=$(read_server_pid)
 if [[ -n "$PID" ]]; then
-    trap 'kill -TERM "$PID" 2>/dev/null; while kill -0 "$PID" 2>/dev/null; do sleep 1; done; exit 0' TERM INT
     tail --pid="$PID" -f /dev/null
     exit 1
 fi

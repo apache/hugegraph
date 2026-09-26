@@ -18,6 +18,7 @@
 package org.apache.hugegraph.unit.license;
 
 import java.net.InetAddress;
+import java.net.Inet6Address;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -33,10 +34,6 @@ public class MachineInfoTest {
             "^(([01]?\\d\\d?|2[0-4]\\d|25[0-5])\\.){3}" +
             "([01]?\\d\\d?|2[0-4]\\d|25[0-5])$"
     );
-    private static final Pattern IPV6_PATTERN = Pattern.compile(
-            "^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$"
-    );
-
     private static final Pattern MAC_PATTERN = Pattern.compile(
             "^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$"
     );
@@ -47,8 +44,7 @@ public class MachineInfoTest {
     public void testGetIpAddressList() {
         List<String> ipAddressList = machineInfo.getIpAddress();
         for (String ip : ipAddressList) {
-            Assert.assertTrue(IPV4_PATTERN.matcher(ip).matches() ||
-                              IPV6_PATTERN.matcher(ip).matches());
+            Assert.assertTrue(isIpAddress(ip));
         }
         Assert.assertEquals(ipAddressList, machineInfo.getIpAddress());
     }
@@ -67,8 +63,47 @@ public class MachineInfoTest {
         List<InetAddress> addressList = machineInfo.getLocalAllInetAddress();
         for (InetAddress address : addressList) {
             String ip = address.getHostAddress();
-            Assert.assertTrue(IPV4_PATTERN.matcher(ip).matches() ||
-                              IPV6_PATTERN.matcher(ip).matches());
+            Assert.assertTrue(isIpAddress(ip));
+        }
+    }
+
+    @Test
+    public void testScopedIpv6AddressValidation() throws UnknownHostException {
+        byte[] bytes = new byte[16];
+        bytes[0] = 0x20;
+        bytes[1] = 0x01;
+        bytes[2] = 0x0d;
+        bytes[3] = (byte) 0xb8;
+        bytes[15] = 1;
+        Inet6Address scoped = Inet6Address.getByAddress(null, bytes, 7);
+        Assert.assertTrue(isIpAddress(scoped.getHostAddress()));
+        Inet6Address parsed = (Inet6Address) InetAddress.getByName(scoped.getHostAddress());
+        Assert.assertArrayEquals(bytes, parsed.getAddress());
+        Assert.assertEquals(7, parsed.getScopeId());
+        Assert.assertTrue(isIpAddress("2001:db8::1"));
+        Assert.assertTrue(isIpAddress("192.0.2.1"));
+    }
+
+    @Test
+    public void testRejectMalformedIpAddresses() {
+        for (String ip : new String[]{"localhost", "256.0.0.1", "2001:db8::gg",
+                                      "2001::db8::1", "localhost:8080"}) {
+            Assert.assertFalse(isIpAddress(ip));
+        }
+    }
+
+    private static boolean isIpAddress(String ip) {
+        if (IPV4_PATTERN.matcher(ip).matches()) {
+            return true;
+        }
+        // Only parse IPv6 literals here; never resolve a hostname through DNS.
+        if (!ip.contains(":")) {
+            return false;
+        }
+        try {
+            return InetAddress.getByName(ip) instanceof Inet6Address;
+        } catch (UnknownHostException e) {
+            return false;
         }
     }
 

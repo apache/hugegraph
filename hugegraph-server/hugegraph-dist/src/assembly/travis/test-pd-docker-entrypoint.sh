@@ -35,8 +35,11 @@ FAIL=0
 [[ -f "${ENTRYPOINT}" ]] || { echo "entrypoint not found at ${ENTRYPOINT}" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "python3 required" >&2; exit 1; }
 
-mkdir -p "${TMP_DIR}/bin"
+mkdir -p "${TMP_DIR}/bin" "${TMP_DIR}/pd_data"
 cp "${ENTRYPOINT}" "${TMP_DIR}/docker-entrypoint.sh"
+cp "$(dirname "${BASH_SOURCE[0]}")/../static/bin/verify-rocksdb-provider.sh" \
+   "${TMP_DIR}/bin/verify-rocksdb-provider.sh"
+chmod +x "${TMP_DIR}/bin/verify-rocksdb-provider.sh"
 # Stand in for the launcher: record the generated config instead of starting PD
 cat > "${TMP_DIR}/bin/start-hugegraph-pd.sh" <<'STUB'
 #!/usr/bin/env bash

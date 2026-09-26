@@ -19,6 +19,9 @@ set -ev
 
 BACKEND=$1
 
+# install rocksdb
+source "$TRAVIS_DIR/install-rocksdb.sh" server
+
 if [[ "$BACKEND" == "memory" ]]; then
     mvn test -pl hugegraph-server/hugegraph-test -am -P unit-test
 fi

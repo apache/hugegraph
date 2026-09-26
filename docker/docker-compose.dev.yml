@@ -17,26 +17,28 @@
 
 services:
   pd:
-    image: hugegraph/pd:dev
-    pull_policy: build
+    image: ${HUGEGRAPH_PD_IMAGE:-hugegraph/pd:dev}
+    pull_policy: ${HUGEGRAPH_PD_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: hugegraph-pd/Dockerfile
+      target: ${HUGEGRAPH_PD_BUILD_TARGET:-standard}
     healthcheck:
       start_period: 20s
 
   store:
-    image: hugegraph/store:dev
-    pull_policy: build
+    image: ${HUGEGRAPH_STORE_IMAGE:-hugegraph/store:dev}
+    pull_policy: ${HUGEGRAPH_STORE_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: hugegraph-store/Dockerfile
+      target: ${HUGEGRAPH_STORE_BUILD_TARGET:-standard}
     healthcheck:
       start_period: 30s
 
   server:
-    image: hugegraph/server:dev
-    pull_policy: build
+    image: ${HUGEGRAPH_SERVER_IMAGE:-hugegraph/server:dev}
+    pull_policy: ${HUGEGRAPH_SERVER_PULL_POLICY:-build}
     build:
       context: ..
       dockerfile: hugegraph-server/Dockerfile-hstore

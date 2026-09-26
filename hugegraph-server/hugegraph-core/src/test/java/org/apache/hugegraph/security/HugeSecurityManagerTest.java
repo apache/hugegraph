@@ -36,5 +36,9 @@ public class HugeSecurityManagerTest {
         Assert.assertFalse(properties.contains("socksProxyHost"));
         Assert.assertFalse(properties.contains("file.encoding"));
         Assert.assertTrue(properties.contains("java.specification.version"));
+        Assert.assertTrue(properties.contains(
+                "io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator"));
+        Assert.assertTrue(properties.contains(
+                "io.grpc.netty.shaded.io.netty.allocator.maxOrder"));
     }
 }

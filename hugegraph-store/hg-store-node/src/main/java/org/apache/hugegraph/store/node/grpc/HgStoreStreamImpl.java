@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.store.node.grpc;
 
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadPoolExecutor;
 
 import org.apache.hugegraph.store.grpc.state.ScanState;
@@ -31,6 +33,8 @@ import org.apache.hugegraph.store.node.util.HgExecutorUtil;
 import org.lognet.springboot.grpc.GRpcService;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import io.grpc.Context;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,6 +51,53 @@ public class HgStoreStreamImpl extends HgStoreStreamGrpc.HgStoreStreamImplBase {
     private AppConfig appConfig;
     private HgStoreWrapperEx wrapper;
     private ThreadPoolExecutor executor;
+    private boolean closing;
+    private final Set<Runnable> scans = ConcurrentHashMap.newKeySet();
+
+    /** Close admission before cancelling the gRPC server. */
+    public synchronized void stopAcceptingScans() {
+        this.closing = true;
+    }
+
+    /** Cancel streams, then drain queued cleanup tasks. Never discard the queue. */
+    public void shutdownScans() {
+        stopAcceptingScans();
+        for (Runnable cancel : this.scans.toArray(new Runnable[0])) {
+            cancel.run();
+        }
+        ThreadPoolExecutor current = getRealExecutor();
+        if (current != null) {
+            current.shutdown();
+        }
+    }
+
+    private synchronized void checkAcceptingScans() {
+        if (this.closing) {
+            throw Status.UNAVAILABLE.withDescription("Store scans are stopping")
+                                    .asRuntimeException();
+        }
+    }
+
+    private <T> StreamObserver<T> register(StreamObserver<T> observer) {
+        Context context = Context.current();
+        Runnable cancel = new Runnable() {
+            @Override
+            public synchronized void run() {
+                if (scans.contains(this)) {
+                    try {
+                        observer.onError(Status.CANCELLED.asRuntimeException());
+                    } catch (RuntimeException e) {
+                        log.warn("Failed to cancel scan", e);
+                    } finally {
+                        scans.remove(this);
+                    }
+                }
+            }
+        };
+        this.scans.add(cancel);
+        context.addListener(ignored -> cancel.run(), Runnable::run);
+        return observer;
+    }
 
     private HgStoreWrapperEx getWrapper() {
         if (this.wrapper == null) {
@@ -60,20 +111,16 @@ public class HgStoreStreamImpl extends HgStoreStreamGrpc.HgStoreStreamImplBase {
         return this.wrapper;
     }
 
-    public ThreadPoolExecutor getRealExecutor() {
-        return executor;
+    public synchronized ThreadPoolExecutor getRealExecutor() {
+        return this.executor;
     }
 
-    public ThreadPoolExecutor getExecutor() {
+    public synchronized ThreadPoolExecutor getExecutor() {
+        checkAcceptingScans();
         if (this.executor == null) {
-            synchronized (this) {
-                if (this.executor == null) {
-                    AppConfig.ThreadPoolScan scan = this.appConfig.getThreadPoolScan();
-                    this.executor =
-                            HgExecutorUtil.createExecutor("hg-scan", scan.getCore(), scan.getMax(),
-                                                          scan.getQueue());
-                }
-            }
+            AppConfig.ThreadPoolScan scan = this.appConfig.getThreadPoolScan();
+            this.executor = HgExecutorUtil.createExecutor("hg-scan", scan.getCore(),
+                                                         scan.getMax(), scan.getQueue());
         }
         return this.executor;
     }
@@ -95,27 +142,32 @@ public class HgStoreStreamImpl extends HgStoreStreamGrpc.HgStoreStreamImplBase {
     }
 
     @Override
-    public StreamObserver<ScanStreamReq> scan(StreamObserver<KvPageRes> response) {
-        return ScanStreamResponse.of(response, getWrapper(), getExecutor(), appConfig);
+    public synchronized StreamObserver<ScanStreamReq> scan(StreamObserver<KvPageRes> response) {
+        checkAcceptingScans();
+        return register(ScanStreamResponse.of(response, getWrapper(), getExecutor(), appConfig));
     }
 
     @Override
     public void scanOneShot(ScanStreamReq request, StreamObserver<KvPageRes> response) {
+        checkAcceptingScans();
         ScanOneShotResponse.scanOneShot(request, response, getWrapper());
     }
 
     @Override
-    public StreamObserver<ScanStreamBatchReq> scanBatch(StreamObserver<KvPageRes> response) {
-        return ScanBatchResponse3.of(response, getWrapper(), getExecutor());
+    public synchronized StreamObserver<ScanStreamBatchReq> scanBatch(StreamObserver<KvPageRes> response) {
+        checkAcceptingScans();
+        return register(ScanBatchResponse3.of(response, getWrapper(), getExecutor()));
     }
 
     @Override
-    public StreamObserver<ScanStreamBatchReq> scanBatch2(StreamObserver<KvStream> response) {
-        return ScanBatchResponseFactory.of(response, getWrapper(), getExecutor());
+    public synchronized StreamObserver<ScanStreamBatchReq> scanBatch2(StreamObserver<KvStream> response) {
+        checkAcceptingScans();
+        return register(ScanBatchResponseFactory.of(response, getWrapper(), getExecutor()));
     }
 
     @Override
     public void scanBatchOneShot(ScanStreamBatchReq request, StreamObserver<KvPageRes> response) {
+        checkAcceptingScans();
         ScanBatchOneShotResponse.scanOneShot(request, response, getWrapper());
     }
 }

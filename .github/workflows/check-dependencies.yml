@@ -25,8 +25,10 @@ jobs:
   dependency-check:
     runs-on: ubuntu-latest
     env:
-      USE_STAGE: 'false' # Whether to include the stage repository.
+      USE_STAGE: 'true' # Whether to include the stage repository.
       SCRIPT_DEPENDENCY: install-dist/scripts/dependency
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_ACTOR: ${{ github.actor }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4

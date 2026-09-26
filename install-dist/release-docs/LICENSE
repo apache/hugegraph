@@ -266,8 +266,7 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.6 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.7 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.11 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.13 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.14 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/sofa-rpc-all/5.7.6 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/tracer-core/3.0.8 -> Apache 2.0
     https://central.sonatype.com/artifact/com.beust/jcommander/1.30 -> Apache 2.0
@@ -480,6 +479,11 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/net.java.dev.jna/jna/5.12.1 -> Apache 2.0
     https://central.sonatype.com/artifact/net.java.dev.jna/jna/5.5.0 -> Apache 2.0
     https://central.sonatype.com/artifact/net.java.dev.jna/jna/5.7.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.github.jnr/jnr-ffi/2.1.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/joda-time/joda-time/2.10.8 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.skyscreamer/jsonassert/1.5.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.jayway.jsonpath/json-path/2.5.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.googlecode.json-simple/json-simple/1.1 -> Apache 2.0
     https://central.sonatype.com/artifact/net.jodah/failsafe/2.4.1 -> Apache 2.0
     https://central.sonatype.com/artifact/net.minidev/accessors-smart/1.2 -> Apache 2.0
     https://central.sonatype.com/artifact/net.minidev/json-smart/2.3 -> Apache 2.0
@@ -654,10 +658,48 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-rule/2.0.0-RC.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4/2.0.0-RC.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.powermock/powermock-reflect/2.0.0-RC.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/1.17.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/2.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-api/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-collectionschema/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-core/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.protostuff/protostuff-runtime/1.6.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config3/3.0.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.addthis.metrics/reporter-config-base/3.0.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.opencypher/rewriting-9.0/9.0.20190305 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/8.10.2 -> Apache 2.0
+    https://github.com/hugegraph/toplingdb/packages/3151853 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.fusesource/sigar/1.6.4 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.prometheus/simpleclient/0.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.prometheus/simpleclient_common/0.10.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-agent/0.22 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-cli/0.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-cli/0.22 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-core/0.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-core/0.22 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-hflame/0.22 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr5/0.5 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr6/0.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr-standalone/0.7 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-json/0.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-json/0.22 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-nps/0.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-stacktrace/0.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-stacktrace/0.22 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.18 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.26 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.27 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/1.28 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.yaml/snakeyaml/2.2 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.xerial.snappy/snappy-java/1.1.2.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa.common/sofa-common-tools/1.0.12 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alipay.sofa/sofa-rpc-all/5.7.6 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-aop/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework/spring-beans/5.3.20 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-actuator/2.5.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.roaringbitmap/RoaringBitmap/0.9.38 -> Apache 2.0
     https://central.sonatype.com/artifact/org.roaringbitmap/shims/0.9.38 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/6.29.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/7.7.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/8.10.2 -> Apache 2.0
     https://central.sonatype.com/artifact/org.skyscreamer/jsonassert/1.5.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.springframework.boot/spring-boot-actuator-autoconfigure/2.5.14 -> Apache 2.0

@@ -27,6 +27,13 @@
                     <id>staged-releases</id>
                     <url>https://repository.apache.org/content/groups/staging/</url>
                 </repository>
+                <repository>
+                    <id>github</id>
+                    <url>https://maven.pkg.github.com/hugegraph/toplingdb</url>
+                    <snapshots>
+                        <enabled>true</enabled>
+                    </snapshots>
+                </repository>
             </repositories>
             <pluginRepositories>
                 <pluginRepository>

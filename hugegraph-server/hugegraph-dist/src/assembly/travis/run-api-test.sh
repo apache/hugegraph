@@ -67,6 +67,9 @@ JACOCO_PORT=36320
 
 mvn package -Dmaven.test.skip=true -ntp
 
+# install rocksdb
+source "$TRAVIS_DIR/install-rocksdb.sh" server
+
 if [[ ! -e "$SERVER_DIR/lib/ikanalyzer-2012_u6.jar" ]]; then
   download_to_dir "$SERVER_DIR/lib/" \
                   "https://raw.githubusercontent.com/apache/hugegraph-doc/ik_binary/dist/server/ikanalyzer-2012_u6.jar"

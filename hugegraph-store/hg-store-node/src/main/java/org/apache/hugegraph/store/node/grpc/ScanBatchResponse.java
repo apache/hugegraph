@@ -20,7 +20,9 @@ package org.apache.hugegraph.store.node.grpc;
 import static org.apache.hugegraph.store.node.grpc.ScanUtil.getParallelIterator;
 
 import java.util.List;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -59,7 +61,7 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
     private final Object stateLock = new Object();
     private final Lock iteratorLock = new ReentrantLock();
     // Currently traversing iterator
-    private ScanIterator iterator;
+    private volatile ScanIterator iterator;
     // Next send sequence number
     private volatile int seqNo;
     // Client consumed sequence number
@@ -72,6 +74,7 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
     // Last read data time
     private long activeTime;
     private volatile State state;
+    private final AtomicBoolean cancelled = new AtomicBoolean();
 
     public ScanBatchResponse(StreamObserver<KvStream> response, HgStoreWrapperEx wrapper,
                              ThreadPoolExecutor executor) {
@@ -92,24 +95,29 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
      */
     @Override
     public void onNext(ScanStreamBatchReq request) {
+        if (this.cancelled.get()) {
+            return;
+        }
         switch (request.getQueryCase()) {
             case QUERY_REQUEST: // query conditions
-                executor.execute(() -> {
+                submit(() -> {
                     startQuery(request.getHeader().getGraph(), request.getQueryRequest());
                 });
                 break;
             case RECEIPT_REQUEST:   // Message asynchronous response
                 this.clientSeqNo = request.getReceiptRequest().getTimes();
                 if (seqNo - clientSeqNo < maxInFlightCount) {
+                    boolean send = false;
                     synchronized (stateLock) {
                         if (state == State.IDLE) {
                             state = State.DOING;
-                            executor.execute(() -> {
-                                sendEntries();
-                            });
-                        } else if (state == State.DONE) {
-                            sendNoDataEntries();
+                            send = true;
                         }
+                    }
+                    if (send) {
+                        submit(this::sendEntries);
+                    } else if (state == State.DONE) {
+                        sendNoDataEntries();
                     }
                 }
                 break;
@@ -125,7 +133,7 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
     @Override
     public void onError(Throwable t) {
         log.error("onError ", t);
-        closeQuery();
+        closeQuery(t);
     }
 
     @Override
@@ -138,18 +146,43 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
      *
      * @param request
      */
+    private void submit(Runnable task) {
+        if (this.cancelled.get()) {
+            return;
+        }
+        try {
+            this.executor.execute(task);
+        } catch (RejectedExecutionException e) {
+            closeQuery(e);
+        }
+    }
+
     private void startQuery(String graphName, ScanQueryRequest request) {
-        this.query = request;
-        this.limit = request.getLimit();
-        this.count = 0;
-        this.iterator = getParallelIterator(graphName, request, this.wrapper, executor);
-        synchronized (stateLock) {
-            if (state == State.IDLE) {
-                state = State.DOING;
-                executor.execute(() -> {
-                    sendEntries();
-                });
+        this.iteratorLock.lock();
+        try {
+            if (this.cancelled.get() || this.iterator != null) {
+                return;
             }
+            this.query = request;
+            this.limit = request.getLimit();
+            this.count = 0;
+            this.iterator = getParallelIterator(graphName, request, this.wrapper, executor);
+            if (this.cancelled.get()) {
+                closeIter();
+                return;
+            }
+            synchronized (stateLock) {
+                if (state != State.IDLE) {
+                    return;
+                }
+                state = State.DOING;
+            }
+            submit(this::sendEntries);
+        } catch (RuntimeException e) {
+            closeQuery(e);
+            log.warn("Failed to start scan", e);
+        } finally {
+            this.iteratorLock.unlock();
         }
     }
 
@@ -157,10 +190,25 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
      * Generate iterator
      */
     private void closeQuery() {
+        closeQuery(null);
+    }
+
+    private void closeQuery(Throwable error) {
+        if (!this.cancelled.compareAndSet(false, true)) {
+            return;
+        }
         setStateDone();
+        ScanIterator current = this.iterator;
+        if (current instanceof ParallelScanIterator) {
+            ((ParallelScanIterator) current).requestStop();
+        }
         try {
             closeIter();
-            this.sender.onCompleted();
+            if (error == null) {
+                this.sender.onCompleted();
+            } else {
+                this.sender.onError(error);
+            }
         } catch (Exception e) {
             log.error("exception ", e);
         }
@@ -169,13 +217,16 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
     }
 
     private void closeIter() {
+        this.iteratorLock.lock();
         try {
             if (this.iterator != null) {
                 this.iterator.close();
                 this.iterator = null;
             }
         } catch (Exception e) {
-
+            log.warn("Failed to close batch scan iterator", e);
+        } finally {
+            this.iteratorLock.unlock();
         }
     }
 
@@ -209,7 +260,7 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
                 this.sender.onNext(dataBuilder.build());
                 this.activeTime = System.currentTimeMillis();
             }
-            if (!iterator.hasNext() || this.count >= limit || state == State.DONE) {
+            if (state == State.DONE || this.count >= limit || !iterator.hasNext()) {
                 closeIter();
                 this.sender.onNext(KvStream.newBuilder().setOver(true).build());
                 setStateDone();
@@ -219,14 +270,7 @@ public class ScanBatchResponse implements StreamObserver<ScanStreamBatchReq> {
         } catch (Throwable e) {
             if (this.state != State.DONE) {
                 log.error(" send data exception: ", e);
-                setStateIdle();
-                if (this.sender != null) {
-                    try {
-                        this.sender.onError(e);
-                    } catch (Exception ex) {
-                        log.warn("Error when call sender.onError {}", e.getMessage());
-                    }
-                }
+                closeQuery(e);
             }
         } finally {
             iteratorLock.unlock();

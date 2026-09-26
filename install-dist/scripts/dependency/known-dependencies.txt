@@ -282,8 +282,7 @@ jna-5.5.0.jar
 jna-5.7.0.jar
 joda-time-2.10.8.jar
 joni-2.2.1.jar
-jraft-core-1.3.11.jar
-jraft-core-1.3.13.jar
+jraft-core-1.3.14.jar
 jsonassert-1.5.0.jar
 json-path-2.5.0.jar
 json-smart-2.3.jar
@@ -464,8 +463,6 @@ protostuff-core-1.6.0.jar
 protostuff-runtime-1.6.0.jar
 rewriting-9.0-9.0.20190305.jar
 RoaringBitmap-0.9.38.jar
-rocksdbjni-6.29.5.jar
-rocksdbjni-7.7.3.jar
 rocksdbjni-8.10.2.jar
 scala-java8-compat_2.12-0.8.0.jar
 scala-library-2.12.7.jar

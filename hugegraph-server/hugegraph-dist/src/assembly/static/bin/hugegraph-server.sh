@@ -70,17 +70,18 @@ MIN_JAVA_VERSION=11
 MAX_SECURITY_JAVA_VERSION=23
 
 # Add the slf4j-log4j12 binding
-CP=$(find -L $LIB -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
+CP=$(find_standard_lib_jars "$LIB" 'log4j-slf4j-impl*.jar' |
+    sort | tr '\n' ':')
 # Add the jars in lib that start with "hugegraph"
-CP="$CP":$(find -L $LIB -name 'hugegraph*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find_standard_lib_jars "$LIB" 'hugegraph*.jar' |
+    sort | tr '\n' ':')
 # Add the remaining jars in lib.
-CP="$CP":$(find -L $LIB -name '*.jar' \
-    \! -name 'hugegraph*' \
-    \! -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find_standard_lib_jars "$LIB" '*.jar' \
+    'hugegraph*' 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
 # Add the jars in ext (at any subdirectory depth)
-CP="$CP":$(find -L $EXT -name '*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find -L "$EXT" -name '*.jar' | sort | tr '\n' ':')
 # Add the jars in plugins (at any subdirectory depth), check "javaagent" related jars carefully
-CP="$CP":$(find -L $PLUGINS -name '*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find -L "$PLUGINS" -name '*.jar' | sort | tr '\n' ':')
 
 # (Cygwin only) Use ; classpath separator and reformat paths for Windows ("C:\foo")
 [[ $(uname) = CYGWIN* ]] && CP="$(cygpath -p -w "$CP")"
@@ -259,12 +260,12 @@ fi
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
     exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
 else
     exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
         >> ${LOGS}/hugegraph-server-stdout.log 2>&1

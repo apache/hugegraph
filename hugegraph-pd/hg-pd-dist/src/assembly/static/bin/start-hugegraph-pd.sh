@@ -66,6 +66,13 @@ PID_FILE="$BIN/pid"
 ensure_path_writable "$LOGS"
 ensure_path_writable "$PLUGINS"
 
+# preload rocksdb/toplingdb
+if [ ! -r "$BIN/preload-topling.sh" ]; then
+    echo "Required RocksDB runtime selector not found: $BIN/preload-topling.sh" >&2
+    exit 1
+fi
+source "$BIN/preload-topling.sh" || exit 1
+
 # The maximum and minimum heap memory that service can use
 MAX_MEM=$((32 * 1024))
 MIN_MEM=$((1 * 512))
@@ -83,7 +90,7 @@ fi
 
 # check jdk version
 JAVA_VERSION=$($JAVA -version 2>&1 | awk 'NR==1{gsub(/"/,""); print $3}'  | awk -F'_' '{print $1}')
-if [[ $? -ne 0 || $JAVA_VERSION < $EXPECT_JDK_VERSION ]]; then
+if [[ $? -ne 0 || $JAVA_VERSION -lt $EXPECT_JDK_VERSION ]]; then
     echo "Please make sure that the JDK is installed and the version >= $EXPECT_JDK_VERSION"  >> ${OUTPUT}
     exit 1
 fi
@@ -163,22 +170,34 @@ fi
 #if [ "${JMX_EXPORT_PORT}" != "" ] && [ ${JMX_EXPORT_PORT} -ne 0 ] ; then
 #  JAVA_OPTIONS="${JAVA_OPTIONS} -javaagent:${LIB}/jmx_prometheus_javaagent-0.16.1.jar=${JMX_EXPORT_PORT}:${CONF}/jmx_exporter.yml"
 #fi
-if [ $(ps -ef|grep -v grep| grep java|grep -cE ${CONF}) -ne 0 ]; then
+if [ "$(ps -ef | grep -v grep | grep java | grep -cE "${CONF}")" -ne 0 ]; then
    echo "HugeGraphPDServer is already running..."
    exit 0
 fi
 
 JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
+BOOT_JARS=("${LIB}"/hg-pd-service-*.jar)
+if [ "${#BOOT_JARS[@]}" -ne 1 ] || [ ! -f "${BOOT_JARS[0]}" ]; then
+    echo "Expected exactly one HugeGraph PD executable JAR in ${LIB}" >> "${OUTPUT}"
+    exit 1
+fi
+BOOT_JAR="${BOOT_JARS[0]}"
+JAVA_MAIN=(-jar "$BOOT_JAR")
+if [ -n "${TOPLING_RUNTIME_CLASSPATH:-}" ]; then
+    JAVA_MAIN=(-cp "${TOPLING_RUNTIME_CLASSPATH}:${BOOT_JAR}" \
+               org.springframework.boot.loader.JarLauncher)
+fi
 
 # Turn on security check
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphPDServer in daemon mode..."
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar &
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            -Dspring.config.location=${CONF}/application.yml "${JAVA_MAIN[@]}" &
     else
-        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1 &
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            -Dspring.config.location=${CONF}/application.yml "${JAVA_MAIN[@]}" \
+            >> ${OUTPUT} 2>&1 &
     fi
     PID="$!"
     # Write pid to file
@@ -190,10 +209,11 @@ else
     echo "$$" > "$PID_FILE"
     echo "[+pid] $$"
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            -Dspring.config.location=${CONF}/application.yml "${JAVA_MAIN[@]}"
     else
-        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1
+        exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            -Dspring.config.location=${CONF}/application.yml "${JAVA_MAIN[@]}" \
+            >> ${OUTPUT} 2>&1
     fi
 fi

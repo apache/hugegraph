@@ -57,7 +57,7 @@
         <dependency>
             <groupId>org.rocksdb</groupId>
             <artifactId>rocksdbjni</artifactId>
-            <version>7.7.3</version>
+            <version>${rocksdb.version}</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

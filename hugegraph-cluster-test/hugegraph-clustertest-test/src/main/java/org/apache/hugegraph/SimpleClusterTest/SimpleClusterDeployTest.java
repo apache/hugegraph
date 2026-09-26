@@ -19,12 +19,15 @@ package org.apache.hugegraph.SimpleClusterTest;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.client.PDConfig;
 import org.apache.hugegraph.pd.common.PDException;
 import org.junit.Assert;
 import org.junit.Test;
+
+import jakarta.ws.rs.core.Response;
 
 public class SimpleClusterDeployTest extends BaseSimpleTest {
 
@@ -112,5 +115,11 @@ public class SimpleClusterDeployTest extends BaseSimpleTest {
                               + "\"check_exist\": false,\n"
                               + "\"properties\":[]\n"
                               + "}", 202);
+    }
+
+    @Test
+    public void testGremlinEndpoint() {
+        Response response = client.get("gremlin", Map.of("gremlin", "1 + 1"));
+        assertResponseStatus(200, response);
     }
 }

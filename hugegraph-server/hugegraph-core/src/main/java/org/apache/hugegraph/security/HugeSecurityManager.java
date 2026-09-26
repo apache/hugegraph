@@ -63,7 +63,11 @@ public class HugeSecurityManager extends SecurityManager {
             "line.separator",
             "file.separator",
             // Sofa
-            "java.specification.version"
+            "java.specification.version",
+            // gRPC Netty reads these when a transport starts. Denying them
+            // under the Gremlin sandbox panics the shared channel.
+            "io.grpc.netty.shaded.io.grpc.netty.useCustomAllocator",
+            "io.grpc.netty.shaded.io.netty.allocator.maxOrder"
     );
 
     private static final Map<String, Set<String>> ASYNC_TASKS = ImmutableMap.of(

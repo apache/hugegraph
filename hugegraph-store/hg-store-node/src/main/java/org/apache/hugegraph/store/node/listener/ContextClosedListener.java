@@ -17,106 +17,112 @@
 
 package org.apache.hugegraph.store.node.listener;
 
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
-import org.apache.hugegraph.store.HgStoreEngine;
+import org.apache.hugegraph.store.node.grpc.GrpcShutdownBarrier;
 import org.apache.hugegraph.store.node.grpc.HgStoreStreamImpl;
 import org.apache.hugegraph.store.node.task.TTLCleaner;
+import org.lognet.springboot.grpc.context.GRpcServerInitializedEvent;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
-import com.alipay.sofa.jraft.Status;
-import com.alipay.sofa.jraft.entity.PeerId;
-
+import io.grpc.Server;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Service
 public class ContextClosedListener implements ApplicationListener<ContextClosedEvent> {
 
+    private final List<Server> grpcServers = new CopyOnWriteArrayList<>();
+
     @Autowired
     HgStoreStreamImpl storeStream;
     @Autowired
     TTLCleaner cleaner;
+    @Autowired
+    GrpcShutdownBarrier grpcBarrier;
+
+    @EventListener
+    public void onServerInitialized(GRpcServerInitializedEvent event) {
+        this.grpcServers.add(event.getServer());
+    }
 
     @Override
     public void onApplicationEvent(ContextClosedEvent event) {
-        try {
-            try {
-                transferLeaders();
-
-                synchronized (ContextClosedListener.class) {
-                    ContextClosedListener.class.wait(60 * 1000);
-                }
-
-                transferLeaders();
-
-                synchronized (ContextClosedListener.class) {
-                    ContextClosedListener.class.wait(30 * 1000);
-                }
-            } catch (Exception e) {
-                log.info("shutdown hook: ", e);
-            }
-
-            log.info("closing scan threads....");
-            if (storeStream != null) {
-                ThreadPoolExecutor executor = storeStream.getRealExecutor();
-                if (executor != null) {
-                    try {
-                        executor.shutdownNow();
-                    } catch (Exception e) {
-                    }
-                }
-            }
-
-            if (cleaner != null) {
-                ThreadPoolExecutor cleanerExecutor = cleaner.getExecutor();
-                if (cleanerExecutor != null) {
-                    try {
-                        cleanerExecutor.shutdownNow();
-                    } catch (Exception e) {
-
-                    }
-                }
-                ScheduledExecutorService scheduler = cleaner.getScheduler();
-                if (scheduler != null) {
-                    try {
-                        scheduler.shutdownNow();
-                    } catch (Exception e) {
-
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.error("ContextClosedListener: ", e);
-        } finally {
-            log.info("closed scan threads");
+        // Spring invokes HgStoreNodeService.destroy() after this event. Raft and
+        // its databases must remain available until local workers have stopped.
+        this.grpcBarrier.stopAcceptingCalls();
+        if (storeStream != null) {
+            storeStream.stopAcceptingScans();
         }
+        this.grpcServers.forEach(Server::shutdownNow);
+        if (cleaner != null) {
+            // The scheduler can create the worker pool while a job is starting.
+            stopAndWait(cleaner.getScheduler(), "TTL scheduler");
+            stopAndWait(cleaner.getExecutor(), "TTL workers");
+        }
+        if (storeStream != null) {
+            // Cancelled queued scans must run their finally blocks to release iterators.
+            storeStream.shutdownScans();
+            awaitWorkers(storeStream.getRealExecutor(), "scan workers");
+        }
+        boolean interrupted = false;
+        try {
+            for (Server server : this.grpcServers) {
+                while (!server.isTerminated()) {
+                    try {
+                        if (!server.awaitTermination(5, TimeUnit.SECONDS)) {
+                            log.warn("Still waiting for gRPC callbacks before closing databases");
+                        }
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        this.grpcBarrier.awaitCallbacks();
+        log.info("closed gRPC callbacks, scan and TTL workers");
     }
 
-    private void transferLeaders() {
+    private static void stopAndWait(ExecutorService executor, String name) {
+        if (executor == null) {
+            return;
+        }
+        executor.shutdownNow();
+        awaitWorkers(executor, name);
+    }
+
+    private static void awaitWorkers(ExecutorService executor, String name) {
+        if (executor == null) {
+            return;
+        }
+        boolean interrupted = false;
         try {
-            HgStoreEngine.getInstance().getLeaderPartition()
-                         .forEach(leader -> {
-                             try {
-                                 Status status =
-                                         leader.getRaftNode().transferLeadershipTo(PeerId.ANY_PEER);
-                                 log.info("partition {} transfer leader status: {}",
-                                          leader.getGroupId(), status);
-                             } catch (Exception e) {
-                                 log.info("partition {} transfer leader error: ",
-                                          leader.getGroupId(), e);
-                             }
-                         });
-            HgStoreEngine.getInstance().getPartitionEngines().forEach(
-                    ((integer, partitionEngine) -> partitionEngine.getRaftNode()
-                                                                  .shutdown())
-            );
-        } catch (Exception e) {
-            log.error("transfer leader failed: " + e.getMessage());
+            while (!executor.isTerminated()) {
+                try {
+                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        log.warn("Still waiting for {} to stop before closing databases", name);
+                    }
+                } catch (InterruptedException e) {
+                    // An interrupted shutdown thread must not close databases underneath
+                    // a worker that still owns a native iterator.
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

@@ -22,18 +22,22 @@ networks:
 
 volumes:
   server-data:
+  server-topling-data:
   hubble-data:
 
 services:
   server:
-    image: hugegraph/hugegraph:${HUGEGRAPH_VERSION:-latest}
-    pull_policy: ${HUGEGRAPH_PULL_POLICY:-missing}
+    image: ${HUGEGRAPH_SERVER_IMAGE:-hugegraph/hugegraph:${HUGEGRAPH_VERSION:-latest}}
+    pull_policy: ${HUGEGRAPH_SERVER_PULL_POLICY:-${HUGEGRAPH_PULL_POLICY:-missing}}
     restart: unless-stopped
     networks: [hg-net]
     environment:
       PASSWORD: ${HUGEGRAPH_ADMIN_PASSWORD:-}
       HG_SERVER_AUTH_TOKEN_SECRET: ${HUGEGRAPH_AUTH_TOKEN_SECRET:-}
       HG_SERVER_MIN_FREE_MEMORY: "0"
+      HG_SERVER_ROCKSDB_PROVIDER: ${HG_SERVER_ROCKSDB_PROVIDER:-rocksdb}
+      HG_SERVER_DATA_PATH: ${HG_SERVER_DATA_PATH:-/hugegraph-server/rocksdb-data}
+      HG_SERVER_ENFORCE_PROVIDER_MARKER: ${HG_SERVER_ENFORCE_PROVIDER_MARKER:-false}
       # Unset-only default: a host value overrides it, an absent one
       # renders the entrypoint default. ":-" would turn an empty host
       # value into 120 silently, which the entrypoint rejects on purpose.
@@ -41,7 +45,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - server-data:/hugegraph-server/rocksdb-data
+      - ${HUGEGRAPH_SERVER_VOLUME:-server-data}:${HG_SERVER_DATA_PATH:-/hugegraph-server/rocksdb-data}
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8080/versions >/dev/null"]
       interval: 10s

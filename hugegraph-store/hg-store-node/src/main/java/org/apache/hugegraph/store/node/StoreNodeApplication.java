@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.store.node;
 
-import org.apache.hugegraph.store.node.listener.ContextClosedListener;
 import org.apache.hugegraph.store.node.listener.PdConfigureListener;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -30,9 +29,6 @@ import com.alipay.remoting.util.StringUtils;
  */
 @SpringBootApplication
 public class StoreNodeApplication {
-
-    //TODO Is this OK?
-    private final AppShutdownHook shutdownHook = new AppShutdownHook(Thread.currentThread());
 
     public static void main(String[] args) {
         start();
@@ -55,9 +51,7 @@ public class StoreNodeApplication {
         }
         SpringApplication application = new SpringApplication(StoreNodeApplication.class);
         PdConfigureListener listener = new PdConfigureListener();
-        ContextClosedListener closedListener = new ContextClosedListener();
         application.addListeners(listener);
-        application.addListeners(closedListener);
         ConfigurableApplicationContext context = application.run();
         listener.setContext(context);
         System.out.println("StoreNodeApplication started.");

@@ -27,6 +27,7 @@ import org.apache.hugegraph.store.node.util.HgStoreNodeUtil;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -57,12 +58,16 @@ public class ScanOneShotResponse {
             responseObserver.onError(HgGrpc.toErr("limit<=0, please to invoke stream scan."));
             return;
         }
+        if (Context.current().isCancelled()) {
+            return;
+        }
         ScanIterator iterator = ScanUtil.getIterator(request, wrapper);
 
         int count = 0;
 
         try {
-            while (iterator.hasNext()) {
+            while (!Context.current().isCancelled() &&
+                   !Thread.currentThread().isInterrupted() && iterator.hasNext()) {
 
                 if (++count > limit) {
                     break;
@@ -78,6 +83,9 @@ public class ScanOneShotResponse {
 
             }
 
+            if (Context.current().isCancelled()) {
+                return;
+            }
             responseObserver.onNext(
                     resBuilder.setVersion(ScanUtil.responseVersion(request))
                               .build());

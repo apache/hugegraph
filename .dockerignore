@@ -22,6 +22,7 @@
 
 # Pre-extracted release dirs / archives
 apache-hugegraph-*/
+**/apache-hugegraph-*/
 **/*.tar
 **/*.tar.gz
 **/*.zip

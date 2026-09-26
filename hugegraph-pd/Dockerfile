@@ -33,9 +33,9 @@ RUN --mount=type=cache,id=hugegraph-maven-${SOURCE_REVISION},target=/root/.m2,sh
         -am $MAVEN_ARGS -e -B -ntp -Dmaven.test.skip=true -Dmaven.javadoc.skip=true \
     && rm ./hugegraph-server/*.tar.gz ./hugegraph-pd/*.tar.gz ./hugegraph-store/*.tar.gz
 
-# 2nd stage: runtime env
+# Shared runtime environment
 # Note: ZGC (The Z Garbage Collector) is only supported on ARM-Mac with java > 13
-FROM eclipse-temurin:11-jre-jammy
+FROM eclipse-temurin:11-jre-noble AS runtime
 
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
@@ -56,21 +56,82 @@ RUN apt-get -q update \
        dumb-init \
        procps \
        curl \
+       util-linux \
        vim \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
-COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-*/ /hugegraph-pd/
 
 # 2. Init docker script
 COPY hugegraph-pd/hg-pd-dist/docker/docker-entrypoint.sh .
 RUN chmod 755 ./docker-entrypoint.sh
 
 EXPOSE 8620
-VOLUME /hugegraph-pd
 
 HEALTHCHECK --interval=15s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -fsS http://localhost:8620/v1/health >/dev/null
 
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["./docker-entrypoint.sh"]
+
+# Topling runtime packages. The current native library requires glibc 2.38+.
+FROM runtime AS topling-runtime
+
+RUN apt-get -q update \
+    && apt-get -q install -y --no-install-recommends --no-install-suggests \
+       libaio1t64 \
+       libbz2-1.0 \
+       libjemalloc2 \
+       liblz4-1 \
+       libsnappy1v5 \
+       liburing2 \
+       zlib1g \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build the formal component-local Topling distribution on Linux amd64.
+FROM topling-runtime AS build-topling
+
+COPY --from=build /pkg/ /pkg/
+WORKDIR /pkg
+RUN apt-get -q update \
+    && apt-get -q install -y --no-install-recommends --no-install-suggests \
+       rsync \
+       unzip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && PD_DIR=$(find /pkg/hugegraph-pd -maxdepth 1 -type d \
+                  -name 'apache-hugegraph-pd-*' ! -name '*-topling' \
+                  -print -quit) \
+    && test -n "$PD_DIR" \
+    && VERSION=${PD_DIR##*/apache-hugegraph-pd-} \
+    && install-dist/scripts/build-topling-distribution.sh pd "$VERSION"
+
+# Topling image: contains both providers and selects ToplingDB by default.
+# Build with: docker build --platform linux/amd64 --target topling ...
+FROM topling-runtime AS topling
+
+ARG SOURCE_REPOSITORY=https://github.com/apache/hugegraph
+ARG SOURCE_REVISION=local
+LABEL org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
+
+LABEL org.apache.hugegraph.rocksdb-runtime="topling"
+COPY --from=build-topling /pkg/hugegraph-pd/apache-hugegraph-pd-*-topling/ /hugegraph-pd/
+ENV HG_PD_ROCKSDB_PROVIDER="topling" \
+    HG_PD_ENFORCE_PROVIDER_MARKER="true"
+RUN mkdir -p /hugegraph-pd/pd_data /hugegraph-pd/topling-pd-data
+VOLUME ["/hugegraph-pd/pd_data", "/hugegraph-pd/topling-pd-data"]
+
+# Keep the standard image as the final/default target for existing builds.
+FROM runtime AS standard
+
+ARG SOURCE_REPOSITORY=https://github.com/apache/hugegraph
+ARG SOURCE_REVISION=local
+LABEL org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${SOURCE_REVISION}"
+
+LABEL org.apache.hugegraph.rocksdb-runtime="standard"
+COPY --from=build /pkg/hugegraph-pd/apache-hugegraph-pd-*/ /hugegraph-pd/
+ENV HG_PD_ROCKSDB_PROVIDER="rocksdb"
+# Preserve the historical root volume for anonymous-volume upgrades.
+VOLUME /hugegraph-pd

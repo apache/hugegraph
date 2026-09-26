@@ -37,6 +37,7 @@
             <filtered>false</filtered>
             <excludes>
                 <exclude>README.txt</exclude>
+                <exclude>lib/topling/**</exclude>
             </excludes>
         </fileSet>
         <fileSet>

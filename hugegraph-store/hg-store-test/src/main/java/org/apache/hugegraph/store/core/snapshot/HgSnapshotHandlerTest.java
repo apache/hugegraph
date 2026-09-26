@@ -334,23 +334,29 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
      * until the 6-hour path-lock timeout. Interrupts a real compactionPool worker thread while
      * it is parked in tryLock() (identified by stack trace, since the pool is shared), then
      * confirms the path lock returns to its available state while the snapshot range lock
-     * remains owned by this test.
+     * remains owned by this test. Then verifies that another compaction can publish a snapshot.
      */
     @Test
     public void testDbCompactionReleasesPathLockWhenInterruptedWaitingForRangeLock()
             throws InterruptedException {
         BusinessHandler businessHandler = getStoreEngine().getBusinessHandler();
         int partitionId = 5;
-        createPartitionEngine(partitionId);
+        PartitionEngine engine = createPartitionEngine(partitionId);
+        File snapshotDirectory = new File(engine.getOptions().getRaftSnapShotPath(), "snapshot");
+        File[] initialSnapshots = snapshotDirectory.listFiles(
+                (dir, name) -> name.startsWith("snapshot_"));
+        assertTrue("this partition must not have a snapshot before compaction",
+                   initialSnapshots == null || initialSnapshots.length == 0);
         long originalWaitMillis = BusinessHandlerImpl.getCompactionRangeLockWaitMillis();
         // Long enough that the worker thread is still parked in tryLock() when interrupted,
         // rather than racing a real timeout.
         BusinessHandlerImpl.setCompactionRangeLockWaitMillis(60_000);
+        boolean rangeLockHeld = false;
         try {
             // Simulate a snapshot save that is still in progress, forcing dbCompaction() onto
             // the tryLock(wait) path rather than acquiring the range lock immediately.
-            assertTrue("snapshot save must reserve the range lock",
-                       businessHandler.tryLockCompactionRange(partitionId));
+            rangeLockHeld = businessHandler.tryLockCompactionRange(partitionId);
+            assertTrue("snapshot save must reserve the range lock", rangeLockHeld);
 
             businessHandler.dbCompaction("graph0", partitionId);
 
@@ -373,7 +379,7 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
 
             other.interrupt();
             // Wait for the interrupted task to release the path lock. No second compaction
-            // runs here, so the available state remains stable.
+            // has started yet, so the available state remains stable during this wait.
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (pathLockBeforeInterrupt.get() != BusinessHandler.compactionCanStart &&
                    System.nanoTime() < deadline) {
@@ -399,8 +405,41 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
             rangeLockCheck.join();
             assertFalse("range lock must still belong to the snapshot save",
                         concurrentRangeLockResult.get());
-        } finally {
+
+            // The path lock, however, must have been released by the interrupted task -
+            // otherwise this second dbCompaction() call would block on lock(path) until the
+            // 6-hour timeout instead of reaching the compacting state below once the range
+            // lock is released. Ownership of the range lock passes to the second
+            // dbCompaction() call's own worker thread, which acquires and releases it itself -
+            // do not touch compactionRangeLock again after this point.
             businessHandler.unlockCompactionRange(partitionId);
+            rangeLockHeld = false;
+            businessHandler.dbCompaction("graph0", partitionId);
+
+            // compactionDone is transient: the following Raft snapshot resets it.
+            // A newly published snapshot proves the second task passed both locks
+            // and compacted the DB; the released path lock proves its callback finished.
+            // Allow for doSnapshotSync's bounded 5-second wait before saving.
+            long snapshotDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+            boolean completed = false;
+            while (System.nanoTime() < snapshotDeadline) {
+                File[] snapshots = snapshotDirectory.listFiles((dir, name) ->
+                        name.startsWith("snapshot_") &&
+                        new File(new File(dir, name), "__raft_snapshot_meta").isFile());
+                completed = snapshots != null && snapshots.length > 0 &&
+                            businessHandler.getPathLockState(path).get() ==
+                            BusinessHandler.compactionCanStart;
+                if (completed) {
+                    break;
+                }
+                Thread.sleep(50);
+            }
+            assertTrue("second dbCompaction() must publish a snapshot and release the " +
+                       "path lock after the interrupted task", completed);
+        } finally {
+            if (rangeLockHeld) {
+                businessHandler.unlockCompactionRange(partitionId);
+            }
             BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
         }
     }

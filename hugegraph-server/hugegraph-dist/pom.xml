@@ -112,6 +112,9 @@
             <resource>
                 <directory>${basedir}/src/assembly/static</directory>
                 <filtering>true</filtering>
+                <excludes>
+                    <exclude>lib/topling/**</exclude>
+                </excludes>
             </resource>
             <resource>
                 <directory>${basedir}/src/main/resources</directory>

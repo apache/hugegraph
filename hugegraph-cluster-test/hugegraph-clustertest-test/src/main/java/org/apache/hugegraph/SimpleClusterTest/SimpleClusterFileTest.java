@@ -18,6 +18,10 @@
 package org.apache.hugegraph.SimpleClusterTest;
 
 import java.io.File;
+import java.io.Reader;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Properties;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -42,6 +46,19 @@ public class SimpleClusterFileTest extends BaseSimpleTest {
     public void checkServerNodeDir() {
         for (String nodeDir : env.getServerNodeDir()) {
             Assert.assertTrue(new File(nodeDir).isDirectory());
+        }
+    }
+
+    @Test
+    public void checkServerMetadataPDPeers() throws Exception {
+        String expected = String.join(",", env.getPDGrpcAddrs());
+        for (String nodeDir : env.getServerNodeDir()) {
+            Properties config = new Properties();
+            try (Reader reader = Files.newBufferedReader(
+                    Paths.get(nodeDir, "conf", "rest-server.properties"))) {
+                config.load(reader);
+            }
+            Assert.assertEquals(expected, config.getProperty("pd.peers"));
         }
     }
 

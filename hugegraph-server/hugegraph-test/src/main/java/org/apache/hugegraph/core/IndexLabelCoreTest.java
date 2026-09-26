@@ -22,6 +22,7 @@ import java.util.List;
 
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.exception.NotFoundException;
@@ -31,10 +32,12 @@ import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.Userdata;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.IndexType;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.DateUtil;
+import org.apache.hugegraph.util.Events;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.T;
@@ -1295,6 +1298,81 @@ public class IndexLabelCoreTest extends SchemaCoreTest {
             graph().traversal().V().hasLabel("person")
                    .has("age", P.inside(2, 4)).next();
         });
+    }
+
+    @Test
+    public void testUpdateCachedVertexAfterIndexRemoval() throws Exception {
+        super.initPropertyKeys();
+        SchemaManager schema = graph().schema();
+        schema.vertexLabel("person").properties("name", "city")
+              .primaryKeys("name").create();
+        schema.indexLabel("personByCity").onV("person").secondary()
+              .by("city").create();
+        Vertex original = graph().addVertex(T.label, "person", "name", "cache-test", "city", "old");
+        graph().tx().commit();
+        Vertex cached = graph().vertices(original.id()).next();
+        graph().tx().commit();
+        // Schema cache eviction must not make a retained vertex's index list authoritative.
+        HugeGraphParams params = Whitebox.getInternalState(graph(), "params");
+        params.schemaEventHub().notify(Events.CACHE, "clear", null).get();
+
+        schema.indexLabel("personByCity").remove();
+        Assert.assertThrows(NotFoundException.class, () -> schema.getIndexLabel("personByCity"));
+        cached.property("city", "new");
+        graph().tx().commit();
+        Assert.assertEquals("new", graph().vertices(original.id()).next().value("city"));
+        graph().tx().commit();
+        schema.indexLabel("personByCity").onV("person").secondary().by("city").create();
+        schema.propertyKey("extra").asText().create();
+        schema.vertexLabel("person").properties("extra").nullableKeys("extra").append();
+        schema.indexLabel("personByExtra").onV("person").secondary().by("extra").create();
+        graph().taskScheduler().waitUntilAllTasksCompleted(30);
+        cached.property("city", "newer");
+        graph().tx().commit();
+        Assert.assertFalse(graph().traversal().V().has("city", "new").hasNext());
+        Assert.assertEquals(original.id(), graph().traversal().V().has("city", "newer").next().id());
+        graph().tx().commit();
+        cached.remove();
+        graph().tx().commit();
+        Assert.assertFalse(graph().vertices(original.id()).hasNext());
+    }
+
+    @Test
+    public void testUpdateCachedEdgeAfterIndexRemoval() throws Exception {
+        super.initPropertyKeys();
+        SchemaManager schema = graph().schema();
+        schema.vertexLabel("author").properties("id", "name").primaryKeys("id").create();
+        schema.vertexLabel("book").properties("name").primaryKeys("name").create();
+        schema.edgeLabel("authored").singleTime().link("author", "book")
+              .properties("contribution").create();
+        schema.indexLabel("authoredByContri").onE("authored").secondary()
+              .by("contribution").create();
+        Vertex author = graph().addVertex(T.label, "author", "id", 1, "name", "author");
+        Vertex book = graph().addVertex(T.label, "book", "name", "book");
+        Edge original = author.addEdge("authored", book, "contribution", "old");
+        graph().tx().commit();
+        Edge cached = graph().edges(original.id()).next();
+        graph().tx().commit();
+        HugeGraphParams params = Whitebox.getInternalState(graph(), "params");
+        params.schemaEventHub().notify(Events.CACHE, "clear", null).get();
+
+        schema.indexLabel("authoredByContri").remove();
+        Assert.assertThrows(NotFoundException.class, () -> schema.getIndexLabel("authoredByContri"));
+        cached.property("contribution", "new");
+        graph().tx().commit();
+        Assert.assertEquals("new", graph().edges(original.id()).next().value("contribution"));
+        graph().tx().commit();
+        schema.indexLabel("authoredByContri").onE("authored").secondary()
+              .by("contribution").create();
+        graph().taskScheduler().waitUntilAllTasksCompleted(30);
+        cached.property("contribution", "newer");
+        graph().tx().commit();
+        Assert.assertFalse(graph().traversal().E().has("contribution", "new").hasNext());
+        Assert.assertEquals(original.id(), graph().traversal().E().has("contribution", "newer").next().id());
+        graph().tx().commit();
+        cached.remove();
+        graph().tx().commit();
+        Assert.assertFalse(graph().edges(original.id()).hasNext());
     }
 
     @Test

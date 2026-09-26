@@ -64,7 +64,9 @@ jobs:
               in_build && seen && /^FROM / {
                 exit
               }
-              in_build {
+              # Compare Docker instructions only. Comments between stages may
+              # differ when a Dockerfile adds an optional build target.
+              in_build && $0 !~ /^[[:space:]]*(#.*)?$/ {
                 print
                 seen = 1
               }
@@ -89,7 +91,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker buildx bake --file docker/bake.hcl --print > /tmp/hugegraph-bake.json
+          docker buildx bake --file docker/bake.hcl --print \
+            > /tmp/hugegraph-bake.json
+          RUNTIME_VARIANT=topling \
+            docker buildx bake --file docker/bake.hcl --print \
+            > /tmp/hugegraph-bake-topling.json
           jq -e '
             .group.default.targets == [
               "build-cache",
@@ -101,23 +107,145 @@ jobs:
             ([.target[] | .platforms] |
               all(. == ["linux/amd64", "linux/arm64"])) and
             .target["build-cache"].target == "build" and
+            .target.pd.target == "standard" and
+            .target.store.target == "standard" and
+            .target["server-standalone"].target == "standard" and
+            (.target["server-hstore"].target == null) and
             .target["build-cache"].output[0].type == "cacheonly" and
+            ([.target[] | .args.SOURCE_REPOSITORY] |
+              all(. == "https://github.com/apache/hugegraph")) and
             ([.target | to_entries[] |
               select(.key != "build-cache") |
               .value.output[0].type] |
               all(. == "docker"))
           ' /tmp/hugegraph-bake.json
+          jq -e '
+            .target.pd.target == "topling" and
+            .target.store.target == "topling" and
+            .target["server-standalone"].target == "topling" and
+            (.target["server-hstore"].target == null) and
+            ([.target[] | .platforms] |
+              all(. == ["linux/amd64"]))
+          ' /tmp/hugegraph-bake-topling.json
+
+      - name: Validate ToplingDB Compose parameters
+        env:
+          HUGEGRAPH_ADMIN_PASSWORD: ci-test-password
+          HG_PD_AUTH_SECRET_KEY: ci-test-pd-secret
+          HUGEGRAPH_SERVER_PULL_POLICY: always
+          HUGEGRAPH_PD_PULL_POLICY: always
+          HUGEGRAPH_STORE_PULL_POLICY: always
+        run: |
+          set -euo pipefail
+
+          env \
+            HUGEGRAPH_SERVER_IMAGE=local/hugegraph:topling \
+            HUGEGRAPH_SERVER_VOLUME=server-topling-data \
+            HG_SERVER_ROCKSDB_PROVIDER=topling \
+            HG_SERVER_DATA_PATH=/hugegraph-server/topling-data \
+            HG_SERVER_ENFORCE_PROVIDER_MARKER=true \
+          docker compose -f docker/docker-compose.yml \
+            config --format json > /tmp/topling-standalone.json
+          env \
+            HUGEGRAPH_PD_IMAGE=local/hugegraph-pd:topling \
+            HUGEGRAPH_PD_VOLUME=pd-topling-data \
+            HG_PD_ROCKSDB_PROVIDER=topling \
+            HG_PD_DATA_PATH=/hugegraph-pd/topling-pd-data \
+            HG_PD_ENFORCE_PROVIDER_MARKER=true \
+            HUGEGRAPH_STORE_IMAGE=local/hugegraph-store:topling \
+            HUGEGRAPH_STORE_VOLUME=store-topling-data \
+            HG_STORE_ROCKSDB_PROVIDER=topling \
+            HG_STORE_DATA_PATH=/hugegraph-store/topling-storage \
+            HG_STORE_ENFORCE_PROVIDER_MARKER=true \
+          docker compose -f docker/docker-compose-hstore.yml \
+            -f docker/docker-compose.dev.yml \
+            config --format json > /tmp/topling-hstore.json
+          env \
+            HUGEGRAPH_PD_IMAGE=local/hugegraph-pd:topling \
+            HUGEGRAPH_PD0_VOLUME=hg-pd0-topling-data \
+            HUGEGRAPH_PD1_VOLUME=hg-pd1-topling-data \
+            HUGEGRAPH_PD2_VOLUME=hg-pd2-topling-data \
+            HG_PD_ROCKSDB_PROVIDER=topling \
+            HG_PD_DATA_PATH=/hugegraph-pd/topling-pd-data \
+            HG_PD_ENFORCE_PROVIDER_MARKER=true \
+            HUGEGRAPH_STORE_IMAGE=local/hugegraph-store:topling \
+            HUGEGRAPH_STORE0_VOLUME=hg-store0-topling-data \
+            HUGEGRAPH_STORE1_VOLUME=hg-store1-topling-data \
+            HUGEGRAPH_STORE2_VOLUME=hg-store2-topling-data \
+            HG_STORE_ROCKSDB_PROVIDER=topling \
+            HG_STORE_DATA_PATH=/hugegraph-store/topling-storage \
+            HG_STORE_ENFORCE_PROVIDER_MARKER=true \
+          docker compose -f docker/docker-compose-3pd-3store-3server.yml \
+            config --format json > /tmp/topling-3x3.json
+
+          jq -e '
+            .name == "hugegraph-standalone" and
+            .services.server.image == "local/hugegraph:topling" and
+            .services.server.pull_policy == "always" and
+            .services.server.environment.HG_SERVER_ROCKSDB_PROVIDER == "topling" and
+            .services.server.environment.HG_SERVER_DATA_PATH == "/hugegraph-server/topling-data" and
+            .services.server.environment.HG_SERVER_ENFORCE_PROVIDER_MARKER == "true" and
+            (.services.server.volumes |
+              any(.source == "server-topling-data" and
+                  .target == "/hugegraph-server/topling-data"))
+          ' /tmp/topling-standalone.json
+
+          jq -e '
+            .name == "hugegraph-hstore" and
+            .services.pd.image == "local/hugegraph-pd:topling" and
+            .services.store.image == "local/hugegraph-store:topling" and
+            .services.pd.environment.HG_PD_ROCKSDB_PROVIDER == "topling" and
+            .services.store.environment.HG_STORE_ROCKSDB_PROVIDER == "topling" and
+            .services.server.environment.HG_SERVER_BACKEND == "hstore" and
+            (.services.server.environment.HG_SERVER_ROCKSDB_PROVIDER == null) and
+            .services.server.image == "hugegraph/server:dev" and
+            .services.server.pull_policy == "always" and
+            .services.pd.pull_policy == "always" and
+            .services.store.pull_policy == "always" and
+            (.services.pd.ports | all(.target != 2012)) and
+            (.services.store.ports | all(.target != 2013)) and
+            (.services.pd.volumes |
+              any(.source == "pd-topling-data")) and
+            (.services.store.volumes |
+              any(.source == "store-topling-data"))
+          ' /tmp/topling-hstore.json
+
+          jq -e '
+            .name == "hugegraph-3x3" and
+            ([.services.pd0, .services.pd1, .services.pd2] |
+              all(.environment.HG_PD_ROCKSDB_PROVIDER == "topling" and
+                  .image == "local/hugegraph-pd:topling" and
+                  .pull_policy == "always")) and
+            ([.services.store0, .services.store1, .services.store2] |
+              all(.environment.HG_STORE_ROCKSDB_PROVIDER == "topling" and
+                  .image == "local/hugegraph-store:topling" and
+                  .pull_policy == "always")) and
+            ([.services.server0, .services.server1, .services.server2] |
+              all(.environment.HG_SERVER_BACKEND == "hstore" and
+                  (.environment.HG_SERVER_ROCKSDB_PROVIDER == null) and
+                  .image == "hugegraph/server:latest" and
+                  .pull_policy == "always")) and
+            ([.services.pd0, .services.pd1, .services.pd2,
+              .services.store0, .services.store1, .services.store2] |
+              all(.pull_policy == "always"))
+          ' /tmp/topling-3x3.json
 
   docker-build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        dockerfile:
-          - hugegraph-pd/Dockerfile
-          - hugegraph-store/Dockerfile
-          - hugegraph-server/Dockerfile
-          - hugegraph-server/Dockerfile-hstore
+        include:
+          - dockerfile: hugegraph-pd/Dockerfile
+          - dockerfile: hugegraph-pd/Dockerfile
+            target: topling
+          - dockerfile: hugegraph-store/Dockerfile
+          - dockerfile: hugegraph-store/Dockerfile
+            target: topling
+          - dockerfile: hugegraph-server/Dockerfile
+          - dockerfile: hugegraph-server/Dockerfile
+            target: topling
+          - dockerfile: hugegraph-server/Dockerfile-hstore
 
     steps:
       - name: Checkout
@@ -125,17 +253,124 @@ jobs:
 
       - name: Build ${{ matrix.dockerfile }}
         run: |
-          IMAGE_ID=$(docker build -q --build-arg SOURCE_REVISION="$GITHUB_SHA" \
-            -f ${{ matrix.dockerfile }} .)
+          TARGET_ARGS=()
+          if [[ -n "${{ matrix.target }}" ]]; then
+            TARGET_ARGS+=(--target "${{ matrix.target }}")
+          fi
+          IMAGE_ID=$(docker build -q "${TARGET_ARGS[@]}" \
+                     --build-arg SOURCE_REPOSITORY="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+                     --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+                     -f ${{ matrix.dockerfile }} .)
           echo "Built: $IMAGE_ID"
           echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
           echo "Healthcheck: $HC"
           [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
+          SOURCE_LABEL=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.source"}}' "$IMAGE_ID")
+          REVISION_LABEL=$(docker inspect --format='{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_ID")
+          RUNTIME_LABEL=$(docker inspect --format='{{index .Config.Labels "org.apache.hugegraph.rocksdb-runtime"}}' "$IMAGE_ID")
+          [[ "$SOURCE_LABEL" == "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" ]]
+          [[ "$REVISION_LABEL" == "$GITHUB_SHA" ]]
+          if [[ "${{ matrix.dockerfile }}" == "hugegraph-server/Dockerfile-hstore" ]]; then
+            [[ "$RUNTIME_LABEL" == "hstore" ]]
+          elif [[ "${{ matrix.target }}" == "topling" ]]; then
+            [[ "$RUNTIME_LABEL" == "topling" ]]
+          else
+            [[ "$RUNTIME_LABEL" == "standard" ]]
+          fi
 
       - name: Test server entrypoint property mapping
-        if: matrix.dockerfile == 'hugegraph-server/Dockerfile'
+        if: matrix.dockerfile == 'hugegraph-server/Dockerfile' && matrix.target != 'topling'
         run: bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
+
+      - name: Verify ToplingDB image runtime
+        if: matrix.target == 'topling'
+        run: |
+          case "${{ matrix.dockerfile }}" in
+            hugegraph-pd/Dockerfile)
+              EXPECTED_ENV='HG_PD_ROCKSDB_PROVIDER=topling'
+              DATA_ENV_PREFIX='HG_PD_DATA_PATH='
+              STANDARD_VOLUME='/hugegraph-pd/pd_data'
+              TOPLING_VOLUME='/hugegraph-pd/topling-pd-data'
+              ;;
+            hugegraph-store/Dockerfile)
+              EXPECTED_ENV='HG_STORE_ROCKSDB_PROVIDER=topling'
+              DATA_ENV_PREFIX='HG_STORE_DATA_PATH='
+              STANDARD_VOLUME='/hugegraph-store/storage'
+              TOPLING_VOLUME='/hugegraph-store/topling-storage'
+              ;;
+            hugegraph-server/Dockerfile)
+              EXPECTED_ENV='HG_SERVER_ROCKSDB_PROVIDER=topling'
+              DATA_ENV_PREFIX='HG_SERVER_DATA_PATH='
+              STANDARD_VOLUME='/hugegraph-server/rocksdb-data'
+              TOPLING_VOLUME='/hugegraph-server/topling-data'
+              ;;
+            *)
+              echo "ERROR: unsupported Topling Dockerfile" >&2
+              exit 1
+              ;;
+          esac
+          docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' \
+            "$IMAGE_ID" | grep -qx "$EXPECTED_ENV"
+          if docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' \
+               "$IMAGE_ID" | grep -q "^${DATA_ENV_PREFIX}"; then
+            echo "ERROR: data path must follow the selected provider" >&2
+            exit 1
+          fi
+          VOLUMES=$(docker inspect --format='{{json .Config.Volumes}}' \
+            "$IMAGE_ID")
+          jq -e --arg standard "$STANDARD_VOLUME" --arg topling "$TOPLING_VOLUME" \
+            'has($standard) and has($topling)' <<<"$VOLUMES"
+          docker run --rm --entrypoint bash "$IMAGE_ID" -c '
+            set -euo pipefail
+            test -n "$(find lib/topling -maxdepth 1 -name "rocksdbjni*.jar" -print -quit)"
+            test -r library/librocksdbjni-linux64.so
+            LDD_OUTPUT=$(ldd library/librocksdbjni-linux64.so)
+            echo "$LDD_OUTPUT"
+            if grep -q "not found" <<<"$LDD_OUTPUT"; then
+              exit 1
+            fi
+            TOPLINGDB_ROCKSDB_PROVIDER=topling source bin/preload-topling.sh
+            test "$TOPLING_ACTIVE_NATIVE" = \
+              "$PWD/library/librocksdbjni-linux64.so"
+            /bin/true
+          '
+
+      - name: Preserve standard image volume compatibility
+        if: matrix.target != 'topling' && matrix.dockerfile != 'hugegraph-server/Dockerfile-hstore'
+        run: |
+          case "${{ matrix.dockerfile }}" in
+            hugegraph-pd/Dockerfile)
+              DATA_ENV_PREFIX='HG_PD_DATA_PATH='
+              LEGACY_VOLUME='/hugegraph-pd'
+              ;;
+            hugegraph-store/Dockerfile)
+              DATA_ENV_PREFIX='HG_STORE_DATA_PATH='
+              LEGACY_VOLUME='/hugegraph-store'
+              ;;
+            hugegraph-server/Dockerfile)
+              DATA_ENV_PREFIX='HG_SERVER_DATA_PATH='
+              LEGACY_VOLUME='/hugegraph-server'
+              ;;
+          esac
+          if docker inspect --format='{{range .Config.Env}}{{println .}}{{end}}' \
+               "$IMAGE_ID" | grep -q "^${DATA_ENV_PREFIX}"; then
+            echo "ERROR: data path must follow the selected provider" >&2
+            exit 1
+          fi
+          VOLUMES=$(docker inspect --format='{{json .Config.Volumes}}' \
+            "$IMAGE_ID")
+          jq -e --arg legacy "$LEGACY_VOLUME" 'has($legacy)' <<<"$VOLUMES"
+
+      - name: Verify HStore image has no local Topling runtime
+        if: matrix.dockerfile == 'hugegraph-server/Dockerfile-hstore'
+        run: |
+          docker run --rm --entrypoint bash "$IMAGE_ID" -c '
+            set -euo pipefail
+            test -z "$(find lib -path "*/topling/rocksdbjni*.jar" \
+                       -print -quit)"
+            test ! -e library/librocksdbjni-linux64.so
+          '
 
       # The startup preflight needs a socket-table tool, and the base image
       # ships none of its own.  Without one every start reports "unknown" and

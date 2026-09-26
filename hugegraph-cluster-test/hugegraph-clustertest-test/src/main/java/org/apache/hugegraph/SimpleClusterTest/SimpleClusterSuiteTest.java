@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.SimpleClusterTest;
 
+import org.apache.hugegraph.LoggingBindingTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -24,6 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        LoggingBindingTest.class,
         SimpleClusterDeployTest.class,
         SimpleClusterFileTest.class,
 })

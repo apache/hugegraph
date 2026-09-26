@@ -22,7 +22,10 @@ TEST_HOME=$(mktemp -d "${TMPDIR:-/tmp}/hugegraph-entrypoint-test.XXXXXX")
 trap 'rm -rf "${TEST_HOME}"' EXIT
 
 mkdir -p "${TEST_HOME}/bin" "${TEST_HOME}/conf/graphs" "${TEST_HOME}/docker"
+mkdir -p "${TEST_HOME}/rocksdb-data"
 cp "${SCRIPT_DIR}/docker-entrypoint.sh" "${TEST_HOME}/docker-entrypoint.sh"
+cp "${SCRIPT_DIR}/../src/assembly/static/bin/verify-rocksdb-provider.sh" \
+    "${TEST_HOME}/bin/verify-rocksdb-provider.sh"
 touch "${TEST_HOME}/docker/init_complete"
 
 cat > "${TEST_HOME}/conf/rest-server.properties" <<'EOF'
@@ -39,6 +42,19 @@ cat > "${TEST_HOME}/bin/start-hugegraph.sh" <<'EOF'
 # than substring-matching a flattened "$*", where -t 1200 contains -t 120.
 printf '%s\n' "$@" > ./docker/start-hugegraph-argv
 printf 'called\n' >> ./docker/start-hugegraph-calls
+if [[ "${START_TEST_PRE_PID_DELAY:-false}" == "true" ]]; then
+    touch ./docker/start-before-pid
+    sleep 300
+fi
+if [[ "${START_TEST_CHILD:-false}" == "true" ]]; then
+    sleep 300 &
+    child_pid=$!
+    printf '%s\n' "$child_pid" > ./bin/pid
+    if [[ "${START_TEST_DELAY:-false}" == "true" ]]; then
+        trap 'kill -TERM "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; exit 0' TERM
+        wait "$child_pid"
+    fi
+fi
 exit 0
 EOF
 cat > "${TEST_HOME}/bin/init-store.sh" <<'EOF'
@@ -65,6 +81,7 @@ chmod +x "${TEST_HOME}/bin/"*.sh
 (
     cd "${TEST_HOME}"
     HG_SERVER_BACKEND=hstore \
+    HG_SERVER_ROCKSDB_PROVIDER=rocksdb \
     HG_SERVER_PD_PEERS=pd:8686 \
     HG_SERVER_CLUSTER=hg \
     HG_SERVER_USE_PD=true \
@@ -76,6 +93,8 @@ chmod +x "${TEST_HOME}/bin/"*.sh
 [[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 1 ]]
 
 grep -qx 'backend=hstore' "${TEST_HOME}/conf/graphs/hugegraph.properties"
+grep -qx 'rocksdb.provider=rocksdb' \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties"
 grep -qx 'pd.peers=pd:8686' "${TEST_HOME}/conf/graphs/hugegraph.properties"
 grep -qx 'usePD=true' "${TEST_HOME}/conf/rest-server.properties"
 grep -qx 'pd.peers=pd:8686' "${TEST_HOME}/conf/rest-server.properties"
@@ -87,6 +106,78 @@ grep -qx 'restserver.min_free_memory=0' \
 grep -qx 'auth.token_secret=12345678901234567890123456789012' \
     "${TEST_HOME}/conf/rest-server.properties"
 grep -qx 'auth.token_secret=12345678901234567890123456789012' \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties"
+
+cp "${TEST_HOME}/conf/graphs/hugegraph.properties" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties.before-hstore-topling"
+if (
+    cd "${TEST_HOME}"
+    HG_SERVER_BACKEND=hstore \
+    HG_SERVER_ROCKSDB_PROVIDER=topling \
+        bash ./docker-entrypoint.sh
+); then
+    echo "HStore Server unexpectedly selected a local Topling provider" >&2
+    exit 1
+fi
+cmp "${TEST_HOME}/conf/graphs/hugegraph.properties.before-hstore-topling" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties"
+
+mkdir -p "${TEST_HOME}/lib/topling" "${TEST_HOME}/library" \
+         "${TEST_HOME}/topling-data"
+touch "${TEST_HOME}/lib/topling/rocksdbjni-topling.jar"
+touch "${TEST_HOME}/library/librocksdbjni-linux64.so"
+if (
+    cd "${TEST_HOME}"
+    HG_SERVER_BACKEND=hstore \
+    HG_SERVER_ROCKSDB_PROVIDER=rocksdb \
+        bash ./docker-entrypoint.sh
+); then
+    echo "HStore Server unexpectedly accepted a local Topling payload" >&2
+    exit 1
+fi
+rm -f "${TEST_HOME}/lib/topling/rocksdbjni-topling.jar"
+rm -f "${TEST_HOME}/library/librocksdbjni-linux64.so"
+
+cp "${TEST_HOME}/conf/graphs/hugegraph.properties" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties.before-invalid-provider"
+if (
+    cd "${TEST_HOME}"
+    HG_SERVER_ROCKSDB_PROVIDER=invalid bash ./docker-entrypoint.sh
+); then
+    echo "invalid RocksDB provider unexpectedly succeeded" >&2
+    exit 1
+fi
+cmp "${TEST_HOME}/conf/graphs/hugegraph.properties.before-invalid-provider" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties"
+
+(
+    cd "${TEST_HOME}"
+    HG_SERVER_BACKEND=rocksdb \
+    HG_SERVER_ROCKSDB_PROVIDER=topling \
+    HG_SERVER_ENFORCE_PROVIDER_MARKER=true \
+        bash ./docker-entrypoint.sh
+)
+grep -qx "rocksdb.data_path=${TEST_HOME}/topling-data/data" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties"
+grep -qx "rocksdb.wal_path=${TEST_HOME}/topling-data/wal" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties"
+grep -Fqx 'component=server' \
+    "${TEST_HOME}/topling-data/.hugegraph-rocksdb-provider"
+grep -Fqx 'provider=topling' \
+    "${TEST_HOME}/topling-data/.hugegraph-rocksdb-provider"
+cp "${TEST_HOME}/conf/graphs/hugegraph.properties" \
+    "${TEST_HOME}/conf/graphs/hugegraph.properties.before-provider-mismatch"
+if (
+    cd "${TEST_HOME}"
+    HG_SERVER_BACKEND=rocksdb \
+    HG_SERVER_ROCKSDB_PROVIDER=rocksdb \
+    HG_SERVER_DATA_PATH="${TEST_HOME}/topling-data" \
+        bash ./docker-entrypoint.sh
+); then
+    echo "provider-mismatched Server data path unexpectedly succeeded" >&2
+    exit 1
+fi
+cmp "${TEST_HOME}/conf/graphs/hugegraph.properties.before-provider-mismatch" \
     "${TEST_HOME}/conf/graphs/hugegraph.properties"
 
 cp "${TEST_HOME}/conf/rest-server.properties" \
@@ -117,7 +208,7 @@ if (
     echo "required authentication token secret unexpectedly succeeded" >&2
     exit 1
 fi
-[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 1 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 2 ]]
 [[ ! -e "${TEST_HOME}/docker/enable-auth-calls" ]]
 
 (
@@ -125,7 +216,7 @@ fi
     HG_SERVER_REQUIRE_AUTH_TOKEN_SECRET=true \
         bash ./docker-entrypoint.sh
 )
-[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 2 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 3 ]]
 [[ ! -e "${TEST_HOME}/docker/enable-auth-calls" ]]
 
 (
@@ -135,7 +226,7 @@ fi
     HG_SERVER_AUTH_TOKEN_SECRET=12345678901234567890123456789012 \
         bash ./docker-entrypoint.sh
 )
-[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 3 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 4 ]]
 [[ "$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")" -eq 1 ]]
 
 sed -i '/^auth\.token_secret=/d' "${TEST_HOME}/conf/rest-server.properties"
@@ -181,7 +272,7 @@ sed -i "s|^auth\\.token_secret=.*|auth.token_secret  ${rest_secret}|" \
 grep -qx "auth.token_secret=${rest_secret}" \
     "${TEST_HOME}/conf/rest-server.properties"
 
-[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 7 ]]
+[[ "$(wc -l < "${TEST_HOME}/docker/init-store-calls")" -eq 8 ]]
 [[ "$(wc -l < "${TEST_HOME}/docker/enable-auth-calls")" -eq 5 ]]
 
 (
@@ -230,12 +321,118 @@ grep -Fqx 'auth.admin_pa=Strong\\Pass\ 9!' \
     "${TEST_HOME}/conf/rest-server.properties"
 
 rm -f "${TEST_HOME}/docker/init_complete"
+rm -f "${TEST_HOME}/rocksdb-data/.hugegraph-state/init_complete"
 (
     cd "${TEST_HOME}"
     PASSWORD=-n bash ./docker-entrypoint.sh
 )
 grep -Fqx -- '-n' "${TEST_HOME}/docker/init-store-password"
 
+rm -f "${TEST_HOME}/bin/pid"
+(
+    cd "${TEST_HOME}"
+    exec setsid env \
+        START_TEST_CHILD=true \
+        HG_SERVER_BACKEND=hstore \
+        HG_SERVER_ROCKSDB_PROVIDER=rocksdb \
+        bash ./docker-entrypoint.sh
+) &
+entrypoint_pid=$!
+for _ in $(seq 1 10); do
+    [[ -s "${TEST_HOME}/bin/pid" ]] && break
+    sleep 1
+done
+[[ -s "${TEST_HOME}/bin/pid" ]]
+child_pid=$(<"${TEST_HOME}/bin/pid")
+kill -TERM -- "-${entrypoint_pid}"
+for _ in $(seq 1 15); do
+    ! kill -0 "${entrypoint_pid}" 2>/dev/null && break
+    sleep 1
+done
+if kill -0 "${entrypoint_pid}" 2>/dev/null; then
+    kill -KILL -- "-${entrypoint_pid}" 2>/dev/null || true
+    wait "${entrypoint_pid}" 2>/dev/null || true
+    echo "Docker entrypoint did not finish SIGTERM handling" >&2
+    exit 1
+fi
+if ! wait "${entrypoint_pid}"; then
+    echo "Docker entrypoint did not exit cleanly after SIGTERM" >&2
+    exit 1
+fi
+if kill -0 "${child_pid}" 2>/dev/null; then
+    echo "Docker entrypoint left its Server child running" >&2
+    exit 1
+fi
+
+rm -f "${TEST_HOME}/bin/pid"
+(
+    cd "${TEST_HOME}"
+    exec setsid env \
+        START_TEST_CHILD=true \
+        START_TEST_DELAY=true \
+        HG_SERVER_BACKEND=hstore \
+        HG_SERVER_ROCKSDB_PROVIDER=rocksdb \
+        bash ./docker-entrypoint.sh
+) &
+entrypoint_pid=$!
+for _ in $(seq 1 10); do
+    [[ -s "${TEST_HOME}/bin/pid" ]] && break
+    sleep 1
+done
+[[ -s "${TEST_HOME}/bin/pid" ]]
+child_pid=$(<"${TEST_HOME}/bin/pid")
+kill -TERM "${entrypoint_pid}"
+for _ in $(seq 1 15); do
+    ! kill -0 "${entrypoint_pid}" 2>/dev/null && break
+    sleep 1
+done
+if kill -0 "${entrypoint_pid}" 2>/dev/null; then
+    kill -KILL -- "-${entrypoint_pid}" 2>/dev/null || true
+    wait "${entrypoint_pid}" 2>/dev/null || true
+    echo "Docker entrypoint did not handle SIGTERM during startup" >&2
+    exit 1
+fi
+if ! wait "${entrypoint_pid}"; then
+    echo "Docker entrypoint did not exit cleanly during startup" >&2
+    exit 1
+fi
+if kill -0 "${child_pid}" 2>/dev/null; then
+    echo "Docker entrypoint left its startup Server child running" >&2
+    exit 1
+fi
+
+printf '%s\n' '-999999' > "${TEST_HOME}/bin/pid"
+rm -f "${TEST_HOME}/docker/start-before-pid"
+(
+    cd "${TEST_HOME}"
+    exec setsid env \
+        START_TEST_PRE_PID_DELAY=true \
+        HG_SERVER_BACKEND=hstore \
+        HG_SERVER_ROCKSDB_PROVIDER=rocksdb \
+        bash ./docker-entrypoint.sh
+) &
+entrypoint_pid=$!
+for _ in $(seq 1 10); do
+    [[ -e "${TEST_HOME}/docker/start-before-pid" ]] && break
+    sleep 1
+done
+[[ -e "${TEST_HOME}/docker/start-before-pid" ]]
+[[ ! -e "${TEST_HOME}/bin/pid" ]]
+kill -TERM "${entrypoint_pid}"
+for _ in $(seq 1 15); do
+    ! kill -0 "${entrypoint_pid}" 2>/dev/null && break
+    sleep 1
+done
+if kill -0 "${entrypoint_pid}" 2>/dev/null; then
+    kill -KILL -- "-${entrypoint_pid}" 2>/dev/null || true
+    wait "${entrypoint_pid}" 2>/dev/null || true
+    echo "Docker entrypoint did not ignore a stale pid during startup" >&2
+    exit 1
+fi
+if ! wait "${entrypoint_pid}"; then
+    echo "Docker entrypoint did not exit cleanly with a stale pid" >&2
+    exit 1
+fi
 # The value start-hugegraph.sh actually received for -t, read from the
 # recorded argument vector so that -t 1200 can never satisfy an assertion
 # that wants 120.

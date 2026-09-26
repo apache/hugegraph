@@ -24,6 +24,7 @@ import java.util.Objects;
 import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Assert;
 import org.junit.Assume;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -49,6 +50,32 @@ public class GraphSpaceApiTest extends BaseApiTest {
         for (String space : spaces) {
             if (!"DEFAULT".equals(space)) {
                 this.client().delete(PATH, space);
+            }
+        }
+        this.clearRoleTestFixtures();
+    }
+
+    @After
+    public void clearRoleTestFixtures() {
+        if (!"hstore".equals(System.getProperty("backend"))) {
+            return;
+        }
+        String space = "default_role_auth_space";
+        Response spacesResponse = this.client().get(PATH);
+        Map<String, Object> spaces = JsonUtil.fromJson(
+                assertResponseStatus(200, spacesResponse), Map.class);
+        if (((List<?>) spaces.get("graphSpaces")).contains(space)) {
+            assertResponseStatus(204, this.client().delete(PATH, space));
+        }
+        String usersPath = "graphspaces/DEFAULT/auth/users";
+        Response usersResponse = this.client().get(usersPath, ImmutableMap.of("limit", -1));
+        Map<String, Object> result = JsonUtil.fromJson(
+                assertResponseStatus(200, usersResponse), Map.class);
+        List<String> ownedNames = List.of("default_role_analyst", "default_role_target",
+                                         "default_role_manager");
+        for (Map<String, Object> user : (List<Map<String, Object>>) result.get("users")) {
+            if (ownedNames.contains(user.get("user_name"))) {
+                assertResponseStatus(204, this.client().delete(usersPath, (String) user.get("id")));
             }
         }
     }
@@ -505,49 +532,60 @@ public class GraphSpaceApiTest extends BaseApiTest {
         String manager = "default_role_manager";
         createSpace(space, true);
 
-        RestClient analystClient = userClient(analyst);
-        userClient(target);
-        RestClient managerClient = spaceManagerClient(space, manager);
+        RestClient analystClient = null;
+        RestClient managerClient = null;
+        try {
+            analystClient = userClient(analyst);
+            userClient(target).close();
+            managerClient = spaceManagerClient(space, manager);
 
-        String rolePath = String.format("graphspaces/%s/role", space);
-        String analystBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
-                                           analyst);
-        Response r = this.client().post(rolePath, analystBody);
-        assertResponseStatus(201, r);
+            String rolePath = String.format("graphspaces/%s/role", space);
+            String analystBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
+                                               analyst);
+            Response r = this.client().post(rolePath, analystBody);
+            assertResponseStatus(201, r);
 
-        String grantTargetBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
-                                               target);
-        r = analystClient.post(rolePath, grantTargetBody);
-        assertResponseStatus(403, r);
+            String grantTargetBody = String.format("{\"user\":\"%s\",\"role\":\"ANALYST\"}",
+                                                   target);
+            r = analystClient.post(rolePath, grantTargetBody);
+            assertResponseStatus(403, r);
 
-        r = analystClient.get(rolePath,
-                              ImmutableMap.of("user", target,
-                                              "role", "ANALYST"));
-        assertResponseStatus(403, r);
+            r = analystClient.get(rolePath,
+                                  ImmutableMap.of("user", target,
+                                                  "role", "ANALYST"));
+            assertResponseStatus(403, r);
 
-        r = analystClient.delete(rolePath,
-                                 ImmutableMap.of("user", analyst,
-                                                 "role", "ANALYST"));
-        assertResponseStatus(403, r);
+            r = analystClient.delete(rolePath,
+                                     ImmutableMap.of("user", analyst,
+                                                     "role", "ANALYST"));
+            assertResponseStatus(403, r);
 
-        r = managerClient.post(rolePath, grantTargetBody);
-        assertResponseStatus(201, r);
+            r = managerClient.post(rolePath, grantTargetBody);
+            assertResponseStatus(201, r);
 
-        r = managerClient.get(rolePath,
-                              ImmutableMap.of("user", target,
-                                              "role", "ANALYST"));
-        String result = assertResponseStatus(200, r);
-        Assert.assertTrue(result.contains("true"));
+            r = managerClient.get(rolePath,
+                                  ImmutableMap.of("user", target,
+                                                  "role", "ANALYST"));
+            String result = assertResponseStatus(200, r);
+            Assert.assertTrue(result.contains("true"));
 
-        String spaceRoleBody = String.format("{\"user\":\"%s\",\"role\":\"SPACE\"}",
-                                             target);
-        r = managerClient.post(rolePath, spaceRoleBody);
-        assertResponseStatus(403, r);
+            String spaceRoleBody = String.format("{\"user\":\"%s\",\"role\":\"SPACE\"}",
+                                                 target);
+            r = managerClient.post(rolePath, spaceRoleBody);
+            assertResponseStatus(403, r);
 
-        r = managerClient.delete(rolePath,
-                                 ImmutableMap.of("user", target,
-                                                 "role", "ANALYST"));
-        assertResponseStatus(204, r);
+            r = managerClient.delete(rolePath,
+                                     ImmutableMap.of("user", target,
+                                                     "role", "ANALYST"));
+            assertResponseStatus(204, r);
+        } finally {
+            if (analystClient != null) {
+                analystClient.close();
+            }
+            if (managerClient != null) {
+                managerClient.close();
+            }
+        }
     }
 
     @Test
