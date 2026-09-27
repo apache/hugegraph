@@ -642,3 +642,6 @@ next_action: audit remaining default/empty production responses (scan state, str
 
 2026-09-27: Implemented QueryService streaming responses: each incoming QueryRequest now produces a finished QueryResponse with qualified filtered data, and the live tonic test consumes the stream. Workspace passed 24 core + 8 node + 56 transport = 88 tests. Evidence `query-streaming-20260927.log`, code commit `98469a91d`.
 next_action: audit remaining default/empty production responses (scan state, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
+
+2026-09-27: Closed another protocol gap: Session Batch now returns explicit success status feedback for staged writes and commits; the persistence/reopen test asserts both write and commit acknowledgements. Workspace passed 24 core + 8 node + 56 transport = 88 tests. Evidence `batch-feedback-contract-20260927.log`, code commit `d4706c031`.
+next_action: audit remaining default/empty production responses (scan state, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
