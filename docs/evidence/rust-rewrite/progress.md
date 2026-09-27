@@ -576,3 +576,6 @@ next_action: add explicit Graph delete persistence/error behavior and continue r
 
 2026-09-27: Extended network Graph delete coverage: empty graph names and unknown methods are rejected, valid Graph delete returns success without deleting durable graph data, and the seeded value survives service restart. Workspace passed 17 core + 8 node + 46 transport = 71 tests. Evidence `graph-delete-recovery-20260927.log`, code commit `0162b55d0`.
 next_action: audit remaining production contract gaps (Batch delete/range/merge operations, table/graph namespace isolation, Raft/partition behavior and Java differential E2E remain incomplete).
+
+2026-09-27: Implemented atomic BatchDelete/DEL/DEL_SINGLE semantics. Core applies mixed batch mutations in one staged persistence operation; transport maps delete entries, stages them through session transactions and explicitly rejects DEL_PREFIX/DEL_RANGE/MERGE until their range semantics are implemented. Core and transport tests cover persistence, deletion and unsupported range rejection. Workspace passed 18 core + 8 node + 47 transport = 73 tests. Evidence `batch-delete-contract-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: implement independent prefix/range delete semantics and mutation Oracle coverage; keep unsupported MERGE explicit.
