@@ -1,0 +1,127 @@
+   Compiling hugegraph-store-transport v0.1.0 (/home/zy/code/hugegraph/hugegraph-store/rust/store-transport)
+warning: associated type `queryStream` should have an upper camel case name
+   --> /home/zy/code/hugegraph/hugegraph-store/rust/target/debug/build/hugegraph-store-transport-bf3b68bae1af4802/out/_.rs:957:14
+    |
+957 |         type queryStream: tonic::codegen::tokio_stream::Stream<
+    |              ^^^^^^^^^^^ help: convert the identifier to upper camel case: `QueryStream`
+    |
+    = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: `hugegraph-store-transport` (lib test) generated 1 warning
+   Compiling hugegraph-store-node v0.1.0 (/home/zy/code/hugegraph/hugegraph-store/rust/store-node)
+warning: `hugegraph-store-transport` (lib) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.25s
+     Running unittests src/lib.rs (hugegraph-store/rust/target/debug/deps/hugegraph_store_core-c20008da505b4e83)
+
+running 17 tests
+test durable_tests::durable_restart_round_trip ... ok
+test tests::differential_switch_rollback_trace ... ok
+test durable_tests::restore_image_rejects_truncation_without_mutating_store ... ok
+test tests::commit_and_rollback_visibility ... ok
+test request_tests::batch_put_command_applies_all_entries ... ok
+test tests::restart_recovery_and_corruption_rejection ... ok
+test durable_tests::durable_clear_matches_empty_oracle_after_restart ... ok
+test tests::independent_oracle_deterministic_trace ... ok
+test durable_tests::batch_failure_restores_memory_and_retry_succeeds ... ok
+test tests::selectable_java_fallback_rollback ... ok
+test request_tests::request_path_persists_and_reads ... ok
+test tests::snapshot_round_trip ... ok
+test durable_tests::entries_are_sorted_and_owned ... ok
+test transport_tests::client_server_request_mapping ... ok
+test txn_tests::restart_oracle_preserves_committed_and_rollback_state ... ok
+test txn_tests::txn_commit_and_rollback ... ok
+test txn_tests::txn_oracle_commit_is_atomic_observable_boundary ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (hugegraph-store/rust/target/debug/deps/hugegraph_store_node-dee2dc42ddc8f10f)
+
+running 8 tests
+test tests::unified_server_lists_all_production_services ... ok
+test tests::rollback_command_removes_value_when_online ... ok
+test tests::batch_put_failure_preserves_existing_data ... ok
+test tests::scan_command_is_online_gated_and_counts_range ... ok
+test tests::node_state_lifecycle_is_explicit ... ok
+test tests::node_put_get_matches_independent_oracle ... ok
+test tests::concurrent_puts_preserve_data_and_online_state ... ok
+test tests::live_unified_server_answers_health ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/lib.rs (hugegraph-store/rust/target/debug/deps/hugegraph_store_transport-73b00f1ecf12948e)
+
+running 43 tests
+test batch_get_tests::decode_keys ... ok
+test batch_tests::batch_write_maps ... ok
+test batch_get_trait_tests::batch_get_trait_returns_feedback ... ok
+test codec_tests::get2_codec_round_trip ... ok
+test dispatch_tests::typed_dispatch_validates_routes ... ok
+test apply_tests::batch_lifecycle ... ok
+test catalog_restore_tests::snapshot_restore_preserves_table_and_graph_names ... ok
+test envelope_tests::envelope_round_trip_and_rejects_unknown ... ok
+test feedback_tests::values_response ... ok
+test get_decode_tests::decode_get_req_key ... ok
+test generated_tests::string_reply_round_trip ... ok
+test graph_frame_tests::edge_frame_maps_endpoints ... ok
+test graph_frame_tests::encoded_edge_scan_request_selects_edge_mode ... ok
+test graph_frame_tests::entry_filter_observes_half_open_range ... ok
+test graph_frame_tests::entry_limit_is_bounded_and_zero_means_unlimited ... ok
+test graph_frame_tests::encoded_scan_request_yields_range ... ok
+test graph_frame_tests::malformed_scan_payload_is_rejected ... ok
+test graph_frame_tests::graph_service_scan_range_reads_durable_entries ... ok
+test graph_frame_tests::graph_service_selects_edge_frame_branch ... ok
+test graph_frame_tests::scan_frame_has_initial_sequence_and_no_records ... ok
+test graph_frame_tests::scan_frame_maps_persisted_key_and_value ... ok
+test matrix_tests::rpc_family_dispatch_matrix ... ok
+test matrix_tests::cross_layer_oracle_reopen_preserves_transport_write ... ok
+test response_tests::query_response_model ... ok
+test healthy_contract_tests::healthy_is_ok_returns_protocol_message ... ok
+test shared_get_tests::get2_handler_decodes ... ok
+test mixed_tests::mixed_missing_codes ... ok
+test session_txn_tests::stage_commit_rollback ... ok
+test message_tests::all_registered_methods_encode ... ok
+test mapping_tests::get_mapping ... ok
+test state_graph_tests::codecs ... ok
+test tests::grpc_contract_registry_is_complete ... ok
+test schema_tests::query_batch_codecs ... ok
+test graph_frame_tests::session_lifecycle_methods_return_contract_responses ... ok
+test shared_tests::shared_session_opens ... ok
+test tonic_batch_tests::batch_trait_commit ... ok
+test tonic_session_tests::get2_trait_round_trip ... ok
+test session_txn_tests::failed_session_commit_retains_pending_for_retry ... ok
+test tonic_batch_tests::batch_rpc_preserves_all_entries_and_rollback_after_reopen ... ok
+test graph_frame_tests::live_query_and_state_servers_accept_contract_requests ... ok
+test socket_tests::loopback_get_round_trip ... ok
+test graph_frame_tests::live_tonic_graph_server_accepts_client ... ok
+test tonic_batch_tests::live_batch_rpc_fault_retry_and_reopen ... ok
+
+test result: ok. 43 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+   Doc-tests hugegraph_store_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests hugegraph_store_node
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests hugegraph_store_transport
+warning: associated type `queryStream` should have an upper camel case name
+   --> /home/zy/code/hugegraph/hugegraph-store/rust/target/debug/build/hugegraph-store-transport-bf3b68bae1af4802/out/_.rs:957:14
+    |
+957 |         type queryStream: tonic::codegen::tokio_stream::Stream<
+    |              ^^^^^^^^^^^ help: convert the identifier to upper camel case: `QueryStream`
+    |
+    = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: 1 warning emitted
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
