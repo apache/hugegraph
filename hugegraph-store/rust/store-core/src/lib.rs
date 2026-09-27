@@ -250,6 +250,115 @@ impl PartitionState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplicatedCommand {
+    pub op: u8,
+    pub term: u64,
+    pub index: u64,
+    pub request_id: Vec<u8>,
+    pub payload: Vec<u8>,
+}
+
+impl ReplicatedCommand {
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = b"RFT1".to_vec();
+        out.push(self.op);
+        out.extend_from_slice(&self.term.to_le_bytes());
+        out.extend_from_slice(&self.index.to_le_bytes());
+        out.extend_from_slice(&(self.request_id.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.request_id);
+        out.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
+        out.extend_from_slice(&self.payload);
+        out
+    }
+
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 25 || &bytes[..4] != b"RFT1" {
+            return None;
+        }
+        let op = bytes[4];
+        let term = u64::from_le_bytes(bytes[5..13].try_into().ok()?);
+        let index = u64::from_le_bytes(bytes[13..21].try_into().ok()?);
+        let request_len = u32::from_le_bytes(bytes[21..25].try_into().ok()?) as usize;
+        let mut p = 25;
+        if p + request_len + 4 > bytes.len() {
+            return None;
+        }
+        let request_id = bytes[p..p + request_len].to_vec();
+        p += request_len;
+        let payload_len = u32::from_le_bytes(bytes[p..p + 4].try_into().ok()?) as usize;
+        p += 4;
+        if p + payload_len != bytes.len() {
+            return None;
+        }
+        Some(Self {
+            op,
+            term,
+            index,
+            request_id,
+            payload: bytes[p..].to_vec(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CommandLog {
+    entries: std::collections::BTreeMap<u64, ReplicatedCommand>,
+}
+
+impl CommandLog {
+    pub fn last_index(&self) -> u64 {
+        self.entries.keys().next_back().copied().unwrap_or(0)
+    }
+
+    pub fn append(&mut self, command: ReplicatedCommand) -> Result<bool, &'static str> {
+        if command.index == 0 {
+            return Err("command index must be positive");
+        }
+        if let Some(existing) = self.entries.get(&command.index) {
+            return if existing == &command {
+                Ok(false)
+            } else {
+                Err("conflicting command index")
+            };
+        }
+        if command.index != self.last_index() + 1 {
+            return Err("command index gap");
+        }
+        self.entries.insert(command.index, command);
+        Ok(true)
+    }
+
+    pub fn snapshot(&self) -> Vec<u8> {
+        self.entries
+            .values()
+            .flat_map(|c| {
+                let bytes = c.encode();
+                (bytes.len() as u32).to_le_bytes().into_iter().chain(bytes)
+            })
+            .collect()
+    }
+
+    pub fn restore(bytes: &[u8]) -> Option<Self> {
+        let mut p = 0;
+        let mut log = Self::default();
+        while p < bytes.len() {
+            if p + 4 > bytes.len() {
+                return None;
+            }
+            let len = u32::from_le_bytes(bytes[p..p + 4].try_into().ok()?) as usize;
+            p += 4;
+            if p + len > bytes.len() {
+                return None;
+            }
+            log.append(ReplicatedCommand::decode(&bytes[p..p + len])?)
+                .ok()?;
+            p += len;
+        }
+        Some(log)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +463,40 @@ mod tests {
             })
             .is_err());
         assert!(state.split(1, 3, b"z".to_vec(), 3).is_err());
+    }
+
+    #[test]
+    fn replicated_command_log_is_idempotent_and_gap_safe() {
+        let command = ReplicatedCommand {
+            op: 0x61,
+            term: 3,
+            index: 1,
+            request_id: b"move-1".to_vec(),
+            payload: b"partition=1".to_vec(),
+        };
+        assert_eq!(
+            ReplicatedCommand::decode(&command.encode()),
+            Some(command.clone())
+        );
+        let mut log = CommandLog::default();
+        assert_eq!(log.append(command.clone()), Ok(true));
+        assert_eq!(log.append(command.clone()), Ok(false));
+        assert!(log
+            .append(ReplicatedCommand {
+                index: 3,
+                ..command.clone()
+            })
+            .is_err());
+        assert!(log
+            .append(ReplicatedCommand {
+                index: 1,
+                payload: b"conflict".to_vec(),
+                ..command.clone()
+            })
+            .is_err());
+        let recovered = CommandLog::restore(&log.snapshot()).unwrap();
+        assert_eq!(recovered, log);
+        assert!(ReplicatedCommand::decode(&[b'R', b'F', b'T', b'1', 0]).is_none());
     }
 
     #[test]
