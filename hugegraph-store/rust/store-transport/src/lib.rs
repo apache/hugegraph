@@ -1470,6 +1470,17 @@ mod graph_frame_tests {
             .await
             .unwrap();
         assert!(response.into_inner().data.is_empty());
+        let mut streamed = query
+            .query(tokio_stream::iter([super::generated::QueryRequest {
+                query_id: "stream".into(),
+                ..Default::default()
+            }]))
+            .await
+            .unwrap()
+            .into_inner();
+        let streamed_response = streamed.message().await.unwrap().unwrap();
+        assert_eq!(streamed_response.query_id, "stream");
+        assert!(streamed_response.is_finished);
         let mut state =
             super::generated::hg_store_state_client::HgStoreStateClient::connect(endpoint)
                 .await
@@ -2008,11 +2019,38 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
         &self,
         request: tonic::Request<tonic::Streaming<generated::QueryRequest>>,
     ) -> Result<tonic::Response<Self::queryStream>, tonic::Status> {
-        let _ = request;
-        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(Vec::<
-            Result<generated::QueryResponse, tonic::Status>,
-        >::new(
-        )))))
+        let mut input = request.into_inner();
+        let mut responses = Vec::new();
+        while let Some(query) = input
+            .message()
+            .await
+            .map_err(|e| tonic::Status::internal(e.to_string()))?
+        {
+            let data = self
+                .backend
+                .as_ref()
+                .map(|backend| query_entries(backend, &query))
+                .transpose()
+                .map_err(tonic::Status::internal)?
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, value)| generated::Kv {
+                    key,
+                    value,
+                    code: 0,
+                })
+                .collect();
+            responses.push(Ok(generated::QueryResponse {
+                query_id: query.query_id,
+                is_ok: true,
+                is_finished: true,
+                message: "ok".into(),
+                data,
+            }));
+        }
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter(
+            responses,
+        ))))
     }
     async fn query0(
         &self,
