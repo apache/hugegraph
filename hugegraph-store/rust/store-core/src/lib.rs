@@ -125,6 +125,127 @@ impl StoreBackend for InMemoryStore {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PartitionRange {
+    pub id: u32,
+    pub start: Vec<u8>,
+    pub end: Vec<u8>,
+    pub owner: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PartitionState {
+    ranges: std::collections::BTreeMap<u32, PartitionRange>,
+}
+
+impl PartitionState {
+    pub fn assign(&mut self, range: PartitionRange) -> Result<(), &'static str> {
+        if !range.end.is_empty() && range.start >= range.end {
+            return Err("invalid partition range");
+        }
+        if self.ranges.values().any(|r| {
+            (range.end.is_empty() || r.start < range.end)
+                && (r.end.is_empty() || range.start < r.end)
+        }) {
+            return Err("overlapping partition range");
+        }
+        if self.ranges.insert(range.id, range).is_some() {
+            return Err("duplicate partition id");
+        }
+        Ok(())
+    }
+
+    pub fn locate(&self, key: &[u8]) -> Option<&PartitionRange> {
+        self.ranges
+            .values()
+            .find(|r| key >= r.start.as_slice() && (r.end.is_empty() || key < r.end.as_slice()))
+    }
+
+    pub fn transfer(&mut self, id: u32, owner: u64) -> Result<(), &'static str> {
+        self.ranges
+            .get_mut(&id)
+            .map(|r| r.owner = owner)
+            .ok_or("unknown partition")
+    }
+
+    pub fn split(
+        &mut self,
+        id: u32,
+        new_id: u32,
+        split_key: Vec<u8>,
+        new_owner: u64,
+    ) -> Result<(), &'static str> {
+        if self.ranges.contains_key(&new_id) {
+            return Err("duplicate partition id");
+        }
+        let range = self.ranges.get_mut(&id).ok_or("unknown partition")?;
+        if split_key <= range.start || (!range.end.is_empty() && split_key >= range.end) {
+            return Err("split key outside partition");
+        }
+        let old_end = std::mem::replace(&mut range.end, split_key.clone());
+        self.ranges.insert(
+            new_id,
+            PartitionRange {
+                id: new_id,
+                start: split_key,
+                end: old_end,
+                owner: new_owner,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn snapshot(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for r in self.ranges.values() {
+            out.extend_from_slice(&r.id.to_le_bytes());
+            out.extend_from_slice(&r.owner.to_le_bytes());
+            out.extend_from_slice(&(r.start.len() as u32).to_le_bytes());
+            out.extend_from_slice(&r.start);
+            out.extend_from_slice(&(r.end.len() as u32).to_le_bytes());
+            out.extend_from_slice(&r.end);
+        }
+        out
+    }
+
+    pub fn restore(bytes: &[u8]) -> Option<Self> {
+        let mut p = 0;
+        let mut state = Self::default();
+        while p < bytes.len() {
+            if p + 16 > bytes.len() {
+                return None;
+            }
+            let id = u32::from_le_bytes(bytes[p..p + 4].try_into().ok()?);
+            p += 4;
+            let owner = u64::from_le_bytes(bytes[p..p + 8].try_into().ok()?);
+            p += 8;
+            let sl = u32::from_le_bytes(bytes[p..p + 4].try_into().ok()?) as usize;
+            p += 4;
+            if p + sl + 4 > bytes.len() {
+                return None;
+            }
+            let start = bytes[p..p + sl].to_vec();
+            p += sl;
+            let el = u32::from_le_bytes(bytes[p..p + 4].try_into().ok()?) as usize;
+            p += 4;
+            if p + el > bytes.len() {
+                return None;
+            }
+            let end = bytes[p..p + el].to_vec();
+            p += el;
+            state
+                .assign(PartitionRange {
+                    id,
+                    start,
+                    end,
+                    owner,
+                })
+                .ok()?;
+        }
+        Some(state)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +307,49 @@ mod tests {
         s.put(b"k".to_vec(), b"v".to_vec());
         let r = InMemoryStore::restore(&s.snapshot()).unwrap();
         assert_eq!(r.get(b"k"), Some(b"v".to_vec()));
+    }
+
+    #[test]
+    fn partition_split_transfer_and_restart_are_deterministic() {
+        let mut state = PartitionState::default();
+        state
+            .assign(PartitionRange {
+                id: 1,
+                start: b"a".to_vec(),
+                end: b"z".to_vec(),
+                owner: 10,
+            })
+            .unwrap();
+        assert_eq!(state.locate(b"m").unwrap().id, 1);
+        state.split(1, 2, b"m".to_vec(), 20).unwrap();
+        state.transfer(1, 11).unwrap();
+        assert_eq!(state.locate(b"b").unwrap().owner, 11);
+        assert_eq!(state.locate(b"y").unwrap().owner, 20);
+        let recovered = PartitionState::restore(&state.snapshot()).unwrap();
+        assert_eq!(recovered, state);
+        assert!(PartitionState::restore(&state.snapshot()[..state.snapshot().len() - 1]).is_none());
+    }
+
+    #[test]
+    fn partition_rejects_overlap_and_invalid_split() {
+        let mut state = PartitionState::default();
+        state
+            .assign(PartitionRange {
+                id: 1,
+                start: b"a".to_vec(),
+                end: b"m".to_vec(),
+                owner: 1,
+            })
+            .unwrap();
+        assert!(state
+            .assign(PartitionRange {
+                id: 2,
+                start: b"l".to_vec(),
+                end: b"z".to_vec(),
+                owner: 2
+            })
+            .is_err());
+        assert!(state.split(1, 3, b"z".to_vec(), 3).is_err());
     }
 
     #[test]
