@@ -582,3 +582,6 @@ next_action: implement independent prefix/range delete semantics and mutation Or
 
 2026-09-27: Implemented atomic `DEL_PREFIX` and half-open `DEL_RANGE` mutations in core and transport. The independent BTreeMap oracle verifies matched keys, persistence and reopen; transport maps both operations and keeps MERGE explicitly unsupported. Workspace passed 19 core + 8 node + 47 transport = 74 tests. Evidence `batch-range-delete-oracle-20260927.log`, code commit `ec477c38e`.
 next_action: implement MERGE semantics from the public contract and add mutation fault/retry coverage; continue namespace, Raft and Java differential gaps.
+
+2026-09-27: Implemented `OP_TYPE_MERGE` as RocksDB-compatible little-endian uint64 addition. Missing keys initialize from the operand, repeated merges wrap as u64, invalid operands fail without mutating memory or disk, and transport maps merge entries through core/session mutations. Independent merge Oracle and mapping tests pass. Workspace passed 20 core + 8 node + 48 transport = 76 tests. Evidence `batch-merge-oracle-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: add network/session merge retry and overflow/fault coverage; continue namespace, Raft/partition and Java differential gaps.
