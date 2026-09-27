@@ -815,6 +815,7 @@ mod graph_frame_tests {
     #[test]
     fn qualified_scan_filters_table_and_decodes_user_key() {
         let entries = vec![
+            (b"legacy".to_vec(), b"legacy-value".to_vec()),
             (
                 super::qualify_table_name_key("t", b"same"),
                 b"t-value".to_vec(),
@@ -826,6 +827,8 @@ mod graph_frame_tests {
         ];
         let filtered = super::filter_qualified_entries(&entries, b"a", b"z", Some("t"));
         assert_eq!(filtered, vec![(b"same".to_vec(), b"t-value".to_vec())]);
+        let legacy = super::filter_qualified_entries(&entries, b"a", b"z", None);
+        assert!(legacy.contains(&(b"legacy".to_vec(), b"legacy-value".to_vec())));
     }
 
     #[test]
@@ -2921,6 +2924,49 @@ mod batch_get_trait_tests {
             panic!();
         }
         let _ = std::fs::remove_file(p);
+    }
+}
+
+#[cfg(test)]
+mod qualified_reopen_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn session_reopen_reads_qualified_key_without_legacy_collision() {
+        let path =
+            std::env::temp_dir().join(format!("hg-qualified-reopen-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut store = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            store
+                .commit_put(b"shared".to_vec(), b"legacy".to_vec())
+                .unwrap();
+            store
+                .commit_put(
+                    qualify_table_name_key("t", b"shared"),
+                    b"qualified".to_vec(),
+                )
+                .unwrap();
+        }
+        let reopened = SessionService::open(&path).unwrap();
+        let request = generated::BatchGetReq {
+            header: None,
+            partition: 0,
+            table: "t".into(),
+            key: vec![generated::Key {
+                key: b"shared".to_vec(),
+                code: 0,
+            }],
+        };
+        assert_eq!(
+            batch_get_values(
+                &reopened.shared.backend.lock().unwrap(),
+                &prost::Message::encode_to_vec(&request)
+            )
+            .unwrap(),
+            vec![Some(b"qualified".to_vec())]
+        );
+        let _ = std::fs::remove_file(path);
     }
 }
 
