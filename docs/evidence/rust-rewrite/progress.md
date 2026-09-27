@@ -579,3 +579,6 @@ next_action: audit remaining production contract gaps (Batch delete/range/merge 
 
 2026-09-27: Implemented atomic BatchDelete/DEL/DEL_SINGLE semantics. Core applies mixed batch mutations in one staged persistence operation; transport maps delete entries, stages them through session transactions and explicitly rejects DEL_PREFIX/DEL_RANGE/MERGE until their range semantics are implemented. Core and transport tests cover persistence, deletion and unsupported range rejection. Workspace passed 18 core + 8 node + 47 transport = 73 tests. Evidence `batch-delete-contract-20260927.log`, code commit `7ca06ab90`.
 next_action: implement independent prefix/range delete semantics and mutation Oracle coverage; keep unsupported MERGE explicit.
+
+2026-09-27: Implemented atomic `DEL_PREFIX` and half-open `DEL_RANGE` mutations in core and transport. The independent BTreeMap oracle verifies matched keys, persistence and reopen; transport maps both operations and keeps MERGE explicitly unsupported. Workspace passed 19 core + 8 node + 47 transport = 74 tests. Evidence `batch-range-delete-oracle-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: implement MERGE semantics from the public contract and add mutation fault/retry coverage; continue namespace, Raft and Java differential gaps.
