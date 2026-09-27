@@ -188,7 +188,7 @@ impl StoreNode {
         HealthyService
     }
     pub fn query_service(&self) -> QueryServiceImpl {
-        QueryServiceImpl
+        QueryServiceImpl::from_backend(self.session.shared.backend.clone())
     }
     pub fn state_service(&self) -> StateService {
         StateService::new()

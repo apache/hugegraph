@@ -599,7 +599,19 @@ mod response_tests {
     }
 }
 
-pub struct QueryServiceImpl;
+#[derive(Clone, Default)]
+pub struct QueryServiceImpl {
+    backend: Option<std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>>,
+}
+impl QueryServiceImpl {
+    pub fn from_backend(
+        backend: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+    ) -> Self {
+        Self {
+            backend: Some(backend),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct StateService {
@@ -1427,7 +1439,7 @@ mod graph_frame_tests {
             tonic::transport::Server::builder()
                 .add_service(
                     super::generated::query_service_server::QueryServiceServer::new(
-                        super::QueryServiceImpl,
+                        super::QueryServiceImpl::default(),
                     ),
                 )
                 .add_service(
@@ -2007,18 +2019,127 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
         request: tonic::Request<generated::QueryRequest>,
     ) -> Result<tonic::Response<generated::QueryResponse>, tonic::Status> {
         let q = request.into_inner();
-        Ok(tonic::Response::new(query_response(
-            &q.query_id,
-            "ok",
-            true,
-        )))
+        let data = self
+            .backend
+            .as_ref()
+            .map(|backend| query_entries(backend, &q))
+            .transpose()
+            .map_err(|e| tonic::Status::internal(e))?
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(key, value)| generated::Kv {
+                key,
+                value,
+                code: 0,
+            })
+            .collect();
+        Ok(tonic::Response::new(generated::QueryResponse {
+            query_id: q.query_id,
+            is_ok: true,
+            is_finished: true,
+            message: "ok".into(),
+            data,
+        }))
     }
     async fn count(
         &self,
         request: tonic::Request<generated::QueryRequest>,
     ) -> Result<tonic::Response<generated::QueryResponse>, tonic::Status> {
         let q = request.into_inner();
-        Ok(tonic::Response::new(query_response(&q.query_id, "0", true)))
+        let count = self
+            .backend
+            .as_ref()
+            .map(|backend| query_entries(backend, &q).map(|entries| entries.len()))
+            .transpose()
+            .map_err(|e| tonic::Status::internal(e))?
+            .unwrap_or(0);
+        Ok(tonic::Response::new(query_response(
+            &q.query_id,
+            &count.to_string(),
+            true,
+        )))
+    }
+}
+
+fn query_entries(
+    backend: &std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+    request: &generated::QueryRequest,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    let store = backend
+        .lock()
+        .map_err(|_| "backend lock poisoned".to_string())?;
+    let (start, end) = request
+        .scan_type_param
+        .first()
+        .map(|param| (param.key_start.as_slice(), param.key_end.as_slice()))
+        .unwrap_or((&[][..], &[][..]));
+    let mut entries = filter_qualified_entries(
+        &store.entries(),
+        start,
+        end,
+        (!request.table.is_empty()).then_some(request.table.as_str()),
+    );
+    let offset = request.offset as usize;
+    if offset >= entries.len() {
+        entries.clear();
+    } else if offset > 0 {
+        entries.drain(..offset);
+    }
+    if request.limit > 0 {
+        entries.truncate(request.limit as usize);
+    }
+    Ok(entries)
+}
+
+#[cfg(test)]
+mod query_data_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn query0_and_count_read_qualified_backend_entries() {
+        let path = std::env::temp_dir().join(format!("hg-query-data-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let backend = std::sync::Arc::new(std::sync::Mutex::new(
+            hugegraph_store_core::DurableStore::open(&path).unwrap(),
+        ));
+        {
+            let mut store = backend.lock().unwrap();
+            store
+                .commit_put(qualify_table_name_key("t", b"a"), b"one".to_vec())
+                .unwrap();
+            store
+                .commit_put(qualify_table_name_key("t", b"b"), b"two".to_vec())
+                .unwrap();
+            store
+                .commit_put(qualify_table_name_key("u", b"a"), b"other".to_vec())
+                .unwrap();
+        }
+        let service = QueryServiceImpl::from_backend(backend);
+        let request = generated::QueryRequest {
+            query_id: "q".into(),
+            table: "t".into(),
+            limit: 1,
+            ..Default::default()
+        };
+        let out = <QueryServiceImpl as generated::query_service_server::QueryService>::query0(
+            &service,
+            tonic::Request::new(request.clone()),
+        )
+        .await
+        .unwrap()
+        .into_inner();
+        assert_eq!(out.data.len(), 1);
+        assert_eq!(out.data[0].key, b"a");
+        assert_eq!(out.data[0].value, b"one");
+        let count = <QueryServiceImpl as generated::query_service_server::QueryService>::count(
+            &service,
+            tonic::Request::new(request),
+        )
+        .await
+        .unwrap()
+        .into_inner();
+        assert_eq!(count.message, "1");
+        let _ = std::fs::remove_file(path);
     }
 }
 
