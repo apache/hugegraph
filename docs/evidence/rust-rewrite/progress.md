@@ -615,3 +615,6 @@ next_action: compare partition transition and peer metadata semantics against Ja
 
 2026-09-27: Compared Java RaftOperation semantics and added store-core ReplicatedCommand/CommandLog. Commands carry op, term, monotonic index, request identity and payload; duplicate replay is idempotent, conflicting index and gaps are rejected, and logs restore from snapshots. Workspace passed 24 core + 8 node + 53 transport = 85 tests. Evidence `replicated-command-log-20260927.log`, code commit `54d907474`.
 next_action: expose replicated commands through a transport/admin path and test network replay, conflict and gap handling against the partition state service; then continue Java differential coverage.
+
+2026-09-27: Added optional replicated-command bytes and result status to the existing HgStoreState getPeers contract. StateService now persists/restores CommandLog with partition snapshots; the live tonic test verifies post-restart command acceptance, duplicate replay, and gap rejection over the network. Workspace passed 24 core + 8 node + 53 transport = 85 tests. Evidence `replicated-command-network-20260927.log`, code commit `50fe59fd1`.
+next_action: apply decoded replicated admin commands to partition transitions (split/transfer) instead of logging only, then add a two-node replay/differential test against Java instruction outcomes.
