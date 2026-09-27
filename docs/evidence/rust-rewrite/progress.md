@@ -570,3 +570,6 @@ next_action: add network-level Table/Graph RPC coverage and fault handling, then
 
 2026-09-27: Added a network-level generated client test for Table create/exists and Graph delete. The service is stopped and reopened before verifying the table catalog remains visible. Workspace passed 17 core + 8 node + 45 transport = 70 tests. Evidence `network-table-graph-20260927.log`, code commit `f320f5b6c`.
 next_action: add catalog sidecar fault injection and explicit Graph delete persistence/error coverage; continue remaining production contract matrix.
+
+2026-09-27: Added catalog sidecar fault injection: a failed Table create against a directory path returns an error and restores the prior catalog; after path recovery the same create succeeds and survives reopen. Fixed EXISTS to avoid rewriting the catalog during a read, which had incorrectly failed while the sidecar was faulted. Workspace passed 17 core + 8 node + 46 transport = 71 tests. Evidence `catalog-fault-recovery-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: add explicit Graph delete persistence/error behavior and continue remaining production contract matrix.
