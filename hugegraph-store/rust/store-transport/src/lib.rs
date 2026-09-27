@@ -604,6 +604,7 @@ pub struct QueryServiceImpl;
 #[derive(Clone)]
 pub struct StateService {
     partitions: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::PartitionState>>,
+    commands: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::CommandLog>>,
 }
 impl Default for StateService {
     fn default() -> Self {
@@ -614,12 +615,14 @@ impl StateService {
     pub fn new() -> Self {
         Self {
             partitions: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
+            commands: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
         }
     }
 
     pub fn from_partition_state(state: hugegraph_store_core::PartitionState) -> Self {
         Self {
             partitions: std::sync::Arc::new(std::sync::Mutex::new(state)),
+            commands: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
         }
     }
 
@@ -636,6 +639,22 @@ impl StateService {
 
     pub fn from_partition_snapshot(bytes: &[u8]) -> Option<Self> {
         hugegraph_store_core::PartitionState::restore(bytes).map(Self::from_partition_state)
+    }
+
+    pub fn snapshot_command_log(&self) -> Result<Vec<u8>, &'static str> {
+        self.commands
+            .lock()
+            .map(|log| log.snapshot())
+            .map_err(|_| "command log lock poisoned")
+    }
+
+    pub fn from_admin_snapshots(partitions: &[u8], commands: &[u8]) -> Option<Self> {
+        let state = hugegraph_store_core::PartitionState::restore(partitions)?;
+        let log = hugegraph_store_core::CommandLog::restore(commands)?;
+        Some(Self {
+            partitions: std::sync::Arc::new(std::sync::Mutex::new(state)),
+            commands: std::sync::Arc::new(std::sync::Mutex::new(log)),
+        })
     }
 
     pub fn assign_partition(
@@ -666,6 +685,15 @@ impl StateService {
             .lock()
             .map_err(|_| "partition state lock poisoned")?
             .transfer(id, owner)
+    }
+
+    pub fn apply_replicated_command(&self, bytes: &[u8]) -> Result<bool, &'static str> {
+        let command = hugegraph_store_core::ReplicatedCommand::decode(bytes)
+            .ok_or("invalid replicated command")?;
+        self.commands
+            .lock()
+            .map_err(|_| "command log lock poisoned")?
+            .append(command)
     }
 }
 pub struct GraphService {
@@ -1308,8 +1336,21 @@ mod graph_frame_tests {
             .split_partition(1, 2, b"m".to_vec(), 20)
             .unwrap();
         state_service.transfer_partition(1, 11).unwrap();
-        let state_service = super::StateService::from_partition_snapshot(
+        let seed_command = hugegraph_store_core::ReplicatedCommand {
+            op: 0x61,
+            term: 4,
+            index: 1,
+            request_id: b"seed-1".to_vec(),
+            payload: b"seed".to_vec(),
+        }
+        .encode();
+        assert_eq!(
+            state_service.apply_replicated_command(&seed_command),
+            Ok(true)
+        );
+        let state_service = super::StateService::from_admin_snapshots(
             &state_service.snapshot_partition_state().unwrap(),
+            &state_service.snapshot_command_log().unwrap(),
         )
         .unwrap();
         tokio::spawn(async move {
@@ -1370,8 +1411,52 @@ mod graph_frame_tests {
             .unsub_state(super::generated::SubStateReq::default())
             .await
             .unwrap();
+        let command = hugegraph_store_core::ReplicatedCommand {
+            op: 0x61,
+            term: 4,
+            index: 2,
+            request_id: b"net-1".to_vec(),
+            payload: b"split=1:m:2".to_vec(),
+        }
+        .encode();
+        let applied = state
+            .get_peers(super::generated::PartitionRequest {
+                id: 2,
+                command: command.clone(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(applied.code, 0);
+        assert_eq!(applied.message, "applied");
+        let duplicate = state
+            .get_peers(super::generated::PartitionRequest { id: 2, command })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(duplicate.message, "duplicate");
+        let gap = hugegraph_store_core::ReplicatedCommand {
+            op: 0x61,
+            term: 4,
+            index: 4,
+            request_id: b"net-3".to_vec(),
+            payload: b"gap".to_vec(),
+        }
+        .encode();
+        let rejected = state
+            .get_peers(super::generated::PartitionRequest {
+                id: 2,
+                command: gap,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(rejected.code, 1);
         let peers = state
-            .get_peers(super::generated::PartitionRequest { id: 2 })
+            .get_peers(super::generated::PartitionRequest {
+                id: 2,
+                command: Vec::new(),
+            })
             .await
             .unwrap();
         assert_eq!(peers.into_inner().peers, "id=2;start=m;end=z;owner=20");
@@ -1702,7 +1787,19 @@ impl generated::hg_store_state_server::HgStoreState for StateService {
         &self,
         request: tonic::Request<generated::PartitionRequest>,
     ) -> Result<tonic::Response<generated::PeersResponse>, tonic::Status> {
-        let id = request.into_inner().id;
+        let request = request.into_inner();
+        let id = request.id;
+        let command_result = if request.command.is_empty() {
+            Ok(None)
+        } else {
+            self.apply_replicated_command(&request.command).map(Some)
+        };
+        let (code, message) = match command_result {
+            Ok(Some(true)) => (0, "applied"),
+            Ok(Some(false)) => (0, "duplicate"),
+            Ok(None) => (0, "ok"),
+            Err(message) => (1, message),
+        };
         let state = self.partition_state().map_err(tonic::Status::internal)?;
         let peers = state
             .range(id as u32)
@@ -1716,7 +1813,11 @@ impl generated::hg_store_state_server::HgStoreState for StateService {
                 )
             })
             .unwrap_or_default();
-        Ok(tonic::Response::new(generated::PeersResponse { peers }))
+        Ok(tonic::Response::new(generated::PeersResponse {
+            peers,
+            code,
+            message: message.into(),
+        }))
     }
 }
 #[tonic::async_trait]

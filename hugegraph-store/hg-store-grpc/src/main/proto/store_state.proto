@@ -74,7 +74,10 @@ message QuotaRequest {
 
 message PartitionRequest{
   int32 id = 1;
+  bytes command = 2; // Optional replicated admin command envelope.
 }
 message PeersResponse{
   string peers = 1;
+  int32 code = 2;
+  string message = 3;
 }
