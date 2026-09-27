@@ -636,3 +636,6 @@ next_action: audit remaining default/empty production responses, prioritizing Qu
 
 2026-09-27: Closed the query data-plane gap: QueryServiceImpl can share the durable backend, query0 returns qualified table-filtered Kv data with offset/limit, and count reports the filtered cardinality. A differential test seeds tables t/u and verifies isolation and pagination. Workspace passed 24 core + 8 node + 55 transport = 87 tests. Evidence `query-data-plane-20260927.log`, code commit `35cdfc309`.
 next_action: audit remaining default/empty production responses (scan state, streaming query, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
+
+2026-09-27: Fixed TableMethod::Truncate to delete only the requested HGK1 table prefix instead of clearing the shared backend. Cross-table test proves table u survives truncating table t. Workspace passed 24 core + 8 node + 56 transport = 88 tests. Evidence `table-truncate-isolation-20260927.log`, code commit `863bbd4a8`.
+next_action: audit remaining default/empty production responses (scan state, streaming query, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
