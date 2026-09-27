@@ -634,7 +634,7 @@ impl GraphService {
             .store
             .lock()
             .map_err(|_| "store lock poisoned".to_string())?;
-        let entries = filter_entries(&store.entries(), start, end);
+        let entries = filter_qualified_entries(&store.entries(), start, end, None);
         Ok(if edges {
             entries_to_edge_frame(&entries)
         } else {
@@ -648,11 +648,26 @@ impl GraphService {
         edges: bool,
         limit: i64,
     ) -> Result<generated::ScanResponse, String> {
+        let entries = self.scan_range_limited_for_table(start, end, edges, limit, None)?;
+        Ok(entries)
+    }
+
+    pub fn scan_range_limited_for_table(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        edges: bool,
+        limit: i64,
+        table: Option<&str>,
+    ) -> Result<generated::ScanResponse, String> {
         let store = self
             .store
             .lock()
             .map_err(|_| "store lock poisoned".to_string())?;
-        let entries = limit_entries(&filter_entries(&store.entries(), start, end), limit);
+        let entries = limit_entries(
+            &filter_qualified_entries(&store.entries(), start, end, table),
+            limit,
+        );
         Ok(if edges {
             entries_to_edge_frame(&entries)
         } else {
@@ -729,6 +744,37 @@ pub fn filter_entries(
         .cloned()
         .collect()
 }
+
+pub fn filter_qualified_entries(
+    entries: &[(Vec<u8>, Vec<u8>)],
+    start: &[u8],
+    end: &[u8],
+    table: Option<&str>,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    entries
+        .iter()
+        .filter_map(|(key, value)| {
+            if let Some((qualified_table, raw_key)) = hugegraph_store_core::split_table_key(key) {
+                if table
+                    .map(|name| name.as_bytes() == qualified_table.as_slice())
+                    .unwrap_or(true)
+                    && raw_key.as_slice() >= start
+                    && (end.is_empty() || raw_key.as_slice() < end)
+                {
+                    return Some((raw_key, value.clone()));
+                }
+                None
+            } else if table.is_none()
+                && key.as_slice() >= start
+                && (end.is_empty() || key.as_slice() < end)
+            {
+                Some((key.clone(), value.clone()))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 pub fn limit_entries(entries: &[(Vec<u8>, Vec<u8>)], limit: i64) -> Vec<(Vec<u8>, Vec<u8>)> {
     if limit <= 0 {
         return entries.to_vec();
@@ -766,6 +812,22 @@ mod graph_frame_tests {
     use super::empty_scan_frame;
     use crate::generated;
     use prost::Message;
+    #[test]
+    fn qualified_scan_filters_table_and_decodes_user_key() {
+        let entries = vec![
+            (
+                super::qualify_table_name_key("t", b"same"),
+                b"t-value".to_vec(),
+            ),
+            (
+                super::qualify_table_name_key("u", b"same"),
+                b"u-value".to_vec(),
+            ),
+        ];
+        let filtered = super::filter_qualified_entries(&entries, b"a", b"z", Some("t"));
+        assert_eq!(filtered, vec![(b"same".to_vec(), b"t-value".to_vec())]);
+    }
+
     #[test]
     fn scan_frame_has_initial_sequence_and_no_records() {
         let f = empty_scan_frame();
@@ -871,6 +933,46 @@ mod graph_frame_tests {
         let service = super::GraphService::open(&p).unwrap();
         let frame = service.scan_range(b"a", b"z", false).unwrap();
         assert_eq!(frame.vertex.len(), 1);
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn graph_service_scan_qualified_table_decodes_and_isolates() {
+        let p = std::env::temp_dir().join(format!("hg-graph-qualified-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        {
+            let mut store = hugegraph_store_core::DurableStore::open(&p).unwrap();
+            store
+                .commit_put(
+                    super::qualify_table_name_key("t", b"same"),
+                    b"t-value".to_vec(),
+                )
+                .unwrap();
+            store
+                .commit_put(
+                    super::qualify_table_name_key("u", b"same"),
+                    b"u-value".to_vec(),
+                )
+                .unwrap();
+        }
+        let service = super::GraphService::open(&p).unwrap();
+        let frame = service
+            .scan_range_limited_for_table(b"a", b"z", false, 0, Some("t"))
+            .unwrap();
+        assert_eq!(frame.vertex.len(), 1);
+        assert_eq!(
+            frame.vertex[0].id.as_ref().unwrap().value_bytes.as_deref(),
+            Some(&b"same"[..])
+        );
+        assert_eq!(
+            frame.vertex[0].properties[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .value_bytes
+                .as_deref(),
+            Some(&b"t-value"[..])
+        );
         let _ = std::fs::remove_file(p);
     }
     #[test]
@@ -1393,7 +1495,15 @@ impl generated::graph_store_server::GraphStore for GraphService {
                 }
                 _ => 0,
             };
-            self.scan_range_limited(&start, &end, scan_request_is_edge(&r), limit)
+            let table = match r.request.as_ref() {
+                Some(generated::scan_partition_request::RequestOneOf::ScanRequest(v))
+                    if !v.table.is_empty() =>
+                {
+                    Some(v.table.as_str())
+                }
+                _ => None,
+            };
+            self.scan_range_limited_for_table(&start, &end, scan_request_is_edge(&r), limit, table)
                 .map_err(|e| tonic::Status::new(classify_failure(&e), e))?
         } else {
             empty_scan_frame()
