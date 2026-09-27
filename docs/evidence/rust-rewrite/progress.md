@@ -567,3 +567,6 @@ next_action: persist table/graph catalog semantics across restart and add networ
 
 2026-09-27: Added an atomic table catalog sidecar for `SessionService::open`. Table names load on reopen and create/delete/drop updates are persisted; catalog write failures restore the prior in-memory set. A restart test verifies EXISTS after reopening. Workspace passed 17 core + 8 node + 44 transport = 69 tests. Evidence `table-catalog-recovery-20260927.log`, code commit `d45128df7`.
 next_action: add network-level Table/Graph RPC coverage and fault handling, then continue remaining production contract matrix.
+
+2026-09-27: Added a network-level generated client test for Table create/exists and Graph delete. The service is stopped and reopened before verifying the table catalog remains visible. Workspace passed 17 core + 8 node + 45 transport = 70 tests. Evidence `network-table-graph-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: add catalog sidecar fault injection and explicit Graph delete persistence/error coverage; continue remaining production contract matrix.
