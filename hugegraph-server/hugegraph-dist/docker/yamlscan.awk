@@ -57,6 +57,17 @@
 #      Reading `authentication:\r` as no key at all reported a Gremlin mapping
 #      that names a class as absent, which is the direction that leaves REST
 #      open while Gremlin authenticates.
+#   8. a child value may open a flow collection or a quoted scalar that its own
+#      line does not close, and flow content ignores indentation -- so every
+#      line until it closes belongs to the nested node rather than to the
+#      authentication mapping.  Counting one of those continuation lines as a
+#      direct child answered `named` for a file whose authenticator sits inside
+#      `authentication.config`, which is the direction that leaves REST
+#      enforcing beside a Gremlin on AllowAllAuthenticator;
+#   8b. the mapping itself may be a flow collection that opens behind an anchor
+#      (`authentication: &auth {authenticator: X}`) or on its first child line
+#      rather than on the key line.  Settings.read() loads both, so answering
+#      `nameless` for them stops a boot that works.
 #
 # Quote characters come from sprintf so this file holds no literal apostrophe:
 # an awk program written into a single-quoted shell string breaks on one, and
@@ -400,6 +411,51 @@ function is_block_scalar(v) {
     return substr(v, 2) ~ /^[0-9]*[-+]?$/
 }
 
+# `&label` in front of a value is an anchor and not part of the value, so a
+# flow mapping written `authentication: &auth {authenticator: X}` opens with the
+# brace exactly as the unanchored spelling does.  names_class() already reads
+# anchors this way on a scalar.
+function unanchor(s) {
+    s = trim(s)
+    if (substr(s, 1, 1) != "&") return s
+    sub(/^&[^ \t]*/, "", s)
+    return trim(s)
+}
+
+# Walk the bytes of a line that sits inside a flow collection or a quoted
+# scalar opened on an earlier line, updating SP (collections still open) and SQ
+# (the quote still open).  Braces inside a quoted scalar are text, and a
+# backslash escapes the next byte of a double quoted scalar only.
+function flow_span(s,    i, n, c) {
+    n = length(s)
+    for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (SQ != "") {
+            if (ESC) ESC = 0
+            else if (SQ == dquo() && c == "\\") ESC = 1
+            else if (c == SQ) SQ = ""
+            continue
+        }
+        if (is_quote(c)) { SQ = c; continue }
+        if (c == "{") SP++
+        else if (c == "[") SP++
+        else if (c == "}") SP--
+        else if (c == "]") SP--
+    }
+}
+
+# A child value that begins with a brace or bracket, or with a quote this line
+# never closes, carries on below rather than ending here.  Only an opening byte
+# at the very start counts: a plain scalar may hold a brace anywhere else in it
+# and still be complete on its own line.
+function opens_child_span(v,    s, first) {
+    s = unanchor(v)
+    if (s == "") return
+    first = substr(s, 1, 1)
+    if (first != "{" && first != "[" && !is_quote(first)) return
+    flow_span(s)
+}
+
 BEGIN {
     DEPTH = 0
     FST = "key"
@@ -419,6 +475,9 @@ BEGIN {
     BLOCK = 0
     BLOCK_IND = 0
     BLOCK_TXT = ""
+    SP = 0
+    SQ = ""
+    ESC = 0
 }
 
 # Close out the block scalar whose lines were being collected.
@@ -428,7 +487,7 @@ function finish_block() {
     BLOCK_TXT = ""
 }
 
-function handle_line(raw,    line, ind) {
+function handle_line(raw,    line, ind, v) {
     if (BLOCK) {
         # Deeper than the key means the line is still scalar content; anything
         # else ends the scalar and is ordinary content again.
@@ -447,6 +506,16 @@ function handle_line(raw,    line, ind) {
     if (trim(line) == "") return
 
     ind = indent_of(line)
+
+    # A child value that opened a flow collection or a quoted scalar has not
+    # ended: flow and quoted content ignore indentation, so every line until it
+    # closes is nested content of that value and never a direct child of the
+    # authentication mapping.  Reading one as a child is what answered `named`
+    # for a class that only ever reaches `authentication.config`.
+    if (SP > 0 || SQ != "") {
+        flow_span(line)
+        return
+    }
 
     # The indentation of the first real content line is the root indentation.
     # A document marker or a stray scalar opens no mapping, so keep looking
@@ -488,9 +557,12 @@ function handle_line(raw,    line, ind) {
         }
         in_auth = 1
         child = -1
-        if (substr(V_TXT, 1, 1) == "{") {
+        v = unanchor(V_TXT)
+        if (substr(v, 1, 1) == "{") {
+            # A flow mapping is the value whether or not an anchor sits in
+            # front of the brace, and it may stay open past this line.
             flow = 1
-            if (scan_flow(V_TXT)) {
+            if (scan_flow(v)) {
                 in_auth = 0
                 flow = 0
             }
@@ -515,8 +587,31 @@ function handle_line(raw,    line, ind) {
     # only a direct child at that indentation counts.  A line reaching here is
     # never at the root indentation (the sibling case above consumed those),
     # so `child` is always deeper than the root, as a real child must be.
-    if (!split_pair(line)) return
+    if (child < 0) {
+        # The mapping may be a flow collection that opens on the first child
+        # line instead of on the key line.  Its braces hold the direct entries,
+        # so the flow reader has to be the one that sees them.
+        v = unanchor(line)
+        if (substr(v, 1, 1) == "{") {
+            child = ind
+            flow = 1
+            if (scan_flow(v)) {
+                in_auth = 0
+                flow = 0
+            }
+            return
+        }
+    }
+    if (!split_pair(line)) {
+        opens_child_span(line)
+        return
+    }
     if (child < 0) child = ind
+    # Every child is checked for a collection it leaves open, at any
+    # indentation, so that a nested one swallows its own continuation lines
+    # before they can be counted as a direct child.
+    opens_child_span(V_TXT)
+    if (SP > 0 || SQ != "") return
     if (ind != child) return
     if (names_authenticator(K_TXT)) {
         AUTH_SEEN++
@@ -548,6 +643,10 @@ END {
     if (ROOT_FLOW) RESULT = refuse("a document written as a root flow mapping")
     else if (UNRESOLVED)
         RESULT = refuse("a quoted key or value carrying an escape that is not resolvable here")
+    # A collection or quote that never closed is a file the server rejects, so
+    # no answer here can be right; stopping the boot is the safe one.
+    else if (SP > 0 || SQ != "")
+        RESULT = refuse("a flow collection or quoted scalar left open in the authentication mapping")
     else if (AUTH_BLOCKS == 0) RESULT = "none"
     else if (AUTH_BLOCKS > 1) RESULT = duplicate_root()
     else RESULT = auth_state()

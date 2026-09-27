@@ -582,6 +582,104 @@ mkdir -p "${scope_dir}/conf"
     want_state nameless "$(yaml_auth_state)"
 )
 
+# A child value can open a flow collection or a quoted scalar that its own line
+# does not close, and flow content ignores indentation, so the lines under it
+# belong to the nested node rather than to the authentication mapping.  Reading
+# one of them as a direct child answered `named` for a file whose only
+# authenticator sits inside `authentication.config` -- the direction that leaves
+# REST enforcing beside a Gremlin on AllowAllAuthenticator.  The two spellings
+# that open a flow mapping behind an anchor or on the first child line load fine
+# on the server, so answering `nameless` for them stops a boot that works.
+span_dir="${test_dir}/yaml-flow-span"
+mkdir -p "${span_dir}/conf"
+(
+    cd "${span_dir}" || exit 1
+    want_state() {
+        if [[ "$1" != "$2" ]]; then
+            echo "expected yaml state '$1', got '$2'" >&2
+            exit 1
+        fi
+    }
+
+    printf '%s\n' \
+        'authentication:' \
+        '  config: {tokens: conf/rest-server.properties,' \
+        '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator}' \
+        > conf/gremlin-server.yaml
+    want_state nameless "$(yaml_auth_state)"
+
+    # A quoted scalar open past the end of the line has the same effect.
+    printf '%s\n' \
+        'authentication:' \
+        '  config: {tokens: "conf/rest-server.properties,' \
+        '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator"}' \
+        > conf/gremlin-server.yaml
+    want_state nameless "$(yaml_auth_state)"
+
+    printf '%s\n' \
+        'authentication: &auth {authenticator: org.apache.hugegraph.auth.StandardAuthenticator, authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler}' \
+        > conf/gremlin-server.yaml
+    want_state named "$(yaml_auth_state)"
+
+    printf '%s\n' \
+        'authentication:' \
+        '  {authenticator: org.apache.hugegraph.auth.StandardAuthenticator, authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler}' \
+        > conf/gremlin-server.yaml
+    want_state named "$(yaml_auth_state)"
+
+    # The span ends where the collection closes, so a direct child written after
+    # it still counts: the mapping is not simply swallowed to the end of file.
+    printf '%s\n' \
+        'authentication:' \
+        '  config: {tokens: conf/rest-server.properties,' \
+        '  handler: org.apache.hugegraph.auth.StandardAuthenticator}' \
+        '  authenticator: com.example.GremlinAuth' \
+        > conf/gremlin-server.yaml
+    want_state named "$(yaml_auth_state)"
+
+    # A collection that never closes is a file the server rejects, so it is
+    # refused through the nameless state rather than settled from a guess.
+    printf '%s\n' \
+        'authentication:' \
+        '  config: {tokens: conf/rest-server.properties' \
+        '  authenticator: com.example.GremlinAuth' \
+        > conf/gremlin-server.yaml
+    want_state nameless "$(yaml_auth_state)"
+)
+
+# The consequence rather than the answer: this is the tree that used to be armed
+# one-sided, because a reader that said `named` told enable-auth.sh the yaml was
+# already configured, so it wrote the REST side alone and exited 0.  It has to
+# refuse and change nothing.  Note the guard on the yaml is on the properties
+# and the factory only: the file itself carries an authenticator line nested in
+# config, which is the shape under test.
+span_tree_dir="${test_dir}/yaml-flow-span-tree"
+mkdir -p "${span_tree_dir}/conf/graphs"
+install_enable_auth "${span_tree_dir}"
+printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+    > "${span_tree_dir}/conf/graphs/hugegraph.properties"
+: > "${span_tree_dir}/conf/rest-server.properties"
+printf '%s\n' \
+    'authentication:' \
+    '  config: {tokens: conf/rest-server.properties,' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator}' \
+    > "${span_tree_dir}/conf/gremlin-server.yaml"
+(
+    cd "${span_tree_dir}" || exit 1
+    if ./bin/enable-auth.sh; then
+        echo "enable-auth.sh must refuse a mapping whose authenticator is nested in config" >&2
+        exit 1
+    fi
+    if [[ -s conf/rest-server.properties ]]; then
+        echo "a refused run still wrote rest-server.properties" >&2
+        exit 1
+    fi
+    if grep -q 'HugeFactoryAuthProxy' conf/graphs/hugegraph.properties; then
+        echo "a refused run still wrapped the graph factory" >&2
+        exit 1
+    fi
+)
+
 # Both sides silent means "bootstrap authentication", and the class then comes
 # from enable-auth.sh: an operator who passed AUTHENTICATOR_CLASS gets the class
 # they asked for, and only an unset one falls back to StandardAuthenticator.
