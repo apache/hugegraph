@@ -161,6 +161,10 @@ impl PartitionState {
             .find(|r| key >= r.start.as_slice() && (r.end.is_empty() || key < r.end.as_slice()))
     }
 
+    pub fn range(&self, id: u32) -> Option<&PartitionRange> {
+        self.ranges.get(&id)
+    }
+
     pub fn transfer(&mut self, id: u32, owner: u64) -> Result<(), &'static str> {
         self.ranges
             .get_mut(&id)

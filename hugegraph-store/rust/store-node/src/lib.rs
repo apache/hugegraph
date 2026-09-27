@@ -191,7 +191,7 @@ impl StoreNode {
         QueryServiceImpl
     }
     pub fn state_service(&self) -> StateService {
-        StateService
+        StateService::new()
     }
 
     pub fn service_names() -> [&'static str; 5] {

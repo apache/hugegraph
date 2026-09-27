@@ -601,7 +601,73 @@ mod response_tests {
 
 pub struct QueryServiceImpl;
 
-pub struct StateService;
+#[derive(Clone)]
+pub struct StateService {
+    partitions: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::PartitionState>>,
+}
+impl Default for StateService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl StateService {
+    pub fn new() -> Self {
+        Self {
+            partitions: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
+        }
+    }
+
+    pub fn from_partition_state(state: hugegraph_store_core::PartitionState) -> Self {
+        Self {
+            partitions: std::sync::Arc::new(std::sync::Mutex::new(state)),
+        }
+    }
+
+    pub fn partition_state(&self) -> Result<hugegraph_store_core::PartitionState, &'static str> {
+        self.partitions
+            .lock()
+            .map(|state| state.clone())
+            .map_err(|_| "partition state lock poisoned")
+    }
+
+    pub fn snapshot_partition_state(&self) -> Result<Vec<u8>, &'static str> {
+        Ok(self.partition_state()?.snapshot())
+    }
+
+    pub fn from_partition_snapshot(bytes: &[u8]) -> Option<Self> {
+        hugegraph_store_core::PartitionState::restore(bytes).map(Self::from_partition_state)
+    }
+
+    pub fn assign_partition(
+        &self,
+        range: hugegraph_store_core::PartitionRange,
+    ) -> Result<(), &'static str> {
+        self.partitions
+            .lock()
+            .map_err(|_| "partition state lock poisoned")?
+            .assign(range)
+    }
+
+    pub fn split_partition(
+        &self,
+        id: u32,
+        new_id: u32,
+        split_key: Vec<u8>,
+        owner: u64,
+    ) -> Result<(), &'static str> {
+        self.partitions
+            .lock()
+            .map_err(|_| "partition state lock poisoned")?
+            .split(id, new_id, split_key, owner)
+    }
+
+    pub fn transfer_partition(&self, id: u32, owner: u64) -> Result<(), &'static str> {
+        self.partitions
+            .lock()
+            .map_err(|_| "partition state lock poisoned")?
+            .transfer(id, owner)
+    }
+}
 pub struct GraphService {
     store: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
 }
@@ -1229,6 +1295,23 @@ mod graph_frame_tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let state_service = super::StateService::new();
+        state_service
+            .assign_partition(hugegraph_store_core::PartitionRange {
+                id: 1,
+                start: b"a".to_vec(),
+                end: b"z".to_vec(),
+                owner: 10,
+            })
+            .unwrap();
+        state_service
+            .split_partition(1, 2, b"m".to_vec(), 20)
+            .unwrap();
+        state_service.transfer_partition(1, 11).unwrap();
+        let state_service = super::StateService::from_partition_snapshot(
+            &state_service.snapshot_partition_state().unwrap(),
+        )
+        .unwrap();
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(
@@ -1237,9 +1320,7 @@ mod graph_frame_tests {
                     ),
                 )
                 .add_service(
-                    super::generated::hg_store_state_server::HgStoreStateServer::new(
-                        super::StateService,
-                    ),
+                    super::generated::hg_store_state_server::HgStoreStateServer::new(state_service),
                 )
                 .serve_with_incoming(incoming)
                 .await
@@ -1290,13 +1371,10 @@ mod graph_frame_tests {
             .await
             .unwrap();
         let peers = state
-            .get_peers(super::generated::PartitionRequest::default())
+            .get_peers(super::generated::PartitionRequest { id: 2 })
             .await
             .unwrap();
-        assert_eq!(
-            peers.into_inner(),
-            super::generated::PeersResponse::default()
-        );
+        assert_eq!(peers.into_inner().peers, "id=2;start=m;end=z;owner=20");
     }
 
     #[tokio::test]
@@ -1622,9 +1700,23 @@ impl generated::hg_store_state_server::HgStoreState for StateService {
     }
     async fn get_peers(
         &self,
-        _: tonic::Request<generated::PartitionRequest>,
+        request: tonic::Request<generated::PartitionRequest>,
     ) -> Result<tonic::Response<generated::PeersResponse>, tonic::Status> {
-        Ok(tonic::Response::new(generated::PeersResponse::default()))
+        let id = request.into_inner().id;
+        let state = self.partition_state().map_err(tonic::Status::internal)?;
+        let peers = state
+            .range(id as u32)
+            .map(|range| {
+                format!(
+                    "id={};start={};end={};owner={}",
+                    range.id,
+                    String::from_utf8_lossy(&range.start),
+                    String::from_utf8_lossy(&range.end),
+                    range.owner
+                )
+            })
+            .unwrap_or_default();
+        Ok(tonic::Response::new(generated::PeersResponse { peers }))
     }
 }
 #[tonic::async_trait]
