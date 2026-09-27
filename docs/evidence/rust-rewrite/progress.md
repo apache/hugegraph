@@ -597,3 +597,6 @@ next_action: wire qualified keys through Graph scan and Node/session shared APIs
 
 2026-09-27: Wired table-qualified keys through Graph scan filtering. Qualified entries are decoded to user keys, filtered by requested table and range, while raw legacy entries remain visible only to unqualified scans. Graph Oracle stores identical keys in tables t/u and returns only t. Workspace passed 21 core + 8 node + 51 transport = 80 tests. Evidence `qualified-graph-scan-20260927.log`, code commit `9e8fa08dd`.
 next_action: add network Graph scan cross-table isolation and Node/session shared-backend tests; audit raw-to-qualified migration compatibility.
+
+2026-09-27: Added live Graph scan isolation and unified StoreNode shared-backend coverage. TCP Graph scan now decodes HGK1 keys and returns only the requested table; the unified server test writes the same user key to table ids 0/1 through Session Batch, commits both, and verifies Graph table "0" returns only table-zero. Workspace passed 21 core + 8 node + 52 transport = 81 tests. Evidence `node-qualified-shared-backend-20260927.log`, code commit `42f97a0b4`.
+next_action: audit raw-to-qualified migration compatibility and add explicit Node/session reopen-read coverage; then continue remaining Raft/partition and Java differential gaps.
