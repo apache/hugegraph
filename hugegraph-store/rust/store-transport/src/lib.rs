@@ -1123,6 +1123,13 @@ mod graph_frame_tests {
     async fn session_lifecycle_methods_return_contract_responses() {
         let path = std::env::temp_dir().join(format!("hg-session-live-{}.img", std::process::id()));
         let service = super::SessionService::open(&path).unwrap();
+        service
+            .shared
+            .backend
+            .lock()
+            .unwrap()
+            .commit_put(b"before-clean".to_vec(), b"value".to_vec())
+            .unwrap();
         let table = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
             &service, tonic::Request::new(super::generated::TableReq::default())).await.unwrap();
         assert!(table.into_inner().responses.is_none());
@@ -1132,6 +1139,10 @@ mod graph_frame_tests {
         let clean = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::clean(
             &service, tonic::Request::new(super::generated::CleanReq::default())).await.unwrap();
         assert!(clean.into_inner().responses.is_none());
+        assert_eq!(
+            service.shared.backend.lock().unwrap().entries(),
+            Vec::<(Vec<u8>, Vec<u8>)>::new()
+        );
         let _ = std::fs::remove_file(path);
     }
 }
@@ -1353,7 +1364,13 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
         &self,
         _: tonic::Request<generated::CleanReq>,
     ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
-        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+        self.shared
+            .backend
+            .lock()
+            .map_err(|_| tonic::Status::internal("backend lock poisoned"))?
+            .clear()
+            .map_err(|e| tonic::Status::new(classify_failure(&e.to_string()), e.to_string()))?;
+        Ok(tonic::Response::new(feedback_ok()))
     }
 }
 
