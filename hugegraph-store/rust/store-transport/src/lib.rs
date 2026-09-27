@@ -2287,7 +2287,7 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
             .map_err(|_| tonic::Status::internal("backend lock poisoned"))?;
         apply_session_batch(&id, &bytes, &mut tx, &mut store)
             .map_err(|e| tonic::Status::new(classify_failure(&e), e))?;
-        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+        Ok(tonic::Response::new(feedback_ok()))
     }
     async fn table(
         &self,
@@ -3124,15 +3124,17 @@ mod tonic_batch_tests {
                     .collect(),
             })
         };
-        service.batch(request("commit", write())).await.unwrap();
+        let write_response = service.batch(request("commit", write())).await.unwrap();
+        assert_eq!(write_response.into_inner().status.unwrap().code, 0);
         assert!(service.shared.backend.lock().unwrap().entries().is_empty());
-        service
+        let commit_response = service
             .batch(request(
                 "commit",
                 Requests::CommitReq(generated::BatchCommitReq {}),
             ))
             .await
             .unwrap();
+        assert_eq!(commit_response.into_inner().status.unwrap().code, 0);
         assert_eq!(
             service.shared.backend.lock().unwrap().entries(),
             oracle
