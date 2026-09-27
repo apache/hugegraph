@@ -738,6 +738,17 @@ impl StateService {
                     .ok_or("invalid transfer owner")?;
                 next_state.transfer(id, owner)?;
             }
+            0x65 => {
+                let fields: Vec<_> = command.payload.split(|b| *b == b':').collect();
+                if fields.len() != 2 || fields[0] != b"clean" {
+                    return Err("invalid clean command");
+                }
+                let id = std::str::from_utf8(fields[1])
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("invalid clean id")?;
+                next_state.remove(id)?;
+            }
             0x69 => {}
             _ => return Err("unsupported replicated command"),
         }
@@ -1559,12 +1570,37 @@ mod graph_frame_tests {
                 request_id: b"transfer-2".to_vec(),
                 payload: b"transfer:2:21".to_vec(),
             },
+            hugegraph_store_core::ReplicatedCommand {
+                op: 0x65,
+                term: 1,
+                index: 3,
+                request_id: b"clean-3".to_vec(),
+                payload: b"clean:1".to_vec(),
+            },
         ];
         for command in commands {
             let encoded = command.encode();
             assert_eq!(primary.apply_replicated_command(&encoded), Ok(true));
             assert_eq!(follower.apply_replicated_command(&encoded), Ok(true));
         }
+        assert_eq!(
+            primary.snapshot_partition_state().unwrap(),
+            follower.snapshot_partition_state().unwrap()
+        );
+        assert_eq!(
+            primary.snapshot_command_log().unwrap(),
+            follower.snapshot_command_log().unwrap()
+        );
+        let invalid = hugegraph_store_core::ReplicatedCommand {
+            op: 0x65,
+            term: 1,
+            index: 4,
+            request_id: b"clean-4".to_vec(),
+            payload: b"clean:99".to_vec(),
+        }
+        .encode();
+        assert!(primary.apply_replicated_command(&invalid).is_err());
+        assert!(follower.apply_replicated_command(&invalid).is_err());
         assert_eq!(
             primary.snapshot_partition_state().unwrap(),
             follower.snapshot_partition_state().unwrap()

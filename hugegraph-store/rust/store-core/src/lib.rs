@@ -172,6 +172,13 @@ impl PartitionState {
             .ok_or("unknown partition")
     }
 
+    pub fn remove(&mut self, id: u32) -> Result<(), &'static str> {
+        self.ranges
+            .remove(&id)
+            .map(|_| ())
+            .ok_or("unknown partition")
+    }
+
     pub fn split(
         &mut self,
         id: u32,
