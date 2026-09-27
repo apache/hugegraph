@@ -1165,7 +1165,42 @@ mod graph_frame_tests {
             service.shared.backend.lock().unwrap().entries(),
             Vec::<(Vec<u8>, Vec<u8>)>::new()
         );
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("catalog"));
+    }
+
+    #[tokio::test]
+    async fn table_catalog_survives_session_reopen() {
+        let path =
+            std::env::temp_dir().join(format!("hg-table-catalog-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("catalog"));
+        let service = super::SessionService::open(&path).unwrap();
+        <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service,
+            tonic::Request::new(super::generated::TableReq {
+                method: super::generated::TableMethod::Create as i32,
+                table_name: "persisted".into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        drop(service);
+        let reopened = super::SessionService::open(&path).unwrap();
+        let exists = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &reopened,
+            tonic::Request::new(super::generated::TableReq {
+                method: super::generated::TableMethod::Exists as i32,
+                table_name: "persisted".into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(exists.into_inner().status.unwrap().code, 0);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("catalog"));
     }
 }
 
@@ -1304,8 +1339,36 @@ pub struct SessionService {
     pub shared: SharedSession,
     pub transactions: std::sync::Arc<std::sync::Mutex<SessionTransactions>>,
     table_names: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    table_catalog_path: Option<std::path::PathBuf>,
 }
 impl SessionService {
+    fn load_catalog(path: &std::path::Path) -> std::io::Result<std::collections::HashSet<String>> {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                let text = String::from_utf8(bytes)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                Ok(text
+                    .lines()
+                    .map(str::to_owned)
+                    .filter(|name| !name.is_empty())
+                    .collect())
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Default::default()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn persist_catalog(&self, names: &std::collections::HashSet<String>) -> std::io::Result<()> {
+        let Some(path) = &self.table_catalog_path else {
+            return Ok(());
+        };
+        let mut sorted: Vec<_> = names.iter().cloned().collect();
+        sorted.sort();
+        let tmp = path.with_extension("catalog.tmp");
+        std::fs::write(&tmp, sorted.join("\n"))?;
+        std::fs::rename(tmp, path)
+    }
+
     pub fn from_backend(
         backend: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
     ) -> Self {
@@ -1317,17 +1380,20 @@ impl SessionService {
             table_names: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            table_catalog_path: None,
         }
     }
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
+        let path = path.into();
+        let catalog_path = path.with_extension("catalog");
+        let names = Self::load_catalog(&catalog_path)?;
         Ok(Self {
             shared: SharedSession::open(path)?,
             transactions: std::sync::Arc::new(
                 std::sync::Mutex::new(SessionTransactions::default()),
             ),
-            table_names: std::sync::Arc::new(std::sync::Mutex::new(
-                std::collections::HashSet::new(),
-            )),
+            table_names: std::sync::Arc::new(std::sync::Mutex::new(names)),
+            table_catalog_path: Some(catalog_path),
         })
     }
 }
@@ -1391,6 +1457,12 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
             .table_names
             .lock()
             .map_err(|_| tonic::Status::internal("table catalog lock poisoned"))?;
+        if request.table_name.contains('\n') {
+            return Err(tonic::Status::invalid_argument(
+                "table name contains newline",
+            ));
+        }
+        let previous = names.clone();
         let response = match method {
             generated::TableMethod::Exists => {
                 if names.contains(&request.table_name) {
@@ -1422,6 +1494,13 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
                 return Err(tonic::Status::invalid_argument("unknown table method"));
             }
         };
+        if let Err(error) = self.persist_catalog(&names) {
+            *names = previous;
+            return Err(tonic::Status::new(
+                classify_failure(&error.to_string()),
+                error.to_string(),
+            ));
+        }
         Ok(tonic::Response::new(response))
     }
     async fn graph(
