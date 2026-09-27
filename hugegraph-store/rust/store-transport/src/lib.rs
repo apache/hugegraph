@@ -1813,15 +1813,29 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
     let r: generated::BatchReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
     match r.requests {
         Some(generated::batch_req::Requests::WriteReq(w)) => {
-            let entries = w
-                .entry
-                .into_iter()
-                .map(|e| (e.start_key.map(|x| x.key).unwrap_or_default(), e.value))
-                .collect::<Vec<_>>();
+            let entries = w.entry;
             if entries.is_empty() {
                 return Err("empty write".into());
             }
-            Ok(hugegraph_store_core::StoreRequest::BatchPut { entries })
+            let mut puts = Vec::new();
+            let mut deletes = Vec::new();
+            for entry in entries {
+                let key = entry.start_key.map(|x| x.key).unwrap_or_default();
+                match entry.op_type {
+                    0 | 1 => puts.push((key, entry.value)),
+                    2 | 3 => deletes.push(key),
+                    4..=6 => return Err("batch operation type is not implemented".into()),
+                    _ => return Err("unknown batch operation type".into()),
+                }
+            }
+            if !puts.is_empty() && !deletes.is_empty() {
+                return Err("mixed batch operations require session context".into());
+            }
+            if !puts.is_empty() {
+                Ok(hugegraph_store_core::StoreRequest::BatchPut { entries: puts })
+            } else {
+                Ok(hugegraph_store_core::StoreRequest::BatchDelete { keys: deletes })
+            }
         }
         Some(generated::batch_req::Requests::RollbackReq(_)) => {
             Ok(hugegraph_store_core::StoreRequest::Rollback { key: Vec::new() })
@@ -1873,11 +1887,61 @@ mod batch_tests {
             matches!(c, hugegraph_store_core::StoreRequest::BatchPut { entries } if entries == vec![(b"k".to_vec(), b"v".to_vec()), (b"k2".to_vec(), b"v2".to_vec())])
         );
     }
+
+    #[test]
+    fn batch_delete_maps_and_rejects_unimplemented_range() {
+        let delete = generated::BatchReq {
+            header: None,
+            batch_id: "delete".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq {
+                    entry: vec![generated::BatchEntry {
+                        op_type: 3,
+                        table: 0,
+                        start_key: Some(generated::Key {
+                            key: b"gone".to_vec(),
+                            code: 0,
+                        }),
+                        end_key: None,
+                        value: Vec::new(),
+                    }],
+                },
+            )),
+        };
+        assert!(matches!(
+            batch_command(&prost::Message::encode_to_vec(&delete)).unwrap(),
+            hugegraph_store_core::StoreRequest::BatchDelete { keys } if keys == vec![b"gone".to_vec()]
+        ));
+        let range = generated::BatchReq {
+            header: None,
+            batch_id: "range".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq {
+                    entry: vec![generated::BatchEntry {
+                        op_type: 5,
+                        table: 0,
+                        start_key: Some(generated::Key {
+                            key: b"a".to_vec(),
+                            code: 0,
+                        }),
+                        end_key: Some(generated::Key {
+                            key: b"z".to_vec(),
+                            code: 0,
+                        }),
+                        value: Vec::new(),
+                    }],
+                },
+            )),
+        };
+        assert!(batch_command(&prost::Message::encode_to_vec(&range)).is_err());
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BatchAction {
-    Write { entries: Vec<(Vec<u8>, Vec<u8>)> },
+    Mutate {
+        mutations: Vec<hugegraph_store_core::BatchMutation>,
+    },
     Commit,
     Rollback,
 }
@@ -1888,13 +1952,23 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
             if w.entry.is_empty() {
                 return Err("empty write".into());
             }
-            Ok(BatchAction::Write {
-                entries: w
-                    .entry
-                    .into_iter()
-                    .map(|e| (e.start_key.map(|k| k.key).unwrap_or_default(), e.value))
-                    .collect(),
-            })
+            let mutations = w
+                .entry
+                .into_iter()
+                .map(|e| {
+                    let key = e.start_key.map(|k| k.key).unwrap_or_default();
+                    match e.op_type {
+                        0 | 1 => Ok(hugegraph_store_core::BatchMutation::Put {
+                            key,
+                            value: e.value,
+                        }),
+                        2 | 3 => Ok(hugegraph_store_core::BatchMutation::Delete { key }),
+                        4..=6 => Err("batch operation type is not implemented".to_string()),
+                        _ => Err("unknown batch operation type".to_string()),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(BatchAction::Mutate { mutations })
         }
         Some(generated::batch_req::Requests::CommitReq(_)) => Ok(BatchAction::Commit),
         Some(generated::batch_req::Requests::RollbackReq(_)) => Ok(BatchAction::Rollback),
@@ -1907,8 +1981,8 @@ pub fn apply_batch_action(
     action: BatchAction,
 ) -> Result<(), String> {
     match action {
-        BatchAction::Write { entries } => store
-            .handle(StoreRequest::BatchPut { entries })
+        BatchAction::Mutate { mutations } => store
+            .apply_batch(&mutations)
             .map(|_| ())
             .map_err(|e| e.to_string()),
         BatchAction::Rollback => Ok(()),
@@ -1918,11 +1992,20 @@ pub fn apply_batch_action(
 
 #[derive(Default)]
 pub struct SessionTransactions {
-    pending: std::collections::HashMap<String, Vec<(Vec<u8>, Vec<u8>)>>,
+    pending: std::collections::HashMap<String, Vec<hugegraph_store_core::BatchMutation>>,
 }
 impl SessionTransactions {
     pub fn stage(&mut self, id: String, k: Vec<u8>, v: Vec<u8>) {
-        self.pending.entry(id).or_default().push((k, v));
+        self.pending
+            .entry(id)
+            .or_default()
+            .push(hugegraph_store_core::BatchMutation::Put { key: k, value: v });
+    }
+    pub fn stage_delete(&mut self, id: String, key: Vec<u8>) {
+        self.pending
+            .entry(id)
+            .or_default()
+            .push(hugegraph_store_core::BatchMutation::Delete { key });
     }
     pub fn commit(
         &mut self,
@@ -1930,7 +2013,7 @@ impl SessionTransactions {
         store: &mut hugegraph_store_core::DurableStore,
     ) -> Result<(), String> {
         let entries = self.pending.get(id).cloned().unwrap_or_default();
-        store.commit_batch(&entries).map_err(|e| e.to_string())?;
+        store.apply_batch(&entries).map_err(|e| e.to_string())?;
         self.pending.remove(id);
         Ok(())
     }
@@ -1989,9 +2072,16 @@ pub fn apply_session_batch(
     store: &mut hugegraph_store_core::DurableStore,
 ) -> Result<(), String> {
     match decode_batch_action(bytes)? {
-        BatchAction::Write { entries } => {
-            for (key, value) in entries {
-                txns.stage(id.to_string(), key, value);
+        BatchAction::Mutate { mutations } => {
+            for mutation in mutations {
+                match mutation {
+                    hugegraph_store_core::BatchMutation::Put { key, value } => {
+                        txns.stage(id.to_string(), key, value)
+                    }
+                    hugegraph_store_core::BatchMutation::Delete { key } => {
+                        txns.stage_delete(id.to_string(), key)
+                    }
+                }
             }
             Ok(())
         }
@@ -2032,6 +2122,33 @@ mod apply_tests {
         assert_eq!(s.get(b"k"), None);
         tx.commit("b", &mut s).unwrap();
         assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
+        let delete = generated::BatchReq {
+            header: None,
+            batch_id: "b".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq {
+                    entry: vec![generated::BatchEntry {
+                        op_type: 3,
+                        table: 0,
+                        start_key: Some(generated::Key {
+                            key: b"k".to_vec(),
+                            code: 0,
+                        }),
+                        end_key: None,
+                        value: Vec::new(),
+                    }],
+                },
+            )),
+        };
+        apply_session_batch(
+            "b",
+            &prost::Message::encode_to_vec(&delete),
+            &mut tx,
+            &mut s,
+        )
+        .unwrap();
+        tx.commit("b", &mut s).unwrap();
+        assert_eq!(s.get(b"k"), None);
         let _ = std::fs::remove_file(p);
     }
 }

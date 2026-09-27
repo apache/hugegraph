@@ -198,6 +198,12 @@ pub struct DurableStore {
     inner: InMemoryStore,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchMutation {
+    Put { key: Vec<u8>, value: Vec<u8> },
+    Delete { key: Vec<u8> },
+}
+
 impl DurableStore {
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         let path = path.into();
@@ -226,9 +232,35 @@ impl DurableStore {
     }
 
     pub fn commit_batch(&mut self, entries: &[(Vec<u8>, Vec<u8>)]) -> std::io::Result<()> {
+        self.apply_batch(
+            &entries
+                .iter()
+                .map(|(key, value)| BatchMutation::Put {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    pub fn delete_batch(&mut self, keys: &[Vec<u8>]) -> std::io::Result<()> {
+        self.apply_batch(
+            &keys
+                .iter()
+                .map(|key| BatchMutation::Delete { key: key.clone() })
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    pub fn apply_batch(&mut self, mutations: &[BatchMutation]) -> std::io::Result<()> {
         let snapshot = self.inner.snapshot();
-        for (key, value) in entries {
-            self.inner.put(key.clone(), value.clone());
+        for mutation in mutations {
+            match mutation {
+                BatchMutation::Put { key, value } => {
+                    self.inner.put(key.clone(), value.clone());
+                }
+                BatchMutation::Delete { key } => self.inner.rollback(key),
+            }
         }
         if let Err(error) = self.persist() {
             self.inner = InMemoryStore::restore(&snapshot).expect("snapshot must restore");
@@ -237,8 +269,13 @@ impl DurableStore {
         Ok(())
     }
     pub fn rollback_key(&mut self, key: &[u8]) -> std::io::Result<()> {
+        let snapshot = self.inner.snapshot();
         self.inner.rollback(key);
-        self.persist()
+        if let Err(error) = self.persist() {
+            self.inner = InMemoryStore::restore(&snapshot).expect("snapshot must restore");
+            return Err(error);
+        }
+        Ok(())
     }
     pub fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
         self.inner.get(key)
@@ -360,6 +397,7 @@ pub enum StoreRequest {
     Get { key: Vec<u8> },
     Rollback { key: Vec<u8> },
     BatchPut { entries: Vec<(Vec<u8>, Vec<u8>)> },
+    BatchDelete { keys: Vec<Vec<u8>> },
 }
 
 pub enum StoreResponse {
@@ -377,6 +415,9 @@ impl DurableStore {
             StoreRequest::Rollback { key } => self.rollback_key(&key).map(|_| StoreResponse::Ack),
             StoreRequest::BatchPut { entries } => {
                 self.commit_batch(&entries).map(|_| StoreResponse::Ack)
+            }
+            StoreRequest::BatchDelete { keys } => {
+                self.delete_batch(&keys).map(|_| StoreResponse::Ack)
             }
         }
     }
@@ -401,6 +442,28 @@ mod request_tests {
         ));
         assert_eq!(s.get(b"a"), Some(b"1".to_vec()));
         assert_eq!(s.get(b"b"), Some(b"2".to_vec()));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn batch_delete_command_is_atomic_and_persistent() {
+        let path = std::env::temp_dir().join(format!("hg-batch-delete-{}.img", std::process::id()));
+        let mut s = DurableStore::open(&path).unwrap();
+        s.commit_batch(&[
+            (b"keep".to_vec(), b"1".to_vec()),
+            (b"drop".to_vec(), b"2".to_vec()),
+        ])
+        .unwrap();
+        assert!(matches!(
+            s.handle(StoreRequest::BatchDelete {
+                keys: vec![b"drop".to_vec()]
+            })
+            .unwrap(),
+            StoreResponse::Ack
+        ));
+        assert_eq!(s.get(b"keep"), Some(b"1".to_vec()));
+        assert_eq!(s.get(b"drop"), None);
+        assert_eq!(DurableStore::open(&path).unwrap().get(b"drop"), None);
         let _ = std::fs::remove_file(path);
     }
     #[test]
