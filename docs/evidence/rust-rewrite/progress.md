@@ -612,3 +612,6 @@ next_action: expose PartitionState through a transport-level partition/admin con
 
 2026-09-27: Exposed PartitionState through the existing HgStoreState getPeers transport contract. StateService now supports validated assign/split/transfer, snapshot restore, and deterministic peer metadata; the live tonic test restores state before serving and verifies the transferred split over the network. Workspace passed 23 core + 8 node + 53 transport = 84 tests. Evidence `partition-state-network-20260927.log`, code commit `d03e97650`.
 next_action: compare partition transition and peer metadata semantics against Java PartitionManager/Raft instruction paths, then add replicated-command identity/index handling before claiming Raft parity.
+
+2026-09-27: Compared Java RaftOperation semantics and added store-core ReplicatedCommand/CommandLog. Commands carry op, term, monotonic index, request identity and payload; duplicate replay is idempotent, conflicting index and gaps are rejected, and logs restore from snapshots. Workspace passed 24 core + 8 node + 53 transport = 85 tests. Evidence `replicated-command-log-20260927.log`, code commit `54d907474`.
+next_action: expose replicated commands through a transport/admin path and test network replay, conflict and gap handling against the partition state service; then continue Java differential coverage.
