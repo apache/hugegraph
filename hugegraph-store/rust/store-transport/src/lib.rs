@@ -1821,6 +1821,83 @@ mod tonic_batch_tests {
     }
 
     #[tokio::test]
+    async fn live_batch_rpc_fault_retry_and_reopen() {
+        let path =
+            std::env::temp_dir().join(format!("hg-live-batch-retry-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.commit_put(b"stable".to_vec(), b"value".to_vec())
+                .unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let service = SessionService::open(&path).unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let task = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(generated::hg_store_session_server::HgStoreSessionServer::new(service))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        let mut client = generated::hg_store_session_client::HgStoreSessionClient::connect(
+            format!("http://{}", addr),
+        )
+        .await
+        .unwrap();
+        let write = generated::BatchReq {
+            header: None,
+            batch_id: "retry".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq {
+                    entry: vec![
+                        generated::BatchEntry {
+                            op_type: 1,
+                            table: 0,
+                            start_key: Some(generated::Key {
+                                key: b"a".to_vec(),
+                                code: 0,
+                            }),
+                            end_key: None,
+                            value: b"one".to_vec(),
+                        },
+                        generated::BatchEntry {
+                            op_type: 1,
+                            table: 0,
+                            start_key: Some(generated::Key {
+                                key: b"b".to_vec(),
+                                code: 0,
+                            }),
+                            end_key: None,
+                            value: b"two".to_vec(),
+                        },
+                    ],
+                },
+            )),
+        };
+        client.batch(write).await.unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let commit = || generated::BatchReq {
+            header: None,
+            batch_id: "retry".into(),
+            requests: Some(generated::batch_req::Requests::CommitReq(
+                generated::BatchCommitReq {},
+            )),
+        };
+        assert!(client.batch(commit()).await.is_err());
+        std::fs::remove_dir(&path).unwrap();
+        client.batch(commit()).await.unwrap();
+        task.abort();
+        let recovered = hugegraph_store_core::DurableStore::open(&path).unwrap();
+        assert_eq!(recovered.get(b"stable"), Some(b"value".to_vec()));
+        assert_eq!(recovered.get(b"a"), Some(b"one".to_vec()));
+        assert_eq!(recovered.get(b"b"), Some(b"two".to_vec()));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn batch_trait_commit() {
         let p = std::env::temp_dir().join(format!("hg-tb-{}.img", std::process::id()));
         let s = SessionService::open(&p).unwrap();
