@@ -599,7 +599,7 @@ mod response_tests {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct QueryServiceImpl {
     backend: Option<std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>>,
 }
@@ -613,10 +613,45 @@ impl QueryServiceImpl {
     }
 }
 
-#[derive(Clone)]
+#[derive(Default)]
+pub struct ScanMetrics {
+    task_count: std::sync::atomic::AtomicU64,
+    completed_task_count: std::sync::atomic::AtomicU64,
+    active_count: std::sync::atomic::AtomicU64,
+    largest_pool_size: std::sync::atomic::AtomicU64,
+}
+impl ScanMetrics {
+    fn start(self: &std::sync::Arc<Self>) -> ScanGuard {
+        use std::sync::atomic::Ordering;
+        self.task_count.fetch_add(1, Ordering::Relaxed);
+        let active = self.active_count.fetch_add(1, Ordering::Relaxed) + 1;
+        self.largest_pool_size.fetch_max(active, Ordering::Relaxed);
+        ScanGuard(self.clone())
+    }
+
+    fn snapshot(&self) -> (u64, u64, u64, u64) {
+        use std::sync::atomic::Ordering;
+        (
+            self.task_count.load(Ordering::Relaxed),
+            self.completed_task_count.load(Ordering::Relaxed),
+            self.active_count.load(Ordering::Relaxed),
+            self.largest_pool_size.load(Ordering::Relaxed),
+        )
+    }
+}
+struct ScanGuard(std::sync::Arc<ScanMetrics>);
+impl Drop for ScanGuard {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.0.active_count.fetch_sub(1, Ordering::Relaxed);
+        self.0.completed_task_count.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 pub struct StateService {
     partitions: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::PartitionState>>,
     commands: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::CommandLog>>,
+    metrics: Option<std::sync::Arc<ScanMetrics>>,
 }
 impl Default for StateService {
     fn default() -> Self {
@@ -628,6 +663,7 @@ impl StateService {
         Self {
             partitions: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
             commands: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
+            metrics: None,
         }
     }
 
@@ -635,6 +671,7 @@ impl StateService {
         Self {
             partitions: std::sync::Arc::new(std::sync::Mutex::new(state)),
             commands: std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
+            metrics: None,
         }
     }
 
@@ -653,6 +690,11 @@ impl StateService {
         hugegraph_store_core::PartitionState::restore(bytes).map(Self::from_partition_state)
     }
 
+    pub fn with_metrics(mut self, metrics: std::sync::Arc<ScanMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
     pub fn snapshot_command_log(&self) -> Result<Vec<u8>, &'static str> {
         self.commands
             .lock()
@@ -666,6 +708,7 @@ impl StateService {
         Some(Self {
             partitions: std::sync::Arc::new(std::sync::Mutex::new(state)),
             commands: std::sync::Arc::new(std::sync::Mutex::new(log)),
+            metrics: None,
         })
     }
 
@@ -780,19 +823,27 @@ impl StateService {
 }
 pub struct GraphService {
     store: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
+    metrics: std::sync::Arc<ScanMetrics>,
 }
 impl GraphService {
     pub fn from_backend(
         store: std::sync::Arc<std::sync::Mutex<hugegraph_store_core::DurableStore>>,
     ) -> Self {
-        Self { store }
+        Self {
+            store,
+            metrics: std::sync::Arc::new(ScanMetrics::default()),
+        }
     }
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
         Ok(Self {
             store: std::sync::Arc::new(std::sync::Mutex::new(
                 hugegraph_store_core::DurableStore::open(path)?,
             )),
+            metrics: std::sync::Arc::new(ScanMetrics::default()),
         })
+    }
+    pub fn scan_metrics(&self) -> std::sync::Arc<ScanMetrics> {
+        self.metrics.clone()
     }
     pub async fn serve(self, addr: std::net::SocketAddr) -> Result<(), tonic::transport::Error> {
         tonic::transport::Server::builder()
@@ -806,6 +857,7 @@ impl GraphService {
         end: &[u8],
         edges: bool,
     ) -> Result<generated::ScanResponse, String> {
+        let _guard = self.metrics.start();
         let store = self
             .store
             .lock()
@@ -836,6 +888,7 @@ impl GraphService {
         limit: i64,
         table: Option<&str>,
     ) -> Result<generated::ScanResponse, String> {
+        let _guard = self.metrics.start();
         let store = self
             .store
             .lock()
@@ -1967,7 +2020,25 @@ impl generated::hg_store_state_server::HgStoreState for StateService {
         &self,
         _: tonic::Request<generated::SubStateReq>,
     ) -> Result<tonic::Response<generated::ScanState>, tonic::Status> {
-        Ok(tonic::Response::new(generated::ScanState::default()))
+        let state = self
+            .metrics
+            .as_ref()
+            .map(|metrics| {
+                let (tasks, completed, active, largest) = metrics.snapshot();
+                generated::ScanState {
+                    task_count: tasks,
+                    completed_task_count: completed,
+                    active_count: active as u32,
+                    largest_pool_size: largest as u32,
+                    pool_size: active as u32,
+                    maximum_pool_size: if tasks == 0 { 0 } else { 1 },
+                    queue_size: 0,
+                    queue_remaining_capacity: 0,
+                    ..Default::default()
+                }
+            })
+            .unwrap_or_default();
+        Ok(tonic::Response::new(state))
     }
     async fn get_peers(
         &self,
@@ -2177,6 +2248,37 @@ mod query_data_tests {
         .unwrap()
         .into_inner();
         assert_eq!(count.message, "1");
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[cfg(test)]
+mod scan_state_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn scan_state_reports_completed_graph_scan() {
+        let path = std::env::temp_dir().join(format!("hg-scan-state-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut store = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            store.commit_put(b"a".to_vec(), b"v".to_vec()).unwrap();
+        }
+        let graph = GraphService::open(&path).unwrap();
+        graph.scan_range(b"a", b"z", false).unwrap();
+        let state = StateService::new().with_metrics(graph.scan_metrics());
+        let response =
+            <StateService as generated::hg_store_state_server::HgStoreState>::get_scan_state(
+                &state,
+                tonic::Request::new(generated::SubStateReq::default()),
+            )
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(response.task_count, 1);
+        assert_eq!(response.completed_task_count, 1);
+        assert_eq!(response.active_count, 0);
+        assert_eq!(response.largest_pool_size, 1);
         let _ = std::fs::remove_file(path);
     }
 }

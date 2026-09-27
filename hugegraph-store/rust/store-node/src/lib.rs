@@ -191,7 +191,7 @@ impl StoreNode {
         QueryServiceImpl::from_backend(self.session.shared.backend.clone())
     }
     pub fn state_service(&self) -> StateService {
-        StateService::new()
+        StateService::new().with_metrics(self.graph.scan_metrics())
     }
 
     pub fn service_names() -> [&'static str; 5] {
