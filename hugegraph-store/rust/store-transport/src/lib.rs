@@ -690,10 +690,69 @@ impl StateService {
     pub fn apply_replicated_command(&self, bytes: &[u8]) -> Result<bool, &'static str> {
         let command = hugegraph_store_core::ReplicatedCommand::decode(bytes)
             .ok_or("invalid replicated command")?;
-        self.commands
+        if self
+            .commands
             .lock()
             .map_err(|_| "command log lock poisoned")?
-            .append(command)
+            .contains(&command)
+        {
+            return Ok(false);
+        }
+        let mut next_state = self
+            .partitions
+            .lock()
+            .map_err(|_| "partition state lock poisoned")?
+            .clone();
+        match command.op {
+            0x61 => {
+                let fields: Vec<_> = command.payload.split(|b| *b == b':').collect();
+                if fields.len() != 5 || fields[0] != b"split" {
+                    return Err("invalid split command");
+                }
+                let id = std::str::from_utf8(fields[1])
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("invalid split id")?;
+                let new_id = std::str::from_utf8(fields[3])
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("invalid split new id")?;
+                let owner = std::str::from_utf8(fields[4])
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("invalid split owner")?;
+                next_state.split(id, new_id, fields[2].to_vec(), owner)?;
+            }
+            0x66 => {
+                let fields: Vec<_> = command.payload.split(|b| *b == b':').collect();
+                if fields.len() != 3 || fields[0] != b"transfer" {
+                    return Err("invalid transfer command");
+                }
+                let id = std::str::from_utf8(fields[1])
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("invalid transfer id")?;
+                let owner = std::str::from_utf8(fields[2])
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .ok_or("invalid transfer owner")?;
+                next_state.transfer(id, owner)?;
+            }
+            0x69 => {}
+            _ => return Err("unsupported replicated command"),
+        }
+        let appended = self
+            .commands
+            .lock()
+            .map_err(|_| "command log lock poisoned")?
+            .append(command)?;
+        if appended {
+            *self
+                .partitions
+                .lock()
+                .map_err(|_| "partition state lock poisoned")? = next_state;
+        }
+        Ok(appended)
     }
 }
 pub struct GraphService {
@@ -1337,11 +1396,11 @@ mod graph_frame_tests {
             .unwrap();
         state_service.transfer_partition(1, 11).unwrap();
         let seed_command = hugegraph_store_core::ReplicatedCommand {
-            op: 0x61,
+            op: 0x69,
             term: 4,
             index: 1,
             request_id: b"seed-1".to_vec(),
-            payload: b"seed".to_vec(),
+            payload: Vec::new(),
         }
         .encode();
         assert_eq!(
@@ -1416,7 +1475,7 @@ mod graph_frame_tests {
             term: 4,
             index: 2,
             request_id: b"net-1".to_vec(),
-            payload: b"split=1:m:2".to_vec(),
+            payload: b"split:2:t:3:30".to_vec(),
         }
         .encode();
         let applied = state
@@ -1436,11 +1495,11 @@ mod graph_frame_tests {
             .into_inner();
         assert_eq!(duplicate.message, "duplicate");
         let gap = hugegraph_store_core::ReplicatedCommand {
-            op: 0x61,
+            op: 0x66,
             term: 4,
             index: 4,
             request_id: b"net-3".to_vec(),
-            payload: b"gap".to_vec(),
+            payload: b"transfer:3:31".to_vec(),
         }
         .encode();
         let rejected = state
@@ -1459,7 +1518,16 @@ mod graph_frame_tests {
             })
             .await
             .unwrap();
-        assert_eq!(peers.into_inner().peers, "id=2;start=m;end=z;owner=20");
+        assert_eq!(peers.into_inner().peers, "id=2;start=m;end=t;owner=20");
+        let split_peer = state
+            .get_peers(super::generated::PartitionRequest {
+                id: 3,
+                command: Vec::new(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(split_peer.peers, "id=3;start=t;end=z;owner=30");
     }
 
     #[tokio::test]

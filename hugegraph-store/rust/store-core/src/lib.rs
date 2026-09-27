@@ -311,6 +311,10 @@ impl CommandLog {
         self.entries.keys().next_back().copied().unwrap_or(0)
     }
 
+    pub fn contains(&self, command: &ReplicatedCommand) -> bool {
+        self.entries.get(&command.index) == Some(command)
+    }
+
     pub fn append(&mut self, command: ReplicatedCommand) -> Result<bool, &'static str> {
         if command.index == 0 {
             return Err("command index must be positive");
