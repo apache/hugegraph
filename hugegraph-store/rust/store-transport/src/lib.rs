@@ -2288,11 +2288,12 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
                 feedback_ok()
             }
             generated::TableMethod::Truncate => {
+                let prefix = qualify_table_name_key(&request.table_name, &[]);
                 self.shared
                     .backend
                     .lock()
                     .map_err(|_| tonic::Status::internal("backend lock poisoned"))?
-                    .clear()
+                    .apply_batch(&[hugegraph_store_core::BatchMutation::DeletePrefix { prefix }])
                     .map_err(|e| {
                         tonic::Status::new(classify_failure(&e.to_string()), e.to_string())
                     })?;
@@ -3004,6 +3005,44 @@ mod tonic_session_tests {
             _ => panic!("expected value response"),
         }
         let _ = std::fs::remove_file(p);
+    }
+}
+
+#[cfg(test)]
+mod table_truncate_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn truncate_removes_only_the_requested_qualified_table() {
+        let path =
+            std::env::temp_dir().join(format!("hg-truncate-table-{}.img", std::process::id()));
+        let service = SessionService::open(&path).unwrap();
+        {
+            let mut store = service.shared.backend.lock().unwrap();
+            store
+                .commit_put(qualify_table_name_key("t", b"same"), b"t".to_vec())
+                .unwrap();
+            store
+                .commit_put(qualify_table_name_key("u", b"same"), b"u".to_vec())
+                .unwrap();
+        }
+        <SessionService as generated::hg_store_session_server::HgStoreSession>::table(
+            &service,
+            tonic::Request::new(generated::TableReq {
+                method: generated::TableMethod::Truncate as i32,
+                table_name: "t".into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        let store = service.shared.backend.lock().unwrap();
+        assert_eq!(store.get(&qualify_table_name_key("t", b"same")), None);
+        assert_eq!(
+            store.get(&qualify_table_name_key("u", b"same")),
+            Some(b"u".to_vec())
+        );
+        let _ = std::fs::remove_file(path);
     }
 }
 #[cfg(test)]
