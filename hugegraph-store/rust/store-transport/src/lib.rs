@@ -1550,7 +1550,7 @@ mod batch_tests {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum BatchAction {
-    Write { key: Vec<u8>, value: Vec<u8> },
+    Write { entries: Vec<(Vec<u8>, Vec<u8>)> },
     Commit,
     Rollback,
 }
@@ -1558,10 +1558,15 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
     let r: generated::BatchReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
     match r.requests {
         Some(generated::batch_req::Requests::WriteReq(w)) => {
-            let e = w.entry.into_iter().next().ok_or("empty write")?;
+            if w.entry.is_empty() {
+                return Err("empty write".into());
+            }
             Ok(BatchAction::Write {
-                key: e.start_key.map(|k| k.key).unwrap_or_default(),
-                value: e.value,
+                entries: w
+                    .entry
+                    .into_iter()
+                    .map(|e| (e.start_key.map(|k| k.key).unwrap_or_default(), e.value))
+                    .collect(),
             })
         }
         Some(generated::batch_req::Requests::CommitReq(_)) => Ok(BatchAction::Commit),
@@ -1575,8 +1580,8 @@ pub fn apply_batch_action(
     action: BatchAction,
 ) -> Result<(), String> {
     match action {
-        BatchAction::Write { key, value } => store
-            .commit_put(key, value)
+        BatchAction::Write { entries } => store
+            .handle(StoreRequest::BatchPut { entries })
             .map(|_| ())
             .map_err(|e| e.to_string()),
         BatchAction::Rollback => Ok(()),
@@ -1631,8 +1636,10 @@ pub fn apply_session_batch(
     store: &mut hugegraph_store_core::DurableStore,
 ) -> Result<(), String> {
     match decode_batch_action(bytes)? {
-        BatchAction::Write { key, value } => {
-            txns.stage(id.to_string(), key, value);
+        BatchAction::Write { entries } => {
+            for (key, value) in entries {
+                txns.stage(id.to_string(), key, value);
+            }
             Ok(())
         }
         BatchAction::Commit => txns.commit(id, store),
@@ -1703,6 +1710,90 @@ mod tonic_session_tests {
 #[cfg(test)]
 mod tonic_batch_tests {
     use super::*;
+    #[tokio::test]
+    async fn batch_rpc_preserves_all_entries_and_rollback_after_reopen() {
+        use generated::batch_req::Requests;
+        use generated::hg_store_session_server::HgStoreSession;
+        let path =
+            std::env::temp_dir().join(format!("hg-batch-rpc-all-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let service = SessionService::open(&path).unwrap();
+        let entries = vec![
+            (b"a".to_vec(), b"first".to_vec()),
+            (b"b".to_vec(), b"second".to_vec()),
+            (b"a".to_vec(), b"last".to_vec()),
+        ];
+        let oracle: std::collections::BTreeMap<_, _> = entries.iter().cloned().collect();
+        let request = |id: &str, requests| {
+            tonic::Request::new(generated::BatchReq {
+                header: None,
+                batch_id: id.into(),
+                requests: Some(requests),
+            })
+        };
+        let write = || {
+            Requests::WriteReq(generated::BatchWriteReq {
+                entry: entries
+                    .iter()
+                    .map(|(k, v)| generated::BatchEntry {
+                        op_type: 1,
+                        table: 0,
+                        start_key: Some(generated::Key {
+                            key: k.clone(),
+                            code: 0,
+                        }),
+                        end_key: None,
+                        value: v.clone(),
+                    })
+                    .collect(),
+            })
+        };
+        service.batch(request("commit", write())).await.unwrap();
+        assert!(service.shared.backend.lock().unwrap().entries().is_empty());
+        service
+            .batch(request(
+                "commit",
+                Requests::CommitReq(generated::BatchCommitReq {}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            service.shared.backend.lock().unwrap().entries(),
+            oracle.clone().into_iter().collect::<Vec<_>>()
+        );
+        let cancelled = Requests::WriteReq(generated::BatchWriteReq {
+            entry: vec![generated::BatchEntry {
+                op_type: 1,
+                table: 0,
+                start_key: Some(generated::Key {
+                    key: b"cancelled".to_vec(),
+                    code: 0,
+                }),
+                end_key: None,
+                value: b"must-not-persist".to_vec(),
+            }],
+        });
+        service.batch(request("rollback", cancelled)).await.unwrap();
+        service
+            .batch(request(
+                "rollback",
+                Requests::RollbackReq(generated::BatchRollbackReq {}),
+            ))
+            .await
+            .unwrap();
+        service
+            .batch(request(
+                "rollback",
+                Requests::CommitReq(generated::BatchCommitReq {}),
+            ))
+            .await
+            .unwrap();
+        drop(service);
+        let recovered = hugegraph_store_core::DurableStore::open(&path).unwrap();
+        assert_eq!(recovered.entries(), oracle.into_iter().collect::<Vec<_>>());
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[tokio::test]
     async fn batch_trait_commit() {
         let p = std::env::temp_dir().join(format!("hg-tb-{}.img", std::process::id()));
