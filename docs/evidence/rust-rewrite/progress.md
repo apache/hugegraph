@@ -603,3 +603,6 @@ next_action: audit raw-to-qualified migration compatibility and add explicit Nod
 
 2026-09-27: Audited raw-to-qualified migration behavior and added tests: legacy raw keys remain visible to unqualified scans only; table-qualified scans exclude them, and a reopened Session reads the qualified value when the same raw user key exists. Workspace passed 21 core + 8 node + 53 transport = 82 tests. Evidence `raw-qualified-reopen-20260927.log`, code commit `f0b1e4f70`.
 next_action: map remaining Java Store production surfaces to Rust APIs and select the next Raft/partition or differential-validation slice; preserve raw compatibility rules while expanding coverage.
+
+2026-09-27: Audited Java Store production surface: 547 Java sources versus the Rust workspace APIs. HgStoreEngine, PartitionInstructionProcessor, PartitionEngine/Manager, shard ownership and Raft operation/closure semantics remain unimplemented in Rust. Audit evidence `java-store-surface-audit-20260927.log`. Selected next slice: deterministic partition key-range/ownership state in store-core with restart tests before transport/Raft wiring.
+next_action: define and test the minimal partition key-range/ownership state model in store-core, including deterministic split/transfer transitions and restart persistence.

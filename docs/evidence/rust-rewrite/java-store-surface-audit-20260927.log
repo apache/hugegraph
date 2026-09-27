@@ -1,0 +1,14 @@
+Rust rewrite surface audit (2026-09-27)
+
+Production Java source files under hugegraph-store: 547
+Rust source files in rewrite workspace (excluding target): 4 (three crates plus build script)
+
+Representative Java surfaces still absent from Rust parity:
+- HgStoreEngine: Raft RPC server, partition-engine lifecycle, PD synchronization and leader routing.
+- PartitionInstructionProcessor: change-shard, split/move/clean partition instructions and Raft task submission.
+- PartitionEngine / PartitionManager / ShardGroup: partition ownership, key-range metadata, replica membership and recovery.
+- RaftOperation / RaftClosure: replicated command envelope and completion semantics.
+
+Current Rust evidence covers durable atomic batches, qualified namespace isolation, network RPC contracts, restart recovery, and independent Oracle/differential traces. It does not prove Raft replication, partition movement, or Java end-to-end equivalence.
+
+Selected next slice: define a minimal partition key-range/ownership state model in store-core and expose deterministic apply/restart tests before wiring transport or real Raft. Keep this separate from HGK1 key compatibility and preserve the raw-key unqualified scan rule.
