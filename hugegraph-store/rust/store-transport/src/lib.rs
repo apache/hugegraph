@@ -1684,11 +1684,23 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
     }
 }
 
-pub fn decode_get_key(bytes: &[u8]) -> Result<Vec<u8>, String> {
+pub fn qualify_table_name_key(table: &str, key: &[u8]) -> Vec<u8> {
+    hugegraph_store_core::qualify_table_key(table.as_bytes(), key)
+}
+
+pub fn qualify_table_id_key(table: i32, key: &[u8]) -> Vec<u8> {
+    qualify_table_name_key(&table.to_string(), key)
+}
+
+pub fn decode_get_table_key(bytes: &[u8]) -> Result<(String, Vec<u8>), String> {
     let r: generated::GetReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
-    r.tk.map(|t| t.key)
-        .filter(|k| !k.is_empty())
+    r.tk.map(|t| (t.table, t.key))
+        .filter(|(_, key)| !key.is_empty())
         .ok_or_else(|| "GetReq missing key".into())
+}
+
+pub fn decode_get_key(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    decode_get_table_key(bytes).map(|(_, key)| key)
 }
 #[cfg(test)]
 mod get_decode_tests {
@@ -1711,7 +1723,9 @@ mod get_decode_tests {
 pub fn get_req_to_store_request(
     bytes: &[u8],
 ) -> Result<hugegraph_store_core::StoreRequest, String> {
-    decode_get_key(bytes).map(|key| hugegraph_store_core::StoreRequest::Get { key })
+    decode_get_table_key(bytes).map(|(table, key)| hugegraph_store_core::StoreRequest::Get {
+        key: qualify_table_name_key(&table, &key),
+    })
 }
 #[cfg(test)]
 mod mapping_tests {
@@ -1728,7 +1742,7 @@ mod mapping_tests {
         };
         let b = prost::Message::encode_to_vec(&r);
         assert!(
-            matches!(get_req_to_store_request(&b).unwrap(), hugegraph_store_core::StoreRequest::Get{key} if key==b"k")
+            matches!(get_req_to_store_request(&b).unwrap(), hugegraph_store_core::StoreRequest::Get{key} if key==qualify_table_name_key("t", b"k"))
         );
     }
 }
@@ -1762,7 +1776,8 @@ mod shared_tests {
 
 impl SharedSession {
     pub fn handle_get2(&self, bytes: &[u8]) -> Result<generated::FeedbackRes, String> {
-        let key = decode_get_key(bytes)?;
+        let (table, key) = decode_get_table_key(bytes)?;
+        let key = qualify_table_name_key(&table, &key);
         let value = self
             .backend
             .lock()
@@ -1823,12 +1838,22 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
             let mut ranges = Vec::new();
             let mut merges = Vec::new();
             for entry in entries {
-                let key = entry.start_key.map(|x| x.key).unwrap_or_default();
+                let table = entry.table;
+                let key = qualify_table_id_key(
+                    table,
+                    &entry.start_key.map(|x| x.key).unwrap_or_default(),
+                );
                 match entry.op_type {
                     0 | 1 => puts.push((key, entry.value)),
                     2 | 3 => deletes.push(key),
                     4 => prefixes.push(key),
-                    5 => ranges.push((key, entry.end_key.map(|x| x.key).unwrap_or_default())),
+                    5 => ranges.push((
+                        key,
+                        qualify_table_id_key(
+                            table,
+                            &entry.end_key.map(|x| x.key).unwrap_or_default(),
+                        ),
+                    )),
                     6 => merges.push((key, entry.value)),
                     _ => return Err("unknown batch operation type".into()),
                 }
@@ -1916,7 +1941,7 @@ mod batch_tests {
         };
         let c = batch_command(&prost::Message::encode_to_vec(&r)).unwrap();
         assert!(
-            matches!(c, hugegraph_store_core::StoreRequest::BatchPut { entries } if entries == vec![(b"k".to_vec(), b"v".to_vec()), (b"k2".to_vec(), b"v2".to_vec())])
+            matches!(c, hugegraph_store_core::StoreRequest::BatchPut { entries } if entries == vec![(qualify_table_id_key(0, b"k"), b"v".to_vec()), (qualify_table_id_key(0, b"k2"), b"v2".to_vec())])
         );
     }
 
@@ -1942,7 +1967,7 @@ mod batch_tests {
         };
         assert!(matches!(
             batch_command(&prost::Message::encode_to_vec(&delete)).unwrap(),
-            hugegraph_store_core::StoreRequest::BatchDelete { keys } if keys == vec![b"gone".to_vec()]
+            hugegraph_store_core::StoreRequest::BatchDelete { keys } if keys == vec![qualify_table_id_key(0, b"gone")]
         ));
         let range = generated::BatchReq {
             header: None,
@@ -1968,7 +1993,7 @@ mod batch_tests {
         assert!(matches!(
             batch_command(&prost::Message::encode_to_vec(&range)).unwrap(),
             hugegraph_store_core::StoreRequest::BatchDeleteRange { start, end }
-                if start == b"a" && end == b"z"
+                if start == qualify_table_id_key(0, b"a") && end == qualify_table_id_key(0, b"z")
         ));
     }
 
@@ -1995,7 +2020,7 @@ mod batch_tests {
         assert!(matches!(
             batch_command(&prost::Message::encode_to_vec(&request)).unwrap(),
             hugegraph_store_core::StoreRequest::BatchMerge { entries }
-                if entries == vec![(b"counter".to_vec(), 2u64.to_le_bytes().to_vec())]
+                if entries == vec![(qualify_table_id_key(0, b"counter"), 2u64.to_le_bytes().to_vec())]
         ));
     }
 }
@@ -2019,7 +2044,11 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
                 .entry
                 .into_iter()
                 .map(|e| {
-                    let key = e.start_key.map(|k| k.key).unwrap_or_default();
+                    let table = e.table;
+                    let key = qualify_table_id_key(
+                        table,
+                        &e.start_key.map(|k| k.key).unwrap_or_default(),
+                    );
                     match e.op_type {
                         0 | 1 => Ok(hugegraph_store_core::BatchMutation::Put {
                             key,
@@ -2029,7 +2058,10 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
                         4 => Ok(hugegraph_store_core::BatchMutation::DeletePrefix { prefix: key }),
                         5 => Ok(hugegraph_store_core::BatchMutation::DeleteRange {
                             start: key,
-                            end: e.end_key.map(|k| k.key).unwrap_or_default(),
+                            end: qualify_table_id_key(
+                                table,
+                                &e.end_key.map(|k| k.key).unwrap_or_default(),
+                            ),
                         }),
                         6 => Ok(hugegraph_store_core::BatchMutation::Merge {
                             key,
@@ -2217,9 +2249,10 @@ mod apply_tests {
         };
         let b = prost::Message::encode_to_vec(&w);
         apply_session_batch("b", &b, &mut tx, &mut s).unwrap();
-        assert_eq!(s.get(b"k"), None);
+        let qualified = qualify_table_id_key(0, b"k");
+        assert_eq!(s.get(&qualified), None);
         tx.commit("b", &mut s).unwrap();
-        assert_eq!(s.get(b"k"), Some(b"v".to_vec()));
+        assert_eq!(s.get(&qualified), Some(b"v".to_vec()));
         let delete = generated::BatchReq {
             header: None,
             batch_id: "b".into(),
@@ -2246,7 +2279,7 @@ mod apply_tests {
         )
         .unwrap();
         tx.commit("b", &mut s).unwrap();
-        assert_eq!(s.get(b"k"), None);
+        assert_eq!(s.get(&qualified), None);
         let _ = std::fs::remove_file(p);
     }
 }
@@ -2327,7 +2360,11 @@ mod tonic_batch_tests {
             .unwrap();
         assert_eq!(
             service.shared.backend.lock().unwrap().entries(),
-            oracle.clone().into_iter().collect::<Vec<_>>()
+            oracle
+                .clone()
+                .into_iter()
+                .map(|(key, value)| (qualify_table_id_key(0, &key), value))
+                .collect::<Vec<_>>()
         );
         let cancelled = Requests::WriteReq(generated::BatchWriteReq {
             entry: vec![generated::BatchEntry {
@@ -2358,7 +2395,13 @@ mod tonic_batch_tests {
             .unwrap();
         drop(service);
         let recovered = hugegraph_store_core::DurableStore::open(&path).unwrap();
-        assert_eq!(recovered.entries(), oracle.into_iter().collect::<Vec<_>>());
+        assert_eq!(
+            recovered.entries(),
+            oracle
+                .into_iter()
+                .map(|(key, value)| (qualify_table_id_key(0, &key), value))
+                .collect::<Vec<_>>()
+        );
         std::fs::remove_file(path).unwrap();
     }
 
@@ -2434,8 +2477,14 @@ mod tonic_batch_tests {
         task.abort();
         let recovered = hugegraph_store_core::DurableStore::open(&path).unwrap();
         assert_eq!(recovered.get(b"stable"), Some(b"value".to_vec()));
-        assert_eq!(recovered.get(b"a"), Some(b"one".to_vec()));
-        assert_eq!(recovered.get(b"b"), Some(b"two".to_vec()));
+        assert_eq!(
+            recovered.get(&qualify_table_id_key(0, b"a")),
+            Some(b"one".to_vec())
+        );
+        assert_eq!(
+            recovered.get(&qualify_table_id_key(0, b"b")),
+            Some(b"two".to_vec())
+        );
         std::fs::remove_file(path).unwrap();
     }
 
@@ -2447,7 +2496,7 @@ mod tonic_batch_tests {
         {
             let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
             seed.apply_batch(&[hugegraph_store_core::BatchMutation::Merge {
-                key: b"counter".to_vec(),
+                key: qualify_table_id_key(0, b"counter"),
                 value: 10u64.to_le_bytes().to_vec(),
             }])
             .unwrap();
@@ -2503,7 +2552,7 @@ mod tonic_batch_tests {
         assert_eq!(
             hugegraph_store_core::DurableStore::open(&path)
                 .unwrap()
-                .get(b"counter"),
+                .get(&qualify_table_id_key(0, b"counter")),
             Some(15u64.to_le_bytes().to_vec())
         );
         std::fs::remove_file(path).unwrap();
@@ -2544,6 +2593,25 @@ pub fn decode_batch_get_keys(bytes: &[u8]) -> Result<Vec<Vec<u8>>, String> {
         Ok(keys)
     }
 }
+
+pub fn decode_batch_get_qualified_keys(bytes: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    let r: generated::BatchGetReq = prost::Message::decode(bytes).map_err(|e| e.to_string())?;
+    let keys: Vec<_> = r
+        .key
+        .into_iter()
+        .map(|k| k.key)
+        .filter(|k| !k.is_empty())
+        .map(|key| {
+            let qualified = qualify_table_name_key(&r.table, &key);
+            (key, qualified)
+        })
+        .collect();
+    if keys.is_empty() {
+        Err("BatchGetReq has no keys".into())
+    } else {
+        Ok(keys)
+    }
+}
 #[cfg(test)]
 mod batch_get_tests {
     use super::*;
@@ -2569,7 +2637,11 @@ pub fn batch_get_values(
     store: &hugegraph_store_core::DurableStore,
     bytes: &[u8],
 ) -> Result<Vec<Option<Vec<u8>>>, String> {
-    decode_batch_get_keys(bytes).map(|ks| ks.iter().map(|k| store.get(k)).collect())
+    decode_batch_get_qualified_keys(bytes).map(|ks| {
+        ks.iter()
+            .map(|(_, qualified)| store.get(qualified))
+            .collect()
+    })
 }
 
 pub fn feedback_ok() -> generated::FeedbackRes {
@@ -2621,6 +2693,18 @@ mod batch_get_trait_tests {
     async fn batch_get_trait_returns_feedback() {
         let p = std::env::temp_dir().join(format!("hg-bgt-{}.img", std::process::id()));
         let s = SessionService::open(&p).unwrap();
+        s.shared
+            .backend
+            .lock()
+            .unwrap()
+            .commit_put(qualify_table_name_key("t", b"k"), b"table-t".to_vec())
+            .unwrap();
+        s.shared
+            .backend
+            .lock()
+            .unwrap()
+            .commit_put(qualify_table_name_key("u", b"k"), b"table-u".to_vec())
+            .unwrap();
         let r = generated::BatchGetReq {
             header: None,
             partition: 0,
@@ -2633,11 +2717,24 @@ mod batch_get_trait_tests {
         let out =
             <SessionService as generated::hg_store_session_server::HgStoreSession>::batch_get2(
                 &s,
-                tonic::Request::new(r),
+                tonic::Request::new(r.clone()),
             )
             .await
             .unwrap();
         assert!(out.into_inner().responses.is_some());
+        let response = feedback_values_with_missing(
+            &s.shared.backend.lock().unwrap(),
+            &prost::Message::encode_to_vec(&r),
+        )
+        .unwrap();
+        if let Some(generated::feedback_res::Responses::KeyValueResponse(values)) =
+            response.responses
+        {
+            assert_eq!(values.kv[0].value, b"table-t");
+            assert_eq!(values.kv[0].code, 0);
+        } else {
+            panic!();
+        }
         let _ = std::fs::remove_file(p);
     }
 }
@@ -2646,10 +2743,10 @@ pub fn batch_get_pairs(
     store: &hugegraph_store_core::DurableStore,
     bytes: &[u8],
 ) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
-    let keys = decode_batch_get_keys(bytes)?;
+    let keys = decode_batch_get_qualified_keys(bytes)?;
     Ok(keys
         .into_iter()
-        .filter_map(|k| store.get(&k).map(|v| (k, v)))
+        .filter_map(|(raw, qualified)| store.get(&qualified).map(|v| (raw, v)))
         .collect())
 }
 
@@ -2657,16 +2754,16 @@ pub fn feedback_values_with_missing(
     store: &hugegraph_store_core::DurableStore,
     bytes: &[u8],
 ) -> Result<generated::FeedbackRes, String> {
-    let keys = decode_batch_get_keys(bytes)?;
+    let keys = decode_batch_get_qualified_keys(bytes)?;
     let kv = keys
         .into_iter()
-        .map(|k| {
-            let (value, code) = match store.get(&k) {
+        .map(|(raw, qualified)| {
+            let (value, code) = match store.get(&qualified) {
                 Some(v) => (v, 0),
                 None => (Vec::new(), 2),
             };
             generated::Kv {
-                key: k,
+                key: raw,
                 value,
                 code,
             }
@@ -2689,7 +2786,8 @@ mod mixed_tests {
     fn mixed_missing_codes() {
         let p = std::env::temp_dir().join(format!("hg-mix-{}.img", std::process::id()));
         let mut s = hugegraph_store_core::DurableStore::open(&p).unwrap();
-        s.commit_put(b"a".to_vec(), b"1".to_vec()).unwrap();
+        s.commit_put(qualify_table_name_key("t", b"a"), b"1".to_vec())
+            .unwrap();
         let r = generated::BatchGetReq {
             header: None,
             partition: 0,
