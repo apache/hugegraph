@@ -490,6 +490,79 @@ mod tests {
             Some(&b"live-value"[..])
         );
         let mut session = hugegraph_store_transport::generated::hg_store_session_client::HgStoreSessionClient::connect(format!("http://{}", addr)).await.unwrap();
+        let write = |table: i32, value: &[u8]| hugegraph_store_transport::generated::BatchReq {
+            header: None,
+            batch_id: format!("table-{table}"),
+            requests: Some(
+                hugegraph_store_transport::generated::batch_req::Requests::WriteReq(
+                    hugegraph_store_transport::generated::BatchWriteReq {
+                        entry: vec![hugegraph_store_transport::generated::BatchEntry {
+                            op_type: 1,
+                            table,
+                            start_key: Some(hugegraph_store_transport::generated::Key {
+                                key: b"shared-key".to_vec(),
+                                code: 0,
+                            }),
+                            end_key: None,
+                            value: value.to_vec(),
+                        }],
+                    },
+                ),
+            ),
+        };
+        session.batch(write(0, b"table-zero")).await.unwrap();
+        session
+            .batch(hugegraph_store_transport::generated::BatchReq {
+                header: None,
+                batch_id: "table-0".into(),
+                requests: Some(
+                    hugegraph_store_transport::generated::batch_req::Requests::CommitReq(
+                        hugegraph_store_transport::generated::BatchCommitReq {},
+                    ),
+                ),
+            })
+            .await
+            .unwrap();
+        session.batch(write(1, b"table-one")).await.unwrap();
+        session
+            .batch(hugegraph_store_transport::generated::BatchReq {
+                header: None,
+                batch_id: "table-1".into(),
+                requests: Some(
+                    hugegraph_store_transport::generated::batch_req::Requests::CommitReq(
+                        hugegraph_store_transport::generated::BatchCommitReq {},
+                    ),
+                ),
+            })
+            .await
+            .unwrap();
+        let table_request = hugegraph_store_transport::generated::ScanPartitionRequest {
+            header: None,
+            request: Some(hugegraph_store_transport::generated::scan_partition_request::RequestOneOf::ScanRequest(
+                hugegraph_store_transport::generated::scan_partition_request::Request {
+                    table: "0".into(),
+                    position: vec![],
+                    end_code: b'z' as u32,
+                    ..Default::default()
+                },
+            )),
+        };
+        let mut table_frames = graph
+            .scan_partition(tonic::Request::new(tokio_stream::iter([table_request])))
+            .await
+            .unwrap()
+            .into_inner();
+        let table_frame = table_frames.message().await.unwrap().unwrap();
+        assert_eq!(table_frame.vertex.len(), 1);
+        assert_eq!(
+            table_frame.vertex[0].properties[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .value_bytes
+                .as_deref(),
+            Some(&b"table-zero"[..])
+        );
         let feedback = session
             .get2(tonic::Request::new(
                 hugegraph_store_transport::generated::GetReq {

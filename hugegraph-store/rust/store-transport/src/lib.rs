@@ -1147,6 +1147,81 @@ mod graph_frame_tests {
     }
 
     #[tokio::test]
+    async fn live_graph_scan_isolates_qualified_table_over_network() {
+        let path =
+            std::env::temp_dir().join(format!("hg-live-graph-table-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.commit_put(
+                super::qualify_table_name_key("t", b"same"),
+                b"t-value".to_vec(),
+            )
+            .unwrap();
+            seed.commit_put(
+                super::qualify_table_name_key("u", b"same"),
+                b"u-value".to_vec(),
+            )
+            .unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let service = super::GraphService::open(&path).unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let task = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(super::generated::graph_store_server::GraphStoreServer::new(
+                    service,
+                ))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        let mut client = super::generated::graph_store_client::GraphStoreClient::connect(format!(
+            "http://{}",
+            addr
+        ))
+        .await
+        .unwrap();
+        let request = super::generated::ScanPartitionRequest {
+            header: None,
+            request: Some(
+                super::generated::scan_partition_request::RequestOneOf::ScanRequest(
+                    super::generated::scan_partition_request::Request {
+                        scan_type: 1,
+                        table: "t".into(),
+                        position: b"a".to_vec(),
+                        end_code: b'z' as u32,
+                        ..Default::default()
+                    },
+                ),
+            ),
+        };
+        let response = client
+            .scan_partition(tokio_stream::iter(vec![request]))
+            .await
+            .unwrap();
+        let mut frames = response.into_inner();
+        let frame = frames.message().await.unwrap().unwrap();
+        assert_eq!(frame.vertex.len(), 1);
+        assert_eq!(
+            frame.vertex[0].id.as_ref().unwrap().value_bytes.as_deref(),
+            Some(&b"same"[..])
+        );
+        assert_eq!(
+            frame.vertex[0].properties[0]
+                .value
+                .as_ref()
+                .unwrap()
+                .value_bytes
+                .as_deref(),
+            Some(&b"t-value"[..])
+        );
+        task.abort();
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
     async fn live_query_and_state_servers_accept_contract_requests() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
