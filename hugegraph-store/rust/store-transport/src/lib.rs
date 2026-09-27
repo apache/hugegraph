@@ -1602,9 +1602,9 @@ impl SessionTransactions {
         id: &str,
         store: &mut hugegraph_store_core::DurableStore,
     ) -> Result<(), String> {
-        for (k, v) in self.pending.remove(id).unwrap_or_default() {
-            store.commit_put(k, v).map_err(|e| e.to_string())?;
-        }
+        let entries = self.pending.get(id).cloned().unwrap_or_default();
+        store.commit_batch(&entries).map_err(|e| e.to_string())?;
+        self.pending.remove(id);
         Ok(())
     }
     pub fn rollback(&mut self, id: &str) {
@@ -1614,6 +1614,32 @@ impl SessionTransactions {
 #[cfg(test)]
 mod session_txn_tests {
     use super::*;
+    #[test]
+    fn failed_session_commit_retains_pending_for_retry() {
+        let p = std::env::temp_dir().join(format!("hg-stxn-retry-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let mut store = hugegraph_store_core::DurableStore::open(&p).unwrap();
+        store
+            .commit_put(b"stable".to_vec(), b"value".to_vec())
+            .unwrap();
+        let mut tx = SessionTransactions::default();
+        tx.stage("retry".into(), b"k".to_vec(), b"v".to_vec());
+        std::fs::remove_file(&p).unwrap();
+        std::fs::create_dir(&p).unwrap();
+        assert!(tx.commit("retry", &mut store).is_err());
+        assert!(tx.pending.contains_key("retry"));
+        std::fs::remove_dir(&p).unwrap();
+        tx.commit("retry", &mut store).unwrap();
+        assert!(!tx.pending.contains_key("retry"));
+        assert_eq!(
+            hugegraph_store_core::DurableStore::open(&p)
+                .unwrap()
+                .get(b"k"),
+            Some(b"v".to_vec())
+        );
+        std::fs::remove_file(p).unwrap();
+    }
+
     #[test]
     fn stage_commit_rollback() {
         let p = std::env::temp_dir().join(format!("hg-stxn-{}.img", std::process::id()));

@@ -216,9 +216,25 @@ impl DurableStore {
         std::fs::rename(tmp, &self.path)
     }
     pub fn commit_put(&mut self, key: Vec<u8>, value: Vec<u8>) -> std::io::Result<Option<Vec<u8>>> {
+        let snapshot = self.inner.snapshot();
         let old = self.inner.put(key, value);
-        self.persist()?;
+        if let Err(error) = self.persist() {
+            self.inner = InMemoryStore::restore(&snapshot).expect("snapshot must restore");
+            return Err(error);
+        }
         Ok(old)
+    }
+
+    pub fn commit_batch(&mut self, entries: &[(Vec<u8>, Vec<u8>)]) -> std::io::Result<()> {
+        let snapshot = self.inner.snapshot();
+        for (key, value) in entries {
+            self.inner.put(key.clone(), value.clone());
+        }
+        if let Err(error) = self.persist() {
+            self.inner = InMemoryStore::restore(&snapshot).expect("snapshot must restore");
+            return Err(error);
+        }
+        Ok(())
     }
     pub fn rollback_key(&mut self, key: &[u8]) -> std::io::Result<()> {
         self.inner.rollback(key);
@@ -301,6 +317,29 @@ mod durable_tests {
     }
 
     #[test]
+    fn batch_failure_restores_memory_and_retry_succeeds() {
+        let path = std::env::temp_dir().join(format!("hg-batch-retry-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut store = DurableStore::open(&path).unwrap();
+        store
+            .commit_put(b"stable".to_vec(), b"value".to_vec())
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let entries = vec![(b"new".to_vec(), b"value".to_vec())];
+        assert!(store.commit_batch(&entries).is_err());
+        assert_eq!(store.get(b"stable"), Some(b"value".to_vec()));
+        assert_eq!(store.get(b"new"), None);
+        std::fs::remove_dir(&path).unwrap();
+        store.commit_batch(&entries).unwrap();
+        assert_eq!(
+            DurableStore::open(&path).unwrap().get(b"new"),
+            Some(b"value".to_vec())
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn restore_image_rejects_truncation_without_mutating_store() {
         let path = std::env::temp_dir().join(format!("hg-recover-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -337,14 +376,7 @@ impl DurableStore {
             StoreRequest::Get { key } => Ok(StoreResponse::Value(self.get(&key))),
             StoreRequest::Rollback { key } => self.rollback_key(&key).map(|_| StoreResponse::Ack),
             StoreRequest::BatchPut { entries } => {
-                let snapshot = self.snapshot();
-                for (key, value) in entries {
-                    if let Err(error) = self.commit_put(key, value) {
-                        let _ = self.restore_image(&snapshot);
-                        return Err(error);
-                    }
-                }
-                Ok(StoreResponse::Ack)
+                self.commit_batch(&entries).map(|_| StoreResponse::Ack)
             }
         }
     }
