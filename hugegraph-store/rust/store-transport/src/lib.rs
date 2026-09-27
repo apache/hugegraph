@@ -2440,6 +2440,76 @@ mod tonic_batch_tests {
     }
 
     #[tokio::test]
+    async fn live_batch_merge_fault_retry_and_reopen() {
+        let path =
+            std::env::temp_dir().join(format!("hg-live-merge-retry-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.apply_batch(&[hugegraph_store_core::BatchMutation::Merge {
+                key: b"counter".to_vec(),
+                value: 10u64.to_le_bytes().to_vec(),
+            }])
+            .unwrap();
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let service = SessionService::open(&path).unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let task = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(generated::hg_store_session_server::HgStoreSessionServer::new(service))
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        let mut client = generated::hg_store_session_client::HgStoreSessionClient::connect(
+            format!("http://{}", addr),
+        )
+        .await
+        .unwrap();
+        let merge = || generated::BatchReq {
+            header: None,
+            batch_id: "merge-retry".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq {
+                    entry: vec![generated::BatchEntry {
+                        op_type: 6,
+                        table: 0,
+                        start_key: Some(generated::Key {
+                            key: b"counter".to_vec(),
+                            code: 0,
+                        }),
+                        end_key: None,
+                        value: 5u64.to_le_bytes().to_vec(),
+                    }],
+                },
+            )),
+        };
+        client.batch(merge()).await.unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let commit = || generated::BatchReq {
+            header: None,
+            batch_id: "merge-retry".into(),
+            requests: Some(generated::batch_req::Requests::CommitReq(
+                generated::BatchCommitReq {},
+            )),
+        };
+        assert!(client.batch(commit()).await.is_err());
+        std::fs::remove_dir(&path).unwrap();
+        client.batch(commit()).await.unwrap();
+        task.abort();
+        assert_eq!(
+            hugegraph_store_core::DurableStore::open(&path)
+                .unwrap()
+                .get(b"counter"),
+            Some(15u64.to_le_bytes().to_vec())
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
     async fn batch_trait_commit() {
         let p = std::env::temp_dir().join(format!("hg-tb-{}.img", std::process::id()));
         let s = SessionService::open(&p).unwrap();

@@ -485,6 +485,19 @@ mod durable_tests {
             }])
             .unwrap();
         assert_eq!(store.get(b"counter"), Some(15u64.to_le_bytes().to_vec()));
+        store
+            .apply_batch(&[BatchMutation::Merge {
+                key: b"overflow".to_vec(),
+                value: u64::MAX.to_le_bytes().to_vec(),
+            }])
+            .unwrap();
+        store
+            .apply_batch(&[BatchMutation::Merge {
+                key: b"overflow".to_vec(),
+                value: 1u64.to_le_bytes().to_vec(),
+            }])
+            .unwrap();
+        assert_eq!(store.get(b"overflow"), Some(0u64.to_le_bytes().to_vec()));
         assert!(store
             .apply_batch(&[BatchMutation::Merge {
                 key: b"counter".to_vec(),
