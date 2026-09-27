@@ -1,0 +1,33 @@
+   Compiling hugegraph-store-transport v0.1.0 (/home/zy/code/hugegraph/hugegraph-store/rust/store-transport)
+warning: associated type `queryStream` should have an upper camel case name
+   --> /home/zy/code/hugegraph/hugegraph-store/rust/target/debug/build/hugegraph-store-transport-bf3b68bae1af4802/out/_.rs:957:14
+    |
+957 |         type queryStream: tonic::codegen::tokio_stream::Stream<
+    |              ^^^^^^^^^^^ help: convert the identifier to upper camel case: `QueryStream`
+    |
+    = note: `#[warn(non_camel_case_types)]` (part of `#[warn(nonstandard_style)]`) on by default
+
+warning: `hugegraph-store-transport` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.05s
+     Running unittests src/lib.rs (hugegraph-store/rust/target/debug/deps/hugegraph_store_transport-73b00f1ecf12948e)
+
+running 1 test
+test tonic_batch_tests::batch_rpc_preserves_all_entries_and_rollback_after_reopen ... FAILED
+
+failures:
+
+---- tonic_batch_tests::batch_rpc_preserves_all_entries_and_rollback_after_reopen stdout ----
+
+thread 'tonic_batch_tests::batch_rpc_preserves_all_entries_and_rollback_after_reopen' (1702387) panicked at store-transport/src/lib.rs:1731:9:
+assertion `left == right` failed
+  left: [([97], [102, 105, 114, 115, 116])]
+ right: [([97], [108, 97, 115, 116]), ([98], [115, 101, 99, 111, 110, 100])]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tonic_batch_tests::batch_rpc_preserves_all_entries_and_rollback_after_reopen
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p hugegraph-store-transport --lib`

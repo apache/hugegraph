@@ -173,3 +173,6 @@
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `working-tree` | PASS (64 tests; rollback/scan workspace regression) | `workspace-scan-regression-20260914.log` |
 | `find hugegraph-store -path '*/src/main/java/*' -type f; find hugegraph-store/rust -maxdepth 2 -name Cargo.toml` | `working-tree` | AUDIT (477 Java production sources vs 3 Rust crates; incomplete) | `production-module-audit-20260914.log` |
 | `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace --release` | `working-tree` | PASS (64 tests; optimized workspace regression) | `release-regression-20260914.log` |
+
+| `cargo test --manifest-path hugegraph-store/rust/Cargo.toml -p hugegraph-store-transport batch_rpc_preserves_all_entries_and_rollback_after_reopen` | `05b6b2925 + new regression test` | EXPECTED FAIL (1 failed; only first entry stored); changed: store-transport/src/lib.rs; seed: none, fixed 3-entry trace | `batch-rpc-before-20260927.log` |
+| `cargo fmt --manifest-path hugegraph-store/rust/Cargo.toml --all` then `cargo test --manifest-path hugegraph-store/rust/Cargo.toml --workspace` | `a32e81be3` | PASS (65 tests: 16/8/41); changed: store-transport/src/lib.rs; seed: none, fixed 3-entry trace | `batch-rpc-after-20260927.log` |
