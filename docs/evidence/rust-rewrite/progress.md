@@ -645,3 +645,6 @@ next_action: audit remaining default/empty production responses (scan state, gra
 
 2026-09-27: Closed another protocol gap: Session Batch now returns explicit success status feedback for staged writes and commits; the persistence/reopen test asserts both write and commit acknowledgements. Workspace passed 24 core + 8 node + 56 transport = 88 tests. Evidence `batch-feedback-contract-20260927.log`, code commit `d4706c031`.
 next_action: audit remaining default/empty production responses (scan state, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
+
+2026-09-27: Replaced default scan-state reporting with shared GraphService metrics: task, completed, active and largest counts are updated around scans and exposed by HgStoreState; StoreNode wires both services to the same metrics. Test verifies one completed scan and startup compatibility. Workspace passed 24 core + 8 node + 57 transport = 89 tests. Evidence `scan-state-metrics-20260927.log`, code commit `647576e74`.
+next_action: audit remaining default/empty production responses and Java endpoint parity, especially graph deletion/catalog semantics and partition-scoped Clean; add only behavior backed by an independent invariant test.
