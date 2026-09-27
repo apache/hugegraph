@@ -1279,10 +1279,13 @@ yaml_case nameless "explicit str tag, a type this scanner cannot resolve" \
     'authentication:' \
     '  authenticator: !!str org.apache.hugegraph.auth.StandardAuthenticator'
 # Two top-level authentication mappings: Settings.read() resolves the LAST one,
-# or rejects the file, so the first must not decide the answer.  Reporting
-# `named` for a config whose empty second mapping leaves Gremlin on
-# AllowAllAuthenticator is the same unsafe direction the duplicate-authenticator
-# case refuses for -- so read to EOF and refuse.
+# so the first must not decide the answer and neither may the file as a whole be
+# refused for carrying two.  The base enable-auth.sh appended a block every time
+# conf-bak/ was missing, and conf-bak/ is not on the mounted volume, so a
+# bind-mounted conf/ holds two or three identical ones (#3133, the bug this
+# entrypoint fixes) while TinkerPop 3.5.1 boots that file authenticating.
+# Refusing it stops containers that work; only a LAST mapping that names no
+# class is the unsafe direction, and that still reads nameless here.
 yaml_case nameless "duplicate root authentication mappings" \
     'authentication:' \
     '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
@@ -1290,6 +1293,49 @@ yaml_case nameless "duplicate root authentication mappings" \
     '  tokens: conf/tokens' \
     'authentication:' \
     '  handler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler'
+yaml_case named "two identical root mappings name the class" \
+    'authentication:' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
+    '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler' \
+    'authentication:' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
+    '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler'
+# The empty mapping as the last one is still the mapping the server loads, and
+# it leaves Gremlin on AllowAllAuthenticator beside a configured REST: refused.
+yaml_case nameless "duplicate roots whose last mapping is an empty flow" \
+    'authentication:' \
+    '  authenticator: org.apache.hugegraph.auth.StandardAuthenticator' \
+    'authentication: {}'
+# YAML folds the following deeper line into the scalar, so a key line carrying
+# no value is not the null node: Settings.read() hands over the class, and
+# answering nameless for it stops a container that boots.
+yaml_case named "authenticator value on the following deeper line" \
+    'authentication:' \
+    '  authenticator:' \
+    '    org.apache.hugegraph.auth.StandardAuthenticator'
+yaml_case named "quoted authenticator value on the following deeper line" \
+    'authentication:' \
+    '  authenticator:' \
+    '    "org.apache.hugegraph.auth.StandardAuthenticator"'
+# A sibling at the child indentation is not that value, so the key really is
+# empty here and the server reads no authenticator.
+yaml_case nameless "authenticator left empty with a sibling below it" \
+    'authentication:' \
+    '  authenticator:' \
+    '  authenticationHandler: org.apache.hugegraph.auth.WsAndHttpBasicAuthHandler'
+# A mapping or collection in that position names no class, and reading one as a
+# class name would arm REST beside a server that dies on the shape.
+yaml_case nameless "authenticator value that is a nested mapping" \
+    'authentication:' \
+    '  authenticator:' \
+    '    tokens: conf/rest-server.properties'
+# Settings.read() builds the `? authentication` line and its `: ...` value line
+# into the authentication mapping, so answering `none` for that file would start
+# REST open beside a Gremlin that authenticates.  The reader does not walk
+# explicit keys, so it refuses rather than guess.
+yaml_case nameless "explicit key root mapping is refused" \
+    '? authentication' \
+    ': authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
 # A root mapping written indented below a document marker is still the root to
 # Settings.read().  Reporting `none` for it is the opposite mismatch: REST would
 # start open beside a Gremlin that authenticates.

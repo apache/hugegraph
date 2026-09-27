@@ -48,10 +48,14 @@
 #      sees the whole node: a direct `authenticator` defined twice is refused
 #      rather than settled by whoever met it first;
 #   6b. the file is read to its end, not to the first mapping, because two
-#      top-level `authentication` mappings resolve to the last one (or are
-#      rejected outright).  Answering from the first reported `named` for a
-#      server left on AllowAllAuthenticator by the empty second mapping, so a
-#      duplicate root mapping is refused rather than guessed at;
+#      top-level `authentication` mappings resolve to the LAST one.  The
+#      answer therefore comes from the last mapping, which is the mapping the
+#      server loads: the base enable-auth.sh appended a block every time
+#      conf-bak/ was missing, so a bind-mounted conf/ carries two or three
+#      identical ones (#3133, the bug this entrypoint fixes) and boots as an
+#      authenticating server.  Refusing that file would stop a container that
+#      works, while an empty or class-less LAST mapping is still `nameless` and
+#      still stops the boot, which is the direction that matters;
 #   7. YAML ends a line at CR, LF or CRLF, so a CR that has survived the
 #      comment being stripped is line noise, not part of a key or a value.
 #      Reading `authentication:\r` as no key at all reported a Gremlin mapping
@@ -68,6 +72,18 @@
 #      (`authentication: &auth {authenticator: X}`) or on its first child line
 #      rather than on the key line.  Settings.read() loads both, so answering
 #      `nameless` for them stops a boot that works.
+#   9. a child key may carry no value on its own line and leave the scalar to
+#      the following, deeper line, which YAML folds into that value.  Settings
+#      reads
+#          authenticator:
+#            org.apache.hugegraph.auth.StandardAuthenticator
+#      as a class name, so answering `nameless` for that spelling stops a
+#      container that boots.  A value there that is a nested mapping or
+#      collection names no class and is refused instead of read as one.
+#  10. an explicit key (`? authentication` with its `: ...` value line) is a
+#      root mapping this reader does not walk.  Settings.read() still builds
+#      the authentication mapping from it, so answering `none` would start REST
+#      open beside a Gremlin that authenticates; it is refused.
 #
 # Quote characters come from sprintf so this file holds no literal apostrophe:
 # an awk program written into a single-quoted shell string breaks on one, and
@@ -268,13 +284,15 @@ function names_class(v,    first, last, body, rest) {
 
 # The answer for the mapping read so far, for both the block and the flow form.
 # AUTH_SEEN counts direct `authenticator` children and AUTH_NAMED remembers
-# whether the last one named a class.  A key defined twice has no answer this
-# scanner can give honestly: snakeyaml either keeps the last value or, with
-# unique keys enforced, rejects the document and the server never starts.
-# Either way the operator has to be told which line to fix, so the duplicate is
-# reported on stderr and the mapping is refused through the nameless state,
-# which check_auth_sides stops the boot on and enable-auth.sh will not append
-# beside.
+# whether the last one named a class.  Both describe the LAST top-level
+# `authentication` mapping, because handle_line() clears them when a later one
+# opens and that is the node Settings.read() loads.  A key defined twice inside
+# that mapping has no answer this scanner can give honestly: snakeyaml either
+# keeps the last value or, with unique keys enforced, rejects the document and
+# the server never starts.  Either way the operator has to be told which line to
+# fix, so the duplicate is reported on stderr and the mapping is refused through
+# the nameless state, which check_auth_sides stops the boot on and
+# enable-auth.sh will not append beside.
 function auth_state(    msg) {
     if (AUTH_SEEN > 1) {
         msg = "yamlscan.awk: a mapping with " AUTH_SEEN " direct authenticator entries"
@@ -284,20 +302,15 @@ function auth_state(    msg) {
         return "nameless"
     }
     if (AUTH_SEEN == 1 && AUTH_NAMED) return "named"
-    return "nameless"
-}
-
-# The answer when the file carries more than one top-level `authentication`
-# mapping.  SnakeYAML either takes the last one or, with unique keys enforced,
-# rejects the document and the server never starts -- either way the effective
-# mapping is not the first the scanner met, so this cannot be answered here.
-# Report it on stderr and refuse through the nameless state, exactly like the
-# duplicate-authenticator case above, so check_auth_sides stops the boot.
-function duplicate_root(    msg) {
-    msg = "yamlscan.awk: " AUTH_BLOCKS " top-level authentication mappings"
-    print msg > "/dev/stderr"
-    print "cannot be answered here: the server takes the last one, or rejects the file." > "/dev/stderr"
-    print "Keep a single top-level authentication mapping in gremlin-server.yaml." > "/dev/stderr"
+    # A class-less mapping is normally a hand edit, but the last of several
+    # duplicated root mappings is what the base enable-auth.sh leaves behind,
+    # and there "add an authenticator entry" is the wrong advice: the fix is to
+    # drop the extra mapping, so say which one was read.
+    if (AUTH_BLOCKS > 1) {
+        msg = "yamlscan.awk: " AUTH_BLOCKS " top-level authentication mappings; read the last"
+        print msg > "/dev/stderr"
+        print "one, and it names no authenticator. Keep a single mapping that does." > "/dev/stderr"
+    }
     return "nameless"
 }
 
@@ -478,6 +491,10 @@ BEGIN {
     SP = 0
     SQ = ""
     ESC = 0
+    PENDING = 0
+    PENDING_IND = 0
+    EXPLICIT = 0
+    NESTED_VAL = 0
 }
 
 # Close out the block scalar whose lines were being collected.
@@ -487,7 +504,7 @@ function finish_block() {
     BLOCK_TXT = ""
 }
 
-function handle_line(raw,    line, ind, v) {
+function handle_line(raw,    line, ind, v, t, f) {
     if (BLOCK) {
         # Deeper than the key means the line is still scalar content; anything
         # else ends the scalar and is ordinary content again.
@@ -514,6 +531,39 @@ function handle_line(raw,    line, ind, v) {
     # for a class that only ever reaches `authentication.config`.
     if (SP > 0 || SQ != "") {
         flow_span(line)
+        return
+    }
+
+    # `authenticator:` can carry no value on its own line and leave the scalar
+    # to the following, deeper one, which YAML folds into that value and
+    # Settings.read() hands over as the class.  Comment and blank lines are not
+    # content, so this state survives them; the first line that is not deeper
+    # ends it and the key stays the valueless one it looked like.
+    if (PENDING) {
+        PENDING = 0
+        if (ind > PENDING_IND) {
+            t = trim(line)
+            f = substr(t, 1, 1)
+            # A nested mapping or collection in that position is not a class
+            # name.  Calling it one would arm REST beside a server that either
+            # dies on the shape or finds no authenticator, so refuse it.
+            if (split_pair(t) || f == "{" || f == "[" || f == "-" || f == "?")
+                NESTED_VAL = 1
+            else
+                AUTH_NAMED = names_class(t)
+            return
+        }
+    }
+
+    # An explicit key at the document root is a mapping this reader does not
+    # walk, and Settings.read() still builds `? authentication` together with
+    # its `: ...` value line into the authentication mapping.  The key search
+    # below meets no `key: value` pair on those lines and would answer `none`,
+    # which starts REST open beside a Gremlin that authenticates, so refuse.
+    t = trim(line)
+    if ((ROOT_IND < 0 || ind == ROOT_IND) &&
+        (t == "?" || substr(t, 1, 2) == "? ")) {
+        EXPLICIT = 1
         return
     }
 
@@ -545,15 +595,18 @@ function handle_line(raw,    line, ind, v) {
     }
 
     # A top-level authentication key opens a mapping.  Count them and read to
-    # EOF rather than exiting at the first: two top-level mappings resolve to
-    # the last one (or are rejected), and answering from the first reported
-    # `named` for a server the empty second mapping left open.
+    # EOF rather than exiting at the first, and clear the child state when a
+    # later one opens: two top-level mappings resolve to the LAST one, so the
+    # answer has to describe that node and not the first the scanner met.
     if (ind == ROOT_IND && split_pair(line) &&
         unquote(K_TXT) == "authentication") {
         AUTH_BLOCKS++
         if (AUTH_BLOCKS > 1) {
             AUTH_SEEN = 0
             AUTH_NAMED = 0
+            # A shape the earlier mapping left unresolved says nothing about the
+            # mapping the server actually loads, so it goes with the reset.
+            NESTED_VAL = 0
         }
         in_auth = 1
         child = -1
@@ -623,6 +676,13 @@ function handle_line(raw,    line, ind, v) {
             BLOCK_TXT = ""
             return
         }
+        if (trim(V_TXT) == "") {
+            # `authenticator:` with nothing behind it: the value may still be
+            # the next deeper line rather than the empty node this line shows.
+            PENDING = 1
+            PENDING_IND = ind
+            return
+        }
         AUTH_NAMED = names_class(V_TXT)
     }
 }
@@ -647,8 +707,13 @@ END {
     # no answer here can be right; stopping the boot is the safe one.
     else if (SP > 0 || SQ != "")
         RESULT = refuse("a flow collection or quoted scalar left open in the authentication mapping")
+    else if (EXPLICIT)
+        RESULT = refuse("an explicit key, question mark then space, opening a root mapping")
+    else if (NESTED_VAL)
+        RESULT = refuse("an authenticator whose value is a nested mapping or collection")
     else if (AUTH_BLOCKS == 0) RESULT = "none"
-    else if (AUTH_BLOCKS > 1) RESULT = duplicate_root()
+    # The last top-level mapping is the node Settings.read() loads, whether or
+    # not there were others above it, so one answer covers both files.
     else RESULT = auth_state()
     print RESULT
 }
