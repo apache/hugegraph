@@ -621,3 +621,6 @@ next_action: apply decoded replicated admin commands to partition transitions (s
 
 2026-09-27: Replicated admin commands now apply partition transitions after validation: op 0x61 split payloads and op 0x66 transfer payloads update a cloned PartitionState before log commit; unsupported/malformed commands and index gaps leave state unchanged. Network test verifies snapshot restore, split result, duplicate replay, and gap rejection. Workspace passed 24 core + 8 node + 53 transport = 85 tests. Evidence `replicated-transition-network-20260927.log`, code commit `00ff409c6`.
 next_action: add a two-node replay test that transfers the same command stream between independent StateService instances and compares partition/command-log snapshots; then continue Java differential validation for clean/move instruction semantics.
+
+2026-09-27: Added two-node StateService replay coverage. Independent primary/follower instances apply the same split and transfer command stream and produce identical partition and command-log snapshots. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `two-node-replay-20260927.log`, code commit `1988d8e94`.
+next_action: extend Java differential validation to clean/move partition instructions and verify command failure leaves both replicas identical; then audit remaining Store production APIs and end-to-end gaps.
