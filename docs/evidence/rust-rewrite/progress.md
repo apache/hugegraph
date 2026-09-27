@@ -600,3 +600,6 @@ next_action: add network Graph scan cross-table isolation and Node/session share
 
 2026-09-27: Added live Graph scan isolation and unified StoreNode shared-backend coverage. TCP Graph scan now decodes HGK1 keys and returns only the requested table; the unified server test writes the same user key to table ids 0/1 through Session Batch, commits both, and verifies Graph table "0" returns only table-zero. Workspace passed 21 core + 8 node + 52 transport = 81 tests. Evidence `node-qualified-shared-backend-20260927.log`, code commit `42f97a0b4`.
 next_action: audit raw-to-qualified migration compatibility and add explicit Node/session reopen-read coverage; then continue remaining Raft/partition and Java differential gaps.
+
+2026-09-27: Audited raw-to-qualified migration behavior and added tests: legacy raw keys remain visible to unqualified scans only; table-qualified scans exclude them, and a reopened Session reads the qualified value when the same raw user key exists. Workspace passed 21 core + 8 node + 53 transport = 82 tests. Evidence `raw-qualified-reopen-20260927.log`, code commit `f0b1e4f70`.
+next_action: map remaining Java Store production surfaces to Rust APIs and select the next Raft/partition or differential-validation slice; preserve raw compatibility rules while expanding coverage.
