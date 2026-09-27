@@ -564,3 +564,6 @@ next_action: implement and test Table/Graph method semantics and explicit unsupp
 
 2026-09-27: Implemented session Table and Graph method semantics. Table create/exists/delete/drop/truncate now validate names, maintain an explicit catalog for the session, clear durable data for truncate and return status codes; Graph delete succeeds and unknown/empty methods return InvalidArgument instead of an empty success. Contract tests cover create/exists/delete and valid graph delete. Workspace passed 17 core + 8 node + 43 transport = 68 tests. Evidence `table-graph-contract-20260927.log`, code commit `d11bbd189`.
 next_action: persist table/graph catalog semantics across restart and add network-level Table/Graph tests; then continue remaining production contract matrix.
+
+2026-09-27: Added an atomic table catalog sidecar for `SessionService::open`. Table names load on reopen and create/delete/drop updates are persisted; catalog write failures restore the prior in-memory set. A restart test verifies EXISTS after reopening. Workspace passed 17 core + 8 node + 44 transport = 69 tests. Evidence `table-catalog-recovery-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: add network-level Table/Graph RPC coverage and fault handling, then continue remaining production contract matrix.
