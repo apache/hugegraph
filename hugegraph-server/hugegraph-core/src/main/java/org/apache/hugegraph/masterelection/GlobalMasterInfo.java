@@ -22,48 +22,14 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.type.define.NodeRole;
 import org.apache.hugegraph.util.E;
 
-// TODO: We need to completely delete the startup of master-worker
 public final class GlobalMasterInfo {
-
-    private static final NodeInfo NO_MASTER = new NodeInfo(false, "");
-
-    private volatile boolean supportElection;
-    private volatile NodeInfo masterNodeInfo;
 
     private volatile Id nodeId;
     private volatile NodeRole nodeRole;
 
     public GlobalMasterInfo() {
-        this(NO_MASTER);
-    }
-
-    public GlobalMasterInfo(NodeInfo masterInfo) {
-        this.supportElection = false;
-        this.masterNodeInfo = masterInfo;
-
         this.nodeId = null;
         this.nodeRole = null;
-    }
-
-    public void supportElection(boolean featureSupport) {
-        this.supportElection = featureSupport;
-    }
-
-    public boolean supportElection() {
-        return this.supportElection;
-    }
-
-    public void resetMasterInfo() {
-        this.masterNodeInfo = NO_MASTER;
-    }
-
-    public void masterInfo(boolean isMaster, String nodeUrl) {
-        // final can avoid instruction rearrangement, visibility can be ignored
-        this.masterNodeInfo = new NodeInfo(isMaster, nodeUrl);
-    }
-
-    public NodeInfo masterInfo() {
-        return this.masterNodeInfo;
     }
 
     public Id nodeId() {
@@ -91,29 +57,9 @@ public final class GlobalMasterInfo {
     }
 
     public static GlobalMasterInfo master(String nodeId) {
-        NodeInfo masterInfo = new NodeInfo(true, nodeId);
-        GlobalMasterInfo nodeInfo = new GlobalMasterInfo(masterInfo);
+        GlobalMasterInfo nodeInfo = new GlobalMasterInfo();
         nodeInfo.nodeId = IdGenerator.of(nodeId);
         nodeInfo.nodeRole = NodeRole.MASTER;
         return nodeInfo;
-    }
-
-    public static class NodeInfo {
-
-        private final boolean isMaster;
-        private final String nodeUrl;
-
-        public NodeInfo(boolean isMaster, String url) {
-            this.isMaster = isMaster;
-            this.nodeUrl = url;
-        }
-
-        public boolean isMaster() {
-            return this.isMaster;
-        }
-
-        public String nodeUrl() {
-            return this.nodeUrl;
-        }
     }
 }
