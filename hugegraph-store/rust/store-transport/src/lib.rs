@@ -1591,6 +1591,20 @@ mod graph_frame_tests {
             primary.snapshot_command_log().unwrap(),
             follower.snapshot_command_log().unwrap()
         );
+        let duplicate_task = hugegraph_store_core::ReplicatedCommand {
+            op: 0x66,
+            term: 1,
+            index: 4,
+            request_id: b"transfer-2".to_vec(),
+            payload: b"transfer:2:99".to_vec(),
+        }
+        .encode();
+        assert!(primary.apply_replicated_command(&duplicate_task).is_err());
+        assert!(follower.apply_replicated_command(&duplicate_task).is_err());
+        assert_eq!(
+            primary.snapshot_partition_state().unwrap(),
+            follower.snapshot_partition_state().unwrap()
+        );
         let invalid = hugegraph_store_core::ReplicatedCommand {
             op: 0x65,
             term: 1,

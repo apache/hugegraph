@@ -333,6 +333,13 @@ impl CommandLog {
                 Err("conflicting command index")
             };
         }
+        if self
+            .entries
+            .values()
+            .any(|existing| existing.request_id == command.request_id)
+        {
+            return Err("duplicate request id");
+        }
         if command.index != self.last_index() + 1 {
             return Err("command index gap");
         }
@@ -495,6 +502,13 @@ mod tests {
         assert!(log
             .append(ReplicatedCommand {
                 index: 3,
+                ..command.clone()
+            })
+            .is_err());
+        assert!(log
+            .append(ReplicatedCommand {
+                index: 2,
+                payload: b"same-task-new-index".to_vec(),
                 ..command.clone()
             })
             .is_err());
