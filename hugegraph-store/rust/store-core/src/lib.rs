@@ -204,6 +204,7 @@ pub enum BatchMutation {
     Delete { key: Vec<u8> },
     DeletePrefix { prefix: Vec<u8> },
     DeleteRange { start: Vec<u8>, end: Vec<u8> },
+    Merge { key: Vec<u8>, value: Vec<u8> },
 }
 
 impl DurableStore {
@@ -287,6 +288,33 @@ impl DurableStore {
                     for key in keys {
                         self.inner.rollback(&key);
                     }
+                }
+                BatchMutation::Merge { key, value } => {
+                    if value.len() != 8 {
+                        self.inner =
+                            InMemoryStore::restore(&snapshot).expect("snapshot must restore");
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "merge operand must be a little-endian u64",
+                        ));
+                    }
+                    let operand = u64::from_le_bytes(value.as_slice().try_into().unwrap());
+                    let merged = match self.inner.get(key) {
+                        None => operand,
+                        Some(current) if current.len() == 8 => {
+                            u64::from_le_bytes(current.as_slice().try_into().unwrap())
+                                .wrapping_add(operand)
+                        }
+                        Some(_) => {
+                            self.inner =
+                                InMemoryStore::restore(&snapshot).expect("snapshot must restore");
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "existing merge value must be a little-endian u64",
+                            ));
+                        }
+                    };
+                    self.inner.put(key.clone(), merged.to_le_bytes().to_vec());
                 }
             }
         }
@@ -439,6 +467,39 @@ mod durable_tests {
     }
 
     #[test]
+    fn merge_uint64_oracle_and_invalid_operand_rollback() {
+        let path = std::env::temp_dir().join(format!("hg-merge-oracle-{}.img", std::process::id()));
+        let mut store = DurableStore::open(&path).unwrap();
+        let ten = 10u64.to_le_bytes().to_vec();
+        let five = 5u64.to_le_bytes().to_vec();
+        store
+            .apply_batch(&[BatchMutation::Merge {
+                key: b"counter".to_vec(),
+                value: ten.clone(),
+            }])
+            .unwrap();
+        store
+            .apply_batch(&[BatchMutation::Merge {
+                key: b"counter".to_vec(),
+                value: five,
+            }])
+            .unwrap();
+        assert_eq!(store.get(b"counter"), Some(15u64.to_le_bytes().to_vec()));
+        assert!(store
+            .apply_batch(&[BatchMutation::Merge {
+                key: b"counter".to_vec(),
+                value: b"bad".to_vec()
+            }])
+            .is_err());
+        assert_eq!(store.get(b"counter"), Some(15u64.to_le_bytes().to_vec()));
+        assert_eq!(
+            DurableStore::open(&path).unwrap().get(b"counter"),
+            Some(15u64.to_le_bytes().to_vec())
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn restore_image_rejects_truncation_without_mutating_store() {
         let path = std::env::temp_dir().join(format!("hg-recover-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -462,6 +523,7 @@ pub enum StoreRequest {
     BatchDelete { keys: Vec<Vec<u8>> },
     BatchDeletePrefix { prefix: Vec<u8> },
     BatchDeleteRange { start: Vec<u8>, end: Vec<u8> },
+    BatchMerge { entries: Vec<(Vec<u8>, Vec<u8>)> },
 }
 
 pub enum StoreResponse {
@@ -488,6 +550,14 @@ impl DurableStore {
                 .map(|_| StoreResponse::Ack),
             StoreRequest::BatchDeleteRange { start, end } => self
                 .apply_batch(&[BatchMutation::DeleteRange { start, end }])
+                .map(|_| StoreResponse::Ack),
+            StoreRequest::BatchMerge { entries } => self
+                .apply_batch(
+                    &entries
+                        .into_iter()
+                        .map(|(key, value)| BatchMutation::Merge { key, value })
+                        .collect::<Vec<_>>(),
+                )
                 .map(|_| StoreResponse::Ack),
         }
     }

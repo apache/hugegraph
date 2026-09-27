@@ -1821,6 +1821,7 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
             let mut deletes = Vec::new();
             let mut prefixes = Vec::new();
             let mut ranges = Vec::new();
+            let mut merges = Vec::new();
             for entry in entries {
                 let key = entry.start_key.map(|x| x.key).unwrap_or_default();
                 match entry.op_type {
@@ -1828,7 +1829,7 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
                     2 | 3 => deletes.push(key),
                     4 => prefixes.push(key),
                     5 => ranges.push((key, entry.end_key.map(|x| x.key).unwrap_or_default())),
-                    6 => return Err("batch merge operation is not implemented".into()),
+                    6 => merges.push((key, entry.value)),
                     _ => return Err("unknown batch operation type".into()),
                 }
             }
@@ -1837,6 +1838,7 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
                 !deletes.is_empty(),
                 !prefixes.is_empty(),
                 !ranges.is_empty(),
+                !merges.is_empty(),
             ]
             .into_iter()
             .filter(|present| *present)
@@ -1861,6 +1863,8 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
                 }
                 let (start, end) = ranges.remove(0);
                 Ok(hugegraph_store_core::StoreRequest::BatchDeleteRange { start, end })
+            } else if !merges.is_empty() {
+                Ok(hugegraph_store_core::StoreRequest::BatchMerge { entries: merges })
             } else {
                 Err("empty batch operation".into())
             }
@@ -1967,6 +1971,33 @@ mod batch_tests {
                 if start == b"a" && end == b"z"
         ));
     }
+
+    #[test]
+    fn batch_merge_maps_to_uint64_mutation() {
+        let request = generated::BatchReq {
+            header: None,
+            batch_id: "merge".into(),
+            requests: Some(generated::batch_req::Requests::WriteReq(
+                generated::BatchWriteReq {
+                    entry: vec![generated::BatchEntry {
+                        op_type: 6,
+                        table: 0,
+                        start_key: Some(generated::Key {
+                            key: b"counter".to_vec(),
+                            code: 0,
+                        }),
+                        end_key: None,
+                        value: 2u64.to_le_bytes().to_vec(),
+                    }],
+                },
+            )),
+        };
+        assert!(matches!(
+            batch_command(&prost::Message::encode_to_vec(&request)).unwrap(),
+            hugegraph_store_core::StoreRequest::BatchMerge { entries }
+                if entries == vec![(b"counter".to_vec(), 2u64.to_le_bytes().to_vec())]
+        ));
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -2000,7 +2031,10 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
                             start: key,
                             end: e.end_key.map(|k| k.key).unwrap_or_default(),
                         }),
-                        6 => Err("batch merge operation is not implemented".to_string()),
+                        6 => Ok(hugegraph_store_core::BatchMutation::Merge {
+                            key,
+                            value: e.value,
+                        }),
                         _ => Err("unknown batch operation type".to_string()),
                     }
                 })
@@ -2055,6 +2089,12 @@ impl SessionTransactions {
             .entry(id)
             .or_default()
             .push(hugegraph_store_core::BatchMutation::DeleteRange { start, end });
+    }
+    pub fn stage_merge(&mut self, id: String, key: Vec<u8>, value: Vec<u8>) {
+        self.pending
+            .entry(id)
+            .or_default()
+            .push(hugegraph_store_core::BatchMutation::Merge { key, value });
     }
     pub fn commit(
         &mut self,
@@ -2135,6 +2175,9 @@ pub fn apply_session_batch(
                     }
                     hugegraph_store_core::BatchMutation::DeleteRange { start, end } => {
                         txns.stage_delete_range(id.to_string(), start, end)
+                    }
+                    hugegraph_store_core::BatchMutation::Merge { key, value } => {
+                        txns.stage_merge(id.to_string(), key, value)
                     }
                 }
             }
