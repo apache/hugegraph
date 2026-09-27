@@ -585,3 +585,6 @@ next_action: implement MERGE semantics from the public contract and add mutation
 
 2026-09-27: Implemented `OP_TYPE_MERGE` as RocksDB-compatible little-endian uint64 addition. Missing keys initialize from the operand, repeated merges wrap as u64, invalid operands fail without mutating memory or disk, and transport maps merge entries through core/session mutations. Independent merge Oracle and mapping tests pass. Workspace passed 20 core + 8 node + 48 transport = 76 tests. Evidence `batch-merge-oracle-20260927.log`, code commit `073055c35`.
 next_action: add network/session merge retry and overflow/fault coverage; continue namespace, Raft/partition and Java differential gaps.
+
+2026-09-27: Added TCP tonic-client merge recovery coverage: a staged uint64 merge fails over a directory persistence fault, retries after path recovery and reopens as 15. Core Oracle also verifies u64 overflow wrapping to zero. Workspace passed 20 core + 8 node + 49 transport = 77 tests. Evidence `network-merge-recovery-20260927.log`, code commit `$(git rev-parse HEAD)`.
+next_action: audit namespace isolation and implement table-qualified storage keys; continue Raft/partition and Java differential gaps.
