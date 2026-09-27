@@ -1208,6 +1208,11 @@ mod graph_frame_tests {
         let path = std::env::temp_dir().join(format!("hg-live-catalog-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("catalog"));
+        {
+            let mut seed = hugegraph_store_core::DurableStore::open(&path).unwrap();
+            seed.commit_put(b"graph-data".to_vec(), b"preserve".to_vec())
+                .unwrap();
+        }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let service = super::SessionService::open(&path).unwrap();
@@ -1253,8 +1258,28 @@ mod graph_frame_tests {
             .await
             .unwrap();
         assert_eq!(graph.into_inner().status.unwrap().code, 0);
+        assert!(client
+            .graph(super::generated::GraphReq {
+                method: super::generated::GraphMethod::Delete as i32,
+                graph_name: String::new(),
+                ..Default::default()
+            })
+            .await
+            .is_err());
+        assert!(client
+            .graph(super::generated::GraphReq {
+                method: 99,
+                graph_name: "network-graph".into(),
+                ..Default::default()
+            })
+            .await
+            .is_err());
         task.abort();
         let reopened = super::SessionService::open(&path).unwrap();
+        assert_eq!(
+            reopened.shared.backend.lock().unwrap().get(b"graph-data"),
+            Some(b"preserve".to_vec())
+        );
         let status = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
             &reopened,
             tonic::Request::new(super::generated::TableReq {
