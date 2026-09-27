@@ -91,6 +91,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyKeyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyValueStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ElementValueComparator;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.EmptyStep;
@@ -1096,10 +1097,14 @@ public final class TraversalUtil {
     }
 
     private static boolean changesCurrentElement(Step<?, ?> step) {
-        // VertexStep can return the source through a self-loop or a later hop,
-        // just as edge endpoints can. Only property traversal proves that a
-        // later label predicate cannot apply to the source vertex or edge.
-        return step instanceof PropertiesStep;
+        // Vertex adjacency is a scope boundary for this label fallback, not
+        // proof that a self-loop or later hop cannot return the source.
+        // Preserve the source property query's existing index/error semantics;
+        // complete cross-label property candidates are tracked in #3201.
+        // Edge endpoints can recover the source (outE().outV(), inE().inV(),
+        // bothV()). Do not admit EdgeVertexStep here or in the suffix allowlist:
+        // checking only that step is too late if outE() already ended the scan.
+        return step instanceof VertexStep || step instanceof PropertiesStep;
     }
 
     private static boolean onlyCurrentElementSuffix(List<Step> steps) {
