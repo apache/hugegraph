@@ -400,8 +400,7 @@ public final class HugeFactoryAuthProxy {
                                            "oneNumericField", "hasSameProperties");
         Reflection.registerFieldsToFilter(TaskManager.class, "LOG", "SCHEDULE_PERIOD", "THREADS",
                                           "MANAGER", "schedulers", "taskExecutor", "taskDbExecutor",
-                                          "serverInfoDbExecutor", "contexts",
-                                          "$assertionsDisabled");
+                                          "contexts", "$assertionsDisabled");
         Reflection.registerMethodsToFilter(TaskManager.class, "lambda$0", "resetContext",
                                            "closeTaskTx", "setContext", "instance",
                                            "notifyNewTask",

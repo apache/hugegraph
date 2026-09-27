@@ -32,12 +32,18 @@ import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.exception.NotFoundException;
+import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.task.DistributedTaskScheduler;
 import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.task.TaskCallable;
 import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.IdStrategy;
+import org.apache.hugegraph.type.define.NodeRole;
+import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.ExecutorUtil;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -63,13 +69,11 @@ public class TaskSchedulerServerInfoTest {
         ExecutorService olapTaskExecutor = Executors.newSingleThreadExecutor();
         ExecutorService gremlinTaskExecutor = Executors.newSingleThreadExecutor();
         ExecutorService ephemeralTaskExecutor = Executors.newSingleThreadExecutor();
-        ExecutorService serverInfoDbExecutor = Executors.newSingleThreadExecutor();
 
         try {
             DistributedTaskScheduler scheduler = new DistributedTaskScheduler(
                     params, schedulerExecutor, taskDbExecutor, schemaTaskExecutor,
-                    olapTaskExecutor, gremlinTaskExecutor, ephemeralTaskExecutor,
-                    serverInfoDbExecutor);
+                    olapTaskExecutor, gremlinTaskExecutor, ephemeralTaskExecutor);
             scheduler.checkRequirement("schedule");
         } finally {
             schedulerExecutor.shutdownNow();
@@ -78,7 +82,6 @@ public class TaskSchedulerServerInfoTest {
             olapTaskExecutor.shutdownNow();
             gremlinTaskExecutor.shutdownNow();
             ephemeralTaskExecutor.shutdownNow();
-            serverInfoDbExecutor.shutdownNow();
         }
     }
 
@@ -101,13 +104,11 @@ public class TaskSchedulerServerInfoTest {
         ExecutorService olapTaskExecutor = Executors.newSingleThreadExecutor();
         ExecutorService gremlinTaskExecutor = Executors.newSingleThreadExecutor();
         ExecutorService ephemeralTaskExecutor = Executors.newSingleThreadExecutor();
-        ExecutorService serverInfoDbExecutor = Executors.newSingleThreadExecutor();
 
         try {
             DistributedTaskScheduler scheduler = new DistributedTaskScheduler(
                     params, schedulerExecutor, taskDbExecutor, schemaTaskExecutor,
-                    olapTaskExecutor, gremlinTaskExecutor, ephemeralTaskExecutor,
-                    serverInfoDbExecutor) {
+                    olapTaskExecutor, gremlinTaskExecutor, ephemeralTaskExecutor) {
 
                 @Override
                 protected boolean updateStatus(Id id, TaskStatus prestatus,
@@ -138,12 +139,11 @@ public class TaskSchedulerServerInfoTest {
             olapTaskExecutor.shutdownNow();
             gremlinTaskExecutor.shutdownNow();
             ephemeralTaskExecutor.shutdownNow();
-            serverInfoDbExecutor.shutdownNow();
         }
     }
 
     @Test
-    public void testGraphManagerDoesNotGenerateServerIdWhenElectionDisabled() {
+    public void testGraphManagerDoesNotGenerateServerId() {
         HugeConfig config = newConfig();
 
         GraphManager manager = new GraphManager(config, new EventHub("test"));
@@ -161,14 +161,33 @@ public class TaskSchedulerServerInfoTest {
         PropertiesConfiguration conf = new PropertiesConfiguration();
         conf.setProperty("server.role_election", true);
         conf.setProperty("server.role.fail_count", 5);
+        conf.setProperty(ServerOptions.SERVER_ROLE.name(), "worker");
         HugeConfig config = new HugeConfig(conf);
 
         GraphManager manager = new GraphManager(config, new EventHub("test"));
         try {
-            Assert.assertNotNull(manager);
+            Assert.assertEquals(NodeRole.WORKER,
+                                manager.globalNodeRoleInfo().nodeRole());
         } finally {
             manager.close();
         }
+    }
+
+    @Test
+    public void testLegacyServerLabelsKeepServerType() {
+        // Graphs created by older versions may still store these vertices
+        FakeObjects fakeObject = new FakeObjects();
+        for (String name : new String[]{"~server", "~role_data"}) {
+            VertexLabel label = fakeObject.newVertexLabel(IdGenerator.of(name), name,
+                                                          IdStrategy.CUSTOMIZE_STRING);
+            HugeVertex vertex = new HugeVertex(fakeObject.graph(), null, label);
+            Assert.assertEquals(HugeType.SERVER, vertex.type());
+        }
+
+        VertexLabel person = fakeObject.newVertexLabel(IdGenerator.of(1), "person",
+                                                       IdStrategy.CUSTOMIZE_STRING);
+        HugeVertex vertex = new HugeVertex(fakeObject.graph(), null, person);
+        Assert.assertEquals(HugeType.VERTEX, vertex.type());
     }
 
     @Test

@@ -45,7 +45,6 @@ public final class TaskManager {
     public static final String TASK_WORKER_PREFIX = "task-worker";
     public static final String TASK_WORKER = TASK_WORKER_PREFIX + "-%d";
     public static final String TASK_DB_WORKER = "task-db-worker-%d";
-    public static final String SERVER_INFO_DB_WORKER = "server-info-db-worker-%d";
 
     public static final String OLAP_TASK_WORKER = "olap-task-worker-%d";
     public static final String SCHEMA_TASK_WORKER = "schema-task-worker-%d";
@@ -61,7 +60,6 @@ public final class TaskManager {
 
     private final ExecutorService taskExecutor;
     private final ExecutorService taskDbExecutor;
-    private final ExecutorService serverInfoDbExecutor;
 
     private final ExecutorService schemaTaskExecutor;
     private final ExecutorService olapTaskExecutor;
@@ -80,8 +78,6 @@ public final class TaskManager {
         // For save/query task state, just one thread is ok
         this.taskDbExecutor = ExecutorUtil.newFixedThreadPool(
                 1, TASK_DB_WORKER);
-        this.serverInfoDbExecutor = ExecutorUtil.newFixedThreadPool(
-                1, SERVER_INFO_DB_WORKER);
 
         this.schemaTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, SCHEMA_TASK_WORKER);
         this.olapTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, OLAP_TASK_WORKER);
@@ -107,8 +103,7 @@ public final class TaskManager {
                                 schemaTaskExecutor,
                                 olapTaskExecutor,
                                 taskExecutor, /* gremlinTaskExecutor */
-                                ephemeralTaskExecutor,
-                                serverInfoDbExecutor);
+                                ephemeralTaskExecutor);
                 this.schedulers.put(graph, scheduler);
                 break;
             }
@@ -118,8 +113,7 @@ public final class TaskManager {
                         new StandardTaskScheduler(
                                 graph,
                                 this.taskExecutor,
-                                this.taskDbExecutor,
-                                this.serverInfoDbExecutor);
+                                this.taskDbExecutor);
                 this.schedulers.put(graph, scheduler);
                 break;
             }
@@ -224,15 +218,6 @@ public final class TaskManager {
             this.taskExecutor.shutdown();
             try {
                 terminated = this.taskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.serverInfoDbExecutor.isShutdown()) {
-            this.serverInfoDbExecutor.shutdown();
-            try {
-                terminated = this.serverInfoDbExecutor.awaitTermination(timeout, unit);
             } catch (Throwable e) {
                 ex = e;
             }

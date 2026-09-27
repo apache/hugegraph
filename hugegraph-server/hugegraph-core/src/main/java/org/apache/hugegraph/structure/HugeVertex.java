@@ -43,7 +43,6 @@ import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.schema.EdgeLabel;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.VertexLabel;
-import org.apache.hugegraph.task.HugeServerInfo;
 import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.task.HugeTaskResult;
 import org.apache.hugegraph.type.HugeType;
@@ -72,9 +71,10 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     private static final List<HugeEdge> EMPTY_LIST = ImmutableList.of();
 
     /*
-     * Labels of the removed server info and role election vertices, graphs
-     * created by older versions may still store them
+     * Labels of the removed server info and role election vertices. Graphs
+     * created by older versions may still store them.
      */
+    private static final String LEGACY_SERVER_LABEL = Graph.Hidden.hide("server");
     private static final String LEGACY_ROLE_DATA_LABEL = Graph.Hidden.hide("role_data");
 
     private Id id;
@@ -106,7 +106,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
             return HugeType.TASK;
         }
         if (label != null &&
-            (label.name().equals(HugeServerInfo.P.SERVER) ||
+            (label.name().equals(LEGACY_SERVER_LABEL) ||
              label.name().equals(LEGACY_ROLE_DATA_LABEL))) {
             return HugeType.SERVER;
         }
