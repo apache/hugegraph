@@ -630,3 +630,6 @@ next_action: audit remaining Java Store production APIs and add differential cov
 
 2026-09-27: Matched Java preCheckTaskId semantics by rejecting a replicated command whose request/task identity already exists at another log index; same-index replay remains idempotent. Two-replica differential test confirms duplicate task and invalid clean failures leave both snapshots identical. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `task-dedup-differential-20260927.log`, code commit `4139dc23e`.
 next_action: audit remaining Java Store production APIs and end-to-end requirements, prioritizing missing data-plane behavior (query/graph/session responses) and failure injection before final completion audit.
+
+2026-09-27: Closed a data-plane gap found in the transport audit: Session Get2 now returns ValueResponse bytes and missing status, preserving qualified table lookup. Shared and tonic Get2 tests assert the actual value, not only status. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `get2-value-response-20260927.log`, code commit `16cee0461`.
+next_action: audit remaining default/empty production responses, prioritizing Query and scan-state behavior against Java endpoints; add meaningful response assertions and differential traces.
