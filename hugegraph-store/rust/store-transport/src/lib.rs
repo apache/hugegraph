@@ -1131,10 +1131,32 @@ mod graph_frame_tests {
             .commit_put(b"before-clean".to_vec(), b"value".to_vec())
             .unwrap();
         let table = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
-            &service, tonic::Request::new(super::generated::TableReq::default())).await.unwrap();
+            &service, tonic::Request::new(super::generated::TableReq {
+                method: super::generated::TableMethod::Create as i32,
+                table_name: "vertices".into(),
+                ..Default::default()
+        })).await.unwrap();
         assert!(table.into_inner().responses.is_none());
+        let exists = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, tonic::Request::new(super::generated::TableReq {
+                method: super::generated::TableMethod::Exists as i32,
+                table_name: "vertices".into(),
+                ..Default::default()
+            })).await.unwrap();
+        assert_eq!(exists.into_inner().status.unwrap().code, 0);
+        let deleted = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, tonic::Request::new(super::generated::TableReq {
+                method: super::generated::TableMethod::Delete as i32,
+                table_name: "vertices".into(),
+                ..Default::default()
+            })).await.unwrap();
+        assert_eq!(deleted.into_inner().status.unwrap().code, 0);
         let graph = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::graph(
-            &service, tonic::Request::new(super::generated::GraphReq::default())).await.unwrap();
+            &service, tonic::Request::new(super::generated::GraphReq {
+                method: super::generated::GraphMethod::Delete as i32,
+                graph_name: "g".into(),
+                ..Default::default()
+            })).await.unwrap();
         assert!(graph.into_inner().responses.is_none());
         let clean = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::clean(
             &service, tonic::Request::new(super::generated::CleanReq::default())).await.unwrap();
@@ -1281,6 +1303,7 @@ impl generated::query_service_server::QueryService for QueryServiceImpl {
 pub struct SessionService {
     pub shared: SharedSession,
     pub transactions: std::sync::Arc<std::sync::Mutex<SessionTransactions>>,
+    table_names: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 impl SessionService {
     pub fn from_backend(
@@ -1291,6 +1314,9 @@ impl SessionService {
             transactions: std::sync::Arc::new(
                 std::sync::Mutex::new(SessionTransactions::default()),
             ),
+            table_names: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
         }
     }
     pub fn open(path: impl Into<std::path::PathBuf>) -> std::io::Result<Self> {
@@ -1299,6 +1325,9 @@ impl SessionService {
             transactions: std::sync::Arc::new(
                 std::sync::Mutex::new(SessionTransactions::default()),
             ),
+            table_names: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
         })
     }
 }
@@ -1350,15 +1379,67 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
     }
     async fn table(
         &self,
-        _: tonic::Request<generated::TableReq>,
+        request: tonic::Request<generated::TableReq>,
     ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
-        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+        let request = request.into_inner();
+        if request.table_name.is_empty() {
+            return Err(tonic::Status::invalid_argument("table name is required"));
+        }
+        let method = generated::TableMethod::try_from(request.method)
+            .map_err(|_| tonic::Status::invalid_argument("unknown table method"))?;
+        let mut names = self
+            .table_names
+            .lock()
+            .map_err(|_| tonic::Status::internal("table catalog lock poisoned"))?;
+        let response = match method {
+            generated::TableMethod::Exists => {
+                if names.contains(&request.table_name) {
+                    feedback_ok()
+                } else {
+                    feedback_status(2, "table does not exist")
+                }
+            }
+            generated::TableMethod::Create => {
+                names.insert(request.table_name);
+                feedback_ok()
+            }
+            generated::TableMethod::Delete | generated::TableMethod::Drop => {
+                names.remove(&request.table_name);
+                feedback_ok()
+            }
+            generated::TableMethod::Truncate => {
+                self.shared
+                    .backend
+                    .lock()
+                    .map_err(|_| tonic::Status::internal("backend lock poisoned"))?
+                    .clear()
+                    .map_err(|e| {
+                        tonic::Status::new(classify_failure(&e.to_string()), e.to_string())
+                    })?;
+                feedback_ok()
+            }
+            generated::TableMethod::Unknown => {
+                return Err(tonic::Status::invalid_argument("unknown table method"));
+            }
+        };
+        Ok(tonic::Response::new(response))
     }
     async fn graph(
         &self,
-        _: tonic::Request<generated::GraphReq>,
+        request: tonic::Request<generated::GraphReq>,
     ) -> Result<tonic::Response<generated::FeedbackRes>, tonic::Status> {
-        Ok(tonic::Response::new(generated::FeedbackRes::default()))
+        let request = request.into_inner();
+        if request.graph_name.is_empty() {
+            return Err(tonic::Status::invalid_argument("graph name is required"));
+        }
+        match generated::GraphMethod::try_from(request.method)
+            .map_err(|_| tonic::Status::invalid_argument("unknown graph method"))?
+        {
+            generated::GraphMethod::Delete => Ok(tonic::Response::new(feedback_ok())),
+            generated::GraphMethod::Unknown => {
+                Err(tonic::Status::invalid_argument("unknown graph method"))
+            }
+        }
     }
     async fn clean(
         &self,
@@ -1978,10 +2059,14 @@ pub fn batch_get_values(
 }
 
 pub fn feedback_ok() -> generated::FeedbackRes {
+    feedback_status(0, "ok")
+}
+
+pub fn feedback_status(code: i32, msg: &str) -> generated::FeedbackRes {
     generated::FeedbackRes {
         status: Some(generated::ResStatus {
-            code: 0,
-            msg: "ok".into(),
+            code,
+            msg: msg.into(),
         }),
         responses: None,
     }
