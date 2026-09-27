@@ -606,3 +606,6 @@ next_action: map remaining Java Store production surfaces to Rust APIs and selec
 
 2026-09-27: Audited Java Store production surface: 547 Java sources versus the Rust workspace APIs. HgStoreEngine, PartitionInstructionProcessor, PartitionEngine/Manager, shard ownership and Raft operation/closure semantics remain unimplemented in Rust. Audit evidence `java-store-surface-audit-20260927.log`. Selected next slice: deterministic partition key-range/ownership state in store-core with restart tests before transport/Raft wiring.
 next_action: define and test the minimal partition key-range/ownership state model in store-core, including deterministic split/transfer transitions and restart persistence.
+
+2026-09-27: Added store-core PartitionState with validated non-overlapping key ranges, deterministic locate, split, owner transfer, and restart snapshot/restore. Independent tests cover invalid overlap/split and truncated snapshot rejection. Workspace passed 23 core + 8 node + 53 transport = 84 tests. Evidence `partition-state-20260927.log`, code commit `98425d889`.
+next_action: expose PartitionState through a transport-level partition/admin contract and add a restart/ownership transition network test; then compare transition semantics against Java PartitionManager/Raft instruction paths.
