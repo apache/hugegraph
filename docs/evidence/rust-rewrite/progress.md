@@ -639,3 +639,6 @@ next_action: audit remaining default/empty production responses (scan state, str
 
 2026-09-27: Fixed TableMethod::Truncate to delete only the requested HGK1 table prefix instead of clearing the shared backend. Cross-table test proves table u survives truncating table t. Workspace passed 24 core + 8 node + 56 transport = 88 tests. Evidence `table-truncate-isolation-20260927.log`, code commit `863bbd4a8`.
 next_action: audit remaining default/empty production responses (scan state, streaming query, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
+
+2026-09-27: Implemented QueryService streaming responses: each incoming QueryRequest now produces a finished QueryResponse with qualified filtered data, and the live tonic test consumes the stream. Workspace passed 24 core + 8 node + 56 transport = 88 tests. Evidence `query-streaming-20260927.log`, code commit `98469a91d`.
+next_action: audit remaining default/empty production responses (scan state, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
