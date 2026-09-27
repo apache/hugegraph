@@ -1530,6 +1530,51 @@ mod graph_frame_tests {
         assert_eq!(split_peer.peers, "id=3;start=t;end=z;owner=30");
     }
 
+    #[test]
+    fn two_state_services_replay_identical_partition_command_stream() {
+        let primary = super::StateService::new();
+        let follower = super::StateService::new();
+        for service in [&primary, &follower] {
+            service
+                .assign_partition(hugegraph_store_core::PartitionRange {
+                    id: 1,
+                    start: b"a".to_vec(),
+                    end: b"z".to_vec(),
+                    owner: 10,
+                })
+                .unwrap();
+        }
+        let commands = [
+            hugegraph_store_core::ReplicatedCommand {
+                op: 0x61,
+                term: 1,
+                index: 1,
+                request_id: b"split-1".to_vec(),
+                payload: b"split:1:m:2:20".to_vec(),
+            },
+            hugegraph_store_core::ReplicatedCommand {
+                op: 0x66,
+                term: 1,
+                index: 2,
+                request_id: b"transfer-2".to_vec(),
+                payload: b"transfer:2:21".to_vec(),
+            },
+        ];
+        for command in commands {
+            let encoded = command.encode();
+            assert_eq!(primary.apply_replicated_command(&encoded), Ok(true));
+            assert_eq!(follower.apply_replicated_command(&encoded), Ok(true));
+        }
+        assert_eq!(
+            primary.snapshot_partition_state().unwrap(),
+            follower.snapshot_partition_state().unwrap()
+        );
+        assert_eq!(
+            primary.snapshot_command_log().unwrap(),
+            follower.snapshot_command_log().unwrap()
+        );
+    }
+
     #[tokio::test]
     async fn session_lifecycle_methods_return_contract_responses() {
         let path = std::env::temp_dir().join(format!("hg-session-live-{}.img", std::process::id()));
