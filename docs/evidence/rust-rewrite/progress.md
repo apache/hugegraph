@@ -609,3 +609,6 @@ next_action: define and test the minimal partition key-range/ownership state mod
 
 2026-09-27: Added store-core PartitionState with validated non-overlapping key ranges, deterministic locate, split, owner transfer, and restart snapshot/restore. Independent tests cover invalid overlap/split and truncated snapshot rejection. Workspace passed 23 core + 8 node + 53 transport = 84 tests. Evidence `partition-state-20260927.log`, code commit `98425d889`.
 next_action: expose PartitionState through a transport-level partition/admin contract and add a restart/ownership transition network test; then compare transition semantics against Java PartitionManager/Raft instruction paths.
+
+2026-09-27: Exposed PartitionState through the existing HgStoreState getPeers transport contract. StateService now supports validated assign/split/transfer, snapshot restore, and deterministic peer metadata; the live tonic test restores state before serving and verifies the transferred split over the network. Workspace passed 23 core + 8 node + 53 transport = 84 tests. Evidence `partition-state-network-20260927.log`, code commit `d03e97650`.
+next_action: compare partition transition and peer metadata semantics against Java PartitionManager/Raft instruction paths, then add replicated-command identity/index handling before claiming Raft parity.
