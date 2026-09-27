@@ -69,14 +69,7 @@ import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.io.HugeGraphIoRegistry;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.kvstore.KvStore;
-import org.apache.hugegraph.masterelection.ClusterRoleStore;
-import org.apache.hugegraph.masterelection.Config;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.masterelection.RoleElectionConfig;
-import org.apache.hugegraph.masterelection.RoleElectionOptions;
-import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
-import org.apache.hugegraph.masterelection.StandardClusterRoleStore;
-import org.apache.hugegraph.masterelection.StandardRoleElectionStateMachine;
 import org.apache.hugegraph.memory.MemoryManager;
 import org.apache.hugegraph.memory.util.RoundUtil;
 import org.apache.hugegraph.meta.MetaManager;
@@ -184,7 +177,6 @@ public class StandardHugeGraph implements HugeGraph {
     private volatile HugeVariables variables;
     private String graphSpace;
     private AuthManager authManager;
-    private RoleElectionStateMachine roleElectionStateMachine;
     private String nickname;
     private String creator;
     private Date createTime;
@@ -225,13 +217,6 @@ public class StandardHugeGraph implements HugeGraph {
 
         this.taskManager = TaskManager.instance();
         this.name = config.get(CoreOptions.STORE);
-
-        // Keep old config files upgrade-safe while ignoring the legacy scheduler.
-        if (config.containsKey("task.scheduler_type")) {
-            LOG.warn("Config key 'task.scheduler_type' is deprecated and " +
-                     "ignored. The scheduler is auto-selected by backend " +
-                     "type (hstore -> distributed, others -> local).");
-        }
 
         this.started = false;
         this.closed = false;
@@ -364,7 +349,6 @@ public class StandardHugeGraph implements HugeGraph {
 
         if (nodeInfo != null && nodeInfo.nodeId() != null) {
             this.serverInfoManager().initServerInfo(nodeInfo);
-            this.initRoleStateMachine(nodeInfo.nodeId());
         }
 
         // TODO: check necessary?
@@ -379,22 +363,6 @@ public class StandardHugeGraph implements HugeGraph {
         this.taskScheduler().restoreTasks();
 
         this.started = true;
-    }
-
-    private void initRoleStateMachine(Id serverId) {
-        HugeConfig conf = this.configuration;
-        Config roleConfig = new RoleElectionConfig(serverId.toString(),
-                                                   conf.get(RoleElectionOptions.NODE_EXTERNAL_URL),
-                                                   conf.get(RoleElectionOptions.EXCEEDS_FAIL_COUNT),
-                                                   conf.get(
-                                                           RoleElectionOptions.RANDOM_TIMEOUT_MILLISECOND),
-                                                   conf.get(
-                                                           RoleElectionOptions.HEARTBEAT_INTERVAL_SECOND),
-                                                   conf.get(RoleElectionOptions.MASTER_DEAD_TIMES),
-                                                   conf.get(
-                                                           RoleElectionOptions.BASE_TIMEOUT_MILLISECOND));
-        ClusterRoleStore roleStore = new StandardClusterRoleStore(this.params);
-        this.roleElectionStateMachine = new StandardRoleElectionStateMachine(roleConfig, roleStore);
     }
 
     @Override
@@ -1254,11 +1222,6 @@ public class StandardHugeGraph implements HugeGraph {
     public AuthManager authManager() {
         // this.authManager.initSchemaIfNeeded();
         return this.authManager;
-    }
-
-    @Override
-    public RoleElectionStateMachine roleElectionStateMachine() {
-        return this.roleElectionStateMachine;
     }
 
     @Override

@@ -373,7 +373,7 @@ public class MultiGraphsTest extends BaseCoreTest {
     }
 
     @Test
-    public void testOpenGraphWithDeprecatedTaskSchedulerType() {
+    public void testOpenGraphWithRemovedTaskSchedulerType() {
         HugeGraph graph = openGraphWithBackend("legacySchedulerType",
                                                "rocksdb", "binary",
                                                "task.scheduler_type", "local");

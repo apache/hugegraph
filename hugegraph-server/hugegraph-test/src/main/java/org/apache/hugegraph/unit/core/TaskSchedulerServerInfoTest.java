@@ -156,9 +156,11 @@ public class TaskSchedulerServerInfoTest {
     }
 
     @Test
-    public void testGraphManagerWarnsOnRoleElection() {
+    public void testGraphManagerIgnoresRemovedRoleElectionOptions() {
+        // Old rest-server.properties files may still set these keys
         PropertiesConfiguration conf = new PropertiesConfiguration();
-        conf.setProperty(ServerOptions.ENABLE_SERVER_ROLE_ELECTION.name(), true);
+        conf.setProperty("server.role_election", true);
+        conf.setProperty("server.role.fail_count", 5);
         HugeConfig config = new HugeConfig(conf);
 
         GraphManager manager = new GraphManager(config, new EventHub("test"));
