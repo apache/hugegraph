@@ -1269,6 +1269,57 @@ mod graph_frame_tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("catalog"));
     }
+
+    #[tokio::test]
+    async fn table_catalog_fault_restores_memory_and_retries() {
+        let path =
+            std::env::temp_dir().join(format!("hg-table-catalog-fault-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let catalog = path.with_extension("catalog");
+        let _ = std::fs::remove_file(&catalog);
+        let service = super::SessionService::open(&path).unwrap();
+        let request = |method, name: &str| {
+            tonic::Request::new(super::generated::TableReq {
+                method,
+                table_name: name.into(),
+                ..Default::default()
+            })
+        };
+        <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, request(super::generated::TableMethod::Create as i32, "stable"),
+        )
+        .await
+        .unwrap();
+        std::fs::remove_file(&catalog).unwrap();
+        std::fs::create_dir(&catalog).unwrap();
+        assert!(<super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, request(super::generated::TableMethod::Create as i32, "transient"),
+        )
+        .await
+        .is_err());
+        let stable = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, request(super::generated::TableMethod::Exists as i32, "stable"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stable.into_inner().status.unwrap().code, 0);
+        std::fs::remove_dir(&catalog).unwrap();
+        <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &service, request(super::generated::TableMethod::Create as i32, "transient"),
+        )
+        .await
+        .unwrap();
+        drop(service);
+        let reopened = super::SessionService::open(&path).unwrap();
+        let recovered = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &reopened, request(super::generated::TableMethod::Exists as i32, "transient"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(recovered.into_inner().status.unwrap().code, 0);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(catalog);
+    }
 }
 
 #[tonic::async_trait]
@@ -1561,12 +1612,19 @@ impl generated::hg_store_session_server::HgStoreSession for SessionService {
                 return Err(tonic::Status::invalid_argument("unknown table method"));
             }
         };
-        if let Err(error) = self.persist_catalog(&names) {
-            *names = previous;
-            return Err(tonic::Status::new(
-                classify_failure(&error.to_string()),
-                error.to_string(),
-            ));
+        if matches!(
+            method,
+            generated::TableMethod::Create
+                | generated::TableMethod::Delete
+                | generated::TableMethod::Drop
+        ) {
+            if let Err(error) = self.persist_catalog(&names) {
+                *names = previous;
+                return Err(tonic::Status::new(
+                    classify_failure(&error.to_string()),
+                    error.to_string(),
+                ));
+            }
         }
         Ok(tonic::Response::new(response))
     }
