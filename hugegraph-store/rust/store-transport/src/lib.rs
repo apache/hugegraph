@@ -1819,22 +1819,50 @@ pub fn batch_command(bytes: &[u8]) -> Result<hugegraph_store_core::StoreRequest,
             }
             let mut puts = Vec::new();
             let mut deletes = Vec::new();
+            let mut prefixes = Vec::new();
+            let mut ranges = Vec::new();
             for entry in entries {
                 let key = entry.start_key.map(|x| x.key).unwrap_or_default();
                 match entry.op_type {
                     0 | 1 => puts.push((key, entry.value)),
                     2 | 3 => deletes.push(key),
-                    4..=6 => return Err("batch operation type is not implemented".into()),
+                    4 => prefixes.push(key),
+                    5 => ranges.push((key, entry.end_key.map(|x| x.key).unwrap_or_default())),
+                    6 => return Err("batch merge operation is not implemented".into()),
                     _ => return Err("unknown batch operation type".into()),
                 }
             }
-            if !puts.is_empty() && !deletes.is_empty() {
+            let categories = [
+                !puts.is_empty(),
+                !deletes.is_empty(),
+                !prefixes.is_empty(),
+                !ranges.is_empty(),
+            ]
+            .into_iter()
+            .filter(|present| *present)
+            .count();
+            if categories != 1 {
                 return Err("mixed batch operations require session context".into());
             }
             if !puts.is_empty() {
                 Ok(hugegraph_store_core::StoreRequest::BatchPut { entries: puts })
-            } else {
+            } else if !deletes.is_empty() {
                 Ok(hugegraph_store_core::StoreRequest::BatchDelete { keys: deletes })
+            } else if !prefixes.is_empty() {
+                if prefixes.len() != 1 {
+                    return Err("multiple prefix deletes require session context".into());
+                }
+                Ok(hugegraph_store_core::StoreRequest::BatchDeletePrefix {
+                    prefix: prefixes.remove(0),
+                })
+            } else if !ranges.is_empty() {
+                if ranges.len() != 1 {
+                    return Err("multiple range deletes require session context".into());
+                }
+                let (start, end) = ranges.remove(0);
+                Ok(hugegraph_store_core::StoreRequest::BatchDeleteRange { start, end })
+            } else {
+                Err("empty batch operation".into())
             }
         }
         Some(generated::batch_req::Requests::RollbackReq(_)) => {
@@ -1889,7 +1917,7 @@ mod batch_tests {
     }
 
     #[test]
-    fn batch_delete_maps_and_rejects_unimplemented_range() {
+    fn batch_delete_maps_and_maps_range() {
         let delete = generated::BatchReq {
             header: None,
             batch_id: "delete".into(),
@@ -1933,7 +1961,11 @@ mod batch_tests {
                 },
             )),
         };
-        assert!(batch_command(&prost::Message::encode_to_vec(&range)).is_err());
+        assert!(matches!(
+            batch_command(&prost::Message::encode_to_vec(&range)).unwrap(),
+            hugegraph_store_core::StoreRequest::BatchDeleteRange { start, end }
+                if start == b"a" && end == b"z"
+        ));
     }
 }
 
@@ -1963,7 +1995,12 @@ pub fn decode_batch_action(bytes: &[u8]) -> Result<BatchAction, String> {
                             value: e.value,
                         }),
                         2 | 3 => Ok(hugegraph_store_core::BatchMutation::Delete { key }),
-                        4..=6 => Err("batch operation type is not implemented".to_string()),
+                        4 => Ok(hugegraph_store_core::BatchMutation::DeletePrefix { prefix: key }),
+                        5 => Ok(hugegraph_store_core::BatchMutation::DeleteRange {
+                            start: key,
+                            end: e.end_key.map(|k| k.key).unwrap_or_default(),
+                        }),
+                        6 => Err("batch merge operation is not implemented".to_string()),
                         _ => Err("unknown batch operation type".to_string()),
                     }
                 })
@@ -2006,6 +2043,18 @@ impl SessionTransactions {
             .entry(id)
             .or_default()
             .push(hugegraph_store_core::BatchMutation::Delete { key });
+    }
+    pub fn stage_delete_prefix(&mut self, id: String, prefix: Vec<u8>) {
+        self.pending
+            .entry(id)
+            .or_default()
+            .push(hugegraph_store_core::BatchMutation::DeletePrefix { prefix });
+    }
+    pub fn stage_delete_range(&mut self, id: String, start: Vec<u8>, end: Vec<u8>) {
+        self.pending
+            .entry(id)
+            .or_default()
+            .push(hugegraph_store_core::BatchMutation::DeleteRange { start, end });
     }
     pub fn commit(
         &mut self,
@@ -2080,6 +2129,12 @@ pub fn apply_session_batch(
                     }
                     hugegraph_store_core::BatchMutation::Delete { key } => {
                         txns.stage_delete(id.to_string(), key)
+                    }
+                    hugegraph_store_core::BatchMutation::DeletePrefix { prefix } => {
+                        txns.stage_delete_prefix(id.to_string(), prefix)
+                    }
+                    hugegraph_store_core::BatchMutation::DeleteRange { start, end } => {
+                        txns.stage_delete_range(id.to_string(), start, end)
                     }
                 }
             }

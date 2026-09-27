@@ -202,6 +202,8 @@ pub struct DurableStore {
 pub enum BatchMutation {
     Put { key: Vec<u8>, value: Vec<u8> },
     Delete { key: Vec<u8> },
+    DeletePrefix { prefix: Vec<u8> },
+    DeleteRange { start: Vec<u8>, end: Vec<u8> },
 }
 
 impl DurableStore {
@@ -260,6 +262,32 @@ impl DurableStore {
                     self.inner.put(key.clone(), value.clone());
                 }
                 BatchMutation::Delete { key } => self.inner.rollback(key),
+                BatchMutation::DeletePrefix { prefix } => {
+                    let keys: Vec<_> = self
+                        .inner
+                        .0
+                        .keys()
+                        .filter(|key| key.starts_with(prefix))
+                        .cloned()
+                        .collect();
+                    for key in keys {
+                        self.inner.rollback(&key);
+                    }
+                }
+                BatchMutation::DeleteRange { start, end } => {
+                    let keys: Vec<_> = self
+                        .inner
+                        .0
+                        .keys()
+                        .filter(|key| {
+                            key.as_slice() >= start.as_slice() && key.as_slice() < end.as_slice()
+                        })
+                        .cloned()
+                        .collect();
+                    for key in keys {
+                        self.inner.rollback(&key);
+                    }
+                }
             }
         }
         if let Err(error) = self.persist() {
@@ -309,7 +337,7 @@ impl DurableStore {
 
 #[cfg(test)]
 mod durable_tests {
-    use super::DurableStore;
+    use super::{BatchMutation, DurableStore};
     #[test]
     fn durable_restart_round_trip() {
         let path = std::env::temp_dir().join(format!("hg-store-{}.img", std::process::id()));
@@ -377,6 +405,40 @@ mod durable_tests {
     }
 
     #[test]
+    fn prefix_and_range_delete_match_independent_oracle() {
+        let path =
+            std::env::temp_dir().join(format!("hg-delete-oracle-{}.img", std::process::id()));
+        let mut store = DurableStore::open(&path).unwrap();
+        let entries = [
+            (b"pre-a".to_vec(), b"1".to_vec()),
+            (b"pre-b".to_vec(), b"2".to_vec()),
+            (b"mid".to_vec(), b"3".to_vec()),
+            (b"z".to_vec(), b"4".to_vec()),
+        ];
+        store.commit_batch(&entries).unwrap();
+        let mut oracle = std::collections::BTreeMap::from(entries);
+        store
+            .apply_batch(&[BatchMutation::DeletePrefix {
+                prefix: b"pre".to_vec(),
+            }])
+            .unwrap();
+        oracle.retain(|key, _| !key.starts_with(b"pre"));
+        store
+            .apply_batch(&[BatchMutation::DeleteRange {
+                start: b"mid".to_vec(),
+                end: b"zz".to_vec(),
+            }])
+            .unwrap();
+        oracle.retain(|key, _| key.as_slice() < b"mid" || key.as_slice() >= b"zz");
+        assert_eq!(store.entries(), oracle.into_iter().collect::<Vec<_>>());
+        assert_eq!(
+            DurableStore::open(&path).unwrap().entries(),
+            store.entries()
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn restore_image_rejects_truncation_without_mutating_store() {
         let path = std::env::temp_dir().join(format!("hg-recover-{}.img", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -398,6 +460,8 @@ pub enum StoreRequest {
     Rollback { key: Vec<u8> },
     BatchPut { entries: Vec<(Vec<u8>, Vec<u8>)> },
     BatchDelete { keys: Vec<Vec<u8>> },
+    BatchDeletePrefix { prefix: Vec<u8> },
+    BatchDeleteRange { start: Vec<u8>, end: Vec<u8> },
 }
 
 pub enum StoreResponse {
@@ -419,6 +483,12 @@ impl DurableStore {
             StoreRequest::BatchDelete { keys } => {
                 self.delete_batch(&keys).map(|_| StoreResponse::Ack)
             }
+            StoreRequest::BatchDeletePrefix { prefix } => self
+                .apply_batch(&[BatchMutation::DeletePrefix { prefix }])
+                .map(|_| StoreResponse::Ack),
+            StoreRequest::BatchDeleteRange { start, end } => self
+                .apply_batch(&[BatchMutation::DeleteRange { start, end }])
+                .map(|_| StoreResponse::Ack),
         }
     }
 }
