@@ -558,3 +558,6 @@ next_action: add network-level batch RPC fault/recovery coverage and then contin
 
 2026-09-27: Added a real TCP tonic-client Batch RPC fault/retry/reopen test. It stages two entries over the generated client, turns the image path into a directory before Commit, observes the network error, restores the path, retries the same batch and verifies stable plus both batch values after reopen. Workspace passed 17 core + 8 node + 43 transport = 68 tests. Evidence `network-batch-fault-recovery-20260927.log`, code commit `fb8300e95`.
 next_action: audit and implement the next uncovered production contract (Batch operation types, table/graph namespaces, response semantics and remaining cluster/raft boundaries are still incomplete).
+
+2026-09-27: Implemented `HgStoreSession.Clean` against the shared durable backend instead of returning an empty default response. The contract test seeds data, invokes Clean and verifies the store is empty; workspace passed 17 core + 8 node + 43 transport = 68 tests. Evidence `session-clean-regression-20260927.log`, commit `$(git rev-parse HEAD)`.
+next_action: implement and test Table/Graph method semantics and explicit unsupported/error responses; continue the remaining production contract matrix.
