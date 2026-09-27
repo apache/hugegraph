@@ -633,3 +633,6 @@ next_action: audit remaining Java Store production APIs and end-to-end requireme
 
 2026-09-27: Closed a data-plane gap found in the transport audit: Session Get2 now returns ValueResponse bytes and missing status, preserving qualified table lookup. Shared and tonic Get2 tests assert the actual value, not only status. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `get2-value-response-20260927.log`, code commit `16cee0461`.
 next_action: audit remaining default/empty production responses, prioritizing Query and scan-state behavior against Java endpoints; add meaningful response assertions and differential traces.
+
+2026-09-27: Closed the query data-plane gap: QueryServiceImpl can share the durable backend, query0 returns qualified table-filtered Kv data with offset/limit, and count reports the filtered cardinality. A differential test seeds tables t/u and verifies isolation and pagination. Workspace passed 24 core + 8 node + 55 transport = 87 tests. Evidence `query-data-plane-20260927.log`, code commit `35cdfc309`.
+next_action: audit remaining default/empty production responses (scan state, streaming query, graph/session mutations), then add the next end-to-end data-plane slice with Java behavior comparison.
