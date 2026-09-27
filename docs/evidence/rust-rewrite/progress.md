@@ -627,3 +627,6 @@ next_action: extend Java differential validation to clean/move partition instruc
 
 2026-09-27: Compared Java PartitionInstructionProcessor clean/move behavior and added Rust clean transition (op 0x65) alongside transfer semantics. Two-node replay now applies split, transfer and clean identically; an invalid clean leaves both partition and command-log snapshots unchanged. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `clean-move-differential-20260927.log`, code commit `c971232f0`.
 next_action: audit remaining Java Store production APIs and add differential coverage for snapshot/restore, task de-duplication and failure injection; then close remaining protocol and end-to-end gaps.
+
+2026-09-27: Matched Java preCheckTaskId semantics by rejecting a replicated command whose request/task identity already exists at another log index; same-index replay remains idempotent. Two-replica differential test confirms duplicate task and invalid clean failures leave both snapshots identical. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `task-dedup-differential-20260927.log`, code commit `4139dc23e`.
+next_action: audit remaining Java Store production APIs and end-to-end requirements, prioritizing missing data-plane behavior (query/graph/session responses) and failure injection before final completion audit.
