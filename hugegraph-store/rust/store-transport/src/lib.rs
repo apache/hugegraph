@@ -2313,6 +2313,11 @@ mod shared_tests {
     fn shared_session_opens() {
         let p = std::env::temp_dir().join(format!("hg-shared-{}.img", std::process::id()));
         let s = SharedSession::open(&p).unwrap();
+        s.backend()
+            .lock()
+            .unwrap()
+            .commit_put(qualify_table_name_key("t", b"k"), b"value".to_vec())
+            .unwrap();
         assert!(s.backend().lock().is_ok());
         let _ = std::fs::remove_file(p);
     }
@@ -2328,13 +2333,16 @@ impl SharedSession {
             .map_err(|_| "backend lock poisoned")?
             .get(&key);
         let status = generated::ResStatus {
-            code: 0,
-            msg: "ok".into(),
+            code: if value.is_some() { 0 } else { 2 },
+            msg: if value.is_some() { "ok" } else { "missing" }.into(),
         };
-        let _ = value;
         Ok(generated::FeedbackRes {
             status: Some(status),
-            responses: None,
+            responses: Some(generated::feedback_res::Responses::ValueResponse(
+                generated::ValueResponse {
+                    value: value.unwrap_or_default(),
+                },
+            )),
         })
     }
 }
@@ -2345,6 +2353,11 @@ mod shared_get_tests {
     fn get2_handler_decodes() {
         let p = std::env::temp_dir().join(format!("hg-sget-{}.img", std::process::id()));
         let s = SharedSession::open(&p).unwrap();
+        s.backend()
+            .lock()
+            .unwrap()
+            .commit_put(qualify_table_name_key("t", b"k"), b"value".to_vec())
+            .unwrap();
         let r = generated::GetReq {
             header: None,
             tk: Some(generated::Tk {
@@ -2353,7 +2366,14 @@ mod shared_get_tests {
                 code: 0,
             }),
         };
-        assert!(s.handle_get2(&prost::Message::encode_to_vec(&r)).is_ok());
+        let response = s.handle_get2(&prost::Message::encode_to_vec(&r)).unwrap();
+        assert_eq!(response.status.unwrap().code, 0);
+        match response.responses.unwrap() {
+            generated::feedback_res::Responses::ValueResponse(value) => {
+                assert_eq!(value.value, b"value")
+            }
+            _ => panic!("expected value response"),
+        }
         let _ = std::fs::remove_file(p);
     }
 }
@@ -2834,6 +2854,12 @@ mod tonic_session_tests {
     async fn get2_trait_round_trip() {
         let p = std::env::temp_dir().join(format!("hg-ts-{}.img", std::process::id()));
         let s = SessionService::open(&p).unwrap();
+        s.shared
+            .backend
+            .lock()
+            .unwrap()
+            .commit_put(qualify_table_name_key("t", b"k"), b"value".to_vec())
+            .unwrap();
         let r = generated::GetReq {
             header: None,
             tk: Some(generated::Tk {
@@ -2848,7 +2874,14 @@ mod tonic_session_tests {
         )
         .await
         .unwrap();
-        assert!(out.into_inner().status.is_some());
+        let out = out.into_inner();
+        assert_eq!(out.status.unwrap().code, 0);
+        match out.responses.unwrap() {
+            generated::feedback_res::Responses::ValueResponse(value) => {
+                assert_eq!(value.value, b"value")
+            }
+            _ => panic!("expected value response"),
+        }
         let _ = std::fs::remove_file(p);
     }
 }
