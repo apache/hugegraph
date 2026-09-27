@@ -1202,6 +1202,73 @@ mod graph_frame_tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("catalog"));
     }
+
+    #[tokio::test]
+    async fn live_table_graph_rpc_catalog_recovery() {
+        let path = std::env::temp_dir().join(format!("hg-live-catalog-{}.img", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("catalog"));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let service = super::SessionService::open(&path).unwrap();
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        let task = tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(
+                    super::generated::hg_store_session_server::HgStoreSessionServer::new(service),
+                )
+                .serve_with_incoming(incoming)
+                .await
+                .unwrap();
+        });
+        let mut client = super::generated::hg_store_session_client::HgStoreSessionClient::connect(
+            format!("http://{}", addr),
+        )
+        .await
+        .unwrap();
+        let create = client
+            .table(super::generated::TableReq {
+                method: super::generated::TableMethod::Create as i32,
+                table_name: "network-table".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(create.into_inner().status.unwrap().code, 0);
+        let exists = client
+            .table(super::generated::TableReq {
+                method: super::generated::TableMethod::Exists as i32,
+                table_name: "network-table".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(exists.into_inner().status.unwrap().code, 0);
+        let graph = client
+            .graph(super::generated::GraphReq {
+                method: super::generated::GraphMethod::Delete as i32,
+                graph_name: "network-graph".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(graph.into_inner().status.unwrap().code, 0);
+        task.abort();
+        let reopened = super::SessionService::open(&path).unwrap();
+        let status = <super::SessionService as super::generated::hg_store_session_server::HgStoreSession>::table(
+            &reopened,
+            tonic::Request::new(super::generated::TableReq {
+                method: super::generated::TableMethod::Exists as i32,
+                table_name: "network-table".into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(status.into_inner().status.unwrap().code, 0);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("catalog"));
+    }
 }
 
 #[tonic::async_trait]
