@@ -624,3 +624,6 @@ next_action: add a two-node replay test that transfers the same command stream b
 
 2026-09-27: Added two-node StateService replay coverage. Independent primary/follower instances apply the same split and transfer command stream and produce identical partition and command-log snapshots. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `two-node-replay-20260927.log`, code commit `1988d8e94`.
 next_action: extend Java differential validation to clean/move partition instructions and verify command failure leaves both replicas identical; then audit remaining Store production APIs and end-to-end gaps.
+
+2026-09-27: Compared Java PartitionInstructionProcessor clean/move behavior and added Rust clean transition (op 0x65) alongside transfer semantics. Two-node replay now applies split, transfer and clean identically; an invalid clean leaves both partition and command-log snapshots unchanged. Workspace passed 24 core + 8 node + 54 transport = 86 tests. Evidence `clean-move-differential-20260927.log`, code commit `c971232f0`.
+next_action: audit remaining Java Store production APIs and add differential coverage for snapshot/restore, task de-duplication and failure injection; then close remaining protocol and end-to-end gaps.
