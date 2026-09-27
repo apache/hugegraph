@@ -6,6 +6,28 @@ pub trait StoreBackend {
     fn rollback(&mut self, key: &[u8]);
 }
 
+pub fn qualify_table_key(table: &[u8], key: &[u8]) -> Vec<u8> {
+    let mut qualified = b"HGK1".to_vec();
+    qualified.extend_from_slice(&(table.len() as u32).to_le_bytes());
+    qualified.extend_from_slice(table);
+    qualified.extend_from_slice(key);
+    qualified
+}
+
+pub fn split_table_key(qualified: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    if qualified.len() < 8 || &qualified[..4] != b"HGK1" {
+        return None;
+    }
+    let table_len = u32::from_le_bytes(qualified[4..8].try_into().ok()?) as usize;
+    if qualified.len() < 8 + table_len {
+        return None;
+    }
+    Some((
+        qualified[8..8 + table_len].to_vec(),
+        qualified[8 + table_len..].to_vec(),
+    ))
+}
+
 #[derive(Default)]
 pub struct InMemoryStore(std::collections::BTreeMap<Vec<u8>, Vec<u8>>);
 
@@ -106,6 +128,26 @@ impl StoreBackend for InMemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn qualified_table_keys_isolate_same_user_key_and_reject_corruption() {
+        let first = qualify_table_key(b"vertices", b"same");
+        let second = qualify_table_key(b"edges", b"same");
+        assert_ne!(first, second);
+        assert_eq!(
+            split_table_key(&first),
+            Some((b"vertices".to_vec(), b"same".to_vec()))
+        );
+        assert_eq!(
+            split_table_key(&second),
+            Some((b"edges".to_vec(), b"same".to_vec()))
+        );
+        let mut corrupt = first.clone();
+        corrupt[0] = b'X';
+        assert!(split_table_key(&corrupt).is_none());
+        corrupt.truncate(7);
+        assert!(split_table_key(&corrupt).is_none());
+    }
+
     #[test]
     fn commit_and_rollback_visibility() {
         let mut s = InMemoryStore::default();
