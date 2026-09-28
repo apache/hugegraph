@@ -30,7 +30,9 @@ import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.traversal.optimize.Text;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.GraphReadMode;
 import org.apache.hugegraph.type.define.SchemaStatus;
+import org.apache.hugegraph.type.define.WriteType;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
@@ -41,6 +43,7 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 public class SourceIndexCoverageTest extends BaseCoreTest {
@@ -101,6 +104,48 @@ public class SourceIndexCoverageTest extends BaseCoreTest {
         this.nameIndex("coverageB");
         Assert.assertEquals(expected,
                             graph().traversal().V().has("coverageName", "same").toSet());
+    }
+
+    @Test
+    public void testInvalidValuePrecedesPartialCoverageError() {
+        this.addVertices();
+        ConditionQuery invalid = new ConditionQuery(HugeType.VERTEX);
+        invalid.query(Condition.eq(graph().propertyKey("coverageScore").id(), "not-an-int"));
+        Assert.assertThrows(NoIndexException.class, () -> graph().vertices(invalid).hasNext());
+
+        graph().schema().indexLabel("coverageAByScore").onV("coverageA")
+               .by("coverageScore").secondary().create();
+        Assert.assertEquals(ImmutableList.of(), ImmutableList.copyOf(graph().vertices(invalid)));
+
+        ConditionQuery valid = new ConditionQuery(HugeType.VERTEX);
+        valid.query(Condition.eq(graph().propertyKey("coverageScore").id(), 10));
+        Assert.assertThrows(NoIndexException.class, () -> graph().vertices(valid).hasNext());
+    }
+
+    @Test
+    public void testOlapOnlyQueryAcrossLabels() {
+        // The existing OLAP secondary-property query also returns no results
+        // on HStore master; its backend coverage is tracked in #3090.
+        Assume.assumeFalse("HStore OLAP secondary query is tracked in #3090",
+                           "hstore".equals(graph().backend()));
+        Assume.assumeTrue("Not support olap properties",
+                          storeFeatures().supportsOlapProperties());
+        graph().schema().propertyKey("coverageOlap").asText()
+               .writeType(WriteType.OLAP_SECONDARY).create();
+        Set<Vertex> expected = this.addVertices();
+        for (Vertex vertex : expected) {
+            graph().addVertex(T.id, vertex.id(), "coverageOlap", "same");
+        }
+        this.commitTx();
+
+        GraphReadMode previous = graph().readMode();
+        graph().readMode(GraphReadMode.ALL);
+        try {
+            Assert.assertEquals(expected,
+                                graph().traversal().V().has("coverageOlap", "same").toSet());
+        } finally {
+            graph().readMode(previous);
+        }
     }
 
     @Test

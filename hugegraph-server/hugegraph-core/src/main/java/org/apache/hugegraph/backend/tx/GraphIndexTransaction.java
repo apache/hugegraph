@@ -814,7 +814,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 matchedIndexes.add(index);
             }
         }
-        if (requireCompleteCoverage && !matchedIndexes.isEmpty()) {
+        // An invalid value returns no results after an index is found. Keep
+        // that result before deciding whether index coverage is complete.
+        if (requireCompleteCoverage && !matchedIndexes.isEmpty() &&
+            validQueryConditionValues(this.graph(), query)) {
             this.checkIndexCoverage(query, schemaLabels, matchedIndexes);
         }
         return matchedIndexes;
@@ -829,6 +832,11 @@ public class GraphIndexTransaction extends AbstractTransaction {
         if (this.graph().readMode().showOlap()) {
             // OLAP properties are shared rather than declared on every label.
             requiredProperties.removeIf(id -> this.graph().propertyKey(id).olap());
+        }
+        if (requiredProperties.isEmpty()) {
+            // A shared OLAP index can match several labels, while MatchedIndex
+            // deduplicates those matches by index labels alone.
+            return;
         }
         Set<Id> covered = new HashSet<>();
         for (MatchedIndex index : indexes) {
