@@ -1336,6 +1336,32 @@ yaml_case nameless "authenticator value that is a nested mapping" \
 yaml_case nameless "explicit key root mapping is refused" \
     '? authentication' \
     ': authenticator: org.apache.hugegraph.auth.StandardAuthenticator'
+# A byte order mark frames the stream; it is not part of the first key, and
+# SnakeYAML resolves `<BOM>authentication` to the root mapping.  Compared
+# byte-for-byte the mark made the key unknown, so the file that does
+# authenticate was reported as having no mapping at all.
+yaml_case named "byte order mark before the root key is not part of it" \
+    $'\xef\xbb\xbf''authentication: {authenticator: com.example.BomAuth}'
+# A root key preceded by a tag, an anchor or an alias still resolves to
+# `authentication` for SnakeYAML, so the server does build the mapping.  This
+# reader resolves no node properties, and answering `none` for such a file is
+# the one-sided direction, so it is refused the way an explicit key is.
+yaml_case nameless "tagged root key is refused, not called unauthenticated" \
+    '!!str authentication: {authenticator: com.example.TaggedAuth}'
+yaml_case nameless "anchored root key is refused, not called unauthenticated" \
+    '&k authentication: {authenticator: com.example.AnchoredAuth}'
+yaml_case nameless "aliased root key is refused, not called unauthenticated" \
+    '*a authentication: {authenticator: com.example.AliasedAuth}'
+# Refusing a file because of a node property has a cost, so the refusal covers
+# only the one key this reader is asked about.  A property in front of a
+# different root key is an ordinary sibling, and a deployment that carries one
+# beside a working authentication mapping must still be read as named.
+yaml_case named "node property on a different root key stays an ordinary sibling" \
+    '!!str host: 0.0.0.0' \
+    'authentication:' \
+    '  authenticator: com.example.SiblingAuth'
+yaml_case nameless "tag and anchor together on the root key are refused" \
+    '!!str &k authentication: {authenticator: com.example.TaggedAuth}'
 # A root mapping written indented below a document marker is still the root to
 # Settings.read().  Reporting `none` for it is the opposite mismatch: REST would
 # start open beside a Gremlin that authenticates.
@@ -1716,6 +1742,18 @@ mkdir -p "${crlf_yaml_dir}/conf"
         "${yaml_cr}" "${yaml_cr}" > "${state_file}"
     [[ "$(yaml_auth_state)" == "nameless" ]] || {
         echo "a CRLF mapping without one read as [$(yaml_auth_state)]" >&2
+        exit 1
+    }
+
+    # An empty line never ends a block scalar, and on a CRLF file the record
+    # splits at the CR and leaves exactly such an empty segment after every
+    # line.  Closing the scalar there read `authenticator: >-\r` as an empty
+    # value, so a Windows-saved config that does name a class stopped its own
+    # boot while the same file written with LF read `named`.
+    printf "host: 0.0.0.0%sauthentication:%s  authenticator: >-%s    com.example.CrlfBlockAuth%s" \
+        "${yaml_cr}" "${yaml_cr}" "${yaml_cr}" "${yaml_cr}" > "${state_file}"
+    [[ "$(yaml_auth_state)" == "named" ]] || {
+        echo "a CRLF block-scalar authenticator read as [$(yaml_auth_state)]" >&2
         exit 1
     }
 

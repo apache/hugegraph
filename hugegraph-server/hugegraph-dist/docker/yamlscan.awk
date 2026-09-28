@@ -84,6 +84,24 @@
 #      root mapping this reader does not walk.  Settings.read() still builds
 #      the authentication mapping from it, so answering `none` would start REST
 #      open beside a Gremlin that authenticates; it is refused.
+#  11. a UTF-8 byte order mark before the first line is stream framing, not
+#      part of the key: SnakeYAML skips it, so `<BOM>authentication` is the
+#      root mapping.  Carrying the mark into the key comparison missed it and
+#      answered `none`, which is the unsafe direction, so it is dropped from the
+#      first record.
+#  12. a root key preceded by a node property (`!!str authentication`, `&k
+#      authentication`, `*a authentication`) resolves to `authentication` for
+#      SnakeYAML and does open the Gremlin mapping.  Resolving node properties
+#      is not what this reader does, so like rule 10 it is refused rather than
+#      called unauthenticated.  Only a property in front of that one key is
+#      refused: `&defaults handler_pool:` or `!!str host:` is an ordinary root
+#      sibling whose own mapping the server never reads as authentication, and
+#      refusing a file because of one would stop a container that boots.
+#  13. a block scalar is not ended by an empty line -- YAML keeps an empty line
+#      inside it as content.  Splitting a CRLF record at the CR (rule 7) leaves
+#      an empty segment behind, and closing the scalar there read
+#      `authenticator: >-\r` as an empty value, so a Windows-saved config that
+#      does name a class stopped its own boot.
 #
 # Quote characters come from sprintf so this file holds no literal apostrophe:
 # an awk program written into a single-quoted shell string breaks on one, and
@@ -97,6 +115,19 @@ function rtrim(s) { sub(/[ \t]+$/, "", s); return s }
 function trim(s) { return rtrim(ltrim(s)) }
 
 function is_quote(c) { return c == apos() || c == dquo() }
+
+# Drop a leading UTF-8 byte order mark from a record.  A multibyte-aware awk
+# hands the mark over as the single character U+FEFF and a byte-oriented one as
+# the three bytes EF BB BF, so both spellings are tried and only the one this
+# reader actually produced can match -- the guards on length keep a reader that
+# produced neither from stripping a byte off a legitimate first key.
+function strip_bom(s,    mark) {
+    mark = sprintf("%c%c%c", 239, 187, 191)
+    if (length(mark) == 3 && substr(s, 1, 3) == mark) return substr(s, 4)
+    mark = sprintf("%c", 65279)
+    if (length(mark) == 1 && substr(s, 1, 1) == mark) return substr(s, 2)
+    return s
+}
 
 # Remove an unquoted trailing comment together with the whitespace that has to
 # precede the `#` for it to be a comment rather than part of a scalar.
@@ -435,6 +466,20 @@ function unanchor(s) {
     return trim(s)
 }
 
+# One or more node properties may open a key -- `!!str`, `&label`, `*alias` --
+# and SnakeYAML resolves them off the key rather than reading them as part of its
+# text, so `&k authentication` is the authentication key.  Stripping them lets
+# the root comparison below say which key the server is actually building.
+function strip_node_props(s,    f) {
+    s = trim(s)
+    while (1) {
+        f = substr(s, 1, 1)
+        if (f != "!" && f != "&" && f != "*") break
+        sub(/^[^ \t]+[ \t]*/, "", s)
+    }
+    return s
+}
+
 # Walk the bytes of a line that sits inside a flow collection or a quoted
 # scalar opened on an earlier line, updating SP (collections still open) and SQ
 # (the quote still open).  Braces inside a quoted scalar are text, and a
@@ -494,6 +539,7 @@ BEGIN {
     PENDING = 0
     PENDING_IND = 0
     EXPLICIT = 0
+    ROOT_PROP = 0
     NESTED_VAL = 0
 }
 
@@ -506,6 +552,12 @@ function finish_block() {
 
 function handle_line(raw,    line, ind, v, t, f) {
     if (BLOCK) {
+        # An empty line is content inside a block scalar, never its end.  On a
+        # CRLF file the record splits at the CR and leaves exactly such an empty
+        # segment after every line, so closing here ended `authenticator: >-`
+        # before the class line below it had been read and a config that does
+        # name a class was refused.
+        if (trim(raw) == "") return
         # Deeper than the key means the line is still scalar content; anything
         # else ends the scalar and is ordinary content again.
         if (indent_of(raw) > BLOCK_IND) {
@@ -564,6 +616,23 @@ function handle_line(raw,    line, ind, v, t, f) {
     if ((ROOT_IND < 0 || ind == ROOT_IND) &&
         (t == "?" || substr(t, 1, 2) == "? ")) {
         EXPLICIT = 1
+        return
+    }
+
+    # A root key preceded by a tag, an anchor or an alias is the authentication
+    # key to SnakeYAML -- `!!str authentication` and `&k authentication` both
+    # resolve to it and the server builds the mapping -- but resolving node
+    # properties is outside this reader and the sibling line below it would set
+    # the root indentation, so the mapping went unnoticed and the answer came
+    # out `none`.  That is the direction which starts REST open beside a Gremlin
+    # that authenticates, so it is refused the way an explicit key is.  A
+    # property in front of a different key is an ordinary root sibling, so it
+    # falls through and keeps setting the indentation and closing mappings the
+    # way an untagged one does.
+    if ((ROOT_IND < 0 || ind == ROOT_IND) && split_pair(line) &&
+        substr(unquote(K_TXT), 1, 1) ~ /^[*&!]/ &&
+        strip_node_props(unquote(K_TXT)) == "authentication") {
+        ROOT_PROP = 1
         return
     }
 
@@ -694,7 +763,11 @@ function handle_line(raw,    line, ind, v, t, f) {
     # gives every spelling its own line; the CR that a Linux reader leaves at
     # the end of a CRLF record simply yields the empty segment that the blank
     # check drops.
-    seg_n = split($0, seg, /\r/)
+    # A byte order mark belongs to the stream, not to the first key, so it is
+    # dropped before the record is split; see rule 11 above.
+    rec = $0
+    if (NR == 1) rec = strip_bom(rec)
+    seg_n = split(rec, seg, /\r/)
     for (seg_i = 1; seg_i <= seg_n; seg_i++) handle_line(seg[seg_i])
 }
 
@@ -709,6 +782,8 @@ END {
         RESULT = refuse("a flow collection or quoted scalar left open in the authentication mapping")
     else if (EXPLICIT)
         RESULT = refuse("an explicit key, question mark then space, opening a root mapping")
+    else if (ROOT_PROP)
+        RESULT = refuse("the authentication key preceded by a tag, an anchor or an alias")
     else if (NESTED_VAL)
         RESULT = refuse("an authenticator whose value is a nested mapping or collection")
     else if (AUTH_BLOCKS == 0) RESULT = "none"
