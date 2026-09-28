@@ -1045,29 +1045,26 @@ printf '\f\f\ngraph=a\n' > "${ff_file}"
 [[ "$(get_prop_encoded 'graph' "${ff_file}")" == "a" ]]
 assert_line_count 1 '^graph=a$' "${ff_file}"
 
-# has-mode answers "is this key defined" without confusing an empty definition
-# with no definition, which is what an append guard needs: appending a default
-# on top of `auth.authenticator=` leaves the empty first definition in force.
-has_file="${test_dir}/config-has"
-printf 'auth.authenticator=\n' > "${has_file}"
-if ! PROPS_MODE=has PROPS_KEY='auth.authenticator' PROPS_FILE="${has_file}" \
-        awk -f "${PROPS_AWK}" /dev/null; then
-    echo "PROPS_MODE=has must report an empty definition as present" >&2
+# get answers absence with empty output at exit 0, and an empty definition
+# reads back the same way -- which is why ensure_rest_prop tests the value
+# rather than a presence status.  The one nonzero case is a file the reader
+# cannot answer a question about, and it must not be read as "absent": a guard
+# wearing errexit has to stop rather than append a default over a file it could
+# not read.
+get_status_file="${test_dir}/config-get-status"
+printf 'auth.authenticator=\n' > "${get_status_file}"
+[[ -z "$(get_prop_encoded 'auth.authenticator' "${get_status_file}")" ]] || {
+    echo "an empty definition must read back empty" >&2
+    exit 1
+}
+if ! get_prop_encoded 'auth.graph_store' "${get_status_file}" >/dev/null; then
+    echo "an absent key in a readable file must exit 0" >&2
     exit 1
 fi
-if PROPS_MODE=has PROPS_KEY='auth.graph_store' PROPS_FILE="${has_file}" \
-        awk -f "${PROPS_AWK}" /dev/null; then
-    echo "PROPS_MODE=has must report an absent key as absent" >&2
-    exit 1
-fi
-# An unreadable file must not read as "absent": status 2 is what tells a caller
-# wearing errexit to stop rather than append a default over a file it could not
-# read.
 status=0
-PROPS_MODE=has PROPS_KEY='k' PROPS_FILE="${test_dir}/no-such-file" \
-    awk -f "${PROPS_AWK}" /dev/null 2>/dev/null || status=$?
+get_prop_encoded 'k' "${test_dir}/no-such-file" >/dev/null 2>&1 || status=$?
 if (( status != 2 )); then
-    echo "PROPS_MODE=has must exit 2 for an unreadable file, got ${status}" >&2
+    echo "get must exit 2 for an unreadable file, got ${status}" >&2
     exit 1
 fi
 
@@ -1789,11 +1786,6 @@ mkdir -p "${include_dir}/conf"
 
     if get_prop_encoded restserver.url "${REST_SERVER_CONF}" >/dev/null 2>&1; then
         echo "a read of a file with an include must refuse, not answer" >&2
-        exit 1
-    fi
-    if PROPS_MODE=has PROPS_KEY=restserver.url PROPS_FILE="${REST_SERVER_CONF}" \
-        awk -f "${PROPS_AWK}" /dev/null 2>/dev/null; then
-        echo "PROPS_MODE=has must refuse too" >&2
         exit 1
     fi
     # A refused write leaves the config exactly as it stood: no second

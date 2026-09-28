@@ -25,10 +25,11 @@
 #   PROPS_MODE=get  PROPS_KEY=K PROPS_FILE=F
 #       print the value of K's first logical definition, in the on-disk
 #       escaped form; with PROPS_DECODED=1 print it as java.util.Properties
-#       would hand it to the server.  Always exits 0.
-#   PROPS_MODE=has  PROPS_KEY=K PROPS_FILE=F
-#       print nothing; exit 0 when K has any definition at all, empty
-#       included, 1 when it has none, 2 on an error
+#       would hand it to the server.  Exits 0 when K has no definition, which
+#       prints nothing, and 2 when the file cannot be read or uses an include
+#       directive.  The guards that append a default -- `check_auth_sides` and
+#       `props_get` -- rely on that nonzero status to refuse rather than treat
+#       an unreadable file as an absent key.
 #   PROPS_MODE=set  PROPS_KEY=K PROPS_FILE=F
 #       replace K's first definition in place, drop every other
 #       definition of K, append one when the file has none.  The new
@@ -64,9 +65,9 @@
 
 function die(msg) {
     printf "props.awk: %s\n", msg > "/dev/stderr"
-    # 2 for an error, so a caller that reads exit status 1 as "the key is not
-    # there" (PROPS_MODE=has) cannot mistake an unreadable file for an absent
-    # property and append a definition on top of one it failed to read.
+    # 2 for an error.  An absent key answers with empty output at exit 0, so an
+    # error needs a status of its own: a caller that read any nonzero as "not
+    # there" would append a definition on top of one it failed to read.
     exit 2
 }
 
@@ -389,19 +390,8 @@ function props_get(file, key, decoded,    b) {
     # Absence prints nothing and is NOT an exit status: callers assign from
     # command substitution (`rest=$(get_prop ...)`) under a shell with errexit
     # on, where a nonzero status would abort the entrypoint over a merely
-    # missing property.  PROPS_MODE=has is the mode that reports by status.
-}
-
-# Exit status only: 0 when the key has any definition at all, including an
-# empty one.  Guards that append a default must not treat `auth.authenticator=`
-# as absent, because appending a second definition leaves the empty first one
-# in force under first-definition-wins.
-function props_has(file, key,    b) {
-    props_load(file)
-    for (b = 1; b <= NBLOCK; b++) {
-        if (BTYPE[b] == "entry" && BKEY[b] == key) return 0
-    }
-    return 1
+    # missing property.  A nonzero status therefore only ever means the file
+    # could not be read or was refused, which is what the guards act on.
 }
 
 BEGIN {
@@ -413,11 +403,9 @@ BEGIN {
         die("PROPS_FILE and PROPS_KEY must be set")
     if (mode == "get") {
         props_get(file, key, decoded)
-    } else if (mode == "has") {
-        if (props_has(file, key)) exit 1
     } else if (mode == "set") {
         props_set(file, key, ENVIRON["PROPS_VALUE_ENCODED"])
     } else {
-        die("PROPS_MODE must be get, has or set")
+        die("PROPS_MODE must be get or set")
     }
 }

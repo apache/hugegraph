@@ -106,10 +106,12 @@ props_set() {
 }
 
 # Give `$3` its default `$2` for key `$1`, in place, unless it already has a
-# value.  Guarding with props_has and appending was not the same question:
+# value.  Guarding on the key being present and appending was not the same
+# question:
 # `auth.authenticator=` and a bare `auth.authenticator` line both parse to the
 # empty string (measured against java.util.Properties, which also strips the
-# trailing blanks of `auth.authenticator=   `), so props_has reported them as
+# trailing blanks of `auth.authenticator=   `), so a presence check reported
+# them as
 # answered and the append was skipped -- while the entrypoint's
 # check_auth_sides, which asks for the value rather than the key, counted the
 # same file as unconfigured.  `loadAuthenticator("")` returns null, so REST then
