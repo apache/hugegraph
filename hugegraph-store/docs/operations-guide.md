@@ -448,6 +448,15 @@ df -h
 
 ---
 
+### State Machine Apply Failures
+
+A partition that reports a Raft state machine error stops applying logs and is
+not automatically restarted, including by the activity check. Inspect the Store
+error log and repair the underlying storage or apply failure before manually
+restarting the Store process. Restarting without repairing the cause may replay
+the same failing entry. This protection does not undo writes already performed
+by the failed entry.
+
 ## Backup and Recovery
 
 ### Backup Strategies
@@ -498,6 +507,22 @@ scp backup-store1-*.tar.gz backup-server:/backups/
    - Deploy new Store node with same configuration
    - PD automatically assigns partitions to new node
    - Wait for data replication (may take hours)
+   - If the new node reuses the failed node's raft address with an empty data directory (for
+     example a Kubernetes StatefulSet Pod rebuilt after its volume was lost), it registers under
+     a new store ID while the old ID still holds its partitions. Retire the old ID on the PD
+     leader so the replicas move to the new node:
+     ```bash
+     # Two entries share the address: the new ID and the old one
+     curl http://192.168.1.10:8620/v1/stores
+     curl -X POST -H 'Content-Type: application/json' -d '{"storeState":"Tombstone"}' \
+          http://192.168.1.10:8620/v1/store/<oldStoreId>
+     curl http://192.168.1.10:8620/v1/task/patrolPartitions
+     ```
+     Every shard group in `/v1/shardGroups` should then list the new ID, and the new node's
+     `http://<store>:8520/v1/partition/<partitionId>` should answer for each group. Then remove
+     the old record with `curl -X DELETE http://192.168.1.10:8620/v1/store/<oldStoreId>`. Store
+     versions without the fix for apache/hugegraph#3227 never finish this: the groups keep the
+     old ID and the new node stays empty.
 
 4. **Verify**: Check partition distribution
    ```bash
@@ -713,6 +738,18 @@ bin/stop-hugegraph.sh
 
 bin/start-hugegraph.sh
 ```
+
+**Meta key prefix (`usePD=true`)**: the Server keeps its schema, graph spaces
+and users in PD under `HUGEGRAPH/<cluster>/...`, where `<cluster>` is the
+`cluster` option of `rest-server.properties` (default `hg-test`). Release 1.7.0
+bound that name; master builds between #3008 (2026-07-10) and #3220 bound the
+literal `hg` instead, because a graph was opened before the Server's own
+binding. Since #3220 the Server binds `cluster` again and logs
+`Meta cluster bound to '<cluster>' (keys under HUGEGRAPH/<cluster>/)` at
+startup. If a Server comes up with an empty schema after an upgrade, compare
+that line with the prefix your data lives under (1.7.0: `hg-test`; a master
+snapshot from that window: `hg`) and set `cluster` in `rest-server.properties`
+to the prefix that holds your data.
 
 ### Rollback Procedure
 

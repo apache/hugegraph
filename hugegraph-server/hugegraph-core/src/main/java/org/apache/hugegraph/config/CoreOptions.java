@@ -652,6 +652,18 @@ public class CoreOptions extends OptionHolder {
             disallowEmpty(),
             "127.0.0.1:8686"
     );
+    public static final ConfigOption<String> PD_CLUSTER = new ConfigOption<>(
+            "pd.cluster",
+            "The cluster name prefixing the meta keys in PD " +
+            "('HUGEGRAPH/<cluster>/...') when the graph itself connects the " +
+            "MetaManager, i.e. the server runs with usePD=false. The prefix " +
+            "is bound once per process: with usePD=true the server binds its " +
+            "own 'cluster' option first, otherwise the first hstore graph " +
+            "opened wins, and a different value on a later graph is ignored " +
+            "with a warning.",
+            disallowEmpty(),
+            "hg"
+    );
     public static final ConfigOption<String> MEMORY_MODE = new ConfigOption<>(
             "memory.mode",
             "The memory mode used for query in HugeGraph.",

@@ -268,7 +268,6 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/com.alipay.sofa/hessian/3.3.7 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.11 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.13 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alipay.sofa/jraft-core/1.3.9 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/sofa-rpc-all/5.7.6 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/tracer-core/3.0.8 -> Apache 2.0
     https://central.sonatype.com/artifact/com.beust/jcommander/1.30 -> Apache 2.0

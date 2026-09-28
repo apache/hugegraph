@@ -156,6 +156,16 @@ public class HgStoreStateMachineTest {
             }
 
             @Override
+            public boolean commit() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void commitAndSnapshotSync(Closure done) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
             public boolean hasNext() {
                 return iterator.hasNext();
             }

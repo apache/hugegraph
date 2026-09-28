@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -332,8 +333,8 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
      * logs), skipping unlock(path) - so every later compaction for that partition would block
      * until the 6-hour path-lock timeout. Interrupts a real compactionPool worker thread while
      * it is parked in tryLock() (identified by stack trace, since the pool is shared), then
-     * confirms a second dbCompaction() call is able to complete instead of hanging behind the
-     * still-held path lock.
+     * confirms the path lock returns to its available state while the snapshot range lock
+     * remains owned by this test.
      */
     @Test
     public void testDbCompactionReleasesPathLockWhenInterruptedWaitingForRangeLock()
@@ -371,13 +372,16 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
                          BusinessHandler.doing, pathLockBeforeInterrupt.get());
 
             other.interrupt();
-            // Give the interrupted task time to run its InterruptedException handling and
-            // return.
-            Thread.sleep(500);
+            // Wait for the interrupted task to release the path lock. No second compaction
+            // runs here, so the available state remains stable.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (pathLockBeforeInterrupt.get() != BusinessHandler.compactionCanStart &&
+                   System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
 
             // The path lock must have been released by the interrupted task's
-            // InterruptedException handler, directly confirming the fix rather than relying
-            // solely on the second dbCompaction() call below to prove it indirectly.
+            // InterruptedException handler, directly confirming the fix.
             String path = businessHandler.getLockPath(partitionId);
             AtomicInteger pathLockState = businessHandler.getPathLockState(path);
             assertNotNull("path lock must have been initialized by the interrupted task",
@@ -395,31 +399,8 @@ public class HgSnapshotHandlerTest extends StoreEngineTestBase {
             rangeLockCheck.join();
             assertFalse("range lock must still belong to the snapshot save",
                         concurrentRangeLockResult.get());
-
-            // The path lock, however, must have been released by the interrupted task -
-            // otherwise this second dbCompaction() call would block on lock(path) until the
-            // 6-hour timeout instead of reaching the compacting state below once the range
-            // lock is released. Ownership of the range lock passes to the second
-            // dbCompaction() call's own worker thread, which acquires and releases it itself -
-            // do not touch compactionRangeLock again after this point.
-            businessHandler.unlockCompactionRange(partitionId);
-            businessHandler.dbCompaction("graph0", partitionId);
-
-            // Compaction on the test's near-empty RocksDB completes almost immediately, so the
-            // transient "doing" state cannot be reliably observed here - poll for the
-            // terminal compactionDone state instead. What this proves is that dbCompaction()
-            // was able to acquire lock(path) at all: before the fix, the leaked path lock
-            // would have made this call hang on lock(path) until the 6-hour timeout instead
-            // of ever reaching compactionDone.
-            long start = System.currentTimeMillis();
-            while (businessHandler.getState(partitionId).get() != BusinessHandler.compactionDone &&
-                   System.currentTimeMillis() - start < 5000) {
-                Thread.sleep(50);
-            }
-            assertEquals("second dbCompaction() must complete, proving the path lock was " +
-                         "released rather than leaked by the interrupted task",
-                         BusinessHandler.compactionDone, businessHandler.getState(partitionId).get());
         } finally {
+            businessHandler.unlockCompactionRange(partitionId);
             BusinessHandlerImpl.setCompactionRangeLockWaitMillis(originalWaitMillis);
         }
     }

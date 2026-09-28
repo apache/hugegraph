@@ -87,10 +87,20 @@ public class PartitionAPI {
             raft.setGroupId(engine.getGroupId());
             raft.setLeader(engine.getLeader());
             raft.setRole(engine.getRaftNode().getNodeState().name());
-            raft.setConf(engine.getCurrentConf().toString());
+            // jraft only lists peers and learners on the leader, and isLeader() does not
+            // hold the node lock, so leadership can still move before these calls
             if (engine.isLeader()) {
-                raft.setPeers(engine.getRaftNode().listPeers());
-                raft.setLearners(engine.getRaftNode().listLearners());
+                try {
+                    String conf = engine.getCurrentConf().toString();
+                    List<PeerId> peers = engine.getRaftNode().listPeers();
+                    List<PeerId> learners = engine.getRaftNode().listLearners();
+                    raft.setConf(conf);
+                    raft.setPeers(peers);
+                    raft.setLearners(learners);
+                } catch (IllegalStateException e) {
+                    log.info("Raft {} is no longer leader, skip its conf: {}",
+                             engine.getGroupId(), e.getMessage());
+                }
             }
             raft.setTerm(engine.getLeaderTerm());
             raft.setLogIndex(engine.getCommittedIndex());
@@ -139,6 +149,7 @@ public class PartitionAPI {
         }
 
         return raft;
+        // TODO: remove this dead return, the method already returns raft above
         //return okMap("partition", rafts);
     }
 
@@ -195,6 +206,7 @@ public class PartitionAPI {
         configMap.put("arthas.ip", appConfig.getArthasConfig().getArthasip());
         configMap.put("arthas.disabledCommands", appConfig.getArthasConfig().getDisCmd());
         ArthasAgent.attach(configMap);
+        // TODO: remove this commented-out line, retPose is never used
 //        DashResponse retPose = new DashResponse();
         List<String> ret = new ArrayList<>();
         ret.add("Arthas started successfully");

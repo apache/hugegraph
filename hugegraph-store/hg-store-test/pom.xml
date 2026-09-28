@@ -201,7 +201,7 @@
         <dependency>
             <groupId>com.alipay.sofa</groupId>
             <artifactId>jraft-core</artifactId>
-            <version>1.3.9</version>
+            <version>${pd-store-jraft.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.rocksdb</groupId>
@@ -250,6 +250,8 @@
                             <reuseForks>false</reuseForks>
                             <includes>
                                 <include>**/CoreSuiteTest.java</include>
+                                <include>**/PartitionStateMachineTest.java</include>
+                                <include>**/PartitionEngineErrorTest.java</include>
                                 <include>**/BatchGraphIsolationTest.java</include>
                             </includes>
                         </configuration>
