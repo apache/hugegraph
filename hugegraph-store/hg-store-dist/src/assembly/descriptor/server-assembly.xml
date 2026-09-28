@@ -55,6 +55,7 @@
             <useProjectArtifact>false</useProjectArtifact>
             <includes>
                 <include>org.apache.hugegraph:${executable.jar.name}:jar:*</include>
+                <include>org.rocksdb:rocksdbjni:jar:*</include>
             </includes>
         </dependencySet>
     </dependencySets>

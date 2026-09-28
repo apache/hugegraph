@@ -43,6 +43,11 @@
             <artifactId>hg-store-node</artifactId>
             <version>${revision}</version>
         </dependency>
+        <dependency>
+            <groupId>org.rocksdb</groupId>
+            <artifactId>rocksdbjni</artifactId>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
     <build>
         <plugins>

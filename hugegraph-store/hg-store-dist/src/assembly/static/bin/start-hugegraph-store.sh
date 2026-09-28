@@ -226,17 +226,36 @@ fi
 
 echo "Starting HG-StoreServer..."
 
+# Insert before launching Java.
+STORE_JARS=("$LIB"/hg-store-node-*.jar)
+ROCKSDB_JARS=("$LIB"/rocksdbjni-*.jar)
+
+if [[ ${#STORE_JARS[@]} -ne 1 || ! -f "${STORE_JARS[0]}" ]]; then
+    echo "Expected exactly one hg-store-node JAR in $LIB" >&2
+    exit 1
+fi
+
+if [[ ${#ROCKSDB_JARS[@]} -ne 1 || ! -f "${ROCKSDB_JARS[0]}" ]]; then
+    echo "Expected exactly one matching rocksdbjni JAR in $LIB; rebuild the distribution" >&2
+    exit 1
+fi
+
+STORE_CLASSPATH="${ROCKSDB_JARS[0]}:${STORE_JARS[0]}"
+STORE_LAUNCHER="org.springframework.boot.loader.JarLauncher"
+
 # Turn on security check
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphStoreServer in daemon mode..."
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar &
+        exec "${JAVA}" -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            "-Dspring.config.location=${CONF}/application.yml" \
+            -cp "${STORE_CLASSPATH}" \
+            "${STORE_LAUNCHER}" &
     else
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+        exec "${JAVA}" -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            "-Dspring.config.location=${CONF}/application.yml" \
+            -cp "${STORE_CLASSPATH}" \
+            "${STORE_LAUNCHER}" >> ${OUTPUT} 2>&1 &
     fi
     PID="$!"
     # Write pid to file
@@ -248,12 +267,14 @@ else
     echo "$$" > "$PID_FILE"
     echo "[+pid] $$"
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar
+        exec "${JAVA}" -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            "-Dspring.config.location=${CONF}/application.yml" \
+            -cp "${STORE_CLASSPATH}" \
+            "${STORE_LAUNCHER}"
     else
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1
+        exec "${JAVA}" -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+            "-Dspring.config.location=${CONF}/application.yml" \
+            -cp "${STORE_CLASSPATH}" \
+            "${STORE_LAUNCHER}" 2>&1
     fi
 fi
