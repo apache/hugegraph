@@ -1163,6 +1163,105 @@ printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
     fi
 )
 
+# ── A refused read has to precede every write ──────────────────────────
+# The block above covers a write that fails; this covers a read that fails.
+# A rest-server.properties carrying commons-configuration's `include` directive
+# is a file props.awk refuses, and the script used to reach it only at
+# ensure_rest_prop -- one statement after the yaml block had been appended.  Its
+# guard also tested `[[ -n "$(props_get ...)" ]]`, and `[[` keeps the text of a
+# command substitution while discarding its status, so props_get's refusal only
+# exited the subshell and the REST write went ahead too.  The run left
+# gremlin-server.yaml naming StandardAuthenticator beside a rest-server.properties
+# with no authenticator at all, and in the release tarball that does not repair
+# itself: the appended block reads as a mapping, so the rerun after the operator
+# removes the include line stops on the unverifiable branch and the yaml has to
+# be edited by hand.  graphs/hugegraph.properties was read last of all, so an
+# include directive there let the run write both auth sides and leave the factory
+# unwrapped.  Every value the script decides on is now read before the first
+# write, so a refusal leaves the tree exactly as the operator left it, and one
+# run after the repair arms both sides.
+refused_read_tree() {
+    local dir="$1" with_scan="$2" unreadable="$3"
+    mkdir -p "${dir}/conf/graphs"
+    install_enable_auth "${dir}"
+    if [[ "${with_scan}" == "no-yamlscan" ]]; then
+        rm -f "${dir}/yamlscan.awk"
+    fi
+    printf '%s\n' 'server.name=hugegraph' > "${dir}/conf/rest-server.properties"
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+        > "${dir}/conf/graphs/hugegraph.properties"
+    printf 'host: 8182\n' > "${dir}/conf/gremlin-server.yaml"
+    printf '%s\n' 'include=other.properties' >> "${dir}/conf/${unreadable}"
+}
+
+refused_read() {
+    local dir="$1" desc="$2" unreadable="$3"
+    (
+        cd "${dir}" || exit 1
+        keep="${dir}.found"
+        mkdir -p "${keep}/graphs"
+        cp conf/gremlin-server.yaml conf/rest-server.properties "${keep}/"
+        cp conf/graphs/hugegraph.properties "${keep}/graphs/"
+        if ./bin/enable-auth.sh; then
+            echo "${desc}: enable-auth.sh must refuse a config props.awk cannot read" >&2
+            exit 1
+        fi
+        for kept in gremlin-server.yaml rest-server.properties; do
+            if ! cmp -s "conf/${kept}" "${keep}/${kept}"; then
+                echo "${desc}: a refused read still edited ${kept}" >&2
+                exit 1
+            fi
+        done
+        if ! cmp -s conf/graphs/hugegraph.properties \
+            "${keep}/graphs/hugegraph.properties"; then
+            echo "${desc}: a refused read still edited graphs/hugegraph.properties" >&2
+            exit 1
+        fi
+        # The operator's repair, then one run over a tree that is back to the
+        # shipped shape.  Rewritten rather than filtered so no CR can enter the
+        # fixture on this host.
+        if [[ "${unreadable}" == "rest-server.properties" ]]; then
+            printf '%s\n' 'server.name=hugegraph' > conf/rest-server.properties
+        else
+            printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+                > conf/graphs/hugegraph.properties
+        fi
+        if ! ./bin/enable-auth.sh; then
+            echo "${desc}: enable-auth.sh failed on the repaired tree" >&2
+            exit 1
+        fi
+        if ! grep -q \
+            '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+            conf/rest-server.properties; then
+            echo "${desc}: the repaired run wrote no class to REST" >&2
+            exit 1
+        fi
+        if ! grep -q \
+            '^  authenticator: org\.apache\.hugegraph\.auth\.StandardAuthenticator,$' \
+            conf/gremlin-server.yaml; then
+            echo "${desc}: the repaired run named no class in the yaml" >&2
+            exit 1
+        fi
+        if ! grep -q '^gremlin\.graph=org\.apache\.hugegraph\.auth\.HugeFactoryAuthProxy$' \
+            conf/graphs/hugegraph.properties; then
+            echo "${desc}: the repaired run left the graph factory unwrapped" >&2
+            exit 1
+        fi
+    )
+}
+
+for scan in yes no-yamlscan; do
+    case "${scan}" in
+        yes) scan_desc="image layout (yamlscan.awk present)" ;;
+        *) scan_desc="release tarball (no yamlscan.awk)" ;;
+    esac
+    for unreadable in rest-server.properties graphs/hugegraph.properties; do
+        dir="${test_dir}/refused-read-${scan}-${unreadable##*/}"
+        refused_read_tree "${dir}" "${scan}" "${unreadable}"
+        refused_read "${dir}" "${scan_desc}, ${unreadable} unreadable" "${unreadable}"
+    done
+done
+
 # ── yaml_auth_state answers about the mapping, not about the text ───────
 # Each case below is a mounted gremlin-server.yaml that a grep-shaped reader
 # calls named while the Gremlin server runs without an authenticator.  Reported

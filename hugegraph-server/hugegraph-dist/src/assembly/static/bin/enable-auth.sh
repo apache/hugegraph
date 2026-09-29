@@ -120,8 +120,15 @@ props_set() {
 # props_set covers both shapes the guard had to split: with a definition
 # present it replaces the first one where it stands (no duplicate for
 # first-definition-wins to bury), with none present it appends.
+#
+# `$4` is the key's current value, read before the first write.  Reading it
+# here instead -- `[[ -n "$(props_get "$1" "$3")" ]]` -- discarded the status of
+# the command substitution, because `[[` only looks at the text, so props_get's
+# refusal of a file props.awk cannot read (an `include` directive) exited the
+# subshell, the guard saw an empty string, and props_set then tried to write
+# that same unreadable file.
 ensure_rest_prop() {
-    [[ -n "$(props_get "$1" "$3")" ]] && return 0
+    [[ -n "$4" ]] && return 0
     props_set "$1" "$2" "$3"
 }
 
@@ -231,8 +238,23 @@ if [[ "${GREMLIN_AUTH}" == "nameless" ]]; then
     fail "${GREMLIN_SERVER_CONF} carries an authentication mapping that names no authenticator, or a shape the reader refuses; writing ${REST_SERVER_CONF} beside it would enforce on REST and leave Gremlin on its default. Name authentication.authenticator in that mapping, or drop the mapping and let this script write both sides."
 fi
 
-if [[ "${GREMLIN_AUTH}" == "unverifiable" ]] &&
-    [[ -z "$(props_get "auth.authenticator" "${CONF}/${REST_SERVER_CONF}")" ]]; then
+# Every value the decisions below act on is read here, before the first write.
+# A plain assignment is what makes the read fatal: errexit sees the status of a
+# command substitution on an assignment statement, while `[[ -n "$(props_get
+# ...)" ]]` looked only at the text and discarded it.  Reading rest-server.properties
+# from ensure_rest_prop instead discovered an unreadable file one statement after
+# the yaml block had been appended, leaving the yaml naming StandardAuthenticator
+# beside a REST config with no `auth.authenticator` -- the one-sided tree this
+# script exists to prevent, which in the tarball layout then refuses to repair
+# itself: the appended block reads as a mapping, so a rerun after the operator
+# fixes the include line stops on the unverifiable branch below.
+# graphs/hugegraph.properties was read last of all, so an unreadable graph config
+# let the run write both auth sides and leave the factory unwrapped.
+REST_AUTHENTICATOR=$(props_get "auth.authenticator" "${CONF}/${REST_SERVER_CONF}")
+REST_GRAPH_STORE=$(props_get "auth.graph_store" "${CONF}/${REST_SERVER_CONF}")
+GRAPH_FACTORY=$(props_get "gremlin.graph" "${CONF}/graphs/${GRAPH_CONF}")
+
+if [[ "${GREMLIN_AUTH}" == "unverifiable" ]] && [[ -z "${REST_AUTHENTICATOR}" ]]; then
     # The operator already naming a class on the REST side is the one answer
     # this layout can act on without a reader: ensure_rest_prop then has
     # nothing to write, so both sides stay as the operator left them.
@@ -254,8 +276,10 @@ if [[ "${GREMLIN_AUTH}" == "none" ]]; then
         '}'
 fi
 
-ensure_rest_prop "auth.authenticator" "${AUTHENTICATOR_CLASS}" "${CONF}/${REST_SERVER_CONF}"
-ensure_rest_prop "auth.graph_store" "hugegraph" "${CONF}/${REST_SERVER_CONF}"
+ensure_rest_prop "auth.authenticator" "${AUTHENTICATOR_CLASS}" \
+    "${CONF}/${REST_SERVER_CONF}" "${REST_AUTHENTICATOR}"
+ensure_rest_prop "auth.graph_store" "hugegraph" \
+    "${CONF}/${REST_SERVER_CONF}" "${REST_GRAPH_STORE}"
 
 # Wrap the graph factory only when it really is the plain HugeFactory, which is
 # a question about the decoded value, so it goes through the same reader.
@@ -269,7 +293,6 @@ ensure_rest_prop "auth.graph_store" "hugegraph" "${CONF}/${REST_SERVER_CONF}"
 # left such a config unwrapped: authentication on both servers, and no
 # HugeFactoryAuthProxy in front of the graph, which GraphManager only warns
 # about.  A factory that is not HugeFactory stays untouched either way.
-GRAPH_FACTORY=$(props_get "gremlin.graph" "${CONF}/graphs/${GRAPH_CONF}")
 while [[ "${GRAPH_FACTORY}" =~ [[:space:]]$ ]]; do
     GRAPH_FACTORY="${GRAPH_FACTORY%?}"
 done
