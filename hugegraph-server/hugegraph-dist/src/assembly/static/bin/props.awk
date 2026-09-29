@@ -36,7 +36,9 @@
 #       value arrives pre-encoded in PROPS_VALUE_ENCODED (an environment
 #       variable, so secrets never appear in `ps` output or in awk's
 #       argv), and -v is not used for it so awk cannot mangle its
-#       backslash escapes.
+#       backslash escapes.  A file that cannot be written exits 2 as
+#       well, before anything is staged, so a read-only config neither
+#       loses a secret into a leftover temp file nor reads as damaged.
 #
 # Grammar implemented (java.util.Properties line reader + the
 # first-definition-wins rule Configuration.getString applies):
@@ -314,6 +316,19 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs,
         nbs++
     if (nbs % 2 == 1)
         die("refusing to write " key ": trimmed of its trailing blanks the value ends in a backslash, which would swallow the next line")
+    # Refuse a destination that cannot be written before staging anything, not
+    # after.  Without this the copy-back below is the first write attempted, so
+    # a read-only config produced the failure message at the end of this
+    # function -- and that message is only true of a copy that got partway.
+    # The shell opens the destination for writing before cat has written a byte,
+    # so EACCES leaves the original untouched while the staged temp file, which
+    # carries the value being written, stays beside it.  A container on a restart
+    # policy therefore adds one temp/snapshot pair per restart, each holding the
+    # secret.  `test -w` is the cheap answer and it is not the whole answer: root
+    # can write a 0444 file, and access() reports a bind-mounted read-only file
+    # as writable, so the compare on copy-back failure below still has to hold.
+    if (system("test -w " shquote(file)) != 0)
+        die(file " is not writable; nothing written")
     first = 0
     for (b = 1; b <= NBLOCK; b++) {
         if (BTYPE[b] == "entry" && BKEY[b] == key) {
@@ -366,10 +381,21 @@ function props_set(file, key, enc_val,    tmp, bak, cmd, b, first, ln, msg, nbs,
         die("cannot back up " file " before the copy-back")
     cmd = "cat -- " shquote(tmp) " > " shquote(file)
     if (system(cmd) != 0) {
-        # Best effort: the destination is already damaged, so restoring it
-        # from the snapshot comes first, and the temp file is kept for an
-        # operator who wants to inspect what was being written.
         msg = "cannot copy " tmp " over " file
+        # Only a copy that reached the destination and then failed can damage
+        # it.  A failure to open the destination leaves the original
+        # byte-for-byte as it was, so asking the snapshot is what separates the
+        # two: reporting an untouched config as damaged sends the operator to
+        # restore a file that never needed restoring, and leaves the staged
+        # value -- the secret being written -- sitting in the conf directory.
+        if (system("cmp -s -- " shquote(file) " " shquote(bak)) == 0) {
+            if (system("rm -f -- " shquote(tmp) " " shquote(bak)) != 0)
+                die(msg "; " file " is unchanged but " tmp " and " bak " could not be removed")
+            die(msg "; " file " is unchanged and nothing was written")
+        }
+        # Best effort: the destination really is damaged, so restoring it from
+        # the snapshot comes first, and the temp file is kept for an operator
+        # who wants to inspect what was being written.
         cmd = "cat -- " shquote(bak) " > " shquote(file)
         if (system(cmd) == 0) die(msg "; the previous content is restored")
         die(msg "; " file " is damaged, previous content is in " bak)

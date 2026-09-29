@@ -85,6 +85,27 @@ chmod 600 "${probe}"
 [[ "$(stat -c '%a' "${probe}")" == "600" ]] && host_keeps_chmod=1
 rm -f "${probe}"
 
+# The probe above asks whether the host reports a mode back, which is a question
+# about `stat`.  The read-only-config group below needs a different answer: does
+# a 0444 mode actually stop a write.  The two are independent -- a Windows host
+# under MSYS keeps the write denial (redirect, append and `test -w` all honour
+# the read-only attribute) while `stat` still prints 644 -- so gating that group
+# on host_keeps_chmod would skip it where it genuinely runs, and gating it on
+# nothing would fail on a host that ignores modes.  Asking the host what it does
+# is the only honest way to choose.
+host_denies_write=0
+printf '%s\n' x > "${probe}"
+chmod 444 "${probe}"
+# The redirect runs inside a group carrying the 2>/dev/null, because a failed
+# redirection is reported by the shell that opens the file, not by printf: put on
+# the command itself the redirect error still reaches stderr and the probe prints
+# a spurious failure on every host that denies the write.
+if ! { printf 'y' >> "${probe}"; } 2>/dev/null && ! test -w "${probe}"; then
+    host_denies_write=1
+fi
+chmod 644 "${probe}"
+rm -f "${probe}"
+
 host_keeps_symlink=0
 printf '%s\n' x > "${probe}-t"
 ln -s "${probe}-t" "${probe}-l" 2>/dev/null && [[ -L "${probe}-l" ]] && host_keeps_symlink=1
@@ -928,6 +949,93 @@ cmp -s "${rb_bak}" "${rb_expect}" || {
     exit 1
 }
 
+# ── A config that cannot be written is refused before anything is staged ──
+# The copy-back was the first write props.awk attempted, so a read-only config
+# failed there and got the message written for a copy that reached the
+# destination and then broke.  The shell opens the destination for writing before
+# cat has written a byte, so on EACCES nothing was truncated and the config is
+# intact, yet the run called it damaged and sent the operator to restore a file
+# that needed nothing -- while leaving the staged temp file, which holds the value
+# being written, and the snapshot beside it.  A container on a restart policy
+# therefore gained one pair per restart, each temp file carrying the secret.
+# Repeating the attempt three times is the point: the leak is per attempt.
+# The group only means something on a host that stops a write to 0444, so it is
+# gated on the probe that tries it rather than weakened into a pass anywhere.
+ro_staged() {
+    find "${test_dir}" -maxdepth 1 -name "config-readonly.$1.*" | sort
+}
+if (( host_denies_write )); then
+    ro_file="${test_dir}/config-readonly"
+    ro_pristine="${test_dir}/config-readonly.pristine"
+    printf '%s\n' 'server.name=hugegraph' > "${ro_file}"
+    cp "${ro_file}" "${ro_pristine}"
+    chmod 444 "${ro_file}"
+    for ro_attempt in 1 2 3; do
+        if ro_out=$(set_prop 'auth.admin_pa' 's3cretVALUE' "${ro_file}" 2>&1); then
+            chmod 644 "${ro_file}"
+            echo "set_prop must refuse a config it cannot write" >&2
+            exit 1
+        fi
+        if [[ "${ro_out}" != *"not writable"* ]]; then
+            chmod 644 "${ro_file}"
+            echo "a refused set must say the config is not writable, got [${ro_out}]" >&2
+            exit 1
+        fi
+        if [[ "${ro_out}" == *"damaged"* ]]; then
+            chmod 644 "${ro_file}"
+            echo "a config nothing wrote to must not be called damaged, got [${ro_out}]" >&2
+            exit 1
+        fi
+    done
+    chmod 644 "${ro_file}"
+    cmp -s "${ro_file}" "${ro_pristine}" || {
+        echo "a refused set must leave the config byte-for-byte untouched" >&2
+        exit 1
+    }
+    [[ -z "$(ro_staged tmp)$(ro_staged bak)" ]] || {
+        echo "a refused set left staging files behind: $(ro_staged tmp) $(ro_staged bak)" >&2
+        exit 1
+    }
+    # Refusing to write a read-only config must not turn into refusing to read
+    # one, which is what the entrypoint does first on every boot.
+    [[ "$(get_prop_decoded 'server.name' "${ro_file}")" == "hugegraph" ]] || {
+        echo "get_prop must still answer from a read-only config" >&2
+        exit 1
+    }
+    # A write that cannot even begin is the same case arriving a different way:
+    # `test -w` can report a bind-mounted read-only file as writable, so the
+    # compare against the snapshot has to hold on its own.  A `cat` that fails
+    # without writing simulates it, and an empty config is the shape where that
+    # really does leave the original intact, so this exercises the compare rather
+    # than re-testing the redirect above.
+    nowrite_bin="${test_dir}/fakebin-nowrite"
+    mkdir -p "${nowrite_bin}"
+    printf '%s\n' '#!/bin/sh' 'exit 1' > "${nowrite_bin}/cat"
+    chmod +x "${nowrite_bin}/cat"
+    nm_file="${test_dir}/config-notmodified"
+    : > "${nm_file}"
+    if nm_out=$(
+        PATH="${nowrite_bin}:${PATH}"
+        FAKE_CAT_REAL="${real_cat}"
+        export PATH FAKE_CAT_REAL
+        set_prop 'auth.token_secret' 's3cretVALUE' "${nm_file}" 2>&1
+    ); then
+        echo "set_prop must fail when the copy-back cannot run" >&2
+        exit 1
+    fi
+    [[ "${nm_out}" == *"unchanged"* ]] || {
+        echo "a copy-back that never started must say the config is unchanged, got [${nm_out}]" >&2
+        exit 1
+    }
+    [[ -s "${nm_file}" ]] && { echo "the config gained content from a refused write" >&2; exit 1; }
+    [[ -z "$(find "${test_dir}" -maxdepth 1 -name "config-notmodified.*" | grep -v pristine)" ]] || {
+        echo "a refused copy-back that left the config intact must remove both staging files" >&2
+        exit 1
+    }
+else
+    skip "the read-only-config group -- this host lets a 0444 file be written"
+fi
+
 # A value whose encoded form ends in an odd number of backslashes must not be
 # written at all.  The entrypoint copies an existing secret between files with
 # set_prop_encoded, replaying the raw bytes, and on disk `key=abc\` as the last
@@ -1261,6 +1369,111 @@ for scan in yes no-yamlscan; do
         refused_read "${dir}" "${scan_desc}, ${unreadable} unreadable" "${unreadable}"
     done
 done
+
+# ── A config that cannot be written has to precede every write too ──────
+# The group above covers a read that fails; this covers a write that cannot
+# start.  The read-only gremlin-server.yaml already had a case, but the mirror
+# image did not: append_lines guards only the file it appends to, so a
+# rest-server.properties that can be read and not written let the yaml gain the
+# authentication block, props_set then failed on the REST side, and the run
+# exited 1 on the one-sided tree the comment above append_lines says must not
+# happen -- which is precisely what gremlin-server.yaml naming
+# StandardAuthenticator beside a REST config with no auth.authenticator is.
+# graphs/hugegraph.properties had the same hole one side further along: both
+# auth sides got written and the factory stayed unwrapped.  In the release
+# tarball the tree did not repair itself either, because the appended block reads
+# as a mapping, so the rerun after the operator restored write access stopped on
+# the unverifiable branch and the yaml had to be edited by hand.  So each
+# permutation must refuse with every byte of every config where it was, leave no
+# staging file behind, and arm both sides and wrap the factory once write access
+# returns.
+refused_write_tree() {
+    local dir="$1" with_scan="$2" unwritable="$3"
+    mkdir -p "${dir}/conf/graphs"
+    install_enable_auth "${dir}"
+    if [[ "${with_scan}" == "no-yamlscan" ]]; then
+        rm -f "${dir}/yamlscan.awk"
+    fi
+    printf '%s\n' 'server.name=hugegraph' > "${dir}/conf/rest-server.properties"
+    printf '%s\n' 'gremlin.graph=org.apache.hugegraph.HugeFactory' \
+        > "${dir}/conf/graphs/hugegraph.properties"
+    printf 'host: 8182\n' > "${dir}/conf/gremlin-server.yaml"
+    chmod 444 "${dir}/conf/${unwritable}"
+}
+
+refused_write() {
+    local dir="$1" desc="$2" unwritable="$3"
+    (
+        cd "${dir}" || exit 1
+        keep="${dir}.kept"
+        mkdir -p "${keep}/graphs"
+        cp conf/gremlin-server.yaml conf/rest-server.properties "${keep}/"
+        cp conf/graphs/hugegraph.properties "${keep}/graphs/"
+        if ./bin/enable-auth.sh; then
+            echo "${desc}: enable-auth.sh must refuse a config it cannot write" >&2
+            exit 1
+        fi
+        for kept in gremlin-server.yaml rest-server.properties; do
+            if ! cmp -s "conf/${kept}" "${keep}/${kept}"; then
+                echo "${desc}: a refused write still edited ${kept}" >&2
+                exit 1
+            fi
+        done
+        if ! cmp -s conf/graphs/hugegraph.properties \
+            "${keep}/graphs/hugegraph.properties"; then
+            echo "${desc}: a refused write still edited graphs/hugegraph.properties" >&2
+            exit 1
+        fi
+        # The staged temp file holds the value being written, so a refusal that
+        # leaves it in a mounted conf directory is a leak, not a diagnostic.
+        if find conf -name '*.tmp.*' -o -name '*.bak.*' | grep -q .; then
+            echo "${desc}: a refused write left staging files behind" >&2
+            find conf -name '*.tmp.*' -o -name '*.bak.*' >&2
+            exit 1
+        fi
+        # The operator's repair, then one run over the tree that was never
+        # touched.  This is what the refused case buys: the yaml cannot have a
+        # half-written mapping for the rerun to misread.
+        chmod 644 "conf/${unwritable}"
+        if ! ./bin/enable-auth.sh; then
+            echo "${desc}: enable-auth.sh failed once the config was writable" >&2
+            exit 1
+        fi
+        if ! grep -q \
+            '^auth\.authenticator=org\.apache\.hugegraph\.auth\.StandardAuthenticator$' \
+            conf/rest-server.properties; then
+            echo "${desc}: the repaired run wrote no class to REST" >&2
+            exit 1
+        fi
+        if ! grep -q \
+            '^  authenticator: org\.apache\.hugegraph\.auth\.StandardAuthenticator,$' \
+            conf/gremlin-server.yaml; then
+            echo "${desc}: the repaired run named no class in the yaml" >&2
+            exit 1
+        fi
+        if ! grep -q '^gremlin\.graph=org\.apache\.hugegraph\.auth\.HugeFactoryAuthProxy$' \
+            conf/graphs/hugegraph.properties; then
+            echo "${desc}: the repaired run left the graph factory unwrapped" >&2
+            exit 1
+        fi
+    )
+}
+
+if (( host_denies_write )); then
+    for scan in yes no-yamlscan; do
+        case "${scan}" in
+            yes) scan_desc="image layout (yamlscan.awk present)" ;;
+            *) scan_desc="release tarball (no yamlscan.awk)" ;;
+        esac
+        for unwritable in rest-server.properties graphs/hugegraph.properties; do
+            dir="${test_dir}/refused-write-${scan}-${unwritable##*/}"
+            refused_write_tree "${dir}" "${scan}" "${unwritable}"
+            refused_write "${dir}" "${scan_desc}, ${unwritable} read-only" "${unwritable}"
+        done
+    done
+else
+    skip "the read-only enable-auth.sh group -- this host lets a 0444 file be written"
+fi
 
 # ── yaml_auth_state answers about the mapping, not about the text ───────
 # Each case below is a mounted gremlin-server.yaml that a grep-shaped reader

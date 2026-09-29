@@ -254,6 +254,47 @@ REST_AUTHENTICATOR=$(props_get "auth.authenticator" "${CONF}/${REST_SERVER_CONF}
 REST_GRAPH_STORE=$(props_get "auth.graph_store" "${CONF}/${REST_SERVER_CONF}")
 GRAPH_FACTORY=$(props_get "gremlin.graph" "${CONF}/graphs/${GRAPH_CONF}")
 
+# Wrap the graph factory only when it really is the plain HugeFactory, which is
+# a question about the decoded value, so it goes through the same reader.
+#
+# The trailing blanks come off before the comparison because the server reads
+# the trimmed line: commons-configuration right-trims a property line before it
+# resolves the class, so a mounted `gremlin.graph=org.apache.hugegraph.HugeFactory  `
+# opens the graph through the plain factory exactly as if it carried no blanks.
+# java.util.Properties by itself keeps them (measured against JDK 17), which is
+# why the reader hands the value back verbatim.  Comparing the untrimmed bytes
+# left such a config unwrapped: authentication on both servers, and no
+# HugeFactoryAuthProxy in front of the graph, which GraphManager only warns
+# about.  A factory that is not HugeFactory stays untouched either way.
+#
+# The trim happens here rather than next to the write below because the
+# writability guard under it asks the same question, and two copies of it would
+# be free to disagree.
+while [[ "${GRAPH_FACTORY}" =~ [[:space:]]$ ]]; do
+    GRAPH_FACTORY="${GRAPH_FACTORY%?}"
+done
+
+# A config the script can read but not write has to be refused here, before the
+# yaml block below, for the same reason the reads moved up.  `append_lines`
+# guards only the file it appends to, so with a read-only rest-server.properties
+# the yaml gained the authentication mapping, props_set then failed on the REST
+# side, and the run exited 1 leaving the one-sided tree the comment above
+# `append_lines` says must not happen -- and in the release tarball it does not
+# repair itself: the appended block reads as a mapping, so the rerun after the
+# operator restores write access stops on the unverifiable branch and the yaml
+# has to be edited by hand.  Only a file this run actually owes a write to is
+# guarded, so a read-only config that already answers every key still passes.
+# `-w` asks the shell rather than reading the mode because root can write a 0444
+# file, and refusing that would break the image it is meant to protect.
+if [[ -z "${REST_AUTHENTICATOR}" || -z "${REST_GRAPH_STORE}" ]] &&
+    ! [[ -w "${CONF}/${REST_SERVER_CONF}" ]]; then
+    fail "${REST_SERVER_CONF} is not writable and does not answer auth.authenticator and auth.graph_store, so this run owes it a write it cannot make; nothing was written"
+fi
+if [[ "${GRAPH_FACTORY}" == "org.apache.hugegraph.HugeFactory" ]] &&
+    ! [[ -w "${CONF}/graphs/${GRAPH_CONF}" ]]; then
+    fail "graphs/${GRAPH_CONF} is not writable and gremlin.graph is the plain HugeFactory, so this run owes it a write it cannot make; nothing was written"
+fi
+
 if [[ "${GREMLIN_AUTH}" == "unverifiable" ]] && [[ -z "${REST_AUTHENTICATOR}" ]]; then
     # The operator already naming a class on the REST side is the one answer
     # this layout can act on without a reader: ensure_rest_prop then has
@@ -281,21 +322,8 @@ ensure_rest_prop "auth.authenticator" "${AUTHENTICATOR_CLASS}" \
 ensure_rest_prop "auth.graph_store" "hugegraph" \
     "${CONF}/${REST_SERVER_CONF}" "${REST_GRAPH_STORE}"
 
-# Wrap the graph factory only when it really is the plain HugeFactory, which is
-# a question about the decoded value, so it goes through the same reader.
-#
-# The trailing blanks come off before the comparison because the server reads
-# the trimmed line: commons-configuration right-trims a property line before it
-# resolves the class, so a mounted `gremlin.graph=org.apache.hugegraph.HugeFactory  `
-# opens the graph through the plain factory exactly as if it carried no blanks.
-# java.util.Properties by itself keeps them (measured against JDK 17), which is
-# why the reader hands the value back verbatim.  Comparing the untrimmed bytes
-# left such a config unwrapped: authentication on both servers, and no
-# HugeFactoryAuthProxy in front of the graph, which GraphManager only warns
-# about.  A factory that is not HugeFactory stays untouched either way.
-while [[ "${GRAPH_FACTORY}" =~ [[:space:]]$ ]]; do
-    GRAPH_FACTORY="${GRAPH_FACTORY%?}"
-done
+# The value was trimmed, and the writability of this file was refused before the
+# yaml append, both next to the reads that decided them.
 if [[ "${GRAPH_FACTORY}" == "org.apache.hugegraph.HugeFactory" ]]; then
     props_set "gremlin.graph" "org.apache.hugegraph.auth.HugeFactoryAuthProxy" \
         "${CONF}/graphs/${GRAPH_CONF}"
