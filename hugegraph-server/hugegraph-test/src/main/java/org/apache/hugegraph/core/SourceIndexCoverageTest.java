@@ -28,14 +28,17 @@ import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.tinkerpop.TestGraph;
 import org.apache.hugegraph.traversal.optimize.Text;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.GraphReadMode;
+import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.type.define.SchemaStatus;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
+import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
@@ -78,16 +81,59 @@ public class SourceIndexCoverageTest extends BaseCoreTest {
     }
 
     @Test
-    public void testCompleteCandidatesOrExplicitFailure() {
+    public void testCompleteCandidatesReturnAllResults() {
         this.nameIndex("coverageA");
+        this.nameIndex("coverageB");
         Set<Vertex> expected = this.addVertices();
-        Set<Vertex> actual;
-        try {
-            actual = graph().traversal().V().has("coverageName", "same").toSet();
-        } catch (NoIndexException e) {
-            return;
-        }
-        Assert.assertEquals(expected, actual);
+        Assert.assertEquals(expected,
+                            graph().traversal().V().has("coverageName", "same").toSet());
+    }
+
+    @Test
+    public void testTinkerPopModernSchemaCoversGlobalPropertyQueries() {
+        new TestGraph(graph()).initModernSchema(IdStrategy.AUTOMATIC);
+        Vertex person = graph().addVertex(T.label, "person", "name", "marko", "age", 29);
+        Vertex software = graph().addVertex(T.label, "software", "name", "lop");
+        Edge created = person.addEdge("created", software, "weight", 0.4d);
+        this.commitTx();
+
+        Assert.assertEquals(ImmutableSet.of(person),
+                            graph().traversal().V().has("name", "marko").toSet());
+        Assert.assertEquals(ImmutableSet.of(person),
+                            graph().traversal().V().has("age", 29).toSet());
+        Assert.assertEquals(ImmutableSet.of(created),
+                            graph().traversal().E().has("weight", 0.4d).toSet());
+    }
+
+    @Test
+    public void testTinkerPopBasicSchemaCoversSharedProperties() {
+        new TestGraph(graph()).initBasicSchema(IdStrategy.AUTOMATIC, TestGraph.DEFAULT_VL);
+        Vertex vertex = graph().addVertex(T.label, TestGraph.DEFAULT_VL, "name", "shared");
+        Vertex person = graph().addVertex(T.label, "person", "name", "shared");
+        Vertex software = graph().addVertex(T.label, "software", "name", "shared");
+        Edge self = vertex.addEdge("self", vertex, "name", "shared");
+        Edge friend = vertex.addEdge("friend", vertex, "name", "shared");
+        Edge link = vertex.addEdge("l", vertex, "name", "shared");
+        Edge partition = vertex.addEdge("aTOa", vertex,
+                                        "gremlin.partitionGraphStrategy.partition", "shared");
+        this.commitTx();
+
+        Assert.assertEquals(ImmutableSet.of(vertex, person, software),
+                            graph().traversal().V().has("name", "shared").toSet());
+        Assert.assertEquals(ImmutableSet.of(self, friend, link),
+                            graph().traversal().E().has("name", "shared").toSet());
+        Assert.assertEquals(ImmutableSet.of(partition), graph().traversal().E()
+                .has("gremlin.partitionGraphStrategy.partition", "shared").toSet());
+    }
+
+    @Test
+    public void testTinkerPopSinkSchemaCoversName() {
+        new TestGraph(graph()).initSinkSchema();
+        Vertex message = graph().addVertex(T.label, "message", "name", "ping");
+        this.commitTx();
+
+        Assert.assertEquals(ImmutableSet.of(message),
+                            graph().traversal().V().has("name", "ping").toSet());
     }
 
     @Test
