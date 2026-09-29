@@ -52,7 +52,7 @@
         <checkstyle.plugin.version>3.1.2</checkstyle.plugin.version>
         <checkstyle.version>8.45</checkstyle.version>
         <grpc.version>1.47.0</grpc.version>
-        <protobuf.version>3.21.7</protobuf.version>
+        <protobuf.version>3.25.5</protobuf.version>
         <jmh.version>1.36</jmh.version>
         <arthas.version>3.7.1</arthas.version>
         <swagger.version>2.2.18</swagger.version>
