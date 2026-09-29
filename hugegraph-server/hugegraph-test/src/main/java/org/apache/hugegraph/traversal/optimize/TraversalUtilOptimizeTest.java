@@ -797,11 +797,26 @@ public class TraversalUtilOptimizeTest {
                 __.V().has("city", "Beijing").in().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").both().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").outE().hasLabel(P.neq("knows")),
+                __.V().has("city", "Beijing").outE().hasLabel(P.neq("knows")).dedup(),
+                __.V().has("city", "Beijing").outE().hasLabel(P.neq("knows"))
+                  .order().by("weight"),
                 __.V().has("city", "Beijing").inE().hasLabel(P.neq("knows")),
                 __.V().has("city", "Beijing").bothE().hasLabel(P.neq("knows")),
                 __.V().has("city", "Beijing").out().in().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").both().both().hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).count(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).dedup(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .order().by("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .valueMap("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .elementMap("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).fold(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .groupCount(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .project("n").by("name"),
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).id(),
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).label(),
                 __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).values("age").sum(),
@@ -817,6 +832,12 @@ public class TraversalUtilOptimizeTest {
         for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
                 __.V().has("city", "Beijing").as("a").out().select("a").hasLabel(P.neq("author")),
                 __.V().has("city", "Beijing").out().path().unfold().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").as("a").out().hasLabel(P.neq("author"))
+                  .dedup().by(__.select("a")),
+                __.V().has("city", "Beijing").as("a").out().hasLabel(P.neq("author"))
+                  .order().by(__.select("a")),
+                __.V().has("city", "Beijing").as("a").out().hasLabel(P.neq("author"))
+                  .project("n").by(__.select("a")),
                 __.V().has("city", "Beijing").out().filter(__.select("a").hasLabel(P.neq("author")))}) {
             Traversal.Admin<?, ?> admin = traversal(query, graph);
             HugeGraphStep<?, ?> source = replaceGraphStep(admin);

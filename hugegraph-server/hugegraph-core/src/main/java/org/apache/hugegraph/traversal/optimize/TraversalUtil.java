@@ -71,6 +71,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.DedupGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
@@ -78,7 +79,10 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.ElementMapStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.FoldStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.GroupCountStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.IdStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.LabelStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchStep;
@@ -87,8 +91,10 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.NoOpBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.ProjectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyKeyStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyMapStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyValueStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
@@ -1111,14 +1117,19 @@ public final class TraversalUtil {
         for (Step<?, ?> step : steps) {
             // An allowlist is deliberate: select/path, lambdas, repeat and
             // extension steps may recover earlier elements. Never infer their
-            // provenance from the output type alone.
+            // provenance from the output type alone. Check by()-children of
+            // order, dedup and projections below before admitting them.
             if (!(changesCurrentElement(step) || step instanceof HasStep ||
                   step instanceof NoOpBarrierStep || step instanceof RangeGlobalStep ||
                   step instanceof IdentityStep || step instanceof NotStep ||
                   step instanceof AndStep || step instanceof OrStep ||
                   step instanceof TraversalFilterStep ||
+                  step instanceof DedupGlobalStep || step instanceof OrderGlobalStep ||
                   step instanceof IdStep || step instanceof LabelStep ||
-                  step instanceof PropertyKeyStep || step instanceof PropertyValueStep ||
+                  step instanceof PropertyKeyStep || step instanceof PropertyMapStep ||
+                  step instanceof PropertyValueStep || step instanceof ElementMapStep ||
+                  step instanceof ProjectStep || step instanceof FoldStep ||
+                  step instanceof GroupCountStep ||
                   step instanceof CountGlobalStep || step instanceof SumGlobalStep ||
                   step instanceof MinGlobalStep || step instanceof MaxGlobalStep ||
                   step instanceof MeanGlobalStep)) {

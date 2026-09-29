@@ -9303,6 +9303,10 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(source, g.V().has("city", "Beijing")
                 .out().hasLabel(P.neq("author")).toSet());
         Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).dedup().toSet());
+        Assert.assertEquals(ImmutableList.of(person), g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).order().by("name").toList());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
                 .out().in().hasLabel(P.neq("author")).toSet());
         Assert.assertEquals(source, g.V().has("city", "Beijing")
                 .both().both().hasLabel(P.neq("author")).toSet());
@@ -9312,6 +9316,8 @@ public class VertexCoreTest extends BaseCoreTest {
                 .where(__.out().in().hasLabel(P.neq("author"))).toSet());
         Assert.assertEquals(ImmutableSet.of(personEdge), g.V().has("city", "Beijing")
                 .outE().hasLabel(P.neq("knows")).toSet());
+        Assert.assertEquals(ImmutableSet.of(personEdge), g.V().has("city", "Beijing")
+                .outE().hasLabel(P.neq("knows")).dedup().toSet());
     }
 
     @Test
@@ -10192,7 +10198,13 @@ public class VertexCoreTest extends BaseCoreTest {
                                    .out().hasLabel(P.neq("scanExcluded")).toList());
         Assert.assertThrows(NoIndexException.class,
                             () -> g.V().has("unindexedProp", "x")
+                                   .out().hasLabel(P.neq("scanExcluded")).dedup().toList());
+        Assert.assertThrows(NoIndexException.class,
+                            () -> g.V().has("unindexedProp", "x")
                                    .outE().hasLabel(P.neq("knows")).toList());
+        Assert.assertThrows(NoIndexException.class,
+                            () -> g.V().has("unindexedProp", "x")
+                                   .outE().hasLabel(P.neq("knows")).dedup().toList());
         Assert.assertThrows(NoIndexException.class,
                             () -> g.V().has("unindexedProp", "x")
                                    .where(__.out().hasLabel(P.neq("scanExcluded"))).toList());
