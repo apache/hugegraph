@@ -74,8 +74,7 @@ public class StandardTaskScheduler implements TaskScheduler {
 
     public StandardTaskScheduler(HugeGraphParams graph,
                                  ExecutorService taskExecutor,
-                                 ExecutorService taskDbExecutor,
-                                 ExecutorService serverInfoDbExecutor) {
+                                 ExecutorService taskDbExecutor) {
         E.checkNotNull(graph, "graph");
         E.checkNotNull(taskExecutor, "taskExecutor");
         E.checkNotNull(taskDbExecutor, "dbExecutor");
@@ -84,7 +83,7 @@ public class StandardTaskScheduler implements TaskScheduler {
         this.taskExecutor = taskExecutor;
         this.taskDbExecutor = taskDbExecutor;
 
-        this.serverManager = new ServerInfoManager(graph, serverInfoDbExecutor);
+        this.serverManager = new ServerInfoManager(graph);
         this.tasks = new ConcurrentHashMap<>();
 
         this.taskTx = null;

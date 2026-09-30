@@ -61,7 +61,6 @@ import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.kvstore.KvStore;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Server;
 import org.apache.hugegraph.schema.EdgeLabel;
@@ -883,12 +882,6 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     public AuthManager authManager() {
         // Just return proxy
         return this.authManager;
-    }
-
-    @Override
-    public RoleElectionStateMachine roleElectionStateMachine() {
-        this.verifyAdminPermission();
-        return this.hugegraph.roleElectionStateMachine();
     }
 
     @Override

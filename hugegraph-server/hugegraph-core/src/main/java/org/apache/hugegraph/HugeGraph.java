@@ -37,7 +37,6 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.TypedOption;
 import org.apache.hugegraph.kvstore.KvStore;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Server;
 import org.apache.hugegraph.schema.EdgeLabel;
@@ -272,8 +271,6 @@ public interface HugeGraph extends Graph {
     HugeFeatures features();
 
     AuthManager authManager();
-
-    RoleElectionStateMachine roleElectionStateMachine();
 
     void switchAuthManager(AuthManager authManager);
 

@@ -21,7 +21,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.id.Id;
@@ -61,16 +60,14 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
 
     private final ServerInfoManager serverManager;
 
-    public TaskAndResultScheduler(
-            HugeGraphParams graph,
-            ExecutorService serverInfoDbExecutor) {
+    public TaskAndResultScheduler(HugeGraphParams graph) {
         E.checkNotNull(graph, "graph");
 
         this.graph = graph;
         this.graphSpace = graph.graph().graphSpace();
         this.graphName = graph.name();
 
-        this.serverManager = new ServerInfoManager(graph, serverInfoDbExecutor);
+        this.serverManager = new ServerInfoManager(graph);
     }
 
     @Override

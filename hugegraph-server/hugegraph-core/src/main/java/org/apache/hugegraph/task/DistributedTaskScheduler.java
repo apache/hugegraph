@@ -75,9 +75,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
                                     ExecutorService schemaTaskExecutor,
                                     ExecutorService olapTaskExecutor,
                                     ExecutorService gremlinTaskExecutor,
-                                    ExecutorService ephemeralTaskExecutor,
-                                    ExecutorService serverInfoDbExecutor) {
-        super(graph, serverInfoDbExecutor);
+                                    ExecutorService ephemeralTaskExecutor) {
+        super(graph);
 
         this.taskDbExecutor = taskDbExecutor;
         this.schemaTaskExecutor = schemaTaskExecutor;
