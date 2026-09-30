@@ -44,7 +44,7 @@ public class EdgesQueryIterator implements Iterator<Query> {
 
     @Override
     public boolean hasNext() {
-        return sources.hasNext();
+        return this.sources.hasNext();
     }
 
     @Override
@@ -52,7 +52,7 @@ public class EdgesQueryIterator implements Iterator<Query> {
         Id sourceId = this.sources.next();
         ConditionQuery query = GraphTransaction.constructEdgesQuery(sourceId,
                                                                     this.directions,
-                                                                    this.labels.toArray(new Id[0]));
+                                                                    this.labels);
         if (this.limit != Query.NO_LIMIT) {
             query.limit(this.limit);
             query.capacity(this.limit);

@@ -365,31 +365,31 @@ public abstract class Condition {
         return new SyspropRelation(key, RelationType.NEQ, value);
     }
 
-    public static Condition in(HugeKeys key, List<?> value) {
+    public static Relation in(HugeKeys key, List<?> value) {
         return new SyspropRelation(key, RelationType.IN, value);
     }
 
-    public static Condition nin(HugeKeys key, List<?> value) {
+    public static Relation nin(HugeKeys key, List<?> value) {
         return new SyspropRelation(key, RelationType.NOT_IN, value);
     }
 
-    public static Condition prefix(HugeKeys key, Id value) {
+    public static Relation prefix(HugeKeys key, Id value) {
         return new SyspropRelation(key, RelationType.PREFIX, value);
     }
 
-    public static Condition containsValue(HugeKeys key, Object value) {
+    public static Relation containsValue(HugeKeys key, Object value) {
         return new SyspropRelation(key, RelationType.CONTAINS_VALUE, value);
     }
 
-    public static Condition containsKey(HugeKeys key, Object value) {
+    public static Relation containsKey(HugeKeys key, Object value) {
         return new SyspropRelation(key, RelationType.CONTAINS_KEY, value);
     }
 
-    public static Condition contains(HugeKeys key, Object value) {
+    public static Relation contains(HugeKeys key, Object value) {
         return new SyspropRelation(key, RelationType.CONTAINS, value);
     }
 
-    public static Condition scan(String start, String end) {
+    public static Relation scan(String start, String end) {
         Shard value = new Shard(start, end, 0);
         return new SyspropRelation(HugeKeys.ID, RelationType.SCAN, value);
     }

@@ -31,6 +31,8 @@ import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheManager;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.perf.PerfUtil;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.structure.HugeVertex;
@@ -38,6 +40,7 @@ import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
+
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.structure.Edge;
@@ -291,11 +294,9 @@ public abstract class PerfExampleBase {
             return this.hugegraph.vertices(id).next();
         }
 
-        public Iterator<Edge> queryVertexEdge(Object id, Directions direction) {
-            ConditionQuery q = new ConditionQuery(HugeType.EDGE);
-            q.eq(HugeKeys.OWNER_VERTEX, id);
-            q.eq(HugeKeys.DIRECTION, direction);
-            return this.hugegraph.edges(q);
+        public Iterator<Edge> queryVertexEdge(Object id, Directions dir) {
+            Query query = GraphTransaction.constructEdgesQuery((Id) id, dir, new Id[0]);
+            return this.hugegraph.edges(query);
         }
     }
 }
