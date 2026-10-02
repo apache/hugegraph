@@ -35,6 +35,13 @@ assert_argument() {
         fail "missing JVM argument: $argument"
 }
 
+assert_argument_matching() {
+    local pattern="$1"
+    local capture="$2"
+    grep -Eq -- "$pattern" "$capture" || \
+        fail "missing JVM argument matching: $pattern"
+}
+
 assert_no_argument() {
     local pattern="$1"
     local capture="$2"
@@ -432,6 +439,52 @@ assert_argument "true" "$ENABLED_CAPTURE"
 assert_argument "-Doperator.marker=preserved" "$ENABLED_CAPTURE"
 assert_no_argument '^-D(networkaddress\.cache\.ttl|sun\.net\.inetaddr\.ttl)=' \
                    "$ENABLED_CAPTURE"
+assert_argument "-XX:+HeapDumpOnOutOfMemoryError" "$ENABLED_CAPTURE"
+# The names carry the launch time, since a restarted container often reuses the
+# PID and HotSpot will not overwrite an existing crash log or heap dump.
+LOGS_PATTERN=$(printf '%s' "${SERVER_ROOT}/logs" | sed 's/[][\.*^$+?(){}|]/\\&/g')
+assert_argument_matching \
+    "^-XX:HeapDumpPath=${LOGS_PATTERN}/java_pid[0-9]+_[0-9]{8}-[0-9]{6}\.hprof$" \
+    "$ENABLED_CAPTURE"
+assert_argument_matching \
+    "^-XX:ErrorFile=${LOGS_PATTERN}/hs_err_pid%p_[0-9]{8}-[0-9]{6}\.log$" \
+    "$ENABLED_CAPTURE"
+
+# Heap dumps and JVM crash logs must stay in logs/ when JAVA_OPTIONS replaces
+# the default heap options, and an operator's own paths must still win.
+CUSTOM_OPTIONS_CAPTURE="${TEMP_DIR}/custom-java-options.args"
+CAPTURE_FILE="$CUSTOM_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JAVA_OPTIONS="-Xmx1g -XX:ErrorFile=/operator/hs_err.log \
+                  -XX:HeapDumpPath=/operator/dumps" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_argument "-Xmx1g" "$CUSTOM_OPTIONS_CAPTURE"
+assert_argument "-XX:+HeapDumpOnOutOfMemoryError" "$CUSTOM_OPTIONS_CAPTURE"
+assert_argument_matching "^-XX:HeapDumpPath=${LOGS_PATTERN}/" "$CUSTOM_OPTIONS_CAPTURE"
+LAST_ERROR_FILE_ARGUMENT=$(grep -E '^-XX:ErrorFile=' \
+                           "$CUSTOM_OPTIONS_CAPTURE" | tail -n 1)
+if [[ "$LAST_ERROR_FILE_ARGUMENT" != "-XX:ErrorFile=/operator/hs_err.log" ]]; then
+    fail "operator -XX:ErrorFile was overridden by the launcher default"
+fi
+LAST_HEAP_DUMP_PATH_ARGUMENT=$(grep -E '^-XX:HeapDumpPath=' \
+                               "$CUSTOM_OPTIONS_CAPTURE" | tail -n 1)
+if [[ "$LAST_HEAP_DUMP_PATH_ARGUMENT" != "-XX:HeapDumpPath=/operator/dumps" ]]; then
+    fail "operator -XX:HeapDumpPath was overridden by the launcher default"
+fi
+
+# JAVA_TOOL_OPTIONS and JDK_JAVA_OPTIONS are read before the command line, so
+# the launcher must leave out a flag already set there rather than override it.
+TOOL_OPTIONS_CAPTURE="${TEMP_DIR}/tool-java-options.args"
+CAPTURE_FILE="$TOOL_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JAVA_TOOL_OPTIONS="-XX:ErrorFile=/operator/hs_err.log" \
+    JDK_JAVA_OPTIONS="-XX:-HeapDumpOnOutOfMemoryError" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_no_argument '^-XX:ErrorFile=' "$TOOL_OPTIONS_CAPTURE"
+assert_no_argument '^-XX:[+-]HeapDumpOnOutOfMemoryError$' "$TOOL_OPTIONS_CAPTURE"
+assert_argument_matching "^-XX:HeapDumpPath=${LOGS_PATTERN}/" "$TOOL_OPTIONS_CAPTURE"
 
 JDK21_CAPTURE="${TEMP_DIR}/jdk21.args"
 CAPTURE_FILE="$JDK21_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \

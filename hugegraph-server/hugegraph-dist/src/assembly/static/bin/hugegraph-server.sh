@@ -121,12 +121,42 @@ if [ "$JAVA_OPTIONS" = "" ]; then
         echo "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory" >> "${OUTPUT}"
         exit 1
     fi
-    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION}"
+    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m ${USER_OPTION}"
 
     # Rolling out detailed GC logs
     #JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseGCLogFileRotation -XX:GCLogFileSize=10M -XX:NumberOfGCLogFiles=3 \
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
+
+# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. They go
+# first so a value from JAVA_OPTIONS, -j or _JAVA_OPTIONS, all later on the command
+# line, still wins. JAVA_TOOL_OPTIONS and JDK_JAVA_OPTIONS are read before the command
+# line, so a flag set there is left out here instead of being overridden.
+# A restarted container often reuses the JVM's PID, and HotSpot will not overwrite an
+# existing crash log or heap dump, so the file names also carry the launch time. The
+# script execs java below, so $$ is the JVM's PID.
+LAUNCH_STAMP=$(date +%Y%m%d-%H%M%S)
+CRASH_OPTIONS=""
+SET_HEAP_DUMP="true"
+SET_HEAP_DUMP_PATH="true"
+SET_ERROR_FILE="true"
+for OPTION in ${JAVA_TOOL_OPTIONS:-} ${JDK_JAVA_OPTIONS:-}; do
+    case "${OPTION}" in
+        -XX:[+-]HeapDumpOnOutOfMemoryError) SET_HEAP_DUMP="false" ;;
+        -XX:HeapDumpPath=*) SET_HEAP_DUMP_PATH="false" ;;
+        -XX:ErrorFile=*) SET_ERROR_FILE="false" ;;
+    esac
+done
+if [[ $SET_HEAP_DUMP == "true" ]]; then
+    CRASH_OPTIONS="${CRASH_OPTIONS} -XX:+HeapDumpOnOutOfMemoryError"
+fi
+if [[ $SET_HEAP_DUMP_PATH == "true" ]]; then
+    CRASH_OPTIONS="${CRASH_OPTIONS} -XX:HeapDumpPath=${LOGS}/java_pid$$_${LAUNCH_STAMP}.hprof"
+fi
+if [[ $SET_ERROR_FILE == "true" ]]; then
+    CRASH_OPTIONS="${CRASH_OPTIONS} -XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_STAMP}.log"
+fi
+JAVA_OPTIONS="${CRASH_OPTIONS} ${JAVA_OPTIONS}"
 
 if [[ $JAVA_VERSION -gt 9 ]]; then
     JAVA_OPTIONS="${JAVA_OPTIONS} --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED \

@@ -108,18 +108,23 @@
             <appender-ref ref="file"/>
         </root>
         <logger name="org.apache.hadoop" level="INFO" additivity="false">
+            <appender-ref ref="console" level="WARN"/>
             <appender-ref ref="file"/>
         </logger>
         <logger name="org.apache.zookeeper" level="WARN" additivity="false">
+            <appender-ref ref="console" level="WARN"/>
             <appender-ref ref="file"/>
         </logger>
         <logger name="com.alipay.sofa" level="WARN" additivity="false">
+            <appender-ref ref="console" level="WARN"/>
             <appender-ref ref="file"/>
         </logger>
         <logger name="io.netty" level="INFO" additivity="false">
+            <appender-ref ref="console" level="WARN"/>
             <appender-ref ref="file"/>
         </logger>
         <logger name="org.apache.commons" level="INFO" additivity="false">
+            <appender-ref ref="console" level="WARN"/>
             <appender-ref ref="file"/>
         </logger>
         <!-- Use mixed async way to output logs -->
