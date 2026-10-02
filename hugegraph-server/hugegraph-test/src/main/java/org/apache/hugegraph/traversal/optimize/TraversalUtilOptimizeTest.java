@@ -38,6 +38,7 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.Scope;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
@@ -879,6 +880,92 @@ public class TraversalUtilOptimizeTest {
             Assert.assertFalse(hasContainer(source, "city"));
             Assert.assertTrue(hasStepExists(admin, "city"));
         }
+    }
+
+    @Test
+    public void testStandardSuffixesKeepRootAndChildSourceIndexPlan() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> suffix : new GraphTraversal<?, ?>[]{
+                __.tail(1), __.values("age").is(P.gt(1)), __.fold().unfold(),
+                __.constant(1), __.sample(2), __.sample(2).by("name"),
+                __.group().by(T.label), __.group().by(T.label).by(__.values("age").fold()),
+                __.aggregate("x"), __.aggregate("x").by("name"),
+                __.aggregate(Scope.local, "x"), __.group("x").by(T.label),
+                __.groupCount("x").by(T.label), __.simplePath(), __.cyclicPath(),
+                __.simplePath().by("name"), __.coin(0.5d), __.timeLimit(100),
+                __.fold().tail(Scope.local, 1), __.fold().limit(Scope.local, 1),
+                __.fold().order(Scope.local), __.fold().dedup(Scope.local),
+                __.fold().sample(Scope.local, 1), __.fold().count(Scope.local),
+                __.values("age").fold().sum(Scope.local),
+                __.values("age").fold().min(Scope.local),
+                __.values("age").fold().max(Scope.local),
+                __.values("age").fold().mean(Scope.local), __.fold().index(),
+                __.sideEffect(__.values("name")), __.identity().profile("metrics")}) {
+            for (boolean child : new boolean[]{false, true}) {
+                GraphTraversal<?, ?> chain = __.out().hasLabel(P.neq("author"));
+                for (Step<?, ?> step : suffix.asAdmin().getSteps()) {
+                    chain.asAdmin().addStep(step.clone());
+                }
+                GraphTraversal<?, ?> query = __.V().has("city", "Beijing");
+                if (child) {
+                    query.where(chain);
+                } else {
+                    for (Step<?, ?> step : chain.asAdmin().getSteps()) {
+                        query.asAdmin().addStep(step.clone());
+                    }
+                }
+                Traversal.Admin<?, ?> admin = traversal(query, graph);
+                HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+                TraversalUtil.extractHasContainer(source, admin);
+                Assert.assertTrue(query.toString(), hasContainer(source, "city"));
+                Assert.assertFalse(query.toString(), hasStepExists(admin, "city"));
+            }
+        }
+    }
+
+    @Test
+    public void testHistoryAndOpaqueSuffixesKeepSourceFilterLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> suffix : new GraphTraversal<?, ?>[]{
+                __.group().by(__.select("a")), __.group().by(T.label).by(__.select("a")),
+                __.aggregate("x").by(__.select("a")),
+                __.aggregate(Scope.local, "x").by(__.select("a")),
+                __.sample(2).by(__.select("a")), __.simplePath().by(__.select("a")),
+                __.group("x").by(__.select("a")), __.groupCount("x").by(__.select("a")),
+                __.dedup("a"), __.select("a"), __.path().unfold(), __.tree(),
+                __.cap("x").unfold(), __.sack(), __.repeat(__.select("a")).times(1),
+                __.where(P.eq("a")), __.match(__.as("a").out().as("b")),
+                __.map(t -> t.path().get("a")), __.filter(t -> true),
+                __.fold(0, (a, b) -> a), __.sideEffect(t -> { })}) {
+            GraphTraversal<?, ?> query = __.V().has("city", "Beijing").as("a")
+                                          .out().hasLabel(P.neq("author"));
+            for (Step<?, ?> step : suffix.asAdmin().getSteps()) {
+                query.asAdmin().addStep(step.clone());
+            }
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertFalse(query.toString(), hasContainer(source, "city"));
+            Assert.assertTrue(query.toString(), hasStepExists(admin, "city"));
+        }
+    }
+
+    @Test
+    public void testUnknownHasStepSubclassKeepsSourceFilterLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        Traversal.Admin<?, ?> admin = traversal(__.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")), graph);
+        admin.addStep(new HasStep<>(admin, new HasContainer("name", P.eq("x"))) { });
+        HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(source, admin);
+        Assert.assertFalse(hasContainer(source, "city"));
+        Assert.assertTrue(hasStepExists(admin, "city"));
     }
 
     @Test

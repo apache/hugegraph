@@ -95,6 +95,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
 public class VertexCoreTest extends BaseCoreTest {
@@ -9307,6 +9308,22 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertEquals(ImmutableList.of(person), g.V().has("city", "Beijing")
                 .out().hasLabel(P.neq("author")).order().by("name").toList());
         Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).tail(1).toSet());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).fold().unfold().toSet());
+        Assert.assertEquals(ImmutableList.of(20), g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).values("age").is(P.gt(1)).toList());
+        Assert.assertEquals(ImmutableList.of(1), g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).constant(1).toList());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).sample(2).toSet());
+        Assert.assertEquals(ImmutableMap.of("person", ImmutableList.of(person)), g.V()
+                .has("city", "Beijing").out().hasLabel(P.neq("author")).group().by(T.label).next());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).aggregate("x").toSet());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")).cyclicPath().toSet());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
                 .out().in().hasLabel(P.neq("author")).toSet());
         Assert.assertEquals(source, g.V().has("city", "Beijing")
                 .both().both().hasLabel(P.neq("author")).toSet());
@@ -9318,6 +9335,12 @@ public class VertexCoreTest extends BaseCoreTest {
                 .outE().hasLabel(P.neq("knows")).toSet());
         Assert.assertEquals(ImmutableSet.of(personEdge), g.V().has("city", "Beijing")
                 .outE().hasLabel(P.neq("knows")).dedup().toSet());
+        Assert.assertEquals(ImmutableSet.of(personEdge), g.V().has("city", "Beijing")
+                .outE().hasLabel(P.neq("knows")).tail(1).toSet());
+        Assert.assertEquals(ImmutableSet.of(personEdge), g.V().has("city", "Beijing")
+                .outE().hasLabel(P.neq("knows")).fold().unfold().toSet());
+        Assert.assertEquals(source, g.V().has("city", "Beijing")
+                .where(__.out().hasLabel(P.neq("author")).tail(1)).toSet());
     }
 
     @Test
@@ -10199,6 +10222,25 @@ public class VertexCoreTest extends BaseCoreTest {
         Assert.assertThrows(NoIndexException.class,
                             () -> g.V().has("unindexedProp", "x")
                                    .out().hasLabel(P.neq("scanExcluded")).dedup().toList());
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded")).tail(1),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded"))
+                 .values("unindexedProp").is("y"),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded"))
+                 .fold().unfold(),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded")).constant(1),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded")).sample(2),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded"))
+                 .group().by(T.label),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded"))
+                 .aggregate("x"),
+                g.V().has("unindexedProp", "x").out().hasLabel(P.neq("scanExcluded")).simplePath(),
+                g.V().has("unindexedProp", "x").outE().hasLabel(P.neq("knows")).tail(1),
+                g.V().has("unindexedProp", "x").outE().hasLabel(P.neq("knows")).fold().unfold(),
+                g.V().has("unindexedProp", "x")
+                 .where(__.out().hasLabel(P.neq("scanExcluded")).tail(1))}) {
+            Assert.assertThrows(NoIndexException.class, query::toList);
+        }
         Assert.assertThrows(NoIndexException.class,
                             () -> g.V().has("unindexedProp", "x")
                                    .outE().hasLabel(P.neq("knows")).toList());

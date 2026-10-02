@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -71,37 +72,67 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.ClassFilterStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.CoinStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.DedupGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.IsStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NoneStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.PathFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.SampleGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TailGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TimeLimitStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.ConstantStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.DedupLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.ElementMapStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.FoldStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GroupCountStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.GroupStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.IdStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.IndexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.LabelStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MaxGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MaxLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.NoOpBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.ProjectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyKeyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyMapStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyValueStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.RangeLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.SampleLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.TailLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.UnfoldStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupCountSideEffectStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupSideEffectStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.ProfileSideEffectStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.SubgraphStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.TraversalSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ElementValueComparator;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.EmptyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.ProfileStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ReducingBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.util.AndP;
 import org.apache.tinkerpop.gremlin.process.traversal.util.ConnectiveP;
@@ -117,6 +148,7 @@ import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 
 public final class TraversalUtil {
 
@@ -124,6 +156,34 @@ public final class TraversalUtil {
             "~hugegraph.connective-label-step";
 
     public static final String P_CALL = "P.";
+
+    // Standard filters, current-value projections/reductions (including local
+    // collection variants), and side effects that return the current traverser.
+    // Exact classes keep extension subclasses conservative. History/state readers
+    // (select/path/tree, sack/cap, labeled where/match), repeat/branches, mutations,
+    // lambdas, custom folds and unknown steps are deliberately not admitted.
+    private static final Set<Class<?>> CURRENT_ELEMENT_SUFFIX_STEPS = ImmutableSet.of(
+            VertexStep.class, HugeVertexStep.class, HugeVertexStepByBatch.class,
+            PropertiesStep.class, HasStep.class, LocalContainsStep.class,
+            AndStep.class, OrStep.class, NotStep.class, TraversalFilterStep.class,
+            IsStep.class, ClassFilterStep.class, NoneStep.class, CoinStep.class,
+            RangeGlobalStep.class, TailGlobalStep.class, SampleGlobalStep.class,
+            DedupGlobalStep.class, PathFilterStep.class, TimeLimitStep.class,
+            NoOpBarrierStep.class, IdentityStep.class,
+            IdStep.class, LabelStep.class, PropertyKeyStep.class, PropertyValueStep.class,
+            PropertyMapStep.class, ElementMapStep.class, ProjectStep.class, ConstantStep.class,
+            FoldStep.class, UnfoldStep.class, IndexStep.class,
+            GroupStep.class, GroupCountStep.class,
+            OrderGlobalStep.class, OrderLocalStep.class, RangeLocalStep.class, TailLocalStep.class,
+            DedupLocalStep.class, SampleLocalStep.class,
+            CountGlobalStep.class, SumGlobalStep.class, MinGlobalStep.class,
+            MaxGlobalStep.class, MeanGlobalStep.class,
+            CountLocalStep.class, SumLocalStep.class, MinLocalStep.class,
+            MaxLocalStep.class, MeanLocalStep.class,
+            AggregateGlobalStep.class, AggregateLocalStep.class,
+            GroupSideEffectStep.class, GroupCountSideEffectStep.class,
+            TraversalSideEffectStep.class,
+            SubgraphStep.class, ProfileStep.class, ProfileSideEffectStep.class);
 
     public static HugeGraph getGraph(Step<?, ?> step) {
         HugeGraph graph = tryGetGraph(step);
@@ -1115,24 +1175,13 @@ public final class TraversalUtil {
 
     private static boolean onlyCurrentElementSuffix(List<Step> steps) {
         for (Step<?, ?> step : steps) {
-            // An allowlist is deliberate: select/path, lambdas, repeat and
-            // extension steps may recover earlier elements. Never infer their
-            // provenance from the output type alone. Check by()-children of
-            // order, dedup and projections below before admitting them.
-            if (!(changesCurrentElement(step) || step instanceof HasStep ||
-                  step instanceof NoOpBarrierStep || step instanceof RangeGlobalStep ||
-                  step instanceof IdentityStep || step instanceof NotStep ||
-                  step instanceof AndStep || step instanceof OrStep ||
-                  step instanceof TraversalFilterStep ||
-                  step instanceof DedupGlobalStep || step instanceof OrderGlobalStep ||
-                  step instanceof IdStep || step instanceof LabelStep ||
-                  step instanceof PropertyKeyStep || step instanceof PropertyMapStep ||
-                  step instanceof PropertyValueStep || step instanceof ElementMapStep ||
-                  step instanceof ProjectStep || step instanceof FoldStep ||
-                  step instanceof GroupCountStep ||
-                  step instanceof CountGlobalStep || step instanceof SumGlobalStep ||
-                  step instanceof MinGlobalStep || step instanceof MaxGlobalStep ||
-                  step instanceof MeanGlobalStep)) {
+            // Check both child traversals and hidden history/lambda inputs.
+            // dedup("a") reads step labels even without a select() child;
+            // fold(seed, function) can run arbitrary code unlike list fold().
+            if (!CURRENT_ELEMENT_SUFFIX_STEPS.contains(step.getClass()) ||
+                step instanceof DedupGlobalStep &&
+                !((DedupGlobalStep<?>) step).getScopeKeys().isEmpty() ||
+                step instanceof FoldStep && !((FoldStep<?, ?>) step).isListFold()) {
                 return false;
             }
             if (step instanceof TraversalParent) {
