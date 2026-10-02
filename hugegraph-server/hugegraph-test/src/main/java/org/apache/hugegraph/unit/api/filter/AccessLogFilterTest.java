@@ -39,9 +39,6 @@ import org.apache.hugegraph.api.filter.AccessLogFilter;
 import org.apache.hugegraph.api.filter.DecompressInterceptor;
 import org.apache.hugegraph.api.filter.DecompressInterceptor.Decompress;
 import org.apache.hugegraph.api.filter.PathFilter;
-import org.apache.hugegraph.api.filter.RedirectFilter;
-import org.apache.hugegraph.api.filter.RedirectFilter.RedirectMasterRole;
-import org.apache.hugegraph.api.filter.RedirectFilterDynamicFeature;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
 import org.apache.hugegraph.core.GraphManager;
@@ -65,11 +62,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import jakarta.inject.Provider;
-import jakarta.ws.rs.Priorities;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerResponseContext;
 import jakarta.ws.rs.container.ResourceInfo;
-import jakarta.ws.rs.core.FeatureContext;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.UriInfo;
@@ -365,16 +360,6 @@ public class AccessLogFilterTest extends BaseUnitTest {
         Mockito.verify(this.requestContext, Mockito.never()).setEntityStream(Mockito.any(InputStream.class));
     }
 
-    @Test
-    public void testRedirectRunsAfterBodyCapture() {
-        this.mockResourceMethod("redirectResource");
-        FeatureContext context = Mockito.mock(FeatureContext.class);
-
-        new RedirectFilterDynamicFeature().configure(this.resourceInfo, context);
-
-        Mockito.verify(context).register(RedirectFilter.class, Priorities.USER + 1);
-    }
-
     /**
      * Test the slow query log line contains the client IP and the body preview
      */
@@ -540,11 +525,6 @@ public class AccessLogFilterTest extends BaseUnitTest {
      */
     @Decompress
     public void decompressResource() {
-        // pass
-    }
-
-    @RedirectMasterRole
-    public void redirectResource() {
         // pass
     }
 

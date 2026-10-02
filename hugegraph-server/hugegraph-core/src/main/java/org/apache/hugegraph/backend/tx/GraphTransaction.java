@@ -751,18 +751,6 @@ public class GraphTransaction extends IndexableTransaction {
                                        HugeType.VERTEX);
     }
 
-    public Iterator<Vertex> queryServerInfos(Query query) {
-        return this.queryVertices(query);
-    }
-
-    public Iterator<Vertex> queryServerInfos(Object... vertexIds) {
-        if (this.graph().backendStoreFeatures().supportsTaskAndServerVertex()) {
-            return this.queryVerticesByIds(vertexIds, false, false,
-                                           HugeType.SERVER);
-        }
-        return this.queryVerticesByIds(vertexIds, false, false, HugeType.VERTEX);
-    }
-
     protected Iterator<Vertex> queryVerticesByIds(Object[] vertexIds, boolean adjacentVertex,
                                                   boolean checkMustExist) {
         return this.queryVerticesByIds(vertexIds, adjacentVertex, checkMustExist, HugeType.VERTEX);

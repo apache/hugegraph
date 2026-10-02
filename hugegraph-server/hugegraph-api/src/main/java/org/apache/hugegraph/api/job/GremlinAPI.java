@@ -28,7 +28,6 @@ import java.util.Map;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.core.GraphManager;
@@ -77,7 +76,6 @@ public class GremlinAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
                             "$action=gremlin_execute"})
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> post(@Context GraphManager manager,
                                 @Parameter(description = "The graphspace name")
                                 @PathParam("graphspace") String graphSpace,
