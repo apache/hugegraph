@@ -806,6 +806,18 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
         }
 
+        if (requireCompleteCoverage) {
+            // Match the public result visibility, including flattened queries.
+            // Removal jobs drop indexes before data/schema; those labels must
+            // neither require coverage nor contribute unavailable index plans.
+            // Cleanup callers still need to inspect invisible labels' indexes.
+            Query visibility = query.rootOriginQuery();
+            schemaLabels = schemaLabels.stream().filter(schemaLabel ->
+                    (visibility.showHidden() || !schemaLabel.hidden()) &&
+                    (visibility.showDeleting() || !schemaLabel.status().deleting()))
+                                       .collect(Collectors.toList());
+        }
+
         // Collect MatchedIndex for each SchemaLabel
         Set<MatchedIndex> matchedIndexes = InsertionOrderUtil.newSet();
         for (SchemaLabel schemaLabel : schemaLabels) {
