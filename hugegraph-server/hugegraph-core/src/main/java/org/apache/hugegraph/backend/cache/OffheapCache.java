@@ -356,7 +356,8 @@ public class OffheapCache extends AbstractCache<Id, Object> {
         FLOAT(DataType.FLOAT),
         DOUBLE(DataType.DOUBLE),
         DATE(DataType.DATE),
-        UUID(DataType.UUID);
+        UUID(DataType.UUID),
+        DECIMAL(DataType.DECIMAL);
 
         private final DataType dataType;
 

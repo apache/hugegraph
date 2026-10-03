@@ -934,6 +934,11 @@ public class ConditionQuery extends IdQuery {
             // Otherwise convert to BigDecimal to make two numbers comparable
             Number n1 = NumericUtil.convertToNumber(number1);
             Number n2 = NumericUtil.convertToNumber(number2);
+            if (n1 instanceof BigDecimal || n2 instanceof BigDecimal) {
+                // Exact: a decimal must not be squeezed through a double
+                return new BigDecimal(n1.toString())
+                       .compareTo(new BigDecimal(n2.toString())) == 0;
+            }
             BigDecimal b1 = BigDecimal.valueOf(n1.doubleValue());
             BigDecimal b2 = BigDecimal.valueOf(n2.doubleValue());
             return b1.compareTo(b2) == 0;

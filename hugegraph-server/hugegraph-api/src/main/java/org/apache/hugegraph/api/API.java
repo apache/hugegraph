@@ -26,17 +26,20 @@ import java.util.function.Consumer;
 import org.apache.commons.lang.mutable.MutableLong;
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.api.graph.PropertiesDeserializer;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.metrics.MetricsUtil;
+import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.space.Service;
+import org.apache.hugegraph.traversal.optimize.TraversalUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.InsertionOrderUtil;
-import org.apache.hugegraph.util.JsonUtil;
 import org.apache.hugegraph.util.Log;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.slf4j.Logger;
 
 import com.codahale.metrics.Meter;
@@ -221,6 +224,32 @@ public class API {
         }
     }
 
+    /**
+     * Convert each filter value to the runtime type of its property key the
+     * way the traversal does (TraversalUtil.validPropertyValue, which knows
+     * the key's cardinality: a list on a single key converts every member,
+     * a scalar on a LIST/SET key stays a scalar for membership). A JSON
+     * fraction arrives as BigDecimal, so a DECIMAL value keeps every digit
+     * and a DOUBLE value becomes a double as before. Predicates (P.gt(...))
+     * are converted when the traversal builds its conditions; values of
+     * unknown keys are left as they are.
+     */
+    protected static void normalizeProperties(HugeGraph g, Map<String, Object> props) {
+        for (Map.Entry<String, Object> entry : props.entrySet()) {
+            Object value = entry.getValue();
+            if (value == null || value instanceof P) {
+                continue;
+            }
+            PropertyKey pkey;
+            try {
+                pkey = g.propertyKey(entry.getKey());
+            } catch (NotFoundException e) {
+                continue;
+            }
+            entry.setValue(TraversalUtil.validPropertyValue(value, pkey));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     protected static Map<String, Object> parseProperties(String properties) {
         if (properties == null || properties.isEmpty()) {
@@ -229,7 +258,10 @@ public class API {
 
         Map<String, Object> props = null;
         try {
-            props = JsonUtil.fromJson(properties, Map.class);
+            // The request-body rule: exact fractions for the filter values
+            // and top-level array members (a DECIMAL filter keeps every
+            // digit), Jackson's number types inside an OBJECT value
+            props = PropertiesDeserializer.parse(properties);
         } catch (Exception ignored) {
             // ignore
         }

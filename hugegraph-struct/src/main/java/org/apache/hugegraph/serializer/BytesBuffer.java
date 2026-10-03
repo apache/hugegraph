@@ -19,6 +19,8 @@
 
 package org.apache.hugegraph.serializer;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -643,6 +645,13 @@ public class BytesBuffer extends OutputStream {
                 this.writeLong(uuid.getMostSignificantBits());
                 this.writeLong(uuid.getLeastSignificantBits());
                 break;
+            case DECIMAL:
+                // unscaled two's-complement bytes + scale: exact for any
+                // precision, 33 bytes for a 78-digit (uint256) value
+                BigDecimal decimal = (BigDecimal) value;
+                this.writeBytes(decimal.unscaledValue().toByteArray());
+                this.writeVInt(decimal.scale());
+                break;
             default:
                 throw new IllegalArgumentException("Unsupported data type " + dataType);
         }
@@ -670,6 +679,9 @@ public class BytesBuffer extends OutputStream {
                 return Blob.wrap(this.readBigBytes());
             case UUID:
                 return new UUID(this.readLong(), this.readLong());
+            case DECIMAL:
+                BigInteger unscaled = new BigInteger(this.readBytes());
+                return new BigDecimal(unscaled, this.readVInt());
             default:
                 throw new IllegalArgumentException("Unsupported data type " + dataType);
         }

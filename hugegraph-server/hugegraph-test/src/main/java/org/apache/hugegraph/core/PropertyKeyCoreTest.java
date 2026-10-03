@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.core;
 
+import java.math.BigDecimal;
 import java.util.Date;
 
 import org.apache.hugegraph.HugeException;
@@ -392,6 +393,41 @@ public class PropertyKeyCoreTest extends SchemaCoreTest {
     }
 
     @Test
+    public void testAddOlapPropertyKeyWithDecimalType() {
+        Assume.assumeTrue("Not support olap properties",
+                          storeFeatures().supportsOlapProperties());
+
+        SchemaManager schema = graph().schema();
+
+        // OLAP_SECONDARY and OLAP_RANGE build an index label on the key
+        // through SchemaTransaction.createIndexLabelForOlapPk(), which
+        // skips IndexLabelBuilder.checkFields(): the rule "no index of any
+        // type on a decimal" has to hold there too
+        Assert.assertThrows(NotAllowException.class, () -> {
+            schema.propertyKey("rank").asDecimal().valueSingle()
+                  .writeType(WriteType.OLAP_SECONDARY).create();
+        }, e -> {
+            Assert.assertContains("decimal keys can't be indexed",
+                                  e.getMessage());
+        });
+        Assert.assertThrows(NotAllowException.class, () -> {
+            schema.propertyKey("rank").asDecimal().valueSingle()
+                  .writeType(WriteType.OLAP_RANGE).create();
+        }, e -> {
+            Assert.assertContains("decimal keys can't be indexed",
+                                  e.getMessage());
+        });
+        Assert.assertFalse(graph().existsIndexLabel("*olap_by_rank"));
+
+        // OLAP_COMMON has no index and stays allowed
+        PropertyKey rank = schema.propertyKey("rank").asDecimal()
+                                 .valueSingle()
+                                 .writeType(WriteType.OLAP_COMMON).create();
+        Assert.assertEquals(DataType.DECIMAL, rank.dataType());
+        Assert.assertEquals(WriteType.OLAP_COMMON, rank.writeType());
+    }
+
+    @Test
     public void testClearOlapPropertyKey() {
         Assume.assumeTrue("Not support olap properties",
                           storeFeatures().supportsOlapProperties());
@@ -740,5 +776,65 @@ public class PropertyKeyCoreTest extends SchemaCoreTest {
                   .checkExist(false)
                   .create();
         });
+    }
+
+    @Test
+    public void testAddPropertyKeyWithDecimalType() {
+        SchemaManager schema = graph().schema();
+        PropertyKey balance = schema.propertyKey("balance")
+                                    .asDecimal()
+                                    .valueSingle()
+                                    .create();
+
+        Assert.assertEquals("balance", balance.name());
+        Assert.assertEquals(DataType.DECIMAL, balance.dataType());
+        Assert.assertEquals(Cardinality.SINGLE, balance.cardinality());
+        Assert.assertEquals(DataType.DECIMAL,
+                            graph().propertyKey("balance").dataType());
+
+        // values are normalised to BigDecimal, exactly
+        String uint256Max = "115792089237316195423570985008687907853" +
+                            "269984665640564039457584007913129639935";
+        Assert.assertEquals(new BigDecimal(uint256Max),
+                            balance.validValue(uint256Max));
+        Assert.assertEquals(new BigDecimal("42"), balance.validValue(42L));
+        Assert.assertEquals(new BigDecimal("0.1"), balance.validValue(0.1D));
+        Assert.assertNull(balance.validValue(true));
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            balance.validValue("1,5");
+        }, e -> {
+            Assert.assertContains("Can't read '1,5' as decimal",
+                                  e.getMessage());
+        });
+        // bounds hold for strings and for ready-made BigDecimals alike
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            balance.validValue("1E+999999999");
+        }, e -> {
+            Assert.assertContains("out of bounds", e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            balance.validValue(new BigDecimal("1E+999999999"));
+        }, e -> {
+            Assert.assertContains("out of bounds", e.getMessage());
+        });
+        Assert.assertEquals(new BigDecimal("1E+128"),
+                            balance.validValue(new BigDecimal("1E+128")));
+
+        // SUM/MAX/MIN aggregate types are allowed like on any numeric key
+        PropertyKey total = schema.propertyKey("total")
+                                  .asDecimal()
+                                  .calcSum()
+                                  .create();
+        Assert.assertEquals(AggregateType.SUM, total.aggregateType());
+
+        // decimal lists and sets
+        PropertyKey amounts = schema.propertyKey("amounts")
+                                    .asDecimal()
+                                    .valueList()
+                                    .create();
+        Assert.assertEquals(Cardinality.LIST, amounts.cardinality());
+        Assert.assertEquals(ImmutableList.of(new BigDecimal("1"),
+                                             new BigDecimal("2.5")),
+                            amounts.validValue(ImmutableList.of("1", "2.5")));
     }
 }

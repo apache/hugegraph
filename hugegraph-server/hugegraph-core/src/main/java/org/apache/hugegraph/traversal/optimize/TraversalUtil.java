@@ -1254,7 +1254,7 @@ public final class TraversalUtil {
         return order == Order.desc ? Query.Order.DESC : Query.Order.ASC;
     }
 
-    private static <V> V validPropertyValue(V value, PropertyKey pkey) {
+    public static <V> V validPropertyValue(V value, PropertyKey pkey) {
         if (pkey.cardinality().single() && value instanceof Collection &&
             !pkey.dataType().isBlob()) {
             // Expect single but got collection, like P.within([])
@@ -1488,7 +1488,9 @@ public final class TraversalUtil {
 
     private static Number predicateNumber(String value) {
         try {
-            return JsonUtil.fromJson(value, Number.class);
+            // Exact: a fraction becomes a BigDecimal with every digit and
+            // is converted to the property key's type by validPropertyValue
+            return JsonUtil.fromJsonExact(value, Number.class);
         } catch (Exception e) {
             // Try to parse date
             if (e.getMessage().contains("not a valid number") ||
@@ -1537,7 +1539,7 @@ public final class TraversalUtil {
     @SuppressWarnings("unchecked")
     private static <V> V predicateArg(String value) {
         try {
-            return (V) JsonUtil.fromJson(value, Object.class);
+            return (V) JsonUtil.fromJsonExact(value, Object.class);
         } catch (Exception e) {
             throw new HugeException(
                     "Invalid value '%s', expect a single value", e, value);
@@ -1547,7 +1549,7 @@ public final class TraversalUtil {
     @SuppressWarnings("unchecked")
     private static <V> List<V> predicateArgs(String value) {
         try {
-            return JsonUtil.fromJson("[" + value + "]", List.class);
+            return JsonUtil.fromJsonExact("[" + value + "]", List.class);
         } catch (Exception e) {
             throw new HugeException(
                     "Invalid value '%s', expect a list", e, value);

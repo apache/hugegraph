@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.unit.core;
 
+import java.math.BigDecimal;
+
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.traversal.optimize.TraversalUtil;
@@ -46,44 +48,44 @@ public class TraversalUtilTest {
                             TraversalUtil.parsePredicate("P.lt(-1)"));
         Assert.assertEquals(P.lt(-1),
                             TraversalUtil.parsePredicate("P.lt(\"-1\")"));
-        Assert.assertEquals(P.lte(-123.45),
+        Assert.assertEquals(P.lte(new BigDecimal("-123.45")),
                             TraversalUtil.parsePredicate("P.lte(-123.45)"));
-        Assert.assertEquals(P.lte(3.14),
+        Assert.assertEquals(P.lte(new BigDecimal("3.14")),
                             TraversalUtil.parsePredicate("P.lte(\"3.14\")"));
 
         Assert.assertEquals(P.gt(18),
                             TraversalUtil.parsePredicate("P.gt(18)"));
         Assert.assertEquals(P.gt(18),
                             TraversalUtil.parsePredicate("P.gt(\"18\")"));
-        Assert.assertEquals(P.gte(3.14),
+        Assert.assertEquals(P.gte(new BigDecimal("3.14")),
                             TraversalUtil.parsePredicate("P.gte(3.14)"));
-        Assert.assertEquals(P.gte(3.14),
+        Assert.assertEquals(P.gte(new BigDecimal("3.14")),
                             TraversalUtil.parsePredicate("P.gte(\"3.14\")"));
 
         Assert.assertEquals(P.between(1, 100),
                             TraversalUtil.parsePredicate("P.between(1, 100)"));
-        Assert.assertEquals(P.between(1, 1.2),
+        Assert.assertEquals(P.between(1, new BigDecimal("1.2")),
                             TraversalUtil.parsePredicate("P.between(1, 1.2)"));
         Assert.assertEquals(P.between(1, 2),
                             TraversalUtil.parsePredicate("P.between(\"1\", 2)"));
 
         Assert.assertEquals(P.inside(1, 100),
                             TraversalUtil.parsePredicate("P.inside(1, 100)"));
-        Assert.assertEquals(P.inside(0.28, 1),
+        Assert.assertEquals(P.inside(new BigDecimal("0.28"), 1),
                             TraversalUtil.parsePredicate("P.inside(0.28, 1)"));
         Assert.assertEquals(P.inside(1, 2),
                             TraversalUtil.parsePredicate("P.inside(\"1\", 2)"));
 
         Assert.assertEquals(P.outside(1, 100),
                             TraversalUtil.parsePredicate("P.outside(1, 100)"));
-        Assert.assertEquals(P.outside(1, 1.5),
+        Assert.assertEquals(P.outside(1, new BigDecimal("1.5")),
                             TraversalUtil.parsePredicate("P.outside(1, 1.5)"));
         Assert.assertEquals(P.outside(1, 2),
                             TraversalUtil.parsePredicate("P.outside(\"1\", 2)"));
 
         Assert.assertEquals(P.within(1, 3, 5),
                             TraversalUtil.parsePredicate("P.within(1, 3, 5)"));
-        Assert.assertEquals(P.within("abc", "hello", (Object) 123, 3.14),
+        Assert.assertEquals(P.within("abc", "hello", (Object) 123, new BigDecimal("3.14")),
                             TraversalUtil.parsePredicate(
                                     "P.within(\"abc\", \"hello\", 123, 3.14)"));
     }
@@ -334,5 +336,20 @@ public class TraversalUtilTest {
             Assert.assertEquals("Invalid value '18m, 20', " +
                                 "expect a list", e.getMessage());
         });
+    }
+
+    /** A fractional operand keeps every digit; the key's type converts it later. */
+    @Test
+    public void testParsePredicateFractionIsExact() {
+        Assert.assertEquals(P.eq(new BigDecimal("0.100000000000000001")),
+                            TraversalUtil.parsePredicate("P.eq(0.100000000000000001)"));
+        Assert.assertEquals(P.gt(new BigDecimal("12345678901234567890.123456789012345678")),
+                            TraversalUtil.parsePredicate(
+                                    "P.gt(12345678901234567890.123456789012345678)"));
+        Assert.assertEquals(P.between(new BigDecimal("0.1"), new BigDecimal("0.2")),
+                            TraversalUtil.parsePredicate("P.between(0.1, 0.2)"));
+        Assert.assertEquals(P.within(new BigDecimal("1.00"), 2, "x"),
+                            TraversalUtil.parsePredicate("P.within(1.00, 2, \"x\")"));
+        Assert.assertEquals(P.eq(7), TraversalUtil.parsePredicate("P.eq(7)"));
     }
 }

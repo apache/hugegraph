@@ -19,6 +19,7 @@ package org.apache.hugegraph.io;
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -51,6 +52,7 @@ import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.Log;
@@ -66,7 +68,6 @@ import org.apache.tinkerpop.shaded.jackson.core.JsonParser;
 import org.apache.tinkerpop.shaded.jackson.core.JsonToken;
 import org.apache.tinkerpop.shaded.jackson.core.type.WritableTypeId;
 import org.apache.tinkerpop.shaded.jackson.databind.DeserializationContext;
-import org.apache.tinkerpop.shaded.jackson.databind.JsonSerializer;
 import org.apache.tinkerpop.shaded.jackson.databind.SerializerProvider;
 import org.apache.tinkerpop.shaded.jackson.databind.deser.std.DateDeserializers.DateDeserializer;
 import org.apache.tinkerpop.shaded.jackson.databind.deser.std.StdDeserializer;
@@ -183,6 +184,10 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
 
         module.addSerializer(Blob.class, new BlobSerializer());
         module.addDeserializer(Blob.class, new BlobDeserializer());
+
+        // Decimals travel as strings: JSON numbers are doubles to most clients
+        module.addSerializer(BigDecimal.class, new BigDecimalSerializer());
+        module.addDeserializer(BigDecimal.class, new BigDecimalDeserializer());
     }
 
     public static void registerIdSerializers(SimpleModule module) {
@@ -755,18 +760,14 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 String key = property.key();
                 Object val = property.value();
                 try {
-                    generator.writeFieldName(key);
-                    if (val != null) {
-                        JsonSerializer<Object> serializer =
-                                provider.findValueSerializer(val.getClass());
-                        serializer.serialize(val, generator, provider);
-                    } else {
-                        generator.writeNull();
-                    }
+                    // The provider contextualizes the serializer: a bare
+                    // findValueSerializer() returns a Map serializer without
+                    // its key serializer, so an OBJECT map value failed here
+                    provider.defaultSerializeField(key, val, generator);
                 } catch (IOException e) {
                     throw new HugeException(
                             "Failed to serialize property(%s: %s) " +
-                            "for vertex '%s'", key, val, property.element());
+                            "for vertex '%s'", e, key, val, property.element());
                 }
             }
             // End write properties
@@ -954,6 +955,74 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 throws IOException {
             byte[] bytes = jsonParser.getBinaryValue();
             return Blob.wrap(bytes);
+        }
+    }
+
+    private static class BigDecimalSerializer extends StdSerializer<BigDecimal> {
+
+        public BigDecimalSerializer() {
+            super(BigDecimal.class);
+        }
+
+        @Override
+        public void serialize(BigDecimal decimal, JsonGenerator jsonGenerator,
+                              SerializerProvider provider) throws IOException {
+            jsonGenerator.writeString(exactString(decimal));
+        }
+
+        /**
+         * The plain form ("1000", "0.000000000000000001") while the scale
+         * is within the DECIMAL bound, so a stored value always reads as
+         * digits; beyond it the scientific form ("1E+999999999"), which is
+         * just as exact but does not expand the exponent into characters.
+         * A generic Gremlin result is not bound by the property check.
+         */
+        static String exactString(BigDecimal decimal) {
+            int scale = decimal.scale();
+            if (scale >= -DataType.DECIMAL_MAX_SCALE &&
+                scale <= DataType.DECIMAL_MAX_SCALE) {
+                return decimal.toPlainString();
+            }
+            return decimal.toString();
+        }
+
+        @Override
+        public void serializeWithType(BigDecimal decimal,
+                                      JsonGenerator jsonGenerator,
+                                      SerializerProvider provider,
+                                      TypeSerializer typeSer)
+                throws IOException {
+            /*
+             * The typed GraphSON mappers (v2/v3) call this variant and
+             * StdSerializer does not implement it. Keep the type prefix so
+             * that the value stays "gx:BigDecimal", but carry the plain
+             * string inside it: a JSON number would be read as a double by
+             * most clients, which is what this type exists to avoid.
+             */
+            WritableTypeId typeId = typeSer.typeId(decimal,
+                                                   JsonToken.VALUE_STRING);
+            typeSer.writeTypePrefix(jsonGenerator, typeId);
+            this.serialize(decimal, jsonGenerator, provider);
+            typeSer.writeTypeSuffix(jsonGenerator, typeId);
+        }
+    }
+
+    private static class BigDecimalDeserializer extends StdDeserializer<BigDecimal> {
+
+        public BigDecimalDeserializer() {
+            super(BigDecimal.class);
+        }
+
+        @Override
+        public BigDecimal deserialize(JsonParser jsonParser,
+                                      DeserializationContext ctxt)
+                throws IOException {
+            JsonToken token = jsonParser.getCurrentToken();
+            if (token == JsonToken.VALUE_NUMBER_INT ||
+                token == JsonToken.VALUE_NUMBER_FLOAT) {
+                return jsonParser.getDecimalValue();
+            }
+            return new BigDecimal(jsonParser.getText().trim());
         }
     }
 }

@@ -32,6 +32,7 @@ import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.filter.AccessLogFilterTest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
+import org.apache.hugegraph.unit.api.graph.PropertiesDeserializerTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
 import org.apache.hugegraph.unit.api.gremlin.GremlinQueryAPITest;
 import org.apache.hugegraph.unit.api.space.GraphSpaceAPITest;
@@ -72,6 +73,7 @@ import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.StandardHugeGraphClearBackendTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
 import org.apache.hugegraph.unit.core.TaskSchedulerServerInfoTest;
+import org.apache.hugegraph.unit.core.PropertyKeyUserdataTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
 import org.apache.hugegraph.unit.id.EdgeIdTest;
 import org.apache.hugegraph.unit.id.IdTest;
@@ -85,6 +87,7 @@ import org.apache.hugegraph.unit.serializer.BinaryBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.BinaryScatterSerializerTest;
 import org.apache.hugegraph.unit.serializer.BinarySerializerTest;
 import org.apache.hugegraph.unit.serializer.BytesBufferTest;
+import org.apache.hugegraph.unit.serializer.HugeGraphSONModuleTest;
 import org.apache.hugegraph.unit.serializer.SerializerFactoryTest;
 import org.apache.hugegraph.unit.serializer.StoreSerializerTest;
 import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
@@ -111,6 +114,7 @@ import org.junit.runners.Suite;
         /* api filter */
         AccessLogFilterTest.class,
         LoadDetectFilterTest.class,
+        PropertiesDeserializerTest.class,
         LoginAPITest.class,
         PathFilterTest.class,
 
@@ -174,6 +178,7 @@ import org.junit.runners.Suite;
         HstoreSessionsTest.class,
         BackendStoreInfoTest.class,
         TraversalUtilTest.class,
+        PropertyKeyUserdataTest.class,
         TraversalUtilOptimizeTest.class,
         IdHolderTest.class,
         PageStateTest.class,
@@ -197,6 +202,7 @@ import org.junit.runners.Suite;
         BinaryScatterSerializerTest.class,
         StoreSerializerTest.class,
         TextSerializerTest.class,
+        HugeGraphSONModuleTest.class,
 
         /* rocksdb */
         RocksDBSessionsTest.class,

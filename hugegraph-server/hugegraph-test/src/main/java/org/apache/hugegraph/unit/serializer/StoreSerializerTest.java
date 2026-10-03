@@ -17,8 +17,13 @@
 
 package org.apache.hugegraph.unit.serializer;
 
+import java.math.BigDecimal;
 import java.util.Iterator;
 
+import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
 import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.BackendAction;
@@ -32,6 +37,8 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Action;
 import org.junit.Test;
+
+import com.google.common.collect.ImmutableList;
 
 public class StoreSerializerTest {
 
@@ -61,6 +68,35 @@ public class StoreSerializerTest {
             Assert.assertEquals(entry.columnsSize(), e.columnsSize());
             Assert.assertEquals(entry.columns(), e.columns());
         }
+    }
+
+    @Test
+    public void testConditionQueryBytesKeepBigDecimal() {
+        // A DECIMAL filter travels to the store as a BigDecimal, not as an
+        // untyped JSON number that Gson would read back as a double
+        Id key = IdGenerator.of(7L);
+        BigDecimal exact = new BigDecimal("12345678901234567890.123456789012345678");
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.eq(key, exact));
+        query.query(Condition.gte(IdGenerator.of(8L), new BigDecimal("0.000000000000000001")));
+        query.query(Condition.in(IdGenerator.of(9L),
+                                 ImmutableList.of(new BigDecimal("1.10"),
+                                                  new BigDecimal("2.20"))));
+
+        ConditionQuery copy = ConditionQuery.fromBytes(query.bytes());
+        Object value = copy.userpropValue(key);
+        Assert.assertEquals(BigDecimal.class, value.getClass());
+        Assert.assertEquals(exact, value);
+        Object low = copy.userpropValue(IdGenerator.of(8L));
+        Assert.assertEquals(new BigDecimal("0.000000000000000001"), low);
+        Object list = copy.userpropValue(IdGenerator.of(9L));
+        Assert.assertEquals(ImmutableList.of(new BigDecimal("1.10"),
+                                             new BigDecimal("2.20")), list);
+        // a plain double condition is unchanged
+        query = new ConditionQuery(HugeType.VERTEX);
+        query.query(Condition.eq(key, 1.5d));
+        Assert.assertEquals(1.5d, ConditionQuery.fromBytes(query.bytes())
+                                                .userpropValue(key));
     }
 
     @Test

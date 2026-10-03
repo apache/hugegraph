@@ -31,6 +31,7 @@ import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.NumericUtil;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
@@ -225,12 +226,12 @@ public abstract class Condition {
 
         IN("in", null, Collection.class, (v1, v2) -> {
             assert v2 != null;
-            return ((Collection<?>) v2).contains(v1);
+            return collectionContains((Collection<?>) v2, v1);
         }),
 
         NOT_IN("notin", null, Collection.class, (v1, v2) -> {
             assert v2 != null;
-            return !((Collection<?>) v2).contains(v1);
+            return !collectionContains((Collection<?>) v2, v1);
         }),
 
         PREFIX("prefix", Id.class, Id.class, (v1, v2) -> {
@@ -301,7 +302,7 @@ public abstract class Condition {
 
         CONTAINS("contains", Collection.class, null, (v1, v2) -> {
             assert v2 != null;
-            return v1 != null && ((Collection<?>) v1).contains(v2);
+            return v1 != null && collectionContains((Collection<?>) v1, v2);
         }),
 
         CONTAINS_VALUE("containsv", Map.class, null, (v1, v2) -> {
@@ -566,6 +567,29 @@ public abstract class Condition {
                     this == TEXT_CONTAINS_REGEX || this == TEXT_REGEX ||
                     this == TEXT_CONTAINS_ANY || this == TEXT_MATCH_REGEX ||
                     this == TEXT_MATCH_EDIT_DISTANCE;
+        }
+
+        /**
+         * Membership by value once a BigDecimal is involved: its equals() is
+         * scale sensitive (1.0 vs 1.00), while EQ compares decimals by value,
+         * so IN/NOT_IN do the same. Other numbers keep contains() semantics
+         * (an Integer 1 is not a Double 1.0 here, as before).
+         */
+        private static boolean collectionContains(Collection<?> values, Object value) {
+            if (values.contains(value)) {
+                return true;
+            }
+            if (!(value instanceof Number)) {
+                return false;
+            }
+            boolean decimal = value instanceof BigDecimal;
+            for (Object member : values) {
+                if (member instanceof Number && (decimal || member instanceof BigDecimal) &&
+                    NumericUtil.compareNumber(value, (Number) member) == 0) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public boolean isRangeType() {

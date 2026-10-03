@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.unit.serializer;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Set;
@@ -27,12 +28,14 @@ import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.schema.PropertyKey;
 import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.DateUtil;
@@ -205,5 +208,40 @@ public class BinarySerializerTest extends BaseUnitTest {
         edge = vertex2.getEdges().iterator().next();
         Assert.assertEquals(edge2, edge);
         assertCollectionEquals(edge2.getProperties(), edge.getProperties());
+    }
+
+    /**
+     * Userdata read back from the backend keeps its types: a fractional
+     * custom entry stays a Double (on every schema element) and a DECIMAL
+     * default stays the exact BigDecimal.
+     */
+    @Test
+    public void testUserdataTypesSurviveAReload() {
+        HugeConfig config = FakeObjects.newConfig();
+        BinarySerializer ser = new BinarySerializer(config);
+        FakeObjects objects = new FakeObjects();
+
+        PropertyKey fee = objects.newPropertyKey(IdGenerator.of(7L), "fee",
+                                                 DataType.DECIMAL, Cardinality.SINGLE);
+        Userdata userdata = new Userdata();
+        userdata.put(Userdata.DEFAULT_VALUE, new BigDecimal("0.1234567890123456789"));
+        userdata.put("rate", 0.85d);
+        fee.userdata(userdata);
+        PropertyKey reloadedKey = ser.readPropertyKey(objects.graph(), ser.writePropertyKey(fee));
+        Assert.assertEquals(new BigDecimal("0.1234567890123456789"),
+                            reloadedKey.userdata().get(Userdata.DEFAULT_VALUE));
+        Assert.assertEquals(new BigDecimal("0.1234567890123456789"), reloadedKey.defaultValue());
+        Assert.assertEquals(0.85d, reloadedKey.userdata().get("rate"));
+        // a second write of the reloaded key keeps the types too
+        PropertyKey again = ser.readPropertyKey(objects.graph(), ser.writePropertyKey(reloadedKey));
+        Assert.assertEquals(0.85d, again.userdata().get("rate"));
+        Assert.assertEquals(new BigDecimal("0.1234567890123456789"), again.defaultValue());
+
+        VertexLabel person = objects.newVertexLabel(IdGenerator.of(2L), "person",
+                                                    IdStrategy.PRIMARY_KEY,
+                                                    IdGenerator.of(7L));
+        person.userdata("rate", 0.85d);
+        VertexLabel reloadedLabel = ser.readVertexLabel(objects.graph(), ser.writeVertexLabel(person));
+        Assert.assertEquals(0.85d, reloadedLabel.userdata().get("rate"));
     }
 }

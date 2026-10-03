@@ -1882,4 +1882,41 @@ public class IndexLabelCoreTest extends SchemaCoreTest {
                   .create();
         });
     }
+
+    @Test
+    public void testAddIndexLabelOnDecimalProperty() {
+        super.initPropertyKeys();
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("balance").asDecimal().create();
+        schema.vertexLabel("account")
+              .properties("name", "balance")
+              .primaryKeys("name")
+              .create();
+
+        // no byte-order encoding exists for decimals: no index of any type
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.indexLabel("accountByBalance").onV("account")
+                  .by("balance").secondary().create();
+        }, e -> {
+            Assert.assertContains("data type is decimal", e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.indexLabel("accountByBalanceRange").onV("account")
+                  .by("balance").range().create();
+        }, e -> {
+            Assert.assertContains("data type is decimal", e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.indexLabel("accountByNameBalance").onV("account")
+                  .by("name", "balance").shard().create();
+        }, e -> {
+            Assert.assertContains("data type is decimal", e.getMessage());
+        });
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.indexLabel("accountByBalanceUnique").onV("account")
+                  .by("balance").unique().create();
+        }, e -> {
+            Assert.assertContains("data type is decimal", e.getMessage());
+        });
+    }
 }

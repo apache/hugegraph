@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.store.business;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -255,6 +257,12 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
                     variant.setType(VariantType.VT_DOUBLE)
                            .setValueDouble((Double) v);
                     break;
+                case DECIMAL:
+                    // A LIST/SET value is a collection of decimals: every
+                    // member in plain form, as a JSON array of strings
+                    variant.setType(VariantType.VT_STRING)
+                           .setValueString(decimalString(v));
+                    break;
                 case OBJECT:
                 case UNKNOWN:
                     variant.setType(VariantType.VT_UNKNOWN)
@@ -271,6 +279,20 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
             props.add(pb.build());
         }
         return props;
+    }
+
+    private static String decimalString(Object value) {
+        if (!(value instanceof Collection)) {
+            return ((BigDecimal) value).toPlainString();
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (Object member : (Collection<?>) value) {
+            if (sb.length() > 1) {
+                sb.append(',');
+            }
+            sb.append('"').append(((BigDecimal) member).toPlainString()).append('"');
+        }
+        return sb.append(']').toString();
     }
 
     private void buildId(Builder variant, Id id) {

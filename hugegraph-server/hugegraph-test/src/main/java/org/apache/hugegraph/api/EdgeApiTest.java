@@ -18,6 +18,8 @@
 package org.apache.hugegraph.api;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 import org.apache.hugegraph.testutil.Assert;
 import org.junit.Before;
@@ -180,6 +182,47 @@ public class EdgeApiTest extends BaseApiTest {
 
         r = client().get(PATH);
         assertResponseStatus(200, r);
+    }
+
+    /**
+     * An adjacency query filtered on an OBJECT key: the filter map is read
+     * by the request-body rule (numbers inside an OBJECT value keep their
+     * Jackson types), so it equals the stored map and the edge is found.
+     */
+    @Test
+    public void testObjectMapFilterOnAdjacency() throws IOException {
+        String schema = "/graphspaces/DEFAULT/graphs/hugegraph/schema/";
+        createAndAssert(schema + "propertykeys",
+                        "{\"name\": \"meta\", \"data_type\": \"OBJECT\"," +
+                        "\"cardinality\": \"SINGLE\", \"check_exist\": false," +
+                        "\"properties\":[]}", 202);
+        createAndAssert(schema + "edgelabels",
+                        "{\"name\": \"rated\", \"source_label\": \"person\"," +
+                        "\"target_label\": \"software\", \"frequency\": \"SINGLE\"," +
+                        "\"properties\":[\"meta\"], \"nullable_keys\":[\"meta\"]," +
+                        "\"check_exist\": false}");
+        String outVId = getVertexId("person", "name", "peter");
+        String inVId = getVertexId("software", "name", "lop");
+        String edge = String.format("{\"label\": \"rated\", \"outVLabel\": \"person\"," +
+                                    "\"inVLabel\": \"software\", \"outV\": \"%s\"," +
+                                    "\"inV\": \"%s\", \"properties\":{" +
+                                    "\"meta\": {\"ratio\": 0.25, \"n\": 3}}}",
+                                    outVId, inVId);
+        String content = assertResponseStatus(201, client().post(PATH, edge));
+        Assert.assertContains("\"ratio\":0.25", content);
+
+        Response r = client().get(PATH, ImmutableMap.of(
+                "vertex_id", id2Json(outVId), "direction", "OUT", "label", "rated",
+                "properties", URLEncoder.encode("{\"meta\":{\"ratio\":0.25,\"n\":3}}",
+                                                StandardCharsets.UTF_8)));
+        content = assertResponseStatus(200, r);
+        Assert.assertContains("\"ratio\":0.25", content);
+        r = client().get(PATH, ImmutableMap.of(
+                "vertex_id", id2Json(outVId), "direction", "OUT", "label", "rated",
+                "properties", URLEncoder.encode("{\"meta\":{\"ratio\":0.5,\"n\":3}}",
+                                                StandardCharsets.UTF_8)));
+        content = assertResponseStatus(200, r);
+        Assert.assertEquals("{\"edges\":[]}", content);
     }
 
     @Test

@@ -316,8 +316,11 @@ public class PropertyKey extends SchemaElement implements Propfiable {
         if (value == null) {
             return null;
         }
-        if (this.checkValueType(value)) {
-            // Same as expected type, no conversion required
+        if (this.checkValueType(value) && !this.dataType().isDecimal()) {
+            // Same as expected type, no conversion required. A decimal is
+            // not short-circuited: a ready-made BigDecimal (Gremlin literal,
+            // SUM result of a batch update) still has to pass the bounds
+            // check in DataType.valueToDecimal()
             return value;
         }
 
@@ -373,6 +376,10 @@ public class PropertyKey extends SchemaElement implements Propfiable {
             @SuppressWarnings("unchecked")
             V blob = (V) this.dataType().valueToBlob(value);
             return blob;
+        } else if (this.dataType().isDecimal()) {
+            @SuppressWarnings("unchecked")
+            V decimal = (V) this.dataType().valueToDecimal(value);
+            return decimal;
         }
 
         if (this.checkDataType(value)) {
@@ -423,6 +430,9 @@ public class PropertyKey extends SchemaElement implements Propfiable {
                 break;
             case UUID:
                 builder.append(".asUUID()");
+                break;
+            case DECIMAL:
+                builder.append(".asDecimal()");
                 break;
             case OBJECT:
                 builder.append(".asObject()");
@@ -547,6 +557,8 @@ public class PropertyKey extends SchemaElement implements Propfiable {
         Builder asFloat();
 
         Builder asLong();
+
+        Builder asDecimal();
 
         Builder valueSingle();
 

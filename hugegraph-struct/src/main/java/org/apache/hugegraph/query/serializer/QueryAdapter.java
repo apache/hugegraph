@@ -18,6 +18,8 @@
 package org.apache.hugegraph.query.serializer;
 
 import java.lang.reflect.Type;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -48,8 +50,13 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                         .build();
 
     static boolean isPrimitive(Class clz) {
+        // Values whose class must travel with them: Gson reads an untyped
+        // JSON number back as a double, which would round a BigDecimal
+        if (clz == Date.class || clz == BigDecimal.class || clz == BigInteger.class) {
+            return true;
+        }
         try {
-            return (clz == Date.class) || ((Class) clz.getField("TYPE").get(null)).isPrimitive();
+            return ((Class) clz.getField("TYPE").get(null)).isPrimitive();
         } catch (Exception e) {
             return false;
         }

@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.schema;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -116,7 +117,89 @@ public class PropertyKey extends SchemaElement implements Propertiable {
 
     public void defineDefaultValue(Object value) {
         // TODO add a field default_value
-        this.userdata().put(Userdata.DEFAULT_VALUE, value);
+        this.userdata().put(Userdata.DEFAULT_VALUE, this.normalizeDefaultValue(value));
+    }
+
+    /** A BigDecimal from the exact parser as the Double the default parser gave. */
+    private static Object undoExact(Object value) {
+        if (value instanceof BigDecimal) {
+            return ((BigDecimal) value).doubleValue();
+        }
+        if (value instanceof Collection) {
+            List<Object> values = new ArrayList<>(((Collection<?>) value).size());
+            for (Object member : (Collection<?>) value) {
+                values.add(undoExact(member));
+            }
+            return value instanceof Set ? new LinkedHashSet<>(values) : values;
+        }
+        return value;
+    }
+
+    /**
+     * One entry, as the backend serializers add them when a stored key is
+     * read back: an already stored DECIMAL default that does not convert
+     * keeps loading (the error surfaces when the default is applied).
+     */
+    @Override
+    public void userdata(String key, Object value) {
+        if (Userdata.DEFAULT_VALUE.equals(key)) {
+            value = this.normalizeDefaultValue(value, true);
+        }
+        super.userdata(key, value);
+    }
+
+    /**
+     * The userdata of a create or append through the builder: an invalid or
+     * out-of-bounds DECIMAL default is rejected here, not at the first vertex
+     * that would have used it.
+     */
+    @Override
+    public void userdata(Userdata userdata) {
+        E.checkArgumentNotNull(userdata, "userdata");
+        for (Map.Entry<String, Object> e : userdata.entrySet()) {
+            Object value = e.getValue();
+            if (Userdata.DEFAULT_VALUE.equals(e.getKey())) {
+                value = this.normalizeDefaultValue(value, false);
+            }
+            super.userdata(e.getKey(), value);
+        }
+    }
+
+    /**
+     * A DECIMAL key keeps its default value in userdata as the exact
+     * BigDecimal (a JSON fraction arrives as BigDecimal, a string is parsed),
+     * both when the key is defined through the API and when it is read back
+     * from the backend, so the value serializes the same way on every path.
+     * Every other data type keeps the raw value the user sent, as before:
+     * {@link #defaultValue()} converts it lazily when it is applied; only a
+     * BigDecimal (which exists solely because the API reads the default
+     * exactly) becomes the Double the default parser produced on master.
+     */
+    private Object normalizeDefaultValue(Object value) {
+        return this.normalizeDefaultValue(value, false);
+    }
+
+    private Object normalizeDefaultValue(Object value, boolean lenient) {
+        if (value == null) {
+            return value;
+        }
+        if (this.dataType != DataType.DECIMAL) {
+            return undoExact(value);
+        }
+        Object raw = value;
+        if (this.cardinality == Cardinality.SET && value instanceof Collection &&
+            !(value instanceof Set)) {
+            raw = new LinkedHashSet<>((Collection<?>) value);
+        }
+        if (!lenient) {
+            return this.validValueOrThrow(raw);
+        }
+        try {
+            Object valid = this.validValue(raw);
+            return valid != null ? valid : value;
+        } catch (RuntimeException e) {
+            return value;
+        }
     }
 
     public Object defaultValue() {
@@ -311,8 +394,11 @@ public class PropertyKey extends SchemaElement implements Propertiable {
         if (value == null) {
             return null;
         }
-        if (this.checkValueType(value)) {
-            // Same as expected type, no conversion required
+        if (this.checkValueType(value) && !this.dataType().isDecimal()) {
+            // Same as expected type, no conversion required. A decimal is
+            // not short-circuited: a ready-made BigDecimal (Gremlin literal,
+            // SUM result of a batch update) still has to pass the bounds
+            // check in DataType.valueToDecimal()
             return value;
         }
 
@@ -368,6 +454,10 @@ public class PropertyKey extends SchemaElement implements Propertiable {
             @SuppressWarnings("unchecked")
             V blob = (V) this.dataType().valueToBlob(value);
             return blob;
+        } else if (this.dataType().isDecimal()) {
+            @SuppressWarnings("unchecked")
+            V decimal = (V) this.dataType().valueToDecimal(value);
+            return decimal;
         }
 
         if (this.checkDataType(value)) {
@@ -399,6 +489,8 @@ public class PropertyKey extends SchemaElement implements Propertiable {
         Builder asFloat();
 
         Builder asLong();
+
+        Builder asDecimal();
 
         Builder valueSingle();
 

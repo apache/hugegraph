@@ -17,11 +17,34 @@
 
 package org.apache.hugegraph.query;
 
+import java.math.BigDecimal;
+import java.util.Arrays;
+
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.junit.Assert;
 import org.junit.Test;
 
 public class ConditionTest {
+
+    @Test
+    public void testConditionInMatchesNumbersByValue() {
+        Condition c = new Condition.SyspropRelation(HugeKeys.ID, Condition.RelationType.IN,
+                                                    Arrays.asList(new BigDecimal("1.00"),
+                                                                  new BigDecimal("2.5")));
+        Assert.assertTrue(c.test(new BigDecimal("1.0")));
+        Assert.assertTrue(c.test(1));
+        Assert.assertTrue(c.test(2.5d));
+        Assert.assertFalse(c.test(new BigDecimal("1.01")));
+        Assert.assertFalse(c.test("1.0"));
+        Condition n = new Condition.SyspropRelation(HugeKeys.ID, Condition.RelationType.NOT_IN,
+                                                    Arrays.asList(new BigDecimal("1.00")));
+        Assert.assertFalse(n.test(new BigDecimal("1.0")));
+        Assert.assertTrue(n.test(new BigDecimal("1.1")));
+        Condition c2 = new Condition.SyspropRelation(HugeKeys.ID, Condition.RelationType.CONTAINS,
+                                                     new BigDecimal("1.0"));
+        Assert.assertTrue(c2.test(Arrays.asList(new BigDecimal("1.00"), new BigDecimal("2"))));
+        Assert.assertFalse(c2.test(Arrays.asList(new BigDecimal("1.01"))));
+    }
 
     @Test
     public void testConditionBooleanRange() {

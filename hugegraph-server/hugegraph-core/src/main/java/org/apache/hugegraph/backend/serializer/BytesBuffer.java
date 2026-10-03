@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.backend.serializer;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -660,6 +662,13 @@ public final class BytesBuffer extends OutputStream {
                 this.writeLong(uuid.getMostSignificantBits());
                 this.writeLong(uuid.getLeastSignificantBits());
                 break;
+            case DECIMAL:
+                // unscaled two's-complement bytes + scale: exact for any
+                // precision, 33 bytes for a 78-digit (uint256) value
+                BigDecimal decimal = (BigDecimal) value;
+                this.writeBytes(decimal.unscaledValue().toByteArray());
+                this.writeVInt(decimal.scale());
+                break;
             default:
                 // TODO: replace Kryo with Fury (https://github.com/apache/fury)
                 this.writeBytes(KryoUtil.toKryoWithType(value));
@@ -693,6 +702,9 @@ public final class BytesBuffer extends OutputStream {
                 return Blob.wrap(this.readBigBytes());
             case UUID:
                 return new UUID(this.readLong(), this.readLong());
+            case DECIMAL:
+                BigInteger unscaled = new BigInteger(this.readBytes());
+                return new BigDecimal(unscaled, this.readVInt());
             default:
                 // TODO: replace Kryo with Fury (https://github.com/apache/fury)
                 return KryoUtil.fromKryoWithType(this.readBytes());
@@ -872,7 +884,7 @@ public final class BytesBuffer extends OutputStream {
         }
         // Parse id from bytes
         int start = this.buffer.position();
-         // OLAP {PropertyKey}{VertexId}
+        // OLAP {PropertyKey}{VertexId}
         if (isOlap) {
             // Read olap property id first
             Id pkId = this.readId();

@@ -26,6 +26,7 @@ import org.apache.tinkerpop.shaded.jackson.core.JsonGenerator;
 import org.apache.tinkerpop.shaded.jackson.core.JsonProcessingException;
 import org.apache.tinkerpop.shaded.jackson.core.type.TypeReference;
 import org.apache.tinkerpop.shaded.jackson.databind.Module;
+import org.apache.tinkerpop.shaded.jackson.databind.DeserializationFeature;
 import org.apache.tinkerpop.shaded.jackson.databind.ObjectMapper;
 import org.apache.tinkerpop.shaded.jackson.databind.ObjectReader;
 import org.apache.tinkerpop.shaded.jackson.databind.SerializationFeature;
@@ -81,6 +82,25 @@ public final class JsonUtil {
         }
     }
 
+    /**
+     * Like {@link #fromJson(String, Class)}, but a JSON fraction becomes a
+     * BigDecimal with every digit instead of a double: for JSON whose
+     * fractions may be DECIMAL property values (a property key's userdata
+     * with its default value, the properties filter of the list APIs).
+     */
+    public static <T> T fromJsonExact(String json, Class<T> clazz) {
+        E.checkState(json != null,
+                     "Json value can't be null for '%s'",
+                     clazz.getSimpleName());
+        try {
+            return MAPPER.readerFor(clazz)
+                         .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                         .readValue(json);
+        } catch (IOException e) {
+            throw new HugeException("Can't read json: %s", e, e.getMessage());
+        }
+    }
+
     public static <T> T fromJson(String json, TypeReference<?> typeRef) {
         E.checkState(json != null,
                      "Json value can't be null for '%s'",
@@ -113,7 +133,8 @@ public final class JsonUtil {
             } else if (clazz == Float.class) {
                 object = number.floatValue();
             } else if (clazz == Double.class) {
-                assert object instanceof Double : object;
+                // A property value may arrive as BigDecimal (exact JSON fraction)
+                object = number.doubleValue();
             } else {
                 assert clazz == Date.class : clazz;
             }

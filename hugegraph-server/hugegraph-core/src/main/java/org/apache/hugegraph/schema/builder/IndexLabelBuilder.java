@@ -114,6 +114,12 @@ public class IndexLabelBuilder extends AbstractBuilder
         indexLabel.indexType(this.indexType);
         for (String field : this.indexFields) {
             PropertyKey propertyKey = graph.propertyKey(field);
+            // Also guarded in checkFields(), but build() is reached directly
+            // by the OLAP property-key path, which skips checkFields()
+            E.checkArgument(!propertyKey.dataType().isDecimal(),
+                            "Not allowed to build index on property key " +
+                            "'%s' whose data type is decimal",
+                            propertyKey.name());
             indexLabel.indexField(propertyKey.id());
         }
         indexLabel.userdata(this.userdata);
@@ -472,6 +478,9 @@ public class IndexLabelBuilder extends AbstractBuilder
             E.checkArgument(pkey.aggregateType().isIndexable(),
                             "The aggregate type %s is not indexable",
                             pkey.aggregateType());
+            E.checkArgument(!pkey.dataType().isDecimal(),
+                            "Not allowed to build index on property key " +
+                            "'%s' whose data type is decimal", pkey.name());
 
             if (pkey.cardinality().multiple()) {
                 E.checkArgument(fields.size() == 1,

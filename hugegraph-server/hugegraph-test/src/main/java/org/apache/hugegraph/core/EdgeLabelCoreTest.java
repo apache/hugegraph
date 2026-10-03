@@ -1500,4 +1500,34 @@ public class EdgeLabelCoreTest extends SchemaCoreTest {
                   .create();
         });
     }
+
+    @Test
+    public void testAddEdgeLabelWithDecimalSortKey() {
+        super.initPropertyKeys();
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("amount").asDecimal().create();
+        schema.vertexLabel("account")
+              .properties("name")
+              .primaryKeys("name")
+              .create();
+
+        Assert.assertThrows(IllegalArgumentException.class, () -> {
+            schema.edgeLabel("transfer").multiTimes()
+                  .properties("amount", "time")
+                  .link("account", "account")
+                  .sortKeys("amount")
+                  .create();
+        }, e -> {
+            Assert.assertContains("can't be a decimal property",
+                                  e.getMessage());
+        });
+
+        // a decimal is fine as an ordinary edge property
+        EdgeLabel transfer = schema.edgeLabel("transfer").multiTimes()
+                                   .properties("amount", "time")
+                                   .link("account", "account")
+                                   .sortKeys("time")
+                                   .create();
+        Assert.assertEquals(1, transfer.sortKeys().size());
+    }
 }

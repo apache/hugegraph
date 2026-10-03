@@ -45,6 +45,7 @@ import org.slf4j.Logger;
 import com.codahale.metrics.annotation.Timed;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.google.common.collect.ImmutableMap;
 
 import io.swagger.v3.oas.annotations.Parameter;
@@ -250,6 +251,7 @@ public class PropertyKeyAPI extends API {
         public String[] properties;
         @Schema(description = "User-defined metadata")
         @JsonProperty("user_data")
+        @JsonDeserialize(using = UserdataDeserializer.class)
         public Userdata userdata;
         @Schema(description = "Whether to check if property key exists before creation")
         @JsonProperty("check_exist")

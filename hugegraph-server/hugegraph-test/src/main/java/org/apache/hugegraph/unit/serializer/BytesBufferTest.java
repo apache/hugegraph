@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.unit.serializer;
 
+import java.math.BigDecimal;
 import java.awt.Point;
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -1024,6 +1025,36 @@ public class BytesBufferTest extends BaseUnitTest {
         Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
         Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
 
+        // decimal = vint(len) + two's-complement unscaled bytes + vint(scale)
+        pkey = genPkey(DataType.DECIMAL);
+        value = new BigDecimal("-1.5"); // unscaled -15 (0xf1), scale 1
+        bytes = genBytes("01f101");
+        buf.forReadWritten();
+        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+
+        value = BigDecimal.ZERO;
+        bytes = genBytes("010000");
+        buf.forReadWritten();
+        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+
+        // uint256 max: 33 bytes (sign byte + 32 × 0xff), scale 0
+        value = new BigDecimal("115792089237316195423570985008687907853" +
+                               "269984665640564039457584007913129639935");
+        bytes = genBytes("2100" + "ff".repeat(32) + "00");
+        buf.forReadWritten();
+        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+
+        // scale survives the round trip (1 wei above 1 ether, in ether)
+        value = new BigDecimal("1.000000000000000001");
+        buf.forReadWritten();
+        bytes = buf.writeProperty(pkey, value).bytes();
+        Object read = BytesBuffer.wrap(bytes).readProperty(pkey);
+        Assert.assertEquals(value, read);
+        Assert.assertEquals(18, ((BigDecimal) read).scale());
+
         pkey = genPkey(DataType.OBJECT);
         value = new Point(3, 8);
         bytes = genBytes("1301006a6176612e6177742e506f696ef4010610");
@@ -1131,6 +1162,13 @@ public class BytesBufferTest extends BaseUnitTest {
                          "3cfcafc879064ab7a2074ded056f58de");
         buf.forReadWritten();
         Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+
+        pkey = genListPkey(DataType.DECIMAL);
+        value = ImmutableList.of(new BigDecimal("0.1"), new BigDecimal("1e21"),
+                                 new BigDecimal("-0.000000000000000001"));
+        buf.forReadWritten();
+        bytes = buf.writeProperty(pkey, value).bytes();
         Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
 
         pkey = genListPkey(DataType.OBJECT);
