@@ -78,6 +78,10 @@ public class IdMetaStore extends MetadataRocksDBStore {
         Object probableLock = getLock(key);
         byte[] keyBs = (ID_PREFIX + key).getBytes(Charset.defaultCharset());
         synchronized (probableLock) {
+            // The read and the put are two steps, not one raft entry: a leader elected a
+            // moment ago may not have applied its predecessor's last put yet, and would
+            // hand out the same range again without this wait
+            getStore().waitReadIndex();
             byte[] bs = getOne(keyBs);
             long current = bs != null ? bytesToLong(bs) : 0L;
             long next = current + delta;

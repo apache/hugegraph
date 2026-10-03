@@ -180,6 +180,15 @@ public class RaftKVStore implements HgKVStore, RaftTaskHandler {
     }
 
     /**
+     * Reads above are served from the local state, which on a new leader can trail the
+     * entries its predecessor committed; this waits for them to be applied
+     */
+    @Override
+    public void waitReadIndex() throws PDException {
+        this.engine.waitReadIndex();
+    }
+
+    /**
      * Need to walk the real operation of Raft
      */
     private void doPut(byte[] key, byte[] value) throws PDException {

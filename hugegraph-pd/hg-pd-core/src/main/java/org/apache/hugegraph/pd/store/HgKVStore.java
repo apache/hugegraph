@@ -56,4 +56,11 @@ public interface HgKVStore {
     List<KV> scanRange(byte[] start, byte[] end);
 
     void close();
+
+    /**
+     * Wait until a local read sees every write committed before the call. A store that
+     * is not replicated has nothing to wait for.
+     */
+    default void waitReadIndex() throws PDException {
+    }
 }

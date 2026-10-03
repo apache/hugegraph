@@ -1045,13 +1045,16 @@ public class AuthMetaManager extends AbstractMetaManager {
     }
 
     private String authPrefix(String graphSpace) {
-        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphSpace}/AUTH
+        // HUGEGRAPH/{cluster}/GRAPHSPACE/{graphSpace}/AUTH/
+        // Graph keys sit beside AUTH under the graphspace, so without the trailing
+        // delimiter the prefix would also match a graph named like "AUTHx"
         return String.join(META_PATH_DELIMITER,
                            META_PATH_HUGEGRAPH,
                            this.cluster,
                            META_PATH_GRAPHSPACE,
                            graphSpace,
-                           META_PATH_AUTH);
+                           META_PATH_AUTH,
+                           "");
     }
 
     private String groupKey(String group) {

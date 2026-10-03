@@ -119,6 +119,9 @@ raft:
 |-----------|------|---------|-------------|
 | `raft.address` | String | `127.0.0.1:8610` | Raft service address for this PD node. Format: `<ip>:<port>`. Must be unique across all PD nodes. |
 | `raft.peers-list` | String | `127.0.0.1:8610` | Comma-separated list of all PD nodes' Raft addresses. Used for cluster formation and leader election. |
+| `raft.rpc-timeout` | Integer | `10000` | Timeout of a Raft RPC between PD nodes, in milliseconds. |
+| `raft.rpc-connect-timeout` | Integer | `1000` | Timeout for opening a connection to a peer, in milliseconds. A candidate opens its connections one peer at a time while it holds the Raft node lock, so an election waits this long for each peer that accepts the connection but does not answer (a stopped process, a lost host). |
+| `raft.rpc-install-snapshot-timeout` | Integer | `0` | Timeout for sending a snapshot to a follower that fell behind the log, in milliseconds. It bounds the transfer of the whole metadata store. `0` uses `raft.rpc-timeout`, the value this timeout had before it became a separate option; raise it if large snapshots time out. |
 
 **Critical Rules**:
 1. `raft.address` must be unique for each PD node

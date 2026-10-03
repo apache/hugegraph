@@ -21,6 +21,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.apache.commons.configuration2.BaseConfiguration;
@@ -31,6 +32,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
+import org.apache.hugegraph.backend.tx.IdCounter;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
@@ -41,6 +43,7 @@ import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Utils;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.GraphFactory;
@@ -114,6 +117,41 @@ public class MultiGraphsTest extends BaseCoreTest {
             graph.addVertex(T.label, "person", "name", "marko");
             graph.tx().commit();
             Assert.assertEquals(1L, graph.traversal().V().count().next());
+
+            graph.clearBackend();
+        } finally {
+            destroyGraphs(ImmutableList.of(graph));
+        }
+    }
+
+    @Test
+    public void testHstoreTruncateBackendKeepsSchemaIdCounters() {
+        Assume.assumeTrue("only hstore keeps the schema id counters in PD",
+                          "hstore".equals(graph().backend()));
+
+        HugeGraph graph = openGraphs("truncate_hs").get(0);
+        try {
+            graph.clearBackend();
+            graph.initBackend();
+            graph.serverStarted(GlobalMasterInfo.master("server-truncate"));
+
+            SchemaManager schema = graph.schema();
+            PropertyKey name = schema.propertyKey("name").asText().create();
+
+            graph.truncateBackend();
+
+            // The schema lives in PD meta and survives the truncate
+            Assert.assertEquals(name.id(), schema.getPropertyKey("name").id());
+
+            // Another Server holds no cached id range, it asks PD for one: drop
+            // the ranges this process cached for the graph's schema counters
+            Map<String, ?> ranges = Whitebox.getInternalState(IdCounter.class, "ids");
+            String prefix = String.join("/", graph.graphSpace(), graph.name(), "m", "");
+            ranges.keySet().removeIf(key -> key.startsWith(prefix));
+
+            PropertyKey age = schema.propertyKey("age").asInt().create();
+            Assert.assertTrue(String.format("id %s reused after %s", age.id(), name.id()),
+                              age.id().asLong() > name.id().asLong());
 
             graph.clearBackend();
         } finally {

@@ -46,6 +46,7 @@ import com.alipay.sofa.jraft.JRaftUtils;
 import com.alipay.sofa.jraft.Node;
 import com.alipay.sofa.jraft.RaftGroupService;
 import com.alipay.sofa.jraft.Status;
+import com.alipay.sofa.jraft.closure.ReadIndexClosure;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.Replicator;
 import com.alipay.sofa.jraft.core.State;
@@ -73,6 +74,15 @@ public class RaftEngine {
      * well inside any scrape interval.
      */
     private static final long ALIVE_PEERS_REFRESH_MS = 1000L;
+
+    private static final int READ_INDEX_RETRIES = 5;
+    private static final long READ_INDEX_RETRY_DELAY_MS = 20L;
+    private static final ScheduledExecutorService READ_INDEX_RETRY =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "pd-raft-read-index-retry");
+                thread.setDaemon(true);
+                return thread;
+            });
 
     private volatile static RaftEngine instance = new RaftEngine();
     private RaftStateMachine stateMachine;
@@ -133,9 +143,7 @@ public class RaftEngine {
         // Snapshot interval
         nodeOptions.setSnapshotIntervalSecs(config.getSnapshotInterval());
 
-        nodeOptions.setRpcConnectTimeoutMs(config.getRpcTimeout());
-        nodeOptions.setRpcDefaultTimeout(config.getRpcTimeout());
-        nodeOptions.setRpcInstallSnapshotTimeout(config.getRpcTimeout());
+        setRpcTimeouts(nodeOptions, config);
         // TODO: tune RaftOptions for PD (see hugegraph-store PartitionEngine for reference)
 
         final PeerId serverId = JRaftUtils.getPeerId(config.getAddress());
@@ -150,6 +158,20 @@ public class RaftEngine {
         log.info("RaftEngine start successfully: id = {}, peers list = {}", groupId,
                  nodeOptions.getInitialConf().getPeers());
         return this.raftNode != null;
+    }
+
+    /**
+     * Wire the three raft rpc timeouts from their own options. jraft pings a peer to open a
+     * connection, and a candidate does so for every peer while it holds the node lock, so a
+     * peer that accepts the connection but never answers (a stopped process, a lost host)
+     * stalls the election, and the answers to the other peers' votes, for the whole connect
+     * timeout. Installing a snapshot sends the whole store and needs far longer than a
+     * normal request.
+     */
+    static void setRpcTimeouts(NodeOptions nodeOptions, PDConfig.Raft config) {
+        nodeOptions.setRpcConnectTimeoutMs(config.getRpcConnectTimeout());
+        nodeOptions.setRpcDefaultTimeout(config.getRpcTimeout());
+        nodeOptions.setRpcInstallSnapshotTimeout(config.getRpcInstallSnapshotTimeout());
     }
 
     /**
@@ -600,6 +622,69 @@ public class RaftEngine {
 
     public Node getRaftNode() {
         return raftNode;
+    }
+
+    /**
+     * Wait until this node has applied every entry committed before the call, so a local
+     * read that follows sees every write acknowledged before it. jraft's ReadIndex confirms
+     * the commit index with a quorum in the current term and runs the closure once the
+     * applied index reaches it; a leader elected a moment ago first waits for an entry of
+     * its own term to commit. Bounded by the raft rpc timeout.
+     * <p>
+     * Never call it on the state machine thread: the closure waits for that thread to apply.
+     */
+    public void waitReadIndex() throws PDException {
+        waitReadIndex(this.config.getRpcTimeout());
+    }
+
+    void waitReadIndex(long timeoutMs) throws PDException {
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        readIndex(future, READ_INDEX_RETRIES);
+        try {
+            future.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE,
+                                  "Interrupted while waiting for the raft read index", e);
+        } catch (TimeoutException e) {
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE,
+                                  String.format("Raft read index timed out after %d ms",
+                                                timeoutMs));
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof PDException) {
+                throw (PDException) e.getCause();
+            }
+            throw new PDException(Pdpb.ErrorType.UNKNOWN_VALUE, e.getCause());
+        }
+    }
+
+    private void readIndex(CompletableFuture<Void> future, int retries) {
+        Node node = this.raftNode;
+        if (node == null) {
+            future.completeExceptionally(new PDException(Pdpb.ErrorType.NOT_LEADER_VALUE,
+                                                         "Raft node is not started"));
+            return;
+        }
+        node.readIndex(new byte[0], new ReadIndexClosure() {
+            @Override
+            public void run(Status status, long index, byte[] reqCtx) {
+                if (status.isOk()) {
+                    future.complete(null);
+                    return;
+                }
+                RaftError error = status.getRaftError();
+                // EAGAIN: no entry of the current term committed yet; EBUSY: transferring
+                if (retries > 0 && (error == RaftError.EAGAIN || error == RaftError.EBUSY)) {
+                    READ_INDEX_RETRY.schedule(() -> readIndex(future, retries - 1),
+                                              READ_INDEX_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
+                    return;
+                }
+                int type = error == RaftError.EPERM ? Pdpb.ErrorType.NOT_LEADER_VALUE :
+                           Pdpb.ErrorType.UNKNOWN_VALUE;
+                future.completeExceptionally(
+                        new PDException(type, "Raft read index failed: " + status));
+            }
+        });
     }
 
     private boolean peerEquals(PeerId p1, PeerId p2) {

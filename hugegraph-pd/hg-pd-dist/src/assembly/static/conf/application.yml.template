@@ -63,6 +63,12 @@ raft:
   address: $RAFT_ADDRESS$
   # raft cluster
   peers-list: $RAFT_PEERS_LIST$
+  # Timeout for opening a connection to a peer, in milliseconds; an election waits this
+  # long for each peer that accepts the connection but does not answer
+  rpc-connect-timeout: 1000
+  # Timeout for sending a snapshot to a follower that fell behind the log, in milliseconds;
+  # 0 uses rpc-timeout
+  rpc-install-snapshot-timeout: 0
   # The interval between snapshot generation, in seconds
   snapshotInterval: 300
   metrics: true

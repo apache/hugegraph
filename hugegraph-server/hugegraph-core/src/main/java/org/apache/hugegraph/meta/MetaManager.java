@@ -81,6 +81,7 @@ public class MetaManager {
     public static final String META_PATH_CONF = "CONF";
     public static final String META_PATH_GRAPH = "GRAPH";
     public static final String META_PATH_SCHEMA = "SCHEMA";
+    public static final String META_PATH_SCHEMA_VERSION = "SCHEMA_VERSION";
     public static final String META_PATH_PROPERTY_KEY = "PROPERTY_KEY";
     public static final String META_PATH_VERTEX_LABEL = "VERTEX_LABEL";
     public static final String META_PATH_EDGE_LABEL = "EDGE_LABEL";
@@ -553,6 +554,19 @@ public class MetaManager {
     public void notifySchemaCacheClear(String graphSpace, String graph,
                                        String source) {
         this.graphMetaManager.notifySchemaCacheClear(graphSpace, graph, source);
+    }
+
+    public String getSchemaVersion(String graphSpace, String graph) {
+        return this.graphMetaManager.getSchemaVersion(graphSpace, graph);
+    }
+
+    public void putSchemaVersion(String graphSpace, String graph,
+                                 String version) {
+        this.graphMetaManager.putSchemaVersion(graphSpace, graph, version);
+    }
+
+    public void deleteSchemaVersion(String graphSpace, String graph) {
+        this.graphMetaManager.deleteSchemaVersion(graphSpace, graph);
     }
 
     public void notifyGraphCacheClear(String graphSpace, String graph) {

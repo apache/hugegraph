@@ -529,6 +529,31 @@ public class CoreOptions extends OptionHolder {
                     10000L
             );
 
+    public static final ConfigOption<Boolean> SCHEMA_SYNC_ENABLED =
+            new ConfigOption<>(
+                    "schema.sync.enabled",
+                    "Whether to write a per-graph schema version to PD on every " +
+                    "schema change and check it periodically, so that a schema " +
+                    "change made through another server clears this server's " +
+                    "schema cache. Only for the hstore backend. Set false to " +
+                    "keep the previous behavior: no version writes, no checks.",
+                    disallowEmpty(),
+                    true
+            );
+
+    public static final ConfigOption<Integer> SCHEMA_SYNC_RECONCILE_INTERVAL =
+            new ConfigOption<>(
+                    "schema.sync.reconcile_interval",
+                    "The interval in seconds to check the schema version of a " +
+                    "graph in PD. A schema change made through another server " +
+                    "is visible on this server within about this interval. " +
+                    "0 means never check: the version is still written for " +
+                    "other servers, and a failed write is retried by the next " +
+                    "schema change.",
+                    rangeInt(0, 3600),
+                    10
+            );
+
     public static final ConfigOption<Boolean> SCHEMA_INDEX_REBUILD_USING_PUSHDOWN =
             new ConfigOption<>(
                     "schema.index_rebuild_using_pushdown",
