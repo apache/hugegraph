@@ -112,6 +112,23 @@ public class LoadDetectFilterTest extends BaseUnitTest {
         Assert.assertTrue(this.testAppender.events().isEmpty());
     }
 
+    /**
+     * A readiness probe must answer from the storage state, not from the
+     * worker load: a Server that is merely busy is still ready, and shedding
+     * probes would pull every busy Server out of the Service during a spike.
+     */
+    @Test
+    public void testFilter_ReadinessIgnoredLikeVersions() {
+        setupPath("readiness", List.of("readiness"));
+        this.setConfigProvider(createConfig(2, 0));
+        this.workLoad.incrementAndGet();
+
+        this.loadDetectFilter.filter(this.requestContext);
+
+        Assert.assertEquals(1, this.workLoad.get().get());
+        Assert.assertTrue(this.testAppender.events().isEmpty());
+    }
+
     @Test
     public void testFilter_RejectsWhenWorkerLoadIsTooHigh() {
         setupPath("graphs/hugegraph/vertices",

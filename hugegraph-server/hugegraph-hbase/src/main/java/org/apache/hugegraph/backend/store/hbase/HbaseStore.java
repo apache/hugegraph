@@ -20,10 +20,16 @@ package org.apache.hugegraph.backend.store.hbase;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -87,6 +93,61 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
             HbaseMetrics metrics = new HbaseMetrics(this.sessions);
             return metrics.compact(this.tableNames());
         });
+
+        this.registerMetaHandler(META_STORAGE_READINESS, (session, meta, args) -> {
+            E.checkArgument(args.length == 1 && args[0] instanceof Number,
+                            "Expect the timeout in ms as the only argument");
+            return this.storageReadiness(((Number) args[0]).longValue());
+        });
+    }
+
+    public static final String META_STORAGE_READINESS = "storage_readiness";
+
+    private static final ExecutorService READINESS_EXECUTOR = Executors.newCachedThreadPool(r -> {
+        Thread thread = new Thread(r, "hbase-readiness");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /**
+     * Whether the HBase cluster can serve this graph: one admin round trip
+     * (is the graph's first table enabled and available) within the budget.
+     * The body carries no addresses and no raw exception text, since the
+     * readiness endpoint is unauthenticated.
+     */
+    private Map<String, Object> storageReadiness(long timeoutMs) {
+        List<String> tables = this.tableNames();
+        String table = tables.isEmpty() ? null : tables.get(0);
+        return readinessOf(() -> table != null && this.sessions.tableAvailable(table),
+                           timeoutMs, READINESS_EXECUTOR);
+    }
+
+    /** The probe outcome of one bounded availability check; public for the unit test. */
+    public static Map<String, Object> readinessOf(Callable<Boolean> available, long timeoutMs,
+                                                  ExecutorService executor) {
+        E.checkArgument(timeoutMs > 0, "The probe timeout must be > 0, but got %s", timeoutMs);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ready", false);
+        long start = System.currentTimeMillis();
+        Future<Boolean> check = executor.submit(available);
+        try {
+            boolean ok = check.get(timeoutMs, TimeUnit.MILLISECONDS);
+            body.put("ready", ok);
+            body.put("reason", ok ? "ok" : "the graph's first table is not available");
+        } catch (TimeoutException e) {
+            check.cancel(true);
+            body.put("reason", "hbase did not answer within " + timeoutMs + " ms");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            LOG.warn("Storage readiness: the hbase admin call failed", cause);
+            body.put("reason", "hbase failed: " + cause.getClass().getSimpleName());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            check.cancel(true);
+            body.put("reason", "interrupted");
+        }
+        body.put("hbase_millis", System.currentTimeMillis() - start);
+        return body;
     }
 
     protected void registerTableManager(HugeType type, HbaseTable table) {
