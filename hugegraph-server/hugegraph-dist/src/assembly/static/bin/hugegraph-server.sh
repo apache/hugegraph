@@ -266,7 +266,9 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     fi
 
     # Note: check carefully if multi "javeagent" params are set
-    export JAVA_TOOL_OPTIONS="-javaagent:${PLUGINS}/${OT_JAR}"
+    # Keep the operator's JAVA_TOOL_OPTIONS: the crash-file defaults above leave
+    # out any flag already set there, so dropping it would lose that flag.
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-javaagent:${PLUGINS}/${OT_JAR}"
     export OTEL_TRACES_EXPORTER=otlp
     export OTEL_METRICS_EXPORTER=none
     export OTEL_LOGS_EXPORTER=none

@@ -420,6 +420,9 @@ if [[ " $* " == *" -version "* ]]; then
     exit 0
 fi
 printf '%s\n' "$@" > "$CAPTURE_FILE"
+if [[ -n "${TOOL_OPTIONS_CAPTURE_FILE:-}" ]]; then
+    printf '%s\n' "${JAVA_TOOL_OPTIONS:-}" > "$TOOL_OPTIONS_CAPTURE_FILE"
+fi
 MOCK
 chmod +x "${MOCK_JAVA_HOME}/bin/java"
 
@@ -485,6 +488,39 @@ CAPTURE_FILE="$TOOL_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
 assert_no_argument '^-XX:ErrorFile=' "$TOOL_OPTIONS_CAPTURE"
 assert_no_argument '^-XX:[+-]HeapDumpOnOutOfMemoryError$' "$TOOL_OPTIONS_CAPTURE"
 assert_argument_matching "^-XX:HeapDumpPath=${LOGS_PATTERN}/" "$TOOL_OPTIONS_CAPTURE"
+
+# With telemetry on, the launcher adds its agent to JAVA_TOOL_OPTIONS. It must
+# keep the operator's flags there, or the -XX:ErrorFile left out above is lost.
+OT_EXPECTED_MD5=$(grep -E '^ *expected_md5=' "$SERVER_SCRIPT" | cut -d'"' -f2)
+MOCK_MD5_BIN="${TEMP_DIR}/mock-md5-bin"
+mkdir -p "$MOCK_MD5_BIN"
+printf '#!/bin/bash\necho "%s  $1"\n' "$OT_EXPECTED_MD5" > "${MOCK_MD5_BIN}/md5sum"
+chmod +x "${MOCK_MD5_BIN}/md5sum"
+OT_JAR_PATH="${SERVER_ROOT}/plugins/opentelemetry-javaagent.jar"
+OT_JAR_EXISTED="false"
+if [[ -e "$OT_JAR_PATH" ]]; then
+    OT_JAR_EXISTED="true"
+else
+    mkdir -p "${SERVER_ROOT}/plugins"
+    : > "$OT_JAR_PATH"
+fi
+TELEMETRY_CAPTURE="${TEMP_DIR}/telemetry.args"
+TELEMETRY_TOOL_OPTIONS="${TEMP_DIR}/telemetry-tool-options.txt"
+CAPTURE_FILE="$TELEMETRY_CAPTURE" TOOL_OPTIONS_CAPTURE_FILE="$TELEMETRY_TOOL_OPTIONS" \
+    JAVA_HOME="$MOCK_JAVA_HOME" PATH="${MOCK_MD5_BIN}:${PATH}" \
+    JAVA_TOOL_OPTIONS="-XX:ErrorFile=/operator/hs_err.log" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true "" "" true \
+    >/dev/null
+if [[ "$OT_JAR_EXISTED" == "false" ]]; then
+    rm -f "$OT_JAR_PATH"
+fi
+
+assert_no_argument '^-XX:ErrorFile=' "$TELEMETRY_CAPTURE"
+grep -Eq -- '(^| )-XX:ErrorFile=/operator/hs_err\.log( |$)' "$TELEMETRY_TOOL_OPTIONS" ||
+    fail "telemetry agent setup dropped the operator's JAVA_TOOL_OPTIONS"
+grep -Eq -- '(^| )-javaagent:[^ ]*/opentelemetry-javaagent\.jar$' "$TELEMETRY_TOOL_OPTIONS" ||
+    fail "telemetry agent was not added to JAVA_TOOL_OPTIONS"
 
 JDK21_CAPTURE="${TEMP_DIR}/jdk21.args"
 CAPTURE_FILE="$JDK21_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
