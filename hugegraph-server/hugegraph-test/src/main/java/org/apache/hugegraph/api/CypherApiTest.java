@@ -21,9 +21,12 @@ import static org.apache.hugegraph.testutil.Assert.assertContains;
 
 import java.util.Map;
 
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
 
 import jakarta.ws.rs.core.Response;
@@ -70,6 +73,48 @@ public class CypherApiTest extends BaseApiTest {
                         "WHERE n.name = 'marko'\n" +
                         "RETURN n, friend.name AS friend";
         this.testCypherQueryAndContains(cypher, "friend");
+    }
+
+    @Test
+    public void testSyntaxErrorHasStructuredErrorWithHint() throws Exception {
+        this.assertError("MATCH (n:person) RETURN not_defined_var",
+                         "HugeGraph.Cypher.SyntaxError",
+                         "Declare the variable in a MATCH, UNWIND or WITH clause " +
+                         "before referencing it");
+    }
+
+    @Test
+    public void testParserErrorHasStructuredErrorWithHint() throws Exception {
+        this.assertError("MATCH (n:person RETURN n", "HugeGraph.Cypher.SyntaxError",
+                         "Check the query syntax and function names supported by " +
+                         "the built-in Cypher translator");
+    }
+
+    @Test
+    public void testMultipleStatementsHaveStructuredError() throws Exception {
+        this.assertError("MATCH (n) RETURN n; MATCH (m) RETURN m",
+                         "HugeGraph.Cypher.SyntaxError",
+                         "Submit exactly one Cypher statement per request");
+    }
+
+    @Test
+    public void testUndefinedLabelHasSchemaHint() throws Exception {
+        this.assertError("MATCH (n:robot) RETURN n", "HugeGraph.Cypher.ExecutionError",
+                         "Create the schema element via the schema API before running the query");
+    }
+
+    private void assertError(String query, String code, String hint) throws Exception {
+        Response r = client().post(PATH, query);
+        JsonNode response = new ObjectMapper().readTree(assertResponseStatus(200, r));
+        Assert.assertEquals(3, response.size());
+        Assert.assertFalse(response.has("errors"));
+        Assert.assertEquals(400, response.at("/status/code").asInt());
+        Assert.assertFalse(response.at("/status/message").asText().isEmpty());
+        Assert.assertEquals(1, response.at("/status/attributes/errors").size());
+        JsonNode error = response.at("/status/attributes/errors/0");
+        Assert.assertEquals(code, error.get("code").asText());
+        Assert.assertEquals(hint, error.get("hint").asText());
+        Assert.assertFalse(error.get("message").asText().isEmpty());
     }
 
     private void testCypherQueryAndContains(String cypher, String containsText) {

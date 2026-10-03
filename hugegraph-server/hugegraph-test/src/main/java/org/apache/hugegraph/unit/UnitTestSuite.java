@@ -30,6 +30,7 @@ import org.apache.hugegraph.meta.managers.AuthMetaManagerTest;
 import org.apache.hugegraph.store.client.OrderedScanSecurityTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
+import org.apache.hugegraph.unit.api.cypher.CypherErrorTest;
 import org.apache.hugegraph.unit.api.filter.AccessLogFilterTest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
 import org.apache.hugegraph.unit.api.filter.PathFilterTest;
@@ -113,6 +114,9 @@ import org.junit.runners.Suite;
         LoadDetectFilterTest.class,
         LoginAPITest.class,
         PathFilterTest.class,
+
+        /* api cypher */
+        CypherErrorTest.class,
 
         /* api gremlin */
         GremlinQueryAPITest.class,

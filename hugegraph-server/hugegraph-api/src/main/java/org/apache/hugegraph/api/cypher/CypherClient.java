@@ -80,7 +80,8 @@ public final class CypherClient {
         } catch (Exception e) {
             LOG.error(String.format("Failed to submit cypher-query: [ %s ], caused by:",
                                     cypherQuery), e);
-            res = CypherModel.failOf(request.getRequestId().toString(), e.getMessage());
+            res = CypherModel.failOf(request.getRequestId().toString(),
+                                     e.getMessage(), CypherErrorMapper.map(e));
         } finally {
             client.close();
             cluster.close();
