@@ -395,6 +395,12 @@ public class StoreAPI extends API {
      * @return Returns a string indicating the service's health status. Typically, an empty
      * string indicates the service is healthy.
      */
+    // TODO: answer non-200 when the raft state machine is in STATE_ERROR (a failed snapshot) or
+    // the KV store never opened (a held RocksDB LOCK): both leave this PD unable to recover while
+    // /health stays 200 forever. The Helm chart (helm/hugegraph) derives a single PD's startup
+    // and liveness probes to /v1/ready for this reason; drop that derivation once this reports it.
+    // https://github.com/apache/hugegraph/issues/3222
+    // https://github.com/apache/hugegraph/issues/3226
     @GetMapping(value = "/health", produces = MediaType.TEXT_PLAIN_VALUE)
     public Serializable checkHealthy() {
         return "";

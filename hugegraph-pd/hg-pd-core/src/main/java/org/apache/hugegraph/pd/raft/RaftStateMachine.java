@@ -167,6 +167,11 @@ public class RaftStateMachine extends StateMachineAdapter {
     @Override
     public void onLeaderStop(final Status status) {
         this.leaderTerm.set(-1);
+        // TODO: keep STATE_ERROR set by onError instead of overwriting it with STATE_FOLLOWER, so
+        // the probe view (and /v1/health, see StoreAPI.checkHealthy) can report a PD that stepped
+        // down for good after a snapshot failure. The Helm chart (helm/hugegraph) works around the
+        // missing signal with pd.livenessPath on /v1/ready for a single PD.
+        // https://github.com/apache/hugegraph/issues/3222
         this.probeView = new ProbeView(State.STATE_FOLLOWER, false);
         super.onLeaderStop(status);
         log.info("Raft  lost leader ");

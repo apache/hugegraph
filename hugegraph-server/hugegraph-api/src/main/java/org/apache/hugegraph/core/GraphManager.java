@@ -1820,6 +1820,13 @@ public final class GraphManager {
     }
 
     private void loadGraph(String name, String graphConfPath) {
+        // TODO: offer a loaded graph to Gremlin Server (notify GRAPH_CREATE, as the create paths
+        // do) or fail startup when its static Gremlin instantiation failed. Today a Server whose
+        // first open failed against a PD member mid-restart serves REST and passes readiness
+        // while every Gremlin call on it fails for the life of the process. The Helm chart
+        // (helm/hugegraph) detects this with a per-Pod Gremlin query in `helm test` and documents
+        // the manual Pod deletion; retire both once this is fixed.
+        // https://github.com/apache/hugegraph/issues/3228
         HugeConfig config = new HugeConfig(graphConfPath);
 
         // Transfer `raft.group_peers` from server config to graph config

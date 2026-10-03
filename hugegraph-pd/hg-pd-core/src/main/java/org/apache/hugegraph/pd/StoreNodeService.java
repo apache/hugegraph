@@ -158,6 +158,12 @@ public class StoreNodeService {
         }
 
         // offline or up, or in the initial activation list, go live automatically
+        // TODO: do not mark a re-registering Store Up before it has restored its partition engines
+        // (HgStoreEngine.restoreLocalPartitionEngine); report a restoring state, or expose
+        // restore-complete per shard group, so a rolling restart can wait on it. The Helm chart
+        // (helm/hugegraph) keeps Store rollouts on OnDelete with a manual /v1/shardGroups barrier
+        // between Pod deletions; retire that procedure once PD reports restoration.
+        // https://github.com/apache/hugegraph/issues/3229
         Metapb.StoreState storeState = lastStore.getState();
         if (storeState == Metapb.StoreState.Offline || storeState == Metapb.StoreState.Up
             || inInitialStoreList(store)) {

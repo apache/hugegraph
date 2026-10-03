@@ -27,6 +27,10 @@ management:
 
 rocksdb:
   # rocksdb total memory usage, force flush to disk when reaching this value
+  # TODO: make this overridable from the environment, or default it to 0 so AppConfig falls back
+  # to the JVM max heap: pinned at 32 GB, a Store in a container with a smaller memory limit is
+  # OOM-killed by native caches outside the heap. The Helm chart (helm/hugegraph) can only
+  # document the ceiling and size its cluster preset around it until then.
   total_memory_size: 32000000000
   # memtable size used by rocksdb
   write_buffer_size: 32000000
