@@ -602,7 +602,9 @@ public class HugeTraverser {
 
         ConditionQuery condQuery = (ConditionQuery) query;
         if (!GraphTransaction.matchFullEdgeSortKeys(condQuery, this.graph())) {
-            Id label = condQuery.condition(HugeKeys.LABEL);
+            // Sort-key validation needs one concrete edge label so that the
+            // error message points to the exact schema label in use.
+            Id label = condQuery.conditionValue(HugeKeys.LABEL);
             E.checkArgument(false, "The properties %s does not match " +
                                    "sort keys of edge label '%s'",
                             this.graph().mapPkId2Name(properties.keySet()),

@@ -17,8 +17,11 @@
 
 package org.apache.hugegraph.backend.tx;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.hugegraph.HugeFactory;
@@ -29,17 +32,20 @@ import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.tx.GraphIndexTransaction.RemoveLeftIndexJob;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.structure.HugeEdge;
+import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.SchemaStatus;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.tinkerpop.gremlin.structure.T;
@@ -48,6 +54,65 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 public class GraphTransactionTest {
+
+    @Test
+    public void testRangeIndexCleanupWithoutMatchingLabel() throws Exception {
+        try (FilterFixture fixture = new FilterFixture()) {
+            ConditionQuery query = Mockito.spy(new ConditionQuery(HugeType.VERTEX));
+            query.eq(HugeKeys.LABEL, fixture.vertex.schemaLabel().id());
+            query.eq(HugeKeys.LABEL, IdGenerator.of(Long.MAX_VALUE));
+            Id field = fixture.graph.propertyKey("name").id();
+            ConditionQuery.LeftIndex left = new ConditionQuery.LeftIndex(
+                    Collections.singleton("stale"), field);
+            Mockito.doReturn(Collections.singleton(left)).when(query)
+                   .getLeftIndexOfElement(fixture.vertex.id());
+            Constructor<RemoveLeftIndexJob> constructor =
+                    RemoveLeftIndexJob.class.getDeclaredConstructor(
+                            ConditionQuery.class, HugeElement.class);
+            constructor.setAccessible(true);
+            RemoveLeftIndexJob job = constructor.newInstance(query, fixture.vertex);
+            Whitebox.setInternalState(job, "tx", fixture.transaction.indexTransaction());
+            Method process = RemoveLeftIndexJob.class.getDeclaredMethod(
+                    "processRangeIndexLeft", ConditionQuery.class, HugeElement.class);
+            process.setAccessible(true);
+            Assert.assertEquals(0L, process.invoke(job, query, fixture.vertex));
+            Mockito.verify(query).removeElementLeftIndex(fixture.vertex.id());
+        }
+    }
+
+    @Test
+    public void testResolvedEdgeLabelsInBatchResultFilter() throws Exception {
+        try (FilterFixture fixture = new FilterFixture()) {
+            Method filter = GraphTransaction.class.getDeclaredMethod(
+                    "rightResultFromIndexQuery", QueryResultContext.class, HugeElement.class);
+            filter.setAccessible(true);
+            HugeEdge edge = Mockito.mock(HugeEdge.class);
+            Mockito.when(edge.type()).thenReturn(HugeType.EDGE);
+            Id first = IdGenerator.of(1L);
+            Id second = IdGenerator.of(2L);
+            ConditionQuery query = Mockito.spy(new ConditionQuery(HugeType.EDGE));
+            query.optimized(OptimizedType.INDEX);
+            query.query(Condition.in(HugeKeys.LABEL, Arrays.asList(first, second)));
+            Mockito.doReturn(false).when(query).test(Mockito.eq(edge), Mockito.isNull());
+
+            // Multi-label batches must not take the single-label fast path.
+            Assert.assertEquals(false, filter.invoke(fixture.transaction,
+                                new QueryResultContext(query), edge));
+            Mockito.verify(query).test(edge, null);
+
+            // An intersection that resolves to one label can use the fast path.
+            query.query(Condition.eq(HugeKeys.LABEL, first));
+            Assert.assertEquals(true, filter.invoke(fixture.transaction,
+                               new QueryResultContext(query), edge));
+            Mockito.verify(query).test(edge, null);
+
+            // An empty intersection must be filtered, not accepted as one label.
+            query.query(Condition.eq(HugeKeys.LABEL, second));
+            Assert.assertEquals(false, filter.invoke(fixture.transaction,
+                                new QueryResultContext(query), edge));
+            Mockito.verify(query, Mockito.times(2)).test(edge, null);
+        }
+    }
 
     @Test
     public void testBatchDecisionsRemainFixedAfterOriginChanges() {
