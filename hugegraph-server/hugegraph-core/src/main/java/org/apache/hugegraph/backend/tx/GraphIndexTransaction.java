@@ -480,7 +480,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 }
             }
         }
-        Set<MatchedIndex> indexes = this.collectMatchedIndexes(query);
+        Set<MatchedIndex> indexes = this.collectMatchedIndexes(query, true);
         if (indexes.isEmpty()) {
             Id label = query.condition(HugeKeys.LABEL);
             throw noIndexException(this.graph(), query, label);
@@ -492,8 +492,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
             return IdHolderList.empty(paging);
         }
 
-        // Do index query
-        IdHolderList holders = new IdHolderList(paging);
+        // Validate the whole plan before opening any backend iterators. A later
+        // label's unavailable index must not leave earlier iterators unowned.
         for (MatchedIndex index : indexes) {
             for (IndexLabel il : index.indexLabels()) {
                 validateIndexLabel(il);
@@ -501,7 +501,11 @@ public class GraphIndexTransaction extends AbstractTransaction {
             if (paging && index.indexLabels().size() > 1) {
                 throw new NotSupportException("joint index query in paging");
             }
+        }
 
+        // Do index query
+        IdHolderList holders = new IdHolderList(paging);
+        for (MatchedIndex index : indexes) {
             if (index.containsSearchIndex()) {
                 // Do search-index query
                 holders.addAll(this.doSearchIndex(query, index));
@@ -765,8 +769,13 @@ public class GraphIndexTransaction extends AbstractTransaction {
         }
     }
 
-    @Watched(prefix = "index")
     private Set<MatchedIndex> collectMatchedIndexes(ConditionQuery query) {
+        return this.collectMatchedIndexes(query, false);
+    }
+
+    @Watched(prefix = "index")
+    private Set<MatchedIndex> collectMatchedIndexes(ConditionQuery query,
+                                                     boolean requireCompleteCoverage) {
         ISchemaTransaction schema = this.params().schemaTransaction();
         Id label = query.condition(HugeKeys.LABEL);
 
@@ -797,6 +806,18 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
         }
 
+        if (requireCompleteCoverage) {
+            // Match the public result visibility, including flattened queries.
+            // Removal jobs drop indexes before data/schema; those labels must
+            // neither require coverage nor contribute unavailable index plans.
+            // Cleanup callers still need to inspect invisible labels' indexes.
+            Query visibility = query.rootOriginQuery();
+            schemaLabels = schemaLabels.stream().filter(schemaLabel ->
+                    (visibility.showHidden() || !schemaLabel.hidden()) &&
+                    (visibility.showDeleting() || !schemaLabel.status().deleting()))
+                                       .collect(Collectors.toList());
+        }
+
         // Collect MatchedIndex for each SchemaLabel
         Set<MatchedIndex> matchedIndexes = InsertionOrderUtil.newSet();
         for (SchemaLabel schemaLabel : schemaLabels) {
@@ -805,7 +826,55 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 matchedIndexes.add(index);
             }
         }
+        // An invalid value returns no results after an index is found. Keep
+        // that result before deciding whether index coverage is complete.
+        if (requireCompleteCoverage && !matchedIndexes.isEmpty() &&
+            validQueryConditionValues(this.graph(), query)) {
+            this.checkIndexCoverage(query, schemaLabels, matchedIndexes);
+        }
         return matchedIndexes;
+    }
+
+    private void checkIndexCoverage(ConditionQuery query,
+                                    List<? extends SchemaLabel> labels,
+                                    Set<MatchedIndex> indexes) {
+        // Check at execution, before creating any lazy index iterator. Cleanup
+        // callers only need matching indexes and must not require full coverage.
+        Set<Id> requiredProperties = query.userpropKeys();
+        if (this.graph().readMode().showOlap()) {
+            // OLAP properties are shared rather than declared on every label.
+            requiredProperties.removeIf(id -> this.graph().propertyKey(id).olap());
+        }
+        if (requiredProperties.isEmpty()) {
+            // A shared OLAP index can match several labels, while MatchedIndex
+            // deduplicates those matches by index labels alone.
+            return;
+        }
+        Set<Id> covered = new HashSet<>();
+        for (MatchedIndex index : indexes) {
+            covered.add(index.schemaLabel().id());
+        }
+        for (SchemaLabel label : labels) {
+            if (covered.contains(label.id()) ||
+                !label.properties().containsAll(requiredProperties)) {
+                continue;
+            }
+            if (label instanceof EdgeLabel) {
+                EdgeLabel edgeLabel = (EdgeLabel) label;
+                // Base labels have no direct edges; their property indexes
+                // include edges of their sub-labels (see updateEdgeIndex()).
+                if (edgeLabel.isFather() ||
+                    edgeLabel.hasFather() && covered.contains(edgeLabel.fatherId())) {
+                    continue;
+                }
+            }
+            // Authorization filters elements after the backend query. Do not
+            // disclose an implicitly discovered schema label in this error.
+            throw new NoIndexException("Incomplete index coverage for properties %s; " +
+                                       "specify a label or create compatible indexes " +
+                                       "for every candidate label",
+                                       this.graph().mapPkId2Name(query.userpropKeys()));
+        }
     }
 
     /**
