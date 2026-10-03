@@ -37,6 +37,21 @@ fi
 
 # Monitor HugeGraphServer every minute, if the server crashes then restart it.
 # Modify the frequency according to actual needs carefully.
-CRONTAB_JOB="*/1 * * * * export JAVA_HOME=$JAVA_HOME && $TOP/bin/monitor-hugegraph.sh"
+
+# Persist any path overrides (-c/-l/-i/-o) that the caller (start-hugegraph.sh) exported
+CRONTAB_JOB="*/1 * * * * export JAVA_HOME=$JAVA_HOME &&"
+if [ -n "$CONF_OVERRIDE" ]; then
+    CRONTAB_JOB="$CRONTAB_JOB export CONF_OVERRIDE='$CONF_OVERRIDE' &&"
+fi
+if [ -n "$LOGS_OVERRIDE" ]; then
+    CRONTAB_JOB="$CRONTAB_JOB export LOGS_OVERRIDE='$LOGS_OVERRIDE' &&"
+fi
+if [ -n "$PID_FILE_OVERRIDE" ]; then
+    CRONTAB_JOB="$CRONTAB_JOB export PID_FILE_OVERRIDE='$PID_FILE_OVERRIDE' &&"
+fi
+if [ -n "$PLUGINS_OVERRIDE" ]; then
+    CRONTAB_JOB="$CRONTAB_JOB export PLUGINS_OVERRIDE='$PLUGINS_OVERRIDE' &&"
+fi
+CRONTAB_JOB="$CRONTAB_JOB $TOP/bin/monitor-hugegraph.sh"
 
 crontab_append "$CRONTAB_JOB"

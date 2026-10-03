@@ -29,13 +29,8 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
 LIB="$TOP/lib"
-PLUGINS="$TOP/plugins"
-LOGS="$TOP/logs"
-OUTPUT=${LOGS}/hugegraph-store-server.log
 GITHUB="https://github.com"
-PID_FILE="$BIN/pid"
 
 . "$BIN"/util.sh
 
@@ -105,16 +100,32 @@ if [ -z "$DAEMON" ]; then
     DAEMON="true"
 fi
 
-while getopts "d:g:j:y:" arg; do
+while getopts "d:c:g:i:j:l:o:y:" arg; do
     case ${arg} in
+        c) CONF_OVERRIDE="$OPTARG" ;;
         g) GC_OPTION="$OPTARG" ;;
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
         j) USER_OPTION="$OPTARG" ;;
+        l) LOGS_OVERRIDE="$OPTARG" ;;
+        o) PLUGINS_OVERRIDE="$OPTARG" ;;
         # Telemetry is used to collect metrics, traces and logs
         y) OPEN_TELEMETRY="$OPTARG" ;;
         d) DAEMON="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        ?) echo "USAGE: $0 [-d true|false] [-c conf_dir] [-g g1] [-i pid_file] [-j opts] [-l logs_dir] [-o plugins_dir] [-y true|false]" && exit 1 ;;
     esac
 done
+
+# Canonicalize relative path overrides to absolute paths
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE")"
+LOGS_OVERRIDE="$(canonicalize_dir "$LOGS_OVERRIDE")"
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")"
+PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE")"
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+OUTPUT=${LOGS}/hugegraph-store-server.log
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 
 ensure_path_writable "$LOGS"
 ensure_path_writable "$PLUGINS"
@@ -153,7 +164,7 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     # JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION}"
 
     # Rolling out detailed GC logs
-    JAVA_OPTIONS="${JAVA_OPTIONS} -Xlog:gc=info:file=./logs/gc.log:time,uptime,level,tags:filecount=3,filesize=100m"
+   JAVA_OPTIONS="${JAVA_OPTIONS} -Xlog:gc=info:file=${LOGS}/logs/gc.log:time,uptime,level,tags:filecount=3,filesize=100m"
 fi
 
 # Using G1GC as the default garbage collector (Recommended for large memory machines)
@@ -175,7 +186,7 @@ case "$GC_OPTION" in
         exit 1
 esac
 
-JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Dfastjson.parser.safeMode=true -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
+JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Dfastjson.parser.safeMode=true -Dlogging.config=${CONF}/log4j2.xml -DLOG_PATH=${LOGS} -Dbolt.log.path=${LOGS} -Dlogging.path=${LOGS} -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 if [ "${OPEN_TELEMETRY}" == "true" ]; then
     OT_JAR="opentelemetry-javaagent.jar"

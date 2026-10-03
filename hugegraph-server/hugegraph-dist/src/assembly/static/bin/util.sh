@@ -484,6 +484,33 @@ function ensure_path_writable() {
     fi
 }
 
+# Canonicalize a (possibly relative) directory override into an absolute path.
+function canonicalize_dir() {
+    local path="$1"
+    [ -z "$path" ] && return 0
+    mkdir -p "$path" 2>/dev/null
+    (cd "$path" 2>/dev/null && pwd) || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+}
+
+# Canonicalize a (possibly relative) file override (e.g. the pid file) into an
+# absolute path .
+function canonicalize_file() {
+    local path="$1"
+    [ -z "$path" ] && return 0
+    local dir file abs_dir
+    dir="$(dirname "$path")"
+    file="$(basename "$path")"
+    mkdir -p "$dir" 2>/dev/null
+    abs_dir="$(cd "$dir" 2>/dev/null && pwd)" || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+    echo "$abs_dir/$file"
+}
+
 function get_ip() {
     local os=$(uname)
     local loopback="127.0.0.1"
@@ -655,6 +682,6 @@ function kill_process_and_wait() {
 }
 
 function exit_with_usage_help(){
-    echo "USAGE: $0 [-d true|false] [-g g1] [-m true|false] [-p true|false] [-s true|false] [-j java_options] [-t timeout] [-y true|false]"
+    echo "USAGE: $0 [-c conf_dir] [-d true|false] [-g g1] [-i pid_file] [-l logs_dir] [-m true|false] [-p true|false] [-s true|false] [-j java_options] [-t timeout] [-y true|false]"
     exit 1
 }

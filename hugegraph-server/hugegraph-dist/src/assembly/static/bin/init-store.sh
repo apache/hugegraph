@@ -27,11 +27,26 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "${BIN}"/../ && pwd)"
-CONF="$TOP/conf"
-LIB="$TOP/lib"
-PLUGINS="$TOP/plugins"
+
+# Support overrides via flags (for standalone invocation) or env vars (inherited
+# when launched from start-hugegraph.sh).
+while getopts "c:o:" arg; do
+    case ${arg} in
+        c) CONF_OVERRIDE="$OPTARG" ;;
+        o) PLUGINS_OVERRIDE="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-c conf_dir] [-o plugins_dir]" && exit 1 ;;
+    esac
+done
 
 . "${BIN}"/util.sh
+
+# Canonicalize relative path overrides to absolute paths (see util.sh) before use.
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE")"
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")"
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LIB="$TOP/lib"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
 
 configure_riscv64_libatomic || exit 1
 ensure_path_writable "${PLUGINS}"

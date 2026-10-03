@@ -228,6 +228,32 @@ function ensure_path_writable() {
     fi
 }
 
+# Canonicalize a (possibly relative) directory override into an absolute path.
+function canonicalize_dir() {
+    local path="$1"
+    [ -z "$path" ] && return 0
+    mkdir -p "$path" 2>/dev/null
+    (cd "$path" 2>/dev/null && pwd) || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+}
+
+# Canonicalize a (possibly relative) file override (e.g. the pid file) into an absolute path
+function canonicalize_file() {
+    local path="$1"
+    [ -z "$path" ] && return 0
+    local dir file abs_dir
+    dir="$(dirname "$path")"
+    file="$(basename "$path")"
+    mkdir -p "$dir" 2>/dev/null
+    abs_dir="$(cd "$dir" 2>/dev/null && pwd)" || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+    echo "$abs_dir/$file"
+}
+
 function get_ip() {
     local os=$(uname)
     local loopback="127.0.0.1"

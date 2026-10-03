@@ -27,12 +27,19 @@ abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
+while getopts "i:" arg; do
+    case ${arg} in
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-i pid_file]" && exit 1 ;;
+    esac
+done
+
 BIN=$(abs_path)
 TOP="$(cd $BIN/../ && pwd)"
 
 . "$BIN"/util.sh
 
-PID_FILE=$BIN/pid
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 SERVER_SHUTDOWN_TIMEOUT_S=30
 
 if [ ! -f ${PID_FILE} ]; then

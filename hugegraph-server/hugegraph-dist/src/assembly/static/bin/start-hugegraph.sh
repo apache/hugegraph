@@ -39,29 +39,43 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
-LOGS="$TOP/logs"
 SCRIPTS="$TOP/scripts"
-PID_FILE="$BIN/pid"
 
 . "$BIN"/util.sh
 
 # Note: keep ':' in the end of the string to indicate the option needs a value
-while getopts "d:g:m:p:s:j:t:y:" arg; do
-    case ${arg} in
-        d) DAEMON="$OPTARG" ;;
-        g) GC_OPTION="$OPTARG" ;;
-        m) OPEN_MONITOR="$OPTARG" ;;
-        p) PRELOAD="$OPTARG" ;;
-        s) OPEN_SECURITY_CHECK="$OPTARG" ;;
-        j) USER_OPTION="$OPTARG" ;;
-        t) SERVER_STARTUP_TIMEOUT_S="$OPTARG" ;;
-        # Telemetry is used to collect metrics, traces and logs
-        y) OPEN_TELEMETRY="$OPTARG" ;;
-        # Note: update usage info when the params changed
-        ?) exit_with_usage_help ;;
-    esac
+while getopts "c:d:g:i:j:l:m:o:p:s:t:y:" arg; do
+     case ${arg} in
+         c) CONF_OVERRIDE="$OPTARG" ;;
+         d) DAEMON="$OPTARG" ;;
+         g) GC_OPTION="$OPTARG" ;;
+         i) PID_FILE_OVERRIDE="$OPTARG" ;;
+         j) USER_OPTION="$OPTARG" ;;
+         l) LOGS_OVERRIDE="$OPTARG" ;;
+         m) OPEN_MONITOR="$OPTARG" ;;
+         o) PLUGINS_OVERRIDE="$OPTARG" ;;
+         p) PRELOAD="$OPTARG" ;;
+         s) OPEN_SECURITY_CHECK="$OPTARG" ;;
+         t) SERVER_STARTUP_TIMEOUT_S="$OPTARG" ;;
+         # Telemetry is used to collect metrics, traces and logs
+         y) OPEN_TELEMETRY="$OPTARG" ;;
+         # Note: update usage info when the params changed
+         ?) exit_with_usage_help ;;
+     esac
 done
+
+# Canonicalize relative path overrides to absolute paths
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE")"
+LOGS_OVERRIDE="$(canonicalize_dir "$LOGS_OVERRIDE")"
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")"
+PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE")"
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+
+export CONF_OVERRIDE LOGS_OVERRIDE PID_FILE_OVERRIDE PLUGINS_OVERRIDE
 
 if [[ "$OPEN_MONITOR" != "true" && "$OPEN_MONITOR" != "false" ]]; then
     exit_with_usage_help

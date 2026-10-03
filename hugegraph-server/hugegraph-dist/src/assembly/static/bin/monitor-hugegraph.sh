@@ -30,15 +30,18 @@ TOP="$(cd $BIN/../ && pwd)"
 
 . $BIN/util.sh
 
-SERVER_URL=`read_property "$TOP/conf/rest-server.properties" "restserver.url"`
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+
+SERVER_URL=`read_property "$CONF/rest-server.properties" "restserver.url"`
 DETECT_URL="$SERVER_URL/versions"
 PROC_NAME="HugeGraphServer"
 
-LOG_DIR="$TOP/logs"
+LOG_DIR="$LOGS"
 MONITOR_LOG="$LOG_DIR/monitor.log"
 
 if [ ! -d $LOG_DIR ]; then
-    mkdir $LOG_DIR
+    mkdir -p $LOG_DIR
 fi
 
 function record_monitor_log() {
@@ -48,12 +51,16 @@ function record_monitor_log() {
 function restart_server() {
     local stop_old=$1
     if [ "$stop_old" == "true" ]; then
-        # Don't remove monitor
-        $BIN/stop-hugegraph.sh false
+        # Don't remove monitor; stop the pid file the caller used.
+        $BIN/stop-hugegraph.sh ${PID_FILE_OVERRIDE:+-i "$PID_FILE_OVERRIDE"} false
     fi
     record_monitor_log "Ready to restart $PROC_NAME"
-    # Don't add monitor again
-    $BIN/start-hugegraph.sh -m false
+    # Don't add monitor again, but restart with path overrides
+    $BIN/start-hugegraph.sh -m false \
+        ${CONF_OVERRIDE:+-c "$CONF_OVERRIDE"} \
+        ${LOGS_OVERRIDE:+-l "$LOGS_OVERRIDE"} \
+        ${PLUGINS_OVERRIDE:+-o "$PLUGINS_OVERRIDE"} \
+        ${PID_FILE_OVERRIDE:+-i "$PID_FILE_OVERRIDE"}
     if [ $? -ne 0 ]; then
         record_monitor_log "Failed to restart $PROC_NAME"
         exit 1

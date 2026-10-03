@@ -30,14 +30,18 @@ if [ -z "$DAEMON" ]; then
     DAEMON="true"
 fi
 
-while getopts "d:g:j:y:" arg; do
+while getopts "c:d:g:i:j:l:o:y:" arg; do
     case ${arg} in
+        c) CONF_OVERRIDE="$OPTARG" ;;
         g) GC_OPTION="$OPTARG" ;;
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
         j) USER_OPTION="$OPTARG" ;;
+        l) LOGS_OVERRIDE="$OPTARG" ;;
+        o) PLUGINS_OVERRIDE="$OPTARG" ;;
         # Telemetry is used to collect metrics, traces and logs
         d) DAEMON="$OPTARG" ;;
         y) OPEN_TELEMETRY="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        ?) echo "USAGE: $0 [-c conf_dir] [-d true|false] [-g g1] [-i pid_file] [-j opts] [-l logs_dir] [-o plugins_dir] [-y true|false]" && exit 1 ;;
     esac
 done
 
@@ -53,15 +57,22 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
-LIB="$TOP/lib"
-PLUGINS="$TOP/plugins"
-LOGS="$TOP/logs"
-OUTPUT=${LOGS}/hugegraph-pd-stdout.log
-GITHUB="https://github.com"
-PID_FILE="$BIN/pid"
 
 . "$BIN"/util.sh
+
+# Canonicalize relative path overrides to absolute paths
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE")"
+LOGS_OVERRIDE="$(canonicalize_dir "$LOGS_OVERRIDE")"
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")"
+PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE")"
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LIB="$TOP/lib"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+OUTPUT=${LOGS}/hugegraph-pd-stdout.log
+GITHUB="https://github.com"
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 
 ensure_path_writable "$LOGS"
 ensure_path_writable "$PLUGINS"
@@ -168,7 +179,7 @@ if [ $(ps -ef|grep -v grep| grep java|grep -cE ${CONF}) -ne 0 ]; then
    exit 0
 fi
 
-JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
+JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Dlogging.config=${CONF}/log4j2.xml -DLOG_PATH=${LOGS} -Dbolt.log.path=${LOGS} -Dlogging.path=${LOGS} -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 # Turn on security check
 if [[ $DAEMON == "true" ]]; then
