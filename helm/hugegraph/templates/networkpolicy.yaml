@@ -1,0 +1,199 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+{{- /*
+One NetworkPolicy per component. Each object isolates its own Pods in both
+directions and carries all of their allows, so no object ever denies a Pod
+before that Pod's allows exist, whatever order the objects are applied in.
+Peers match the release and component labels; ports are the values the
+containers bind. The helm test Pod is selected by no policy, so its egress
+stays open and the Server policy admits it. Nothing outside the release is
+admitted unless <component>.extraIngress names it; exposing a component
+without such rules fails in validateValues instead of opening its ports.
+*/}}
+{{- $np := get .Values "networkPolicy" | default dict }}
+{{- if get $np "enabled" }}
+{{- $pd := .Values.pd.ports }}
+{{- $store := .Values.store.ports }}
+{{- $serverPort := .Values.server.port }}
+{{- $hubbleEnabled := .Values.hubble.enabled }}
+{{- $hubblePd := and $hubbleEnabled (eq .Values.hubble.mode "pd") }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hugegraph.pd.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pd
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: pd
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "pd") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $pd.raft $pd.grpc) | nindent 8 }}
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "store") | nindent 8 }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "server") | nindent 8 }}
+        {{- if $hubblePd }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "hubble") | nindent 8 }}
+        {{- end }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $pd.grpc $pd.rest) | nindent 8 }}
+    {{- with get (get $np "pd" | default dict) "extraIngress" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "pd") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $pd.raft $pd.grpc) | nindent 8 }}
+    {{- include "hugegraph.netpol.dns" . | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hugegraph.store.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: store
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: store
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "store") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $store.raft) | nindent 8 }}
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "server") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $store.grpc $store.rest) | nindent 8 }}
+    {{- if $hubblePd }}
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "hubble") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $store.rest) | nindent 8 }}
+    {{- end }}
+    {{- with get (get $np "store" | default dict) "extraIngress" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "pd") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $pd.grpc $pd.rest) | nindent 8 }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "store") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $store.raft) | nindent 8 }}
+    {{- include "hugegraph.netpol.dns" . | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hugegraph.server.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "test") | nindent 8 }}
+        {{- if $hubbleEnabled }}
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "hubble") | nindent 8 }}
+        {{- end }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $serverPort) | nindent 8 }}
+    {{- with get (get $np "server" | default dict) "extraIngress" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  egress:
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "pd") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $pd.grpc $pd.rest) | nindent 8 }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "store") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $store.grpc $store.rest) | nindent 8 }}
+    {{- include "hugegraph.netpol.dns" . | nindent 4 }}
+{{- if $hubbleEnabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hugegraph.hubble.name" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hubble
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hugegraph.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: hubble
+  policyTypes:
+    - Ingress
+    - Egress
+  {{- with get (get $np "hubble" | default dict) "extraIngress" }}
+  ingress:
+    {{- toYaml . | nindent 4 }}
+  {{- else }}
+  # No ingress rules under policyTypes Ingress admits nothing. The key is left
+  # out rather than rendered empty, because the API server drops an empty list
+  # and Helm would then rewrite the object on every upgrade. kubectl
+  # port-forward reaches the Pod over loopback, which no policy filters.
+  {{- end }}
+  egress:
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "server") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $serverPort) | nindent 8 }}
+    {{- if $hubblePd }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "pd") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $pd.grpc $pd.rest) | nindent 8 }}
+    - to:
+        {{- include "hugegraph.netpol.peer" (dict "root" . "component" "store") | nindent 8 }}
+      ports:
+        {{- include "hugegraph.netpol.ports" (list $store.rest) | nindent 8 }}
+    {{- end }}
+    {{- include "hugegraph.netpol.dns" . | nindent 4 }}
+    {{- with get (get $np "hubble" | default dict) "extraEgress" }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
+{{- end }}
