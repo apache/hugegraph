@@ -80,6 +80,8 @@ if [[ "$JAVA_MAJOR" -ge 18 ]]; then
 fi
 
 TEMP_DIR=$(mktemp -d)
+CRASH_NAME_FIXTURES=()
+OT_FIXTURE_JAR=""
 SECURITY_PROPERTIES_BACKUP="${TEMP_DIR}/java-security.properties"
 
 cleanup() {
@@ -89,6 +91,14 @@ cleanup() {
     if [[ -f "$SECURITY_PROPERTIES_BACKUP" &&
           ! -e "$SECURITY_PROPERTIES" ]]; then
         mv "$SECURITY_PROPERTIES_BACKUP" "$SECURITY_PROPERTIES"
+    fi
+    # Fixtures the test adds to the distribution; a failed step must not leave
+    # them behind, or a later real telemetry start would skip its download.
+    if [[ -n "${OT_FIXTURE_JAR:-}" ]]; then
+        rm -f "$OT_FIXTURE_JAR"
+    fi
+    if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
+        rm -f "${CRASH_NAME_FIXTURES[@]}"
     fi
     rm -rf "$TEMP_DIR"
 }
@@ -420,9 +430,7 @@ if [[ " $* " == *" -version "* ]]; then
     exit 0
 fi
 printf '%s\n' "$@" > "$CAPTURE_FILE"
-if [[ -n "${TOOL_OPTIONS_CAPTURE_FILE:-}" ]]; then
-    printf '%s\n' "${JAVA_TOOL_OPTIONS:-}" > "$TOOL_OPTIONS_CAPTURE_FILE"
-fi
+printf '%s\n' "${JAVA_TOOL_OPTIONS:-}" > "${CAPTURE_FILE}.tool-options"
 MOCK
 chmod +x "${MOCK_JAVA_HOME}/bin/java"
 
@@ -442,19 +450,54 @@ assert_argument "true" "$ENABLED_CAPTURE"
 assert_argument "-Doperator.marker=preserved" "$ENABLED_CAPTURE"
 assert_no_argument '^-D(networkaddress\.cache\.ttl|sun\.net\.inetaddr\.ttl)=' \
                    "$ENABLED_CAPTURE"
-assert_argument "-XX:+HeapDumpOnOutOfMemoryError" "$ENABLED_CAPTURE"
-# The names carry the launch time, since a restarted container often reuses the
-# PID and HotSpot will not overwrite an existing crash log or heap dump.
-LOGS_PATTERN=$(printf '%s' "${SERVER_ROOT}/logs" | sed 's/[][\.*^$+?(){}|]/\\&/g')
-assert_argument_matching \
-    "^-XX:HeapDumpPath=${LOGS_PATTERN}/java_pid[0-9]+_[0-9]{8}-[0-9]{6}\.hprof$" \
-    "$ENABLED_CAPTURE"
-assert_argument_matching \
-    "^-XX:ErrorFile=${LOGS_PATTERN}/hs_err_pid%p_[0-9]{8}-[0-9]{6}\.log$" \
-    "$ENABLED_CAPTURE"
+# Heap dump and crash log defaults go first in JAVA_TOOL_OPTIONS, so the JVM's
+# own precedence lets every operator source override them. Check the values a
+# real JVM settles on when started the way a captured launcher run would start
+# it: the captured JAVA_TOOL_OPTIONS, the crash-related -XX: arguments, and
+# JDK_JAVA_OPTIONS.
+effective_flag() {
+    local capture="$1"
+    local flag="$2"
+    local jdk_java_options="${3:-}"
+    local args=()
+    local line
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=) ]]; then
+            args+=("$line")
+        fi
+    done < "$capture"
+    JAVA_TOOL_OPTIONS="$(cat "${capture}.tool-options")" \
+        JDK_JAVA_OPTIONS="$jdk_java_options" \
+        "$JAVA_BIN" ${args[@]+"${args[@]}"} -XX:+PrintFlagsFinal -version \
+        2>/dev/null | awk -v flag="$flag" '$2 == flag { print $4; exit }'
+}
 
-# Heap dumps and JVM crash logs must stay in logs/ when JAVA_OPTIONS replaces
-# the default heap options, and an operator's own paths must still win.
+assert_effective_flag() {
+    local capture="$1"
+    local flag="$2"
+    local pattern="$3"
+    local jdk_java_options="${4:-}"
+    local value
+    value=$(effective_flag "$capture" "$flag" "$jdk_java_options")
+    [[ "$value" =~ $pattern ]] ||
+        fail "effective ${flag} is '${value}', expected to match ${pattern}"
+}
+
+LOGS_PATTERN=$(printf '%s' "${SERVER_ROOT}/logs" | sed 's/[][\.*^$+?(){}|]/\\&/g')
+# The names carry the launch time and, if needed, a counter, since a restarted
+# container often reuses the PID and HotSpot will not overwrite an existing
+# crash log or heap dump.
+HEAP_DUMP_PATTERN="^${LOGS_PATTERN}/java_pid[0-9]+_[0-9]{8}-[0-9]{6}(-[0-9]+)?\.hprof$"
+ERROR_FILE_PATTERN="^${LOGS_PATTERN}/hs_err_pid%p_[0-9]{8}-[0-9]{6}(-[0-9]+)?\.log$"
+
+assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=)' \
+                   "$ENABLED_CAPTURE"
+assert_effective_flag "$ENABLED_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
+assert_effective_flag "$ENABLED_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN"
+assert_effective_flag "$ENABLED_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
+
+# JAVA_OPTIONS replaces the default heap options; the crash defaults stay, and
+# paths given there win.
 CUSTOM_OPTIONS_CAPTURE="${TEMP_DIR}/custom-java-options.args"
 CAPTURE_FILE="$CUSTOM_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     JAVA_OPTIONS="-Xmx1g -XX:ErrorFile=/operator/hs_err.log \
@@ -463,63 +506,87 @@ CAPTURE_FILE="$CUSTOM_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
 assert_argument "-Xmx1g" "$CUSTOM_OPTIONS_CAPTURE"
-assert_argument "-XX:+HeapDumpOnOutOfMemoryError" "$CUSTOM_OPTIONS_CAPTURE"
-assert_argument_matching "^-XX:HeapDumpPath=${LOGS_PATTERN}/" "$CUSTOM_OPTIONS_CAPTURE"
-LAST_ERROR_FILE_ARGUMENT=$(grep -E '^-XX:ErrorFile=' \
-                           "$CUSTOM_OPTIONS_CAPTURE" | tail -n 1)
-if [[ "$LAST_ERROR_FILE_ARGUMENT" != "-XX:ErrorFile=/operator/hs_err.log" ]]; then
-    fail "operator -XX:ErrorFile was overridden by the launcher default"
-fi
-LAST_HEAP_DUMP_PATH_ARGUMENT=$(grep -E '^-XX:HeapDumpPath=' \
-                               "$CUSTOM_OPTIONS_CAPTURE" | tail -n 1)
-if [[ "$LAST_HEAP_DUMP_PATH_ARGUMENT" != "-XX:HeapDumpPath=/operator/dumps" ]]; then
-    fail "operator -XX:HeapDumpPath was overridden by the launcher default"
-fi
+assert_effective_flag "$CUSTOM_OPTIONS_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
+assert_effective_flag "$CUSTOM_OPTIONS_CAPTURE" HeapDumpPath '^/operator/dumps$'
+assert_effective_flag "$CUSTOM_OPTIONS_CAPTURE" ErrorFile '^/operator/hs_err\.log$'
 
-# JAVA_TOOL_OPTIONS and JDK_JAVA_OPTIONS are read before the command line, so
-# the launcher must leave out a flag already set there rather than override it.
-TOOL_OPTIONS_CAPTURE="${TEMP_DIR}/tool-java-options.args"
-CAPTURE_FILE="$TOOL_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
-    JAVA_TOOL_OPTIONS="-XX:ErrorFile=/operator/hs_err.log" \
-    JDK_JAVA_OPTIONS="-XX:-HeapDumpOnOutOfMemoryError" \
+# The JVM, not the launcher, parses the operator's JAVA_TOOL_OPTIONS: a quoted
+# opt-out works, and flag-like text inside a property value changes nothing.
+QUOTED_TOOL_CAPTURE="${TEMP_DIR}/quoted-tool-options.args"
+CAPTURE_FILE="$QUOTED_TOOL_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JAVA_TOOL_OPTIONS='"-XX:-HeapDumpOnOutOfMemoryError" "-Dmarker=-XX:ErrorFile=/nope"' \
     STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
-assert_no_argument '^-XX:ErrorFile=' "$TOOL_OPTIONS_CAPTURE"
-assert_no_argument '^-XX:[+-]HeapDumpOnOutOfMemoryError$' "$TOOL_OPTIONS_CAPTURE"
-assert_argument_matching "^-XX:HeapDumpPath=${LOGS_PATTERN}/" "$TOOL_OPTIONS_CAPTURE"
+assert_effective_flag "$QUOTED_TOOL_CAPTURE" HeapDumpOnOutOfMemoryError '^false$'
+assert_effective_flag "$QUOTED_TOOL_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
 
-# With telemetry on, the launcher adds its agent to JAVA_TOOL_OPTIONS. It must
-# keep the operator's flags there, or the -XX:ErrorFile left out above is lost.
+# JDK_JAVA_OPTIONS, including an @argfile, also overrides the defaults.
+ARGFILE="${TEMP_DIR}/jdk-java-options.args"
+echo '-XX:ErrorFile=/operator/argfile-hs_err.log' > "$ARGFILE"
+ARGFILE_CAPTURE="${TEMP_DIR}/argfile.args"
+CAPTURE_FILE="$ARGFILE_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JDK_JAVA_OPTIONS="@${ARGFILE}" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$ARGFILE_CAPTURE" ErrorFile '^/operator/argfile-hs_err\.log$' \
+                      "@${ARGFILE}"
+assert_effective_flag "$ARGFILE_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN" "@${ARGFILE}"
+
+# A launch never reuses a name already taken in logs/, even within the same
+# second: with a fixed clock, the counter moves past both existing files.
+MOCK_DATE_BIN="${TEMP_DIR}/mock-date-bin"
+mkdir -p "$MOCK_DATE_BIN"
+printf '#!/bin/bash\necho 20200101-000000\n' > "${MOCK_DATE_BIN}/date"
+chmod +x "${MOCK_DATE_BIN}/date"
+mkdir -p "${SERVER_ROOT}/logs"
+CRASH_NAME_FIXTURES=("${SERVER_ROOT}/logs/java_pid1_20200101-000000.hprof"
+                     "${SERVER_ROOT}/logs/hs_err_pid1_20200101-000000-1.log")
+touch "${CRASH_NAME_FIXTURES[@]}"
+UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
+CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
+    "^${LOGS_PATTERN}/java_pid[0-9]+_20200101-000000-2\.hprof$"
+assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
+    "^${LOGS_PATTERN}/hs_err_pid%p_20200101-000000-2\.log$"
+rm -f "${CRASH_NAME_FIXTURES[@]}"
+CRASH_NAME_FIXTURES=()
+
+# With telemetry on, the launcher appends its agent to JAVA_TOOL_OPTIONS and
+# keeps both the defaults and the operator's flags there.
 OT_EXPECTED_MD5=$(grep -E '^ *expected_md5=' "$SERVER_SCRIPT" | cut -d'"' -f2)
 MOCK_MD5_BIN="${TEMP_DIR}/mock-md5-bin"
 mkdir -p "$MOCK_MD5_BIN"
 printf '#!/bin/bash\necho "%s  $1"\n' "$OT_EXPECTED_MD5" > "${MOCK_MD5_BIN}/md5sum"
 chmod +x "${MOCK_MD5_BIN}/md5sum"
 OT_JAR_PATH="${SERVER_ROOT}/plugins/opentelemetry-javaagent.jar"
-OT_JAR_EXISTED="false"
-if [[ -e "$OT_JAR_PATH" ]]; then
-    OT_JAR_EXISTED="true"
-else
+if [[ ! -e "$OT_JAR_PATH" ]]; then
     mkdir -p "${SERVER_ROOT}/plugins"
-    : > "$OT_JAR_PATH"
+    OT_FIXTURE_JAR="$OT_JAR_PATH"
+    : > "$OT_FIXTURE_JAR"
 fi
 TELEMETRY_CAPTURE="${TEMP_DIR}/telemetry.args"
-TELEMETRY_TOOL_OPTIONS="${TEMP_DIR}/telemetry-tool-options.txt"
-CAPTURE_FILE="$TELEMETRY_CAPTURE" TOOL_OPTIONS_CAPTURE_FILE="$TELEMETRY_TOOL_OPTIONS" \
-    JAVA_HOME="$MOCK_JAVA_HOME" PATH="${MOCK_MD5_BIN}:${PATH}" \
+CAPTURE_FILE="$TELEMETRY_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    PATH="${MOCK_MD5_BIN}:${PATH}" \
     JAVA_TOOL_OPTIONS="-XX:ErrorFile=/operator/hs_err.log" \
     STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true "" "" true \
     >/dev/null
-if [[ "$OT_JAR_EXISTED" == "false" ]]; then
-    rm -f "$OT_JAR_PATH"
+if [[ -n "${OT_FIXTURE_JAR:-}" ]]; then
+    rm -f "$OT_FIXTURE_JAR"
+    OT_FIXTURE_JAR=""
 fi
 
-assert_no_argument '^-XX:ErrorFile=' "$TELEMETRY_CAPTURE"
-grep -Eq -- '(^| )-XX:ErrorFile=/operator/hs_err\.log( |$)' "$TELEMETRY_TOOL_OPTIONS" ||
+TELEMETRY_TOOL_OPTIONS=$(cat "${TELEMETRY_CAPTURE}.tool-options")
+[[ "$TELEMETRY_TOOL_OPTIONS" == -XX:+HeapDumpOnOutOfMemoryError\ * ]] ||
+    fail "telemetry agent setup dropped the crash-file defaults"
+[[ "$TELEMETRY_TOOL_OPTIONS" == *" -XX:ErrorFile=/operator/hs_err.log "* ]] ||
     fail "telemetry agent setup dropped the operator's JAVA_TOOL_OPTIONS"
-grep -Eq -- '(^| )-javaagent:[^ ]*/opentelemetry-javaagent\.jar$' "$TELEMETRY_TOOL_OPTIONS" ||
+[[ "$TELEMETRY_TOOL_OPTIONS" =~ \ -javaagent:[^\ ]*/opentelemetry-javaagent\.jar$ ]] ||
     fail "telemetry agent was not added to JAVA_TOOL_OPTIONS"
 
 JDK21_CAPTURE="${TEMP_DIR}/jdk21.args"

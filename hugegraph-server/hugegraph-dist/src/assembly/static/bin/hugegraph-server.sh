@@ -128,35 +128,33 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
 
-# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. They go
-# first so a value from JAVA_OPTIONS, -j or _JAVA_OPTIONS, all later on the command
-# line, still wins. JAVA_TOOL_OPTIONS and JDK_JAVA_OPTIONS are read before the command
-# line, so a flag set there is left out here instead of being overridden.
-# A restarted container often reuses the JVM's PID, and HotSpot will not overwrite an
-# existing crash log or heap dump, so the file names also carry the launch time. The
-# script execs java below, so $$ is the JVM's PID.
+# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. The
+# defaults go first in JAVA_TOOL_OPTIONS, which the JVM reads before the operator's
+# own JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, the command line (JAVA_OPTIONS and -j)
+# and _JAVA_OPTIONS, so any of those overrides them. The JVM does that parsing
+# itself, including quoted options and @argfiles.
+# A restarted container often reuses the JVM's PID, and HotSpot will not overwrite
+# an existing crash log or heap dump, so the file names carry the launch time plus
+# a counter that skips names already used in $LOGS. The script execs java below,
+# so $$ is the JVM's PID.
+crash_files_exist() {
+    local file
+    for file in "${LOGS}"/java_pid*_"$1".hprof "${LOGS}"/hs_err_pid*_"$1".log; do
+        [[ -e ${file} ]] && return 0
+    done
+    return 1
+}
 LAUNCH_STAMP=$(date +%Y%m%d-%H%M%S)
-CRASH_OPTIONS=""
-SET_HEAP_DUMP="true"
-SET_HEAP_DUMP_PATH="true"
-SET_ERROR_FILE="true"
-for OPTION in ${JAVA_TOOL_OPTIONS:-} ${JDK_JAVA_OPTIONS:-}; do
-    case "${OPTION}" in
-        -XX:[+-]HeapDumpOnOutOfMemoryError) SET_HEAP_DUMP="false" ;;
-        -XX:HeapDumpPath=*) SET_HEAP_DUMP_PATH="false" ;;
-        -XX:ErrorFile=*) SET_ERROR_FILE="false" ;;
-    esac
+LAUNCH_ID="${LAUNCH_STAMP}"
+LAUNCH_SUFFIX=0
+while crash_files_exist "${LAUNCH_ID}"; do
+    LAUNCH_SUFFIX=$((LAUNCH_SUFFIX + 1))
+    LAUNCH_ID="${LAUNCH_STAMP}-${LAUNCH_SUFFIX}"
 done
-if [[ $SET_HEAP_DUMP == "true" ]]; then
-    CRASH_OPTIONS="${CRASH_OPTIONS} -XX:+HeapDumpOnOutOfMemoryError"
-fi
-if [[ $SET_HEAP_DUMP_PATH == "true" ]]; then
-    CRASH_OPTIONS="${CRASH_OPTIONS} -XX:HeapDumpPath=${LOGS}/java_pid$$_${LAUNCH_STAMP}.hprof"
-fi
-if [[ $SET_ERROR_FILE == "true" ]]; then
-    CRASH_OPTIONS="${CRASH_OPTIONS} -XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_STAMP}.log"
-fi
-JAVA_OPTIONS="${CRASH_OPTIONS} ${JAVA_OPTIONS}"
+CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
+CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${LOGS}/java_pid$$_${LAUNCH_ID}.hprof\""
+CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
+export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
 
 if [[ $JAVA_VERSION -gt 9 ]]; then
     JAVA_OPTIONS="${JAVA_OPTIONS} --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED \
@@ -266,8 +264,7 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     fi
 
     # Note: check carefully if multi "javeagent" params are set
-    # Keep the operator's JAVA_TOOL_OPTIONS: the crash-file defaults above leave
-    # out any flag already set there, so dropping it would lose that flag.
+    # Append, so the crash-file defaults and the operator's JAVA_TOOL_OPTIONS stay.
     export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-javaagent:${PLUGINS}/${OT_JAR}"
     export OTEL_TRACES_EXPORTER=otlp
     export OTEL_METRICS_EXPORTER=none
