@@ -43,6 +43,18 @@
         <final.name>apache-${release.name}-ct-${project.version}</final.name>
     </properties>
 
+    <dependencyManagement>
+        <dependencies>
+            <!-- The historical test client brings Commons Text 1.9. Keep its
+                 API while disabling the unsafe interpolation defaults. -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-text</artifactId>
+                <version>1.10.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>com.google.code.findbugs</groupId>

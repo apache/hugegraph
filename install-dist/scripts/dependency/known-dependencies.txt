@@ -70,7 +70,6 @@ commons-logging-1.2.jar
 commons-pool2-2.0.jar
 commons-text-1.10.0.jar
 commons-text-1.11.0.jar
-commons-text-1.9.jar
 cucumber-core-7.21.1.jar
 cucumber-expressions-18.0.1.jar
 cucumber-gherkin-7.21.1.jar
