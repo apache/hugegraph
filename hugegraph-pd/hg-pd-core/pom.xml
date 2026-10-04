@@ -38,7 +38,7 @@
             <groupId>com.alipay.sofa</groupId>
             <artifactId>jraft-core</artifactId>
             <!-- TODO: use open source version & adopt the code later -->
-            <version>${pd-store-jraft.version}</version>
+            <version>${jraft.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.rocksdb</groupId>
@@ -49,7 +49,7 @@
         <dependency>
             <groupId>org.rocksdb</groupId>
             <artifactId>rocksdbjni</artifactId>
-            <version>6.29.5</version>
+            <version>${rocksdb.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>

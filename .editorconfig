@@ -36,6 +36,7 @@ continuation_indent_size = 8
 
 [*.md]
 max_line_length = off
+ij_wrap_on_typing = false
 
 [*.java]
 ij_java_doc_add_p_tag_on_empty_lines = true
