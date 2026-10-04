@@ -14,8 +14,8 @@ Apache HugeGraph is a fast-speed, highly-scalable graph database supporting 10+ 
 - Integration with Flink/Spark/HDFS
 
 ## Technology Stack
-- **Language**: Java 11+ (required)
-- **Build**: Maven 3.5+
+- **Language**: Java 17 (required; currently supported release)
+- **Build**: Maven 3.6.3+
 - **Graph Framework**: Apache TinkerPop 3.5.1
 - **RPC**: gRPC + Protocol Buffers
 - **API Docs**: Swagger (io.swagger.core.v3)
