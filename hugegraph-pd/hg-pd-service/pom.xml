@@ -48,7 +48,7 @@
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-core</artifactId>
-            <version>5.8.3</version>
+            <version>6.2.8</version>
         </dependency>
 
         <dependency>
@@ -101,7 +101,7 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
-            <version>2.5.14</version>
+            <version>3.5.12</version>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
