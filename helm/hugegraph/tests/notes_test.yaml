@@ -1,0 +1,41 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The install notes warn about chart-generated credentials under a
+# template-only renderer. The rollout checksums hash the generated values,
+# so such a renderer rolls the Pods on every sync; the warning must say so.
+suite: Install notes
+templates:
+  - NOTES.txt
+tests:
+  - it: says a template-only render rolls the Pods on every sync
+    asserts:
+      - matchRegexRaw:
+          pattern: "Chart-generated credentials are in use: pd.auth, server.auth.admin, server.auth.token"
+      - matchRegexRaw:
+          pattern: "every sync changes the\\s+Secret, rolls the Pods that read it"
+      - notMatchRegexRaw:
+          pattern: "without rolling"
+
+  - it: omits the warning when every credential comes from an existing Secret
+    set:
+      pd.auth.existingSecret: byo-pd
+      server.auth.admin.existingSecret: byo-admin
+      server.auth.token.existingSecret: byo-token
+    asserts:
+      - notMatchRegexRaw:
+          pattern: "Chart-generated credentials"

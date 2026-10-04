@@ -1,0 +1,69 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The membership and identity guards read the live StatefulSets through
+# lookup. These cases fake that object, so the refused path (a raft port
+# change, a rename, a replica shrink) and the allowed path (an unchanged
+# upgrade, a fresh install) are both pinned at render time. validateValues
+# is included from the Server Deployment, so the refusals render that.
+# A nameOverride contained in the release name keeps the StatefulSet name
+# (hugegraph.fullname collapses to the release name) but still changes the
+# app.kubernetes.io/name selector label, which Kubernetes forbids on an
+# existing StatefulSet. The fake StatefulSet carries the name that override
+# renders, so only the selector differs.
+suite: nameOverride that keeps the StatefulSet name but changes its selector
+templates:
+  - server-deployment.yaml
+kubernetesProvider:
+  scheme:
+    "apps/v1/StatefulSet":
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: RELEASE-NAME-pd
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: RELEASE-NAME
+          app.kubernetes.io/component: pd
+      spec:
+        replicas: "3"
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: RELEASE
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: pd
+tests:
+  - it: refuses the selector label change with the reason
+    set:
+      nameOverride: NAME
+    asserts:
+      - failedTemplate:
+          errorPattern: "changes the app.kubernetes.io/name selector label of the pd StatefulSet RELEASE-NAME-pd from RELEASE to NAME"
+
+  - it: lets the same override through when the selector already matches
+    set:
+      nameOverride: RELEASE
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-server

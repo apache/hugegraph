@@ -207,9 +207,16 @@ For advanced Docker configurations, see:
 >
 > **Version Tags**: Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag should only be used for testing or development.
 
+### Option 2: Kubernetes with Helm
+
+The HStore Helm chart deploys HugeGraph PD, Store, and Server as a distributed
+Kubernetes cluster. See the [chart documentation](helm/hugegraph/README.md) for
+single-node and highly available presets, configuration, and
+upgrade guidance.
+
 
 <details>
-<summary><b>Option 2: Download Binary Package</b></summary>
+<summary><b>Option 3: Download Binary Package</b></summary>
 
 Download pre-built packages from the [Download Page](https://hugegraph.apache.org/docs/download/download/):
 
@@ -242,7 +249,7 @@ For detailed instructions, see the [Binary Installation Guide](https://hugegraph
 </details>
 
 <details>
-<summary><b>Option 3: Build from Source</b></summary>
+<summary><b>Option 4: Build from Source</b></summary>
 
 Build from source for development or customization:
 
