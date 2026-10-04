@@ -34,7 +34,6 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateG
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.SideEffectStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.util.CollectingBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.AbstractTraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
 import org.apache.tinkerpop.gremlin.structure.Element;
@@ -73,11 +72,11 @@ public final class HugeCountStepStrategy
         HugeGraphStep<?, ? extends Element> graphStep = null;
         Step<?, ?> step = originStep;
         do {
+            // Only skip steps that preserve the number of traversers.
             if (!(step instanceof CountGlobalStep ||
                   step instanceof GraphStep ||
                   step instanceof IdentityStep ||
-                  step instanceof NoOpBarrierStep ||
-                  step instanceof CollectingBarrierStep) ||
+                  step instanceof NoOpBarrierStep) ||
                 (step instanceof TraversalParent &&
                  TraversalHelper.anyStepRecursively(s -> {
                      return s instanceof SideEffectStep ||
@@ -94,7 +93,9 @@ public final class HugeCountStepStrategy
             step = step.getPreviousStep();
         } while (step != null);
 
-        if (graphStep == null) {
+        // A mid-traversal scan runs once per incoming traverser (including bulk).
+        if (graphStep == null || !graphStep.isStartStep() ||
+            traversal.getStartStep() != graphStep) {
             return;
         }
 

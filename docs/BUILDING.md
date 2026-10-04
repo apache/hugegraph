@@ -3,8 +3,12 @@ Building HugeGraph
 
 Required:
 
-* Java 11
-* Maven 3.5+
+* Java 17 (currently the only supported Java release)
+* Maven 3.6.3+
+
+The launch scripts enforce Java 17 as the minimum runtime. This check does not
+qualify later Java releases; build HugeGraph with Java 17 unless another
+release is explicitly listed as supported.
 
 To build without executing tests: `mvn clean package -Dmaven.test.skip=true`
 
@@ -39,3 +43,6 @@ To find the Java binary in your environment, run the appropriate command for you
 * Linux/macOS: `which java`
 * Windows: `for %i in (java.exe) do @echo. %~$PATH:i`
 
+The Java 17 baseline retains TinkerPop 3.5.1 and uses Groovy 2.5.23 as an
+intermediate compatibility update. Groovy 2.5.14 cannot read Java 17 class files.
+The subsequent TinkerPop upgrade replaces this compatibility pin with Groovy 4.

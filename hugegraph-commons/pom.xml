@@ -94,14 +94,12 @@
         <revision>1.7.0</revision>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <top.level.dir>${project.basedir}/..</top.level.dir>
-        <compiler.source>1.8</compiler.source>
-        <compiler.target>1.8</compiler.target>
         <log4j2.version>2.18.0</log4j2.version>
         <commons.configuration.version>1.10</commons.configuration.version>
-        <commons.configuration2.version>2.8.0</commons.configuration2.version>
+        <commons.configuration2.version>2.10.1</commons.configuration2.version>
         <commons.beanutils.version>1.9.4</commons.beanutils.version>
         <commons.collections.version>3.2.2</commons.collections.version>
-        <commons.lang3.version>3.12.0</commons.lang3.version>
+        <commons.lang3.version>3.18.0</commons.lang3.version>
         <commons.io.version>2.7</commons.io.version>
         <commons.codec.version>1.13</commons.codec.version>
         <guava.version>30.0-jre</guava.version>
@@ -132,8 +130,6 @@
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
-                    <source>${compiler.source}</source>
-                    <target>${compiler.target}</target>
                     <compilerArguments>
                         <Xmaxerrs>500</Xmaxerrs>
                     </compilerArguments>
@@ -193,7 +189,6 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.7</version>
                 <executions>
                     <execution>
                         <id>pre-unit-test</id>
@@ -288,9 +283,12 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.20</version>
                 <configuration>
                     <skipTests>${skipCommonsTests}</skipTests>
+                    <argLine>
+                        @{argLine}
+                        @${project.parent.basedir}/../hugegraph-server/hugegraph-test/conf/jvm-test-module.options
+                    </argLine>
                 </configuration>
             </plugin>
         </plugins>

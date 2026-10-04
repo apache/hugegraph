@@ -259,7 +259,7 @@ The following components are provided under the Apache 2.0 License. See project 
 Per-component LICENSE-[project].txt files are included only when additional
 non-Apache-2.0 license text is required for a bundled component.
 
-    https://central.sonatype.com/artifact/com.alibaba/fastjson/1.2.83 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alibaba/fastjson/1.2.84 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa.common/sofa-common-tools/1.0.12 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa.lookout/lookout-api/1.4.1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.2 -> Apache 2.0
@@ -487,13 +487,14 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/org.ansj/ansj_seg/5.1.6 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-collections4/4.4 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-compress/1.21 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.10.1 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.8.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.12.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.13.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.18.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-pool2/2.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.10.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.apache.commons/commons-text/1.11.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.fury/fury-core/0.9.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.hbase/hbase-client/2.6.5 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.hbase/hbase-common/2.6.5 -> Apache 2.0
@@ -575,15 +576,15 @@ non-Apache-2.0 license text is required for a bundled component.
     https://central.sonatype.com/artifact/org.apiguardian/apiguardian-api/1.1.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.assertj/assertj-core/3.19.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.caffinitas.ohc/ohc-core/0.7.4 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-cli-picocli/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-console/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-groovysh/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-json/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-jsr223/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-swing/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-templates/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-xml/2.5.14 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy/2.5.14 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-cli-picocli/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-console/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-groovysh/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-json/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-jsr223/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-swing/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-templates/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy-xml/2.5.23 -> Apache 2.0
+    https://central.sonatype.com/artifact/org.codehaus.groovy/groovy/2.5.23 -> Apache 2.0
     https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/javax-websocket-client-impl/9.4.46.v20220331 -> Apache 2.0
     https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/javax-websocket-server-impl/9.4.46.v20220331 -> Apache 2.0
     https://central.sonatype.com/artifact/org.eclipse.jetty.websocket/websocket-api/9.4.46.v20220331 -> Apache 2.0
@@ -881,3 +882,5 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
 #
 # This product includes software developed by the Jansi project (http://fusesource.github.io/jansi/).
 # See licenses/LICENSE-jansi-2.4.0.txt for license details (Apache License 2.0 or LGPL 3.0+).
+
+Groovy 2.5.23 modules share licenses/LICENSE-groovy-2.5.23.txt.

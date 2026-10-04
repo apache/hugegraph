@@ -370,12 +370,12 @@ def goals(plugin):
 def check_module(module, test_module):
     parent = ET.parse(ROOT / module / "pom.xml").getroot()
     parent_plugin = jacoco_plugin(parent.find(NS + "build"))
-    assert child_text(parent_plugin, "version") == "0.8.8"
+    assert child_text(parent_plugin, "version") == "", "inherit the managed JaCoCo version"
     assert child_text(parent_plugin.find(NS + "configuration"), "append") == "true"
 
     test = ET.parse(ROOT / module / test_module / "pom.xml").getroot()
     default_plugin = jacoco_plugin(test.find(NS + "build"))
-    assert child_text(default_plugin, "version") == "0.8.8"
+    assert child_text(default_plugin, "version") == "", "inherit the managed JaCoCo version"
     assert "report-aggregate" not in goals(default_plugin)
 
     profile = None
@@ -385,13 +385,18 @@ def check_module(module, test_module):
             break
     assert profile is not None
     profile_plugin = jacoco_plugin(profile.find(NS + "build"))
-    assert child_text(profile_plugin, "version") == "0.8.8"
+    assert child_text(profile_plugin, "version") == "", "inherit the managed JaCoCo version"
     executions = profile_plugin.findall(".//" + NS + "execution")
     aggregates = [execution for execution in executions
                   if "report-aggregate" in goals(execution)]
     assert len(aggregates) == 1
     assert child_text(aggregates[0], "phase") == "verify"
 
+
+root_pom = ET.parse(ROOT / "pom.xml").getroot()
+managed_plugin = jacoco_plugin(root_pom.find(NS + "build/" + NS + "pluginManagement"))
+assert child_text(managed_plugin, "version") == "${jacoco.maven.plugin.version}"
+assert child_text(root_pom.find(NS + "properties"), "jacoco.maven.plugin.version") == "0.8.15"
 
 check_module("hugegraph-pd", "hg-pd-test")
 check_module("hugegraph-store", "hg-store-test")

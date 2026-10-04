@@ -17,11 +17,13 @@
 
 set -euo pipefail
 
-SERVER_ROOT_INPUT="${1:?Usage: $0 PATH_TO_SERVER_DIST}"
+SERVER_ROOT_INPUT="${1:?Usage: $0 PATH_TO_SERVER_DIST [SOURCE_ROOT]}"
+SOURCE_ROOT_INPUT="${2:-}"
 SERVER_ROOT=$(cd "$SERVER_ROOT_INPUT" && pwd)
 SERVER_SCRIPT="${SERVER_ROOT}/bin/hugegraph-server.sh"
 CONF="${SERVER_ROOT}/conf"
 SECURITY_PROPERTIES="${CONF}/java-security.properties"
+JVM_MODULE_OPTIONS="${SERVER_ROOT}/bin/jvm-module.options"
 
 fail() {
     echo "FAIL: $1" >&2
@@ -43,11 +45,135 @@ assert_no_argument() {
     fi
 }
 
+assert_source_consumer() {
+    local source_file="$1"
+    local expected="$2"
+    [[ -f "$source_file" ]] || fail "source consumer is missing: $source_file"
+    grep -Fq -- "$expected" "$source_file" ||
+        fail "JVM module options consumer is not wired: $source_file"
+}
+
+assert_surefire_arg_lines() {
+    local pom="$1"
+    local expected="$2"
+    local total
+    local wired
+    local jacoco_wired
+    read -r total wired jacoco_wired < <(
+        awk -v expected="$expected" '
+            /<artifactId>maven-surefire-plugin<\/artifactId>/ {
+                in_surefire = 1
+            }
+            in_surefire && /<argLine([[:space:]][^>]*)?>/ {
+                in_arg_line = 1
+                arg_line = ""
+            }
+            in_arg_line {
+                arg_line = arg_line $0
+            }
+            in_arg_line && /<\/argLine>/ {
+                total++
+                if (index(arg_line, expected) != 0) {
+                    wired++
+                }
+                if (index(arg_line, "@{argLine}") != 0) {
+                    jacoco_wired++
+                }
+                in_arg_line = 0
+            }
+            in_surefire && /<\/plugin>/ {
+                in_surefire = 0
+            }
+            END {
+                print total + 0, wired + 0, jacoco_wired + 0
+            }
+        ' "$pom"
+    )
+    if [[ "$total" -eq 0 || "$wired" -ne "$total" ]]; then
+        fail "all Surefire argLine values must use jvm-module.options: $pom"
+    fi
+    if [[ "$jacoco_wired" -ne "$total" ]]; then
+        fail "all Surefire argLine values must preserve @{argLine}: $pom"
+    fi
+}
+
+assert_no_inline_module_options() {
+    local pattern
+    local source_file
+    pattern="--add-(exports|opens)([[:space:]]+|=)[\"']?java\\.base/|"
+    pattern="${pattern}--add-modules([[:space:]]+|=)[\"']?jdk\.unsupported"
+    for source_file in "$@"; do
+        [[ -f "$source_file" ]] || fail "source consumer is missing: $source_file"
+    done
+    if grep -En -- "$pattern" "$@"; then
+        fail "JVM module options must only be declared in jvm-module.options"
+    fi
+}
+
 if [[ ! -x "$SERVER_SCRIPT" ]]; then
     fail "server script is not executable: $SERVER_SCRIPT"
 fi
 if [[ ! -f "$SECURITY_PROPERTIES" ]]; then
     fail "security properties file is missing: $SECURITY_PROPERTIES"
+fi
+if [[ ! -f "$JVM_MODULE_OPTIONS" ]]; then
+    fail "JVM module options file is missing: $JVM_MODULE_OPTIONS"
+fi
+
+assert_argument "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED" \
+                "$JVM_MODULE_OPTIONS"
+assert_argument "--add-modules=jdk.unsupported" "$JVM_MODULE_OPTIONS"
+assert_argument "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED" \
+                "$JVM_MODULE_OPTIONS"
+
+if [[ -n "$SOURCE_ROOT_INPUT" ]]; then
+    if [[ ! -d "$SOURCE_ROOT_INPUT" ]]; then
+        fail "source root is not a directory: $SOURCE_ROOT_INPUT"
+    fi
+    SOURCE_ROOT=$(cd "$SOURCE_ROOT_INPUT" && pwd)
+    SERVER_DIST_SOURCE="${SOURCE_ROOT}/hugegraph-server/hugegraph-dist"
+    CLUSTER_SOURCE="${SOURCE_ROOT}/hugegraph-cluster-test/"\
+"hugegraph-clustertest-minicluster/src/main/java/org/apache/hugegraph/ct"
+    SERVER_LAUNCHER_SOURCE="${SERVER_DIST_SOURCE}/src/assembly/static/bin/"\
+"hugegraph-server.sh"
+    INIT_STORE_SOURCE="${SERVER_DIST_SOURCE}/src/assembly/static/bin/init-store.sh"
+    SUREFIRE_POM="${SOURCE_ROOT}/hugegraph-server/hugegraph-test/pom.xml"
+    TEST_JVM_MODULE_OPTIONS="${SOURCE_ROOT}/hugegraph-server/hugegraph-test/"\
+"conf/jvm-test-module.options"
+    COMMONS_POM="${SOURCE_ROOT}/hugegraph-commons/pom.xml"
+    CLUSTER_WRAPPER="${CLUSTER_SOURCE}/node/ServerNodeWrapper.java"
+    SERVER_DOCKERFILE="${SOURCE_ROOT}/hugegraph-server/Dockerfile"
+    HSTORE_DOCKERFILE="${SOURCE_ROOT}/hugegraph-server/Dockerfile-hstore"
+    SERVER_WORKFLOW="${SOURCE_ROOT}/.github/workflows/server-ci.yml"
+    DOCKER_WORKFLOW="${SOURCE_ROOT}/.github/workflows/docker-build-ci.yml"
+    UPGRADE_CONTRACT_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/"\
+"test-java17-upgrade-contracts.sh"
+
+    [[ -x "$UPGRADE_CONTRACT_SCRIPT" ]] || \
+        fail "Java 17 upgrade contract script is missing: $UPGRADE_CONTRACT_SCRIPT"
+    "$UPGRADE_CONTRACT_SCRIPT" "$SERVER_ROOT" "$SOURCE_ROOT"
+
+    assert_source_consumer "$SERVER_LAUNCHER_SOURCE" '@"${JVM_MODULE_OPTIONS}"'
+    assert_source_consumer "$INIT_STORE_SOURCE" '@"${JVM_MODULE_OPTIONS}"'
+    assert_surefire_arg_lines "$SUREFIRE_POM" \
+        '@${project.basedir}/../hugegraph-dist/src/assembly/static/bin/jvm-module.options'
+    [[ -f "$TEST_JVM_MODULE_OPTIONS" ]] || \
+        fail "JVM test module options file is missing: $TEST_JVM_MODULE_OPTIONS"
+    assert_argument \
+        "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED" \
+        "$TEST_JVM_MODULE_OPTIONS"
+    assert_argument "--add-opens=java.base/java.lang=ALL-UNNAMED" \
+                    "$TEST_JVM_MODULE_OPTIONS"
+    assert_surefire_arg_lines "$SUREFIRE_POM" \
+        '@${project.basedir}/conf/jvm-test-module.options'
+    assert_surefire_arg_lines "$COMMONS_POM" \
+        '@${project.parent.basedir}/../hugegraph-server/hugegraph-test/conf/jvm-test-module.options'
+    assert_source_consumer "$CLUSTER_WRAPPER" \
+        '"@" + Paths.get(SERVER_PACKAGE_PATH, BIN_DIR,'
+    assert_no_inline_module_options \
+        "$SERVER_LAUNCHER_SOURCE" "$INIT_STORE_SOURCE" "$SUREFIRE_POM" \
+        "$COMMONS_POM" "$CLUSTER_WRAPPER" "$SERVER_DOCKERFILE" \
+        "$HSTORE_DOCKERFILE" "$SERVER_WORKFLOW" "$DOCKER_WORKFLOW"
 fi
 
 if [[ -n "${JAVA_HOME:-}" ]]; then
@@ -409,7 +535,7 @@ if [[ " $* " == *" -version "* ]]; then
     if [[ -n "${MOCK_JAVA_PREAMBLE:-}" ]]; then
         echo "${MOCK_JAVA_PREAMBLE}" >&2
     fi
-    echo "openjdk version \"${MOCK_JAVA_VERSION:-11}.0.0\"" >&2
+    echo "openjdk version \"${MOCK_JAVA_VERSION:-17}.0.0\"" >&2
     exit 0
 fi
 printf '%s\n' "$@" > "$CAPTURE_FILE"
@@ -425,6 +551,7 @@ CAPTURE_FILE="$ENABLED_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
 
 assert_argument \
     "-Djava.security.properties=${SECURITY_PROPERTIES}" "$ENABLED_CAPTURE"
+assert_argument "@${JVM_MODULE_OPTIONS}" "$ENABLED_CAPTURE"
 assert_no_argument '^-Djava\.security\.manager=' "$ENABLED_CAPTURE"
 assert_argument \
     "org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap" "$ENABLED_CAPTURE"
@@ -503,10 +630,10 @@ assert_argument "-Djava.security.manager=allow" "$AGENT_JDK21_CAPTURE"
 # ... and trip the JDK 24+ security guard when the agent version is high.
 HIGH_AGENT_PREAMBLE=$'Picked up JAVA_TOOL_OPTIONS: -javaagent:apm-agent.jar\nAPM agent version "24.0.1" is starting'
 
-HIGH_AGENT_CAPTURE="${TEMP_DIR}/agent-preamble-jdk11.args"
-HIGH_AGENT_ERROR="${TEMP_DIR}/agent-preamble-jdk11.err"
+HIGH_AGENT_CAPTURE="${TEMP_DIR}/agent-preamble-jdk17.args"
+HIGH_AGENT_ERROR="${TEMP_DIR}/agent-preamble-jdk17.err"
 CAPTURE_FILE="$HIGH_AGENT_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
-    MOCK_JAVA_VERSION=11 MOCK_JAVA_PREAMBLE="$HIGH_AGENT_PREAMBLE" \
+    MOCK_JAVA_VERSION=17 MOCK_JAVA_PREAMBLE="$HIGH_AGENT_PREAMBLE" \
     STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
     >/dev/null 2>"$HIGH_AGENT_ERROR"
@@ -517,6 +644,15 @@ fi
 assert_argument \
     "org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap" "$HIGH_AGENT_CAPTURE"
 assert_no_argument '^-Djava\.security\.manager=' "$HIGH_AGENT_CAPTURE"
+
+JDK11_ERROR="${TEMP_DIR}/jdk11.err"
+if JAVA_HOME="$MOCK_JAVA_HOME" MOCK_JAVA_VERSION=11 STDOUT_MODE=true \
+   "$SERVER_SCRIPT" "${CONF}/gremlin-server.yaml" \
+   "${CONF}/rest-server.properties" false >/dev/null 2>"$JDK11_ERROR"; then
+    fail "launcher accepted a Java 11 runtime"
+fi
+grep -Fq "version >= 17, current is 11" "${SERVER_ROOT}/logs/hugegraph-server.log" ||
+    fail "launcher did not report the Java 17 minimum"
 
 JDK24_DISABLED_CAPTURE="${TEMP_DIR}/jdk24-disabled.args"
 CAPTURE_FILE="$JDK24_DISABLED_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \

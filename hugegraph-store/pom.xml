@@ -98,7 +98,6 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.8</version>
                 <configuration>
                     <append>true</append>
                 </configuration>
@@ -171,7 +170,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>store-client-test</id>
@@ -195,7 +193,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>store-core-test</id>
@@ -219,7 +216,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>store-common-test</id>
@@ -243,7 +239,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>store-rocksdb-test</id>
@@ -267,7 +262,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>store-server-test</id>
@@ -291,7 +285,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>store-raftcore-test</id>

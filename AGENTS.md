@@ -40,7 +40,7 @@ Commons: shared utilities; independent compiler and test settings
 
 ## Build and validation
 
-Commands run from the repository root. Java 11+ and Maven 3.5+;
+Commands run from the repository root. Java 17 and Maven 3.6.3+;
 versions come from [pom.xml](pom.xml), including `${revision}`.
 
 ```bash

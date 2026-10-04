@@ -46,7 +46,6 @@
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.8</version>
                         <executions>
                             <execution>
                                 <id>coverage-report</id>
@@ -191,12 +190,6 @@
             <version>2.0.0-RC.3</version>
             <scope>compile</scope>
         </dependency>
-        <dependency>
-            <groupId>org.apache.tinkerpop</groupId>
-            <artifactId>gremlin-shaded</artifactId>
-            <version>3.5.1</version>
-            <scope>compile</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -204,11 +197,18 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.20</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.apache.maven.surefire</groupId>
+                        <artifactId>surefire-junit4</artifactId>
+                        <version>${maven.surefire.plugin.version}</version>
+                    </dependency>
+                </dependencies>
                 <executions>
                     <execution>
                         <id>pd-client-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -221,6 +221,7 @@
                     <execution>
                         <id>pd-core-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -233,6 +234,7 @@
                     <execution>
                         <id>pd-common-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -245,6 +247,7 @@
                     <execution>
                         <id>pd-rest-test</id>
                         <configuration>
+                            <failIfNoSpecifiedTests>true</failIfNoSpecifiedTests>
                             <testSourceDirectory>${basedir}/src/main/java/
                             </testSourceDirectory>
                             <testClassesDirectory>${basedir}/target/classes/
@@ -259,7 +262,6 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.8</version>
                 <configuration>
                     <excludes>
                         <exclude>org/apache/hugegraph/pd/rest/*.class</exclude>

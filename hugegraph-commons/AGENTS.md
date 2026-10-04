@@ -6,8 +6,8 @@ Shared rules: [root AGENTS.md](../AGENTS.md). Paths here are relative to this mo
 
 - Config, locks, events, iterators and REST: `hugegraph-common/src/main/java/org/apache/hugegraph/`.
 - RPC framework: `hugegraph-rpc/`, which depends on `hugegraph-common`.
-- Commons targets Java 8 bytecode in [pom.xml](pom.xml), although CI uses JDK 11.
-  Do not infer its language/API baseline from Server's JDK requirement.
+- Commons uses the shared Java 17 release target; see [pom.xml](pom.xml) and
+  the [root POM](../pom.xml).
 
 ## Tests
 

@@ -30,6 +30,9 @@ else
 fi
 
 PD_DIR=$HOME_DIR/hugegraph-pd/apache-hugegraph-pd-$VersionInBash
+TRAVIS_DIR=$(dirname "$0")
+
+source "$TRAVIS_DIR"/ci-service-utils.sh
 
 pushd $PD_DIR
 # conf/application.yml ships auth.secret-key empty on purpose, so PD would
@@ -42,5 +45,6 @@ pushd $PD_DIR
     export SPRING_APPLICATION_JSON='{"auth":{"secret-key":"pd-ci-test-secret-not-for-production"}}'
     . bin/start-hugegraph-pd.sh
 )
-sleep 10
+wait_for_http_status HugeGraphPD http://127.0.0.1:8620/v1/ready \
+                     "$PD_DIR"/bin/pid "$PD_DIR" 90 200
 popd

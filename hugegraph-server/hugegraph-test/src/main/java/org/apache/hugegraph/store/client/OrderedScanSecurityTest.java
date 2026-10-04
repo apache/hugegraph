@@ -81,6 +81,9 @@ public class OrderedScanSecurityTest {
             String factoryScript = "org.apache.hugegraph.store.client.util.ExecutorPool." +
                                    "newThreadFactory('untrusted').newThread({} as Runnable)";
             engine.eval(factoryScript);
+            // Load Groovy's Thread metadata before restricting filesystem access.
+            // The assertion below must exercise thread-group access, not class loading.
+            engine.eval("new Thread()");
             SecurityManager previous = System.getSecurityManager();
             String name = Thread.currentThread().getName();
             Thread.currentThread().setName("gremlin-server-exec-ordered-scan-test");

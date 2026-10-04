@@ -114,12 +114,10 @@ public class BackendProviderFactory {
         BackendException.check(subclass, "Class '%s' is not a subclass of " +
                                          "class BackendStoreProvider", classPath);
 
-        // Check exists
-        BackendException.check(!providers.containsKey(name),
+        // Register atomically: identical re-registration is a no-op
+        Class<?> registered = providers.putIfAbsent(name, (Class) clazz);
+        BackendException.check(registered == null || registered.equals(clazz),
                                "Exists BackendStoreProvider: %s (%s)",
-                               name, providers.get(name));
-
-        // Register class
-        providers.put(name, (Class) clazz);
+                               name, registered);
     }
 }

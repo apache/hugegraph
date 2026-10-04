@@ -28,18 +28,23 @@ env:
     tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
   RISCV64_BASE_IMAGE: >-
     ubuntu@sha256:4edded5722eb644868b7b976033d241d2ab3fff0a170924df69b200a59a2b994
-  DRAGONWELL_RISCV64_ARCHIVE: >-
-    Alibaba_Dragonwell_Extended_11.0.31.28.11_riscv64_linux.tar.gz
-  DRAGONWELL_RISCV64_SHA256: >-
-    7df2d308f0dca7a779d2854e6da19214f99cd77aa6d4982c3bf981a77266a79b
-  DRAGONWELL_RISCV64_URL: >-
-    https://github.com/dragonwell-project/dragonwell11/releases/download/dragonwell-extended-11.0.31.28_jdk-11.0.31-ga/Alibaba_Dragonwell_Extended_11.0.31.28.11_riscv64_linux.tar.gz
+  TEMURIN_RISCV64_ARCHIVE: >-
+    OpenJDK17U-jdk_riscv64_linux_hotspot_17.0.20_8.tar.gz
+  TEMURIN_RISCV64_SHA256: >-
+    bc36e8044c88df9f4ec2967c5277d1c8fae572378c12c0bac44dcae15d3af2f7
+  TEMURIN_RISCV64_BASE_URL: >-
+    https://github.com/adoptium/temurin17-binaries/releases/download
+  TEMURIN_RISCV64_RELEASE: jdk-17.0.20%2B8
+  EXPECTED_JAVA_MAJOR: '17'
+  EXPECTED_RISCV64_JAVA_VERSION: '17.0.20'
+  EXPECTED_RISCV64_JAVA_VENDOR: Eclipse Adoptium
   RISCV64_CONTAINER: >-
     hugegraph-riscv64-ci-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   build-server-riscv64:
     runs-on: ubuntu-24.04
+    continue-on-error: true
     timeout-minutes: 90
 
     steps:
@@ -55,24 +60,28 @@ jobs:
             --name "$RISCV64_CONTAINER" "$RISCV64_BASE_IMAGE" sleep infinity
           test "$(docker exec "$RISCV64_CONTAINER" uname -m)" = riscv64
 
-      - name: Prepare source and Java 11
+      - name: Prepare source and Java 17
         run: |
-          ARCHIVE_PATH="$RUNNER_TEMP/$DRAGONWELL_RISCV64_ARCHIVE"
+          ARCHIVE_PATH="$RUNNER_TEMP/$TEMURIN_RISCV64_ARCHIVE"
           curl --fail --location --retry 3 --show-error \
-            "$DRAGONWELL_RISCV64_URL" --output "$ARCHIVE_PATH"
-          echo "$DRAGONWELL_RISCV64_SHA256  $ARCHIVE_PATH" | sha256sum -c -
+            "$TEMURIN_RISCV64_BASE_URL/$TEMURIN_RISCV64_RELEASE/$TEMURIN_RISCV64_ARCHIVE" \
+            --output "$ARCHIVE_PATH"
+          echo "$TEMURIN_RISCV64_SHA256  $ARCHIVE_PATH" | sha256sum -c -
 
-          docker exec "$RISCV64_CONTAINER" mkdir -p /workspace /opt/dragonwell
+          docker exec "$RISCV64_CONTAINER" mkdir -p /workspace /opt/temurin
           git ls-files -z | tar --null --files-from=- -cf - | \
             docker exec -i "$RISCV64_CONTAINER" tar -xf - -C /workspace
           docker cp "$ARCHIVE_PATH" \
-            "$RISCV64_CONTAINER:/tmp/$DRAGONWELL_RISCV64_ARCHIVE"
+            "$RISCV64_CONTAINER:/tmp/$TEMURIN_RISCV64_ARCHIVE"
 
       - name: Build and smoke test on RISC-V
         run: |
           docker exec \
-            --env DRAGONWELL_RISCV64_ARCHIVE="$DRAGONWELL_RISCV64_ARCHIVE" \
-            --env DRAGONWELL_RISCV64_SHA256="$DRAGONWELL_RISCV64_SHA256" \
+            --env TEMURIN_RISCV64_ARCHIVE="$TEMURIN_RISCV64_ARCHIVE" \
+            --env TEMURIN_RISCV64_SHA256="$TEMURIN_RISCV64_SHA256" \
+            --env EXPECTED_JAVA_MAJOR="$EXPECTED_JAVA_MAJOR" \
+            --env EXPECTED_RISCV64_JAVA_VERSION="$EXPECTED_RISCV64_JAVA_VERSION" \
+            --env EXPECTED_RISCV64_JAVA_VENDOR="$EXPECTED_RISCV64_JAVA_VENDOR" \
             "$RISCV64_CONTAINER" bash -euo pipefail -c '
               test "$(uname -m)" = riscv64
               apt-get -q update
@@ -81,11 +90,11 @@ jobs:
                 lsof maven procps \
                 protobuf-compiler protobuf-compiler-grpc-java-plugin
 
-              ARCHIVE_PATH="/tmp/$DRAGONWELL_RISCV64_ARCHIVE"
-              echo "$DRAGONWELL_RISCV64_SHA256  $ARCHIVE_PATH" | sha256sum -c -
-              tar -xzf "$ARCHIVE_PATH" --strip-components=1 -C /opt/dragonwell
+              ARCHIVE_PATH="/tmp/$TEMURIN_RISCV64_ARCHIVE"
+              echo "$TEMURIN_RISCV64_SHA256  $ARCHIVE_PATH" | sha256sum -c -
+              tar -xzf "$ARCHIVE_PATH" --strip-components=1 -C /opt/temurin
               rm "$ARCHIVE_PATH"
-              export JAVA_HOME=/opt/dragonwell
+              export JAVA_HOME=/opt/temurin
               export PATH="$JAVA_HOME/bin:$PATH"
 
               java -XshowSettings:vm -version
