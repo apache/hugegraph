@@ -21,7 +21,6 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <artifactId>hugegraph-store</artifactId>
-    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <parent>
@@ -45,6 +44,7 @@
 
     <properties>
         <log4j2.version>2.15.0</log4j2.version>
+        <rocksdbjni.version>7.7.3</rocksdbjni.version>
         <final.name>apache-${release.name}-store-${project.version}</final.name>
     </properties>
 
@@ -82,8 +82,18 @@
             </dependency>
             <dependency>
                 <groupId>org.apache.hugegraph</groupId>
+                <artifactId>hg-store-cloud-s3</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.hugegraph</groupId>
                 <artifactId>hg-store-transfer</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.rocksdb</groupId>
+                <artifactId>rocksdbjni</artifactId>
+                <version>${rocksdbjni.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
@@ -304,6 +314,18 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+        <!--
+          Opt-in: bundles S3 cloud storage support (hg-store-cloud-s3 + AWS SDK) into
+          hg-store-node's fat jar. Inactive by default so plain `mvn clean package`/CI
+          builds never touch this module or its AWS SDK dependencies. Activate with
+          `-Ps3-cloud-storage`. See hg-store-node/pom.xml for the matching dependency.
+          -->
+        <profile>
+            <id>s3-cloud-storage</id>
+            <modules>
+                <module>hg-store-cloud-s3</module>
+            </modules>
         </profile>
     </profiles>
 </project>

@@ -207,6 +207,34 @@ public class SessionOperatorImpl implements SessionOperator {
 
     @Override
     public byte[] get(String table, byte[] key) throws DBStoreException {
+        byte[] value;
+        try (CFHandleLock cf = this.getLock(table)) {
+            value = rocksdb().get(cf.get(), key);
+            if (value != null) {
+                return value;
+            }
+        } catch (RocksDBException e) {
+            // A live SST referenced by the manifest may be physically missing (e.g. the local disk
+            // was lost while the DB stayed open). RocksDB surfaces that as an exception rather than
+            // a null, so hydration must be attempted here too — not only on the null path below —
+            // otherwise a read that actually needs the evicted file fails instead of self-healing.
+            // The CF handle lock is already released (try-with-resources closes before this catch),
+            // so the slow hydration I/O does not hold it.
+            if (RocksDBFactory.getInstance().onReadMiss(this.session, table, key)) {
+                try (CFHandleLock cf = this.getLock(table)) {
+                    return rocksdb().get(cf.get(), key);
+                } catch (RocksDBException retryError) {
+                    throw new DBStoreException(retryError);
+                }
+            }
+            throw new DBStoreException(e);
+        }
+
+        // Cloud hydration can perform slow I/O, so run it after releasing the CF handle lock.
+        if (!RocksDBFactory.getInstance().onReadMiss(this.session, table, key)) {
+            return null;
+        }
+
         try (CFHandleLock cf = this.getLock(table)) {
             return rocksdb().get(cf.get(), key);
         } catch (RocksDBException e) {
