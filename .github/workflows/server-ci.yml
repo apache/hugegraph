@@ -22,10 +22,12 @@ jobs:
       - name: Run wait-storage.sh peer failover tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
 
-  # Keep the legacy memory check name until the new protection context is active.
-  build-server:
+  # Required coverage: memory on every configured JDK.
+  # Keep the old check display name so this Java 11 PR satisfies current protection.
+  build-server-memory:
+    name: build-server (${{ matrix.BACKEND }}, ${{ matrix.JAVA_VERSION }})
     runs-on: ubuntu-24.04
-    env: &server-env
+    env: &linux-server-env
       USE_STAGE: 'false' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
@@ -41,9 +43,11 @@ jobs:
       fail-fast: false
       matrix:
         BACKEND: [ memory ]
-        JAVA_VERSION: &server-java-versions [ '11' ]
+        # Change this shared list for Linux JDK upgrades; the required check name stays fixed.
+        JAVA_VERSION: &linux-server-jdks [ '11' ]
 
-    steps: &server-steps
+    # YAML & defines shared configuration; * reuses it in the optional backend job below.
+    steps: &linux-server-steps
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -178,33 +182,36 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
-  build-server-backends:
-    name: build-server (${{ matrix.BACKEND }}, ${{ matrix.JAVA_VERSION }})
-    runs-on: ubuntu-24.04
-    env: *server-env
-    strategy:
-      fail-fast: false
-      matrix:
-        BACKEND: [ rocksdb, hbase ]
-        JAVA_VERSION: *server-java-versions
-    steps: *server-steps
-
   server-memory-required:
-    # Aggregate every memory JDK without making other backends required.
+    # This is the only Server check referenced by .asf.yaml; keep its name stable.
     name: Server memory tests
-    needs: build-server
+    needs: build-server-memory
+    # Without always(), an upstream failure/skip would skip this gate too.
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     permissions: {}
     steps:
-      - name: Require successful memory tests
+      - name: Require all memory tests to pass
         env:
-          RESULT: ${{ needs.build-server.result }}
+          MEMORY_RESULT: ${{ needs.build-server-memory.result }}
         run: |
-          if [ "$RESULT" != "success" ]; then
-            echo "::error::Server memory tests ended with: $RESULT"
+          if [ "$MEMORY_RESULT" != "success" ]; then
+            echo "::error::Memory test matrix must succeed; got: $MEMORY_RESULT"
             exit 1
           fi
+
+  # Optional coverage uses the same Linux environment, JDK list and test steps.
+  # Keep it separate so backend failures do not become required memory failures.
+  build-server-backends:
+    name: build-server (${{ matrix.BACKEND }}, ${{ matrix.JAVA_VERSION }})
+    runs-on: ubuntu-24.04
+    env: *linux-server-env
+    strategy:
+      fail-fast: false
+      matrix:
+        BACKEND: [ rocksdb, hbase ]
+        JAVA_VERSION: *linux-server-jdks
+    steps: *linux-server-steps
 
   build-server-macos-rocksdb:
     runs-on: ${{ matrix.os }}

@@ -41,7 +41,8 @@ github:
           - Analyze (java)
           - CodeQL
           - check-license
-          # Stable across JDK upgrades; Commons still runs as an optional check.
+          # Require the fixed memory result gate, independent of the runtime JDK list.
+          # Commons CI continues to run without blocking merges.
           - Server memory tests
       required_pull_request_reviews:
         dismiss_stale_reviews: true
