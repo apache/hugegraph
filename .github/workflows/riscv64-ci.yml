@@ -32,6 +32,8 @@ env:
     Alibaba_Dragonwell_Extended_11.0.31.28.11_riscv64_linux.tar.gz
   DRAGONWELL_RISCV64_SHA256: >-
     7df2d308f0dca7a779d2854e6da19214f99cd77aa6d4982c3bf981a77266a79b
+  # This verified vendor artifact stays separate from setup-java's project runtime.
+  # A RISC-V runtime upgrade must update the archive, URL and checksum together.
   DRAGONWELL_RISCV64_URL: >-
     https://github.com/dragonwell-project/dragonwell11/releases/download/dragonwell-extended-11.0.31.28_jdk-11.0.31-ga/Alibaba_Dragonwell_Extended_11.0.31.28.11_riscv64_linux.tar.gz
   RISCV64_CONTAINER: >-
@@ -44,7 +46,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
