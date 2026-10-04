@@ -25,8 +25,10 @@ import org.apache.hugegraph.backend.query.Condition.Relation;
 import org.apache.hugegraph.backend.query.Condition.RelationType;
 import org.apache.hugegraph.backend.query.Condition.SyspropRelation;
 import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.traversal.optimize.ConditionP;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.unit.BaseUnitTest;
+import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableList;
@@ -147,6 +149,69 @@ public class ConditionTest extends BaseUnitTest {
         Condition c4 = Condition.eq(HugeKeys.ID, "123");
         Assert.assertFalse(c4.test(123));
         Assert.assertFalse(c4.test(new Date(0L)));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testRelationTypeImplementsTinkerPopBiPredicate() {
+        PBiPredicate<Object, Object> contains =
+                (PBiPredicate<Object, Object>) (Object) RelationType.CONTAINS;
+        Assert.assertEquals("contains", contains.getPredicateName());
+        Assert.assertTrue(contains.test(ImmutableList.of("marko", "josh"),
+                                        "marko"));
+        Assert.assertFalse(contains.test(ImmutableList.of("marko", "josh"),
+                                         "vadas"));
+
+        PBiPredicate<Object, Object> containsKey =
+                (PBiPredicate<Object, Object>) (Object)
+                RelationType.CONTAINS_KEY;
+        Assert.assertEquals("containsk", containsKey.getPredicateName());
+        Assert.assertTrue(containsKey.test(ImmutableMap.of("name", "marko"),
+                                           "name"));
+
+        PBiPredicate<Object, Object> textContains =
+                (PBiPredicate<Object, Object>) (Object)
+                RelationType.TEXT_CONTAINS;
+        Assert.assertEquals("textcontains",
+                            textContains.getPredicateName());
+        Assert.assertTrue(textContains.test("marko", "ark"));
+        Assert.assertFalse(textContains.test("marko", "vadas"));
+    }
+
+    @Test
+    public void testConditionPUsesRelationTypeBiPredicate() {
+        ConditionP contains = ConditionP.contains("marko");
+        Assert.assertEquals("contains",
+                            contains.getBiPredicate().getPredicateName());
+        Assert.assertTrue(contains.test(ImmutableList.of("marko", "josh")));
+        Assert.assertFalse(ConditionP.contains("vadas")
+                                     .test(ImmutableList.of("marko", "josh")));
+
+        ConditionP containsKey = ConditionP.containsK("name");
+        Assert.assertEquals("containsk",
+                            containsKey.getBiPredicate().getPredicateName());
+        Assert.assertTrue(containsKey.test(ImmutableMap.of("name", "marko")));
+        Assert.assertFalse(ConditionP.containsK("age")
+                                     .test(ImmutableMap.of("name", "marko")));
+
+        ConditionP containsValue = ConditionP.containsV("marko");
+        Assert.assertEquals("containsv",
+                            containsValue.getBiPredicate().getPredicateName());
+        Assert.assertTrue(containsValue.test(
+                ImmutableMap.of("name", "marko")));
+        Assert.assertFalse(ConditionP.containsV("vadas")
+                                     .test(ImmutableMap.of("name", "marko")));
+
+        ConditionP textContains = ConditionP.textContains("ark");
+        Assert.assertEquals("textcontains",
+                            textContains.getBiPredicate().getPredicateName());
+        Assert.assertTrue(textContains.test("marko"));
+        Assert.assertFalse(ConditionP.textContains("vadas").test("marko"));
+
+        ConditionP eq = ConditionP.eq(new String[]{"a", "b"});
+        Assert.assertEquals("==", eq.getBiPredicate().getPredicateName());
+        Assert.assertTrue(eq.test(new String[]{"a", "b"}));
+        Assert.assertFalse(eq.test(new String[]{"a", "c"}));
     }
 
     @Test

@@ -37,7 +37,7 @@ import org.apache.tinkerpop.gremlin.util.iterator.IteratorUtils;
 import org.slf4j.Logger;
 
 public final class HugeGraphStep<S, E extends Element>
-        extends GraphStep<S, E> implements QueryHolder {
+        extends GraphStep<S, E> implements QueryHolder<S, E> {
 
     private static final long serialVersionUID = -679873894532085972L;
 
@@ -210,8 +210,7 @@ public final class HugeGraphStep<S, E extends Element>
 
         HugeGraphStep other = (HugeGraphStep) obj;
         return this.hasContainers.equals(other.hasContainers) &&
-               this.queryInfo.equals(other.queryInfo) &&
-               this.lastTimeResults.equals(other.lastTimeResults);
+               this.queryInfo.equals(other.queryInfo);
     }
 
     @Override

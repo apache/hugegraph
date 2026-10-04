@@ -42,7 +42,7 @@ import org.apache.tinkerpop.gremlin.structure.util.StringFactory;
 import org.slf4j.Logger;
 
 public class HugeVertexStep<E extends Element>
-        extends VertexStep<E> implements QueryHolder {
+        extends VertexStep<E> implements QueryHolder<Vertex, E> {
 
     private static final long serialVersionUID = -7850636388424382454L;
 

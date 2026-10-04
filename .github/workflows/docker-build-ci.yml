@@ -133,6 +133,15 @@ jobs:
           echo "Healthcheck: $HC"
           [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
 
+      - name: Verify Java 17 runtime in ${{ matrix.dockerfile }}
+        run: |
+          JAVA_VERSION=$(docker run --rm --entrypoint java "$IMAGE_ID" -version 2>&1)
+          echo "$JAVA_VERSION"
+          grep -Eq 'version "17\.' <<< "$JAVA_VERSION" || {
+            echo "ERROR: expected a Java 17 runtime in ${{ matrix.dockerfile }}"
+            exit 1
+          }
+
       - name: Test server entrypoint property mapping
         if: matrix.dockerfile == 'hugegraph-server/Dockerfile'
         run: bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh

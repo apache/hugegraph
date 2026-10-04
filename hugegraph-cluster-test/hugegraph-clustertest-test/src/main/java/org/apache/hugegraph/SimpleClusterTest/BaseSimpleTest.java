@@ -74,7 +74,10 @@ public class BaseSimpleTest {
     public static void clearEnv() throws InterruptedException {
         env.stopCluster();
         Thread.sleep(2000);
-        client.close();
+        if (client != null) {
+            client.close();
+            client = null;
+        }
     }
 
     protected String execCmd(String[] cmds) throws IOException {

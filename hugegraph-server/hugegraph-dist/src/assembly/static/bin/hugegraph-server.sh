@@ -63,11 +63,12 @@ ensure_path_writable "$PLUGINS"
 # The maximum and minimum heap memory that service can use
 MAX_MEM=$((32 * 1024))
 MIN_MEM=$((1 * 512))
-MIN_JAVA_VERSION=11
+MIN_JAVA_VERSION=17
 # JDK 24 removed the Security Manager (JEP 486): "-Djava.security.manager=allow"
 # is a fatal VM initialization error there and System.setSecurityManager() always
 # throws, so HugeSecurityManager cannot be installed on newer runtimes.
 MAX_SECURITY_JAVA_VERSION=23
+JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
 
 # Add the slf4j-log4j12 binding
 CP=$(find -L $LIB -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
@@ -114,6 +115,11 @@ if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $MIN_JAVA_VERSION ]]; then
     exit 1
 fi
 
+if [[ ! -r ${JVM_MODULE_OPTIONS} ]]; then
+    echo "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}" >> "${OUTPUT}"
+    exit 1
+fi
+
 # Set Java options
 if [ "$JAVA_OPTIONS" = "" ]; then
     XMX=$(calc_xmx $MIN_MEM $MAX_MEM)
@@ -128,12 +134,6 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
 
-if [[ $JAVA_VERSION -gt 9 ]]; then
-    JAVA_OPTIONS="${JAVA_OPTIONS} --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED \
-                                  --add-modules=jdk.unsupported \
-                                  --add-exports=java.base/sun.nio.ch=ALL-UNNAMED "
-fi
-
 # Using G1GC as the default garbage collector (Recommended for large memory machines)
 # mention: zgc is only available on ARM-Mac with java > 13
 case "$GC_OPTION" in
@@ -144,7 +144,7 @@ case "$GC_OPTION" in
                                       -XX:G1RSetUpdatingPauseTimePercent=5"
         ;;
     zgc|ZGC)
-        echo "Using ZGC as the default garbage collector (Only support Java 11+)"
+        echo "Using ZGC as the default garbage collector (requires Java 17 or later)"
         JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseZGC -XX:+UnlockExperimentalVMOptions \
                                       -XX:ConcGCThreads=2 -XX:ParallelGCThreads=6 \
                                       -XX:ZCollectionInterval=120 -XX:ZAllocationSpikeTolerance=5 \
@@ -258,12 +258,12 @@ fi
 
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+    exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
         ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
 else
-    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+    exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
         ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
