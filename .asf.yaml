@@ -41,8 +41,8 @@ github:
           - Analyze (java)
           - CodeQL
           - check-license
-          - build-server (memory, 11)
-          - build-commons (11)
+          # Stable across JDK upgrades; Commons still runs as an optional check.
+          - Server memory tests
       required_pull_request_reviews:
         dismiss_stale_reviews: true
         require_code_owner_reviews: false

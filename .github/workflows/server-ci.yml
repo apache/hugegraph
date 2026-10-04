@@ -22,9 +22,10 @@ jobs:
       - name: Run wait-storage.sh peer failover tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
 
+  # Keep the legacy memory check name until the new protection context is active.
   build-server:
     runs-on: ubuntu-24.04
-    env:
+    env: &server-env
       USE_STAGE: 'false' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
@@ -39,10 +40,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        BACKEND: [ memory, rocksdb, hbase ]
-        JAVA_VERSION: [ '11' ]
+        BACKEND: [ memory ]
+        JAVA_VERSION: &server-java-versions [ '11' ]
 
-    steps:
+    steps: &server-steps
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -176,6 +177,34 @@ jobs:
           files: ${{ env.REPORT_DIR }}/*.xml
           disable_search: true
           fail_ci_if_error: false
+
+  build-server-backends:
+    name: build-server (${{ matrix.BACKEND }}, ${{ matrix.JAVA_VERSION }})
+    runs-on: ubuntu-24.04
+    env: *server-env
+    strategy:
+      fail-fast: false
+      matrix:
+        BACKEND: [ rocksdb, hbase ]
+        JAVA_VERSION: *server-java-versions
+    steps: *server-steps
+
+  server-memory-required:
+    # Aggregate every memory JDK without making other backends required.
+    name: Server memory tests
+    needs: build-server
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require successful memory tests
+        env:
+          RESULT: ${{ needs.build-server.result }}
+        run: |
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::Server memory tests ended with: $RESULT"
+            exit 1
+          fi
 
   build-server-macos-rocksdb:
     runs-on: ${{ matrix.os }}
