@@ -10,7 +10,14 @@ on:
   pull_request:
 
 jobs:
+  java-runtime:
+    uses: ./.github/workflows/java-runtime.yml
+    permissions:
+      contents: read
+
   build-commons:
+    name: Commons tests (Java ${{ matrix.JAVA_VERSION }})
+    needs: java-runtime
     runs-on: ubuntu-latest
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
@@ -18,26 +25,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        JAVA_VERSION: ['11']
+        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
       - name: Install JDK ${{ matrix.JAVA_VERSION }}
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ matrix.JAVA_VERSION }}
           distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 2
+          cache: maven
+          cache-jdk: false
 
       - name: Use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
@@ -58,9 +60,27 @@ jobs:
           mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite -DskipCommonsTests=false
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: hugegraph-commons/target/jacoco.xml
           disable_search: true
           fail_ci_if_error: false
+
+  # Temporary compatibility check; Commons becomes optional when .asf.yaml takes effect.
+  legacy-commons-required:
+    name: build-commons (11)
+    needs: [ java-runtime, build-commons ]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions: {}
+    steps:
+      - name: Require the runtime configuration and all Commons tests to pass
+        env:
+          RUNTIME_RESULT: ${{ needs.java-runtime.result }}
+          COMMONS_RESULT: ${{ needs.build-commons.result }}
+        run: |
+          if [ "$RUNTIME_RESULT" != "success" ] || [ "$COMMONS_RESULT" != "success" ]; then
+            echo "::error::Runtime configuration: $RUNTIME_RESULT; Commons tests: $COMMONS_RESULT"
+            exit 1
+          fi

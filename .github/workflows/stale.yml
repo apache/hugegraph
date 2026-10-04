@@ -13,9 +13,11 @@ jobs:
       pull-requests: write
 
     steps:
-    - uses: actions/stale@v3
+    - uses: actions/stale@v11
       with:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
+        # Preserve the old issue-close classification across the action upgrade.
+        close-issue-reason: completed
         stale-issue-message: 'Due to the lack of activity, the current issue is marked as stale and will be closed after 20 days, any update will remove the stale label'
         stale-pr-message: 'Due to the lack of activity, the current pr is marked as stale and will be closed after 180 days, any update will remove the stale label'
         stale-issue-label: 'inactive'

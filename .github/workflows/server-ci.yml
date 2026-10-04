@@ -9,22 +9,33 @@ on:
   pull_request:
 
 jobs:
+  java-runtime:
+    uses: ./.github/workflows/java-runtime.yml
+    permissions:
+      contents: read
+
   wait-storage-shell-test:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       - name: Run wait-storage.sh peer failover tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
 
+  # Required coverage: memory on the project runtime and any additional test JDKs.
+  # The shared runtime comes from .github/workflows/.java-version, independent of bytecode targets.
+  # Keep the job ID for the Codecov configuration validator.
+  # The old required check name is provided by the temporary result job below.
   build-server:
+    needs: java-runtime
+    name: Server memory (Java ${{ matrix.JAVA_VERSION }})
     runs-on: ubuntu-24.04
-    env:
+    env: &linux-server-env
       USE_STAGE: 'false' # Whether to include the stage repository.
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
@@ -39,18 +50,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        BACKEND: [ memory, rocksdb, hbase ]
-        JAVA_VERSION: [ '11' ]
+        BACKEND: [ memory ]
+        # Keep the graph evaluable when the reader fails; result checks still reject skips.
+        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
 
-    steps:
+    # YAML & defines shared configuration; * reuses it in the optional backend job below.
+    steps: &linux-server-steps
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 5
 
       # TODO: Remove this step after install-backend.sh updated
       - name: Install Java8 for backend
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '8'
           distribution: 'zulu'
@@ -60,17 +73,12 @@ jobs:
           $TRAVIS_DIR/install-backend.sh $BACKEND && jps -l
 
       - name: Install Java ${{ matrix.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ matrix.JAVA_VERSION }}
           distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
+          cache: maven
+          cache-jdk: false
 
       - name: Use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
@@ -170,12 +178,56 @@ jobs:
           $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND tinkerpop
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_DIR }}/*.xml
           disable_search: true
           fail_ci_if_error: false
+
+  server-memory-required:
+    # This is the only Server check referenced by .asf.yaml; keep its name stable.
+    name: Server memory tests
+    needs: [ java-runtime, build-server ]
+    # Always evaluate results, including dependency failures and unexpected skips.
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions: {}
+    env: &memory-results
+      RUNTIME_RESULT: ${{ needs.java-runtime.result }}
+      MEMORY_RESULT: ${{ needs.build-server.result }}
+    steps: &require-memory-success
+      - name: Require the runtime configuration and all memory tests to pass
+        run: |
+          if [ "$RUNTIME_RESULT" != "success" ] || [ "$MEMORY_RESULT" != "success" ]; then
+            echo "::error::Runtime configuration: $RUNTIME_RESULT; memory tests: $MEMORY_RESULT"
+            exit 1
+          fi
+
+  # Temporary alias for live protection. Remove after ASF activates the stable context.
+  # Reuse the real result check so a skipped matrix cannot satisfy the old requirement.
+  legacy-server-memory-required:
+    name: build-server (memory, 11)
+    needs: [ java-runtime, build-server ]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions: {}
+    env: *memory-results
+    steps: *require-memory-success
+
+  # Optional coverage uses the same Linux environment, resolved JDKs and test steps.
+  # Keep it separate so backend failures do not become required memory failures.
+  build-server-backends:
+    needs: java-runtime
+    name: build-server (${{ matrix.BACKEND }}, ${{ matrix.JAVA_VERSION }})
+    runs-on: ubuntu-24.04
+    env: *linux-server-env
+    strategy:
+      fail-fast: false
+      matrix:
+        BACKEND: [ rocksdb, hbase ]
+        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
+    steps: *linux-server-steps
 
   build-server-macos-rocksdb:
     runs-on: ${{ matrix.os }}
@@ -192,27 +244,21 @@ jobs:
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
       BACKEND: rocksdb
-      JAVA_VERSION: '11'
       SERVER_JAVA_OPTIONS: ${{ matrix.server_java_options }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 5
 
-      - name: Install Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+      - name: Install project JDK
+        uses: actions/setup-java@v6
         with:
-          java-version: ${{ env.JAVA_VERSION }}
+          java-version-file: .github/workflows/.java-version
           distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
+          cache: maven
+          cache-jdk: false
 
       - name: Use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
