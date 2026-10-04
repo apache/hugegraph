@@ -230,6 +230,12 @@ Standalone stores RocksDB data at `/hugegraph-server/rocksdb-data`. The HStore t
 
 `docker compose down` keeps named-volume data. `docker compose down -v` intentionally deletes it.
 
+### Server logs and crash files
+
+Both Server images (`hugegraph/hugegraph` and `hugegraph/server`) write the HugeGraph log to container stdout. WARN and above from Hadoop, ZooKeeper, SOFA, Netty and Commons also reaches stdout; their INFO output, the audit log and the slow-query log stay in files only. When a Server exits during startup, `docker logs` or `kubectl logs --previous` shows why.
+
+Files stay under `/hugegraph-server/logs`: the full `hugegraph-server.log`, JVM crash logs (`hs_err_pid<pid>_<launch time>.log`) and out-of-memory heap dumps (`java_pid<pid>_<launch time>.hprof`). `docker restart` keeps the container filesystem, so the files survive it. Kubernetes starts a new container on every restart and does not turn the image's `VOLUME` into a pod volume, so mount an `emptyDir` or a PersistentVolumeClaim at `/hugegraph-server/logs` to keep them. A heap dump can be as large as the JVM heap; size the volume for it, or pass `-XX:-HeapDumpOnOutOfMemoryError` in `JAVA_OPTS` to turn heap dumps off.
+
 ## Developers
 
 ### Images and Compose files

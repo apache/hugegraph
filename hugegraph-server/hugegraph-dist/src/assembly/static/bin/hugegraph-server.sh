@@ -121,12 +121,40 @@ if [ "$JAVA_OPTIONS" = "" ]; then
         echo "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory" >> "${OUTPUT}"
         exit 1
     fi
-    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION}"
+    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m ${USER_OPTION}"
 
     # Rolling out detailed GC logs
     #JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseGCLogFileRotation -XX:GCLogFileSize=10M -XX:NumberOfGCLogFiles=3 \
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
+
+# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. The
+# defaults go first in JAVA_TOOL_OPTIONS, which the JVM reads before the operator's
+# own JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, the command line (JAVA_OPTIONS and -j)
+# and _JAVA_OPTIONS, so any of those overrides them. The JVM does that parsing
+# itself, including quoted options and @argfiles.
+# A restarted container often reuses the JVM's PID, and HotSpot will not overwrite
+# an existing crash log or heap dump, so the file names carry the launch time plus
+# a counter that skips names already used in $LOGS. The script execs java below,
+# so $$ is the JVM's PID.
+crash_files_exist() {
+    local file
+    for file in "${LOGS}"/java_pid*_"$1".hprof "${LOGS}"/hs_err_pid*_"$1".log; do
+        [[ -e ${file} ]] && return 0
+    done
+    return 1
+}
+LAUNCH_STAMP=$(date +%Y%m%d-%H%M%S)
+LAUNCH_ID="${LAUNCH_STAMP}"
+LAUNCH_SUFFIX=0
+while crash_files_exist "${LAUNCH_ID}"; do
+    LAUNCH_SUFFIX=$((LAUNCH_SUFFIX + 1))
+    LAUNCH_ID="${LAUNCH_STAMP}-${LAUNCH_SUFFIX}"
+done
+CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
+CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${LOGS}/java_pid$$_${LAUNCH_ID}.hprof\""
+CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
+export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
 
 if [[ $JAVA_VERSION -gt 9 ]]; then
     JAVA_OPTIONS="${JAVA_OPTIONS} --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED \
@@ -236,7 +264,8 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     fi
 
     # Note: check carefully if multi "javeagent" params are set
-    export JAVA_TOOL_OPTIONS="-javaagent:${PLUGINS}/${OT_JAR}"
+    # Append, so the crash-file defaults and the operator's JAVA_TOOL_OPTIONS stay.
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-javaagent:${PLUGINS}/${OT_JAR}"
     export OTEL_TRACES_EXPORTER=otlp
     export OTEL_METRICS_EXPORTER=none
     export OTEL_LOGS_EXPORTER=none

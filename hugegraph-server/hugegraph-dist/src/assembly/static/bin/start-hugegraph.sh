@@ -112,7 +112,7 @@ if [[ $DAEMON == "true" ]]; then
 
     wait_for_startup ${PID} 'HugeGraphServer' "$REST_SERVER_URL/graphs" "${SERVER_STARTUP_TIMEOUT_S}" || {
         if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-            echo "See 'docker logs' for HugeGraphServer log output." >&2
+            echo "See the container logs ('docker logs' or 'kubectl logs') for HugeGraphServer log output." >&2
         else
             echo "See $LOGS/hugegraph-server.log for HugeGraphServer log output." >&2
         fi
