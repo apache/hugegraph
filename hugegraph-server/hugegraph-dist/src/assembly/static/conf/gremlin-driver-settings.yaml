@@ -23,7 +23,7 @@ serializer: {
     ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
   }
 }
-# Typed GraphSON fallback for clients that require @type/@value for
+# Typed GraphSON V1 fallback for clients that require type metadata for
 # File/Id/simple typed values:
 # use org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV1 in
 # place of GraphSONUntypedMessageSerializerV1, and keep HugeGraphIoRegistry.
