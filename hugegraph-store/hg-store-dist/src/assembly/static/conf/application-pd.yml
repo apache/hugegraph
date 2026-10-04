@@ -32,6 +32,7 @@ rocksdb:
   # (RaftRocksdbOptions), not an upfront allocation, but pinned at 32 GB those native caches can
   # grow past a smaller container memory limit under load and get the Store OOM-killed. The Helm
   # chart (helm/hugegraph) can only document the ceiling and size its cluster preset around it.
+  # https://github.com/apache/hugegraph/issues/3254
   total_memory_size: 32000000000
   # memtable size used by rocksdb
   write_buffer_size: 32000000
