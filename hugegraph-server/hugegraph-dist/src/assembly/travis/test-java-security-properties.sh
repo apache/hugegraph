@@ -541,9 +541,15 @@ mkdir -p "$MOCK_DATE_BIN"
 printf '#!/bin/bash\necho 20200101-000000\n' > "${MOCK_DATE_BIN}/date"
 chmod +x "${MOCK_DATE_BIN}/date"
 mkdir -p "${SERVER_ROOT}/logs"
-CRASH_NAME_FIXTURES=("${SERVER_ROOT}/logs/java_pid1_20200101-000000.hprof"
-                     "${SERVER_ROOT}/logs/hs_err_pid1_20200101-000000-1.log")
-touch "${CRASH_NAME_FIXTURES[@]}"
+# Only files this run creates are recorded for removal, so an existing file
+# with the same name in the supplied distribution is left alone.
+for CRASH_NAME_FIXTURE in "${SERVER_ROOT}/logs/java_pid1_20200101-000000.hprof" \
+                          "${SERVER_ROOT}/logs/hs_err_pid1_20200101-000000-1.log"; do
+    if [[ ! -e "$CRASH_NAME_FIXTURE" ]]; then
+        CRASH_NAME_FIXTURES+=("$CRASH_NAME_FIXTURE")
+        : > "$CRASH_NAME_FIXTURE"
+    fi
+done
 UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
 CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
@@ -553,7 +559,9 @@ assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
     "^${LOGS_PATTERN}/java_pid[0-9]+_20200101-000000-2\.hprof$"
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
     "^${LOGS_PATTERN}/hs_err_pid%p_20200101-000000-2\.log$"
-rm -f "${CRASH_NAME_FIXTURES[@]}"
+if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
+    rm -f "${CRASH_NAME_FIXTURES[@]}"
+fi
 CRASH_NAME_FIXTURES=()
 
 # With telemetry on, the launcher appends its agent to JAVA_TOOL_OPTIONS and
