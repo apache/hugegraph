@@ -131,6 +131,11 @@ public class HgStoreStateMachineTest {
             Task task;
 
             @Override
+            public void setAutoCommitPerLog(boolean autoCommit) {
+                // This test iterator does not model commit behavior.
+            }
+
+            @Override
             public ByteBuffer getData() {
                 return task.getData();
             }

@@ -42,15 +42,6 @@ public class ServerOptions extends OptionHolder {
                     1
             );
 
-    public static final ConfigOption<Boolean> ENABLE_SERVER_ROLE_ELECTION =
-            new ConfigOption<>(
-                    "server.role_election",
-                    "Whether to enable role election, if enabled, the server " +
-                    "will elect a master node in the cluster.",
-                    disallowEmpty(),
-                    false
-            );
-
     public static final ConfigOption<Integer> MAX_WORKER_THREADS =
             new ConfigOption<>(
                     "restserver.max_worker_threads",

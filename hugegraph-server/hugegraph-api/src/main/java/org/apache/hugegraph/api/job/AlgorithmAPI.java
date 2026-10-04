@@ -21,7 +21,6 @@ import java.util.Map;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.core.GraphManager;
@@ -60,7 +59,6 @@ public class AlgorithmAPI extends API {
     @Status(Status.CREATED)
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> post(@Context GraphManager manager,
                                 @Parameter(description = "The graphspace name")
                                 @PathParam("graphspace") String graphSpace,

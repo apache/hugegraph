@@ -36,10 +36,7 @@ import org.slf4j.Logger;
 
 /**
  * Central task management system that coordinates task scheduling and execution.
- * Manages task schedulers for different graphs and handles role-based execution.
- * <p>
- * Note: The local master-worker mechanism will be deprecated in version 1.7
- * (configuration has been removed from config files).
+ * Manages the task schedulers of each graph and the executors they share.
  */
 public final class TaskManager {
 
@@ -48,8 +45,6 @@ public final class TaskManager {
     public static final String TASK_WORKER_PREFIX = "task-worker";
     public static final String TASK_WORKER = TASK_WORKER_PREFIX + "-%d";
     public static final String TASK_DB_WORKER = "task-db-worker-%d";
-    public static final String SERVER_INFO_DB_WORKER = "server-info-db-worker-%d";
-    public static final String TASK_SCHEDULER = "task-scheduler-%d";
 
     public static final String OLAP_TASK_WORKER = "olap-task-worker-%d";
     public static final String SCHEMA_TASK_WORKER = "schema-task-worker-%d";
@@ -65,8 +60,6 @@ public final class TaskManager {
 
     private final ExecutorService taskExecutor;
     private final ExecutorService taskDbExecutor;
-    private final ExecutorService serverInfoDbExecutor;
-    private final PausableScheduledThreadPool schedulerExecutor;
 
     private final ExecutorService schemaTaskExecutor;
     private final ExecutorService olapTaskExecutor;
@@ -85,18 +78,12 @@ public final class TaskManager {
         // For save/query task state, just one thread is ok
         this.taskDbExecutor = ExecutorUtil.newFixedThreadPool(
                 1, TASK_DB_WORKER);
-        this.serverInfoDbExecutor = ExecutorUtil.newFixedThreadPool(
-                1, SERVER_INFO_DB_WORKER);
 
         this.schemaTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, SCHEMA_TASK_WORKER);
         this.olapTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, OLAP_TASK_WORKER);
         this.ephemeralTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, EPHEMERAL_TASK_WORKER);
         this.distributedSchedulerExecutor =
                 ExecutorUtil.newPausableScheduledThreadPool(1, DISTRIBUTED_TASK_SCHEDULER);
-
-        // For a schedule task to run, just one thread is ok
-        this.schedulerExecutor = ExecutorUtil.newPausableScheduledThreadPool(
-                1, TASK_SCHEDULER);
     }
 
     public void addScheduler(HugeGraphParams graph) {
@@ -116,8 +103,7 @@ public final class TaskManager {
                                 schemaTaskExecutor,
                                 olapTaskExecutor,
                                 taskExecutor, /* gremlinTaskExecutor */
-                                ephemeralTaskExecutor,
-                                serverInfoDbExecutor);
+                                ephemeralTaskExecutor);
                 this.schedulers.put(graph, scheduler);
                 break;
             }
@@ -127,8 +113,7 @@ public final class TaskManager {
                         new StandardTaskScheduler(
                                 graph,
                                 this.taskExecutor,
-                                this.taskDbExecutor,
-                                this.serverInfoDbExecutor);
+                                this.taskDbExecutor);
                 this.schedulers.put(graph, scheduler);
                 break;
             }
@@ -160,10 +145,6 @@ public final class TaskManager {
             this.closeTaskTx(graph);
         }
 
-        if (!this.schedulerExecutor.isTerminated()) {
-            this.closeSchedulerTx(graph);
-        }
-
         if (!this.distributedSchedulerExecutor.isTerminated()) {
             this.closeDistributedSchedulerTx(graph);
         }
@@ -187,21 +168,6 @@ public final class TaskManager {
             }
         } catch (Exception e) {
             throw new HugeException("Exception when closing task tx", e);
-        }
-    }
-
-    private void closeSchedulerTx(HugeGraphParams graph) {
-        final Callable<Void> closeTx = () -> {
-            // Do close-tx for the current thread
-            graph.closeTx();
-            // Let other threads run
-            Thread.yield();
-            return null;
-        };
-        try {
-            this.schedulerExecutor.submit(closeTx).get();
-        } catch (Exception e) {
-            throw new HugeException("Exception when closing scheduler tx", e);
         }
     }
 
@@ -236,19 +202,10 @@ public final class TaskManager {
         assert this.schedulers.isEmpty() : this.schedulers.size();
 
         Throwable ex = null;
-        boolean terminated = this.schedulerExecutor.isTerminated();
+        boolean terminated = this.distributedSchedulerExecutor.isTerminated();
         final TimeUnit unit = TimeUnit.SECONDS;
 
-        if (!this.schedulerExecutor.isShutdown()) {
-            this.schedulerExecutor.shutdown();
-            try {
-                terminated = this.schedulerExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.distributedSchedulerExecutor.isShutdown()) {
+        if (!this.distributedSchedulerExecutor.isShutdown()) {
             this.distributedSchedulerExecutor.shutdown();
             try {
                 terminated = this.distributedSchedulerExecutor.awaitTermination(timeout, unit);
@@ -261,15 +218,6 @@ public final class TaskManager {
             this.taskExecutor.shutdown();
             try {
                 terminated = this.taskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.serverInfoDbExecutor.isShutdown()) {
-            this.serverInfoDbExecutor.shutdown();
-            try {
-                terminated = this.serverInfoDbExecutor.awaitTermination(timeout, unit);
             } catch (Throwable e) {
                 ex = e;
             }
@@ -329,14 +277,6 @@ public final class TaskManager {
             size += scheduler.pendingTasks();
         }
         return size;
-    }
-
-    public void onAsRoleMaster() {
-        // ServerInfo based role propagation is deprecated.
-    }
-
-    public void onAsRoleWorker() {
-        // ServerInfo based role propagation is deprecated.
     }
 
     private static final ThreadLocal<String> CONTEXTS = new ThreadLocal<>();
