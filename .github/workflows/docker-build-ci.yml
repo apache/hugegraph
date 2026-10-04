@@ -125,8 +125,12 @@ jobs:
 
       - name: Build ${{ matrix.dockerfile }}
         run: |
-          IMAGE_ID=$(docker build -q --build-arg SOURCE_REVISION="$GITHUB_SHA" \
-            -f ${{ matrix.dockerfile }} .)
+          # Keep the build log visible: -q would swallow Maven's output and
+          # leave only "exit code: 1" when the build stage fails.
+          docker build --progress=plain --iidfile "$RUNNER_TEMP/iid" \
+            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
+            -f ${{ matrix.dockerfile }} .
+          IMAGE_ID=$(cat "$RUNNER_TEMP/iid")
           echo "Built: $IMAGE_ID"
           echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
