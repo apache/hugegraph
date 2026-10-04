@@ -9,6 +9,7 @@ on:
   pull_request:
     # Keep source/resources and shared build inputs; skip named documentation files.
     paths:
+      - '.github/workflows/.java-version'
       - 'pom.xml'
       - '.mvn/**'
       - 'style/**'
@@ -28,28 +29,78 @@ on:
 
 # TODO: consider merge to one ci.yml file
 jobs:
+  rocksdb-compatibility:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    env:
+      BEFORE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+      AFTER_SHA: ${{ github.event.pull_request.head.sha || github.event.after }}
+    steps:
+      - name: Require exact comparison revisions
+        run: |
+          for revision in "$BEFORE_SHA" "$AFTER_SHA"; do
+            if [[ ! "$revision" =~ ^[0-9a-f]{40}$ || "$revision" =~ ^0+$ ]]; then
+              echo "Error: cannot determine the before/after revision for RocksDB compatibility" >&2
+              exit 1
+            fi
+          done
+
+      - name: Checkout before
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.BEFORE_SHA }}
+          path: before
+          persist-credentials: false
+
+      - name: Checkout after
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ env.AFTER_SHA }}
+          path: after
+          persist-credentials: false
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: after/.github/workflows/.java-version
+          distribution: 'zulu'
+
+      - name: Test only changed RocksDB version pairs
+        run: |
+          bash after/hugegraph-server/hugegraph-test/src/test/rocksdb-compatibility/run.sh \
+            "$GITHUB_WORKSPACE/before" "$GITHUB_WORKSPACE/after" \
+            "$RUNNER_TEMP/rocksdb-compatibility"
+
+      - name: Preserve comparison and synthetic-data failure evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rocksdb-compatibility-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/rocksdb-compatibility/run.log
+            ${{ runner.temp }}/rocksdb-compatibility/models/
+            ${{ runner.temp }}/rocksdb-compatibility/pairs.tsv
+            ${{ runner.temp }}/rocksdb-compatibility/cases/
+
   struct:
     runs-on: ubuntu-latest
     env:
       USE_STAGE: 'false'
     steps:
-      - name: Install JDK 11
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 5
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
 
       - name: Run JaCoCo report validator tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-jacoco-report.sh
@@ -93,23 +144,18 @@ jobs:
       TEST_REPORT_DIR: hugegraph-pd/hg-pd-test/target/surefire-reports
 
     steps:
-      - name: Install JDK 11
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 5
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
 
       - name: use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
@@ -213,7 +259,7 @@ jobs:
             hg-pd-grpc hg-pd-common hg-pd-client hg-pd-core hg-pd-service hg-pd-dist
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_FILE }}
@@ -231,23 +277,18 @@ jobs:
       TEST_REPORT_DIR: hugegraph-store/hg-store-test/target/surefire-reports
 
     steps:
-      - name: Install JDK 11
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 5
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
 
       - name: use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
@@ -357,7 +398,7 @@ jobs:
             hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb hg-store-core
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_FILE }}
@@ -375,23 +416,18 @@ jobs:
       RELEASE_BRANCH: ${{ startsWith(github.ref_name, 'release-') || startsWith(github.ref_name, 'test-') || startsWith(github.base_ref, 'release-') }}
 
     steps:
-      - name: Install JDK 11
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
         with:
           fetch-depth: 2
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
 
       - name: use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
@@ -433,7 +469,7 @@ jobs:
           $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND tinkerpop
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ env.REPORT_DIR }}/*.xml

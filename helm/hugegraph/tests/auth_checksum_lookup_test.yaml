@@ -1,0 +1,148 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The membership and identity guards read the live StatefulSets through
+# lookup. These cases fake that object, so the refused path (a raft port
+# change, a rename, a replica shrink) and the allowed path (an unchanged
+# upgrade, a fresh install) are both pinned at render time. validateValues
+# is included from the Server Deployment, so the refusals render that.
+# The lookup half of the rollout checksums, rendered against fake live
+# Secrets. A chart-generated Secret contributes the digest of its data, so
+# a render that finds the Secret (every upgrade) equals the install render
+# (which hashes the value it writes): no roll on a no-change upgrade. An
+# operator-supplied existingSecret contributes its resourceVersion. Each
+# expected value is sha256 of the parts joined with "|", computed outside
+# Helm, as in auth_checksum_source_test.yaml.
+suite: Rollout checksum lookup half against live Secrets
+templates:
+  - pd-statefulset.yaml
+  - server-deployment.yaml
+kubernetesProvider:
+  scheme:
+    "v1/Secret":
+      gvr:
+        version: v1
+        resource: secrets
+      namespaced: true
+    # The identity guards list StatefulSets; the fake client registers the
+    # list kind only for kinds that have an object, so one StatefulSet of
+    # another release is faked (which the guards must ignore).
+    "apps/v1/StatefulSet":
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: other-hugegraph-pd
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: other
+          app.kubernetes.io/component: pd
+      spec:
+        replicas: "1"
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: RELEASE-NAME-pd-auth
+        namespace: NAMESPACE
+        resourceVersion: "41"
+      data:
+        secret-key: cGQtc2VjcmV0LXN0ZWFkeQ==
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: byo-pd-secret
+        namespace: NAMESPACE
+        resourceVersion: "100"
+      data:
+        secret-key: b3BlcmF0b3ItY2hvc2Vu
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: RELEASE-NAME-admin
+        namespace: NAMESPACE
+        resourceVersion: "42"
+      data:
+        password: YWRtaW4tc3RlYWR5
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: RELEASE-NAME-auth-token
+        namespace: NAMESPACE
+        resourceVersion: "43"
+      data:
+        token_secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+    - apiVersion: v1
+      kind: Secret
+      metadata:
+        name: byo-admin
+        namespace: NAMESPACE
+        resourceVersion: "7"
+      data:
+        password: b3BlcmF0b3ItYWRtaW4=
+tests:
+  - it: hashes the live generated PD Secret by its value, not its resourceVersion
+    template: pd-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/pd-auth"]
+          value: c28abf86b4f58b426476d7d7d95dc9bc0aee3f87d64616b5314a823eb3285328
+
+  - it: renders the same PD checksum when the inline value equals the live value
+    template: pd-statefulset.yaml
+    set:
+      pd.auth.value: pd-secret-steady
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/pd-auth"]
+          value: c28abf86b4f58b426476d7d7d95dc9bc0aee3f87d64616b5314a823eb3285328
+
+  - it: hashes an operator-supplied PD Secret by its resourceVersion only
+    template: pd-statefulset.yaml
+    set:
+      pd.auth.existingSecret: byo-pd-secret
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/pd-auth"]
+          value: c59f1600408fcc703d7ba56aafaa1a3154380c4c9f97f422a603f79139661ec3
+
+  - it: keeps the generated PD value in the Secret and out of the annotation
+    template: pd-statefulset.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.template.metadata.annotations["checksum/pd-auth"]
+          pattern: "pd-secret-steady|cGQtc2VjcmV0LXN0ZWFkeQ=="
+
+  - it: hashes both live generated Server Secrets by value
+    template: server-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          value: d5e9d6f7d7bdafc092bd65571b124c37b6aefdf5af871a1b5c4f999131e6e329
+
+  - it: mixes an operator-supplied admin Secret resourceVersion with the generated token digest
+    template: server-deployment.yaml
+    set:
+      server.auth.admin.existingSecret: byo-admin
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/auth"]
+          value: 36d51dce49f4d417c0bad64d99f128a4f7498633dba0486ad6eb432c61196f0d

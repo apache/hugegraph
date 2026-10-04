@@ -9,6 +9,7 @@ on:
   pull_request:
     # Keep source/resources and shared build inputs; skip named documentation files.
     paths:
+      - '.github/workflows/.java-version'
       - 'pom.xml'
       - '.mvn/**'
       - 'style/**'
@@ -33,23 +34,18 @@ jobs:
       USE_STAGE: 'false' # Whether to include the stage repository.
 
     steps:
-      - name: Install JDK 11
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 5
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
 
       - name: use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}

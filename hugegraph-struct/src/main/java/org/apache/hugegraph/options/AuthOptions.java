@@ -22,9 +22,6 @@ package org.apache.hugegraph.options;
 import org.apache.hugegraph.config.ConfigOption;
 import org.apache.hugegraph.config.OptionHolder;
 
-import java.security.SecureRandom;
-import java.util.Base64;
-
 import static org.apache.hugegraph.config.OptionChecker.*;
 
 public class AuthOptions extends OptionHolder {
@@ -42,14 +39,6 @@ public class AuthOptions extends OptionHolder {
         }
         return instance;
     }
-
-    public static final ConfigOption<String> AUTH_TOKEN_SECRET =
-            new ConfigOption<>(
-                    "auth.token_secret",
-                    "Secret key of HS256 algorithm.",
-                    disallowEmpty(),
-                    "FXQXbJtbCLxODc6tGci732pkH1cyf8Qg"
-            );
 
     public static final ConfigOption<Double> AUTH_AUDIT_LOG_RATE =
             new ConfigOption<>(
@@ -122,12 +111,4 @@ public class AuthOptions extends OptionHolder {
                     rangeInt(0L, Long.MAX_VALUE),
                     (3600 * 24L)
             );
-
-    private static String generateRandomBase64Key() {
-        SecureRandom random = new SecureRandom();
-        // 32 bytes for HMAC-SHA256
-        byte[] bytes = new byte[32];
-        random.nextBytes(bytes);
-        return Base64.getEncoder().encodeToString(bytes);
-    }
 }

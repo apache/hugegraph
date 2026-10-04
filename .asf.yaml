@@ -41,8 +41,9 @@ github:
           - Analyze (java)
           - CodeQL
           - check-license
-          - build-server (memory, 11)
-          - build-commons (11)
+          # Require the fixed memory result gate, independent of the runtime JDK list.
+          # Commons CI continues to run without blocking merges.
+          - Server memory tests
       required_pull_request_reviews:
         dismiss_stale_reviews: true
         require_code_owner_reviews: false

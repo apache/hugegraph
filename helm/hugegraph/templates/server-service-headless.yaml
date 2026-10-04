@@ -1,0 +1,39 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Headless Service enumerating the individual Server Pods. The helm test
+# hook resolves it to run its graph-bound Gremlin check against every Pod
+# (a broken-binding Pod passes readiness, so it appears here), and the
+# per-Pod troubleshooting steps in the README can use it too.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hugegraph.server.headlessName" . }}
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  clusterIP: None
+  # Deliberately not publishNotReadyAddresses: the checks want exactly the
+  # Pods the client Service routes to.
+  selector:
+    {{- include "hugegraph.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+  ports:
+    - name: http
+      port: {{ .Values.server.port }}
+      targetPort: http
