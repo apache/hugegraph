@@ -153,10 +153,11 @@ if [[ -n "${PASSWORD:-}" && -z "${HG_SERVER_AUTH_TOKEN_SECRET:-}" ]]; then
 fi
 
 # ── Map env → properties file ─────────────────────────────────────────
-# TODO: map server.urls_to_pd, server.deploy_in_k8s and auth.admin_pa from the environment here.
-# Without them the Helm chart (helm/hugegraph) rewrites rest-server.properties in a wrapper before
-# exec'ing this script, which is why it refuses readOnlyRootFilesystem for Server; drop that
-# wrapper once these keys have an env mapping.
+# TODO: map server.urls_to_pd and server.deploy_in_k8s from the environment here, as PASSWORD is
+# mapped to auth.admin_pa below. Without them the Helm chart (helm/hugegraph) rewrites
+# rest-server.properties in a wrapper before exec'ing this script; drop that wrapper once both keys
+# have a mapping. A read-only root filesystem also needs the conf files on a writable path, since
+# set_prop in this script edits them in place; the chart refuses readOnlyRootFilesystem until then.
 [[ -n "${HG_SERVER_BACKEND:-}"  ]] && set_prop "backend"  "${HG_SERVER_BACKEND}"  "${GRAPH_CONF}"
 [[ -n "${HG_SERVER_PD_PEERS:-}" ]] && set_prop "pd.peers" "${HG_SERVER_PD_PEERS}" "${GRAPH_CONF}"
 [[ -n "${HG_SERVER_USE_PD:-}" ]] && \
