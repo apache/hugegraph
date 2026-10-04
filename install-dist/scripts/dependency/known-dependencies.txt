@@ -98,7 +98,7 @@ exp4j-0.4.8.jar
 expressions-9.0-9.0.20190305.jar
 failsafe-2.4.1.jar
 failureaccess-1.0.1.jar
-fastjson-1.2.83.jar
+fastjson-1.2.84.jar
 fastparse_2.12-2.0.4.jar
 fastutil-8.1.0.jar
 fastutil-8.5.9.jar

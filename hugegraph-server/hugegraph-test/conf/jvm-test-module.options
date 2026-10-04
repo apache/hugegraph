@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Test-only access required by TinkerPop 3.8.1 and its Kryo dependencies on
+# Test-only access required by TinkerPop and its Kryo dependencies on
 # Java 17. Keep these permissions out of the Server runtime argument file.
 --add-exports=java.base/sun.security.x509=ALL-UNNAMED
 --add-exports=java.base/sun.security.action=ALL-UNNAMED

@@ -263,7 +263,7 @@ Paths referenced by upstream licenses are reproduced as labeled sections in
 the corresponding per-component license file.
 
     https://central.sonatype.com/artifact/at.yawk.lz4/lz4-java/1.8.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.alibaba/fastjson/1.2.83 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.alibaba/fastjson/1.2.84 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa.common/sofa-common-tools/1.0.12 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa.lookout/lookout-api/1.4.1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.alipay.sofa/bolt/1.6.2 -> Apache 2.0
