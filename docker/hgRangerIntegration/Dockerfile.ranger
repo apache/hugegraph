@@ -15,13 +15,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Stage 1: build the thin RangerHugeGraphService jar
+# Stage 1: build the thin hugegraph-ranger-plugin jar
 FROM --platform=$BUILDPLATFORM maven:3.9.0-eclipse-temurin-11 AS build
 
 WORKDIR /pkg
 
 COPY . .
 
+# This also produces the shaded "-plugin" artifact (~500 MB, mostly the AWS SDK
+# that ranger-plugins-audit drags in). That one is for HugeGraph's own lib/ and
+# is NOT copied below: Ranger Admin already has ranger-plugins-common, gson and
+# slf4j on its classpath, so only the thin jar is needed here.
 RUN --mount=type=cache,target=/root/.m2 \
     mvn package -pl hugegraph-server/hugegraph-ranger-plugin -am -e -B -ntp \
         -Dmaven.test.skip=true \
@@ -29,28 +33,33 @@ RUN --mount=type=cache,target=/root/.m2 \
         -Drat.skip=true \
         -Dcheckstyle.skip=true
 
-# Stage 2: bake the jar into the stock Ranger Admin image
-FROM apache/ranger:2.9.0
+# Stage 2: bake the service class into the stock Ranger Admin image
+#
+# Must stay in step with the ranger.version property in
+# hugegraph-server/hugegraph-ranger-plugin/pom.xml, which decides the
+# ranger-plugins-common version the jar is compiled against.
+FROM apache/ranger:2.4.0
 
 LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
 
-# apache/ranger:2.9.0 ships Java 8, but RangerHugeGraphService (loaded directly by
-# Ranger Admin's JVM, see implClass in ranger-servicedef-hugegraph.json) is compiled
-# to Java 11 bytecode by the parent hugegraph POM, causing "class file version 55.0
-# ... only recognizes ... up to 52.0". Install Java 11 alongside the bundled Java 8
-# and repoint JAVA_HOME so Ranger Admin (and setup.sh's version check) run on it.
-ARG TARGETARCH
-USER root
-RUN apt-get update -qq \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-       openjdk-11-jdk-headless \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-${TARGETARCH}
-ENV PATH=${JAVA_HOME}/bin:$PATH
-USER ranger
+# Ranger Admin loads the service definition's implClass
+# (org.apache.hugegraph.ranger.RangerHugeGraphService, see
+# ranger-servicedef-hugegraph.json) from ranger-plugins/<service-type>/, where
+# <service-type> is the service def name "hugegraph". That directory is scanned
+# once at JVM startup, so baking the jar in is what makes "Test Connection" and
+# the policy editor's resource autocomplete work on a plain `docker compose up`
+# — no copy-into-the-container-and-restart dance.
+#
+# The /opt/ranger/admin symlink is used instead of the versioned
+# ranger-<version>-admin directory so this path survives a base image bump.
+#
+# The base image's bundled Java 8 is sufficient: hugegraph-ranger-plugin sets
+# maven.compiler.target=8 in its POM, so the jar is class file version 52.
+ARG HUGEGRAPH_VERSION=1.7.0
+ARG PLUGIN_DIR=/opt/ranger/admin/ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph
 
-RUN mkdir -p /opt/ranger/ranger-2.9.0-admin/ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph
+RUN mkdir -p ${PLUGIN_DIR}
 
-COPY --from=build --chown=ranger:ranger /pkg/hugegraph-server/hugegraph-ranger-plugin/target/hugegraph-ranger-plugin-1.7.0.jar \
-    /opt/ranger/ranger-2.9.0-admin/ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph/hugegraph-ranger-plugin.jar
+COPY --from=build --chown=ranger:ranger \
+    /pkg/hugegraph-server/hugegraph-ranger-plugin/target/hugegraph-ranger-plugin-${HUGEGRAPH_VERSION}.jar \
+    ${PLUGIN_DIR}/hugegraph-ranger-plugin.jar
