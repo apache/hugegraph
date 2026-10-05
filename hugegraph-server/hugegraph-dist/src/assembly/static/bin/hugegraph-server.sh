@@ -58,6 +58,13 @@ GC_OPTION="${SERVER_ARGS[4]:-}"
 OPEN_TELEMETRY="${SERVER_ARGS[5]:-}"
 
 ensure_path_writable "$LOGS"
+
+# Fatal launcher errors go to stderr, which reaches the terminal or the container
+# log, and to ${OUTPUT}, the log start-hugegraph.sh points operators at.
+report_error() {
+    echo "$1" >&2
+    echo "$1" >> "${OUTPUT}"
+}
 ensure_path_writable "$PLUGINS"
 
 # The maximum and minimum heap memory that service can use
@@ -109,8 +116,7 @@ JAVA_VERSION=$($JAVA -version 2>&1 |
 # Drop any pre-release suffix, e.g. "24-ea" -> "24"
 JAVA_VERSION="${JAVA_VERSION%%[!0-9]*}"
 if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $MIN_JAVA_VERSION ]]; then
-    echo "Make sure the JDK is installed and the version >= $MIN_JAVA_VERSION, current is $JAVA_VERSION" \
-         >> "${OUTPUT}"
+    report_error "Make sure the JDK is installed and the version >= $MIN_JAVA_VERSION, current is $JAVA_VERSION"
     exit 1
 fi
 
@@ -118,7 +124,7 @@ fi
 if [ "$JAVA_OPTIONS" = "" ]; then
     XMX=$(calc_xmx $MIN_MEM $MAX_MEM)
     if [ $? -ne 0 ]; then
-        echo "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory" >> "${OUTPUT}"
+        report_error "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory"
         exit 1
     fi
     JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m ${USER_OPTION}"
@@ -134,9 +140,10 @@ fi
 # and _JAVA_OPTIONS, so any of those overrides them. The JVM does that parsing
 # itself, including quoted options and @argfiles.
 # A restarted container often reuses the JVM's PID, and HotSpot will not overwrite
-# an existing crash log or heap dump, so the file names carry the launch time plus
-# a counter that skips names already used in $LOGS. The script execs java below,
-# so $$ is the JVM's PID.
+# an existing crash log or heap dump, so the file names carry the host name (the
+# pod name on Kubernetes, so pods sharing one log volume do not collide), the
+# launch time, and a counter that skips names already used in $LOGS. The script
+# execs java below, so $$ is the JVM's PID.
 crash_files_exist() {
     local file
     for file in "${LOGS}"/java_pid*_"$1".hprof "${LOGS}"/hs_err_pid*_"$1".log; do
@@ -144,7 +151,8 @@ crash_files_exist() {
     done
     return 1
 }
-LAUNCH_STAMP=$(date +%Y%m%d-%H%M%S)
+LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | tr -c 'A-Za-z0-9._-' '_')
+LAUNCH_STAMP="${LAUNCH_HOST}_$(date +%Y%m%d-%H%M%S)"
 LAUNCH_ID="${LAUNCH_STAMP}"
 LAUNCH_SUFFIX=0
 while crash_files_exist "${LAUNCH_ID}"; do
@@ -179,7 +187,7 @@ case "$GC_OPTION" in
                                       -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
         ;;
     *)
-        echo "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now" >> ${OUTPUT}
+        report_error "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now"
         exit 1
 esac
 
@@ -194,8 +202,7 @@ Run the server on Java ${MAX_SECURITY_JAVA_VERSION} or lower, or start it with t
 disabled: 'start-hugegraph.sh -s false'.
 EOF
 )
-        echo "${SECURITY_UNSUPPORTED_MSG}" >&2
-        echo "${SECURITY_UNSUPPORTED_MSG}" >> "${OUTPUT}"
+        report_error "${SECURITY_UNSUPPORTED_MSG}"
         exit 1
     fi
 
@@ -223,12 +230,10 @@ EOF
         # The bootstrap validates the effective policy and refuses to start, but
         # its stderr goes to the stdout log in daemon mode. Name the cause here
         # so it also reaches the log start-hugegraph.sh points operators at.
-        cat >> "${OUTPUT}" <<EOF
-ERROR: Missing or unreadable '${SECURITY_PROPERTIES}'.
+        report_error "ERROR: Missing or unreadable '${SECURITY_PROPERTIES}'.
 An upgraded deployment that reuses an older conf/ directory must add this file,
 or supply its own -Djava.security.properties=<file> setting a finite positive
-networkaddress.cache.ttl.
-EOF
+networkaddress.cache.ttl."
     fi
     JVM_OPTIONS="${JVM_OPTIONS} \
                  -Djava.security.properties=${SECURITY_PROPERTIES}"
@@ -248,7 +253,7 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
             "${GITHUB}/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.1.0/${OT_JAR}"
 
         if [[ ! -e "${OT_JAR_PATH}" ]]; then
-            echo "## Error: Failed to download ${OT_JAR}." >>${OUTPUT}
+            report_error "## Error: Failed to download ${OT_JAR}."
             exit 1
         fi
     fi
@@ -258,8 +263,8 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     actual_md5=$(md5sum "${OT_JAR_PATH}" | awk '{print $1}')
 
     if [[ "${expected_md5}" != "${actual_md5}" ]]; then
-        echo "## Error: MD5 checksum verification failed for ${OT_JAR_PATH}." >>${OUTPUT}
-        echo "## Tips: Remove the file and try again." >>${OUTPUT}
+        report_error "## Error: MD5 checksum verification failed for ${OT_JAR_PATH}."
+        report_error "## Tips: Remove the file and try again."
         exit 1
     fi
 

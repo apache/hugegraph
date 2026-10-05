@@ -484,11 +484,12 @@ assert_effective_flag() {
 }
 
 LOGS_PATTERN=$(printf '%s' "${SERVER_ROOT}/logs" | sed 's/[][\.*^$+?(){}|]/\\&/g')
-# The names carry the launch time and, if needed, a counter, since a restarted
-# container often reuses the PID and HotSpot will not overwrite an existing
-# crash log or heap dump.
-HEAP_DUMP_PATTERN="^${LOGS_PATTERN}/java_pid[0-9]+_[0-9]{8}-[0-9]{6}(-[0-9]+)?\.hprof$"
-ERROR_FILE_PATTERN="^${LOGS_PATTERN}/hs_err_pid%p_[0-9]{8}-[0-9]{6}(-[0-9]+)?\.log$"
+# The names carry the host name, the launch time and, if needed, a counter,
+# since a restarted container often reuses the PID, pods may share one log
+# volume, and HotSpot will not overwrite an existing crash log or heap dump.
+NAME_ID_PATTERN="[A-Za-z0-9._-]+_[0-9]{8}-[0-9]{6}(-[0-9]+)?"
+HEAP_DUMP_PATTERN="^${LOGS_PATTERN}/java_pid[0-9]+_${NAME_ID_PATTERN}\.hprof$"
+ERROR_FILE_PATTERN="^${LOGS_PATTERN}/hs_err_pid%p_${NAME_ID_PATTERN}\.log$"
 
 assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=)' \
                    "$ENABLED_CAPTURE"
@@ -535,7 +536,8 @@ assert_effective_flag "$ARGFILE_CAPTURE" ErrorFile '^/operator/argfile-hs_err\.l
 assert_effective_flag "$ARGFILE_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN" "@${ARGFILE}"
 
 # A launch never reuses a name already taken in logs/, even within the same
-# second: with a fixed clock, the counter moves past both existing files.
+# second: with a fixed clock and host name, the counter moves past both
+# existing files.
 MOCK_DATE_BIN="${TEMP_DIR}/mock-date-bin"
 mkdir -p "$MOCK_DATE_BIN"
 printf '#!/bin/bash\necho 20200101-000000\n' > "${MOCK_DATE_BIN}/date"
@@ -543,8 +545,8 @@ chmod +x "${MOCK_DATE_BIN}/date"
 mkdir -p "${SERVER_ROOT}/logs"
 # Only files this run creates are recorded for removal, so an existing file
 # with the same name in the supplied distribution is left alone.
-for CRASH_NAME_FIXTURE in "${SERVER_ROOT}/logs/java_pid1_20200101-000000.hprof" \
-                          "${SERVER_ROOT}/logs/hs_err_pid1_20200101-000000-1.log"; do
+for CRASH_NAME_FIXTURE in "${SERVER_ROOT}/logs/java_pid1_test-pod-a_20200101-000000.hprof" \
+                          "${SERVER_ROOT}/logs/hs_err_pid1_test-pod-a_20200101-000000-1.log"; do
     if [[ ! -e "$CRASH_NAME_FIXTURE" ]]; then
         CRASH_NAME_FIXTURES+=("$CRASH_NAME_FIXTURE")
         : > "$CRASH_NAME_FIXTURE"
@@ -552,17 +554,41 @@ for CRASH_NAME_FIXTURE in "${SERVER_ROOT}/logs/java_pid1_20200101-000000.hprof" 
 done
 UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
 CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
-    PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    HOSTNAME=test-pod-a PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
-    "^${LOGS_PATTERN}/java_pid[0-9]+_20200101-000000-2\.hprof$"
+    "^${LOGS_PATTERN}/java_pid[0-9]+_test-pod-a_20200101-000000-2\.hprof$"
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
-    "^${LOGS_PATTERN}/hs_err_pid%p_20200101-000000-2\.log$"
+    "^${LOGS_PATTERN}/hs_err_pid%p_test-pod-a_20200101-000000-2\.log$"
+
+# Another pod sharing the volume gets its own names in the same second, and
+# characters unsafe in a file name are replaced.
+OTHER_HOST_CAPTURE="${TEMP_DIR}/other-host.args"
+CAPTURE_FILE="$OTHER_HOST_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    HOSTNAME='test/pod-b' PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$OTHER_HOST_CAPTURE" HeapDumpPath \
+    "^${LOGS_PATTERN}/java_pid[0-9]+_test_pod-b_20200101-000000\.hprof$"
 if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
     rm -f "${CRASH_NAME_FIXTURES[@]}"
 fi
 CRASH_NAME_FIXTURES=()
+
+# A launcher error before Java starts must reach stderr, which start-hugegraph.sh
+# passes to the terminal or container log, as well as the server log.
+: > "$SERVER_LOG"
+PREFLIGHT_ERROR="${TEMP_DIR}/preflight.err"
+if JAVA_HOME="$MOCK_JAVA_HOME" STDOUT_MODE=true "$SERVER_SCRIPT" \
+   "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true "" "bad-gc" \
+   >/dev/null 2>"$PREFLIGHT_ERROR"; then
+    fail "launcher accepted an unknown GC option"
+fi
+grep -Fq "Unrecognized gc option: 'bad-gc'" "$PREFLIGHT_ERROR" ||
+    fail "launcher preflight error did not reach stderr"
+grep -Fq "Unrecognized gc option: 'bad-gc'" "$SERVER_LOG" ||
+    fail "launcher preflight error did not reach the server log"
 
 # With telemetry on, the launcher appends its agent to JAVA_TOOL_OPTIONS and
 # keeps both the defaults and the operator's flags there.
