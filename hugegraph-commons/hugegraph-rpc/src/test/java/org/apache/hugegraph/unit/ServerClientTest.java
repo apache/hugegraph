@@ -558,7 +558,7 @@ public class ServerClientTest extends BaseUnitTest {
 
     @Test
     public void testAddServiceMultiTimesOfSameService() {
-        RpcServer rpcServerExport = new RpcServer(config(true));
+        RpcServer rpcServerExport = new RpcServer(config("server-random"));
 
         rpcServerExport.config().addService(HelloService.class,
                                             new HelloServiceImpl());
@@ -578,7 +578,7 @@ public class ServerClientTest extends BaseUnitTest {
 
     @Test
     public void testExportMultiTimesOfSameServer() {
-        RpcServer rpcServerExport = new RpcServer(config(true));
+        RpcServer rpcServerExport = new RpcServer(config("server-random"));
         rpcServerExport.config().addService(HelloService.class,
                                             new HelloServiceImpl());
         rpcServerExport.exportAll();
@@ -589,7 +589,7 @@ public class ServerClientTest extends BaseUnitTest {
 
     @Test
     public void testExportMultiTimesOfSameService() {
-        RpcServer rpcServerExport = new RpcServer(config(true));
+        RpcServer rpcServerExport = new RpcServer(config("server-random"));
         rpcServerExport.config().addService(HelloService.class,
                                             new HelloServiceImpl());
         rpcServerExport.exportAll();
@@ -603,7 +603,7 @@ public class ServerClientTest extends BaseUnitTest {
 
     @Test
     public void testExportNoneService() {
-        RpcServer rpcServerNoneService = new RpcServer(config(true));
+        RpcServer rpcServerNoneService = new RpcServer(config("server-random"));
 
         // Will be ignored if none service added
         rpcServerNoneService.exportAll();
@@ -611,57 +611,70 @@ public class ServerClientTest extends BaseUnitTest {
         stopServer(rpcServerNoneService);
     }
 
+    private static RpcClientProvider clientFor(RpcServer server) {
+        HugeConfig config = config(false);
+        String remoteUrlKey = org.apache.hugegraph.config.RpcOptions.RPC_REMOTE_URL.name();
+        config.setProperty(remoteUrlKey, server.host() + ":" + server.port());
+        return new RpcClientProvider(config);
+    }
+
+    @Test
+    public void testTemporaryServerDoesNotShareMainListener() {
+        rpcServer.config().addService(HelloService.class, new HelloServiceImpl());
+        startServer(rpcServer);
+        RpcServer temporary = new RpcServer(config("server-random"));
+        try {
+            temporary.config().addService(HelloService.class, new HelloServiceImpl());
+            startServer(temporary);
+            Assert.assertNotEquals(rpcServer.port(), temporary.port());
+        } finally {
+            stopServer(temporary);
+        }
+        HelloService client = rpcClient.config().serviceProxy(HelloService.class);
+        Assert.assertEquals("hello tom!", client.hello("tom"));
+    }
+
     @Test
     public void testUnexportService() {
-        RpcServer rpcServerUnexport = new RpcServer(config(true));
-
+        RpcServer rpcServerUnexport = new RpcServer(config("server-random"));
         RpcProviderConfig serverConfig = rpcServerUnexport.config();
         String service = serverConfig.addService(HelloService.class,
                                                  new HelloServiceImpl());
         rpcServerUnexport.exportAll();
-
-        RpcConsumerConfig clientConfig = rpcClient.config();
-        HelloService client = clientConfig.serviceProxy(HelloService.class);
-
-        Assert.assertEquals("hello tom!", client.hello("tom"));
-
-        rpcServerUnexport.unexport(service);
-
-        Assert.assertThrows(SofaRpcException.class, () -> {
-            client.hello("tom");
-        });
-
-        stopServer(rpcServerUnexport);
+        RpcClientProvider isolatedClient = clientFor(rpcServerUnexport);
+        try {
+            HelloService client = isolatedClient.config().serviceProxy(HelloService.class);
+            Assert.assertEquals("hello tom!", client.hello("tom"));
+            rpcServerUnexport.unexport(service);
+            Assert.assertThrows(SofaRpcException.class, () -> client.hello("tom"));
+        } finally {
+            isolatedClient.destroy();
+            stopServer(rpcServerUnexport);
+        }
     }
 
     @Test
     public void testUnexportAllService() {
-        RpcServer rpcServerUnexport = new RpcServer(config(true));
-
+        RpcServer rpcServerUnexport = new RpcServer(config("server-random"));
         RpcProviderConfig serverConfig = rpcServerUnexport.config();
         serverConfig.addService(HelloService.class, new HelloServiceImpl());
         serverConfig.addService("graph", HelloService.class,
                                 new GraphHelloServiceImpl("graph"));
         rpcServerUnexport.exportAll();
-
-        RpcConsumerConfig clientConfig = rpcClient.config();
-        HelloService client = clientConfig.serviceProxy(HelloService.class);
-        HelloService clientG = clientConfig.serviceProxy("graph",
-                                                         HelloService.class);
-
-        Assert.assertEquals("hello tom!", client.hello("tom"));
-        Assert.assertEquals("graph: hello tom!", clientG.hello("tom"));
-
-        rpcServerUnexport.unexportAll();
-
-        Assert.assertThrows(SofaRpcException.class, () -> {
-            client.hello("tom");
-        });
-        Assert.assertThrows(SofaRpcException.class, () -> {
-            clientG.hello("tom");
-        });
-
-        stopServer(rpcServerUnexport);
+        RpcClientProvider isolatedClient = clientFor(rpcServerUnexport);
+        try {
+            RpcConsumerConfig clientConfig = isolatedClient.config();
+            HelloService client = clientConfig.serviceProxy(HelloService.class);
+            HelloService clientG = clientConfig.serviceProxy("graph", HelloService.class);
+            Assert.assertEquals("hello tom!", client.hello("tom"));
+            Assert.assertEquals("graph: hello tom!", clientG.hello("tom"));
+            rpcServerUnexport.unexportAll();
+            Assert.assertThrows(SofaRpcException.class, () -> client.hello("tom"));
+            Assert.assertThrows(SofaRpcException.class, () -> clientG.hello("tom"));
+        } finally {
+            isolatedClient.destroy();
+            stopServer(rpcServerUnexport);
+        }
     }
 
     @Test

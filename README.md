@@ -66,7 +66,7 @@ HugeGraph supports both **standalone** and **distributed** deployments:
                         │             HugeGraph Server (:8080)                │
                         │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
                         │  │ REST API │  │ Gremlin  │  │   Cypher Engine  │   │
-                        │  │(Jersey 3)│  │ (TP 3.5) │  │   (OpenCypher)   │   │
+                        │  │(Jersey 3)│  │(TP 3.5.1)│  │   (OpenCypher)   │   │
                         │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
                         │       └─────────────┼─────────────────┘             │
                         │            ┌────────▼────────┐                      │
@@ -125,7 +125,7 @@ flowchart TB
 
     subgraph Server["HugeGraph Server :8080"]
         API[REST API<br/>Jersey 3]
-        GS[Gremlin Server<br/>TinkerPop 3.5]
+        GS[Gremlin Server<br/>TinkerPop 3.5.1]
         CS[Cypher Engine<br/>OpenCypher]
         CORE[Graph Engine<br/>hugegraph-core]
 
@@ -176,8 +176,12 @@ curl -X POST http://localhost:8080/gremlin \
 
 ### Prerequisites
 
-- **Java 11+** (required)
-- **Maven 3.5+** (for building from source)
+- **Java 17** (required and currently the only supported Java release)
+- **Maven 3.6.3+** (for building from source)
+
+The launch scripts reject Java versions older than 17. That minimum-version
+check does not qualify later Java releases; use Java 17 unless another release
+is explicitly listed as supported.
 
 ### Option 1: Docker (Fastest)
 
@@ -207,9 +211,16 @@ For advanced Docker configurations, see:
 >
 > **Version Tags**: Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag should only be used for testing or development.
 
+### Option 2: Kubernetes with Helm
+
+The HStore Helm chart deploys HugeGraph PD, Store, and Server as a distributed
+Kubernetes cluster. See the [chart documentation](helm/hugegraph/README.md) for
+single-node and highly available presets, configuration, and
+upgrade guidance.
+
 
 <details>
-<summary><b>Option 2: Download Binary Package</b></summary>
+<summary><b>Option 3: Download Binary Package</b></summary>
 
 Download pre-built packages from the [Download Page](https://hugegraph.apache.org/docs/download/download/):
 
@@ -242,7 +253,7 @@ For detailed instructions, see the [Binary Installation Guide](https://hugegraph
 </details>
 
 <details>
-<summary><b>Option 3: Build from Source</b></summary>
+<summary><b>Option 4: Build from Source</b></summary>
 
 Build from source for development or customization:
 
@@ -329,7 +340,7 @@ For repository constraints and module guidance, see [AGENTS.md](AGENTS.md).
    - Review the [Architecture Diagram](#architecture) above
 
 2. **Set Up Your Environment**
-   - Install Java 11+ and Maven 3.5+
+   - Install Java 17 and Maven 3.6.3+
    - Follow [BUILDING.md](docs/BUILDING.md) for build instructions
    - Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 

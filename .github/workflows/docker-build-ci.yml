@@ -44,6 +44,11 @@ on:
       - '!**/AGENTS.md'
       - '!**/CLAUDE.md'
 
+# Keep the newest PR run; preserve independent push, release and manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   docker-bake-check:
     runs-on: ubuntu-latest
@@ -136,6 +141,15 @@ jobs:
           HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
           echo "Healthcheck: $HC"
           [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
+
+      - name: Verify Java 17 runtime in ${{ matrix.dockerfile }}
+        run: |
+          JAVA_VERSION=$(docker run --rm --entrypoint java "$IMAGE_ID" -version 2>&1)
+          echo "$JAVA_VERSION"
+          grep -Eq 'version "17\.' <<< "$JAVA_VERSION" || {
+            echo "ERROR: expected a Java 17 runtime in ${{ matrix.dockerfile }}"
+            exit 1
+          }
 
       - name: Test server entrypoint property mapping
         if: matrix.dockerfile == 'hugegraph-server/Dockerfile'

@@ -298,7 +298,8 @@ public class OrderedKvIteratorTest {
         TestIterator slow = new TestIterator(1);
         TestIterator failed = new TestIterator(2);
         slow.blockFirstHasNext(slowStarted, releaseSlow);
-        failed.failOnHasNextAfter(0);
+        // Start the slow source before failure can cancel its task.
+        failed.blockAndFailFirstHasNext(new CountDownLatch(0), slowStarted);
 
         Future<Boolean> result = caller.submit(() -> {
             OrderedKvIterator iterator = new OrderedKvIterator(

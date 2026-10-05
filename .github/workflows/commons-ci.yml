@@ -9,6 +9,11 @@ on:
       - 'test-*'
   pull_request:
 
+# Keep the newest PR run; preserve independent push, release and manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   java-runtime:
     uses: ./.github/workflows/java-runtime.yml
@@ -53,11 +58,13 @@ jobs:
 
       - name: Run common test
         run: |
-          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite -DskipCommonsTests=false
+          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite \
+            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
       - name: Run rpc test
         run: |
-          mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite -DskipCommonsTests=false
+          mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite \
+            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7

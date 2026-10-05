@@ -1,0 +1,157 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The membership and identity guards read the live StatefulSets through
+# lookup. These cases fake that object, so the refused path (a raft port
+# change, a rename, a replica shrink) and the allowed path (an unchanged
+# upgrade, a fresh install) are both pinned at render time. validateValues
+# is included from the Server Deployment, so the refusals render that.
+suite: Raft identity and membership guards against the live StatefulSet
+templates:
+  - server-deployment.yaml
+  - pd-statefulset.yaml
+  - store-statefulset.yaml
+# The fake objects spell numbers as strings: the fake client cannot deep
+# copy Go ints, and the guards convert through `int` either way.
+kubernetesProvider:
+  scheme:
+    "apps/v1/StatefulSet":
+      gvr:
+        group: apps
+        version: v1
+        resource: statefulsets
+      namespaced: true
+  objects:
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: RELEASE-NAME-hugegraph-pd
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: RELEASE-NAME
+          app.kubernetes.io/component: pd
+      spec:
+        replicas: "3"
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: hugegraph
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: pd
+        template:
+          spec:
+            containers:
+              - name: pd
+                ports:
+                  - name: grpc
+                    containerPort: "8686"
+                  - name: rest
+                    containerPort: "8620"
+                  - name: raft
+                    containerPort: "8610"
+    - apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: RELEASE-NAME-hugegraph-store
+        namespace: NAMESPACE
+        labels:
+          app.kubernetes.io/instance: RELEASE-NAME
+          app.kubernetes.io/component: store
+      spec:
+        replicas: "3"
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: hugegraph
+            app.kubernetes.io/instance: RELEASE-NAME
+            app.kubernetes.io/component: store
+        template:
+          spec:
+            containers:
+              - name: store
+                ports:
+                  - name: grpc
+                    containerPort: "8500"
+                  - name: raft
+                    containerPort: "8510"
+                  - name: rest
+                    containerPort: "8520"
+tests:
+  - it: lets an unchanged upgrade through
+    template: server-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: refuses a PD raft port change on an initialized release
+    template: server-deployment.yaml
+    set:
+      pd.ports.raft: 8611
+    asserts:
+      - failedTemplate:
+          errorPattern: "pd.ports.raft cannot change from 8610 to 8611 on an initialized release"
+
+  - it: refuses a Store raft port change on an initialized release
+    template: server-deployment.yaml
+    set:
+      store.ports.raft: 8511
+    asserts:
+      - failedTemplate:
+          errorPattern: "store.ports.raft cannot change from 8510 to 8511 on an initialized release"
+
+  - it: leaves the other ports routinely mutable
+    template: pd-statefulset.yaml
+    set:
+      pd.ports.rest: 8621
+      store.ports.grpc: 8501
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].ports[1].containerPort
+          value: 8621
+
+  - it: refuses a rename through fullnameOverride on an initialized release
+    template: server-deployment.yaml
+    set:
+      fullnameOverride: renamed
+    asserts:
+      - failedTemplate:
+          errorPattern: "already owns the pd StatefulSet RELEASE-NAME-hugegraph-pd, but the values now name it renamed-pd"
+
+  - it: refuses a rename through nameOverride on an initialized release
+    template: server-deployment.yaml
+    set:
+      nameOverride: graph
+    asserts:
+      - failedTemplate:
+          errorPattern: "already owns the (pd|store) StatefulSet RELEASE-NAME-hugegraph-(pd|store), but the values now name it RELEASE-NAME-graph-(pd|store)"
+
+  - it: refuses a Store replica shrink against the live StatefulSet
+    template: server-deployment.yaml
+    set:
+      store.replicas: 2
+      store.pdb.minAvailable: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: "store.replicas cannot shrink from 3 to 2 through a helm upgrade"
+
+  - it: refuses PD growth against the live StatefulSet
+    template: server-deployment.yaml
+    set:
+      pd.replicas: 5
+      pd.pdb.minAvailable: 3
+    asserts:
+      - failedTemplate:
+          errorPattern: "pd.replicas cannot grow from 3 to 5 through a helm upgrade"

@@ -49,6 +49,7 @@ public class ClusterConstant {
     public static final String GRAPH_TEMPLATE_FILE = "hugegraph.properties.template";
     public static final String GREMLIN_DRIVER_SETTING_FILE = "gremlin-driver-settings.yaml";
     public static final String GREMLIN_SERVER_FILE = "gremlin-server.yaml";
+    public static final String JVM_MODULE_OPTIONS_FILE = "jvm-module.options";
     public static final String REMOTE_SETTING_FILE = "remote.yaml";
     public static final String REMOTE_OBJECTS_SETTING_FILE = "remote-objects.yaml";
     public static final String EMPTY_SAMPLE_GROOVY_FILE = "scripts/empty-sample.groovy";
@@ -106,7 +107,7 @@ public class ClusterConstant {
         return "";
     }
 
-    public static boolean isJava11OrHigher() {
+    public static boolean isJava17OrHigher() {
         String version = System.getProperty("java.version");
         if (version.startsWith("1.")) {
             version = version.substring(2, 3);
@@ -117,7 +118,7 @@ public class ClusterConstant {
             }
         }
         int versionNumber = Integer.parseInt(version);
-        return versionNumber >= 11;
+        return versionNumber >= 17;
     }
 
     public static String getProjectDir() {

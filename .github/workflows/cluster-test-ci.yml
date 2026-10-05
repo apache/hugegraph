@@ -27,6 +27,11 @@ on:
       - '!**/AGENTS.md'
       - '!**/CLAUDE.md'
 
+# Keep the newest PR run; preserve independent push, release and manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   cluster-test:
     runs-on: ubuntu-latest
@@ -59,8 +64,27 @@ jobs:
 
       - name: Run simple cluster test
         run: |
-          mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test -am -P simple-cluster-test
+          timeout 45m mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test \
+            -am -P simple-cluster-test
 
       - name: Run multi cluster test
         run: |
-          mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test -am -P multi-cluster-test
+          timeout 45m mvn test -pl hugegraph-cluster-test/hugegraph-clustertest-test \
+            -am -P multi-cluster-test
+
+      - name: Show cluster diagnostics on failure
+        if: failure()
+        run: |
+          echo "[ci] java processes:"
+          ps -ef | grep -E "HugeGraph|hg-|java" | grep -v grep || true
+          echo "[ci] listening tcp ports:"
+          (ss -ltnp || netstat -ltnp || true) 2>&1
+          find hugegraph-cluster-test -path '*/logs/*' -type f | sort | while read -r log; do
+            echo "--- tail -n 200 $log ---"
+            tail -n 200 "$log" || true
+          done
+          find . -path '*/surefire-reports/*' -type f \
+            \( -name '*.txt' -o -name '*.xml' \) | sort | while read -r report; do
+            echo "--- tail -n 120 $report ---"
+            tail -n 120 "$report" || true
+          done

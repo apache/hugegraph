@@ -8,6 +8,11 @@ on:
       - 'test-*'
   pull_request:
 
+# Keep the newest PR run; preserve independent push, release and manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   java-runtime:
     uses: ./.github/workflows/java-runtime.yml
@@ -27,6 +32,9 @@ jobs:
       - name: Run wait-storage.sh peer failover tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-wait-storage.sh
 
+      - name: Run RISC-V Java runtime contract tests
+        run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-riscv64-java-runtime.sh
+
   # Required coverage: memory on the project runtime and any additional test JDKs.
   # The shared runtime comes from .github/workflows/.java-version, independent of bytecode targets.
   # Keep the job ID for the Codecov configuration validator.
@@ -45,7 +53,7 @@ jobs:
       BASE_BRANCH_NAME: ${{ github.base_ref }}
       TARGET_BRANCH_NAME: ${{ github.base_ref != '' && github.base_ref || github.ref_name }}
       RELEASE_BRANCH: ${{ startsWith(github.ref_name, 'release-') || startsWith(github.ref_name, 'test-') }}
-      RAFT_MODE: ${{ startsWith(github.head_ref, 'test') || startsWith(github.head_ref, 'raft') }}
+      RAFT_MODE: ${{ startsWith(github.ref_name, 'raft-') || startsWith(github.head_ref, 'raft-') }}
 
     strategy:
       fail-fast: false
@@ -114,7 +122,34 @@ jobs:
           mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
-          $TRAVIS_DIR/test-java-security-properties.sh $SERVER_DIR
+          $TRAVIS_DIR/test-java-security-properties.sh \
+            "$SERVER_DIR" "$GITHUB_WORKSPACE"
+
+      - name: Verify Surefire single-class routing
+        if: ${{ env.BACKEND == 'rocksdb' }}
+        run: |
+          SUREFIRE_DIR=hugegraph-server/hugegraph-test/target/surefire-reports
+          REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest.xml"
+          rm -f "$REPORT"
+          mvn test -pl hugegraph-server/hugegraph-test -am \
+            -P unit-test -Dtest=HugeGraphAuthProxyTest -ntp
+          test -s "$REPORT" || {
+            echo "::error::Server single-class test produced no report"
+            exit 1
+          }
+          NEGATIVE_LOG=$(mktemp)
+          trap 'rm -f "$NEGATIVE_LOG"' EXIT
+          if mvn test -pl hugegraph-server/hugegraph-test -am \
+            -P unit-test -Dtest=NoSuchJava17ContractTest -ntp \
+            >"$NEGATIVE_LOG" 2>&1; then
+            cat "$NEGATIVE_LOG"
+            echo "::error::Surefire accepted a missing Server test class"
+            exit 1
+          fi
+          cat "$NEGATIVE_LOG"
+          grep -Fq 'No tests matching pattern "NoSuchJava17ContractTest"' \
+            "$NEGATIVE_LOG"
+          grep -Fq '(unit-test) @ hugegraph-test' "$NEGATIVE_LOG"
 
       - name: Check startup test prerequisites
         id: server-preflight
@@ -142,6 +177,8 @@ jobs:
         run: |
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          bash $TRAVIS_DIR/test-ci-service-utils.sh "$TRAVIS_DIR/ci-service-utils.sh"
+          bash $TRAVIS_DIR/test-start-hugegraph-signal.sh "$SERVER_DIR/bin/start-hugegraph.sh"
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
 
       - name: Startup tests skipped (missing prerequisites)
@@ -168,6 +205,7 @@ jobs:
       # TODO: disable raft test in normal PR due to the always timeout problem
       - name: Run raft test
         if: ${{ env.RAFT_MODE == 'true' && env.BACKEND == 'rocksdb' }}
+        timeout-minutes: 45
         run: |
           $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR
 
@@ -304,6 +342,8 @@ jobs:
           fi
 
   build-server-riscv64:
+    # Keep the emulated Java 17 RISC-V native-runtime signal visible while the
+    # platform lane stabilizes, but do not use it as a gate yet.
     uses: ./.github/workflows/riscv64-ci.yml
     permissions:
       contents: read

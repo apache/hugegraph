@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.unit;
 
+import java.net.URI;
 import java.net.URL;
+import java.nio.file.Paths;
 
 import org.junit.BeforeClass;
 
@@ -39,7 +41,7 @@ public class BaseUnitTest {
     protected static HugeConfig config(String type) {
         String name = String.format("rpc-%s.properties", type);
         URL conf = BaseUnitTest.class.getClassLoader().getResource(name);
-        return new HugeConfig(conf.getPath());
+        return new HugeConfig(Paths.get(URI.create(conf.toExternalForm())).toString());
     }
 
     protected static void startServer(RpcServer rpcServer) {
