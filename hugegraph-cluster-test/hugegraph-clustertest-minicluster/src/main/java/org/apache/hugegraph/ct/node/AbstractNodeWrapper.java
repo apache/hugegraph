@@ -20,8 +20,6 @@ package org.apache.hugegraph.ct.node;
 import static org.apache.hugegraph.ct.base.ClusterConstant.CT_PACKAGE_PATH;
 
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -147,18 +145,30 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
 
     @Override
     public boolean isStarted() {
-        try (Scanner sc = new Scanner(new FileReader(getLogPath()))) {
+        if (!isAlive()) {
+            return false;
+        }
+
+        try (Scanner sc = new Scanner(Paths.get(getLogPath()),
+                                      StandardCharsets.UTF_8.name())) {
             while (sc.hasNextLine()) {
                 String line = sc.nextLine();
                 if (line.contains(startLine)) return true;
             }
-        } catch (FileNotFoundException ignored) {
+        } catch (IOException ignored) {
         }
         return false;
     }
 
     public void stop() {
         if (this.instance == null) {
+            return;
+        }
+        if (!this.instance.isAlive()) {
+            System.out.printf("[cluster-test] %s stopped unexpectedly: %s%n",
+                              getID(), processStatus());
+            dumpLog();
+            deleteDir();
             return;
         }
         this.instance.destroy();
@@ -174,7 +184,36 @@ public abstract class AbstractNodeWrapper implements BaseNodeWrapper {
     }
 
     public boolean isAlive() {
-        return this.instance.isAlive();
+        return this.instance != null && this.instance.isAlive();
+    }
+
+    public String processStatus() {
+        if (this.instance == null) {
+            return "not started";
+        }
+        if (this.instance.isAlive()) {
+            return "alive";
+        }
+        return "exited with code " + this.instance.exitValue();
+    }
+
+    public void dumpLog() {
+        Path logPath = Paths.get(getLogPath());
+        System.out.println("===== " + getID() + " log: " + logPath + " =====");
+        if (!Files.exists(logPath)) {
+            System.out.println("Log file does not exist");
+            return;
+        }
+
+        try {
+            List<String> lines = Files.readAllLines(logPath, StandardCharsets.UTF_8);
+            int start = Math.max(0, lines.size() - 200);
+            for (int i = start; i < lines.size(); i++) {
+                System.out.println(lines.get(i));
+            }
+        } catch (IOException e) {
+            System.out.println("Failed to read log file: " + e.getMessage());
+        }
     }
 
     protected ProcessBuilder runCmd(List<String> startCmd, File stdoutFile) throws IOException {

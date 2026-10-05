@@ -35,7 +35,7 @@
 - **Profiles**: `unit-test`, `core-test`, `api-test`, `tinkerpop-structure-test`, `tinkerpop-process-test`
 - **Backends in CI**: memory, rocksdb, hbase (matrix)
 - **Single test class**: `mvn test -pl hugegraph-server/hugegraph-test -am -P core-test,memory -Dtest=ClassName`
-- TinkerPop tests: only on `release-*`/`test-*` branches
+- TinkerPop tests in this Java 17 foundation branch: only `release-*` and `test-*` are selected by `server-ci.yml`; the TinkerPop 3.8 upgrade branch adds its own CI condition in the third PR.
 - Server Raft API tests are branch-gated in `server-ci.yml`; Store raft-core tests run in normal `pd-store-ci.yml` CI.
 
 ## Docker
@@ -44,6 +44,6 @@
 - Container logs: stdout-based
 
 ## CI Pipelines
-- `server-ci.yml`: compile + unit/core/API tests (memory/rocksdb/hbase × Java 11)
+- `server-ci.yml`: compile + unit/core/API tests (memory/rocksdb/hbase × Java 17)
 - `rerun-ci.yml`: auto-rerun flaky failures (max 2 reruns, 180s delay)
 - `auto-pr-review.yml`: auto-comment on new PRs

@@ -210,8 +210,7 @@ public final class HugeGraphStep<S, E extends Element>
 
         HugeGraphStep other = (HugeGraphStep) obj;
         return this.hasContainers.equals(other.hasContainers) &&
-               this.queryInfo.equals(other.queryInfo) &&
-               this.lastTimeResults.equals(other.lastTimeResults);
+               this.queryInfo.equals(other.queryInfo);
     }
 
     @Override

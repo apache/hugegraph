@@ -30,6 +30,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/ci-service-utils.sh"
+
 HUGEGRAPH_ROOT="${1:-$(pwd)}"
 BIN="$HUGEGRAPH_ROOT/bin"
 START_SCRIPT="$BIN/start-hugegraph.sh"
@@ -417,9 +420,9 @@ else
     wait_script_exit "$SCRIPT_PID"
     ACTUAL_EXIT=$?
 
-    # If the trap fired correctly, the wrapper's `wait $PID` already reaped Java.
-    # If wait_script_exit timed out (killer fired), Java may still be running — also a failure.
-    if ! ps -p "$FG_PID" >/dev/null 2>&1; then
+    # Allow a bounded shutdown window and treat a zombie as already terminated.
+    # If wait_script_exit timed out, a live Java process remains a failure.
+    if wait_for_process_exit "$FG_PID" "$SETTLE_WAIT"; then
         pass "Java process terminated after SIGTERM sent to wrapper"
     else
         fail "Java process still running after SIGTERM — signal not forwarded"

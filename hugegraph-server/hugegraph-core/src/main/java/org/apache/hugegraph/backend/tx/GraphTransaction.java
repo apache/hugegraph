@@ -64,6 +64,7 @@ import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.iterator.BatchMapperIterator;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.iterator.FilterIterator;
+import org.apache.hugegraph.iterator.FlatMapperIterator;
 import org.apache.hugegraph.iterator.LimitIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.job.system.DeleteExpiredJob;
@@ -548,24 +549,27 @@ public class GraphTransaction extends IndexableTransaction {
         boolean hasUpdate = this.hasUpdate();
         Aggregate aggregate = query.aggregateNotNull();
 
-        // TODO: we can concat index-query results and tx uncommitted records.
-        if (hasUpdate) {
-            E.checkArgument(!isConditionQuery,
-                            "It's not allowed to query by index when " +
-                            "there are uncommitted records.");
+        if (hasUpdate && (query.resultType() == HugeType.VERTEX ||
+                          query.resultType() == HugeType.EDGE)) {
+            E.checkArgument(aggregate.func() == AggregateFunc.COUNT,
+                            "The %s operator with uncommitted records " +
+                            "is not supported",
+                            aggregate.func().string());
+            Query queryWithoutAggregate = query.copy();
+            queryWithoutAggregate.aggregate(null);
+            Iterator<?> results = queryWithoutAggregate.resultType().isVertex() ?
+                                  this.queryVertices(queryWithoutAggregate) :
+                                  this.queryEdges(queryWithoutAggregate);
+            return countAndClose(results);
         }
 
         QueryList<Number> queries = this.optimizeQueries(query, q -> {
             boolean isIndexQuery = q instanceof IdQuery;
             assert isIndexQuery || isConditionQuery || q == query;
-            // Need to fall back if there are uncommitted records
-            boolean fallback = hasUpdate;
+            boolean fallback = false;
             Number result;
 
-            if (fallback) {
-                // Here just ignore it, and do fall back later
-                result = null;
-            } else if (!isIndexQuery || !isConditionQuery) {
+            if (!isIndexQuery || !isConditionQuery) {
                 // It's a sysprop-query, let parent tx do it
                 assert !fallback;
                 result = super.queryNumber(q);
@@ -591,9 +595,9 @@ public class GraphTransaction extends IndexableTransaction {
                 assert q.resultType().isVertex() || q.resultType().isEdge();
                 // Reset aggregate to fallback and scan
                 q.aggregate(null);
-                result = IteratorUtils.count(q.resultType().isVertex() ?
-                                             this.queryVertices(q) :
-                                             this.queryEdges(q));
+                result = countAndClose(q.resultType().isVertex() ?
+                                       this.queryVertices(q) :
+                                       this.queryEdges(q));
             }
 
             return new QueryResults<>(IteratorUtils.of(result), q);
@@ -603,6 +607,19 @@ public class GraphTransaction extends IndexableTransaction {
                                        QueryResults.empty() :
                                        queries.fetch(this.pageSize);
         return aggregate.reduce(results.iterator());
+    }
+
+    private static long countAndClose(Iterator<?> results) {
+        try {
+            long count = 0L;
+            while (results.hasNext()) {
+                results.next();
+                count++;
+            }
+            return count;
+        } finally {
+            CloseableIterator.closeIterator(results);
+        }
     }
 
     @Watched(prefix = "graph")
@@ -819,7 +836,7 @@ public class GraphTransaction extends IndexableTransaction {
     public Iterator<Vertex> queryVertices(Query query) {
         if (this.hasUpdate()) {
             E.checkArgument(query.noLimitAndOffset(),
-                            "It's not allowed to query with offser/limit " +
+                            "It's not allowed to query with offset/limit " +
                             "when there are uncommitted records.");
             // TODO: also add check: no SCAN, no OLAP
             E.checkArgument(!query.paging(),
@@ -1008,7 +1025,7 @@ public class GraphTransaction extends IndexableTransaction {
     public Iterator<Edge> queryEdges(Query query) {
         if (this.hasUpdate()) {
             E.checkArgument(query.noLimitAndOffset(),
-                            "It's not allowed to query with offser/limit " +
+                            "It's not allowed to query with offset/limit " +
                             "when there are uncommitted records.");
             // TODO: also add check: no SCAN, no OLAP
             E.checkArgument(!query.paging(),
@@ -2037,6 +2054,22 @@ public class GraphTransaction extends IndexableTransaction {
         edges = this.joinTxRecords(query, edges, matchTxFunc,
                                    this.addedEdges, this.removedEdges,
                                    this.updatedEdges);
+        if (query instanceof ConditionQuery &&
+            ((ConditionQuery) query).containsCondition(HugeKeys.OWNER_VERTEX) &&
+            !(this.addedEdges.isEmpty() && this.updatedEdges.isEmpty())) {
+            edges = new FlatMapperIterator<>(edges, edge -> {
+                // Rehydrated self-loops may hold distinct vertex objects.
+                if (edge.sourceVertex().id().equals(edge.targetVertex().id()) &&
+                    (this.addedEdges.containsKey(edge.id()) ||
+                     this.updatedEdges.containsKey(edge.id()))) {
+                    HugeEdge opposite = edge.switchOwner();
+                    if (query.test(opposite)) {
+                        return ImmutableList.of(edge, opposite).iterator();
+                    }
+                }
+                return ImmutableList.of(edge).iterator();
+            });
+        }
         if (removingVertices.isEmpty()) {
             return edges;
         }
@@ -2073,6 +2106,9 @@ public class GraphTransaction extends IndexableTransaction {
          * Records in memory have higher priority than a query from backend store
          */
         for (V elem : addedTxRecords.values()) {
+            if (removedTxRecords.containsKey(elem.id())) {
+                continue;
+            }
             if (query.reachLimit(txResults.size())) {
                 break;
             }
@@ -2081,6 +2117,9 @@ public class GraphTransaction extends IndexableTransaction {
             }
         }
         for (V elem : updatedTxRecords.values()) {
+            if (removedTxRecords.containsKey(elem.id()) || addedTxRecords.containsKey(elem.id())) {
+                continue;
+            }
             if (query.reachLimit(txResults.size())) {
                 break;
             }

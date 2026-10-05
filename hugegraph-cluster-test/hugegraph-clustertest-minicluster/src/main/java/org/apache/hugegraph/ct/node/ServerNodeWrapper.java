@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.ct.node;
 
+import static org.apache.hugegraph.ct.base.ClusterConstant.BIN_DIR;
 import static org.apache.hugegraph.ct.base.ClusterConstant.CONF_DIR;
 import static org.apache.hugegraph.ct.base.ClusterConstant.EMPTY_SAMPLE_GROOVY_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.EXAMPLE_GROOVY_FILE;
@@ -24,15 +25,18 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.EXT_DIR;
 import static org.apache.hugegraph.ct.base.ClusterConstant.GREMLIN_DRIVER_SETTING_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.GREMLIN_SERVER_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.JAVA_CMD;
+import static org.apache.hugegraph.ct.base.ClusterConstant.JVM_MODULE_OPTIONS_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.LIB_DIR;
 import static org.apache.hugegraph.ct.base.ClusterConstant.LOG4J_FILE;
+import static org.apache.hugegraph.ct.base.ClusterConstant.LOCALHOST;
 import static org.apache.hugegraph.ct.base.ClusterConstant.PLUGINS_DIR;
 import static org.apache.hugegraph.ct.base.ClusterConstant.REMOTE_OBJECTS_SETTING_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.REMOTE_SETTING_FILE;
 import static org.apache.hugegraph.ct.base.ClusterConstant.SERVER_LIB_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.SERVER_PACKAGE_PATH;
 import static org.apache.hugegraph.ct.base.ClusterConstant.SERVER_TEMPLATE_PATH;
-import static org.apache.hugegraph.ct.base.ClusterConstant.isJava11OrHigher;
+import static org.apache.hugegraph.ct.base.ClusterConstant.isJava17OrHigher;
+import static org.apache.hugegraph.ct.base.EnvUtil.isPortOpen;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -46,16 +50,37 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import org.apache.hugegraph.ct.config.GremlinServerConfig;
+
 public class ServerNodeWrapper extends AbstractNodeWrapper {
 
     private static List<String> hgJars = loadHgJarsOnce();
+    private final int restPort;
+    private final int gremlinPort;
+
     public ServerNodeWrapper(int clusterIndex, int index) {
+        this(clusterIndex, index, -1, -1);
+    }
+
+    public ServerNodeWrapper(int clusterIndex, int index, int restPort) {
+        this(clusterIndex, index, restPort, -1);
+    }
+
+    public ServerNodeWrapper(int clusterIndex, int index, int restPort,
+                             int gremlinPort) {
         super(clusterIndex, index);
+        this.restPort = restPort;
+        this.gremlinPort = gremlinPort;
         this.fileNames = new ArrayList<>(
                 List.of(LOG4J_FILE, GREMLIN_SERVER_FILE, GREMLIN_DRIVER_SETTING_FILE,
                         REMOTE_SETTING_FILE, REMOTE_OBJECTS_SETTING_FILE));
         this.workPath = SERVER_LIB_PATH;
         createNodeDir(Paths.get(SERVER_TEMPLATE_PATH), getNodePath() + CONF_DIR + File.separator);
+        if (this.gremlinPort >= 0) {
+            GremlinServerConfig.update(
+                    Paths.get(getNodePath(), CONF_DIR, GREMLIN_SERVER_FILE),
+                    LOCALHOST, this.gremlinPort);
+        }
         this.fileNames = new ArrayList<>(List.of(EMPTY_SAMPLE_GROOVY_FILE, EXAMPLE_GROOVY_FILE));
         this.startLine = "INFO: [HttpServer] Started.";
         createNodeDir(Paths.get(SERVER_PACKAGE_PATH), getNodePath());
@@ -111,8 +136,8 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
             File stdoutFile = new File(getLogPath());
             List<String> startCmd = new ArrayList<>();
             startCmd.add(JAVA_CMD);
-            if (!isJava11OrHigher()) {
-                LOG.error("Please make sure that the JDK is installed and the version >= 11");
+            if (!isJava17OrHigher()) {
+                LOG.error("Please make sure that the JDK is installed and the version >= 17");
                 return;
             }
 
@@ -124,9 +149,8 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
 
             startCmd.addAll(Arrays.asList(
                     "-Dname=HugeGraphServer" + this.index,
-                    "--add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED",
-                    "--add-modules=jdk.unsupported",
-                    "--add-exports=java.base/sun.nio.ch=ALL-UNNAMED",
+                    "@" + Paths.get(SERVER_PACKAGE_PATH, BIN_DIR,
+                                    JVM_MODULE_OPTIONS_FILE),
                     "-cp", storeClassPath,
                     "org.apache.hugegraph.dist.HugeGraphServer",
                     "./conf/gremlin-server.yaml",
@@ -136,6 +160,14 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
         } catch (IOException ex) {
             throw new AssertionError("Started server node failed. " + ex);
         }
+    }
+
+    @Override
+    public boolean isStarted() {
+        return super.isStarted() &&
+               (this.restPort < 0 || isPortOpen(LOCALHOST, this.restPort)) &&
+               (this.gremlinPort < 0 ||
+                isPortOpen(LOCALHOST, this.gremlinPort));
     }
 
     @Override

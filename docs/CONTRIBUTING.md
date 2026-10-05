@@ -16,7 +16,7 @@ Report reproducible bugs and proposed features through [GitHub issues](https://g
 
 ## Build and validate
 
-Use Java 11+ and Maven 3.5+. Compiler settings and project versions are defined in
+Use Java 17 and Maven 3.6.3+. Compiler settings and project versions are defined in
 [pom.xml](../pom.xml); module guidance describes test profiles and service prerequisites.
 Run commands from the repository root.
 

@@ -72,13 +72,11 @@ public class SerializerFactory {
                                        "AbstractSerializer: '%s'", classPath);
         }
 
-        // Check exists
-        if (serializers.containsKey(name)) {
+        // Register atomically: identical re-registration is a no-op
+        Class<?> registered = serializers.putIfAbsent(name, (Class) clazz);
+        if (registered != null && !registered.equals(clazz)) {
             throw new BackendException("Exists serializer: %s(Class '%s')",
-                                       name, serializers.get(name).getName());
+                                       name, registered.getName());
         }
-
-        // Register class
-        serializers.put(name, (Class) clazz);
     }
 }

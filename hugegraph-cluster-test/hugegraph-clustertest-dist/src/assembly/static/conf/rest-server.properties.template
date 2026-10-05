@@ -19,7 +19,7 @@
 # could use '0.0.0.0' or specified (real)IP to expose external network access
 restserver.url=http://$REST_SERVER_ADDRESS$
 # gremlin server url, need to be consistent with host and port in gremlin-server.yaml
-#gremlinserver.url=http://$REST_SERVER_ADDRESS$
+gremlinserver.url=http://$GREMLIN_SERVER_ADDRESS$
 
 graphs=./conf/graphs
 
@@ -39,6 +39,7 @@ arthas.disabled_commands=jad
 auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator
 # true if using hstore mode
 usePD=true
+pd.peers=$PD_PEERS_LIST$
 
 # default password
 auth.admin_pa=pa

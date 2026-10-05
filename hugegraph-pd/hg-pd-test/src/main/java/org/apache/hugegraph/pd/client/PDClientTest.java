@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.tinkerpop.shaded.minlog.Log;
+import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -323,14 +323,12 @@ public class PDClientTest extends BaseClientTest {
     @Test
     public void testSplitData() {
         try {
-            Metapb.PDConfig config = pdClient.getPDConfig();
-            pdClient.setPDConfig(config.toBuilder()
-                                       .setMaxShardsPerStore(12)
-                                       .build());
-            System.out.println(pdClient.getPDConfig());
             pdClient.splitData();
+            Assert.fail("Expected splitData() to reject an unready cluster");
         } catch (PDException e) {
-            Log.error("testSplitData", e);
+            Assert.assertEquals(
+                    Pdpb.ErrorType.Cluster_State_Forbid_Splitting_VALUE,
+                    e.getErrorCode());
         }
     }
 

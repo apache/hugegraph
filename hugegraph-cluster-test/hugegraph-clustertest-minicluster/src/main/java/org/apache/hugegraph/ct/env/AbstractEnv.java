@@ -21,6 +21,7 @@ import static org.apache.hugegraph.ct.base.ClusterConstant.CONF_DIR;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.ct.base.HGTestLogger;
 import org.apache.hugegraph.ct.config.ClusterConfig;
@@ -28,6 +29,7 @@ import org.apache.hugegraph.ct.config.GraphConfig;
 import org.apache.hugegraph.ct.config.PDConfig;
 import org.apache.hugegraph.ct.config.ServerConfig;
 import org.apache.hugegraph.ct.config.StoreConfig;
+import org.apache.hugegraph.ct.node.AbstractNodeWrapper;
 import org.apache.hugegraph.ct.node.PDNodeWrapper;
 import org.apache.hugegraph.ct.node.ServerNodeWrapper;
 import org.apache.hugegraph.ct.node.StoreNodeWrapper;
@@ -40,6 +42,8 @@ import lombok.extern.slf4j.Slf4j;
 public abstract class AbstractEnv implements BaseEnv {
 
     private static final Logger LOG = HGTestLogger.ENV_LOG;
+    private static final int NODE_START_TIMEOUT_SECONDS = 120;
+    private static final int NODE_START_POLL_MILLIS = 1000;
 
     protected ClusterConfig clusterConfig;
     protected List<PDNodeWrapper> pdNodeWrappers;
@@ -71,9 +75,12 @@ public abstract class AbstractEnv implements BaseEnv {
         }
 
         for (int i = 0; i < serverCnt; i++) {
-            ServerNodeWrapper serverNodeWrapper = new ServerNodeWrapper(cluster_id, i);
-            serverNodeWrappers.add(serverNodeWrapper);
             ServerConfig serverConfig = clusterConfig.getServerConfig(i);
+            ServerNodeWrapper serverNodeWrapper =
+                    new ServerNodeWrapper(cluster_id, i,
+                                          serverConfig.getRestPort(),
+                                          serverConfig.getGremlinPort());
+            serverNodeWrappers.add(serverNodeWrapper);
             serverConfig.setServerID(serverNodeWrapper.getID());
             GraphConfig graphConfig = clusterConfig.getGraphConfig(i);
             if (i == 0) {
@@ -88,34 +95,54 @@ public abstract class AbstractEnv implements BaseEnv {
 
     public void startCluster() {
         for (PDNodeWrapper pdNodeWrapper : pdNodeWrappers) {
-            pdNodeWrapper.start();
-            while (!pdNodeWrapper.isStarted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            startNode(pdNodeWrapper);
         }
         for (StoreNodeWrapper storeNodeWrapper : storeNodeWrappers) {
-            storeNodeWrapper.start();
-            while (!storeNodeWrapper.isStarted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+            startNode(storeNodeWrapper);
         }
         for (ServerNodeWrapper serverNodeWrapper : serverNodeWrappers) {
-            serverNodeWrapper.start();
-            while (!serverNodeWrapper.isStarted()) {
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+            startNode(serverNodeWrapper);
+        }
+    }
+
+    private void startNode(AbstractNodeWrapper nodeWrapper) {
+        System.out.printf("[cluster-test] starting %s in %s%n",
+                          nodeWrapper.getID(), nodeWrapper.getNodePath());
+        nodeWrapper.start();
+        waitUntilStarted(nodeWrapper);
+    }
+
+    private static void waitUntilStarted(AbstractNodeWrapper nodeWrapper) {
+        long deadline = System.nanoTime() +
+                        TimeUnit.SECONDS.toNanos(NODE_START_TIMEOUT_SECONDS);
+        while (System.nanoTime() < deadline) {
+            if (!nodeWrapper.isAlive()) {
+                nodeWrapper.dumpLog();
+                throw new AssertionError(String.format(
+                        "%s failed to start, process status: %s",
+                        nodeWrapper.getID(), nodeWrapper.processStatus()));
             }
+            if (nodeWrapper.isStarted()) {
+                System.out.printf("[cluster-test] %s started%n",
+                                  nodeWrapper.getID());
+                return;
+            }
+            sleepBeforeRetry();
+        }
+
+        nodeWrapper.dumpLog();
+        throw new AssertionError(String.format(
+                "%s did not start within %s seconds, process status: %s",
+                nodeWrapper.getID(), NODE_START_TIMEOUT_SECONDS,
+                nodeWrapper.processStatus()));
+    }
+
+    private static void sleepBeforeRetry() {
+        try {
+            TimeUnit.MILLISECONDS.sleep(NODE_START_POLL_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting node start", e);
         }
     }
 
@@ -128,6 +155,22 @@ public abstract class AbstractEnv implements BaseEnv {
         }
         for (PDNodeWrapper pdNodeWrapper : pdNodeWrappers) {
             pdNodeWrapper.stop();
+        }
+    }
+
+    public void dumpClusterStatus() {
+        System.out.println("===== cluster node diagnostics =====");
+        dumpNodeStatus(pdNodeWrappers);
+        dumpNodeStatus(storeNodeWrappers);
+        dumpNodeStatus(serverNodeWrappers);
+    }
+
+    private static void dumpNodeStatus(
+            List<? extends AbstractNodeWrapper> nodeWrappers) {
+        for (AbstractNodeWrapper nodeWrapper : nodeWrappers) {
+            System.out.printf("[cluster-test] %s process status: %s%n",
+                              nodeWrapper.getID(), nodeWrapper.processStatus());
+            nodeWrapper.dumpLog();
         }
     }
 

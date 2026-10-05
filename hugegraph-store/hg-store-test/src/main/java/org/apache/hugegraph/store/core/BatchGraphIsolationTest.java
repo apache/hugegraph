@@ -63,6 +63,7 @@ public class BatchGraphIsolationTest {
 
     private static final int PARTITION_ID = 0;
     private static final int EMPTY_PARTITION_ID = 1;
+    private static final int ALLOCATION_PARTITION_ID = 2;
     private static final int KEY_CODE = 0;
     private static final int EMPTY_PARTITION_KEY_CODE = 32768;
     private static final byte[] SHARED_KEY =
@@ -86,7 +87,7 @@ public class BatchGraphIsolationTest {
 
         HgStoreEngineOptions.FakePdOptions fakePdOptions =
                 new HgStoreEngineOptions.FakePdOptions();
-        fakePdOptions.setPartitionCount(2);
+        fakePdOptions.setPartitionCount(3);
         fakePdOptions.setPeersList("127.0.0.1");
         fakePdOptions.setStoreList("127.0.0.1");
         options.setFakePdOptions(fakePdOptions);
@@ -101,7 +102,8 @@ public class BatchGraphIsolationTest {
 
             @Override
             public boolean hasPartition(String graphName, int partitionId) {
-                return partitionId == PARTITION_ID || partitionId == EMPTY_PARTITION_ID;
+                return partitionId == PARTITION_ID || partitionId == EMPTY_PARTITION_ID ||
+                       partitionId == ALLOCATION_PARTITION_ID;
             }
 
             @Override
@@ -121,6 +123,18 @@ public class BatchGraphIsolationTest {
         if (databasePath != null) {
             UnitTestBase.deleteDir(databasePath.toFile());
         }
+    }
+
+    @Test
+    public void testGraphIdAllocationDoesNotCreateVertexTable() {
+        String graph = "graph-id-allocation";
+
+        Assert.assertFalse(handler.existsTable(graph, ALLOCATION_PARTITION_ID, VERTEX_TABLE));
+
+        ((BusinessHandlerImpl) handler).getKeyCreator()
+                                     .getGraphIdOrCreate(ALLOCATION_PARTITION_ID, graph);
+
+        Assert.assertFalse(handler.existsTable(graph, ALLOCATION_PARTITION_ID, VERTEX_TABLE));
     }
 
     @Test(timeout = 5000L)
