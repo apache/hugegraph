@@ -384,7 +384,7 @@ jobs:
   build-server-backends:
     name: HBase compatibility (Java ${{ matrix.JAVA_VERSION }})
     needs: [plan, java-runtime, affected-module-tests]
-    if: needs.plan.outputs.compatibility == 'true'
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
     runs-on: ubuntu-24.04
     env: *linux-server-env
     strategy:
@@ -396,7 +396,7 @@ jobs:
 
   build-server-macos-rocksdb:
     needs: [plan, affected-module-tests]
-    if: needs.plan.outputs.compatibility == 'true'
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -474,14 +474,14 @@ jobs:
     # Keep the emulated Java 17 RISC-V native-runtime signal visible while the
     # platform lane stabilizes, but do not use it as a gate yet.
     needs: [plan, affected-module-tests]
-    if: needs.plan.outputs.compatibility == 'true'
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
     uses: ./.github/workflows/riscv64-ci.yml
     permissions:
       contents: read
 
   codeql:
     needs: [plan, affected-module-tests]
-    if: vars.CI_OPTIMIZED_REQUIRED != 'true' || needs.plan.outputs.security == 'true'
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && (vars.CI_OPTIMIZED_REQUIRED != 'true' || needs.plan.outputs.security == 'true') }}
     uses: ./.github/workflows/codeql-analysis.yml
     permissions:
       contents: read

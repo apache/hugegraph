@@ -42,7 +42,7 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual({"client", "loader", "tools", "spark", "hubble"},
                          policy.select("toolchain", ["hugegraph-client/src/A.java"]))
         self.assertEqual({"loader", "hubble"}, policy.select("toolchain", ["hugegraph-loader/src/A.java"]))
-        self.assertEqual({"server", "cluster"}, policy.select("server", ["hugegraph-server/A.java"]))
+        self.assertEqual({"server", "pd", "store", "hstore", "cluster"}, policy.select("server", ["hugegraph-server/A.java"]))
 
     def test_server_backend_and_startup_dependents(self):
         selected = policy.select("server", ["hugegraph-server/hugegraph-hstore/src/test/HstoreTableTest.java"])
@@ -56,7 +56,80 @@ class PolicyTest(unittest.TestCase):
             self.assertIn("hstore", selected)
             self.assertIn("server", selected)
         self.assertEqual(set(), policy.select("server", ["hugegraph-server/hugegraph-hstore/README.md"]))
-        self.assertNotIn("hstore", policy.select("server", ["hugegraph-server/hugegraph-rocksdb/src/main/A.java"]))
+        self.assertIn("hstore", policy.select("server", ["hugegraph-server/hugegraph-rocksdb/src/main/A.java"]))
+
+    def test_audited_consumer_edges(self):
+        expected = {"server", "pd", "store", "hstore", "cluster"}
+        for path in ["hugegraph-server/hugegraph-hstore/src/A.java", "hugegraph-server/hugegraph-rocksdb/A.java"]:
+            self.assertTrue(expected.issubset(policy.select("server", [path])))
+            self.assertNotIn("helm", policy.select("server", [path]))
+        self.assertEqual(set(policy.MODULES["server"]), policy.select("server", [".github/workflows/server-ci.yml"]))
+        self.assertTrue({"commons", "docker"}.issubset(policy.select("server", [
+            "hugegraph-commons/hugegraph-common/src/main/resources/version.properties"])))
+        self.assertIn("go", policy.select("toolchain", ["hugegraph-client/assembly/travis/start-hugegraph-servers.sh"]))
+        self.assertNotIn("go", policy.select("toolchain", ["hugegraph-client/src/A.java"]))
+        self.assertNotIn("server", policy.select("server", ["hugegraph-pd/src/A.java"]))
+        self.assertTrue({"store", "docker"}.issubset(policy.select("server", [
+            "hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh"])))
+
+    def test_version_resource_follows_real_docker_consumer(self):
+        root = Path(__file__).resolve().parents[2]
+        consumer = root / ".github/workflows/docker-build-ci.yml"
+        if not consumer.exists():
+            self.skipTest("Server Docker consumer is not in the Toolchain repository")
+        resource = next(line.strip().rstrip(")") for line in consumer.read_text().splitlines()
+                        if line.strip().startswith("hugegraph-commons/") and "version.properties" in line)
+        self.assertTrue((root / resource).is_file())
+        self.assertTrue({"commons", "docker"}.issubset(policy.select("server", [resource])))
+
+    def test_external_hubble_baseline_only_affects_hubble(self):
+        a = {"server": {"sha": "release"}, "hubble": {"sha": "old"}}
+        b = {"server": {"sha": "release"}, "hubble": {"sha": "new"}}
+        self.assertEqual(policy.external_context(a, ["go"]), policy.external_context(b, ["go"]))
+        self.assertNotEqual(policy.external_context(a, ["hubble"]), policy.external_context(b, ["hubble"]))
+
+    def test_packaged_readme_content_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+            git("init", "-q")
+            git("config", "user.email", "ci@example.invalid")
+            git("config", "user.name", "CI")
+            (root / "hugegraph-hubble").mkdir()
+            readme = root / "hugegraph-hubble/README.md"
+            readme.write_text("nonempty docs")
+            git("add", ".")
+            git("commit", "-qm", "valid readme")
+            old = os.getcwd()
+            try:
+                os.chdir(root)
+                initial = policy.fingerprint("HEAD", project="toolchain")
+                readme.write_text("changed nonempty docs")
+                git("commit", "-qam", "valid docs edit")
+                self.assertEqual(initial, policy.fingerprint("HEAD", project="toolchain"))
+                for content in ["", "  \t\n"]:
+                    readme.write_text(content)
+                    git("commit", "-qam", "empty docs")
+                    self.assertNotEqual("valid", policy.packaged_readme_state("HEAD"))
+                    self.assertNotEqual(initial, policy.fingerprint("HEAD", project="toolchain"))
+                readme.write_text("nonempty")
+                readme.chmod(0o755)
+                git("add", ".")
+                git("commit", "-qm", "executable docs")
+                self.assertNotEqual("valid", policy.packaged_readme_state("HEAD"))
+                readme.unlink()
+                readme.symlink_to("missing-target")
+                git("add", ".")
+                git("commit", "-qm", "symlink docs")
+                self.assertNotEqual("valid", policy.packaged_readme_state("HEAD"))
+                readme.unlink()
+                git("add", ".")
+                git("commit", "-qm", "deleted docs")
+                self.assertEqual("missing", policy.packaged_readme_state("HEAD"))
+                self.assertNotEqual(initial, policy.fingerprint("HEAD", project="toolchain"))
+            finally:
+                os.chdir(old)
 
     def test_single_workflow_has_no_global_fanout(self):
         self.assertEqual({"hubble"}, policy.select("toolchain", [".github/workflows/hubble-ci.yml"]))
@@ -162,6 +235,145 @@ class PolicyTest(unittest.TestCase):
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "99"}):
             self.assertEqual({}, policy.find_reuse(self.plan(), fetch))
 
+    def optional_fixture(self, receipts, optional_results=None):
+        optional_results = optional_results or {}
+        def fetch(path, binary=False):
+            if "/actions/workflows/" in path:
+                return {"workflow_runs": [{"id": run_id, "head_repository": {"full_name": "alice/t"},
+                                            "head_branch": "feature", "pull_requests": [{"number": 7}]}
+                                           for run_id in sorted(receipts, reverse=True)]}
+            if "/artifacts?" in path:
+                run_id = int(path.split("/runs/")[1].split("/")[0])
+                return {"artifacts": [{"name": "ci-test-receipt", "id": run_id,
+                                       "expired": False, "size_in_bytes": 512}]}
+            if "/actions/artifacts/" in path:
+                run_id = int(path.split("/artifacts/")[1].split("/")[0])
+                data = io.BytesIO()
+                with zipfile.ZipFile(data, "w") as archive:
+                    archive.writestr("receipt.json", json.dumps(receipts[run_id]))
+                return data.getvalue()
+            if "/git/commits/" in path:
+                head = "new" if path.endswith("/merge") else "old"
+                return {"parents": [{"sha": "base"}, {"sha": head}]}
+            if "/jobs?" in path:
+                run_id = int(path.split("/runs/")[1].split("/")[0])
+                jobs = [{"name": "affected-module-tests", "id": run_id * 10, "conclusion": "success"}]
+                if run_id == 42:
+                    jobs.append({"name": "client / client-ci", "id": 123, "conclusion": "success"})
+                for index, name in enumerate(sorted(policy.optional_groups(self.plan())["security"])):
+                    result = optional_results.get(run_id, "success" if run_id == 42 else "skipped")
+                    jobs.append({"name": name, "id": run_id * 100 + index, "conclusion": result})
+                return {"jobs": jobs}
+            value = self.fetch(path)
+            if "/actions/runs/43" in path:
+                value["head_sha"] = "new"
+            return value
+        return fetch
+
+    def find_optional(self, receipts, optional_results=None):
+        plan = self.plan()
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "99"}), patch.object(
+                policy, "remote_fingerprint", side_effect=lambda *a, **k: "policy" if k.get("policy_only") else "inputs"):
+            plan["reused"] = policy.find_reuse(plan, self.optional_fixture(receipts, optional_results))
+        return plan
+
+    def test_optional_original_proof_survives_two_documentation_updates(self):
+        original = self.receipt()
+        original.update(runID=42, head="old", testedMergeSHA="oldmerge")
+        second = self.find_optional({42: original})
+        self.assertTrue(second["optionalSuccess"]["security"])
+        self.assertEqual(42, second["optionalProofs"]["security"]["runID"])
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "43"}):
+            forwarded = policy.gate(second, {"plan": {"result": "success"}}, self.fetch)
+        third = self.find_optional({43: forwarded, 42: original})
+        self.assertTrue(third["optionalSuccess"]["security"])
+        self.assertEqual(second["optionalProofs"], third["optionalProofs"])
+        self.assertEqual(second["reused"], third["reused"])
+        for result in ["failure", "cancelled", "timed_out", None]:
+            with self.subTest(result=result):
+                latest = self.find_optional({43: forwarded, 42: original}, {43: result})
+                self.assertTrue(latest["reused"])
+                self.assertFalse(latest["optionalSuccess"]["security"])
+
+    def test_newer_unverifiable_receipt_blocks_older_optional_green(self):
+        original = self.receipt()
+        original.update(runID=42, head="old", testedMergeSHA="oldmerge")
+        invalid = dict(original, runID=43, source="other/t")
+        plan = self.find_optional({43: invalid, 42: original})
+        self.assertTrue(plan["reused"])
+        self.assertFalse(plan["optionalSuccess"]["security"])
+
+    def test_server_optional_matrix_follows_project_runtime(self):
+        plan = dict(self.plan(), project="server")
+        runtime_file = Path(__file__).resolve().parents[1] / "workflows/.java-version"
+        if not runtime_file.exists():
+            self.skipTest("Server runtime configuration is not in the Toolchain repository")
+        runtime = runtime_file.read_text().strip()
+        names = policy.optional_groups(plan)["compatibility"]
+        self.assertIn(f"HBase compatibility (Java {runtime})", names)
+        self.assertEqual(4, len(names))
+        jobs = [{"name": name, "id": index, "conclusion": "success"}
+                for index, name in enumerate(sorted(names))]
+        self.assertEqual(4, len(policy.optional_jobs(jobs, names)))
+        for missing in range(len(jobs)):
+            with self.assertRaises(ValueError):
+                policy.optional_jobs(jobs[:missing] + jobs[missing + 1:], names)
+
+    def test_optional_forwarded_forgery_and_original_failure_reject(self):
+        original = self.receipt()
+        original.update(runID=42, head="old", testedMergeSHA="oldmerge")
+        second = self.find_optional({42: original})
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "43"}):
+            forwarded = policy.gate(second, {"plan": {"result": "success"}}, self.fetch)
+        for field in ["jobIDs", "jobNames", "source", "base", "inputFingerprint", "policyFingerprint", "head"]:
+            changed = json.loads(json.dumps(forwarded))
+            changed["optionalProofs"]["security"][field] = [999] if field == "jobIDs" else "forged"
+            with self.subTest(field=field):
+                latest = self.find_optional({43: changed, 42: original})
+                self.assertTrue(latest["reused"])
+                self.assertFalse(latest["optionalSuccess"]["security"])
+        latest = self.find_optional({43: forwarded, 42: original}, {42: "failure"})
+        self.assertFalse(latest["optionalSuccess"]["security"])
+
+    def test_optional_group_requires_complete_known_matrix(self):
+        plan = self.plan()
+        original = self.receipt()
+        original.update(runID=42, head="old", testedMergeSHA="oldmerge")
+        fetch = self.optional_fixture({42: original})
+        for mutation in ["missing", "unknown", "duplicate", "api-error"]:
+            def bad_fetch(path, binary=False):
+                if "/actions/runs/" in path and mutation == "api-error":
+                    raise OSError("unavailable")
+                value = fetch(path, binary)
+                if "/jobs?" in path:
+                    if mutation == "missing":
+                        value["jobs"].pop()
+                    elif mutation == "unknown":
+                        value["jobs"].append({"name": "security / Analyze (unknown)", "id": 999, "conclusion": "success"})
+                    elif mutation == "duplicate":
+                        value["jobs"].append(dict(value["jobs"][-1]))
+                return value
+            jobs = fetch("repos/apache/t/actions/runs/42/jobs?per_page=100&page=1")["jobs"]
+            if mutation != "api-error":
+                jobs = bad_fetch("repos/apache/t/actions/runs/42/jobs?per_page=100&page=1")["jobs"]
+            with patch.object(policy, "remote_fingerprint", side_effect=lambda *a, **k: "policy" if k.get("policy_only") else "inputs"):
+                self.assertEqual({}, policy.optional_proofs(plan, original, jobs, set(), bad_fetch))
+
+    def test_branch_filtered_bounded_run_pagination(self):
+        calls = []
+        def fetch(path, binary=False):
+            if "/actions/workflows/" in path:
+                calls.append(path)
+                self.assertIn("branch=feature", path)
+                if "page=1" in path:
+                    return {"workflow_runs": [{"id": n, "head_repository": {"full_name": "alice/t"},
+                                                "head_branch": "other"} for n in range(30)]}
+                return {"workflow_runs": []}
+            return self.fetch(path)
+        with patch.dict(os.environ, {"GITHUB_RUN_ID": "99"}):
+            self.assertEqual({}, policy.find_reuse(self.plan(), fetch))
+        self.assertEqual(2, len(calls))
+
     def test_tested_merge_parent_mismatch_rejects(self):
         def fetch(path):
             if "/git/commits/" in path:
@@ -242,14 +454,14 @@ class PolicyTest(unittest.TestCase):
             if args[0] == "diff":
                 return "hugegraph-client/src/A.java\nREADME.md"
             return "new"
-        with patch.object(policy, "unsafe_documentation", return_value=False), patch.object(policy, "git", side_effect=git), patch.object(policy, "fingerprint", return_value="hash"), patch.object(
+        with patch.object(policy, "packaged_readme_state", return_value="valid"), patch.object(policy, "unsafe_documentation", return_value=False), patch.object(policy, "git", side_effect=git), patch.object(policy, "fingerprint", return_value="hash"), patch.object(
                 policy, "find_reuse", return_value={m: {"runID": 42} for m in ["client", "loader", "tools", "spark", "hubble"]}):
             plan = policy.create_plan("toolchain", event, "apache/t", lambda p: live,
                                       external_inputs={"serverSHA": "immutable"})
             self.assertFalse(plan["client"])
             self.assertFalse(plan["needsFixture"])
             self.assertTrue(plan["security"])
-        with patch.object(policy, "unsafe_documentation", return_value=False), patch.object(policy, "git", side_effect=git), patch.object(policy, "fingerprint", return_value="hash"), patch.object(
+        with patch.object(policy, "packaged_readme_state", return_value="valid"), patch.object(policy, "unsafe_documentation", return_value=False), patch.object(policy, "git", side_effect=git), patch.object(policy, "fingerprint", return_value="hash"), patch.object(
                 policy, "find_reuse", return_value={}):
             plan = policy.create_plan("toolchain", event, "apache/t", lambda p: live,
                                       external_inputs={"serverSHA": "immutable"})

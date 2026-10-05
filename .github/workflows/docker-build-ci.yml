@@ -88,6 +88,23 @@ jobs:
               all(. == "docker"))
           ' /tmp/hugegraph-bake.json
 
+  deployment-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify deployment shell contracts
+        run: |
+          bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
+          bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh
+          bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-check-port.sh \
+            hugegraph-server/hugegraph-dist/src/assembly/static \
+            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
+      - name: Verify Compose contracts
+        run: bash docker/test-compose.sh render
+      - name: Run Compose auth-on smoke tests
+        run: bash docker/test-compose.sh smoke
+
   docker-build:
     runs-on: ubuntu-latest
     strategy:

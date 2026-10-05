@@ -17,6 +17,7 @@
 """Conservative CI selection and GitHub-verified test receipt reuse."""
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -39,7 +40,7 @@ PREFIXES = {
                   "hugegraph-spark-connector/": "spark", "hugegraph-hubble/": "hubble"},
 }
 WORKFLOWS = {
-    "server": {"server-ci.yml": ["server"], "commons-ci.yml": ["commons"],
+    "server": {"server-ci.yml": MODULES["server"], "commons-ci.yml": ["commons"],
                "pd-store-ci.yml": ["pd", "store", "hstore"], "cluster-test-ci.yml": ["cluster"],
                "docker-build-ci.yml": ["docker"], "helm-chart-ci.yml": ["helm"],
                "codeql-analysis.yml": [], "riscv64-ci.yml": ["server"], "check-dependencies.yml": ["dependency_license"]},
@@ -51,7 +52,7 @@ WORKFLOWS = {
 DEPENDENTS = {
     "server": {"commons": ["server", "pd", "store", "hstore", "cluster"],
                "struct": ["server", "pd", "store", "hstore", "cluster"],
-               "server": ["cluster"], "pd": ["store", "hstore", "cluster"],
+               "server": ["pd", "store", "hstore", "cluster"], "pd": ["store", "hstore", "cluster"],
                "store": ["hstore", "cluster"], "hstore": ["cluster"]},
     "toolchain": {"client": ["loader", "tools", "spark", "hubble"], "loader": ["hubble"]},
 }
@@ -105,9 +106,18 @@ def select(project, paths):
             continue
         if path.endswith(".proto"):
             return set(MODULES[project])
+        if project == "server" and path == "hugegraph-commons/hugegraph-common/src/main/resources/version.properties":
+            selected.update(["commons", "docker"])
+            continue
+        if project == "server" and path == "hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh":
+            selected.update(["store", "docker"])
+            continue
+        if project == "toolchain" and path.startswith("hugegraph-client/assembly/travis/"):
+            selected.update(["client", "go"])
+            continue
         if project == "server":
             if path.startswith("hugegraph-server/hugegraph-hstore/"):
-                selected.add("hstore")
+                selected.update(["server", "hstore"])
                 continue
             if path.startswith("hugegraph-server/hugegraph-dist/"):
                 selected.update(["server", "pd", "store", "hstore", "docker", "cluster"])
@@ -131,7 +141,26 @@ def select(project, paths):
     return selected
 
 
-def fingerprint(ref, policy=False):
+def external_context(inputs, selected):
+    context = dict(inputs or {})
+    if "hubble" not in selected:
+        context.pop("hubble", None)
+    return json.dumps(context, sort_keys=True, separators=(",", ":"))
+
+
+def packaged_readme_state(ref):
+    path = "hugegraph-hubble/README.md"
+    entry = git("ls-tree", ref, "--", path)
+    if not entry:
+        return "missing"
+    mode, kind, blob = entry.split("\t", 1)[0].split()
+    if mode != "100644" or kind != "blob":
+        return "invalid-mode:" + mode + ":" + blob
+    content = subprocess.check_output(["git", "cat-file", "blob", blob])
+    return "valid" if content.strip() else "empty:" + blob
+
+
+def fingerprint(ref, policy=False, project=None):
     """Hash blob identities, including paths; exclude only the strict prose whitelist."""
     entries = subprocess.check_output(["git", "ls-tree", "-rz", "--full-tree", ref]).split(b"\0")
     digest = hashlib.sha256()
@@ -146,10 +175,14 @@ def fingerprint(ref, policy=False):
         elif documentation(path, metadata.split(b" ", 1)[0].decode()):
             continue
         digest.update(metadata + b"\t" + name + b"\0")
+    if project == "toolchain" and not policy:
+        state = packaged_readme_state(ref)
+        if state != "valid":
+            digest.update(("required-packaged-readme:" + state).encode())
     return digest.hexdigest()
 
 
-def remote_fingerprint(repository, sha, policy_only=False, fetch=api):
+def remote_fingerprint(repository, sha, policy_only=False, fetch=api, project=None):
     tree = fetch(f"repos/{repository}/git/trees/{sha}?recursive=1")
     if tree.get("truncated"):
         raise ValueError("truncated proof tree")
@@ -165,6 +198,17 @@ def remote_fingerprint(repository, sha, policy_only=False, fetch=api):
             continue
         digest.update((entry["mode"] + " " + entry["type"] + " " + entry["sha"]
                        + "\t" + path + "\0").encode())
+    if project == "toolchain" and not policy_only:
+        entry = next((item for item in tree["tree"] if item["path"] == "hugegraph-hubble/README.md"), None)
+        state = "missing"
+        if entry:
+            if entry["mode"] != "100644" or entry["type"] != "blob":
+                state = "invalid-mode:" + entry["mode"] + ":" + entry["sha"]
+            else:
+                blob = fetch(f"repos/{repository}/git/blobs/{entry['sha']}")
+                state = "valid" if base64.b64decode(blob["content"]).strip() else "empty:" + entry["sha"]
+        if state != "valid":
+            digest.update(("required-packaged-readme:" + state).encode())
     return digest.hexdigest()
 
 
@@ -218,6 +262,29 @@ def successful_jobs(repository, run_id, suite, fetch=api):
     return sorted(job["id"] for job in matching)
 
 
+def validate_proof_run(plan, item, fetch=api):
+    run = fetch(f"repos/{plan['repository']}/actions/runs/{int(item['runID'])}")
+    if (run.get("status") != "completed"
+            or run.get("event") != "pull_request" or run.get("head_sha") != item.get("head")
+            or run.get("workflow_id") != plan["workflowID"]
+            or run.get("head_repository", {}).get("full_name") != plan["source"]
+            or run.get("head_branch") != plan["branch"]):
+        raise ValueError("proof run is not a successful trusted workflow")
+    if not proof_pr(plan, run, fetch):
+        raise ValueError("proof run lacks matching PR association")
+    merge = fetch(f"repos/{plan['repository']}/git/commits/{item['testedMergeSHA']}")
+    if [parent["sha"] for parent in merge.get("parents", [])] != [plan["base"], item["head"]]:
+        raise ValueError("tested merge parents differ")
+    actual_input = remote_fingerprint(plan["repository"], item["testedMergeSHA"], fetch=fetch, project=plan["project"])
+    if plan["project"] == "toolchain":
+        context = external_context(plan.get("externalInputs", {}), plan["selected"])
+        actual_input = hashlib.sha256((actual_input + context).encode()).hexdigest()
+    if (actual_input != plan["inputFingerprint"] or remote_fingerprint(
+            plan["repository"], item["testedMergeSHA"], policy_only=True, fetch=fetch)
+            != plan["policyFingerprint"]):
+        raise ValueError("actual tested inputs differ from claimed receipt")
+
+
 def validate_receipt(plan, receipt, fetch=api):
     for key in ["schema", "repository", "project", "pr", "source", "branch", "base", "inputFingerprint", "policyFingerprint"]:
         if receipt.get(key) != plan.get(key):
@@ -229,27 +296,8 @@ def validate_receipt(plan, receipt, fetch=api):
     verified = {}
     for suite in required:
         item = proof[suite]
-        run = fetch(f"repos/{plan['repository']}/actions/runs/{int(item['runID'])}")
-        if (run.get("status") != "completed"
-                or run.get("event") != "pull_request" or run.get("head_sha") != item.get("head")
-                or run.get("workflow_id") != plan["workflowID"]
-                or run.get("head_repository", {}).get("full_name") != plan["source"]
-                or run.get("head_branch") != plan["branch"]):
-            raise ValueError("proof run is not a successful trusted workflow")
+        validate_proof_run(plan, item, fetch)
         successful_jobs(plan["repository"], item["runID"], "affected-module-tests", fetch)
-        if not proof_pr(plan, run, fetch):
-            raise ValueError("proof run lacks matching PR association")
-        merge = fetch(f"repos/{plan['repository']}/git/commits/{item['testedMergeSHA']}")
-        if [parent["sha"] for parent in merge.get("parents", [])] != [plan["base"], item["head"]]:
-            raise ValueError("tested merge parents differ")
-        actual_input = remote_fingerprint(plan["repository"], item["testedMergeSHA"], fetch=fetch)
-        if plan["project"] == "toolchain":
-            context = json.dumps(plan.get("externalInputs", {}), sort_keys=True, separators=(",", ":"))
-            actual_input = hashlib.sha256((actual_input + context).encode()).hexdigest()
-        if (actual_input != plan["inputFingerprint"] or remote_fingerprint(
-                plan["repository"], item["testedMergeSHA"], policy_only=True, fetch=fetch)
-                != plan["policyFingerprint"]):
-            raise ValueError("actual tested inputs differ from claimed receipt")
         ids = successful_jobs(plan["repository"], item["runID"], suite, fetch)
         if ids != item.get("jobIDs"):
             raise ValueError("actual job evidence differs")
@@ -257,13 +305,94 @@ def validate_receipt(plan, receipt, fetch=api):
     return verified
 
 
+PROVENANCE = ["schema", "repository", "project", "pr", "source", "branch", "base",
+              "inputFingerprint", "policyFingerprint"]
+
+
+def optional_groups(plan):
+    if plan["project"] == "toolchain":
+        return {"security": {"security / Analyze (java)", "security / Analyze (javascript)",
+                             "security / Analyze (python)", "security / dependency-review"}}
+    runtime = (Path(__file__).resolve().parents[1] / "workflows/.java-version").read_text().strip()
+    return {"security": {"codeql / Analyze (java)"},
+            "compatibility": {f"HBase compatibility (Java {runtime})",
+                              "build-server-macos-rocksdb (macos-15-intel)",
+                              "build-server-macos-rocksdb (macos-15, -Xms512m -Xmx2g)",
+                              "build-server-riscv64 / build-server-riscv64"}}
+
+
+def optional_group_jobs(jobs, group):
+    def belongs(name):
+        if group == "security":
+            return name.startswith(("codeql /", "security /"))
+        return name.startswith(("HBase compatibility", "build-server-macos-rocksdb", "build-server-riscv64 /"))
+    return [job for job in jobs if belongs(job.get("name", ""))]
+
+
+def optional_jobs(jobs, names):
+    # Reject incomplete/duplicate matrices; proof identities must describe the full group.
+    matching = [job for job in jobs if job.get("name") in names]
+    if len(matching) != len(names) or {job["name"] for job in matching} != names:
+        raise ValueError("optional group is incomplete")
+    if any(job.get("conclusion") != "success" for job in matching):
+        raise ValueError("optional group did not succeed")
+    return sorted(matching, key=lambda job: job["name"])
+
+
+def optional_proofs(plan, receipt, jobs, blocked, fetch=api):
+    proofs = {}
+    for group, names in optional_groups(plan).items():
+        if group in blocked:
+            continue
+        try:
+            current = optional_group_jobs(jobs, group)
+            if any(job.get("name") not in names for job in current):
+                raise ValueError("unknown optional group job")
+            # Skipped wrapper jobs can forward proof. A partial or failed execution cannot.
+            executed = [job for job in current if job.get("conclusion") != "skipped"]
+            if executed:
+                matching = optional_jobs(jobs, names)
+                item = {key: receipt[key] for key in PROVENANCE}
+                item.update(runID=receipt["runID"], head=receipt["head"],
+                            testedMergeSHA=receipt["testedMergeSHA"])
+                validate_proof_run(plan, item, fetch)
+                item.update(jobIDs=[job["id"] for job in matching], jobNames=[job["name"] for job in matching])
+            else:
+                item = receipt.get("optionalProofs", {}).get(group)
+                if not item:
+                    continue
+                if any(item.get(key) != plan.get(key) for key in PROVENANCE):
+                    raise ValueError("optional provenance differs")
+                validate_proof_run(plan, item, fetch)
+                successful_jobs(plan["repository"], item["runID"], "affected-module-tests", fetch)
+                original = optional_group_jobs(
+                    pages(f"repos/{plan['repository']}/actions/runs/{item['runID']}/jobs", fetch), group)
+                if any(job.get("name") not in names for job in original):
+                    raise ValueError("unknown original optional group job")
+                matching = optional_jobs(original, names)
+                if (item.get("jobIDs") != [job["id"] for job in matching]
+                        or item.get("jobNames") != [job["name"] for job in matching]):
+                    raise ValueError("optional job evidence differs")
+            proofs[group] = item
+        except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return proofs
+
+
 def find_reuse(plan, fetch=api):
     """Receipts are uploaded by this workflow, not read from the PR tree."""
     repository = plan["repository"]
     current = fetch(f"repos/{repository}/actions/runs/{os.environ['GITHUB_RUN_ID']}")
     plan["workflowID"] = current["workflow_id"]
-    runs = fetch(f"repos/{repository}/actions/workflows/{plan['workflowID']}/runs?" + urlencode({
-        "event": "pull_request", "status": "completed", "per_page": 30}))["workflow_runs"]
+    runs = []
+    for page in range(1, 6):
+        batch = fetch(f"repos/{repository}/actions/workflows/{plan['workflowID']}/runs?" + urlencode({
+            "event": "pull_request", "status": "completed", "branch": plan["branch"],
+            "per_page": 30, "page": page}))["workflow_runs"]
+        runs.extend(batch)
+        if len(batch) < 30:
+            break
+    blocked_optional = set()
     for run in runs:
         if run["id"] == int(os.environ["GITHUB_RUN_ID"]):
             continue
@@ -295,18 +424,14 @@ def find_reuse(plan, fetch=api):
                 successful_jobs(repository, run["id"], "affected-module-tests", fetch)
                 verified = validate_receipt(plan, receipt, fetch)
                 jobs = pages(f"repos/{repository}/actions/runs/{run['id']}/jobs", fetch)
-                def good_matches(predicate, minimum=1):
-                    matching = [job for job in jobs if predicate(job.get("name", "").lower())]
-                    return len(matching) >= minimum and all(job.get("conclusion") == "success" for job in matching)
-                plan["optionalSuccess"] = {
-                    "compatibility": (good_matches(lambda n: "hbase compatibility" in n)
-                                      and good_matches(lambda n: "macos" in n, 2)
-                                      and good_matches(lambda n: "riscv64" in n)),
-                    "security": good_matches(lambda n: n.startswith(("codeql /", "security /"))),
-                }
+                plan["optionalProofs"] = optional_proofs(plan, receipt, jobs, blocked_optional, fetch)
+                plan["optionalSuccess"] = {group: group in plan["optionalProofs"]
+                                           for group in ["compatibility", "security"]}
                 return verified
             except (ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile):
                 continue
+        # Missing/unverifiable evidence from a newer same-PR run is conservative for optional lanes.
+        blocked_optional.update(optional_groups(plan))
     return {}
 
 
@@ -339,9 +464,12 @@ def create_plan(project, event, repository, fetch=api, external_inputs=None):
         selected = select(project, paths)
         if unsafe_documentation(plan["base"], paths) or unsafe_documentation(plan["testedMergeSHA"], paths):
             selected = set(MODULES[project])
-        plan["inputFingerprint"] = fingerprint(plan["testedMergeSHA"])
+        if project == "toolchain" and packaged_readme_state(plan["testedMergeSHA"]) != "valid":
+            selected = set(MODULES[project])
+        plan["selected"] = sorted(selected)
+        plan["inputFingerprint"] = fingerprint(plan["testedMergeSHA"], project=project)
         if project == "toolchain":
-            context = json.dumps(external_inputs or {}, sort_keys=True, separators=(",", ":"))
+            context = external_context(external_inputs, selected)
             plan["inputFingerprint"] = hashlib.sha256((plan["inputFingerprint"] + context).encode()).hexdigest()
         plan["policyFingerprint"] = fingerprint(plan["testedMergeSHA"], policy=True)
         plan["expected"] = suites(project, selected)
@@ -399,6 +527,7 @@ def gate(plan, results, fetch=api):
         except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
             pass
     receipt["proofs"] = proofs
+    receipt["optionalProofs"] = plan.get("optionalProofs", {})
     receipt["executed"] = executed
     receipt["reused"] = sorted(plan["reused"])
     summary = "Selection: " + plan.get("reason", "affected inputs") + "\nExecuted: " + ", ".join(executed) + "\nReused: " + ", ".join(receipt["reused"])
