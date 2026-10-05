@@ -74,7 +74,7 @@ class PolicyTest(unittest.TestCase):
 
     def test_version_resource_follows_real_docker_consumer(self):
         root = Path(__file__).resolve().parents[2]
-        consumer = root / ".github/workflows/docker-build-ci.yml"
+        consumer = root / ".github/scripts/check-docker-images.sh"
         if not consumer.exists():
             self.skipTest("Server Docker consumer is not in the Toolchain repository")
         resource = next(line.strip().rstrip(")") for line in consumer.read_text().splitlines()
@@ -412,6 +412,26 @@ class PolicyTest(unittest.TestCase):
         for result in [None, "failure", "cancelled", "skipped"]:
             with self.subTest(result=result), self.assertRaises(ValueError):
                 policy.gate(self.plan(), {"plan": {"result": "success"}, "client": {"result": result}}, self.fetch)
+
+    def test_third_party_failure_does_not_exempt_required_tests(self):
+        selected = policy.select("server", ["pom.xml"])
+        self.assertIn("dependency_license", selected)
+        expected = {"server_memory", "server_rocksdb", "commons", "pd_store", "cluster", "docker", "helm"}
+        self.assertEqual(expected, set(policy.suites("server", selected)))
+        plan = self.plan()
+        plan.update(project="server", selected=sorted(selected), expected=sorted(expected))
+        results = {suite: {"result": "success"} for suite in expected}
+        results["plan"] = {"result": "success"}
+        for result in ["failure", "cancelled", "skipped", None]:
+            results["dependency_license"] = {"result": result}
+            with self.subTest(third_party=result):
+                receipt = policy.gate(plan, results, self.fetch)
+                self.assertEqual(expected, set(receipt["executed"]))
+                self.assertNotIn("dependency_license", receipt["proofs"])
+        for result in ["failure", "cancelled", "skipped", None]:
+            results["cluster"] = {"result": result}
+            with self.subTest(cluster=result), self.assertRaisesRegex(ValueError, "cluster"):
+                policy.gate(plan, results, self.fetch)
 
     def test_gate_success_receipt_and_verified_reuse(self):
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "42"}):

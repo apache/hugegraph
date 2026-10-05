@@ -107,94 +107,28 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        dockerfile:
-          - hugegraph-pd/Dockerfile
-          - hugegraph-store/Dockerfile
-          - hugegraph-server/Dockerfile
-          - hugegraph-server/Dockerfile-hstore
-
+    timeout-minutes: 45
+    env:
+      IMAGE_TAG: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SOURCE_REVISION: ${{ github.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Build ${{ matrix.dockerfile }}
+      - name: Build and load all four PR images with a shared Maven stage
         run: |
-          # Keep the build log visible: -q would swallow Maven's output and
-          # leave only "exit code: 1" when the build stage fails.
-          docker build --progress=plain --iidfile "$RUNNER_TEMP/iid" \
-            --build-arg SOURCE_REVISION="$GITHUB_SHA" \
-            -f ${{ matrix.dockerfile }} .
-          IMAGE_ID=$(cat "$RUNNER_TEMP/iid")
-          echo "Built: $IMAGE_ID"
-          echo "IMAGE_ID=$IMAGE_ID" >> "$GITHUB_ENV"
-          HC=$(docker inspect --format='{{json .Config.Healthcheck}}' "$IMAGE_ID")
-          echo "Healthcheck: $HC"
-          [[ "$HC" != "null" ]] || { echo "ERROR: HEALTHCHECK missing in ${{ matrix.dockerfile }}"; exit 1; }
+          docker buildx create --driver docker-container --use
+          docker buildx bake --file docker/bake.hcl --progress=plain \
+            --set '*.platform=linux/amd64' \
+            pd store server-standalone server-hstore
 
-      - name: Verify Java 17 runtime in ${{ matrix.dockerfile }}
+      - name: Verify image runtime contracts
         run: |
-          JAVA_VERSION=$(docker run --rm --entrypoint java "$IMAGE_ID" -version 2>&1)
-          echo "$JAVA_VERSION"
-          grep -Eq 'version "17\.' <<< "$JAVA_VERSION" || {
-            echo "ERROR: expected a Java 17 runtime in ${{ matrix.dockerfile }}"
-            exit 1
-          }
+          bash .github/scripts/check-docker-images.sh
+          bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
 
-      - name: Test server entrypoint property mapping
-        if: matrix.dockerfile == 'hugegraph-server/Dockerfile'
-        run: bash hugegraph-server/hugegraph-dist/docker/test/test-docker-entrypoint.sh
+      - name: Verify deployment checker contracts
+        run: python3 -m unittest discover -s .github/scripts -p 'test_docker_deployment.py'
 
-      # The startup preflight needs a socket-table tool, and the base image
-      # ships none of its own.  Without one every start reports "unknown" and
-      # a duplicate start is no longer refused, so assert the image can
-      # actually answer.  Only the server images run check_port.
-      # TODO(docker-ci): this pins the probe dependency, not the behaviour it
-      # protects.  A full duplicate-start/stop check needs a booted server with
-      # a backend, which belongs with the e2e job rather than the image build.
-      - name: Port preflight can answer inside ${{ matrix.dockerfile }}
-        if: ${{ startsWith(matrix.dockerfile, 'hugegraph-server/') }}
-        run: |
-          STATE=$(docker run --rm "$IMAGE_ID" bash -c \
-            'source /hugegraph-server/bin/util.sh && port_listen_state 8080')
-          echo "port_listen_state 8080 -> $STATE"
-          # Assert a positive answer rather than "not unknown": an empty $STATE
-          # would otherwise satisfy the check.  The step's default `bash -e`
-          # already aborts on a failed `docker run`, so this only states intent.
-          [[ "$STATE" == "free" || "$STATE" == "busy" ]] || {
-            echo "ERROR: no usable socket-table tool (ss/netstat) in ${{ matrix.dockerfile }}"
-            exit 1
-          }
-
-      - name: Server image API versions match source
-        if: ${{ startsWith(matrix.dockerfile, 'hugegraph-server/') }}
-        run: |
-          CHECK_DIR=$(mktemp -d)
-          trap 'rm -rf "$CHECK_DIR"' EXIT
-          docker run --rm --entrypoint bash \
-            -v "$CHECK_DIR:/check" "$IMAGE_ID" -c \
-            'cp /hugegraph-server/lib/hugegraph-api-*.jar \
-                /hugegraph-server/lib/hugegraph-common-*.jar /check/'
-
-          API_JAR=$(find "$CHECK_DIR" -name 'hugegraph-api-*.jar' -print -quit)
-          COMMON_JAR=$(find "$CHECK_DIR" -name 'hugegraph-common-*.jar' -print -quit)
-          EXPECTED_MANIFEST=$(sed -n \
-            's|.*<Implementation-Version>\([^<]*\)</Implementation-Version>.*|\1|p' \
-            hugegraph-server/hugegraph-api/pom.xml)
-          ACTUAL_MANIFEST=$(unzip -p "$API_JAR" META-INF/MANIFEST.MF |
-            sed -n 's/^Implementation-Version: *//p' | tr -d '\r')
-          EXPECTED_PROPERTY=$(sed -n 's/^ApiVersion=//p' \
-            hugegraph-commons/hugegraph-common/src/main/resources/version.properties)
-          ACTUAL_PROPERTY=$(unzip -p "$COMMON_JAR" version.properties |
-            sed -n 's/^ApiVersion=//p' | tr -d '\r')
-
-          [[ "$ACTUAL_MANIFEST" == "$EXPECTED_MANIFEST" ]] || {
-            echo "ERROR: API manifest is $ACTUAL_MANIFEST; expected $EXPECTED_MANIFEST"
-            exit 1
-          }
-          [[ "$ACTUAL_PROPERTY" == "$EXPECTED_PROPERTY" ]] || {
-            echo "ERROR: API property is $ACTUAL_PROPERTY; expected $EXPECTED_PROPERTY"
-            exit 1
-          }
+      - name: Start the exact PR images and verify health and authentication
+        run: python3 .github/scripts/docker-deployment.py "$IMAGE_TAG"

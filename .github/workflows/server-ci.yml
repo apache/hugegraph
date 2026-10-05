@@ -325,7 +325,7 @@ jobs:
 
   affected-module-tests:
     name: affected-module-tests
-    needs: [plan, java-runtime, wait-storage-shell-test, build-server, server-rocksdb, commons, pd_store, cluster, docker, helm, dependency_license]
+    needs: [plan, java-runtime, wait-storage-shell-test, build-server, server-rocksdb, commons, pd_store, cluster, docker, helm]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:

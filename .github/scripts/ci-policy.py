@@ -235,7 +235,8 @@ def suites(project, selected):
     result = []
     if "server" in selected:
         result.extend(["server_memory", "server_rocksdb"])
-    for module in ["commons", "cluster", "docker", "helm", "dependency_license"]:
+    # Third-party inventory/review remains visible without becoming a merge gate.
+    for module in ["commons", "cluster", "docker", "helm"]:
         if module in selected:
             result.append(module)
     if selected.intersection({"pd", "store", "hstore", "struct"}):

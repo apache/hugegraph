@@ -1,7 +1,7 @@
 # CI policy
 
 Pull requests and supported branch pushes enter `HugeGraph-Server CI`. The workflow
-always reports `affected-module-tests`; license checks run independently. Module
+always reports `affected-module-tests`; the required `check-license` runs independently. Module
 workflows are reusable and can also be started manually.
 
 | Changed inputs | Required Linux coverage |
@@ -19,6 +19,21 @@ workflows are reusable and can also be started manually.
 The selector follows dependency edges. PD, Store, HStore and Struct share one suite
 in this first stage. Selected tests must succeed; failure, cancellation or an
 unexpected skip cannot satisfy the gate. Startup prerequisites are enforced.
+
+Third-party dependency inventory and vulnerability review retain their existing
+non-blocking policy. They run when selected, but are excluded from the core gate
+and test-reuse receipts. Their failure does not prevent affected module tests or
+post-gate checks from reporting results; the required license check is unchanged.
+
+The Docker suite builds and loads the four production images from the current
+checkout on one Linux runner, sharing their Maven build through BuildKit Bake.
+It verifies image healthcheck and Java contracts, then starts standalone Server
+and the PD/Store/Server topology with unique run tags and pulling disabled.
+Runtime checks match each container's image ID to the build, require healthy
+services and validate Server version and authenticated graph-list responses.
+PD must report readiness and a registered Store; unauthenticated graph and PD
+metadata access must be rejected. The existing Hubble Compose smoke
+remains a separate compatibility check; it does not verify the new PR images.
 
 HBase, macOS, RISC-V and CodeQL run after the core gate. Their results remain visible,
 but they are outside `affected-module-tests`. Post-gate conditions explicitly
