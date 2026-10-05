@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Stage 1: build the thin hugegraph-ranger-plugin jar
+FROM --platform=$BUILDPLATFORM maven:3.9.0-eclipse-temurin-11 AS build
+
+WORKDIR /pkg
+
+COPY . .
+
+# This also produces the shaded "-plugin" artifact (~520 MB, mostly the audit
+# backends ranger-plugins-audit requires: Solr, Elasticsearch, Kafka and the AWS
+# SDK). That one is for HugeGraph's own lib/ and is NOT copied below: Ranger
+# Admin already has ranger-plugins-common, gson and slf4j on its classpath, so
+# only the thin jar is needed here.
+#
+# -Dwith-ranger-plugin is required, not optional: the plugin is an opt-in module,
+# declared under that profile in hugegraph-server/pom.xml. Without the flag the
+# module is not in the reactor and -pl fails with
+# "Could not find the selected project in the reactor".
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn package -pl hugegraph-server/hugegraph-ranger-plugin -am -e -B -ntp \
+        -Dwith-ranger-plugin \
+        -Dmaven.test.skip=true \
+        -Dmaven.javadoc.skip=true \
+        -Drat.skip=true \
+        -Dcheckstyle.skip=true
+
+# Stage 2: bake the service class into the stock Ranger Admin image
+#
+# Must stay in step with the ranger.version property in
+# hugegraph-server/hugegraph-ranger-plugin/pom.xml, which decides the
+# ranger-plugins-common version the jar is compiled against.
+FROM apache/ranger:2.4.0
+
+LABEL maintainer="HugeGraph Docker Maintainers <dev@hugegraph.apache.org>"
+
+# Ranger Admin loads the service definition's implClass
+# (org.apache.hugegraph.ranger.RangerHugeGraphService, see
+# ranger-servicedef-hugegraph.json) from ranger-plugins/<service-type>/, where
+# <service-type> is the service def name "hugegraph". That directory is scanned
+# once at JVM startup, so baking the jar in is what makes "Test Connection" and
+# the policy editor's resource autocomplete work on a plain `docker compose up`
+# — no copy-into-the-container-and-restart dance.
+#
+# The /opt/ranger/admin symlink is used instead of the versioned
+# ranger-<version>-admin directory so this path survives a base image bump.
+#
+# The base image's bundled Java 8 is sufficient: hugegraph-ranger-plugin sets
+# maven.compiler.target=8 in its POM, so the jar is class file version 52.
+ARG HUGEGRAPH_VERSION=1.7.0
+ARG PLUGIN_DIR=/opt/ranger/admin/ews/webapp/WEB-INF/classes/ranger-plugins/hugegraph
+
+RUN mkdir -p ${PLUGIN_DIR}
+
+COPY --from=build --chown=ranger:ranger \
+    /pkg/hugegraph-server/hugegraph-ranger-plugin/target/hugegraph-ranger-plugin-${HUGEGRAPH_VERSION}.jar \
+    ${PLUGIN_DIR}/hugegraph-ranger-plugin.jar

@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<!--
+  ranger-hugegraph-security.xml
+  ==============================
+  Ranger client configuration for the HugeGraph service plugin.
+  Copy to /etc/ranger/hugegraph/ and adjust the values below.
+  Reference this file via rest-server.properties:
+      auth.ranger.config=/etc/ranger/hugegraph/ranger-hugegraph-security.xml
+-->
+<configuration>
+
+    <!-- Ranger Admin URL -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.rest.url</name>
+        <value>http://ranger-admin-host:6080</value>
+        <description>URL of the Ranger Admin server</description>
+    </property>
+
+    <!-- Ranger service name (must match the service created in Ranger Admin) -->
+    <property>
+        <name>ranger.plugin.hugegraph.service.name</name>
+        <value>hugegraph</value>
+    </property>
+
+    <!-- Policy refresh interval in milliseconds -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.pollIntervalMs</name>
+        <value>30000</value>
+    </property>
+
+    <!-- Local policy cache directory -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.cache.dir</name>
+        <value>/tmp/ranger/cache/hugegraph</value>
+    </property>
+
+    <!-- Policy source implementation (pull from Ranger Admin) -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.source.impl</name>
+        <value>org.apache.ranger.admin.client.RangerAdminRESTClient</value>
+    </property>
+
+    <!-- Audit to Solr (optional) -->
+    <property>
+        <name>xasecure.audit.is.enabled</name>
+        <value>true</value>
+    </property>
+    <property>
+        <name>xasecure.audit.solr.is.enabled</name>
+        <value>false</value>
+    </property>
+
+    <!-- Audit to HDFS (optional) -->
+    <property>
+        <name>xasecure.audit.hdfs.is.enabled</name>
+        <value>false</value>
+    </property>
+
+    <!-- SSL for Ranger Admin communication (optional) -->
+    <property>
+        <name>ranger.plugin.hugegraph.policy.rest.ssl.config.file</name>
+        <value />
+    </property>
+
+</configuration>

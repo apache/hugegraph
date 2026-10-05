@@ -202,8 +202,9 @@ public class StandardAuthenticator implements HugeAuthenticator {
         config.addProperty(INITING_STORE, true);
         auth.setup(config);
         if (auth.graph().backendStoreFeatures().supportsPersistence()) {
-            auth.initAdminUser();
+            auth.initAdminUser(config.get(ServerOptions.ADMIN_PA));
         }
+        auth.graph().close();
     }
 
     private class TokenSaslAuthenticator implements SaslNegotiator {

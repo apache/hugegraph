@@ -103,6 +103,24 @@ public class ResourceObject<V> {
         return this.graphSpace;
     }
 
+    /**
+     * Extract the real label/name being accessed, mirroring the logic used by
+     * {@code HugeAuthenticator.RolePerm.matchResource()} for local matching:
+     * schema elements match by name, graph elements (vertex/edge) by label,
+     * anything else has no meaningful label.
+     */
+    public String label() {
+        if (this.type.isSchema()) {
+            return ((Nameable) this.operated).name();
+        } else if (this.type.isGraph()) {
+            if (this.operated instanceof HugeElement) {
+                return ((HugeElement) this.operated).label();
+            }
+            return ((Nameable) this.operated).name();
+        }
+        return "*";
+    }
+
     @Override
     public String toString() {
         Object operated = this.operated;

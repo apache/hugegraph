@@ -303,6 +303,34 @@
             </properties>
         </profile>
         <profile>
+            <id>with-ranger-plugin</id>
+            <activation>
+                <property>
+                    <name>with-ranger-plugin</name>
+                </property>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.hugegraph</groupId>
+                    <artifactId>hugegraph-ranger-plugin</artifactId>
+                    <version>${revision}</version>
+                    <classifier>plugin</classifier>
+                    <!-- The "plugin" classifier is the shaded jar: it already embeds
+                         every dependency below (relocated where needed). Pulling them
+                         in again as separate jars puts two copies of relocated classes
+                         (e.g. jersey.repackaged.org.objectweb.asm.*) on the classpath
+                         at different versions, which crashes Jersey's classpath scanner
+                         at server startup. -->
+                    <exclusions>
+                        <exclusion>
+                            <groupId>*</groupId>
+                            <artifactId>*</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
             <id>assembly-hugegraph</id>
             <build>
                 <plugins>
