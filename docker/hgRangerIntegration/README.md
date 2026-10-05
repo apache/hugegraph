@@ -18,11 +18,21 @@ mvn package -pl hugegraph-server/hugegraph-dist -am -DskipTests -Dwith-ranger-pl
 ```
 
 `-Dwith-ranger-plugin` bundles the shaded `hugegraph-ranger-plugin-1.7.0-plugin.jar`
-(the one with Ranger's runtime deps, not the ~37 KB thin jar) directly into the
+(the one with Ranger's runtime deps, not the ~44 KB thin jar) directly into the
 distribution's `lib/`. There's nothing to build or mount by hand — `docker compose up`
-(Step 2 below) does it all. The flag is opt-in on `hugegraph-dist`; a plain
-`mvn package` without it omits the plugin entirely, so standalone HugeGraph builds are
-unaffected.
+(Step 2 below) does it all.
+
+That one property gates the plugin in two places, both opt-in:
+
+- `hugegraph-server/pom.xml` — declares `hugegraph-ranger-plugin` as a module, so
+  without the flag it is not in the reactor and is never compiled. This is also what
+  keeps Ranger's dependency tree out of
+  `install-dist/scripts/dependency/known-dependencies.txt` and `release-docs/LICENSE`.
+- `hugegraph-server/hugegraph-dist/pom.xml` — adds the shaded jar to the distribution.
+
+So a plain `mvn package` omits the plugin entirely and standalone HugeGraph builds are
+unaffected. The flip side: any command that selects the module with `-pl` **must** pass
+the flag too, or Maven fails with `Could not find the selected project in the reactor`.
 
 If you want to build the distribution standalone (outside Docker) — e.g. to inspect
 `lib/` or run HugeGraph directly on the host — use the same command from the repo root:
@@ -778,6 +788,7 @@ The HugeGraph Ranger plugin is configured to log audit events to a local file:
 | Policy changes not taking effect | Poll interval not elapsed | Default is 30 s; reduce `ranger.plugin.hugegraph.policy.pollIntervalMs` for testing |
 | `no service found with name[hugegraph]` when creating a policy | Service instance was never created because `implClass` blocked it | Deploy the plugin JAR per step 4b (or clear `implClass`), then redo step 4c |
 | Policy editor shows no Graph Space / Graph / Resource Type suggestions | Ranger Admin cannot call `RangerHugeGraphService.lookupResource()` — either `implClass` is empty or the plugin JAR is not on Ranger Admin's classpath | Complete step 4b and confirm the `lookupResource` curl there returns `["hugegraph"]`. Resource fields are free-text, so you can always type values manually |
+| Code changes have no effect after `docker compose up -d --build hugegraph` (old jar still running) | `Dockerfile.hugegraph` declares `VOLUME /hugegraph-server`, so the whole server dir — including `lib/` — is an anonymous volume that Compose **reuses** when it recreates the container. The rebuilt image is ignored. | Confirm with `docker exec hugegraph ls -l /hugegraph-server/lib/ \| grep ranger` and compare against the image: `docker run --rm --entrypoint sh hugegraph-ranger-local:1.7.0 -c 'ls -l lib/ \| grep ranger'`. Fix by recreating the volume: `docker compose -f docker/hgRangerIntegration/docker-compose.yml up -d --build --renew-anon-volumes hugegraph` — note this **wipes the graph data**, so re-run Steps 5-6. To keep the data, `docker cp` the new jar into `/hugegraph-server/lib/` and `docker restart hugegraph` instead |
 | Ranger Admin returns 401 | Wrong password | Ranger Admin password is `rangerR0cks!` — hardcoded in the image, not overridable via env var |
 | HugeGraph container exits immediately | Bad `rest-server.properties` mount | Run `docker logs hugegraph` and check for config parse errors |
 | Ranger Admin slow to start | DB initialisation takes time | The `start_period` is 180 s — wait up to 3 min before assuming a failure |

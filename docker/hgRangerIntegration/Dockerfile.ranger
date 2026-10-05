@@ -22,12 +22,19 @@ WORKDIR /pkg
 
 COPY . .
 
-# This also produces the shaded "-plugin" artifact (~500 MB, mostly the AWS SDK
-# that ranger-plugins-audit drags in). That one is for HugeGraph's own lib/ and
-# is NOT copied below: Ranger Admin already has ranger-plugins-common, gson and
-# slf4j on its classpath, so only the thin jar is needed here.
+# This also produces the shaded "-plugin" artifact (~520 MB, mostly the audit
+# backends ranger-plugins-audit requires: Solr, Elasticsearch, Kafka and the AWS
+# SDK). That one is for HugeGraph's own lib/ and is NOT copied below: Ranger
+# Admin already has ranger-plugins-common, gson and slf4j on its classpath, so
+# only the thin jar is needed here.
+#
+# -Dwith-ranger-plugin is required, not optional: the plugin is an opt-in module,
+# declared under that profile in hugegraph-server/pom.xml. Without the flag the
+# module is not in the reactor and -pl fails with
+# "Could not find the selected project in the reactor".
 RUN --mount=type=cache,target=/root/.m2 \
     mvn package -pl hugegraph-server/hugegraph-ranger-plugin -am -e -B -ntp \
+        -Dwith-ranger-plugin \
         -Dmaven.test.skip=true \
         -Dmaven.javadoc.skip=true \
         -Drat.skip=true \
