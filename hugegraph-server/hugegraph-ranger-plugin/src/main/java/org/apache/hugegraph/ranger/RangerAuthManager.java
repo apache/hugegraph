@@ -166,10 +166,16 @@ public class RangerAuthManager implements AuthManager {
         RolePermission enriched = mergeRangerRole(
                 role != null ? role : RolePermission.none(),
                 base.username());
-        // If the merged result has no grants at all, use ROLE_NONE so that
-        // HugeAuthenticator.verifyRole() rejects the user outright (403).
+        // No grants from either HugeGraph's own role or Ranger policy: reject the
+        // login outright rather than admitting a role with no permissions.
+        //
+        // This MUST be the HugeAuthenticator.ROLE_NONE instance, not a fresh
+        // RolePermission.none(). HugeAuthenticator.verifyRole() tests identity:
+        //     return role != ROLE_NONE && role != null;
+        // so a newly built none() is not that reference, passes verifyRole() and
+        // logs the user in with an empty role.
         if (isEffectivelyNone(enriched)) {
-            enriched = RolePermission.none();
+            enriched = HugeAuthenticator.ROLE_NONE;
         }
         return new UserWithRole(base.userId(), base.username(), enriched);
     }
