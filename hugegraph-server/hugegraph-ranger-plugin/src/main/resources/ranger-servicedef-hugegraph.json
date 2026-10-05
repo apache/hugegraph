@@ -73,7 +73,7 @@
       "level": 40,
       "parent": "resource-type",
       "mandatory": false,
-      "lookupSupported": false,
+      "lookupSupported": true,
       "recursiveSupported": false,
       "excludesSupported": true,
       "matcher": "org.apache.ranger.plugin.resourcematcher.RangerDefaultResourceMatcher",

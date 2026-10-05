@@ -100,9 +100,9 @@ public class RangerAuthManager implements AuthManager {
      */
     public UserWithRole authenticate(String username, String password,
                                      String token) {
-        UserWithRole base = (token != null && !token.isEmpty())
-                ? delegate.validateUser(token)
-                : delegate.validateUser(username, password);
+        UserWithRole base = (token != null && !token.isEmpty()) ?
+                            delegate.validateUser(token) :
+                            delegate.validateUser(username, password);
         return enrichWithRanger(base);
     }
 
@@ -125,9 +125,9 @@ public class RangerAuthManager implements AuthManager {
         if (RolePermission.isAdmin(base)) {
             return base;
         }
-        String name = (element instanceof HugeUser)
-                ? ((HugeUser) element).name()
-                : element.id().asString();
+        String name = (element instanceof HugeUser) ?
+                      ((HugeUser) element).name() :
+                      element.id().asString();
         // admin is a trusted bootstrap identity (same bypass as
         // HugeGraphAuthProxy.verifyResPermission() and
         // RangerHugeGraphAuthenticator.authenticate()) — no Ranger policy is
@@ -206,11 +206,9 @@ public class RangerAuthManager implements AuthManager {
         // exact key lookup for requiredResource.graphSpace(), which is "DEFAULT".
         StringBuilder sb = new StringBuilder("{\"roles\":{\"DEFAULT\":{\"*\":{");
         boolean first = true;
-        for (HugePermission perm : new HugePermission[]{
-                HugePermission.READ,
-                HugePermission.WRITE,
-                HugePermission.DELETE,
-                HugePermission.EXECUTE}) {
+        HugePermission[] probedPerms = {HugePermission.READ, HugePermission.WRITE,
+                                        HugePermission.DELETE, HugePermission.EXECUTE};
+        for (HugePermission perm : probedPerms) {
             if (rangerPlugin.isAllowed(username, "*", "*",
                                        ResourceType.ALL, "*", perm)) {
                 if (!first) {
@@ -247,8 +245,12 @@ public class RangerAuthManager implements AuthManager {
      */
     private static RolePermission mergeViaJson(RolePermission a,
                                                RolePermission b) {
-        if (a == null) a = RolePermission.none();
-        if (b == null) b = RolePermission.none();
+        if (a == null) {
+            a = RolePermission.none();
+        }
+        if (b == null) {
+            b = RolePermission.none();
+        }
         if (RolePermission.isAdmin(a) || RolePermission.isAdmin(b)) {
             return RolePermission.admin();
         }

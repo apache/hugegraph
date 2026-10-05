@@ -28,7 +28,6 @@ import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.ServerOptions;
-import org.apache.hugegraph.masterelection.RoleElectionOptions;
 import org.apache.hugegraph.rpc.RpcClientProviderWithAuth;
 import org.apache.hugegraph.util.ConfigUtil;
 import org.apache.hugegraph.util.E;
@@ -82,7 +81,6 @@ public class RangerHugeGraphAuthenticator implements HugeAuthenticator {
         }
         String raftGroupPeers = config.get(ServerOptions.RAFT_GROUP_PEERS);
         graphConfig.addProperty(ServerOptions.RAFT_GROUP_PEERS.name(), raftGroupPeers);
-        transferRoleWorkerConfig(graphConfig, config);
 
         this.graph = (HugeGraph) GraphFactory.open(graphConfig);
 
@@ -94,12 +92,12 @@ public class RangerHugeGraphAuthenticator implements HugeAuthenticator {
         }
 
         // --- wrap the standard AuthManager with a Ranger policy enforcer ---
-        String serviceName = config.getProperty(RangerOptions.RANGER_SERVICE_NAME) != null
-                ? (String) config.getProperty(RangerOptions.RANGER_SERVICE_NAME)
-                : RangerOptions.DEFAULT_SERVICE_NAME;
-        String rangerConfigFile = config.getProperty(RangerOptions.RANGER_CONFIG_FILE) != null
-                ? (String) config.getProperty(RangerOptions.RANGER_CONFIG_FILE)
-                : null;
+        String serviceName = config.getProperty(RangerOptions.RANGER_SERVICE_NAME) != null ?
+                             (String) config.getProperty(RangerOptions.RANGER_SERVICE_NAME) :
+                             RangerOptions.DEFAULT_SERVICE_NAME;
+        String rangerConfigFile = config.getProperty(RangerOptions.RANGER_CONFIG_FILE) != null ?
+                                  (String) config.getProperty(RangerOptions.RANGER_CONFIG_FILE) :
+                                  null;
 
         // graph.authManager() here returns AuthManagerProxy(StandardAuthManager).
         // We capture it as the delegate for RangerAuthManager. We do NOT call
@@ -177,28 +175,6 @@ public class RangerHugeGraphAuthenticator implements HugeAuthenticator {
     @Override
     public SaslNegotiator newSaslNegotiator(InetAddress remoteAddress) {
         return new PlainSaslNegotiator();
-    }
-
-    private void transferRoleWorkerConfig(HugeConfig graphConfig,
-                                          HugeConfig serverConfig) {
-        graphConfig.addProperty(
-                RoleElectionOptions.NODE_EXTERNAL_URL.name(),
-                serverConfig.get(ServerOptions.REST_SERVER_URL));
-        graphConfig.addProperty(
-                RoleElectionOptions.BASE_TIMEOUT_MILLISECOND.name(),
-                serverConfig.get(RoleElectionOptions.BASE_TIMEOUT_MILLISECOND));
-        graphConfig.addProperty(
-                RoleElectionOptions.EXCEEDS_FAIL_COUNT.name(),
-                serverConfig.get(RoleElectionOptions.EXCEEDS_FAIL_COUNT));
-        graphConfig.addProperty(
-                RoleElectionOptions.RANDOM_TIMEOUT_MILLISECOND.name(),
-                serverConfig.get(RoleElectionOptions.RANDOM_TIMEOUT_MILLISECOND));
-        graphConfig.addProperty(
-                RoleElectionOptions.HEARTBEAT_INTERVAL_SECOND.name(),
-                serverConfig.get(RoleElectionOptions.HEARTBEAT_INTERVAL_SECOND));
-        graphConfig.addProperty(
-                RoleElectionOptions.MASTER_DEAD_TIMES.name(),
-                serverConfig.get(RoleElectionOptions.MASTER_DEAD_TIMES));
     }
 
     // -------------------------------------------------------------------------

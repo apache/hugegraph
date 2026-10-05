@@ -49,7 +49,14 @@ services:
       retries: 10
 
   ranger:
-    image: apache/ranger:2.4.0
+    # Built from the stock apache/ranger:2.4.0 image with the thin
+    # hugegraph-ranger-plugin jar baked onto Ranger Admin's classpath, so the
+    # policy editor's resource autocomplete and "Test Connection" work out of
+    # the box. See Dockerfile.ranger.
+    build:
+      context: ../..
+      dockerfile: docker/hgRangerIntegration/Dockerfile.ranger
+    image: ranger-hugegraph-local:2.4.0
     container_name: ranger
     depends_on:
       ranger-db:
