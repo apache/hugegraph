@@ -1,18 +1,11 @@
 name: "HugeGraph-Commons CI"
 
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-      - 'release-*'
-      - 'test-*'
-  pull_request:
 
-# Keep the newest PR run; preserve independent push, release and manual runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
 
 jobs:
   java-runtime:

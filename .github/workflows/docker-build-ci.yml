@@ -18,36 +18,11 @@
 name: "Docker Build CI"
 
 on:
-  push:
-    branches:
-      - master
-      - 'release-*'
-  pull_request:
-    # Keep source/resources and shared build inputs; skip named documentation files.
-    paths:
-      - 'pom.xml'
-      - '.mvn/**'
-      - 'style/**'
-      - '.editorconfig'
-      - '.github/configs/**'
-      - 'hugegraph-commons/**'
-      - 'hugegraph-struct/**'
-      - 'hugegraph-pd/**'
-      - 'hugegraph-store/**'
-      - 'hugegraph-server/**'
-      - 'hugegraph-cluster-test/**'
-      - 'install-dist/**'
-      - 'docker/**'
-      - '.dockerignore'
-      - '.github/workflows/docker-build-ci.yml'
-      - '!**/README*'
-      - '!**/AGENTS.md'
-      - '!**/CLAUDE.md'
+  workflow_call:
+  workflow_dispatch:
 
-# Keep the newest PR run; preserve independent push, release and manual runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
 
 jobs:
   docker-bake-check:

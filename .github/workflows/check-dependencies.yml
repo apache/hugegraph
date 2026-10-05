@@ -2,30 +2,11 @@
 name: "3rd-party"
 
 on:
-  push:
-    branches:
-      - 'release-*'
-  pull_request:
-    # Keep source/resources and shared build inputs; skip named documentation files.
-    paths:
-      - '.github/workflows/.java-version'
-      - '**/pom.xml'
-      - '.mvn/**'
-      - '.github/configs/**'
-      - 'install-dist/**'
-      - '**/*.jar'
-      - '.github/workflows/check-dependencies.yml'
-      - '!**/README*'
-      - '!**/AGENTS.md'
-      - '!**/CLAUDE.md'
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
-
-# Keep the newest PR run; preserve independent push, release and manual runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   dependency-check:
@@ -64,6 +45,7 @@ jobs:
       - name: 'Checkout Repository'
         uses: actions/checkout@v7
       - name: 'Dependency Review'
+        if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v5
         # Refer: https://github.com/actions/dependency-review-action
         with:

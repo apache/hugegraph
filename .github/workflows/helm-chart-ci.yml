@@ -18,19 +18,11 @@
 name: "Helm Chart CI"
 
 on:
-  push:
-    branches: [ master, 'release-*' ]
-    paths: [ 'helm/**', '.github/workflows/helm-chart-ci.yml' ]
-  pull_request:
-    paths: [ 'helm/**', '.github/workflows/helm-chart-ci.yml' ]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
-
-# Keep the newest PR run; preserve independent push, release and manual runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint-and-render:

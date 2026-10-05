@@ -16,6 +16,9 @@
 
 """Behavioral tests for retry freshness, without credentials or network."""
 import copy
+import io
+import json
+import zipfile
 import importlib.util
 from pathlib import Path
 import unittest
@@ -33,13 +36,24 @@ class FreshnessTest(unittest.TestCase):
     def setUp(self):
         self.repository = "hugegraph/hugegraph-toolchain"
         self.run = {"status": "completed", "conclusion": "failure", "run_attempt": 1,
-                    "event": "pull_request", "head_sha": "old", "head_branch": "feature"}
-        self.pr = {"number": 7, "state": "open", "head": {"sha": "old"},
-                   "base": {"repo": {"full_name": self.repository}}}
+                    "event": "pull_request", "head_sha": "old", "head_branch": "feature",
+                    "head_repository": {"full_name": "alice/toolchain", "owner": {"login": "alice"}}}
+        self.pr = {"number": 7, "state": "open", "head": {"sha": "old", "ref": "feature", "repo": {"full_name": "alice/toolchain", "owner": {"login": "alice"}}},
+                   "base": {"sha": "base", "repo": {"full_name": self.repository}}}
         self.run["pull_requests"] = [copy.deepcopy(self.pr)]
         self.calls = []
 
-    def fetch(self, path):
+    def fetch(self, path, binary=False):
+        if "/artifacts?" in path:
+            return {"artifacts": [{"name": "ci-plan", "id": 99, "expired": False}]}
+        if "/actions/artifacts/" in path:
+            data = io.BytesIO()
+            with zipfile.ZipFile(data, "w") as archive:
+                archive.writestr("plan.json", json.dumps({"repository": self.repository, "pr": 7,
+                                                         "head": "old", "base": "base", "testedMergeSHA": "merge"}))
+            return data.getvalue()
+        if "/git/commits/" in path:
+            return {"parents": [{"sha": "base"}, {"sha": "old"}]}
         self.calls.append(path)
         if "/actions/runs/" in path:
             return self.run
@@ -47,6 +61,8 @@ class FreshnessTest(unittest.TestCase):
             return [self.pr]
         if "/commits?" in path:
             return [{"sha": self.pr["head"]["sha"]}]
+        if "/pulls?" in path:
+            return [self.pr]
         if "/pulls/" in path:
             return self.pr
         raise AssertionError(path)
@@ -85,6 +101,20 @@ class FreshnessTest(unittest.TestCase):
         self.assertEqual("rerun", self.decide())
         self.assertTrue(any("/commits/old/pulls" in p for p in self.calls))
 
+    def test_fork_empty_associations_owner_qualified_fallback(self):
+        self.run.update(pull_requests=[], head_repository={"full_name": "alice/toolchain", "owner": {"login": "alice"}})
+        self.pr["head"].update(ref="feature", repo={"full_name": "alice/toolchain", "owner": {"login": "alice"}})
+        def fetch(path, **kwargs):
+            if "/commits/old/pulls" in path:
+                return []
+            if "/pulls?" in path:
+                self.assertIn("head=alice%3Afeature", path)
+                return [self.pr]
+            return self.fetch(path, **kwargs)
+        self.assertEqual("rerun", checker.decide(self.repository, 42, 1, 2, fetch)[0])
+        self.pr["head"]["repo"]["owner"]["login"] = "bob"
+        self.assertEqual("skip", checker.decide(self.repository, 42, 1, 2, fetch)[0])
+
     def test_other_repository_pr_is_ignored(self):
         self.run["pull_requests"][0]["base"]["repo"]["full_name"] = "apache/hugegraph-toolchain"
         self.assertEqual("rerun", self.decide())
@@ -93,6 +123,24 @@ class FreshnessTest(unittest.TestCase):
     def test_foreign_pr_fallback_still_rejects_foreign_pr(self):
         self.run["pull_requests"][0]["base"]["repo"]["full_name"] = "apache/hugegraph-toolchain"
         self.pr["base"]["repo"]["full_name"] = "apache/hugegraph-toolchain"
+        self.assertEqual("skip", self.decide())
+
+    def test_same_head_moved_base_is_stale(self):
+        self.pr["base"]["sha"] = "new-base"
+        self.assertEqual("skip", self.decide())
+
+    def test_missing_immutable_plan_refuses_retry(self):
+        def fetch(path, **kwargs):
+            if "/artifacts?" in path:
+                return {"artifacts": []}
+            return self.fetch(path, **kwargs)
+        self.assertEqual("skip", checker.decide(self.repository, 42, 1, 2, fetch)[0])
+
+    def test_same_sha_other_fork_cannot_authorize_retry(self):
+        self.pr["head"]["repo"].update(full_name="bob/toolchain", owner={"login": "bob"})
+        self.assertEqual("skip", self.decide())
+        self.pr["head"]["repo"].update(full_name="alice/toolchain", owner={"login": "alice"})
+        self.pr["head"]["ref"] = "other"
         self.assertEqual("skip", self.decide())
 
     def test_changed_attempt(self):

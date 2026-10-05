@@ -7,19 +7,62 @@ on:
       - 'release-*'
       - 'test-*'
   pull_request:
+  workflow_dispatch:
 
 # Keep the newest PR run; preserve independent push, release and manual runs.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      server: ${{ steps.select.outputs.server }}
+      commons: ${{ steps.select.outputs.commons }}
+      pd_store: ${{ steps.select.outputs.pd_store }}
+      cluster: ${{ steps.select.outputs.cluster }}
+      docker: ${{ steps.select.outputs.docker }}
+      helm: ${{ steps.select.outputs.helm }}
+      dependency_license: ${{ steps.select.outputs.dependency_license }}
+      compatibility: ${{ steps.select.outputs.compatibility }}
+      security: ${{ steps.select.outputs.security }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test selection, receipts and retry policy
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+      - name: Select affected tests
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/ci-policy.py plan --project server
+          --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
+          --output plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-plan
+          path: plan.json
+          retention-days: 7
+          overwrite: true
+
   java-runtime:
     uses: ./.github/workflows/java-runtime.yml
     permissions:
       contents: read
 
   wait-storage-shell-test:
+    name: server_memory / startup contracts
+    needs: plan
+    if: needs.plan.outputs.server == 'true'
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -40,8 +83,9 @@ jobs:
   # Keep the job ID for the Codecov configuration validator.
   # The old required check name is provided by the temporary result job below.
   build-server:
-    needs: java-runtime
-    name: Server memory (Java ${{ matrix.JAVA_VERSION }})
+    needs: [plan, java-runtime]
+    if: needs.plan.outputs.server == 'true'
+    name: server_memory (Java ${{ matrix.JAVA_VERSION }})
     runs-on: ubuntu-24.04
     env: &linux-server-env
       USE_STAGE: 'false' # Whether to include the stage repository.
@@ -135,13 +179,13 @@ jobs:
             if ! command -v "$tool" >/dev/null 2>&1; then
               echo "can_run=false" >> "$GITHUB_OUTPUT"
               echo "skip_reason=missing tool: $tool" >> "$GITHUB_OUTPUT"
-              exit 0
+              exit 1
             fi
           done
           if ! command -v fuser >/dev/null 2>&1; then
             echo "can_run=false" >> "$GITHUB_OUTPUT"
             echo "skip_reason=missing tool: fuser (required for Linux port cleanup)" >> "$GITHUB_OUTPUT"
-            exit 0
+            exit 1
           fi
           echo "can_run=true" >> "$GITHUB_OUTPUT"
 
@@ -193,51 +237,133 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
-  server-memory-required:
-    # This is the only Server check referenced by .asf.yaml; keep its name stable.
-    name: Server memory tests
-    needs: [ java-runtime, build-server ]
-    # Always evaluate results, including dependency failures and unexpected skips.
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
-    permissions: {}
-    env: &memory-results
-      RUNTIME_RESULT: ${{ needs.java-runtime.result }}
-      MEMORY_RESULT: ${{ needs.build-server.result }}
-    steps: &require-memory-success
-      - name: Require the runtime configuration and all memory tests to pass
-        run: |
-          if [ "$RUNTIME_RESULT" != "success" ] || [ "$MEMORY_RESULT" != "success" ]; then
-            echo "::error::Runtime configuration: $RUNTIME_RESULT; memory tests: $MEMORY_RESULT"
-            exit 1
-          fi
-
-  # Temporary alias for live protection. Remove after ASF activates the stable context.
-  # Reuse the real result check so a skipped matrix cannot satisfy the old requirement.
-  legacy-server-memory-required:
-    name: build-server (memory, 11)
-    needs: [ java-runtime, build-server ]
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
-    permissions: {}
-    env: *memory-results
-    steps: *require-memory-success
-
-  # Optional coverage uses the same Linux environment, resolved JDKs and test steps.
-  # Keep it separate so backend failures do not become required memory failures.
-  build-server-backends:
-    needs: java-runtime
-    name: build-server (${{ matrix.BACKEND }}, ${{ matrix.JAVA_VERSION }})
+  server-rocksdb:
+    name: server_rocksdb (Java ${{ matrix.JAVA_VERSION }})
+    needs: [plan, java-runtime]
+    if: needs.plan.outputs.server == 'true'
     runs-on: ubuntu-24.04
     env: *linux-server-env
     strategy:
       fail-fast: false
       matrix:
-        BACKEND: [ rocksdb, hbase ]
+        BACKEND: [ rocksdb ]
+        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
+    steps: *linux-server-steps
+
+  commons:
+    name: commons
+    needs: plan
+    if: needs.plan.outputs.commons == 'true'
+    uses: ./.github/workflows/commons-ci.yml
+    secrets: inherit
+
+  pd_store:
+    name: pd_store
+    needs: plan
+    if: needs.plan.outputs.pd_store == 'true'
+    uses: ./.github/workflows/pd-store-ci.yml
+    secrets: inherit
+
+  cluster:
+    name: cluster
+    needs: plan
+    if: needs.plan.outputs.cluster == 'true'
+    uses: ./.github/workflows/cluster-test-ci.yml
+    secrets: inherit
+
+  docker:
+    name: docker
+    needs: plan
+    if: needs.plan.outputs.docker == 'true'
+    uses: ./.github/workflows/docker-build-ci.yml
+    secrets: inherit
+
+  helm:
+    name: helm
+    needs: plan
+    if: needs.plan.outputs.helm == 'true'
+    uses: ./.github/workflows/helm-chart-ci.yml
+
+  dependency_license:
+    name: dependency_license
+    needs: plan
+    if: needs.plan.outputs.dependency_license == 'true'
+    uses: ./.github/workflows/check-dependencies.yml
+
+  affected-module-tests:
+    name: affected-module-tests
+    needs: [plan, java-runtime, wait-storage-shell-test, build-server, server-rocksdb, commons, pd_store, cluster, docker, helm, dependency_license]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: ci-plan
+      - name: Validate selected suites and publish receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYGATE'
+          import json, os
+          results = json.loads(os.environ['JOB_RESULTS'])
+          if results['plan']['result'] != 'success':
+              raise SystemExit('CI planning failed')
+          if results['plan']['outputs'].get('server') == 'true':
+              for job in ['java-runtime', 'wait-storage-shell-test']:
+                  if results[job]['result'] != 'success':
+                      raise SystemExit('Selected prerequisite failed: ' + job)
+          results['server_memory'] = results['build-server']
+          results['server_rocksdb'] = results['server-rocksdb']
+          with open('results.json', 'w') as output:
+              json.dump(results, output)
+          PYGATE
+          python3 .github/scripts/ci-policy.py gate --plan plan.json --results results.json --output receipt.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-test-receipt
+          path: receipt.json
+          retention-days: 14
+          overwrite: true
+
+  # Temporary protection aliases; skipped modules pass only through the verified gate.
+  server-memory-required:
+    name: Server memory tests
+    needs: affected-module-tests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    env: &gate-result
+      GATE_RESULT: ${{ needs.affected-module-tests.result }}
+    steps: &require-gate
+      - run: test "$GATE_RESULT" = success
+
+  legacy-server-memory-required:
+    name: build-server (memory, 11)
+    needs: affected-module-tests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    env: *gate-result
+    steps: *require-gate
+
+  build-server-backends:
+    name: HBase compatibility (Java ${{ matrix.JAVA_VERSION }})
+    needs: [plan, java-runtime, affected-module-tests]
+    if: needs.plan.outputs.compatibility == 'true'
+    runs-on: ubuntu-24.04
+    env: *linux-server-env
+    strategy:
+      fail-fast: false
+      matrix:
+        BACKEND: [ hbase ]
         JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
     steps: *linux-server-steps
 
   build-server-macos-rocksdb:
+    needs: [plan, affected-module-tests]
+    if: needs.plan.outputs.compatibility == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -312,6 +438,28 @@ jobs:
           fi
 
   build-server-riscv64:
+    needs: [plan, affected-module-tests]
+    if: needs.plan.outputs.compatibility == 'true'
     uses: ./.github/workflows/riscv64-ci.yml
     permissions:
       contents: read
+
+  codeql:
+    needs: [plan, affected-module-tests]
+    if: vars.CI_OPTIMIZED_REQUIRED != 'true' || needs.plan.outputs.security == 'true'
+    uses: ./.github/workflows/codeql-analysis.yml
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    secrets: inherit
+
+  legacy-analyze-required:
+    name: Analyze (java)
+    needs: codeql
+    if: ${{ !cancelled() && vars.CI_OPTIMIZED_REQUIRED != 'true' }}
+    runs-on: ubuntu-24.04
+    env:
+      SCAN_RESULT: ${{ needs.codeql.result }}
+    steps:
+      - run: test "$SCAN_RESULT" = success
