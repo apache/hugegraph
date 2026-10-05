@@ -23,6 +23,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAuthenticator;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
+import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.StandardAuthManager;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.config.CoreOptions;
@@ -128,11 +129,23 @@ public class RangerHugeGraphAuthenticator implements HugeAuthenticator {
     @Override
     public UserWithRole authenticate(String username, String password, String token) {
         UserWithRole userWithRole = rangerAuthManager.authenticate(username, password, token);
-        // admin always gets full admin role (same behaviour as StandardAuthenticator)
-        if (USER_ADMIN.equals(userWithRole.username())) {
-            return new UserWithRole(userWithRole.userId(), userWithRole.username(), ROLE_ADMIN);
+
+        // Mirrors StandardAuthenticator.authenticate(). The null-role branch is
+        // load-bearing, not defensive: AuthManager.validateUser() signals a failed
+        // login by returning a UserWithRole that KEEPS the submitted username but
+        // carries a null id and a null role (see UserWithRole(String)). Testing the
+        // username before the role therefore promotes a failed "admin" login to
+        // ROLE_ADMIN, which let any password through for the admin account.
+        RolePermission role = userWithRole.role();
+        if (role == null) {
+            role = ROLE_NONE;
+        } else if (USER_ADMIN.equals(userWithRole.username())) {
+            role = ROLE_ADMIN;
+        } else {
+            return userWithRole;
         }
-        return userWithRole;
+
+        return new UserWithRole(userWithRole.userId(), userWithRole.username(), role);
     }
 
     @Override
