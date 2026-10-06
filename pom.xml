@@ -92,8 +92,8 @@
         <jackson.version>2.15.2</jackson.version>
         <netty.version>4.1.137.Final</netty.version>
         <snakeyaml.version>2.2</snakeyaml.version>
-        <spring-boot.version>2.5.15</spring-boot.version>
-        <spring-framework.version>5.3.27</spring-framework.version>
+        <spring-boot.version>3.0.0</spring-boot.version>
+        <spring-framework.version>6.1.20</spring-framework.version>
         <lombok.version>1.18.30</lombok.version>
         <!-- JRaft 1.3.14 supports the RocksDB 8.x table options API. -->
         <jraft.version>1.3.14</jraft.version>
