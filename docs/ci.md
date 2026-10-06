@@ -7,11 +7,11 @@ workflows are reusable and can also be started manually.
 | Changed inputs | Required Linux coverage |
 | --- | --- |
 | Any non-document Server module input, including RocksDB and HStore | Memory, RocksDB, PD/Store/HStore and Cluster |
-| Distribution or shared startup scripts | Server, PD/Store/HStore, Docker and Cluster |
+| Server distribution or shared startup scripts | Server, PD/Store/HStore, Docker and Cluster |
 | Commons or Struct | Their tests and affected Server, PD, Store, HStore and Cluster tests |
-| PD or Store | PD/Store/HStore suite and Cluster |
+| PD or Store distribution inputs (`hg-pd-dist/`, `hg-store-dist/`), including scripts, configs, assembly descriptors and POMs | PD/Store/HStore, Cluster and Docker |
+| Other PD or Store inputs | PD/Store/HStore suite and Cluster |
 | Cluster, Docker or Helm | The corresponding suite; Docker includes Compose render/smoke and startup contracts |
-| Store port utility | PD/Store/HStore, Cluster and Docker startup contracts |
 | Central `server-ci.yml` | All Linux suites controlled by the caller |
 | A module workflow | Its suite and known downstream suites |
 | Dependencies, shared build inputs or unknown paths | Conservative full coverage |
@@ -22,12 +22,12 @@ unexpected skip cannot satisfy the gate. Startup prerequisites are enforced.
 
 Third-party dependency inventory and vulnerability review retain their existing
 non-blocking policy. They run when selected, but are excluded from the core gate
-and test-reuse receipts. Their failure does not prevent affected module tests or
+and current-run test results. Their failure does not prevent affected module tests or
 post-gate checks from reporting results; the required license check is unchanged.
 
 The Docker suite builds and loads the four production images from the current
 checkout on one Linux runner, sharing their Maven build through BuildKit Bake.
-It verifies image healthcheck and Java contracts, then starts standalone Server
+It verifies healthcheck presence and Java contracts, then starts standalone Server
 and the PD/Store/Server topology with unique run tags and pulling disabled.
 Runtime checks match each container's image ID to the build, require healthy
 services and validate Server version and authenticated graph-list responses.
@@ -44,19 +44,26 @@ not grant runner priority over other PRs. Existing scheduled CodeQL scanning rem
 
 Only explicitly allowed prose and static documentation assets qualify. Source,
 types, tests, dependencies and CI configuration never qualify as documentation.
-An unchanged test input can reuse a receipt from the same open PR only when its
-base, source repository and CI policy match. GitHub job records must prove the
-selected suites completed successfully. Receipt lookup is restricted to the PR
-branch and bounded pages; repository and PR provenance are still checked. The current commit gets a fresh gate and
-summary identifying executed and reused suites. Missing or unverifiable evidence
-causes the tests to run again.
-For consecutive documentation updates, optional-check proofs retain their original
-run and exact job identities and are reverified before forwarding. A newer failed
-check or unverifiable evidence prevents reuse of an older optional success.
+A PR containing only allowed documentation changes can omit unaffected modules.
+A source PR that later receives a documentation update still selects its cumulative
+source changes and runs the necessary module tests, compatibility and security
+checks on every update. Cross-run success reuse is paused: an artifact's claimed
+merge SHA, parents and job IDs do not independently prove the original execution tree.
+A trustworthy execution-proof design is separate work.
 
-The plan and successful receipt are saved as `ci-plan` and `ci-test-receipt`
-artifacts. They are evidence, not credentials; each reused proof is checked against
-GitHub rather than trusted solely because an artifact exists.
+The plan and current-run results are saved as `ci-plan` and `ci-test-results`
+artifacts. Results describe only this run's successful selected suites; they are
+not authentication evidence and never authorize a later run to skip tests.
+
+PR planning records the event's head, base and source before querying live metadata.
+A known mismatch with the checkout merge or current PR fails planning; expanding
+coverage cannot make an outdated checkout current. After all selected jobs and
+fixtures succeed, the gate rechecks the open PR's head, base and source using a
+read-only API request. Changed inputs or unavailable metadata fail the gate.
+Refresh the branch and start a new PR event after head or base movement: GitHub
+reruns retain the original commit and event, so rerunning alone cannot refresh the
+base. An unknown API or selection failure falls back to full coverage; a manual
+full rerun can recover a transient failure while the recorded inputs remain current.
 
 ## Protection migration
 
@@ -68,7 +75,10 @@ repository variable to `true` then permits unchanged documentation updates to
 avoid redundant security scanning. Enabling the variable is a separate rollout
 operation.
 
-Automatic retry verifies the run and PR/branch before and after its existing wait.
-A moved PR base or missing immutable plan also prevents an obsolete retry.
-A retry has a separate concurrency group, so retrying an old commit cannot cancel
-the newest PR run. Only failed jobs are retried.
+Automatic retry is limited to failed pushes. It verifies the run attempt, source
+repository and current branch head before and after its existing wait; at most two
+automatic reruns are allowed. Only failed jobs are retried. PR automatic retry is
+paused because it relied on the PR's CI plan artifact to attest the tested base.
+For a transient PR failure with unchanged inputs, use a manual full rerun so shared
+build and fixture artifacts are rebuilt together with their consumers. A retry retains its separate concurrency
+group and cannot cancel a newer PR run.

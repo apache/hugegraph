@@ -16,7 +16,6 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
   pull-requests: read
 
 jobs:
@@ -37,7 +36,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Test selection, receipts and retry policy
+      - name: Test selection, gate and retry policy
         run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Select affected tests
         id: select
@@ -335,7 +334,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: ci-plan
-      - name: Validate selected suites and publish receipt
+      - name: Validate selected suites and report results
         env:
           GH_TOKEN: ${{ github.token }}
           JOB_RESULTS: ${{ toJSON(needs) }}
@@ -354,15 +353,15 @@ jobs:
           with open('results.json', 'w') as output:
               json.dump(results, output)
           PYGATE
-          python3 .github/scripts/ci-policy.py gate --plan plan.json --results results.json --output receipt.json
+          python3 .github/scripts/ci-policy.py gate --plan plan.json --results results.json --output test-results.json
       - uses: actions/upload-artifact@v4
         with:
-          name: ci-test-receipt
-          path: receipt.json
+          name: ci-test-results
+          path: test-results.json
           retention-days: 14
           overwrite: true
 
-  # Temporary protection aliases; skipped modules pass only through the verified gate.
+  # Temporary protection aliases; skipped modules pass only through the current-run gate.
   server-memory-required:
     name: Server memory tests
     needs: affected-module-tests

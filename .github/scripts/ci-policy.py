@@ -14,18 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Conservative CI selection and GitHub-verified test receipt reuse."""
+"""Conservative CI selection and gating of this run's selected tests."""
 
 import argparse
-import base64
-import hashlib
-import io
 import json
 import os
 from pathlib import Path
 import subprocess
-import zipfile
-from urllib.parse import urlencode
 
 MODULES = {
     "server": ["server", "commons", "struct", "pd", "store", "hstore", "cluster", "docker", "helm", "dependency_license"],
@@ -62,9 +57,9 @@ def git(*args):
     return subprocess.check_output(["git", *args], text=True).strip()
 
 
-def api(path, binary=False):
+def api(path):
     result = subprocess.run(["gh", "api", "--method", "GET", path], check=True, capture_output=True, timeout=30)
-    return result.stdout if binary else json.loads(result.stdout)
+    return json.loads(result.stdout)
 
 
 def documentation(path, mode="100644"):
@@ -109,13 +104,12 @@ def select(project, paths):
         if project == "server" and path == "hugegraph-commons/hugegraph-common/src/main/resources/version.properties":
             selected.update(["commons", "docker"])
             continue
-        if project == "server" and path == "hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh":
-            selected.update(["store", "docker"])
-            continue
         if project == "toolchain" and path.startswith("hugegraph-client/assembly/travis/"):
             selected.update(["client", "go"])
             continue
         if project == "server":
+            if path.startswith(("hugegraph-pd/hg-pd-dist/", "hugegraph-store/hg-store-dist/")):
+                selected.add("docker")
             if path.startswith("hugegraph-server/hugegraph-hstore/"):
                 selected.update(["server", "hstore"])
                 continue
@@ -141,94 +135,6 @@ def select(project, paths):
     return selected
 
 
-def external_context(inputs, selected):
-    context = dict(inputs or {})
-    if "hubble" not in selected:
-        context.pop("hubble", None)
-    return json.dumps(context, sort_keys=True, separators=(",", ":"))
-
-
-def packaged_readme_state(ref):
-    path = "hugegraph-hubble/README.md"
-    entry = git("ls-tree", ref, "--", path)
-    if not entry:
-        return "missing"
-    mode, kind, blob = entry.split("\t", 1)[0].split()
-    if mode != "100644" or kind != "blob":
-        return "invalid-mode:" + mode + ":" + blob
-    content = subprocess.check_output(["git", "cat-file", "blob", blob])
-    return "valid" if content.strip() else "empty:" + blob
-
-
-def fingerprint(ref, policy=False, project=None):
-    """Hash blob identities, including paths; exclude only the strict prose whitelist."""
-    entries = subprocess.check_output(["git", "ls-tree", "-rz", "--full-tree", ref]).split(b"\0")
-    digest = hashlib.sha256()
-    for entry in sorted(entries, key=lambda e: e.split(b"\t", 1)[-1]):
-        if not entry:
-            continue
-        metadata, name = entry.split(b"\t", 1)
-        path = name.decode("utf-8", "surrogateescape")
-        if policy:
-            if not (path.startswith(".github/") or path == ".asf.yaml"):
-                continue
-        elif documentation(path, metadata.split(b" ", 1)[0].decode()):
-            continue
-        digest.update(metadata + b"\t" + name + b"\0")
-    if project == "toolchain" and not policy:
-        state = packaged_readme_state(ref)
-        if state != "valid":
-            digest.update(("required-packaged-readme:" + state).encode())
-    return digest.hexdigest()
-
-
-def remote_fingerprint(repository, sha, policy_only=False, fetch=api, project=None):
-    tree = fetch(f"repos/{repository}/git/trees/{sha}?recursive=1")
-    if tree.get("truncated"):
-        raise ValueError("truncated proof tree")
-    digest = hashlib.sha256()
-    for entry in sorted(tree["tree"], key=lambda item: item["path"].encode()):
-        path = entry["path"]
-        if entry["type"] == "tree":
-            continue
-        if policy_only:
-            if not (path.startswith(".github/") or path == ".asf.yaml"):
-                continue
-        elif documentation(path, entry["mode"]):
-            continue
-        digest.update((entry["mode"] + " " + entry["type"] + " " + entry["sha"]
-                       + "\t" + path + "\0").encode())
-    if project == "toolchain" and not policy_only:
-        entry = next((item for item in tree["tree"] if item["path"] == "hugegraph-hubble/README.md"), None)
-        state = "missing"
-        if entry:
-            if entry["mode"] != "100644" or entry["type"] != "blob":
-                state = "invalid-mode:" + entry["mode"] + ":" + entry["sha"]
-            else:
-                blob = fetch(f"repos/{repository}/git/blobs/{entry['sha']}")
-                state = "valid" if base64.b64decode(blob["content"]).strip() else "empty:" + entry["sha"]
-        if state != "valid":
-            digest.update(("required-packaged-readme:" + state).encode())
-    return digest.hexdigest()
-
-
-def proof_pr(plan, run, fetch):
-    associations = run.get("pull_requests", [])
-    if any(pr.get("number") == plan["pr"] for pr in associations):
-        return True
-    owner = run.get("head_repository", {}).get("owner", {}).get("login")
-    branch = run.get("head_branch")
-    if not owner or not branch:
-        return False
-    candidates = pages(f"repos/{plan['repository']}/pulls?" + urlencode({
-        "state": "open", "head": f"{owner}:{branch}"}), fetch)
-    return any(pr.get("number") == plan["pr"]
-               and pr.get("base", {}).get("repo", {}).get("full_name") == plan["repository"]
-               and pr.get("head", {}).get("ref") == branch
-               and pr.get("head", {}).get("repo", {}).get("full_name") == plan["source"]
-               for pr in candidates)
-
-
 def suites(project, selected):
     if project == "toolchain":
         return sorted(selected)
@@ -244,218 +150,44 @@ def suites(project, selected):
     return sorted(result)
 
 
-def pages(path, fetch=api):
-    result = []
-    for page in range(1, 11):
-        value = fetch(path + ("&" if "?" in path else "?") + urlencode({"per_page": 100, "page": page}))
-        batch = value["jobs"] if isinstance(value, dict) else value
-        result.extend(batch)
-        if len(batch) < 100:
-            return result
-    raise ValueError("API pagination exceeded verification bound")
+class StaleInputError(RuntimeError):
+    """The checkout no longer represents the current PR inputs."""
 
 
-def successful_jobs(repository, run_id, suite, fetch=api):
-    jobs = pages(f"repos/{repository}/actions/runs/{run_id}/jobs", fetch)
-    matching = [job for job in jobs if job.get("name") == suite or job.get("name", "").startswith((suite + " / ", suite + " ("))]
-    if not matching or any(job.get("conclusion") != "success" for job in matching):
-        raise ValueError("missing or unsuccessful suite jobs")
-    return sorted(job["id"] for job in matching)
+def require_current_pr(plan, fetch):
+    if not plan["pr"]:
+        return
+    live = fetch(f"repos/{plan['repository']}/pulls/{plan['pr']}")
+    if (live.get("state") != "open" or live["head"]["sha"] != plan["head"]
+            or live["base"]["sha"] != plan["base"]
+            or live["head"]["repo"]["full_name"] != plan["source"]
+            or live["head"]["ref"] != plan["branch"]
+            or live["base"]["repo"]["full_name"] != plan["repository"]):
+        raise StaleInputError("PR inputs changed; refresh the branch and start a new PR run")
 
 
-def validate_proof_run(plan, item, fetch=api):
-    run = fetch(f"repos/{plan['repository']}/actions/runs/{int(item['runID'])}")
-    if (run.get("status") != "completed"
-            or run.get("event") != "pull_request" or run.get("head_sha") != item.get("head")
-            or run.get("workflow_id") != plan["workflowID"]
-            or run.get("head_repository", {}).get("full_name") != plan["source"]
-            or run.get("head_branch") != plan["branch"]):
-        raise ValueError("proof run is not a successful trusted workflow")
-    if not proof_pr(plan, run, fetch):
-        raise ValueError("proof run lacks matching PR association")
-    merge = fetch(f"repos/{plan['repository']}/git/commits/{item['testedMergeSHA']}")
-    if [parent["sha"] for parent in merge.get("parents", [])] != [plan["base"], item["head"]]:
-        raise ValueError("tested merge parents differ")
-    actual_input = remote_fingerprint(plan["repository"], item["testedMergeSHA"], fetch=fetch, project=plan["project"])
-    if plan["project"] == "toolchain":
-        context = external_context(plan.get("externalInputs", {}), plan["selected"])
-        actual_input = hashlib.sha256((actual_input + context).encode()).hexdigest()
-    if (actual_input != plan["inputFingerprint"] or remote_fingerprint(
-            plan["repository"], item["testedMergeSHA"], policy_only=True, fetch=fetch)
-            != plan["policyFingerprint"]):
-        raise ValueError("actual tested inputs differ from claimed receipt")
-
-
-def validate_receipt(plan, receipt, fetch=api):
-    for key in ["schema", "repository", "project", "pr", "source", "branch", "base", "inputFingerprint", "policyFingerprint"]:
-        if receipt.get(key) != plan.get(key):
-            raise ValueError("receipt provenance differs: " + key)
-    proof = receipt.get("proofs", {})
-    required = plan["expected"]
-    if not required or not set(required).issubset(proof):
-        raise ValueError("receipt lacks selected suites")
-    verified = {}
-    for suite in required:
-        item = proof[suite]
-        validate_proof_run(plan, item, fetch)
-        successful_jobs(plan["repository"], item["runID"], "affected-module-tests", fetch)
-        ids = successful_jobs(plan["repository"], item["runID"], suite, fetch)
-        if ids != item.get("jobIDs"):
-            raise ValueError("actual job evidence differs")
-        verified[suite] = item
-    return verified
-
-
-PROVENANCE = ["schema", "repository", "project", "pr", "source", "branch", "base",
-              "inputFingerprint", "policyFingerprint"]
-
-
-def optional_groups(plan):
-    if plan["project"] == "toolchain":
-        return {"security": {"security / Analyze (java)", "security / Analyze (javascript)",
-                             "security / Analyze (python)", "security / dependency-review"}}
-    runtime = (Path(__file__).resolve().parents[1] / "workflows/.java-version").read_text().strip()
-    return {"security": {"codeql / Analyze (java)"},
-            "compatibility": {f"HBase compatibility (Java {runtime})",
-                              "build-server-macos-rocksdb (macos-15-intel)",
-                              "build-server-macos-rocksdb (macos-15, -Xms512m -Xmx2g)",
-                              "build-server-riscv64 / build-server-riscv64"}}
-
-
-def optional_group_jobs(jobs, group):
-    def belongs(name):
-        if group == "security":
-            return name.startswith(("codeql /", "security /"))
-        return name.startswith(("HBase compatibility", "build-server-macos-rocksdb", "build-server-riscv64 /"))
-    return [job for job in jobs if belongs(job.get("name", ""))]
-
-
-def optional_jobs(jobs, names):
-    # Reject incomplete/duplicate matrices; proof identities must describe the full group.
-    matching = [job for job in jobs if job.get("name") in names]
-    if len(matching) != len(names) or {job["name"] for job in matching} != names:
-        raise ValueError("optional group is incomplete")
-    if any(job.get("conclusion") != "success" for job in matching):
-        raise ValueError("optional group did not succeed")
-    return sorted(matching, key=lambda job: job["name"])
-
-
-def optional_proofs(plan, receipt, jobs, blocked, fetch=api):
-    proofs = {}
-    for group, names in optional_groups(plan).items():
-        if group in blocked:
-            continue
-        try:
-            current = optional_group_jobs(jobs, group)
-            if any(job.get("name") not in names for job in current):
-                raise ValueError("unknown optional group job")
-            # Skipped wrapper jobs can forward proof. A partial or failed execution cannot.
-            executed = [job for job in current if job.get("conclusion") != "skipped"]
-            if executed:
-                matching = optional_jobs(jobs, names)
-                item = {key: receipt[key] for key in PROVENANCE}
-                item.update(runID=receipt["runID"], head=receipt["head"],
-                            testedMergeSHA=receipt["testedMergeSHA"])
-                validate_proof_run(plan, item, fetch)
-                item.update(jobIDs=[job["id"] for job in matching], jobNames=[job["name"] for job in matching])
-            else:
-                item = receipt.get("optionalProofs", {}).get(group)
-                if not item:
-                    continue
-                if any(item.get(key) != plan.get(key) for key in PROVENANCE):
-                    raise ValueError("optional provenance differs")
-                validate_proof_run(plan, item, fetch)
-                successful_jobs(plan["repository"], item["runID"], "affected-module-tests", fetch)
-                original = optional_group_jobs(
-                    pages(f"repos/{plan['repository']}/actions/runs/{item['runID']}/jobs", fetch), group)
-                if any(job.get("name") not in names for job in original):
-                    raise ValueError("unknown original optional group job")
-                matching = optional_jobs(original, names)
-                if (item.get("jobIDs") != [job["id"] for job in matching]
-                        or item.get("jobNames") != [job["name"] for job in matching]):
-                    raise ValueError("optional job evidence differs")
-            proofs[group] = item
-        except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
-            continue
-    return proofs
-
-
-def find_reuse(plan, fetch=api):
-    """Receipts are uploaded by this workflow, not read from the PR tree."""
-    repository = plan["repository"]
-    current = fetch(f"repos/{repository}/actions/runs/{os.environ['GITHUB_RUN_ID']}")
-    plan["workflowID"] = current["workflow_id"]
-    runs = []
-    for page in range(1, 6):
-        batch = fetch(f"repos/{repository}/actions/workflows/{plan['workflowID']}/runs?" + urlencode({
-            "event": "pull_request", "status": "completed", "branch": plan["branch"],
-            "per_page": 30, "page": page}))["workflow_runs"]
-        runs.extend(batch)
-        if len(batch) < 30:
-            break
-    blocked_optional = set()
-    for run in runs:
-        if run["id"] == int(os.environ["GITHUB_RUN_ID"]):
-            continue
-        if (run.get("head_repository", {}).get("full_name") != plan["source"]
-                or run.get("head_branch") != plan["branch"]):
-            continue
-        if not proof_pr(plan, run, fetch):
-            continue
-        artifacts = fetch(f"repos/{repository}/actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]
-        for artifact in artifacts:
-            size = artifact.get("size_in_bytes")
-            if (artifact.get("name") != "ci-test-receipt" or artifact.get("expired")
-                    or type(size) is not int or not 0 < size <= 1048576):
-                continue
-            try:
-                payload = fetch(f"repos/{repository}/actions/artifacts/{artifact['id']}/zip", binary=True)
-                with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-                    entries = archive.infolist()
-                    if len(entries) != 1 or entries[0].filename != "receipt.json":
-                        raise ValueError("unexpected receipt archive entries")
-                    info = entries[0]
-                    mode = (info.external_attr >> 16) & 0o170000
-                    if (info.is_dir() or info.flag_bits & 1 or mode not in {0, 0o100000}
-                            or info.file_size > 1048576):
-                        raise ValueError("oversized receipt")
-                    receipt = json.loads(archive.read(info))
-                if receipt.get("runID") != run["id"]:
-                    raise ValueError("receipt not uploaded by claimed run")
-                successful_jobs(repository, run["id"], "affected-module-tests", fetch)
-                verified = validate_receipt(plan, receipt, fetch)
-                jobs = pages(f"repos/{repository}/actions/runs/{run['id']}/jobs", fetch)
-                plan["optionalProofs"] = optional_proofs(plan, receipt, jobs, blocked_optional, fetch)
-                plan["optionalSuccess"] = {group: group in plan["optionalProofs"]
-                                           for group in ["compatibility", "security"]}
-                return verified
-            except (ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile):
-                continue
-        # Missing/unverifiable evidence from a newer same-PR run is conservative for optional lanes.
-        blocked_optional.update(optional_groups(plan))
-    return {}
-
-
-def create_plan(project, event, repository, fetch=api, external_inputs=None):
+def create_plan(project, event, repository, fetch=api):
     plan = {"schema": 1, "project": project, "repository": repository, "pr": 0,
             "source": repository, "branch": "", "base": "", "head": git("rev-parse", "HEAD"),
-            "reused": {}, "workflowID": 0, "reason": "affected inputs",
-            "externalInputs": external_inputs or {}, "testedMergeSHA": git("rev-parse", "HEAD")}
+            "reason": "affected inputs", "testedMergeSHA": git("rev-parse", "HEAD")}
     try:
         pr = event.get("pull_request")
-        if pr:
-            # Refresh PR metadata: event payload may predate a new push or base movement.
-            live = fetch(f"repos/{repository}/pulls/{pr['number']}")
-            if (live.get("state") != "open" or live["head"]["sha"] != pr["head"]["sha"]
-                    or live["base"]["repo"]["full_name"] != repository):
-                raise ValueError("PR metadata changed")
-            plan.update(pr=pr["number"], source=live["head"]["repo"]["full_name"],
-                        base=pr["base"]["sha"], head=live["head"]["sha"], branch=live["head"]["ref"])
+        if "pull_request" in event:
+            if not isinstance(pr, dict) or type(pr.get("number")) is not int or pr["number"] <= 0:
+                raise StaleInputError("PR event lacks a valid number")
+            plan["pr"] = pr["number"]
+            # An incomplete PR event must never fall back to a push plan with pr=0.
+            try:
+                plan.update(source=pr["head"]["repo"]["full_name"], base=pr["base"]["sha"],
+                            head=pr["head"]["sha"], branch=pr["head"]["ref"])
+            except (KeyError, TypeError) as error:
+                raise StaleInputError("PR event lacks required input identity") from error
+            if not all(isinstance(plan[key], str) and plan[key] for key in ("source", "base", "head", "branch")):
+                raise StaleInputError("PR event has an empty input identity")
             parents = git("show", "-s", "--format=%P", plan["testedMergeSHA"]).split()
             if parents != [plan["base"], plan["head"]]:
-                raise ValueError("checkout is not the event PR merge")
-            if live["base"]["sha"] != plan["base"]:
-                raise ValueError("base advanced after event checkout")
+                raise StaleInputError("checkout is not the event PR merge; start a new PR run")
+            require_current_pr(plan, fetch)
             # head/base objects must exist locally; workflow fetches both before planning.
             ancestor = git("merge-base", plan["base"], plan["head"])
             paths = git("diff", "--no-renames", "--name-only", ancestor, plan["head"]).splitlines()
@@ -465,79 +197,51 @@ def create_plan(project, event, repository, fetch=api, external_inputs=None):
         selected = select(project, paths)
         if unsafe_documentation(plan["base"], paths) or unsafe_documentation(plan["testedMergeSHA"], paths):
             selected = set(MODULES[project])
-        if project == "toolchain" and packaged_readme_state(plan["testedMergeSHA"]) != "valid":
-            selected = set(MODULES[project])
-        plan["selected"] = sorted(selected)
-        plan["inputFingerprint"] = fingerprint(plan["testedMergeSHA"], project=project)
-        if project == "toolchain":
-            context = external_context(external_inputs, selected)
-            plan["inputFingerprint"] = hashlib.sha256((plan["inputFingerprint"] + context).encode()).hexdigest()
-        plan["policyFingerprint"] = fingerprint(plan["testedMergeSHA"], policy=True)
         plan["expected"] = suites(project, selected)
-        if pr and plan["expected"] and (project != "toolchain" or external_inputs):
-            plan["reused"] = find_reuse(plan, fetch)
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
         selected = set(MODULES[project])
-        plan.update(reused={}, reason="verification unavailable: full required coverage")
-        plan.setdefault("inputFingerprint", "")
-        plan.setdefault("policyFingerprint", "")
+        plan["reason"] = "verification unavailable: full required coverage"
         plan["expected"] = suites(project, selected)
     if not selected:
         plan["reason"] = "cumulative PR diff contains only plain prose documentation; modules unaffected"
-    elif plan["reused"]:
-        plan["reason"] = "affected inputs match independently verified successful tests"
     plan["selected"] = sorted(selected)
     for module in MODULES[project]:
-        module_suites = suites(project, {module})
-        plan[module] = module in selected and not (module_suites and all(s in plan["reused"] for s in module_suites))
+        plan[module] = module in selected
     plan["pd_store"] = any(plan.get(m, False) for m in ["pd", "store", "hstore", "struct"])
     plan["needsFixture"] = project == "toolchain" and any(plan.get(m, False) for m in MODULES[project])
     plan["fixture"] = plan["needsFixture"]
-    plan["compatibility"] = not plan.get("optionalSuccess", {}).get("compatibility", False) and project == "server" and bool(selected.intersection({"server", "commons", "struct", "pd", "store", "hstore", "cluster"}))
-    plan["security"] = (bool(selected) and not plan.get("optionalSuccess", {}).get("security", False)) or any(p.startswith(".github/workflows/codeql") for p in locals().get("paths", []))
+    plan["compatibility"] = project == "server" and bool(selected.intersection({"server", "commons", "struct", "pd", "store", "hstore", "cluster"}))
+    plan["security"] = bool(selected) or any(p.startswith(".github/workflows/codeql") for p in locals().get("paths", []))
     plan["security_languages"] = json.dumps(["java"])
     return plan
 
 
-def gate(plan, results, fetch=api):
+def gate(plan, results, fetch=None):
     if results.get("plan", {}).get("result") != "success":
         raise ValueError("planner did not succeed")
-    proofs = dict(plan["reused"])
-    executed = []
     for suite in plan["expected"]:
-        if suite in proofs:
-            continue
         if results.get(suite, {}).get("result") != "success":
             raise ValueError("selected suite did not succeed: " + suite)
-        executed.append(suite)
     if plan["project"] == "toolchain":
-        if set(executed).intersection({"client", "loader", "tools", "spark", "go"}):
+        if set(plan["expected"]).intersection({"client", "loader", "tools", "spark", "go"}):
             if results.get("fixture", {}).get("result") != "success":
                 raise ValueError("selected tests lack successful fixture")
-        if "hubble" in executed and results.get("hubble-fixture", {}).get("result") != "success":
+        if "hubble" in plan["expected"] and results.get("hubble-fixture", {}).get("result") != "success":
             raise ValueError("selected Hubble tests lack successful baseline fixture")
-    receipt = {key: plan[key] for key in ["schema", "repository", "project", "pr", "source", "branch", "base",
-                                          "head", "testedMergeSHA", "inputFingerprint", "policyFingerprint", "workflowID"]}
-    receipt["runID"] = int(os.environ.get("GITHUB_RUN_ID", "0"))
-    # Successful tests can gate even if receipt publication is unavailable. Never reuse
-    # unverified evidence: a missing API proof only disables future receipt reuse.
-    for suite in executed:
-        try:
-            ids = successful_jobs(plan["repository"], receipt["runID"], suite, fetch)
-            proofs[suite] = {"runID": receipt["runID"], "head": plan["head"], "testedMergeSHA": plan["testedMergeSHA"], "jobIDs": ids}
-        except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
-            pass
-    receipt["proofs"] = proofs
-    receipt["optionalProofs"] = plan.get("optionalProofs", {})
-    receipt["executed"] = executed
-    receipt["reused"] = sorted(plan["reused"])
-    summary = "Selection: " + plan.get("reason", "affected inputs") + "\nExecuted: " + ", ".join(executed) + "\nReused: " + ", ".join(receipt["reused"])
+    require_current_pr(plan, fetch or api)
+    report = {key: plan[key] for key in ["schema", "repository", "project", "pr", "source", "branch", "base",
+                                        "head", "testedMergeSHA", "selected"]}
+    report["runID"] = int(os.environ.get("GITHUB_RUN_ID", "0"))
+    report["runAttempt"] = int(os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
+    report["executed"] = plan["expected"]
+    report["results"] = {suite: results[suite]["result"] for suite in plan["expected"]}
+    summary = "Selection: " + plan.get("reason", "affected inputs") + "\nExecuted: " + ", ".join(plan["expected"])
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
             out.write("## Affected module tests\n" + summary + "\n\nUnselected modules: "
-                      + ", ".join(set(MODULES[plan["project"]]) - set(plan["selected"])) + "\n")
+                      + ", ".join(sorted(set(MODULES[plan["project"]]) - set(plan["selected"]))) + "\n")
     print(summary)
-    return receipt
+    return report
 
 
 def main():
@@ -548,16 +252,13 @@ def main():
     p.add_argument("--event-path", required=True)
     p.add_argument("--repository", required=True)
     p.add_argument("--output", required=True)
-    p.add_argument("--inputs-json")
     p = sub.add_parser("gate")
     p.add_argument("--plan", required=True)
     p.add_argument("--results", required=True)
     p.add_argument("--output", required=True)
     args = parser.parse_args()
     if args.command == "plan":
-        external = json.loads(Path(args.inputs_json).read_text()) if args.inputs_json else None
-        value = create_plan(args.project, json.loads(Path(args.event_path).read_text()), args.repository,
-                            external_inputs=external)
+        value = create_plan(args.project, json.loads(Path(args.event_path).read_text()), args.repository)
         if os.environ.get("GITHUB_OUTPUT"):
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                 for key, item in value.items():
