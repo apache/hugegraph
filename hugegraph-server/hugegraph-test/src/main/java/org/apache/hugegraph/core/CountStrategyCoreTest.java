@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.core;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -26,6 +28,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.backend.query.Aggregate;
@@ -45,6 +48,7 @@ import org.apache.hugegraph.traversal.optimize.HugeGraphStep;
 import org.apache.hugegraph.traversal.optimize.HugeGraphStepStrategy;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.tinkerpop.gremlin.process.traversal.NotP;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.TextP;
@@ -52,6 +56,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
+import org.apache.tinkerpop.gremlin.process.traversal.step.GValue;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
@@ -67,6 +72,44 @@ import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 import org.junit.Test;
 
 public class CountStrategyCoreTest extends BaseCoreTest {
+
+    @Test
+    public void testNamedLimitCountPreservesExplicitBound() {
+        GraphTraversalSource g = graph().traversal();
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.inject(1, 2, 3).limit(3).count().is(P.gt(0L)).toList());
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.withoutStrategies(HugeCountStrategy.class)
+                             .inject(1, 2, 3).limit(GValue.of("size", 3L))
+                             .count().is(P.gt(0L)).toList());
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.inject(1, 2, 3).limit(GValue.of("size", 3L))
+                             .count().is(P.gt(0L)).toList());
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.inject(1, 2, 3).limit(GValue.of("size", 3L))
+                             .count().is(P.not(P.eq(0L))).toList());
+    }
+
+    @Test
+    public void testNamedRangeCountPreservesExplicitBounds() {
+        GraphTraversalSource g = graph().traversal();
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.inject(1, 2, 3, 4).range(1, 4)
+                             .count().is(P.gt(0L)).toList());
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.withoutStrategies(HugeCountStrategy.class)
+                             .inject(1, 2, 3, 4)
+                             .range(GValue.of("lo", 1L), GValue.of("hi", 4L))
+                             .count().is(P.gt(0L)).toList());
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.inject(1, 2, 3, 4)
+                             .range(GValue.of("lo", 1L), GValue.of("hi", 4L))
+                             .count().is(P.gt(0L)).toList());
+        Assert.assertEquals(Collections.singletonList(3L),
+                            g.inject(1, 2, 3, 4)
+                             .range(GValue.of("lo", 1L), GValue.of("hi", 4L))
+                             .count().is(P.not(P.eq(0L))).toList());
+    }
 
     private void initSchema() {
         SchemaManager schema = graph().schema();
@@ -131,8 +174,8 @@ public class CountStrategyCoreTest extends BaseCoreTest {
             if (!(step instanceof HasStep)) {
                 continue;
             }
-            HasContainerHolder holder =
-                    (HasContainerHolder) step;
+            HasContainerHolder<?, ?> holder =
+                    (HasContainerHolder<?, ?>) step;
             for (HasContainer has : holder.getHasContainers()) {
                 if (key.equals(has.getKey())) {
                     return true;
@@ -266,6 +309,28 @@ public class CountStrategyCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testCountAfterOrderByMissingProperty() {
+        this.initSchema();
+        this.initGraph();
+
+        long count = graph().traversal().V().order().by("none").count().next();
+
+        Assert.assertEquals(0L, count);
+    }
+
+    @Test
+    public void testCountAfterOrderByFilteringTraversal() {
+        this.initSchema();
+        this.initGraph();
+
+        long count = graph().traversal().V().order()
+                            .by(__.hasLabel("person").values("name"))
+                            .count().next();
+
+        Assert.assertEquals(2L, count);
+    }
+
+    @Test
     public void testCountAfterOrderByPresentProperty() {
         this.initSchema();
         this.initGraph();
@@ -390,6 +455,248 @@ public class CountStrategyCoreTest extends BaseCoreTest {
                             .count().next();
 
         Assert.assertEquals(1L, count);
+    }
+
+    @Test
+    public void testCountNegatedCollectionPredicatesKeepFinalResults() {
+        this.assertCountPredicatesKeepFinalResults(List.of(
+                P.not(P.without(2L, 3L)),
+                P.not(P.within(2L, 3L)),
+                P.not(P.without(2L, 3L)).or(P.eq(0L)),
+                P.not(P.within(2L, 3L)).or(P.eq(0L)),
+                P.not(P.without(2L, 3L)).and(P.gt(0L)),
+                P.not(P.within(2L, 3L)).and(P.gt(0L)),
+                P.not(P.not(P.within(2L, 3L))).or(P.eq(0L)),
+                P.not(P.not(P.without(2L, 3L))).or(P.eq(0L)),
+                new NotP<>(new NotP<>(P.within(2L, 3L))).or(P.eq(0L)),
+                new NotP<>(new NotP<>(P.without(2L, 3L))).or(P.eq(0L)),
+                new NotP<>(new NotP<>(P.eq(2L))).or(P.eq(0L)),
+                P.not(P.without(2L, 3L)).or(P.eq(0L)).and(P.gte(0L)),
+                P.not(P.within(2L, 3L).or(P.eq(0L)))));
+    }
+
+    @Test
+    public void testCountUnknownNumericPredicateKeepsFinalResults() {
+        P<Long> custom = new P<>((count, ignored) -> count == 2L, 0L);
+        P<Long> customFalse = new P<>((count, ignored) -> count == 1L, 0L);
+        this.assertCountPredicatesKeepFinalResults(List.of(
+                custom, custom.or(P.eq(0L)), custom.and(P.gt(0L)),
+                customFalse.or(P.eq(0L)), P.not(custom).or(P.eq(0L))));
+    }
+
+    @Test
+    public void testCountWithoutNegativeValuesKeepsEmptyCount() {
+        this.initSchema();
+        commitTx();
+        assertNegativeWithoutCounts(graph().traversal(), 0L);
+    }
+
+    @Test
+    public void testCountWithoutNegativeValuesKeepsNonemptyAndNestedCount() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        for (int i = 0; i < 5; i++) {
+            Vertex target = graph().addVertex(T.label, "person", "name", "target" + i);
+            source.addEdge("knows", target);
+        }
+        commitTx();
+        GraphTraversalSource g = graph().traversal();
+        assertNegativeWithoutCounts(g, 6L);
+        for (P<Long> predicate : List.of(P.without(-1L), P.without(-2L, -1L))) {
+            Assert.assertEquals(Collections.singletonList(source.id()),
+                                g.V().filter(__.out("knows").count().is(predicate.clone())
+                                               .is(P.gt(0L))).id().toList());
+        }
+    }
+
+    private static void assertNegativeWithoutCounts(GraphTraversalSource g, long count) {
+        GraphTraversalSource control = g.withoutStrategies(HugeCountStrategy.class);
+        for (P<Long> predicate : List.of(P.without(-1L), P.without(-2L, -1L))) {
+            Assert.assertEquals(Collections.singletonList(count),
+                                control.V().count().is(predicate.clone()).toList());
+            Assert.assertEquals(Collections.singletonList(count),
+                                g.V().count().is(predicate.clone()).toList());
+            Assert.assertEquals(count > 0L ? Collections.singletonList(count) : Collections.emptyList(),
+                                g.V().count().is(predicate.clone()).is(P.gt(0L)).toList());
+        }
+    }
+
+    @Test
+    public void testCountWithoutUsesBoundAboveAllExcludedCounts() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        for (int i = 0; i < 4; i++) {
+            Vertex target = graph().addVertex(T.label, "person", "name", "target" + i);
+            source.addEdge("knows", target);
+        }
+        commitTx();
+        GraphTraversalSource g = graph().traversal();
+        GraphTraversalSource control = g.withoutStrategies(HugeCountStrategy.class);
+        for (P<Long> predicate : List.of(P.without(2L, 3L),
+                                        P.without(2L, 3L).or(P.eq(0L)),
+                                        P.without(2L, 3L).and(P.gt(0L)))) {
+            Assert.assertEquals(Collections.singletonList(source.id()),
+                                control.V(source.id()).where(__.out("knows").count()
+                                       .is(predicate.clone())).id().toList());
+            Assert.assertEquals(Collections.singletonList(source.id()),
+                                g.V(source.id()).where(__.out("knows").count()
+                                 .is(predicate.clone())).id().toList());
+            Assert.assertEquals(Collections.singletonList(4L),
+                                g.V(source.id()).out("knows").count()
+                                 .is(predicate.clone()).toList());
+        }
+    }
+
+    @Test
+    public void testCountLossyNumericBoundsKeepCompleteCount() {
+        List<Number> bounds = List.of(new BigDecimal("1E-400"),
+                                     BigInteger.ONE, new AtomicLong(1L), 9007199254740993L,
+                                     16777216F, 9007199254740992D);
+        GraphTraversalSource g = graph().traversal();
+        GraphTraversalSource control = g.withoutStrategies(HugeCountStrategy.class);
+        for (Number bound : bounds) {
+            for (P<Number> predicate : List.of(P.gte(bound), P.lt(bound),
+                                              P.gte(bound).or(P.eq(0)))) {
+                List<Long> expected = predicate.test(2L) ?
+                                      Collections.singletonList(2L) :
+                                      Collections.emptyList();
+                Assert.assertEquals(expected,
+                                    control.inject(1, 2).count().is(predicate.clone()).toList());
+                Assert.assertEquals(expected,
+                                    g.inject(1, 2).count().is(predicate.clone()).toList());
+                GraphTraversal<?, Long> traversal = __.count().is(predicate.clone());
+                HugeCountStrategy.instance().apply(traversal.asAdmin());
+                Assert.assertInstanceOf(CountGlobalStep.class,
+                                        traversal.asAdmin().getStartStep());
+            }
+        }
+    }
+
+    private void assertCountPredicatesKeepFinalResults(List<P<Long>> predicates) {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex first = graph().addVertex(T.label, "person", "name", "first");
+        Vertex second = graph().addVertex(T.label, "person", "name", "second");
+        source.addEdge("knows", first);
+        source.addEdge("knows", second);
+        commitTx();
+
+        GraphTraversalSource g = graph().traversal();
+        GraphTraversalSource control = g.withoutStrategies(HugeCountStrategy.class);
+        for (P<Long> predicate : predicates) {
+            List<Object> expectedIds = predicate.test(2L) ?
+                                       Collections.singletonList(source.id()) :
+                                       Collections.emptyList();
+            List<Long> expectedCounts = predicate.test(2L) ?
+                                        Collections.singletonList(2L) :
+                                        Collections.emptyList();
+            Assert.assertEquals(expectedIds,
+                                control.V(source.id()).where(__.out("knows").count()
+                                           .is(predicate.clone())).id().toList());
+            Assert.assertEquals(expectedIds,
+                                g.V(source.id()).where(__.out("knows").count()
+                                 .is(predicate.clone())).id().toList());
+            Assert.assertEquals(expectedCounts,
+                                control.V(source.id()).out("knows").count()
+                                       .is(predicate.clone()).toList());
+            Assert.assertEquals(expectedCounts,
+                                g.V(source.id()).out("knows").count()
+                                 .is(predicate.clone()).toList());
+        }
+    }
+
+    @Test
+    public void testWhereCountNegatedScalarPredicatesKeepSemantics() {
+        this.initSchema();
+        Vertex source = graph().addVertex(T.label, "person", "name", "source");
+        Vertex first = graph().addVertex(T.label, "person", "name", "first");
+        Vertex second = graph().addVertex(T.label, "person", "name", "second");
+        source.addEdge("knows", first);
+        source.addEdge("knows", second);
+        commitTx();
+
+        long notEqZero = graph().traversal().V(source.id())
+                                .where(__.out("knows").count()
+                                         .is(P.not(P.eq(0L))))
+                                .count().next();
+        long notNeqOne = graph().traversal().V(source.id())
+                                .where(__.out("knows").count()
+                                         .is(P.not(P.neq(1L))))
+                                .count().next();
+        long notLtTwo = graph().traversal().V(source.id())
+                                .where(__.out("knows").count()
+                                         .is(P.not(P.lt(2L))))
+                                .count().next();
+        long notLteOne = graph().traversal().V(source.id())
+                                 .where(__.out("knows").count()
+                                          .is(P.not(P.lte(1L))))
+                                 .count().next();
+        long notGtOne = graph().traversal().V(source.id())
+                                .where(__.out("knows").count()
+                                         .is(P.not(P.gt(1L))))
+                                .count().next();
+        long notGteThree = graph().traversal().V(source.id())
+                                   .where(__.out("knows").count()
+                                            .is(P.not(P.gte(3L))))
+                                   .count().next();
+
+        Assert.assertEquals(1L, notEqZero);
+        Assert.assertEquals(0L, notNeqOne);
+        Assert.assertEquals(1L, notLtTwo);
+        Assert.assertEquals(1L, notLteOne);
+        Assert.assertEquals(0L, notGtOne);
+        Assert.assertEquals(1L, notGteThree);
+    }
+
+    @Test
+    public void testNegatedScalarPredicatesUseComplementedHighRange() {
+        assertNegatedCountHighRange(3L, P.eq(2L));
+        assertNegatedCountHighRange(3L, P.neq(2L));
+        assertNegatedCountHighRange(2L, P.lt(2L));
+        assertNegatedCountHighRange(3L, P.lte(2L));
+        assertNegatedCountHighRange(3L, P.gt(2L));
+        assertNegatedCountHighRange(2L, P.gte(2L));
+    }
+
+    @Test
+    public void testNegatedTextPredicateStaysLocal() {
+        this.initTextRangeSchema(false);
+        graph().schema().indexLabel("vl1ByVp4").onV("vl1")
+               .by("vp4").secondary().create();
+        graph().addVertex(T.label, "vl1", "vp4", "marko", "age", 29);
+        graph().addVertex(T.label, "vl1", "vp4", "josh", "age", 32);
+        commitTx();
+
+        GraphTraversal<Vertex, Long> traversal = graph().traversal().V()
+                                                        .hasLabel("vl1")
+                                                        .has("vp4",
+                                                             TextP.containing("ar")
+                                                                  .negate())
+                                                        .count();
+        applyAndGetGraphStep(traversal);
+
+        Assert.assertTrue(hasRemainingHasStep(traversal, "vp4"));
+        Assert.assertEquals(1L, traversal.next().longValue());
+    }
+
+    @Test
+    public void testNegatedNaNPredicatesKeepGremlinSemantics() {
+        this.initNegatedDoubleSchema();
+        graph().addVertex(T.label, "sample", "score", 1.0D);
+        graph().addVertex(T.label, "sample", "score", Double.NaN);
+        commitTx();
+
+        long notLtNaN = graph().traversal().V()
+                               .hasLabel("sample")
+                               .has("score", P.not(P.lt(Double.NaN)))
+                               .count().next();
+        long notEqNaN = graph().traversal().V()
+                               .hasLabel("sample")
+                               .has("score", P.not(P.eq(Double.NaN)))
+                               .count().next();
+
+        Assert.assertEquals(2L, notLtNaN);
+        Assert.assertEquals(2L, notEqNaN);
     }
 
     @Test
@@ -1246,6 +1553,30 @@ public class CountStrategyCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testTextRangeFilterKeepsIndexedGraphHasStepLocal() {
+        this.initTextRangeSchema(false);
+        graph().schema().indexLabel("vl1ByAge").onV("vl1")
+               .by("age").secondary().create();
+
+        graph().addVertex(T.label, "vl1", "vp4", "a", "age", 1);
+        graph().addVertex(T.label, "vl1", "vp4", "b", "age", 2);
+        commitTx();
+
+        GraphTraversal<Vertex, Long> traversal = graph().traversal().V()
+                                                        .hasLabel("vl1")
+                                                        .has("vp4", P.lt(""))
+                                                        .has("age", 1)
+                                                        .count();
+        HugeGraphStep<?, ?> graphStep = applyAndGetGraphStep(traversal);
+
+        Assert.assertTrue(graphStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasRemainingHasStep(traversal, T.label.getAccessor()));
+        Assert.assertTrue(hasRemainingHasStep(traversal, "vp4"));
+        Assert.assertTrue(hasRemainingHasStep(traversal, "age"));
+        Assert.assertEquals(0L, traversal.next().longValue());
+    }
+
+    @Test
     public void testTextRangeFilterKeepsMixedVertexHasStep() {
         this.initTextRangeSchema(true);
 
@@ -1451,6 +1782,53 @@ public class CountStrategyCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testMatchWithNegatedBooleanPredicateKeepsHas() {
+        this.initMatchNoIndexSchema();
+        graph().schema().indexLabel("vl1ByVp2").onV("vl1")
+               .by("vp2").secondary().create();
+        this.initMatchNoIndexGraph();
+
+        GraphTraversal<Vertex, Long> traversal = graph().traversal().V()
+                                                        .has("vp2",
+                                                             P.not(P.eq(true)))
+                                                        .match(__.<Vertex>as("s")
+                                                                 .has("vp2")
+                                                                 .as("m"))
+                                                        .<Vertex>select("m")
+                                                        .count();
+
+        HugeGraphStep<?, ?> graphStep = applyAndGetGraphStep(traversal);
+        Assert.assertEquals(0, graphStep.getHasContainers().size());
+        Assert.assertTrue(hasRemainingHasStep(traversal, "vp2"));
+        Assert.assertEquals(1L, traversal.next());
+    }
+
+    @Test
+    public void testNegatedBooleanComparisonsKeepGremlinSemantics() {
+        this.initMatchNoIndexSchema();
+        graph().schema().indexLabel("vl1ByVp2").onV("vl1")
+               .by("vp2").secondary().create();
+        this.initMatchNoIndexGraph();
+
+        this.assertNegatedBooleanPredicate(1L, P.eq(true));
+        this.assertNegatedBooleanPredicate(1L, P.eq(false));
+        this.assertNegatedBooleanPredicate(1L, P.neq(true));
+        this.assertNegatedBooleanPredicate(1L, P.neq(false));
+        this.assertNegatedBooleanPredicate(1L, P.lt(true));
+        this.assertNegatedBooleanPredicate(2L, P.lt(false));
+        this.assertNegatedBooleanPredicate(0L, P.lte(true));
+        this.assertNegatedBooleanPredicate(1L, P.lte(false));
+        this.assertNegatedBooleanPredicate(2L, P.gt(true));
+        this.assertNegatedBooleanPredicate(1L, P.gt(false));
+        this.assertNegatedBooleanPredicate(1L, P.gte(true));
+        this.assertNegatedBooleanPredicate(0L, P.gte(false));
+        this.assertNegatedBooleanPredicate(1L,
+                                           P.eq(true).and(P.gte(false)));
+        this.assertNegatedBooleanPredicate(0L,
+                                           P.eq(true).or(P.lt(true)));
+    }
+
+    @Test
     public void testMatchWithNoIndexConditionKeepsExtractingNextHas() {
         this.initMatchNoIndexSchema();
         graph().schema().indexLabel("vl1ByVp2").onV("vl1")
@@ -1581,6 +1959,32 @@ public class CountStrategyCoreTest extends BaseCoreTest {
         Assert.assertEquals(1, graphStep.getHasContainers().size());
         Assert.assertEquals("vp2", graphStep.getHasContainers().get(0).getKey());
         Assert.assertTrue(hasRemainingHasStep(traversal, "vp3"));
+        Assert.assertEquals(0L, traversal.next());
+    }
+
+    @Test
+    public void testMatchWithNegatedNumericRangeConditionKeepsHas() {
+        this.initMatchNoIndexSchema();
+        graph().schema().indexLabel("vl0ByVp3").onV("vl0")
+               .by("vp3").range().create();
+        graph().schema().indexLabel("vl1ByVp2").onV("vl1")
+               .by("vp2").secondary().create();
+        this.initMatchNoIndexGraph();
+
+        GraphTraversal<Vertex, Long> traversal = graph().traversal().V()
+                                                        .has("vp3", P.not(P.lte(
+                                                                4592737712018141718L)))
+                                                        .has("vp2", true)
+                                                        .match(__.<Vertex>as("s")
+                                                                 .has("vp2")
+                                                                 .as("m"))
+                                                        .<Vertex>select("m")
+                                                        .count();
+
+        HugeGraphStep<?, ?> graphStep = applyAndGetGraphStep(traversal);
+        Assert.assertEquals(0, graphStep.getHasContainers().size());
+        Assert.assertTrue(hasRemainingHasStep(traversal, "vp3"));
+        Assert.assertTrue(hasRemainingHasStep(traversal, "vp2"));
         Assert.assertEquals(0L, traversal.next());
     }
 

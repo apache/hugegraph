@@ -109,7 +109,6 @@
         <javassist.version>3.28.0-GA</javassist.version>
         <jersey.version>3.0.3</jersey.version>
         <jersey.hk2.version>3.0.3</jersey.hk2.version>
-        <jackson.version>2.14.0-rc1</jackson.version>
         <junit.version>4.13.1</junit.version>
         <mockito.version>4.1.0</mockito.version>
         <jakarta.xml.version>4.0.0-RC2</jakarta.xml.version>

@@ -44,7 +44,7 @@
     </modules>
 
     <properties>
-        <log4j2.version>2.15.0</log4j2.version>
+        <log4j2.version>2.18.0</log4j2.version>
         <final.name>apache-${release.name}-store-${project.version}</final.name>
     </properties>
 

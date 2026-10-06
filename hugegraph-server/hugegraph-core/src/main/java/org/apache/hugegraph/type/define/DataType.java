@@ -18,6 +18,7 @@
 package org.apache.hugegraph.type.define;
 
 import java.nio.ByteBuffer;
+import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.List;
 import java.util.UUID;
@@ -149,6 +150,8 @@ public enum DataType implements SerialEnum {
         }
         if (value instanceof Date) {
             return (Date) value;
+        } else if (value instanceof OffsetDateTime) {
+            return Date.from(((OffsetDateTime) value).toInstant());
         } else if (value instanceof Integer) {
             return new Date(((Number) value).intValue());
         } else if (value instanceof Long) {

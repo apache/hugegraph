@@ -69,6 +69,16 @@ try {
                    "'${SMOKE_MARKER}-' + count"
     results = client.submit(remoteScript).all().get()
     println(results[0].object)
+    interpolation = client.submit('def value = 42; "r3-value:\${value}"').all().get()
+    assert interpolation.size() == 1
+    assert interpolation[0].object instanceof String
+    assert interpolation[0].object == 'r3-value:42'
+    nested = client.submit('def value = 42; [["r3-value:\${value}"], ' +
+                           '[value: "r3-value:\${value}"]]').all().get()
+    assert nested.size() == 2
+    assert nested[0].object == ['r3-value:42']
+    assert nested[1].object == [value: 'r3-value:42']
+    println('gremlin-console-gstring-ok')
 } finally {
     client.close()
     cluster.close()
@@ -81,3 +91,4 @@ EOF
 ) | tee "$SMOKE_LOG"
 
 grep -q "$SMOKE_MARKER" "$SMOKE_LOG"
+grep -q "gremlin-console-gstring-ok" "$SMOKE_LOG"

@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.unit.core;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Date;
 import java.util.UUID;
 
@@ -71,6 +73,17 @@ public class DataTypeTest {
 
         Assert.assertNull(DataType.TEXT.valueToDate("2019-01-01 12:00:00"));
         Assert.assertNull(DataType.DATE.valueToDate(true));
+    }
+
+    @Test
+    public void testValueToDateFromOffsetDateTime() {
+        OffsetDateTime value = OffsetDateTime.parse("2023-08-02T08:00:00.123456789+08:00");
+        Date expected = Date.from(value.toInstant());
+        Assert.assertEquals(expected, DataType.DATE.valueToDate(value));
+        Assert.assertEquals(expected, DataType.DATE.valueToDate(
+                value.withOffsetSameInstant(ZoneOffset.UTC)));
+        Assert.assertEquals(value.toInstant().toEpochMilli(), expected.getTime());
+        Assert.assertNull(DataType.TEXT.valueToDate(value));
     }
 
     @Test

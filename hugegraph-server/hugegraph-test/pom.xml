@@ -67,9 +67,10 @@
             <version>${tinkerpop.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.apache.tinkerpop</groupId>
-            <artifactId>gremlin-groovy-test</artifactId>
-            <version>3.2.11</version>
+            <groupId>com.google.inject</groupId>
+            <artifactId>guice</artifactId>
+            <version>4.2.3</version>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.test-framework.providers</groupId>
@@ -196,6 +197,8 @@
                             </testClassesDirectory>
                             <includes>
                                 <include>**/ProcessStandardTest.java</include>
+                                <include>**/HugeGraphFeatureTest.java</include>
+                                <include>**/HugeGraphProviderLifecycleTest.java</include>
                             </includes>
                         </configuration>
                     </execution>

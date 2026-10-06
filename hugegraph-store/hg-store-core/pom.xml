@@ -29,6 +29,10 @@
 
     <artifactId>hg-store-core</artifactId>
 
+    <properties>
+        <tinkerpop.version>3.8.1</tinkerpop.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
@@ -129,7 +133,7 @@
         <dependency>
             <groupId>org.apache.tinkerpop</groupId>
             <artifactId>gremlin-core</artifactId>
-            <version>3.5.1</version>
+            <version>${tinkerpop.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.yaml</groupId>
@@ -152,7 +156,7 @@
         <dependency>
             <groupId>org.apache.tinkerpop</groupId>
             <artifactId>gremlin-groovy</artifactId>
-            <version>3.5.1</version>
+            <version>${tinkerpop.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.github.jeremyh</groupId>

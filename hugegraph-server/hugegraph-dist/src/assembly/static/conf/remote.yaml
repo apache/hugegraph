@@ -17,9 +17,10 @@
 hosts: [localhost]
 port: 8182
 serializer: {
-  className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV1d0,
+  className: org.apache.tinkerpop.gremlin.util.ser.GraphBinaryMessageSerializerV1,
   config: {
     serializeResultToString: false,
+    builder: org.apache.hugegraph.io.HugeGraphTypeSerializerRegistryBuilder,
     ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
   }
 }

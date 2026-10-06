@@ -39,7 +39,9 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertiesPropertySource;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import com.google.common.base.Charsets;
 
@@ -125,7 +127,7 @@ public class PdConfigureListener implements
     }
 
     private Properties getYmlConfig(String yml) {
-        Yaml yaml = new Yaml();
+        Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
         Iterable load = yaml.loadAll(yml);
         Iterator iterator = load.iterator();
         Properties properties = new Properties();

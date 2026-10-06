@@ -15,6 +15,9 @@ bytecode for downstream compatibility. Their build and tests still run on
 Java 17; this library bytecode target does not lower HugeGraph's runtime
 requirement.
 
+See the [TinkerPop 3.8.1 migration guide](upgrade-tinkerpop-3.8.md) for the
+upgraded runtime, client configuration and compatibility checks.
+
 To build without executing tests: `mvn clean package -Dmaven.test.skip=true`
 
 ## Building in IDEA
@@ -47,7 +50,3 @@ To build without executing tests:
 To find the Java binary in your environment, run the appropriate command for your operating system:
 * Linux/macOS: `which java`
 * Windows: `for %i in (java.exe) do @echo. %~$PATH:i`
-
-The Java 17 baseline retains TinkerPop 3.5.1 and uses Groovy 2.5.23 as an
-intermediate compatibility update. Groovy 2.5.14 cannot read Java 17 class files.
-The subsequent TinkerPop upgrade replaces this compatibility pin with Groovy 4.

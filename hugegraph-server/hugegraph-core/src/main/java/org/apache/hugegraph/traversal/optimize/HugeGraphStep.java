@@ -37,7 +37,7 @@ import org.apache.tinkerpop.gremlin.util.iterator.IteratorUtils;
 import org.slf4j.Logger;
 
 public final class HugeGraphStep<S, E extends Element>
-        extends GraphStep<S, E> implements QueryHolder {
+        extends GraphStep<S, E> implements QueryHolder<S, E> {
 
     private static final long serialVersionUID = -679873894532085972L;
 

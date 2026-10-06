@@ -17,7 +17,7 @@
 hosts: [localhost]
 port: 8182
 serializer: {
-  className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV1d0,
+  className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV1,
   config: {
     serializeResultToString: false,
     # The duplication of HugeGraphIoRegistry is meant to fix a bug in the
@@ -28,3 +28,5 @@ serializer: {
     ]
   }
 }
+# Keep untyped V1 for the Cypher HTTP JSON path. The bundled Server does not
+# register typed V1 because class-name deserialization can run before authentication.

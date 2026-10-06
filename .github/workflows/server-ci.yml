@@ -81,6 +81,9 @@ jobs:
       - name: Run RISC-V Java runtime contract tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-riscv64-java-runtime.sh
 
+      - name: Check TinkerPop report execution gates
+        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-tinkerpop-reports.sh
+
   # Required coverage: memory on the project runtime and any additional test JDKs.
   # The shared runtime comes from .github/workflows/.java-version, independent of bytecode targets.
   # Keep the job ID for the Codecov configuration validator.

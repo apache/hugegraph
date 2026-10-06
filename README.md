@@ -66,7 +66,7 @@ HugeGraph supports both **standalone** and **distributed** deployments:
                         │             HugeGraph Server (:8080)                │
                         │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
                         │  │ REST API │  │ Gremlin  │  │   Cypher Engine  │   │
-                        │  │(Jersey 3)│  │(TP 3.5.1)│  │   (OpenCypher)   │   │
+                        │  │(Jersey 3)│  │(TP 3.8.1)│  │   (OpenCypher)   │   │
                         │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
                         │       └─────────────┼─────────────────┘             │
                         │            ┌────────▼────────┐                      │
@@ -125,7 +125,7 @@ flowchart TB
 
     subgraph Server["HugeGraph Server :8080"]
         API[REST API<br/>Jersey 3]
-        GS[Gremlin Server<br/>TinkerPop 3.5.1]
+        GS[Gremlin Server<br/>TinkerPop 3.8.1]
         CS[Cypher Engine<br/>OpenCypher]
         CORE[Graph Engine<br/>hugegraph-core]
 
@@ -182,6 +182,9 @@ curl -X POST http://localhost:8080/gremlin \
 The launch scripts reject Java versions older than 17. That minimum-version
 check does not qualify later Java releases; use Java 17 unless another release
 is explicitly listed as supported.
+
+For this upgrade, read the [TinkerPop 3.8.1 migration guide](docs/upgrade-tinkerpop-3.8.md)
+for client configuration and query compatibility checks.
 
 ### Option 1: Docker (Fastest)
 
@@ -292,7 +295,7 @@ curl http://localhost:8080/versions
 #   "versions": {
 #     "version": "v1",
 #     "core": "1.7.0",
-#     "gremlin": "3.5.1",
+#     "gremlin": "3.8.1",
 #     "api": "1.7.0"
 #   }
 # }
