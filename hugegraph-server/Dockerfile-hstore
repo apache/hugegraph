@@ -72,6 +72,9 @@ RUN cd /hugegraph-server/conf/graphs \
 COPY hugegraph-server/hugegraph-dist/docker/scripts/remote-connect.groovy ./scripts
 #COPY hugegraph-server/hugegraph-dist/docker/scripts/detect-storage.groovy ./scripts
 COPY hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh .
+# props.awk needs no COPY: it ships in the assembly bin/ above, which is also
+# where bin/enable-auth.sh finds it.  yamlscan.awk serves only the entrypoint.
+COPY hugegraph-server/hugegraph-dist/docker/yamlscan.awk .
 RUN chmod 755 ./docker-entrypoint.sh
 
 EXPOSE 8080
