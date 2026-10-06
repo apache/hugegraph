@@ -17,7 +17,11 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import org.apache.hugegraph.HugeGraph;
@@ -29,10 +33,12 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
+import org.apache.tinkerpop.gremlin.process.traversal.TextP;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
+import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
@@ -120,6 +126,31 @@ public class TraversalUtilOptimizeTest {
 
         Assert.assertTrue(newStep.getHasContainers().isEmpty());
         Assert.assertTrue(hasStepExists(traversal));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsMixedTextGraphHasStepLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        PropertyKey name = propertyKey(2L, "name", DataType.TEXT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+        Mockito.when(graph.propertyKey("name")).thenReturn(name);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("person", "name", TextP.containing("ar")),
+                graph);
+        HasStep<?> hasStep = (HasStep<?>) traversal.getEndStep();
+        hasStep.addHasContainer(new HasContainer("age", P.eq(29)));
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertFalse(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertFalse(hasContainer(newStep, "age"));
+        Assert.assertFalse(hasContainer(newStep, "name"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(hasStepExists(traversal, "name"));
     }
 
     @Test
@@ -281,6 +312,31 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerKeepsMixedTextVertexHasStepLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        PropertyKey name = propertyKey(2L, "name", DataType.TEXT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+        Mockito.when(graph.propertyKey("name")).thenReturn(name);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().out().has("person", "name", TextP.containing("ar")),
+                graph);
+        HasStep<?> hasStep = (HasStep<?>) traversal.getEndStep();
+        hasStep.addHasContainer(new HasContainer("age", P.eq(29)));
+        HugeVertexStep<?> newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertFalse(hasContainer(newStep, T.label.getAccessor()));
+        Assert.assertFalse(hasContainer(newStep, "age"));
+        Assert.assertFalse(hasContainer(newStep, "name"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(hasStepExists(traversal, "name"));
+    }
+
+    @Test
     public void testExtractHasContainerRemovesSafeVertexHasStep() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         PropertyKey age = propertyKey(1L, "age", DataType.INT);
@@ -294,6 +350,40 @@ public class TraversalUtilOptimizeTest {
 
         Assert.assertEquals(1, newStep.getHasContainers().size());
         Assert.assertFalse(hasStepExists(traversal));
+    }
+
+    @Test
+    public void testLabelContainersWithImmutableList() {
+        assertNullHostileLabelCollection(List.of("person"));
+    }
+
+    @Test
+    public void testLabelContainersWithImmutableSet() {
+        assertNullHostileLabelCollection(Set.of("person"));
+    }
+
+    private static void assertNullHostileLabelCollection(Collection<String> labels) {
+        HasContainer within = new HasContainer(T.label.getAccessor(), P.within(labels));
+        Assert.assertTrue(TraversalUtil.canExtractHasContainer(null, within));
+        Assert.assertTrue(TraversalUtil.isPositiveLabelContainer(within));
+        HasContainer without = new HasContainer(T.label.getAccessor(), P.without(labels));
+        Assert.assertTrue(TraversalUtil.canExtractHasContainer(null, without));
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(without));
+    }
+
+    @Test
+    public void testLabelContainersWithMutableNullValuesStayLocal() {
+        Collection<String> list = new ArrayList<>(List.of("person"));
+        list.add(null);
+        Collection<String> set = new HashSet<>(list);
+        for (Collection<String> labels : List.of(list, set)) {
+            HasContainer within = new HasContainer(T.label.getAccessor(), P.within(labels));
+            Assert.assertFalse(TraversalUtil.canExtractHasContainer(null, within));
+            Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(within));
+            HasContainer without = new HasContainer(T.label.getAccessor(), P.without(labels));
+            Assert.assertFalse(TraversalUtil.canExtractHasContainer(null, without));
+            Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(without));
+        }
     }
 
     @Test
@@ -314,6 +404,11 @@ public class TraversalUtilOptimizeTest {
         Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
                 new HasContainer(T.label.getAccessor(),
                                  P.within(Collections.emptyList()))));
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(), P.eq(null))));
+        Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
+                new HasContainer(T.label.getAccessor(),
+                                 P.within(null, "person"))));
     }
 
     @Test
@@ -419,7 +514,8 @@ public class TraversalUtilOptimizeTest {
         TraversalHelper.replaceStep((Step) origin, (Step) newStep, traversal);
     }
 
-    private static boolean hasContainer(HugeGraphStep<?, ?> step, String key) {
+    private static boolean hasContainer(HasContainerHolder step,
+                                        String key) {
         for (HasContainer has : step.getHasContainers()) {
             if (key.equals(has.getKey())) {
                 return true;

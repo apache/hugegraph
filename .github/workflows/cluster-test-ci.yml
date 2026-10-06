@@ -1,36 +1,11 @@
 name: "Cluster Test CI"
 
 on:
-  push:
-    branches:
-      - master
-      - 'release-*'
-      - 'test-*'
-  pull_request:
-    # Keep source/resources and shared build inputs; skip named documentation files.
-    paths:
-      - '.github/workflows/.java-version'
-      - 'pom.xml'
-      - '.mvn/**'
-      - 'style/**'
-      - '.editorconfig'
-      - '.github/configs/**'
-      - 'hugegraph-commons/**'
-      - 'hugegraph-struct/**'
-      - 'hugegraph-pd/**'
-      - 'hugegraph-store/**'
-      - 'hugegraph-server/**'
-      - 'hugegraph-cluster-test/**'
-      - 'install-dist/**'
-      - '.github/workflows/cluster-test-ci.yml'
-      - '!**/README*'
-      - '!**/AGENTS.md'
-      - '!**/CLAUDE.md'
+  workflow_call:
+  workflow_dispatch:
 
-# Keep the newest PR run; preserve independent push, release and manual runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+permissions:
+  contents: read
 
 jobs:
   cluster-test:
