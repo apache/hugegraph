@@ -38,7 +38,9 @@ WORKFLOWS = {
     "server": {"server-ci.yml": MODULES["server"], "commons-ci.yml": ["commons"],
                "pd-store-ci.yml": ["pd", "store", "hstore"], "cluster-test-ci.yml": ["cluster"],
                "docker-build-ci.yml": ["docker"], "helm-chart-ci.yml": ["helm"],
-               "codeql-analysis.yml": [], "riscv64-ci.yml": ["server"], "check-dependencies.yml": ["dependency_license"]},
+               "codeql-analysis.yml": [], "server-memory-ci.yml": ["server"],
+               "server-tests.yml": ["server"], "server-compatibility-ci.yml": ["server", "docker"],
+               "riscv64-ci.yml": ["server"], "check-dependencies.yml": ["dependency_license"]},
     "toolchain": {"client-ci.yml": ["client"], "client-go-ci.yml": ["go"],
                   "loader-ci.yml": ["loader"], "tools-ci.yml": ["tools"],
                   "spark-connector-ci.yml": ["spark"], "hubble-ci.yml": ["hubble"],
@@ -108,6 +110,8 @@ def select(project, paths):
             selected.update(["client", "go"])
             continue
         if project == "server":
+            if path == "hugegraph-server/hugegraph-api/pom.xml":
+                selected.add("docker")
             if path.startswith(("hugegraph-pd/hg-pd-dist/", "hugegraph-store/hg-store-dist/")):
                 selected.add("docker")
             if path.startswith("hugegraph-server/hugegraph-hstore/"):
@@ -159,7 +163,6 @@ def require_current_pr(plan, fetch):
         return
     live = fetch(f"repos/{plan['repository']}/pulls/{plan['pr']}")
     if (live.get("state") != "open" or live["head"]["sha"] != plan["head"]
-            or live["base"]["sha"] != plan["base"]
             or live["head"]["repo"]["full_name"] != plan["source"]
             or live["head"]["ref"] != plan["branch"]
             or live["base"]["repo"]["full_name"] != plan["repository"]):
@@ -200,7 +203,7 @@ def create_plan(project, event, repository, fetch=api):
         plan["expected"] = suites(project, selected)
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
         selected = set(MODULES[project])
-        plan["reason"] = "verification unavailable: full required coverage"
+        plan["reason"] = "verification unavailable: conservative full coverage"
         plan["expected"] = suites(project, selected)
     if not selected:
         plan["reason"] = "cumulative PR diff contains only plain prose documentation; modules unaffected"
@@ -211,36 +214,72 @@ def create_plan(project, event, repository, fetch=api):
     plan["needsFixture"] = project == "toolchain" and any(plan.get(m, False) for m in MODULES[project])
     plan["fixture"] = plan["needsFixture"]
     plan["compatibility"] = project == "server" and bool(selected.intersection({"server", "commons", "struct", "pd", "store", "hstore", "cluster"}))
-    plan["security"] = bool(selected) or any(p.startswith(".github/workflows/codeql") for p in locals().get("paths", []))
+    plan["smoke"] = project == "server" and bool(selected.intersection({"server", "docker"}))
+    plan["security"] = bool(selected - {"docker", "helm"}) or any(
+        p.startswith(".github/workflows/codeql") for p in locals().get("paths", []))
+    plan["required"] = ["server_memory"] if project == "server" and "server" in selected else []
     plan["security_languages"] = json.dumps(["java"])
     return plan
 
 
-def gate(plan, results, fetch=None):
-    if results.get("plan", {}).get("result") != "success":
-        raise ValueError("planner did not succeed")
-    for suite in plan["expected"]:
-        if results.get(suite, {}).get("result") != "success":
-            raise ValueError("selected suite did not succeed: " + suite)
-    if plan["project"] == "toolchain":
-        if set(plan["expected"]).intersection({"client", "loader", "tools", "spark", "go"}):
-            if results.get("fixture", {}).get("result") != "success":
-                raise ValueError("selected tests lack successful fixture")
-        if "hubble" in plan["expected"] and results.get("hubble-fixture", {}).get("result") != "success":
-            raise ValueError("selected Hubble tests lack successful baseline fixture")
-    require_current_pr(plan, fetch or api)
+class GateFailure(ValueError):
+    def __init__(self, message, report):
+        super().__init__(message)
+        self.report = report
+
+
+def gate(plan, results, fetch=None, mode="all"):
+    """Report actual outcomes; Memory and advisory checks have independent dependencies."""
+    expected = list(plan["expected"])
+    if mode == "memory":
+        expected = [suite for suite in expected if suite == "server_memory"]
+    elif mode == "advisory":
+        expected = [suite for suite in expected if suite != "server_memory"]
     report = {key: plan[key] for key in ["schema", "repository", "project", "pr", "source", "branch", "base",
                                         "head", "testedMergeSHA", "selected"]}
-    report["runID"] = int(os.environ.get("GITHUB_RUN_ID", "0"))
-    report["runAttempt"] = int(os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
-    report["executed"] = plan["expected"]
-    report["results"] = {suite: results[suite]["result"] for suite in plan["expected"]}
-    summary = "Selection: " + plan.get("reason", "affected inputs") + "\nExecuted: " + ", ".join(plan["expected"])
+    report.update(runID=int(os.environ.get("GITHUB_RUN_ID", "0")),
+                  runAttempt=int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")), executed=expected,
+                  results={suite: results.get(suite, {}).get("result", "missing") for suite in expected})
+    if mode != "memory" and "dependency_license" in plan["selected"]:
+        report["results"]["dependency_license"] = results.get("dependency_license", {}).get("result", "missing")
+    summary = "Selection: " + plan.get("reason", "affected inputs") + "\n"
+    summary += "Tested base: `" + plan["base"] + "`; merge: `" + plan["testedMergeSHA"] + "`\n\n"
+    summary += "| Check | Selected | Merge requirement | Result |\n| --- | --- | --- | --- |\n"
+    for suite in suites(plan["project"], set(MODULES[plan["project"]])):
+        if mode == "memory" and suite != "server_memory":
+            continue
+        if mode == "advisory" and suite == "server_memory":
+            continue
+        chosen = suite in expected
+        role = "required" if suite == "server_memory" else "advisory"
+        status = report["results"].get(suite, "not selected")
+        summary += f"| {suite} | {'yes' if chosen else 'no'} | {role} | {status} |\n"
+    if "dependency_license" in report["results"]:
+        summary += "| dependency_license | yes | advisory | " + str(report["results"]["dependency_license"]) + " |\n"
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
-            out.write("## Affected module tests\n" + summary + "\n\nUnselected modules: "
-                      + ", ".join(sorted(set(MODULES[plan["project"]]) - set(plan["selected"]))) + "\n")
+            out.write("## " + ("Memory result" if mode == "memory" else "Affected module results") + "\n" + summary + "\n")
     print(summary)
+    errors = []
+    if results.get("plan", {}).get("result") != "success":
+        errors.append("planner did not succeed")
+    errors.extend("selected suite did not succeed: " + suite for suite in expected
+                  if report["results"][suite] != "success")
+    if plan["project"] == "toolchain":
+        if set(expected).intersection({"client", "loader", "tools", "spark", "go"}):
+            if results.get("fixture", {}).get("result") != "success":
+                errors.append("selected tests lack successful fixture")
+        if "hubble" in expected and results.get("hubble-fixture", {}).get("result") != "success":
+            errors.append("selected Hubble tests lack successful baseline fixture")
+    if errors:
+        raise GateFailure("; ".join(errors), report)
+    # Checks are attached to their actual commit; target-branch advancement alone is not stale.
+    # A transient API outage cannot invalidate a genuine completed Memory result.
+    try:
+        require_current_pr(plan, fetch or api)
+    except (subprocess.SubprocessError, OSError):
+        if mode != "memory":
+            raise
     return report
 
 
@@ -255,6 +294,7 @@ def main():
     p = sub.add_parser("gate")
     p.add_argument("--plan", required=True)
     p.add_argument("--results", required=True)
+    p.add_argument("--mode", choices=["all", "memory", "advisory"], default="all")
     p.add_argument("--output", required=True)
     args = parser.parse_args()
     if args.command == "plan":
@@ -266,7 +306,11 @@ def main():
                         output.write(f"{key}={str(item).lower()}\n")
                 output.write(f"security_languages={value['security_languages']}\nplan_file={args.output}\n")
     else:
-        value = gate(json.loads(Path(args.plan).read_text()), json.loads(Path(args.results).read_text()))
+        try:
+            value = gate(json.loads(Path(args.plan).read_text()), json.loads(Path(args.results).read_text()), mode=args.mode)
+        except GateFailure as error:
+            Path(args.output).write_text(json.dumps(error.report, indent=2) + "\n")
+            raise
     Path(args.output).write_text(json.dumps(value, indent=2) + "\n")
 
 

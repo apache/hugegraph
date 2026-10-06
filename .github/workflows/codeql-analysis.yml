@@ -1,23 +1,65 @@
 name: "CodeQL"
 
 on:
-  workflow_call:
+  pull_request:
+  push:
+    branches: [master, 'release-*', 'test-*']
   workflow_dispatch:
   schedule:
     - cron: '33 0 * * 5'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
+  pull-requests: read
   actions: read
   security-events: write
 
 jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      server: ${{ steps.select.outputs.server }}
+      commons: ${{ steps.select.outputs.commons }}
+      pd_store: ${{ steps.select.outputs.pd_store }}
+      cluster: ${{ steps.select.outputs.cluster }}
+      docker: ${{ steps.select.outputs.docker }}
+      helm: ${{ steps.select.outputs.helm }}
+      dependency_license: ${{ steps.select.outputs.dependency_license }}
+      compatibility: ${{ steps.select.outputs.compatibility }}
+      smoke: ${{ steps.select.outputs.smoke }}
+      security: ${{ steps.select.outputs.security }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select affected tests
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/ci-policy.py plan --project server
+          --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
+          --output plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-plan
+          path: plan.json
+          retention-days: 7
+          overwrite: true
+
   analyze:
+    needs: plan
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.plan.outputs.security == 'true'
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
       # Preserve the master scan identity when invoked by a reusable-workflow caller.
       CODEQL_ACTION_ANALYSIS_KEY: .github/workflows/codeql-analysis.yml:analyze
-    name: Analyze
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
     permissions:
       actions: read

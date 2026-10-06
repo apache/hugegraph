@@ -1,0 +1,164 @@
+name: "Server Compatibility CI"
+
+on:
+  push:
+    branches:
+      - master
+      - 'release-*'
+      - 'test-*'
+  pull_request:
+  workflow_dispatch:
+
+# Keep the newest PR run; preserve independent push, release and manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}-${{ github.run_attempt == 1 && 'head' || format('rerun-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      server: ${{ steps.select.outputs.server }}
+      commons: ${{ steps.select.outputs.commons }}
+      pd_store: ${{ steps.select.outputs.pd_store }}
+      cluster: ${{ steps.select.outputs.cluster }}
+      docker: ${{ steps.select.outputs.docker }}
+      helm: ${{ steps.select.outputs.helm }}
+      dependency_license: ${{ steps.select.outputs.dependency_license }}
+      compatibility: ${{ steps.select.outputs.compatibility }}
+      smoke: ${{ steps.select.outputs.smoke }}
+      security: ${{ steps.select.outputs.security }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select affected tests
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 .github/scripts/ci-policy.py plan --project server
+          --event-path "$GITHUB_EVENT_PATH" --repository "$GITHUB_REPOSITORY"
+          --output plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-plan
+          path: plan.json
+          retention-days: 7
+          overwrite: true
+
+  java-runtime:
+    uses: ./.github/workflows/java-runtime.yml
+    permissions:
+      contents: read
+
+  build-server-backends:
+    needs: [plan, java-runtime]
+    if: needs.plan.outputs.compatibility == 'true'
+    uses: ./.github/workflows/server-tests.yml
+    with:
+      backend: hbase
+      java-versions: ${{ needs.java-runtime.outputs.versions }}
+    secrets: inherit
+
+  build-server-macos-rocksdb:
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            server_java_options: ''
+          - os: macos-15
+            server_java_options: '-Xms512m -Xmx2g'
+    env:
+      USE_STAGE: 'false' # Whether to include the stage repository.
+      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
+      REPORT_DIR: target/site/jacoco
+      BACKEND: rocksdb
+      SERVER_JAVA_OPTIONS: ${{ matrix.server_java_options }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 5
+
+      - name: Install project JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'zulu'
+          cache: maven
+          cache-jdk: false
+
+      - name: Use staged maven repo settings
+        if: ${{ env.USE_STAGE == 'true' }}
+        run: |
+          cp $HOME/.m2/settings.xml /tmp/settings.xml
+          cp -vf .github/configs/settings.xml $HOME/.m2/settings.xml && cat $HOME/.m2/settings.xml
+
+      - name: Compile
+        run: |
+          mvn clean compile -pl hugegraph-server/hugegraph-test -am -U -Dmaven.javadoc.skip=true -ntp
+
+      - name: Run check_port unit tests
+        # Validates the ss/netstat port preflight that replaced lsof
+        run: |
+          $TRAVIS_DIR/test-check-port.sh \
+            hugegraph-server/hugegraph-dist/src/assembly/static \
+            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
+
+      - name: Run RocksDB core test
+        run: |
+          $TRAVIS_DIR/run-core-test.sh $BACKEND
+
+      - name: Run RocksDB API test
+        run: |
+          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
+
+      - name: Show server log on failure
+        if: failure()
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          if [ -f "$SERVER_DIR/logs/hugegraph-server.log" ]; then
+            tail -n 200 "$SERVER_DIR/logs/hugegraph-server.log"
+          fi
+
+      - name: Stop RocksDB server
+        if: always()
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
+          if [ -f "$SERVER_DIR/bin/pid" ]; then
+            $TRAVIS_DIR/stop-server.sh $SERVER_DIR || true
+          fi
+
+  build-server-riscv64:
+    # Keep the emulated Java 17 RISC-V native-runtime signal visible while the
+    # platform lane stabilizes, but do not use it as a gate yet.
+    needs: plan
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
+    uses: ./.github/workflows/riscv64-ci.yml
+    permissions:
+      contents: read
+
+  compose-smoke:
+    name: Published Compose smoke
+    needs: plan
+    if: needs.plan.outputs.smoke == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: bash docker/test-compose.sh smoke

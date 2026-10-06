@@ -37,7 +37,7 @@ expected_files = {
         "store": "${{ env.REPORT_FILE }}",
         "hstore": "${{ env.REPORT_DIR }}/*.xml",
     },
-    ".github/workflows/server-ci.yml": {
+    ".github/workflows/server-tests.yml": {
         "build-server": "${{ env.REPORT_DIR }}/*.xml",
     },
 }

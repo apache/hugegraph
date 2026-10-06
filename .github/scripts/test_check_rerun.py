@@ -32,7 +32,7 @@ class FreshnessTest(unittest.TestCase):
     def setUp(self):
         self.repository = "apache/hugegraph"
         self.run = {"status": "completed", "conclusion": "failure", "run_attempt": 1,
-                    "event": "push", "head_sha": "old", "head_branch": "release/test",
+                    "path": ".github/workflows/server-memory-ci.yml", "event": "push", "head_sha": "old", "head_branch": "release/test",
                     "repository": {"full_name": self.repository},
                     "head_repository": {"full_name": self.repository}}
         self.current_head = "old"
@@ -48,6 +48,14 @@ class FreshnessTest(unittest.TestCase):
 
     def decide(self):
         return checker.decide(self.repository, 42, 1, 2, self.fetch)[0]
+
+    def test_only_required_workflows_retry(self):
+        for path in [".github/workflows/server-ci.yml", ".github/workflows/codeql-analysis.yml",
+                     ".github/workflows/server-compatibility-ci.yml"]:
+            self.run["path"] = path
+            self.assertEqual("skip", self.decide())
+        self.run["path"] = ".github/workflows/licence-checker.yml"
+        self.assertEqual("rerun", self.decide())
 
     def test_api_failure_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:

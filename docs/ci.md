@@ -1,84 +1,74 @@
 # CI policy
 
-Pull requests and supported branch pushes enter `HugeGraph-Server CI`. The workflow
-always reports `affected-module-tests`; the required `check-license` runs independently. Module
-workflows are reusable and can also be started manually.
+CI selects tests from the cumulative pull-request diff and known consumer dependencies.
+Selection controls what runs; branch protection controls what must pass before merging.
 
-| Changed inputs | Required Linux coverage |
+| Workflow | Purpose | Merge requirement |
+| --- | --- | --- |
+| License Checker | License headers and RAT | `check-license` |
+| Server Memory CI | Memory unit, core and API tests on the project runtime | `Server memory tests` |
+| HugeGraph-Server CI | Related modules, current images and dependency audits | Advisory |
+| CodeQL | Source analysis, independently selected and scheduled | Advisory |
+| Server Compatibility CI | HBase, macOS, RISC-V and published-image Compose smoke | Advisory |
+
+Each workflow can be cancelled independently. Jobs within a workflow share its cancellation
+scope. Cancelling advisory checks does not cancel Memory or license checks, and does not
+prevent CodeQL from starting. Failed advisory checks retain their real failure result;
+maintainers decide whether they need another run or a requested change.
+
+## Affected inputs
+
+| Changed inputs | Selected validation |
 | --- | --- |
-| Any non-document Server module input, including RocksDB and HStore | Memory, RocksDB, PD/Store/HStore and Cluster |
+| Server, including RocksDB and HStore | Memory, RocksDB, PD/Store/HStore and Cluster |
 | Server distribution or shared startup scripts | Server, PD/Store/HStore, Docker and Cluster |
 | Commons or Struct | Their tests and affected Server, PD, Store, HStore and Cluster tests |
-| PD or Store distribution inputs (`hg-pd-dist/`, `hg-store-dist/`), including scripts, configs, assembly descriptors and POMs | PD/Store/HStore, Cluster and Docker |
-| Other PD or Store inputs | PD/Store/HStore suite and Cluster |
-| Cluster, Docker or Helm | The corresponding suite; Docker includes Compose render/smoke and startup contracts |
-| Central `server-ci.yml` | All Linux suites controlled by the caller |
-| A module workflow | Its suite and known downstream suites |
+| PD or Store distribution scripts, config, assembly or POM | PD/Store/HStore, Cluster and Docker |
+| Other PD or Store inputs | PD/Store/HStore and Cluster |
+| Server API POM or Commons version resource | Normal module coverage plus Docker artifact checks |
+| Cluster, Docker or Helm | Their suite and known consumers |
 | Dependencies, shared build inputs or unknown paths | Conservative full coverage |
 
-The selector follows dependency edges. PD, Store, HStore and Struct share one suite
-in this first stage. Selected tests must succeed; failure, cancellation or an
-unexpected skip cannot satisfy the gate. Startup prerequisites are enforced.
+The Memory required result depends only on its planner, runtime preparation and real Memory
+matrix. A selected test that fails, is cancelled or unexpectedly skipped cannot pass it.
+When Memory is not selected, the result explains that no Memory test was needed.
+The advisory `affected-module-tests` summary lists selection, required status and actual results.
+It does not stand in for Memory or control CodeQL and compatibility checks.
 
-Third-party dependency inventory and vulnerability review retain their existing
-non-blocking policy. They run when selected, but are excluded from the core gate
-and current-run test results. Their failure does not prevent affected module tests or
-post-gate checks from reporting results; the required license check is unchanged.
+The Docker suite builds the current four production images through a shared Maven build.
+Checks consume those final images, verify identity, health, version and authentication, and
+exercise the PD/Store/Server topology. Published-image Hubble Compose smoke runs once in
+compatibility CI when RocksDB or Docker is selected; it does not verify the new PR images.
 
-The Docker suite builds and loads the four production images from the current
-checkout on one Linux runner, sharing their Maven build through BuildKit Bake.
-It verifies healthcheck presence and Java contracts, then starts standalone Server
-and the PD/Store/Server topology with unique run tags and pulling disabled.
-Runtime checks match each container's image ID to the build, require healthy
-services and validate Server version and authenticated graph-list responses.
-PD must report readiness and a registered Store; unauthenticated graph and PD
-metadata access must be rejected. The existing Hubble Compose smoke
-remains a separate compatibility check; it does not verify the new PR images.
+HBase compatibility uses the existing HBase version in one standalone container with local
+storage. Its image is pinned by digest; no separate HDFS service or CI image build is needed.
+Pull, startup and readiness preparation have a five-minute total budget. Preparation failure
+ends the advisory check without falling back to a tar download. Existing HBase behavior tests
+remain. This changes CI preparation, not product support or backend deprecation policy.
 
-HBase, macOS, RISC-V and CodeQL run after the core gate. Their results remain visible,
-but they are outside `affected-module-tests`. Post-gate conditions explicitly
-require a successful plan and gate, including when unrelated modules were skipped. This orders work within a PR; it does
-not grant runner priority over other PRs. Existing scheduled CodeQL scanning remains.
+## Documentation and freshness
 
-## Documentation updates
+Only explicitly allowed prose and static documentation assets qualify as plain documentation.
+Packaged resources, configuration, source, tests and CI inputs never qualify. Documentation-only
+PRs skip compilation, backend services, images and PR CodeQL; lightweight selection and license
+checks still report. A source PR with a later documentation commit still tests its cumulative
+source changes. No result is reused from a previous run.
 
-Only explicitly allowed prose and static documentation assets qualify. Source,
-types, tests, dependencies and CI configuration never qualify as documentation.
-A PR containing only allowed documentation changes can omit unaffected modules.
-A source PR that later receives a documentation update still selects its cumulative
-source changes and runs the necessary module tests, compatibility and security
-checks on every update. Cross-run success reuse is paused: an artifact's claimed
-merge SHA, parents and job IDs do not independently prove the original execution tree.
-A trustworthy execution-proof design is separate work.
+Plans record the event head, tested base and merge. Checkout and PR source identities must
+match the event. A new source head invalidates the old run; target-branch advancement alone
+does not, matching non-strict branch protection. A selection/API failure conservatively selects
+all suites. A final metadata outage alone cannot invalidate completed Memory tests.
+Plans and actual results are diagnostics, not execution credentials for later runs.
 
-The plan and current-run results are saved as `ci-plan` and `ci-test-results`
-artifacts. Results describe only this run's successful selected suites; they are
-not authentication evidence and never authorize a later run to skip tests.
+## Protection migration and retries
 
-PR planning records the event's head, base and source before querying live metadata.
-A known mismatch with the checkout merge or current PR fails planning; expanding
-coverage cannot make an outdated checkout current. After all selected jobs and
-fixtures succeed, the gate rechecks the open PR's head, base and source using a
-read-only API request. Changed inputs or unavailable metadata fail the gate.
-Refresh the branch and start a new PR event after head or base movement: GitHub
-reruns retain the original commit and event, so rerunning alone cannot refresh the
-base. An unknown API or selection failure falls back to full coverage; a manual
-full rerun can recover a transient failure while the recorded inputs remain current.
+`.asf.yaml` requests only `check-license` and `Server memory tests`. Keep existing check names
+through migration and verify live branch protection after merging. The migration PR may need
+one complete run under the old requirements. Do not remove a still-required context or forge
+success for it. Remove obsolete `affected-module-tests`/CodeQL requirements from live protection
+before relying on documentation skips or independently cancelling advisory workflows.
 
-## Protection migration
-
-`.asf.yaml` requests `check-license` and `affected-module-tests`. Temporary memory
-and Java analysis aliases preserve the previous protection names. Leave
-`CI_OPTIMIZED_REQUIRED` unset until the live branch protection uses the new gate;
-CodeQL continues scanning every update during this transition. Setting the
-repository variable to `true` then permits unchanged documentation updates to
-avoid redundant security scanning. Enabling the variable is a separate rollout
-operation.
-
-Automatic retry is limited to failed pushes. It verifies the run attempt, source
-repository and current branch head before and after its existing wait; at most two
-automatic reruns are allowed. Only failed jobs are retried. PR automatic retry is
-paused because it relied on the PR's CI plan artifact to attest the tested base.
-For a transient PR failure with unchanged inputs, use a manual full rerun so shared
-build and fixture artifacts are rebuilt together with their consumers. A retry retains its separate concurrency
-group and cannot cancel a newer PR run.
+Only failed push runs of License Checker and Server Memory CI automatically retry, at most
+twice. The trusted checker verifies the workflow path, attempt, repository and unchanged branch
+head before and after the delay. PRs and advisory workflows never automatically retry.
+Use a manual rerun when appropriate; a rerun retains its original commit and event.
