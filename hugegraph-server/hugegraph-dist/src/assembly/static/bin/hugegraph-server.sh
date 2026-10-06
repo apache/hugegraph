@@ -148,19 +148,28 @@ fi
 # own JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, the command line (JAVA_OPTIONS and -j)
 # and _JAVA_OPTIONS, so any of those overrides them. The JVM does that parsing
 # itself, including quoted options and @argfiles.
-# A restarted container often reuses the JVM's PID, and HotSpot will not overwrite
-# an existing crash log or heap dump, so the file names carry the host name (the
-# pod name on Kubernetes, so pods sharing one log volume do not collide), the
-# launch time, and a counter that skips names already used in $LOGS. The script
-# execs java below, so $$ is the JVM's PID.
+# Child JVMs the Server starts (computer jobs, for example) inherit these options,
+# so every path must stay unique per JVM. ErrorFile expands %p to each JVM's PID.
+# HeapDumpPath does not expand %p, but when it names an existing directory each JVM
+# writes java_pid<its pid>.hprof inside it, so it points at a directory per launch.
+# A restarted container often reuses the PID, and HotSpot will not overwrite an
+# existing crash log or heap dump, so the names carry the host name (the pod name
+# on Kubernetes, so pods sharing one log volume do not collide), the launch time,
+# and a counter that skips names already used in $LOGS.
 crash_files_exist() {
+    [[ -e "${LOGS}/heapdump_$1" ]] && return 0
     local file
-    for file in "${LOGS}"/java_pid*_"$1".hprof "${LOGS}"/hs_err_pid*_"$1".log; do
+    for file in "${LOGS}"/hs_err_pid*_"$1".log; do
         [[ -e ${file} ]] && return 0
     done
     return 1
 }
 LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | tr -c 'A-Za-z0-9._-' '_')
+# Earlier launches on this host leave their heap dump directory behind even when
+# nothing was dumped. Remove those that are empty; rmdir never removes a dump.
+for HEAP_DUMP_DIR in "${LOGS}"/heapdump_"${LAUNCH_HOST}"_*/; do
+    [[ -d ${HEAP_DUMP_DIR} ]] && rmdir "${HEAP_DUMP_DIR}" 2>/dev/null
+done
 LAUNCH_STAMP="${LAUNCH_HOST}_$(date +%Y%m%d-%H%M%S)"
 LAUNCH_ID="${LAUNCH_STAMP}"
 LAUNCH_SUFFIX=0
@@ -168,8 +177,13 @@ while crash_files_exist "${LAUNCH_ID}"; do
     LAUNCH_SUFFIX=$((LAUNCH_SUFFIX + 1))
     LAUNCH_ID="${LAUNCH_STAMP}-${LAUNCH_SUFFIX}"
 done
+HEAP_DUMP_DIR="${LOGS}/heapdump_${LAUNCH_ID}"
+mkdir -p "${HEAP_DUMP_DIR}" || {
+    report_error "Failed to create heap dump directory ${HEAP_DUMP_DIR}"
+    exit 1
+}
 CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
-CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${LOGS}/java_pid$$_${LAUNCH_ID}.hprof\""
+CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${HEAP_DUMP_DIR}\""
 CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
 export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
 

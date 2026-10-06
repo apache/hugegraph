@@ -224,8 +224,15 @@ cleanup() {
         rm -f "$OT_FIXTURE_JAR"
     fi
     if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
-        rm -f "${CRASH_NAME_FIXTURES[@]}"
+        rm -rf "${CRASH_NAME_FIXTURES[@]}"
     fi
+    # Each launcher run creates a heap dump directory; drop the empty ones.
+    local dump_dir
+    for dump_dir in "${SERVER_ROOT}"/logs/heapdump_*/; do
+        if [[ -d "$dump_dir" ]]; then
+            rmdir "$dump_dir" 2>/dev/null || true
+        fi
+    done
     rm -rf "$TEMP_DIR"
 }
 
@@ -614,8 +621,10 @@ LOGS_PATTERN=$(printf '%s' "${SERVER_ROOT}/logs" | sed 's/[][\.*^$+?(){}|]/\\&/g
 # The names carry the host name, the launch time and, if needed, a counter,
 # since a restarted container often reuses the PID, pods may share one log
 # volume, and HotSpot will not overwrite an existing crash log or heap dump.
+# HeapDumpPath names a directory per launch, so each JVM writes its own
+# java_pid<pid>.hprof there.
 NAME_ID_PATTERN="[A-Za-z0-9._-]+_[0-9]{8}-[0-9]{6}(-[0-9]+)?"
-HEAP_DUMP_PATTERN="^${LOGS_PATTERN}/java_pid[0-9]+_${NAME_ID_PATTERN}\.hprof$"
+HEAP_DUMP_PATTERN="^${LOGS_PATTERN}/heapdump_${NAME_ID_PATTERN}$"
 ERROR_FILE_PATTERN="^${LOGS_PATTERN}/hs_err_pid%p_${NAME_ID_PATTERN}\.log$"
 
 assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=)' \
@@ -623,6 +632,36 @@ assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile
 assert_effective_flag "$ENABLED_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
 assert_effective_flag "$ENABLED_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN"
 assert_effective_flag "$ENABLED_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
+ENABLED_DUMP_DIR=$(effective_flag "$ENABLED_CAPTURE" HeapDumpPath)
+[[ -d "$ENABLED_DUMP_DIR" ]] ||
+    fail "launcher did not create the heap dump directory ${ENABLED_DUMP_DIR}"
+
+# Child JVMs the Server starts inherit JAVA_TOOL_OPTIONS. Two JVMs started with
+# the launcher's options, like the Server and a computer job, must each write
+# their own heap dump into the launch directory instead of competing for one.
+OOM_SOURCE="${TEMP_DIR}/OomCheck.java"
+cat > "$OOM_SOURCE" <<'JAVA'
+import java.util.ArrayList;
+import java.util.List;
+
+public class OomCheck {
+    public static void main(String[] args) {
+        List<long[]> hold = new ArrayList<>();
+        while (true) {
+            hold.add(new long[1 << 20]);
+        }
+    }
+}
+JAVA
+for OOM_RUN in 1 2; do
+    JAVA_TOOL_OPTIONS="$(cat "${ENABLED_CAPTURE}.tool-options")" \
+        "$JAVA_BIN" -Xmx64m "$OOM_SOURCE" >/dev/null 2>&1 || true
+done
+OOM_DUMPS=$(find "$ENABLED_DUMP_DIR" -maxdepth 1 -name 'java_pid*.hprof' | wc -l)
+rm -f "$ENABLED_DUMP_DIR"/java_pid*.hprof
+if [[ "$OOM_DUMPS" -ne 2 ]]; then
+    fail "expected a heap dump per JVM in ${ENABLED_DUMP_DIR}, found ${OOM_DUMPS}"
+fi
 
 # JAVA_OPTIONS replaces the default heap options; the crash defaults stay, and
 # paths given there win.
@@ -663,31 +702,50 @@ assert_effective_flag "$ARGFILE_CAPTURE" ErrorFile '^/operator/argfile-hs_err\.l
 assert_effective_flag "$ARGFILE_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN" "@${ARGFILE}"
 
 # A launch never reuses a name already taken in logs/, even within the same
-# second: with a fixed clock and host name, the counter moves past both
-# existing files.
+# second: with a fixed clock and host name, the counter moves past an existing
+# heap dump directory and crash log. Empty dump directories from this host's
+# earlier launches are removed; other hosts' and non-empty ones stay.
 MOCK_DATE_BIN="${TEMP_DIR}/mock-date-bin"
 mkdir -p "$MOCK_DATE_BIN"
 printf '#!/bin/bash\necho 20200101-000000\n' > "${MOCK_DATE_BIN}/date"
 chmod +x "${MOCK_DATE_BIN}/date"
 mkdir -p "${SERVER_ROOT}/logs"
-# Only files this run creates are recorded for removal, so an existing file
+# Only fixtures this run creates are recorded for removal, so an existing file
 # with the same name in the supplied distribution is left alone.
-for CRASH_NAME_FIXTURE in "${SERVER_ROOT}/logs/java_pid1_test-pod-a_20200101-000000.hprof" \
-                          "${SERVER_ROOT}/logs/hs_err_pid1_test-pod-a_20200101-000000-1.log"; do
-    if [[ ! -e "$CRASH_NAME_FIXTURE" ]]; then
-        CRASH_NAME_FIXTURES+=("$CRASH_NAME_FIXTURE")
-        : > "$CRASH_NAME_FIXTURE"
+add_crash_fixture() {
+    local path="$1"
+    local kind="$2"
+    if [[ ! -e "$path" ]]; then
+        CRASH_NAME_FIXTURES+=("$path")
+        case "$kind" in
+            file) : > "$path" ;;
+            empty-dir) mkdir "$path" ;;
+            dump-dir) mkdir "$path" && : > "${path}/java_pid1.hprof" ;;
+        esac
     fi
-done
+}
+USED_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20200101-000000"
+OLD_EMPTY_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20191231-000000"
+OTHER_HOST_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-c_20191231-000000"
+add_crash_fixture "$USED_DUMP_DIR" dump-dir
+add_crash_fixture "${SERVER_ROOT}/logs/hs_err_pid1_test-pod-a_20200101-000000-1.log" file
+add_crash_fixture "$OLD_EMPTY_DUMP_DIR" empty-dir
+add_crash_fixture "$OTHER_HOST_DUMP_DIR" empty-dir
 UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
 CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     HOSTNAME=test-pod-a PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
-    "^${LOGS_PATTERN}/java_pid[0-9]+_test-pod-a_20200101-000000-2\.hprof$"
+    "^${LOGS_PATTERN}/heapdump_test-pod-a_20200101-000000-2$"
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
     "^${LOGS_PATTERN}/hs_err_pid%p_test-pod-a_20200101-000000-2\.log$"
+[[ ! -e "$OLD_EMPTY_DUMP_DIR" ]] ||
+    fail "launcher kept an empty heap dump directory from an earlier launch"
+[[ -d "$OTHER_HOST_DUMP_DIR" ]] ||
+    fail "launcher removed another host's heap dump directory"
+[[ -f "${USED_DUMP_DIR}/java_pid1.hprof" ]] ||
+    fail "launcher removed an existing heap dump"
 
 # Another pod sharing the volume gets its own names in the same second, and
 # characters unsafe in a file name are replaced.
@@ -697,9 +755,9 @@ CAPTURE_FILE="$OTHER_HOST_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
 assert_effective_flag "$OTHER_HOST_CAPTURE" HeapDumpPath \
-    "^${LOGS_PATTERN}/java_pid[0-9]+_test_pod-b_20200101-000000\.hprof$"
+    "^${LOGS_PATTERN}/heapdump_test_pod-b_20200101-000000$"
 if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
-    rm -f "${CRASH_NAME_FIXTURES[@]}"
+    rm -rf "${CRASH_NAME_FIXTURES[@]}"
 fi
 CRASH_NAME_FIXTURES=()
 
