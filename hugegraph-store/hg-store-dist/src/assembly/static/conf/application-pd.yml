@@ -27,11 +27,14 @@ management:
 
 rocksdb:
   # rocksdb total memory usage, force flush to disk when reaching this value
-  # TODO: make this overridable from the environment, or default it to 0 so AppConfig falls back
-  # to the JVM max heap. It is the capacity of the RocksDB block and write LRU caches
-  # (RaftRocksdbOptions), not an upfront allocation, but pinned at 32 GB those native caches can
-  # grow past a smaller container memory limit under load and get the Store OOM-killed. The Helm
-  # chart (helm/hugegraph) can only document the ceiling and size its cluster preset around it.
+  # TODO: default this lower, or size it from the container memory limit, or map it from an
+  # HG_STORE_* variable in the Docker entrypoint. A default of 0 only makes AppConfig fall back
+  # to the JVM max heap, which is another heap-sized native budget, not a safe container total.
+  # It is the capacity of the RocksDB block and write LRU caches (RaftRocksdbOptions), not an
+  # upfront allocation, but pinned at 32 GB those native caches can grow past a smaller
+  # container memory limit under load and get the Store OOM-killed. Until then the only
+  # override is the JVM system property -Drocksdb.total_memory_size=<bytes> (JAVA_OPTS, the
+  # Helm chart's store.javaOpts; helm/hugegraph).
   # https://github.com/apache/hugegraph/issues/3254
   total_memory_size: 32000000000
   # memtable size used by rocksdb
