@@ -473,13 +473,19 @@ function remove_with_prompt() {
 
 function ensure_path_writable() {
     local path=$1
+    local error_handler="${2:-}"
     # Ensure input path exist
     if [ ! -d "${path}" ]; then
         mkdir -p "${path}"
     fi
     # Check for write permission
     if [ ! -w "${path}" ]; then
-        echo "No write permission on directory ${path}"
+        local message="No write permission on directory ${path}"
+        if [ -n "${error_handler}" ]; then
+            "${error_handler}" "${message}"
+        else
+            echo "${message}"
+        fi
         exit 1
     fi
 }

@@ -57,15 +57,18 @@ USER_OPTION="${SERVER_ARGS[3]:-}"
 GC_OPTION="${SERVER_ARGS[4]:-}"
 OPEN_TELEMETRY="${SERVER_ARGS[5]:-}"
 
-ensure_path_writable "$LOGS"
-
 # Fatal launcher errors go to stderr, which reaches the terminal or the container
-# log, and to ${OUTPUT}, the log start-hugegraph.sh points operators at.
+# log, and, when possible, to ${OUTPUT}, the log start-hugegraph.sh points
+# operators at.
 report_error() {
     echo "$1" >&2
-    echo "$1" >> "${OUTPUT}"
+    if [[ -w "${LOGS}" ]]; then
+        { echo "$1" >> "${OUTPUT}"; } 2>/dev/null || true
+    fi
 }
-ensure_path_writable "$PLUGINS"
+
+ensure_path_writable "$LOGS" report_error
+ensure_path_writable "$PLUGINS" report_error
 
 # The maximum and minimum heap memory that service can use
 MAX_MEM=$((32 * 1024))
