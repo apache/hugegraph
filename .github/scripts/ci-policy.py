@@ -170,6 +170,7 @@ def require_current_pr(plan, fetch):
 
 
 def create_plan(project, event, repository, fetch=api):
+    paths = []
     plan = {"schema": 1, "project": project, "repository": repository, "pr": 0,
             "source": repository, "branch": "", "base": "", "head": git("rev-parse", "HEAD"),
             "reason": "affected inputs", "testedMergeSHA": git("rev-parse", "HEAD")}
@@ -200,6 +201,7 @@ def create_plan(project, event, repository, fetch=api):
         selected = select(project, paths)
         if unsafe_documentation(plan["base"], paths) or unsafe_documentation(plan["testedMergeSHA"], paths):
             selected = set(MODULES[project])
+            plan["reason"] = "non-regular documentation input: conservative full coverage"
         plan["expected"] = suites(project, selected)
     except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError, AttributeError):
         selected = set(MODULES[project])
@@ -219,7 +221,41 @@ def create_plan(project, event, repository, fetch=api):
         p.startswith(".github/workflows/codeql") for p in locals().get("paths", []))
     plan["required"] = ["server_memory"] if project == "server" and "server" in selected else []
     plan["security_languages"] = json.dumps(["java"])
+    plan["changedPaths"] = paths
+    plan["selectionReasons"] = {
+        suite: [path for path in paths if suite in suites(project, select(project, [path]))]
+        for suite in plan["expected"]
+    }
+    if "dependency_license" in selected:
+        plan["selectionReasons"]["dependency_license"] = [
+            path for path in paths if "dependency_license" in select(project, [path])]
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+            out.write("## Selected CI checks\n" + selection_table(plan) + "\n")
     return plan
+
+
+def selection_reason(plan, suite):
+    paths = plan.get("selectionReasons", {}).get(suite, [])
+    if not paths:
+        return plan.get("reason", "affected inputs") if suite in plan["expected"] else "no affected inputs"
+    # Bound the summary size; paths in the plan artifact retain the full explanation.
+    shown = ["`" + path.replace("`", "\\`").replace("|", "\\|").replace("\n", " ") + "`"
+             for path in paths[:3]]
+    suffix = f" (+{len(paths) - 3} more)" if len(paths) > 3 else ""
+    return ", ".join(shown) + suffix
+
+
+def selection_table(plan):
+    summary = "| Check | Selected | Merge requirement | Changed inputs |\n| --- | --- | --- | --- |\n"
+    checks = suites(plan["project"], set(MODULES[plan["project"]]))
+    if "dependency_license" in plan["selected"]:
+        checks.append("dependency_license")
+    for suite in checks:
+        chosen = suite in plan["expected"] or suite == "dependency_license"
+        role = "required" if suite == "server_memory" else "advisory"
+        summary += f"| {suite} | {'yes' if chosen else 'no'} | {role} | {selection_reason(plan, suite)} |\n"
+    return summary
 
 
 class GateFailure(ValueError):
@@ -237,6 +273,7 @@ def gate(plan, results, fetch=None, mode="all"):
         expected = [suite for suite in expected if suite != "server_memory"]
     report = {key: plan[key] for key in ["schema", "repository", "project", "pr", "source", "branch", "base",
                                         "head", "testedMergeSHA", "selected"]}
+    report["selectionReasons"] = plan.get("selectionReasons", {})
     report.update(runID=int(os.environ.get("GITHUB_RUN_ID", "0")),
                   runAttempt=int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")), executed=expected,
                   results={suite: results.get(suite, {}).get("result", "missing") for suite in expected})
@@ -244,7 +281,7 @@ def gate(plan, results, fetch=None, mode="all"):
         report["results"]["dependency_license"] = results.get("dependency_license", {}).get("result", "missing")
     summary = "Selection: " + plan.get("reason", "affected inputs") + "\n"
     summary += "Tested base: `" + plan["base"] + "`; merge: `" + plan["testedMergeSHA"] + "`\n\n"
-    summary += "| Check | Selected | Merge requirement | Result |\n| --- | --- | --- | --- |\n"
+    summary += "| Check | Selected | Merge requirement | Changed inputs | Result |\n| --- | --- | --- | --- | --- |\n"
     for suite in suites(plan["project"], set(MODULES[plan["project"]])):
         if mode == "memory" and suite != "server_memory":
             continue
@@ -253,9 +290,9 @@ def gate(plan, results, fetch=None, mode="all"):
         chosen = suite in expected
         role = "required" if suite == "server_memory" else "advisory"
         status = report["results"].get(suite, "not selected")
-        summary += f"| {suite} | {'yes' if chosen else 'no'} | {role} | {status} |\n"
+        summary += f"| {suite} | {'yes' if chosen else 'no'} | {role} | {selection_reason(plan, suite)} | {status} |\n"
     if "dependency_license" in report["results"]:
-        summary += "| dependency_license | yes | advisory | " + str(report["results"]["dependency_license"]) + " |\n"
+        summary += "| dependency_license | yes | advisory | " + selection_reason(plan, "dependency_license") + " | " + str(report["results"]["dependency_license"]) + " |\n"
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
             out.write("## " + ("Memory result" if mode == "memory" else "Affected module results") + "\n" + summary + "\n")

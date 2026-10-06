@@ -230,6 +230,26 @@ class PolicyTest(unittest.TestCase):
         with self.assertRaises(policy.StaleInputError):
             policy.gate(plan, results, lambda _: advanced, mode="memory")
 
+    def test_plan_explains_consumer_selection_and_docs_skip(self):
+        source = "hugegraph-server/hugegraph-api/pom.xml"
+        def git(*args):
+            return source if args[0] == "diff" else "base"
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "summary.md"
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), patch.object(
+                    policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
+                plan = policy.create_plan("server", {"before": "base"}, "apache/server")
+                self.assertEqual([source], plan["selectionReasons"]["docker"])
+                self.assertEqual([source], plan["selectionReasons"]["server_memory"])
+                self.assertIn(source, summary.read_text())
+                self.assertIn("| server_memory | yes | required |", summary.read_text())
+                self.assertIn("| docker | yes | advisory |", summary.read_text())
+                source = "README.md"
+                docs = policy.create_plan("server", {"before": "base"}, "apache/server")
+                self.assertEqual([], docs["expected"])
+                self.assertEqual({}, docs["selectionReasons"])
+                self.assertIn("| server_memory | no | required | no affected inputs |", summary.read_text())
+
     def test_memory_rejects_confirmed_source_and_malformed_metadata(self):
         plan = self.plan()
         results = {"plan": {"result": "success"}, "server_memory": {"result": "success"}}
