@@ -3,10 +3,8 @@ name: "Rerun CI"
 on:
   workflow_run:
     workflows:
-      - "HugeGraph-Server CI"
-      - "HugeGraph-Commons CI"
-      - "HugeGraph-PD & Store & Hstore CI"
-      - "Cluster Test CI"
+      - "Server Memory CI"
+      - "License Checker"
     types:
       - completed
 

@@ -480,6 +480,11 @@ public class ServerOptions extends OptionHolder {
                     ""
             );
 
+    // TODO: accept the initial admin password from the environment (or document the properties
+    // contract): read through PropertiesConfiguration, the value is trimmed, backslash-unescaped
+    // and decoded as ISO-8859-1, so the stored password can differ from what the operator set.
+    // The Helm chart (helm/hugegraph) refuses padded, backslash or non-ASCII admin passwords in
+    // its schema and Server wrapper; relax that guard once the credential bypasses the file.
     public static final ConfigOption<String> ADMIN_PA =
             new ConfigOption<>(
                     "auth.admin_pa",

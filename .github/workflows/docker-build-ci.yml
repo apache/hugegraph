@@ -102,8 +102,6 @@ jobs:
             hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
       - name: Verify Compose contracts
         run: bash docker/test-compose.sh render
-      - name: Run Compose auth-on smoke tests
-        run: bash docker/test-compose.sh smoke
 
   docker-build:
     runs-on: ubuntu-latest

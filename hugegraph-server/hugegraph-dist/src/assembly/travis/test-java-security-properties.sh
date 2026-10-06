@@ -151,7 +151,7 @@ if [[ -n "$SOURCE_ROOT_INPUT" ]]; then
     CLUSTER_WRAPPER="${CLUSTER_SOURCE}/node/ServerNodeWrapper.java"
     SERVER_DOCKERFILE="${SOURCE_ROOT}/hugegraph-server/Dockerfile"
     HSTORE_DOCKERFILE="${SOURCE_ROOT}/hugegraph-server/Dockerfile-hstore"
-    SERVER_WORKFLOW="${SOURCE_ROOT}/.github/workflows/server-ci.yml"
+    SERVER_WORKFLOW="${SOURCE_ROOT}/.github/workflows/server-tests.yml"
     DOCKER_WORKFLOW="${SOURCE_ROOT}/.github/workflows/docker-build-ci.yml"
     UPGRADE_CONTRACT_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/"\
 "test-java17-upgrade-contracts.sh"

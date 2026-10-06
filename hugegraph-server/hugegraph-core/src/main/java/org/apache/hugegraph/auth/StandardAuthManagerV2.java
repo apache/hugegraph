@@ -252,6 +252,12 @@ public class StandardAuthManagerV2 implements AuthManager {
     }
 
     private void invalidatePasswordCache(Id id) {
+        // TODO: invalidate the password and token caches on every Server replica, not only on the
+        // one that handled updateUser. AuthMetaManager.updateUser publishes no AuthEvent and
+        // nothing calls MetaManager.listenAuthEvent, so the other replicas on the shared PD catalog
+        // accept the old password until auth.cache_expire elapses. Publish a USER update event and
+        // listen for it here. The Helm chart (helm/hugegraph) documents the per-replica expiry as a
+        // limitation of admin password rotation; drop that note once fixed.
         this.pwdCache.invalidate(id);
         // Clear all tokenCache because can't get userId in it
         this.tokenCache.clear();

@@ -33,6 +33,8 @@ def api(path):
 
 def decide(repository, run_id, expected_attempt, max_reruns, fetch=api):
     run = fetch(f"repos/{repository}/actions/runs/{run_id}")
+    if run.get("path") not in {".github/workflows/server-memory-ci.yml", ".github/workflows/licence-checker.yml"}:
+        return "skip", "only required workflows automatically retry"
     if (run.get("status") != "completed" or run.get("conclusion") != "failure"
             or run.get("run_attempt") != expected_attempt):
         return "skip", "source run changed or is no longer a completed failure"

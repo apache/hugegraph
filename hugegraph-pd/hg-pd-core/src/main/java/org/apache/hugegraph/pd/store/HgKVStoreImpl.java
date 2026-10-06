@@ -78,6 +78,11 @@ public class HgKVStoreImpl implements HgKVStore {
             }
             openRocksDB(dbPath);
         } catch (PDException e) {
+            // TODO: retry the open and then fail PD startup instead of logging: a held RocksDB LOCK
+            // leaves this PD running uninitialized (/v1/ready answers 503 STATE_UNINITIALIZED
+            // while /v1/health answers 200), and with several PDs nothing restarts it. The Helm
+            // chart (helm/hugegraph) documents this as a limitation; drop that entry once fixed.
+            // https://github.com/apache/hugegraph/issues/3226
             log.error("Failed to open data file,{}", e);
         } finally {
             writeLock.unlock();

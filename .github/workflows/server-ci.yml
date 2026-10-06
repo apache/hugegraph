@@ -30,6 +30,7 @@ jobs:
       helm: ${{ steps.select.outputs.helm }}
       dependency_license: ${{ steps.select.outputs.dependency_license }}
       compatibility: ${{ steps.select.outputs.compatibility }}
+      smoke: ${{ steps.select.outputs.smoke }}
       security: ${{ steps.select.outputs.security }}
     steps:
       - uses: actions/checkout@v7
@@ -59,7 +60,7 @@ jobs:
       contents: read
 
   wait-storage-shell-test:
-    name: server_memory / startup contracts
+    name: Startup contracts
     needs: plan
     if: needs.plan.outputs.server == 'true'
     permissions:
@@ -84,203 +85,14 @@ jobs:
   # The shared runtime comes from .github/workflows/.java-version, independent of bytecode targets.
   # Keep the job ID for the Codecov configuration validator.
   # The old required check name is provided by the temporary result job below.
-  build-server:
-    needs: [plan, java-runtime]
-    if: needs.plan.outputs.server == 'true'
-    name: server_memory (Java ${{ matrix.JAVA_VERSION }})
-    runs-on: ubuntu-24.04
-    env: &linux-server-env
-      USE_STAGE: 'false' # Whether to include the stage repository.
-      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
-      REPORT_DIR: target/site/jacoco
-      BACKEND: ${{ matrix.BACKEND }}
-      TRIGGER_BRANCH_NAME: ${{ github.ref_name }}
-      HEAD_BRANCH_NAME: ${{ github.head_ref }}
-      BASE_BRANCH_NAME: ${{ github.base_ref }}
-      TARGET_BRANCH_NAME: ${{ github.base_ref != '' && github.base_ref || github.ref_name }}
-      RELEASE_BRANCH: ${{ startsWith(github.ref_name, 'release-') || startsWith(github.ref_name, 'test-') }}
-      RAFT_MODE: ${{ startsWith(github.ref_name, 'raft-') || startsWith(github.head_ref, 'raft-') }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        BACKEND: [ memory ]
-        # Keep the graph evaluable when the reader fails; result checks still reject skips.
-        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
-
-    # YAML & defines shared configuration; * reuses it in the optional backend job below.
-    steps: &linux-server-steps
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 5
-
-      # TODO: Remove this step after install-backend.sh updated
-      - name: Install Java8 for backend
-        uses: actions/setup-java@v6
-        with:
-          java-version: '8'
-          distribution: 'zulu'
-
-      - name: Prepare backend environment
-        run: |
-          $TRAVIS_DIR/install-backend.sh $BACKEND && jps -l
-
-      - name: Install Java ${{ matrix.JAVA_VERSION }}
-        uses: actions/setup-java@v6
-        with:
-          java-version: ${{ matrix.JAVA_VERSION }}
-          distribution: 'zulu'
-          cache: maven
-          cache-jdk: false
-
-      - name: Use staged maven repo settings
-        if: ${{ env.USE_STAGE == 'true' }}
-        run: |
-          cp $HOME/.m2/settings.xml /tmp/settings.xml
-          cp -vf .github/configs/settings.xml $HOME/.m2/settings.xml && cat $HOME/.m2/settings.xml
-
-      - name: Compile
-        run: |
-          mvn clean compile -U -Dmaven.javadoc.skip=true -ntp
-
-      - name: Validate Docker integration
-        if: ${{ env.BACKEND == 'rocksdb' }}
-        run: |
-          bash hugegraph-server/hugegraph-dist/docker/docker-entrypoint-test.sh
-          bash docker/test-compose.sh render
-
-      - name: Run Compose auth-on smoke tests
-        if: ${{ env.BACKEND == 'rocksdb' }}
-        run: bash docker/test-compose.sh smoke
-
-      - name: Run check_port unit tests
-        if: ${{ env.BACKEND == 'rocksdb' }}
-        run: |
-          # Validates the ss/netstat port preflight that replaced lsof
-          $TRAVIS_DIR/test-check-port.sh \
-            hugegraph-server/hugegraph-dist/src/assembly/static \
-            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
-
-      - name: Run Java security properties tests
-        if: ${{ env.BACKEND == 'rocksdb' }}
-        run: |
-          mvn package -Dmaven.test.skip=true -pl hugegraph-server/hugegraph-dist -am -ntp
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
-          $TRAVIS_DIR/test-java-security-properties.sh \
-            "$SERVER_DIR" "$GITHUB_WORKSPACE"
-
-      - name: Verify Surefire single-class routing
-        if: ${{ env.BACKEND == 'rocksdb' }}
-        run: |
-          SUREFIRE_DIR=hugegraph-server/hugegraph-test/target/surefire-reports
-          REPORT="$SUREFIRE_DIR/TEST-org.apache.hugegraph.unit.auth.HugeGraphAuthProxyTest.xml"
-          rm -f "$REPORT"
-          mvn test -pl hugegraph-server/hugegraph-test -am \
-            -P unit-test -Dtest=HugeGraphAuthProxyTest -ntp
-          test -s "$REPORT" || {
-            echo "::error::Server single-class test produced no report"
-            exit 1
-          }
-          NEGATIVE_LOG=$(mktemp)
-          trap 'rm -f "$NEGATIVE_LOG"' EXIT
-          if mvn test -pl hugegraph-server/hugegraph-test -am \
-            -P unit-test -Dtest=NoSuchJava17ContractTest -ntp \
-            >"$NEGATIVE_LOG" 2>&1; then
-            cat "$NEGATIVE_LOG"
-            echo "::error::Surefire accepted a missing Server test class"
-            exit 1
-          fi
-          cat "$NEGATIVE_LOG"
-          grep -Fq 'No tests matching pattern "NoSuchJava17ContractTest"' \
-            "$NEGATIVE_LOG"
-          grep -Fq '(unit-test) @ hugegraph-test' "$NEGATIVE_LOG"
-
-      - name: Check startup test prerequisites
-        id: server-preflight
-        if: ${{ env.BACKEND == 'rocksdb' }}
-        run: |
-          # Note: lsof removed from prerequisites; check_port now uses ss, falling back
-          # to netstat, and warns without blocking when neither can answer.
-          # This job always runs on Linux (ubuntu-24.04), which uses fuser for port cleanup.
-          for tool in crontab curl java; do
-            if ! command -v "$tool" >/dev/null 2>&1; then
-              echo "can_run=false" >> "$GITHUB_OUTPUT"
-              echo "skip_reason=missing tool: $tool" >> "$GITHUB_OUTPUT"
-              exit 1
-            fi
-          done
-          if ! command -v fuser >/dev/null 2>&1; then
-            echo "can_run=false" >> "$GITHUB_OUTPUT"
-            echo "skip_reason=missing tool: fuser (required for Linux port cleanup)" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-          echo "can_run=true" >> "$GITHUB_OUTPUT"
-
-      - name: Run start-hugegraph.sh foreground mode tests
-        if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'true' }}
-        run: |
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
-          bash $TRAVIS_DIR/test-ci-service-utils.sh "$TRAVIS_DIR/ci-service-utils.sh"
-          bash $TRAVIS_DIR/test-start-hugegraph-signal.sh "$SERVER_DIR/bin/start-hugegraph.sh"
-          $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
-
-      - name: Startup tests skipped (missing prerequisites)
-        if: ${{ env.BACKEND == 'rocksdb' && steps.server-preflight.outputs.can_run == 'false' }}
-        run: |
-          echo "::notice::Server startup tests skipped — ${{ steps.server-preflight.outputs.skip_reason }}"
-
-      - name: Run unit test
-        run: |
-          $TRAVIS_DIR/run-unit-test.sh $BACKEND
-
-      - name: Run core test
-        run: |
-          $TRAVIS_DIR/run-core-test.sh $BACKEND
-
-      - name: Run api test
-        run: |
-          if [ "$BACKEND" = "rocksdb" ]; then
-            $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
-          else
-            $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR
-          fi
-
-      # TODO: disable raft test in normal PR due to the always timeout problem
-      - name: Run raft test
-        if: ${{ env.RAFT_MODE == 'true' && env.BACKEND == 'rocksdb' }}
-        timeout-minutes: 45
-        run: |
-          $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR
-
-      - name: Run TinkerPop test
-        if: ${{ env.RELEASE_BRANCH == 'true' }}
-        run: |
-          echo "[WARNING] Enter Tinkerpop Test, current 'github.ref_name' is ${{ github.ref_name }}"
-          $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND tinkerpop
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ env.REPORT_DIR }}/*.xml
-          disable_search: true
-          fail_ci_if_error: false
-
   server-rocksdb:
-    name: server_rocksdb (Java ${{ matrix.JAVA_VERSION }})
     needs: [plan, java-runtime]
     if: needs.plan.outputs.server == 'true'
-    runs-on: ubuntu-24.04
-    env: *linux-server-env
-    strategy:
-      fail-fast: false
-      matrix:
-        BACKEND: [ rocksdb ]
-        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
-    steps: *linux-server-steps
+    uses: ./.github/workflows/server-tests.yml
+    with:
+      backend: rocksdb
+      java-versions: ${{ needs.java-runtime.outputs.versions }}
+    secrets: inherit
 
   commons:
     name: commons
@@ -324,19 +136,16 @@ jobs:
 
   affected-module-tests:
     name: affected-module-tests
-    needs: [plan, java-runtime, wait-storage-shell-test, build-server, server-rocksdb, commons, pd_store, cluster, docker, helm]
+    needs: [plan, java-runtime, wait-storage-shell-test, server-rocksdb, commons, pd_store, cluster, docker, helm, dependency_license]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: ci-plan
-      - name: Validate selected suites and report results
+      - name: Check planning and runtime results
         env:
-          GH_TOKEN: ${{ github.token }}
           JOB_RESULTS: ${{ toJSON(needs) }}
         run: |
           python3 - <<'PYGATE'
@@ -348,152 +157,14 @@ jobs:
               for job in ['java-runtime', 'wait-storage-shell-test']:
                   if results[job]['result'] != 'success':
                       raise SystemExit('Selected prerequisite failed: ' + job)
-          results['server_memory'] = results['build-server']
           results['server_rocksdb'] = results['server-rocksdb']
           with open('results.json', 'w') as output:
               json.dump(results, output)
           PYGATE
-          python3 .github/scripts/ci-policy.py gate --plan plan.json --results results.json --output test-results.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: ci-test-results
-          path: test-results.json
-          retention-days: 14
-          overwrite: true
-
-  # Temporary protection aliases; skipped modules pass only through the current-run gate.
-  server-memory-required:
-    name: Server memory tests
-    needs: affected-module-tests
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    env: &gate-result
-      GATE_RESULT: ${{ needs.affected-module-tests.result }}
-    steps: &require-gate
-      - run: test "$GATE_RESULT" = success
-
-  legacy-server-memory-required:
-    name: build-server (memory, 11)
-    needs: affected-module-tests
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    env: *gate-result
-    steps: *require-gate
-
-  build-server-backends:
-    name: HBase compatibility (Java ${{ matrix.JAVA_VERSION }})
-    needs: [plan, java-runtime, affected-module-tests]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
-    runs-on: ubuntu-24.04
-    env: *linux-server-env
-    strategy:
-      fail-fast: false
-      matrix:
-        BACKEND: [ hbase ]
-        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
-    steps: *linux-server-steps
-
-  build-server-macos-rocksdb:
-    needs: [plan, affected-module-tests]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-15-intel
-            server_java_options: ''
-          - os: macos-15
-            server_java_options: '-Xms512m -Xmx2g'
-    env:
-      USE_STAGE: 'false' # Whether to include the stage repository.
-      TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
-      REPORT_DIR: target/site/jacoco
-      BACKEND: rocksdb
-      SERVER_JAVA_OPTIONS: ${{ matrix.server_java_options }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 5
-
-      - name: Install project JDK
-        uses: actions/setup-java@v6
-        with:
-          java-version-file: .github/workflows/.java-version
-          distribution: 'zulu'
-          cache: maven
-          cache-jdk: false
-
-      - name: Use staged maven repo settings
-        if: ${{ env.USE_STAGE == 'true' }}
-        run: |
-          cp $HOME/.m2/settings.xml /tmp/settings.xml
-          cp -vf .github/configs/settings.xml $HOME/.m2/settings.xml && cat $HOME/.m2/settings.xml
-
-      - name: Compile
-        run: |
-          mvn clean compile -pl hugegraph-server/hugegraph-test -am -U -Dmaven.javadoc.skip=true -ntp
-
-      - name: Run check_port unit tests
-        # Validates the ss/netstat port preflight that replaced lsof
-        run: |
-          $TRAVIS_DIR/test-check-port.sh \
-            hugegraph-server/hugegraph-dist/src/assembly/static \
-            hugegraph-store/hg-store-dist/src/assembly/static/bin/util.sh
-
-      - name: Run RocksDB core test
-        run: |
-          $TRAVIS_DIR/run-core-test.sh $BACKEND
-
-      - name: Run RocksDB API test
-        run: |
-          $TRAVIS_DIR/run-api-test.sh $BACKEND $REPORT_DIR true
-
-      - name: Show server log on failure
-        if: failure()
-        run: |
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
-          if [ -f "$SERVER_DIR/logs/hugegraph-server.log" ]; then
-            tail -n 200 "$SERVER_DIR/logs/hugegraph-server.log"
-          fi
-
-      - name: Stop RocksDB server
-        if: always()
-        run: |
-          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
-          if [ -f "$SERVER_DIR/bin/pid" ]; then
-            $TRAVIS_DIR/stop-server.sh $SERVER_DIR || true
-          fi
-
-  build-server-riscv64:
-    # Keep the emulated Java 17 RISC-V native-runtime signal visible while the
-    # platform lane stabilizes, but do not use it as a gate yet.
-    needs: [plan, affected-module-tests]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && needs.plan.outputs.compatibility == 'true' }}
-    uses: ./.github/workflows/riscv64-ci.yml
-    permissions:
-      contents: read
-
-  codeql:
-    needs: [plan, affected-module-tests]
-    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.affected-module-tests.result == 'success' && (vars.CI_OPTIMIZED_REQUIRED != 'true' || needs.plan.outputs.security == 'true') }}
-    uses: ./.github/workflows/codeql-analysis.yml
-    permissions:
-      contents: read
-      actions: read
-      security-events: write
-    secrets: inherit
-
-  legacy-analyze-required:
-    name: Analyze (java)
-    needs: codeql
-    if: ${{ !cancelled() && vars.CI_OPTIMIZED_REQUIRED != 'true' }}
-    runs-on: ubuntu-24.04
-    env:
-      SCAN_RESULT: ${{ needs.codeql.result }}
-    steps:
-      - run: test "$SCAN_RESULT" = success
+          name: ci-plan
+      - name: Report selected suites and their real results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/ci-policy.py gate --mode advisory --plan plan.json --results results.json --output test-results.json

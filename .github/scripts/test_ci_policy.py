@@ -178,6 +178,89 @@ class PolicyTest(unittest.TestCase):
                 "testedMergeSHA": "merge", "expected": ["server_memory", "server_rocksdb", "pd_store", "cluster"],
                 "selected": ["server", "pd", "store", "hstore", "cluster"]}
 
+    def test_memory_gate_ignores_advisory_cancellation(self):
+        plan = self.plan()
+        results = {"plan": {"result": "success"}, "server_memory": {"result": "success"},
+                   "cluster": {"result": "cancelled"}, "server_rocksdb": {"result": "failure"}}
+        self.assertEqual(["server_memory"], policy.gate(plan, results, mode="memory")["executed"])
+        for state in ["failure", "cancelled", "skipped", None]:
+            results["server_memory"]["result"] = state
+            with self.assertRaisesRegex(ValueError, "server_memory"):
+                policy.gate(plan, results, mode="memory")
+        with self.assertRaises(policy.GateFailure) as failure:
+            policy.gate(plan, results, mode="advisory")
+        self.assertEqual("cancelled", failure.exception.report["results"]["cluster"])
+        self.assertNotIn("server_memory", failure.exception.report["results"])
+
+    def test_api_pom_is_a_docker_input(self):
+        self.assertIn("docker", policy.select("server", ["hugegraph-server/hugegraph-api/pom.xml"]))
+        self.assertNotIn("docker", policy.select("server", ["hugegraph-server/hugegraph-api/src/main/A.java"]))
+
+    def test_codeql_and_smoke_follow_affected_inputs(self):
+        def plan_for(path):
+            def git(*args):
+                if args[0] == "diff":
+                    return path
+                return "base"
+            with patch.object(policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
+                return policy.create_plan("server", {"before": "base"}, "apache/server")
+        for path in ["README.md", "docs/guide.md", "helm/templates/service.yaml"]:
+            with self.subTest(path=path):
+                plan = plan_for(path)
+                self.assertFalse(plan["security"])
+                self.assertFalse(plan["smoke"])
+        plan = plan_for("docker/Dockerfile")
+        self.assertFalse(plan["security"])
+        self.assertTrue(plan["smoke"])
+        for path in [".mvn/maven.config", "pom.xml", "hugegraph-pd/src/main/A.java",
+                     ".github/workflows/codeql-analysis.yml"]:
+            with self.subTest(path=path):
+                self.assertTrue(plan_for(path)["security"])
+
+    def test_memory_result_survives_metadata_outage_and_base_movement(self):
+        plan = self.plan()
+        results = {"plan": {"result": "success"}, "server_memory": {"result": "success"}}
+        def unavailable(_):
+            raise subprocess.CalledProcessError(1, "gh")
+        self.assertEqual(["server_memory"], policy.gate(plan, results, unavailable, mode="memory")["executed"])
+        advanced = self.live_pr()
+        advanced["base"]["sha"] = "advanced"
+        policy.gate(plan, results, lambda _: advanced, mode="memory")
+        advanced["head"]["sha"] = "new-head"
+        with self.assertRaises(policy.StaleInputError):
+            policy.gate(plan, results, lambda _: advanced, mode="memory")
+
+    def test_plan_explains_consumer_selection_and_docs_skip(self):
+        source = "hugegraph-server/hugegraph-api/pom.xml"
+        def git(*args):
+            return source if args[0] == "diff" else "base"
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "summary.md"
+            with patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": str(summary)}), patch.object(
+                    policy, "git", side_effect=git), patch.object(policy, "unsafe_documentation", return_value=False):
+                plan = policy.create_plan("server", {"before": "base"}, "apache/server")
+                self.assertEqual([source], plan["selectionReasons"]["docker"])
+                self.assertEqual([source], plan["selectionReasons"]["server_memory"])
+                self.assertIn(source, summary.read_text())
+                self.assertIn("| server_memory | yes | required |", summary.read_text())
+                self.assertIn("| docker | yes | advisory |", summary.read_text())
+                source = "README.md"
+                docs = policy.create_plan("server", {"before": "base"}, "apache/server")
+                self.assertEqual([], docs["expected"])
+                self.assertEqual({}, docs["selectionReasons"])
+                self.assertIn("| server_memory | no | required | no affected inputs |", summary.read_text())
+
+    def test_memory_rejects_confirmed_source_and_malformed_metadata(self):
+        plan = self.plan()
+        results = {"plan": {"result": "success"}, "server_memory": {"result": "success"}}
+        live = self.live_pr()
+        live["head"]["repo"]["full_name"] = "another/fork"
+        with self.assertRaises(policy.StaleInputError):
+            policy.gate(plan, results, lambda _: live, mode="memory")
+        for malformed in [{"state": "open"}, {"state": "open", "head": None}]:
+            with self.subTest(metadata=malformed), self.assertRaises((KeyError, TypeError)):
+                policy.gate(plan, results, lambda _: malformed, mode="memory")
+
     def test_gate_rejects_missing_failed_cancelled_skipped(self):
         plan = self.plan()
         results = {suite: {"result": "success"} for suite in plan["expected"]}
@@ -308,8 +391,7 @@ class PolicyTest(unittest.TestCase):
             self.assertFalse(plan["server"])
             self.assertFalse(plan["security"])
             advanced = dict(live, base={"sha": "new-base", "repo": {"full_name": "apache/server"}})
-            with self.assertRaises(policy.StaleInputError):
-                policy.create_plan("server", event, "apache/server", lambda p: advanced)
+            self.assertFalse(policy.create_plan("server", event, "apache/server", lambda p: advanced)["server"])
             with patch.object(policy, "git", side_effect=lambda *a: "wrong parents" if a[0] == "show" else git(*a)):
                 with self.assertRaises(policy.StaleInputError):
                     policy.create_plan("server", event, "apache/server", lambda p: live)
@@ -323,6 +405,7 @@ class PolicyTest(unittest.TestCase):
         with patch.object(policy, "git", side_effect=git):
             plan = policy.create_plan("server", event, "apache/server", fail)
         self.assertEqual(set(policy.MODULES["server"]), set(plan["selected"]))
+        self.assertEqual(plan["reason"], policy.selection_reason(plan, "dependency_license"))
         self.assertEqual((7, "alice/server", "feature", "base", "head"),
                          tuple(plan[key] for key in ["pr", "source", "branch", "base", "head"]))
         results = {suite: {"result": "success"} for suite in plan["expected"]}
@@ -368,7 +451,7 @@ class PolicyTest(unittest.TestCase):
                 results.update(plan={"result": "success"}, fixture={"result": "success"},
                                **{"hubble-fixture": {"result": "success"}})
                 self.assertEqual(plan["expected"], policy.gate(plan, results, lambda _: live)["executed"])
-                for section, field, value in [("head", "sha", advanced_head), ("base", "sha", advanced_base),
+                for section, field, value in [("head", "sha", advanced_head),
                                               ("head", "ref", "other-branch"),
                                               ("head", "repo", {"full_name": "other/fork"}),
                                               ("base", "repo", {"full_name": "other/target"})]:

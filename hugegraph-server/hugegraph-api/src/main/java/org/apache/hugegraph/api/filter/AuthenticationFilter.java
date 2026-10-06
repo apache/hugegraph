@@ -75,6 +75,10 @@ public class AuthenticationFilter implements ContainerRequestFilter, ContainerRe
     private static final Logger LOG = Log.logger(AuthenticationFilter.class);
 
     private static final AntPathMatcher MATCHER = new AntPathMatcher();
+    // TODO: add the unauthenticated /readiness probe (#3221) here once it lands. The Helm chart
+    // (helm/hugegraph) defaults server.readinessPath to /versions, which stays 200 with zero
+    // Stores, and offers /readiness as an opt-in; flip that default when this set grows.
+    // https://github.com/apache/hugegraph/issues/3212
     private static final Set<String> FIXED_WHITE_API_SET = ImmutableSet.of(
             "versions",
             "openapi.json"
@@ -180,6 +184,11 @@ public class AuthenticationFilter implements ContainerRequestFilter, ContainerRe
 
         if (auth.startsWith(BASIC_AUTH_PREFIX)) {
             auth = auth.substring(BASIC_AUTH_PREFIX.length());
+            // TODO: decode the Basic credential as UTF-8 and split it on the first colon only.
+            // Decoding as ASCII and splitting on every colon makes a non-ASCII password answer
+            // 401 and a password containing ':' answer 400, although both were accepted at
+            // account creation. The Helm chart (helm/hugegraph) refuses such admin passwords in
+            // its schema and Server wrapper; drop that guard once this is fixed.
             auth = new String(DatatypeConverter.parseBase64Binary(auth), Charsets.ASCII_CHARSET);
             String[] values = auth.split(":");
             if (values.length != 2) {

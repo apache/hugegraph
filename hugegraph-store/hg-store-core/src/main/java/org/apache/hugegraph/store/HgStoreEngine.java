@@ -260,6 +260,12 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
      * 1. Need to check the partition saved this time, delete the invalid partitions.
      */
     public void restoreLocalPartitionEngine() {
+        // TODO: surface the outcome of this restore (a per-group ready signal, or a failed state
+        // reported to PD) instead of logging only; a Store is marked Up before this runs and a
+        // failed restore leaves it Up with missing shard groups. Paired with the TODO in
+        // StoreNodeService, which also says why this signal alone does not retire the manual
+        // Store rollout barrier in the Helm chart (helm/hugegraph) cluster preset.
+        // https://github.com/apache/hugegraph/issues/3229
         try {
             if (!options.isFakePD()) {  // FakePD mode does not require synchronization
                 partitionManager.syncPartitionsFromPD(partition -> {
