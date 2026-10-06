@@ -238,7 +238,8 @@ def create_plan(project, event, repository, fetch=api):
 def selection_reason(plan, suite):
     paths = plan.get("selectionReasons", {}).get(suite, [])
     if not paths:
-        return plan.get("reason", "affected inputs") if suite in plan["expected"] else "no affected inputs"
+        selected = suite in plan["expected"] or suite in plan["selected"]
+        return plan.get("reason", "affected inputs") if selected else "no affected inputs"
     # Bound the summary size; paths in the plan artifact retain the full explanation.
     shown = ["`" + path.replace("`", "\\`").replace("|", "\\|").replace("\n", " ") + "`"
              for path in paths[:3]]

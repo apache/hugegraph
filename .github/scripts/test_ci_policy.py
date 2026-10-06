@@ -405,6 +405,7 @@ class PolicyTest(unittest.TestCase):
         with patch.object(policy, "git", side_effect=git):
             plan = policy.create_plan("server", event, "apache/server", fail)
         self.assertEqual(set(policy.MODULES["server"]), set(plan["selected"]))
+        self.assertEqual(plan["reason"], policy.selection_reason(plan, "dependency_license"))
         self.assertEqual((7, "alice/server", "feature", "base", "head"),
                          tuple(plan[key] for key in ["pr", "source", "branch", "base", "head"]))
         results = {suite: {"result": "success"} for suite in plan["expected"]}
