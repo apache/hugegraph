@@ -138,7 +138,7 @@ public abstract class AbstractRestClient implements RestClient {
         } else {
             bodyContent = String.valueOf(body);
         }
-        RequestBody requestBody = RequestBody.create(bodyContent.getBytes(),
+        RequestBody requestBody = RequestBody.create(bodyContent,
                                                      MediaType.parse(contentType));
 
         if (headers != null &&
