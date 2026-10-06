@@ -171,7 +171,7 @@ public class RaftStateMachine extends StateMachineAdapter {
         // the probe view, and with it /v1/ready, reports a PD that stepped down for good after a
         // snapshot failure. /v1/health does not read this view; making it report the state is the
         // separate TODO at StoreAPI.checkHealthy. The Helm chart (helm/hugegraph) works around both
-        // with pd.livenessPath on /v1/ready for a single PD.
+        // by deriving a single PD's startup and liveness probes to /v1/ready.
         // https://github.com/apache/hugegraph/issues/3222
         this.probeView = new ProbeView(State.STATE_FOLLOWER, false);
         super.onLeaderStop(status);

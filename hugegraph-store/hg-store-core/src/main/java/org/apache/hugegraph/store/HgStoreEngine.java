@@ -263,7 +263,8 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         // TODO: surface the outcome of this restore (a per-group ready signal, or a failed state
         // reported to PD) instead of logging only; a Store is marked Up before this runs and a
         // failed restore leaves it Up with missing shard groups. Paired with the TODO in
-        // StoreNodeService; the Helm chart's manual Store roll barrier depends on it.
+        // StoreNodeService, which also says why this signal alone does not retire the manual
+        // Store rollout barrier in the Helm chart (helm/hugegraph) cluster preset.
         // https://github.com/apache/hugegraph/issues/3229
         try {
             if (!options.isFakePD()) {  // FakePD mode does not require synchronization
