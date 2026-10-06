@@ -20,7 +20,11 @@ package org.apache.hugegraph.unit.rest;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.hugegraph.rest.AbstractRestClient;
 import org.apache.hugegraph.rest.RestHeaders;
@@ -35,11 +39,39 @@ import okio.GzipSource;
 public class AbstractRestClientTest {
 
     @Test
-    public void testExpectedDefaultCharset() {
-        // CI repeats this class in a JVM started with US-ASCII as its default.
-        String expected = System.getProperty("hugegraph.test.expectedCharset");
-        if (expected != null) {
-            Assert.assertEquals(Charset.forName(expected), Charset.defaultCharset());
+    public void testRequestBodiesWithAsciiDefaultCharset() throws Exception {
+        String java = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+        String classpath = System.getProperty("surefire.test.class.path",
+                                              System.getProperty("java.class.path"));
+        Path output = Files.createTempFile("rest-client-ascii-", ".log");
+        Process process = null;
+        try {
+            process = new ProcessBuilder(java, "-Dfile.encoding=US-ASCII", "-cp", classpath,
+                                         AsciiRequestBodyProbe.class.getName())
+                    .redirectErrorStream(true)
+                    .redirectOutput(output.toFile())
+                    .start();
+            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+            String diagnostic = Files.readString(output, StandardCharsets.UTF_8);
+            Assert.assertTrue("US-ASCII probe timed out: " + diagnostic, finished);
+            Assert.assertEquals(diagnostic, 0, process.exitValue());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            Files.deleteIfExists(output);
+        }
+    }
+
+    public static class AsciiRequestBodyProbe {
+
+        public static void main(String[] args) throws IOException {
+            Assert.assertEquals(StandardCharsets.US_ASCII, Charset.defaultCharset());
+            AbstractRestClientTest tests = new AbstractRestClientTest();
+            tests.testJsonRequestBodyUsesUtf8();
+            tests.testGzipRequestBodyUsesUtf8();
+            tests.testRequestBodyRespectsExplicitCharset();
         }
     }
 

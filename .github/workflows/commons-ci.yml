@@ -54,13 +54,6 @@ jobs:
           mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite \
             -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
-      - name: Verify REST request encoding with a non-UTF-8 JVM
-        env:
-          JAVA_TOOL_OPTIONS: '-Dfile.encoding=US-ASCII -Dhugegraph.test.expectedCharset=US-ASCII'
-        run: |
-          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=AbstractRestClientTest \
-            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
-
       - name: Run rpc test
         run: |
           mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite \
