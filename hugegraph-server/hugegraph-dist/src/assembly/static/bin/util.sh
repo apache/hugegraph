@@ -25,6 +25,7 @@ function command_available() {
 }
 
 function configure_riscv64_libatomic() {
+    local error_handler="${1:-}"
     if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "riscv64" ]]; then
         return 0
     fi
@@ -56,7 +57,12 @@ function configure_riscv64_libatomic() {
     fi
 
     if [[ -z "$libatomic" ]]; then
-        echo "RISC-V RocksDB requires libatomic.so.1; install libatomic1" >&2
+        local message="RISC-V RocksDB requires libatomic.so.1; install libatomic1"
+        if [[ -n "$error_handler" ]]; then
+            "$error_handler" "$message"
+        else
+            echo "$message" >&2
+        fi
         return 1
     fi
 

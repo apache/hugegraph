@@ -42,21 +42,6 @@ LOGS="$TOP/logs"
 OUTPUT=${LOGS}/hugegraph-server.log
 GITHUB="https://github.com"
 
-export HUGEGRAPH_HOME="$TOP"
-. "${BIN}"/util.sh
-
-configure_riscv64_libatomic || exit 1
-
-# Parse the server arguments in array way
-SERVER_ARGS=("$@")
-GREMLIN_SERVER_CONF="${SERVER_ARGS[0]:-}"
-REST_SERVER_CONF="${SERVER_ARGS[1]:-}"
-OPEN_SECURITY_CHECK="${SERVER_ARGS[2]:-}"
-# Param will be empty str("") if not set
-USER_OPTION="${SERVER_ARGS[3]:-}"
-GC_OPTION="${SERVER_ARGS[4]:-}"
-OPEN_TELEMETRY="${SERVER_ARGS[5]:-}"
-
 # Launcher errors and warnings go to ${OUTPUT} (hugegraph-server.log) when it can
 # be written, and to stderr, which reaches the terminal or the container log. The
 # file comes first so the message is kept even if writing to stderr kills the
@@ -67,6 +52,21 @@ report_error() {
     fi
     printf '%s\n' "$1" >&2
 }
+
+export HUGEGRAPH_HOME="$TOP"
+. "${BIN}"/util.sh
+
+configure_riscv64_libatomic report_error || exit 1
+
+# Parse the server arguments in array way
+SERVER_ARGS=("$@")
+GREMLIN_SERVER_CONF="${SERVER_ARGS[0]:-}"
+REST_SERVER_CONF="${SERVER_ARGS[1]:-}"
+OPEN_SECURITY_CHECK="${SERVER_ARGS[2]:-}"
+# Param will be empty str("") if not set
+USER_OPTION="${SERVER_ARGS[3]:-}"
+GC_OPTION="${SERVER_ARGS[4]:-}"
+OPEN_TELEMETRY="${SERVER_ARGS[5]:-}"
 
 ensure_path_writable "$LOGS" report_error
 ensure_path_writable "$PLUGINS" report_error

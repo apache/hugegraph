@@ -828,6 +828,39 @@ grep -Fq "Unrecognized gc option: 'bad-gc'" "$SERVER_LOG" ||
 [[ ! -e "$PREFLIGHT_DUMP_DIR" ]] ||
     fail "a launch that failed before Java started left ${PREFLIGHT_DUMP_DIR}"
 
+# The riscv64 libatomic check runs before anything else, and its error must also
+# reach the server log. Mock uname and ldconfig so no libatomic is found; skip if
+# this machine has one at a fixed path the launcher also probes.
+RISCV_LIBATOMIC_FOUND="false"
+for RISCV_CANDIDATE in /lib/riscv64-linux-gnu/libatomic.so.1 \
+                       /usr/lib/riscv64-linux-gnu/libatomic.so.1 \
+                       /lib64/lp64d/libatomic.so.1 /usr/lib64/lp64d/libatomic.so.1 \
+                       /lib64/libatomic.so.1 /usr/lib64/libatomic.so.1; do
+    if [[ -r "$RISCV_CANDIDATE" ]]; then
+        RISCV_LIBATOMIC_FOUND="true"
+    fi
+done
+if [[ "$RISCV_LIBATOMIC_FOUND" == "false" ]]; then
+    MOCK_RISCV_BIN="${TEMP_DIR}/mock-riscv-bin"
+    mkdir -p "$MOCK_RISCV_BIN"
+    printf '#!/bin/bash\ncase "$1" in -s) echo Linux ;; -m) echo riscv64 ;; *) echo Linux ;; esac\n' \
+        > "${MOCK_RISCV_BIN}/uname"
+    printf '#!/bin/bash\nexit 0\n' > "${MOCK_RISCV_BIN}/ldconfig"
+    chmod +x "${MOCK_RISCV_BIN}/uname" "${MOCK_RISCV_BIN}/ldconfig"
+    : > "$SERVER_LOG"
+    RISCV_ERROR="${TEMP_DIR}/riscv.err"
+    if JAVA_HOME="$MOCK_JAVA_HOME" PATH="${MOCK_RISCV_BIN}:${PATH}" LD_PRELOAD="" \
+       STDOUT_MODE=true "$SERVER_SCRIPT" \
+       "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
+       >/dev/null 2>"$RISCV_ERROR"; then
+        fail "launcher started on riscv64 without libatomic"
+    fi
+    grep -Fq "RISC-V RocksDB requires libatomic.so.1" "$RISCV_ERROR" ||
+        fail "the riscv64 libatomic error did not reach stderr"
+    grep -Fq "RISC-V RocksDB requires libatomic.so.1" "$SERVER_LOG" ||
+        fail "the riscv64 libatomic error did not reach the server log"
+fi
+
 # A full or read-only logs volume must not stop the Server: when the dump
 # directory cannot be created, the launcher warns and dumps into logs/ itself.
 FAILING_MKDIR_BIN="${TEMP_DIR}/failing-mkdir-bin"
