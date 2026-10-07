@@ -184,8 +184,8 @@ public class AuthenticationFilter implements ContainerRequestFilter, ContainerRe
 
         if (auth.startsWith(BASIC_AUTH_PREFIX)) {
             auth = auth.substring(BASIC_AUTH_PREFIX.length());
-            // RFC 7617: the credential is UTF-8, and only the user-id is barred from
-            // containing a colon, so split on the first one and keep the rest as the password
+            // RFC 7617 section 2.1 allows only UTF-8 as the declared charset, and it bars a
+            // colon from the user-id alone, so split on the first one and keep the rest
             auth = new String(DatatypeConverter.parseBase64Binary(auth), StandardCharsets.UTF_8);
             int colon = auth.indexOf(':');
             if (colon < 0) {

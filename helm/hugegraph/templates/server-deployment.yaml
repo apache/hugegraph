@@ -146,8 +146,8 @@ spec:
               # 401 to every request made with it. Temporary: drop this check,
               # the colon case above and the matching schema pattern once the
               # Server decodes Basic auth as UTF-8 and splits the credential on
-              # its first colon only (TODO in AuthenticationFilter,
-              # apache/hugegraph#3260).
+              # its first colon only (apache/hugegraph#3284) in the image this
+              # chart deploys.
               if (( $(printf '%s' "${PASSWORD}" | LC_ALL=C tr -d '\040-\176' | wc -c) > 0 )); then
                 echo "auth Secret key 'password' must be printable ASCII (bytes" \
                      "0x20-0x7E: no tabs, newlines or non-ASCII characters): the" \

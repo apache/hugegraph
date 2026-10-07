@@ -148,7 +148,9 @@ public class LoginApiTest extends BaseApiTest {
             for (String[] user : users) {
                 Response r = this.createUser(user[0], user[1]);
                 String result = assertResponseStatus(201, r);
-                String id = (String) JsonUtil.fromJson(result, Map.class).get("id");
+                Map<String, Object> created = JsonUtil.fromJson(
+                        result, new TypeReference<Map<String, Object>>() {});
+                String id = (String) created.get("id");
                 try {
                     r = basicAuthGet(noAuthClient, user[0], user[1]);
                     assertResponseStatus(200, r);
@@ -165,6 +167,7 @@ public class LoginApiTest extends BaseApiTest {
     }
 
     private static Response basicAuthGet(RestClient client, String name, String password) {
+        // Built by hand: Jersey's HttpAuthenticationFeature encodes the credential as ISO-8859-1
         byte[] credential = (name + ":" + password).getBytes(StandardCharsets.UTF_8);
         MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
         headers.add(HttpHeaders.AUTHORIZATION,
