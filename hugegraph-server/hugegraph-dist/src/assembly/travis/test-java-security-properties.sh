@@ -208,6 +208,9 @@ fi
 TEMP_DIR=$(mktemp -d)
 CRASH_NAME_FIXTURES=()
 OT_FIXTURE_JAR=""
+# Heap dump directories that exist before the test belong to someone else (a
+# running Server, say), so the cleanup below never touches them.
+PRE_EXISTING_DUMP_DIRS=$(ls -d "${SERVER_ROOT}"/logs/heapdump_*/ 2>/dev/null || true)
 SECURITY_PROPERTIES_BACKUP="${TEMP_DIR}/java-security.properties"
 
 cleanup() {
@@ -226,10 +229,13 @@ cleanup() {
     if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
         rm -rf "${CRASH_NAME_FIXTURES[@]}"
     fi
-    # Each launcher run creates a heap dump directory; drop the empty ones.
+    # Each launcher run creates a heap dump directory. Remove only those this
+    # test created and that hold nothing but their owner marker.
     local dump_dir
     for dump_dir in "${SERVER_ROOT}"/logs/heapdump_*/; do
-        if [[ -d "$dump_dir" ]]; then
+        if [[ -d "$dump_dir" ]] &&
+           ! grep -Fxq -- "$dump_dir" <<< "$PRE_EXISTING_DUMP_DIRS"; then
+            rm -f "${dump_dir}.owner"
             rmdir "$dump_dir" 2>/dev/null || true
         fi
     done
@@ -635,6 +641,8 @@ assert_effective_flag "$ENABLED_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
 ENABLED_DUMP_DIR=$(effective_flag "$ENABLED_CAPTURE" HeapDumpPath)
 [[ -d "$ENABLED_DUMP_DIR" ]] ||
     fail "launcher did not create the heap dump directory ${ENABLED_DUMP_DIR}"
+[[ -f "${ENABLED_DUMP_DIR}/.owner" ]] ||
+    fail "launcher did not record the owner of ${ENABLED_DUMP_DIR}"
 
 # Child JVMs the Server starts inherit JAVA_TOOL_OPTIONS. Two JVMs started with
 # the launcher's options, like the Server and a computer job, must each write
@@ -703,8 +711,10 @@ assert_effective_flag "$ARGFILE_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN" "@${A
 
 # A launch never reuses a name already taken in logs/, even within the same
 # second: with a fixed clock and host name, the counter moves past an existing
-# heap dump directory and crash log. Empty dump directories from this host's
-# earlier launches are removed; other hosts' and non-empty ones stay.
+# heap dump directory and crash log. Of this host's earlier dump directories,
+# only one whose recorded owner process is gone and that holds no dump is
+# removed; one owned by a running process, one without an owner marker,
+# another host's, and one holding a dump all stay.
 MOCK_DATE_BIN="${TEMP_DIR}/mock-date-bin"
 mkdir -p "$MOCK_DATE_BIN"
 printf '#!/bin/bash\necho 20200101-000000\n' > "${MOCK_DATE_BIN}/date"
@@ -721,15 +731,30 @@ add_crash_fixture() {
             file) : > "$path" ;;
             empty-dir) mkdir "$path" ;;
             dump-dir) mkdir "$path" && : > "${path}/java_pid1.hprof" ;;
+            dead-owner)
+                # A finished process: its PID no longer has this start time.
+                sleep 0 &
+                local dead_pid=$!
+                wait "$dead_pid" || true
+                mkdir "$path" &&
+                    printf '%s\n%s\n' "$dead_pid" "Thu Jan  1 00:00:00 1970" > "${path}/.owner" ;;
+            live-owner)
+                mkdir "$path" &&
+                    printf '%s\n%s\n' "$$" "$(ps -o lstart= -p $$ | awk '{$1 = $1; print}')" \
+                        > "${path}/.owner" ;;
         esac
     fi
 }
 USED_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20200101-000000"
-OLD_EMPTY_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20191231-000000"
+DEAD_OWNER_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20191231-000000"
+LIVE_OWNER_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20191231-000001"
+UNOWNED_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20191231-000002"
 OTHER_HOST_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-c_20191231-000000"
 add_crash_fixture "$USED_DUMP_DIR" dump-dir
 add_crash_fixture "${SERVER_ROOT}/logs/hs_err_pid1_test-pod-a_20200101-000000-1.log" file
-add_crash_fixture "$OLD_EMPTY_DUMP_DIR" empty-dir
+add_crash_fixture "$DEAD_OWNER_DUMP_DIR" dead-owner
+add_crash_fixture "$LIVE_OWNER_DUMP_DIR" live-owner
+add_crash_fixture "$UNOWNED_DUMP_DIR" empty-dir
 add_crash_fixture "$OTHER_HOST_DUMP_DIR" empty-dir
 UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
 CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
@@ -740,8 +765,12 @@ assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
     "^${LOGS_PATTERN}/heapdump_test-pod-a_20200101-000000-2$"
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
     "^${LOGS_PATTERN}/hs_err_pid%p_test-pod-a_20200101-000000-2\.log$"
-[[ ! -e "$OLD_EMPTY_DUMP_DIR" ]] ||
-    fail "launcher kept an empty heap dump directory from an earlier launch"
+[[ ! -e "$DEAD_OWNER_DUMP_DIR" ]] ||
+    fail "launcher kept an unused heap dump directory whose owner is gone"
+[[ -d "$LIVE_OWNER_DUMP_DIR" ]] ||
+    fail "launcher removed the heap dump directory of a running process"
+[[ -d "$UNOWNED_DUMP_DIR" ]] ||
+    fail "launcher removed a heap dump directory without an owner marker"
 [[ -d "$OTHER_HOST_DUMP_DIR" ]] ||
     fail "launcher removed another host's heap dump directory"
 [[ -f "${USED_DUMP_DIR}/java_pid1.hprof" ]] ||
