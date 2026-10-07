@@ -27,7 +27,7 @@ import java.util.Set;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.job.UserJob;
 import org.apache.hugegraph.traversal.algorithm.FusiformSimilarityTraverser;
 import org.apache.hugegraph.type.define.Directions;

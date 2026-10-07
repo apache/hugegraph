@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.backend.store.raft.RaftBackendStore.IncrCounter;

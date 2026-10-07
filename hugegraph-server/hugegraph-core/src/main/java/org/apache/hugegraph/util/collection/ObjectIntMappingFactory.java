@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.util.collection;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 

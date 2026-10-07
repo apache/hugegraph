@@ -52,7 +52,7 @@ public class HgStoreWrapperEx {
 
     public ScanIterator scanAll(String graph, String table, byte[] query) {
         ScanIterator scanIterator = this.handler.scanAll(graph, table, query);
-        return FilterIterator.of(scanIterator, query);
+        return FilterIterator.of(scanIterator, query, graph);
     }
 
     public ScanIterator scan(String graph, int partId, String table, byte[] start, byte[] end,
@@ -60,14 +60,14 @@ public class HgStoreWrapperEx {
                              byte[] query) {
         ScanIterator scanIterator =
                 this.handler.scan(graph, partId, table, start, end, scanType, query);
-        return FilterIterator.of(scanIterator, query);
+        return FilterIterator.of(scanIterator, query, graph);
     }
 
     public ScanIterator scanOrdered(String graph, String table, byte[] start,
                                     byte[] end, int scanType, byte[] query) {
         ScanIterator scanIterator =
                 this.handler.scanOrdered(graph, table, start, end, scanType);
-        return FilterIterator.of(scanIterator, query);
+        return FilterIterator.of(scanIterator, query, graph);
     }
 
     public void batchGet(String graph, String table, Supplier<HgPair<Integer, byte[]>> s,
@@ -82,7 +82,7 @@ public class HgStoreWrapperEx {
                                    byte[] query) {
         ScanIterator scanIterator =
                 this.handler.scanPrefix(graph, partition, table, prefix, scanType);
-        return FilterIterator.of(scanIterator, query);
+        return FilterIterator.of(scanIterator, query, graph);
     }
 
     public void doBatch(String graph, int partId, List<BatchEntry> entryList) {

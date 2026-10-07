@@ -20,10 +20,10 @@ package org.apache.hugegraph.job.schema;
 import java.util.Set;
 
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.backend.tx.ISchemaTransaction;
-import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.type.define.SchemaStatus;
 import org.apache.hugegraph.util.LockUtil;
 

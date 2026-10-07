@@ -19,9 +19,9 @@ package org.apache.hugegraph.unit.id;
 
 import java.util.Set;
 
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.unit.BaseUnitTest;

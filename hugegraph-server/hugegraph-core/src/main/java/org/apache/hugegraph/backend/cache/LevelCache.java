@@ -20,7 +20,7 @@ package org.apache.hugegraph.backend.cache;
 import java.util.Iterator;
 import java.util.function.Consumer;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.util.E;
 

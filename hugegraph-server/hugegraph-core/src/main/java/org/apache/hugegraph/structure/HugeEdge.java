@@ -22,24 +22,21 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.query.QueryResults;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
-import org.apache.logging.log4j.util.Strings;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -47,17 +44,14 @@ import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.StringFactory;
 import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyProperty;
 
-import com.google.common.collect.ImmutableList;
 
 public class HugeEdge extends HugeElement implements Edge, Cloneable {
 
-    private Id id;
-    private final EdgeLabel label;
-    private String name;
+    private BaseEdge element;
 
     private HugeVertex sourceVertex;
     private HugeVertex targetVertex;
-    private boolean isOutEdge;
+
 
     public HugeEdge(HugeVertex owner, Id id, EdgeLabel label,
                     HugeVertex other) {
@@ -70,52 +64,69 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
         super(graph);
 
         E.checkArgumentNotNull(label, "Edge label can't be null");
-        this.label = label;
-
-        this.id = id;
-        this.name = null;
+        this.element = new BaseEdge(id, label);
+        this.element.isOutEdge(true);
         this.sourceVertex = null;
         this.targetVertex = null;
-        this.isOutEdge = true;
+    }
+
+    /** Adopt decoded shared state and attach engine endpoint wrappers. */
+    public HugeEdge(final HugeGraph graph, BaseEdge element) {
+        this(graph, element, null);
+    }
+
+    public HugeEdge(final HugeGraph graph, BaseEdge element, HugeVertex owner) {
+        super(graph);
+        E.checkArgumentNotNull(element, "Edge element can't be null");
+        E.checkArgumentNotNull(element.schemaLabel(), "Edge label can't be null");
+        this.element = element;
+        BaseVertex source = element.sourceVertex();
+        BaseVertex target = element.targetVertex();
+        this.sourceVertex = this.wrapVertex(graph, source, owner);
+        this.targetVertex = target == source ? this.sourceVertex : this.wrapVertex(graph, target, owner);
+    }
+
+    private HugeVertex wrapVertex(HugeGraph graph, BaseVertex vertex, HugeVertex owner) {
+        if (vertex == null) {
+            return null;
+        }
+        return owner != null && owner.element() == vertex ? owner : new HugeVertex(graph, vertex);
+    }
+
+    @Override
+    public BaseEdge element() {
+        return this.element;
     }
 
     @Override
     public HugeType type() {
         // NOTE: we optimize the edge type that let it include direction
-        return this.isOutEdge ? HugeType.EDGE_OUT : HugeType.EDGE_IN;
+        return this.element.isOutEdge() ? HugeType.EDGE_OUT : HugeType.EDGE_IN;
     }
 
     @Override
     public EdgeId id() {
-        return (EdgeId) this.id;
+        return (EdgeId) this.element.id();
     }
 
     @Override
     public EdgeLabel schemaLabel() {
-        assert this.graph().sameAs(this.label.graph());
-        return this.label;
+        assert this.graph().sameAs(this.element.schemaLabel().graph());
+        return this.element.schemaLabel();
     }
 
     @Override
     public String name() {
-        if (this.name == null) {
-            List<Object> sortValues = this.sortValues();
-            if (sortValues.isEmpty()) {
-                this.name = Strings.EMPTY;
-            } else {
-                this.name = ConditionQuery.concatValues(sortValues);
-            }
-        }
-        return this.name;
+        return this.element.name();
     }
 
     public void name(String name) {
-        this.name = name;
+        this.element.name(name);
     }
 
     @Override
     public String label() {
-        return this.label.name();
+        return this.element.schemaLabel().name();
     }
 
     public boolean selfLoop() {
@@ -124,7 +135,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     }
 
     public Directions direction() {
-        return this.isOutEdge ? Directions.OUT : Directions.IN;
+        return this.element.isOutEdge() ? Directions.OUT : Directions.IN;
     }
 
     public boolean matchDirection(Directions direction) {
@@ -135,60 +146,25 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     }
 
     public boolean isDirection(Directions direction) {
-        return this.isOutEdge && direction == Directions.OUT ||
-               !this.isOutEdge && direction == Directions.IN;
+        return this.element.isOutEdge() && direction == Directions.OUT ||
+               !this.element.isOutEdge() && direction == Directions.IN;
     }
 
     @Watched(prefix = "edge")
     public void assignId() {
-        // Generate an id and assign
-        if (this.schemaLabel().hasFather()) {
-            this.id = new EdgeId(this.ownerVertex(), this.direction(),
-                                 this.schemaLabel().fatherId(),
-                                 this.schemaLabel().id(),
-                                 this.name(),
-                                 this.otherVertex());
-        } else {
-            this.id = new EdgeId(this.ownerVertex(), this.direction(),
-                                 this.schemaLabel().id(),
-                                 this.schemaLabel().id(),
-                                 this.name(), this.otherVertex());
-        }
-
-        if (this.fresh()) {
-            int len = this.id.length();
-            E.checkArgument(len <= BytesBuffer.EID_LEN_MAX,
-                            "The max length of edge id is %s, but got %s {%s}",
-                            BytesBuffer.EID_LEN_MAX, len, this.id);
-        }
+        this.element.assignId();
     }
 
     @Watched(prefix = "edge")
     public EdgeId idWithDirection() {
-        return ((EdgeId) this.id).directed(true);
+        return this.element.idWithDirection();
     }
 
     @Watched(prefix = "edge")
     protected List<Object> sortValues() {
-        List<Id> sortKeys = this.schemaLabel().sortKeys();
-        if (sortKeys.isEmpty()) {
-            return ImmutableList.of();
-        }
-        List<Object> propValues = new ArrayList<>(sortKeys.size());
-        for (Id sk : sortKeys) {
-            HugeProperty<?> property = this.getProperty(sk);
-            E.checkState(property != null,
-                         "The value of sort key '%s' can't be null", sk);
-            Object propValue = property.serialValue(true);
-            if (Strings.EMPTY.equals(propValue)) {
-                propValue = ConditionQuery.INDEX_VALUE_EMPTY;
-            }
-            propValues.add(propValue);
-        }
-        return propValues;
+        return this.element.sortValues();
     }
 
-    @Watched(prefix = "edge")
     @Override
     public void remove() {
         this.removed(true);
@@ -208,7 +184,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     public <V> Property<V> property(String key, V value) {
         PropertyKey propertyKey = this.graph().propertyKey(key);
         // Check key in edge label
-        E.checkArgument(this.label.properties().contains(propertyKey.id()),
+        E.checkArgument(this.element.schemaLabel().properties().contains(propertyKey.id()),
                         "Invalid property '%s' for edge label '%s'",
                         key, this.label());
         if (value == null) {
@@ -236,6 +212,11 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     @Override
     protected <V> HugeEdgeProperty<V> newProperty(PropertyKey pkey, V val) {
         return new HugeEdgeProperty<>(this, pkey, val);
+    }
+
+    @Override
+    protected <V> HugeEdgeProperty<V> wrapProperty(BaseProperty<V> property) {
+        return new HugeEdgeProperty<>(this, property);
     }
 
     @Watched(prefix = "edge")
@@ -275,7 +256,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
         if (edge == null && !throwIfNotExist) {
             return false;
         }
-        E.checkState(edge != null, "Edge '%s' does not exist", this.id);
+        E.checkState(edge != null, "Edge '%s' does not exist", this.element.id());
         this.copyProperties((HugeEdge) edge);
         this.updateToDefaultValueIfNone();
         return true;
@@ -319,31 +300,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
 
     @Override
     public Object sysprop(HugeKeys key) {
-        switch (key) {
-            case ID:
-                return this.id();
-            case OWNER_VERTEX:
-                return this.ownerVertex().id();
-            case LABEL:
-                if (this.schemaLabel().hasFather()) {
-                    return this.schemaLabel().fatherId();
-                } else {
-                    return this.schemaLabel().id();
-                }
-            case DIRECTION:
-                return this.direction();
-            case SUB_LABEL:
-                return this.schemaLabel().id();
-            case OTHER_VERTEX:
-                return this.otherVertex().id();
-            case SORT_VALUES:
-                return this.name();
-            case PROPERTIES:
-                return this.getPropertiesMap();
-            default:
-                E.checkArgument(false, "Invalid system property '%s' of Edge", key);
-                return null;
-        }
+        return this.element.sysprop(key);
     }
 
     @Override
@@ -380,7 +337,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     public void vertices(HugeVertex owner, HugeVertex other) {
         Id ownerLabel = owner.schemaLabel().id();
         Id otherLabel = other.schemaLabel().id();
-        for (Pair<Id, Id> link : this.label.links()) {
+        for (Pair<Id, Id> link : this.element.schemaLabel().links()) {
             if (ownerLabel.equals(link.getLeft()) &&
                 otherLabel.equals(link.getRight())) {
                 this.vertices(true, owner, other);
@@ -392,8 +349,8 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     }
 
     public void vertices(boolean outEdge, HugeVertex owner, HugeVertex other) {
-        this.isOutEdge = outEdge;
-        if (this.isOutEdge) {
+        this.element.vertices(outEdge, owner.element(), other.element());
+        if (this.element.isOutEdge()) {
             this.sourceVertex = owner;
             this.targetVertex = other;
         } else {
@@ -404,10 +361,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
 
     @Watched
     public HugeEdge switchOwner() {
-        HugeEdge edge = this.clone();
-        edge.isOutEdge = !edge.isOutEdge;
-        edge.id = ((EdgeId) edge.id).switchDirection();
-        return edge;
+        return this.cloneWithElement(this.element.switchOwner());
     }
 
     public HugeEdge switchToOutDirection() {
@@ -418,7 +372,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     }
 
     public HugeVertex ownerVertex() {
-        return this.isOutEdge ? this.sourceVertex() : this.targetVertex();
+        return this.element.isOutEdge() ? this.sourceVertex() : this.targetVertex();
     }
 
     public HugeVertex sourceVertex() {
@@ -428,6 +382,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
 
     public void sourceVertex(HugeVertex sourceVertex) {
         this.sourceVertex = sourceVertex;
+        this.element.sourceVertex(sourceVertex.element());
     }
 
     public HugeVertex targetVertex() {
@@ -437,6 +392,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
 
     public void targetVertex(HugeVertex targetVertex) {
         this.targetVertex = targetVertex;
+        this.element.targetVertex(targetVertex.element());
     }
 
     private void checkAdjacentVertexExist(HugeVertex vertex) {
@@ -477,7 +433,7 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
     }
 
     public HugeVertex otherVertex() {
-        return this.isOutEdge ? this.targetVertex() : this.sourceVertex();
+        return this.element.isOutEdge() ? this.targetVertex() : this.sourceVertex();
     }
 
     /**
@@ -501,8 +457,14 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
 
     @Override
     protected HugeEdge clone() {
+        return this.cloneWithElement(this.element.clone());
+    }
+
+    private HugeEdge cloneWithElement(BaseEdge element) {
         try {
-            return (HugeEdge) super.clone();
+            HugeEdge edge = (HugeEdge) super.clone();
+            edge.element = element;
+            return edge;
         } catch (CloneNotSupportedException e) {
             throw new HugeException("Failed to clone HugeEdge", e);
         }
@@ -528,36 +490,21 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
                                          EdgeLabel edgeLabel,
                                          String sortValues,
                                          Id otherVertexId) {
-        HugeGraph graph = ownerVertex.graph();
-        VertexLabel srcLabel = graph.vertexLabelOrNone(edgeLabel.sourceLabel());
-        VertexLabel tgtLabel = graph.vertexLabelOrNone(edgeLabel.targetLabel());
+        BaseEdge element = BaseEdge.createEdge(ownerVertex.graph(), ownerVertex.element(), isOutEdge,
+                                               edgeLabel, sortValues, otherVertexId);
+        return attachEdge(ownerVertex, element);
+    }
 
-        VertexLabel otherVertexLabel;
-        if (isOutEdge) {
-            ownerVertex.correctVertexLabel(srcLabel);
-            otherVertexLabel = tgtLabel;
-        } else {
-            ownerVertex.correctVertexLabel(tgtLabel);
-            otherVertexLabel = srcLabel;
-        }
-        HugeVertex otherVertex = new HugeVertex(graph, otherVertexId, otherVertexLabel);
-
-        ownerVertex.propNotLoaded();
-        otherVertex.propNotLoaded();
-
-        HugeEdge edge = new HugeEdge(graph, null, edgeLabel);
-        edge.name(sortValues);
-        edge.vertices(isOutEdge, ownerVertex, otherVertex);
-        edge.assignId();
-
-        if (isOutEdge) {
+    private static HugeEdge attachEdge(HugeVertex ownerVertex, BaseEdge element) {
+        HugeEdge edge = new HugeEdge(ownerVertex.graph(), element, ownerVertex);
+        HugeVertex otherVertex = edge.otherVertex();
+        if (element.isOutEdge()) {
             ownerVertex.addOutEdge(edge);
             otherVertex.addInEdge(edge.switchOwner());
         } else {
             ownerVertex.addInEdge(edge);
             otherVertex.addOutEdge(edge.switchOwner());
         }
-
         return edge;
     }
 
@@ -566,25 +513,11 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
                                                      String sortValues,
                                                      Id otherVertexId) {
         HugeGraph graph = ownerVertex.graph();
-        HugeVertex otherVertex = new HugeVertex(graph, otherVertexId,
-                                                VertexLabel.NONE);
-        ownerVertex.propNotLoaded();
-        otherVertex.propNotLoaded();
-
-        HugeEdge edge = new HugeEdge(graph, null, EdgeLabel.NONE);
-        edge.name(sortValues);
-        edge.vertices(isOutEdge, ownerVertex, otherVertex);
-        edge.assignId();
-
-        if (isOutEdge) {
-            ownerVertex.addOutEdge(edge);
-            otherVertex.addInEdge(edge.switchOwner());
-        } else {
-            ownerVertex.addInEdge(edge);
-            otherVertex.addOutEdge(edge.switchOwner());
-        }
-
-        return edge;
+        EdgeLabel label = EdgeLabel.undefined(graph, EdgeLabel.NONE.id());
+        VertexLabel otherLabel = VertexLabel.undefined(graph);
+        BaseEdge element = BaseEdge.createEdge(ownerVertex.element(), isOutEdge, label,
+                                               sortValues, otherVertexId, otherLabel);
+        return attachEdge(ownerVertex, element);
     }
 
     public static HugeEdge constructEdgeWithoutGraph(HugeVertex ownerVertex,
@@ -592,37 +525,8 @@ public class HugeEdge extends HugeElement implements Edge, Cloneable {
                                                      EdgeLabel edgeLabel,
                                                      String sortValues,
                                                      Id otherVertexId) {
-        Id ownerLabelId = edgeLabel.sourceLabel();
-        Id otherLabelId = edgeLabel.targetLabel();
-        VertexLabel srcLabel = new VertexLabel(null, ownerLabelId, "UNDEF");
-        VertexLabel tgtLabel = new VertexLabel(null, otherLabelId, "UNDEF");
-
-        VertexLabel otherVertexLabel;
-        if (isOutEdge) {
-            ownerVertex.correctVertexLabel(srcLabel);
-            otherVertexLabel = tgtLabel;
-        } else {
-            ownerVertex.correctVertexLabel(tgtLabel);
-            otherVertexLabel = srcLabel;
-        }
-        HugeVertex otherVertex = new HugeVertex(null, otherVertexId,
-                                                otherVertexLabel);
-        ownerVertex.propNotLoaded();
-        otherVertex.propNotLoaded();
-
-        HugeEdge edge = new HugeEdge(null, null, edgeLabel);
-        edge.name(sortValues);
-        edge.vertices(isOutEdge, ownerVertex, otherVertex);
-        edge.assignId();
-
-        if (isOutEdge) {
-            ownerVertex.addOutEdge(edge);
-            otherVertex.addInEdge(edge.switchOwner());
-        } else {
-            ownerVertex.addInEdge(edge);
-            otherVertex.addOutEdge(edge.switchOwner());
-        }
-
-        return edge;
+        BaseEdge element = BaseEdge.createEdgeWithoutSchema(ownerVertex.graph(), ownerVertex.element(),
+                                                            isOutEdge, edgeLabel, sortValues, otherVertexId);
+        return attachEdge(ownerVertex, element);
     }
 }

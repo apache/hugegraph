@@ -20,13 +20,13 @@ package org.apache.hugegraph.task;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.store.BackendStore;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;

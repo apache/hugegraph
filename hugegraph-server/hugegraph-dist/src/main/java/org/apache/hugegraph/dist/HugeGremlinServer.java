@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.dist;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.auth.ContextGremlinServer;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.util.ConfigUtil;

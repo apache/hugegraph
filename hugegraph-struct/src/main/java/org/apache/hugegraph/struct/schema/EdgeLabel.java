@@ -332,6 +332,7 @@ public class EdgeLabel extends SchemaLabel {
         Id id = IdGenerator.of((int) map.get(EdgeLabel.P.ID));
         String name = (String) map.get(EdgeLabel.P.NAME);
         EdgeLabel edgeLabel = new EdgeLabel(graph, id, name);
+        restoreLinks(map, edgeLabel);
         for (Map.Entry<String, Object> entry : map.entrySet()) {
             switch (entry.getKey()) {
                 case P.ID:
@@ -373,25 +374,9 @@ public class EdgeLabel extends SchemaLabel {
                     edgeLabel.ttlStartTime(IdGenerator.of(ttlStartTime));
                     break;
                 case P.LINKS:
-                    // TODO: serialize and deserialize
-                    List<Map> list = (List<Map>) entry.getValue();
-                    for (Map m : list) {
-                        for (Object key : m.keySet()) {
-                            Id sid = IdGenerator.of(Long.parseLong((String) key));
-                            Id tid = IdGenerator.of(Long.parseLong(String.valueOf(m.get(key))));
-                            edgeLabel.links(Pair.of(sid, tid));
-                        }
-                    }
-                    break;
                 case P.SOURCE_LABEL:
-                    long sourceLabel =
-                            Long.parseLong((String) entry.getValue());
-                    edgeLabel.sourceLabel(IdGenerator.of(sourceLabel));
-                    break;
                 case P.TARGET_LABEL:
-                    long targetLabel =
-                            Long.parseLong((String) entry.getValue());
-                    edgeLabel.targetLabel(IdGenerator.of(targetLabel));
+                    // These fields describe the same links and were restored together.
                     break;
                 case P.FATHER_ID:
                     long fatherId =
@@ -410,9 +395,9 @@ public class EdgeLabel extends SchemaLabel {
                     edgeLabel.frequency(frequency);
                     break;
                 case P.SORT_KEYS:
-                    ids = ((List<Integer>) entry.getValue()).stream().map(
-                            IdGenerator::of).collect(Collectors.toSet());
-                    edgeLabel.sortKeys(ids.toArray(new Id[0]));
+                    List<Id> orderedIds = ((List<Integer>) entry.getValue()).stream().map(
+                            IdGenerator::of).collect(Collectors.toList());
+                    edgeLabel.sortKeys(orderedIds.toArray(new Id[0]));
                     break;
                 default:
                     throw new AssertionError(String.format(
@@ -421,6 +406,48 @@ public class EdgeLabel extends SchemaLabel {
             }
         }
         return edgeLabel;
+    }
+
+    private static void restoreLinks(Map<String, Object> map, EdgeLabel edgeLabel) {
+        Set<Pair<Id, Id>> links = new HashSet<>();
+        if (map.containsKey(P.LINKS)) {
+            Object value = map.get(P.LINKS);
+            E.checkArgument(value instanceof List, "Invalid edge label links: %s", value);
+            for (Object item : (List<?>) value) {
+                E.checkArgument(item instanceof Map && !((Map<?, ?>) item).isEmpty(),
+                                "Invalid edge label link: %s", item);
+                for (Map.Entry<?, ?> link : ((Map<?, ?>) item).entrySet()) {
+                    links.add(Pair.of(linkId(link.getKey(), P.SOURCE_LABEL),
+                                      linkId(link.getValue(), P.TARGET_LABEL)));
+                }
+            }
+        }
+
+        boolean hasSource = map.containsKey(P.SOURCE_LABEL);
+        boolean hasTarget = map.containsKey(P.TARGET_LABEL);
+        E.checkArgument(hasSource == hasTarget,
+                        "Edge label sourceLabel and targetLabel must be provided together");
+        if (hasSource) {
+            Pair<Id, Id> endpoints = Pair.of(linkId(map.get(P.SOURCE_LABEL), P.SOURCE_LABEL),
+                                             linkId(map.get(P.TARGET_LABEL), P.TARGET_LABEL));
+            E.checkArgument(links.isEmpty() || links.contains(endpoints),
+                            "Edge label endpoints %s conflict with links %s", endpoints, links);
+            links.add(endpoints);
+        }
+        for (Pair<Id, Id> link : links) {
+            edgeLabel.links(link);
+        }
+    }
+
+    private static Id linkId(Object value, String field) {
+        E.checkArgument(value instanceof String || value instanceof Number,
+                        "Invalid edge label %s: %s", field, value);
+        try {
+            return IdGenerator.of(Long.parseLong(value.toString()));
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(String.format(
+                      "Invalid edge label %s: %s", field, value), e);
+        }
     }
 
     public static final class P {

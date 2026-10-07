@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.unit.core;
 
+import org.apache.hugegraph.util.TinkerPopUtil;
+
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
@@ -59,16 +61,16 @@ public class DirectionsTest {
 
     @Test
     public void testToDirection() {
-        Assert.assertEquals(Direction.OUT, Directions.OUT.direction());
-        Assert.assertEquals(Direction.IN, Directions.IN.direction());
-        Assert.assertEquals(Direction.BOTH, Directions.BOTH.direction());
+        Assert.assertEquals(Direction.OUT, TinkerPopUtil.direction(Directions.OUT));
+        Assert.assertEquals(Direction.IN, TinkerPopUtil.direction(Directions.IN));
+        Assert.assertEquals(Direction.BOTH, TinkerPopUtil.direction(Directions.BOTH));
     }
 
     @Test
     public void testFromDirection() {
-        Assert.assertEquals(Directions.OUT, Directions.convert(Direction.OUT));
-        Assert.assertEquals(Directions.IN, Directions.convert(Direction.IN));
+        Assert.assertEquals(Directions.OUT, TinkerPopUtil.direction(Direction.OUT));
+        Assert.assertEquals(Directions.IN, TinkerPopUtil.direction(Direction.IN));
         Assert.assertEquals(Directions.BOTH,
-                            Directions.convert(Direction.BOTH));
+                            TinkerPopUtil.direction(Direction.BOTH));
     }
 }

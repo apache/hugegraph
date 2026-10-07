@@ -20,7 +20,7 @@ package org.apache.hugegraph.meta.managers;
 import java.util.Map;
 
 import org.apache.hugegraph.auth.HugeTarget;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.util.JsonUtil;

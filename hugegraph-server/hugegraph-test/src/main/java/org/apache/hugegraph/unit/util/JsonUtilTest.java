@@ -26,13 +26,13 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeProperty;
@@ -40,7 +40,6 @@ import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Utils;
-import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
@@ -251,7 +250,7 @@ public class JsonUtilTest extends BaseUnitTest {
                         age.id(), new HugeVertexProperty<>(vertex, age, 29),
                         city.id(), new HugeVertexProperty<>(vertex, city, "Beijing")
                 );
-        Whitebox.setInternalState(vertex, "properties", properties);
+        properties.values().forEach(vertex::setProperty);
 
         String json = JsonUtil.toJson(vertex);
         Assert.assertEquals("{\"id\":123456,\"label\":\"person\"," +
@@ -291,8 +290,7 @@ public class JsonUtilTest extends BaseUnitTest {
 
         Id id = EdgeId.parse("L123456>1>1>>L987654");
         HugeEdge edge = new HugeEdge(fakeObject.graph(), id, el);
-        Whitebox.setInternalState(edge, "sourceVertex", source);
-        Whitebox.setInternalState(edge, "targetVertex", target);
+        edge.vertices(true, source, target);
 
         Date dateValue = Utils.date("2019-03-12");
         MutableIntObjectMap<HugeProperty<?>> properties =
@@ -300,7 +298,7 @@ public class JsonUtilTest extends BaseUnitTest {
                         date.id(), new HugeEdgeProperty<>(edge, date, dateValue),
                         weight.id(), new HugeEdgeProperty<>(edge, weight, 0.8)
                 );
-        Whitebox.setInternalState(edge, "properties", properties);
+        properties.values().forEach(edge::setProperty);
 
         String json = JsonUtil.toJson(edge);
         Assert.assertEquals("{\"id\":\"L123456>1>1>>L987654\"," +

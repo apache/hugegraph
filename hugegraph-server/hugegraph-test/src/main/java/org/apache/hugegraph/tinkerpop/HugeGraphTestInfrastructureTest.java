@@ -23,9 +23,9 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;

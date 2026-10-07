@@ -17,32 +17,16 @@
 
 package org.apache.hugegraph.memory.util;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.hugegraph.util.UnsafeUtil;
 
 import sun.misc.Unsafe;
 
 // NOTE: due to different layout of klass in various versions of JDK, this class may easily crash!
 public class OffHeapMemoryUtil {
 
-    private static final Logger LOG = LoggerFactory.getLogger(OffHeapMemoryUtil.class);
-    private static final Unsafe UNSAFE;
-
-    static {
-        Unsafe unsafe;
-        try {
-            Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
-            unsafeField.setAccessible(true);
-            unsafe = (Unsafe) unsafeField.get(null);
-        } catch (Throwable cause) {
-            LOG.warn("sun.misc.Unsafe.theUnsafe: unavailable.", cause);
-            throw new UnsupportedOperationException("Unsafe is not supported in this platform.");
-        }
-        UNSAFE = unsafe;
-    }
+    private static final Unsafe UNSAFE = UnsafeUtil.getUnsafe();
 
     public static long allocateObjectToOffHeap(Object obj) {
         long size = sizeOf(obj);

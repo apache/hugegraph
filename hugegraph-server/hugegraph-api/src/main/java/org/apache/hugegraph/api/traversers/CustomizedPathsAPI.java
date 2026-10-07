@@ -32,7 +32,7 @@ import java.util.Set;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.traversal.algorithm.CustomizePathsTraverser;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser;

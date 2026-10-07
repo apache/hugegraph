@@ -18,7 +18,7 @@
 package org.apache.hugegraph.unit.serializer;
 
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.unit.BaseUnitTest;
@@ -38,6 +38,7 @@ public class BinaryBackendEntryTest extends BaseUnitTest {
         entry.columns(ImmutableList.of(col));
         Assert.assertEquals(1, entry.columnsSize());
         Assert.assertEquals(ImmutableList.of(col), entry.columns());
+        Assert.assertSame(col, entry.columns().iterator().next());
 
         entry.columns(ImmutableList.of(col, col));
         Assert.assertEquals(3, entry.columnsSize());

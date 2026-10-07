@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.type.HugeType;

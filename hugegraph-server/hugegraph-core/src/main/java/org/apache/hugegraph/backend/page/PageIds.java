@@ -19,7 +19,7 @@ package org.apache.hugegraph.backend.page;
 
 import java.util.Set;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 
 import com.google.common.collect.ImmutableSet;
 

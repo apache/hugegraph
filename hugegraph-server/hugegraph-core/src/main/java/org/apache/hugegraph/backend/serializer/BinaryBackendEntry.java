@@ -17,19 +17,20 @@
 
 package org.apache.hugegraph.backend.serializer;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.backend.BinaryId;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.type.HugeType;
-import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.Bytes;
 
 public class BinaryBackendEntry implements BackendEntry {
 
@@ -206,80 +207,5 @@ public class BinaryBackendEntry implements BackendEntry {
 
     public int hashCode() {
         return this.id().hashCode() ^ this.columns.size();
-    }
-
-    public static class BinaryId implements Id {
-
-        protected byte[] bytes;
-        protected Id id;
-
-        public BinaryId(byte[] bytes, Id id) {
-            this.bytes = bytes;
-            this.id = id;
-        }
-
-        public Id origin() {
-            return this.id;
-        }
-
-        @Override
-        public IdType type() {
-            return IdType.UNKNOWN;
-        }
-
-        @Override
-        public Object asObject() {
-            return ByteBuffer.wrap(this.bytes);
-        }
-
-        @Override
-        public String asString() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public long asLong() {
-            throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public int compareTo(Id other) {
-            return Bytes.compare(this.bytes, other.asBytes());
-        }
-
-        @Override
-        public byte[] asBytes() {
-            return this.bytes;
-        }
-
-        public byte[] asBytes(int offset) {
-            E.checkArgument(offset < this.bytes.length,
-                            "Invalid offset %s, must be < length %s",
-                            offset, this.bytes.length);
-            return Arrays.copyOfRange(this.bytes, offset, this.bytes.length);
-        }
-
-        @Override
-        public int length() {
-            return this.bytes.length;
-        }
-
-        @Override
-        public int hashCode() {
-            return ByteBuffer.wrap(this.bytes).hashCode();
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof BinaryId)) {
-                return false;
-            }
-            return Arrays.equals(this.bytes, ((BinaryId) other).bytes);
-        }
-
-        @Override
-        public String toString() {
-            return "0x" + Bytes.toHex(this.bytes);
-        }
     }
 }

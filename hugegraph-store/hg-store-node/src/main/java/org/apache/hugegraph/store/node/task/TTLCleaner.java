@@ -93,7 +93,6 @@ public class TTLCleaner implements Runnable {
     private ThreadPoolExecutor executor;
     private final Set<Integer> failedPartitions = Sets.newConcurrentHashSet();
     private final ScheduledFuture<?> future;
-    private final String key = "HUGEGRAPH/hg/EXPIRED";
     private final DirectBinarySerializer serializer = new DirectBinarySerializer();
     @Autowired
     private HgStoreNodeService service;
@@ -127,24 +126,27 @@ public class TTLCleaner implements Runnable {
         scheduler.submit(this);
     }
 
-    public BiFunction<byte[], byte[], Boolean> getJudge(String table) {
+    public BiFunction<byte[], byte[], Boolean> getJudge(String graph, String table) {
 
         try {
             switch (table) {
                 case HugeServerTables.VERTEX_TABLE:
                     return (key, value) -> {
-                        DirectHugeElement el = serializer.parseVertex(key, value);
+                        DirectHugeElement el = serializer.parseSchemaVertex(
+                                BusinessHandlerImpl.getGraphSupplier(graph), key, value);
                         return predicate(el);
                     };
                 case HugeServerTables.OUT_EDGE_TABLE:
                 case HugeServerTables.IN_EDGE_TABLE:
                     return (key, value) -> {
-                        DirectHugeElement el = serializer.parseEdge(key, value);
+                        DirectHugeElement el = serializer.parseSchemaEdge(
+                                BusinessHandlerImpl.getGraphSupplier(graph), key, value);
                         return predicate(el);
                     };
                 case HugeServerTables.INDEX_TABLE:
                     return (key, value) -> {
-                        DirectHugeElement el = serializer.parseIndex(key, value);
+                        DirectHugeElement el = serializer.parseSchemaIndex(
+                                BusinessHandlerImpl.getGraphSupplier(graph), key, value);
                         return predicate(el);
                     };
                 default:
@@ -182,7 +184,7 @@ public class TTLCleaner implements Runnable {
                 config.setAuthority(DefaultPdProvider.name, DefaultPdProvider.authority);
                 client = new KvClient(config);
             }
-            KResponse k = client.get(key);
+            KResponse k = client.get("HUGEGRAPH/" + appConfig.getPdCluster() + "/EXPIRED");
             String g = k.getValue();
 
             log.info("cleaner config:{}", jobConfig);
@@ -290,7 +292,7 @@ public class TTLCleaner implements Runnable {
                 RocksDBSession session = handler.getSession(id);
                 InnerKeyCreator keyCreator = handler.getKeyCreator();
                 SessionOperator op = session.sessionOp();
-                BiFunction<byte[], byte[], Boolean> judge = getJudge(table);
+                BiFunction<byte[], byte[], Boolean> judge = getJudge(graph, table);
                 scan = op.scan(table,
                                keyCreator.getStartKey(id, graph),
                                keyCreator.getEndKey(id, graph),

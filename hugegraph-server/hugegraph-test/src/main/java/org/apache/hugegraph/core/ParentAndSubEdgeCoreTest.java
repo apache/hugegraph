@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.tinkerpop.gremlin.structure.Edge;

@@ -26,11 +26,11 @@ import org.apache.commons.configuration2.io.FileHandler;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.StandardHugeGraph;
 import org.apache.hugegraph.backend.cache.CachedBackendStore;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.backend.BinaryId;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
@@ -38,8 +38,8 @@ import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.consumer.factory.IdFactory;
 import org.apache.hugegraph.memory.consumer.factory.PropertyFactory;
 import org.apache.hugegraph.memory.consumer.impl.id.StringIdOffHeap;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
@@ -143,7 +143,7 @@ public class MemoryConsumerTest extends MemoryManageTest {
         Id stringIdOffHeap = IdFactory.getInstance().newStringId("java");
         Id idOffHeap =
                 IdFactory.getInstance().newBinaryId(stringIdOffHeap.asBytes(), stringIdOffHeap);
-        Id id = new BinaryBackendEntry.BinaryId(stringIdOffHeap.asBytes(), stringIdOffHeap);
+        Id id = new BinaryId(stringIdOffHeap.asBytes(), stringIdOffHeap);
         Assert.assertNotNull(idOffHeap);
         Assert.assertArrayEquals(stringIdOffHeap.asBytes(), idOffHeap.asBytes());
         Assert.assertEquals(id, ((OffHeapObject) idOffHeap).zeroCopyReadFromByteBuf());
@@ -180,18 +180,47 @@ public class MemoryConsumerTest extends MemoryManageTest {
         Id edgeLabelIdOffHeap = IdFactory.getInstance().newLongId(1);
         Id subLabelIdOffHeap = IdFactory.getInstance().newLongId(2);
         Id edgeIdOffHeap =
-                IdFactory.getInstance().newEdgeId(java, Directions.OUT, edgeLabelIdOffHeap,
+                IdFactory.getInstance().newEdgeId(java.id(), Directions.OUT, edgeLabelIdOffHeap,
                                                   subLabelIdOffHeap,
-                                                  "test", java);
-        Id edgeId = new EdgeId(java,
+                                                  "test", java.id());
+        Id edgeId = new EdgeId(java.id(),
                                Directions.OUT,
                                (Id) ((OffHeapObject) edgeLabelIdOffHeap).zeroCopyReadFromByteBuf(),
                                (Id) ((OffHeapObject) subLabelIdOffHeap).zeroCopyReadFromByteBuf(),
                                "test",
-                               java);
+                               java.id());
         Assert.assertNotNull(edgeIdOffHeap);
         // TODO: adopt equals method
         Assert.assertEquals(edgeId.asString(), edgeIdOffHeap.asString());
+    }
+
+    @Test
+    public void testEdgeIdFormattingUsesSharedComponentsAndCache() {
+        Id owner = IdFactory.getInstance().newStringId("owner>vertex");
+        Id other = IdFactory.getInstance().newStringId("other`vertex");
+        Id label = IdFactory.getInstance().newLongId(1);
+        Id subLabel = IdFactory.getInstance().newLongId(2);
+        String[] sortValues = {"value", "a>b`c!d:北京"};
+        for (Directions direction : new Directions[]{Directions.OUT, Directions.IN}) {
+            for (boolean directed : new boolean[]{false, true}) {
+                for (String sortValue : sortValues) {
+                    EdgeId offHeap = IdFactory.getInstance().newEdgeId(
+                            owner, direction, label, subLabel, sortValue, other, directed);
+                    EdgeId onHeap = new EdgeId(IdGenerator.of("owner>vertex"), direction,
+                                               IdGenerator.of(1), IdGenerator.of(2), sortValue,
+                                               IdGenerator.of("other`vertex"), directed);
+                    OffHeapObject consumer = (OffHeapObject) offHeap;
+                    int memoryBlocks = consumer.getAllMemoryBlock().size();
+                    String formatted = offHeap.asString();
+                    Assert.assertEquals(onHeap.asString(), formatted);
+                    Assert.assertEquals(memoryBlocks + 1, consumer.getAllMemoryBlock().size());
+                    Assert.assertEquals(formatted, offHeap.asString());
+                    Assert.assertEquals(memoryBlocks + 1, consumer.getAllMemoryBlock().size());
+                    Assert.assertArrayEquals(onHeap.asBytes(), offHeap.asBytes());
+                    Assert.assertEquals(sortValue, offHeap.sortValues());
+                }
+            }
+        }
     }
 
     @Test
@@ -201,12 +230,12 @@ public class MemoryConsumerTest extends MemoryManageTest {
         Id edgeLabelIdOffHeap = IdFactory.getInstance().newLongId(1);
         Id subLabelIdOffHeap = IdFactory.getInstance().newLongId(2);
 
-        Id edgeId = new EdgeId(java,
+        Id edgeId = new EdgeId(java.id(),
                                Directions.OUT,
                                (Id) ((OffHeapObject) edgeLabelIdOffHeap).zeroCopyReadFromByteBuf(),
                                (Id) ((OffHeapObject) subLabelIdOffHeap).zeroCopyReadFromByteBuf(),
                                "test",
-                               java);
+                               java.id());
         HugeEdge testEdge = new HugeEdge(graph, edgeId, EdgeLabel.NONE);
         PropertyKey propertyKey = new PropertyKey(null, IdFactory.getInstance().newLongId(3),
                                                   "fake");

@@ -1,0 +1,263 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.backend.id.EdgeId;
+import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.serializer.BinarySerializer;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.hugegraph.backend.store.BackendEntry;
+import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.schema.IndexLabel;
+import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.structure.HugeEdge;
+import org.apache.hugegraph.structure.HugeElement;
+import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.Cardinality;
+import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.Frequency;
+import org.apache.hugegraph.type.define.IndexType;
+import org.apache.hugegraph.type.define.WriteType;
+
+public class LegacyRowFixtureWriter {
+    private static final long NOW = 1609459200000L;
+    private static final long EXPIRY = NOW + 60000L;
+    private static final Map<Long, PropertyKey> PROPERTIES = new HashMap<>();
+    private static final Map<Long, VertexLabel> VERTICES = new HashMap<>();
+    private static final Map<Long, EdgeLabel> EDGES = new HashMap<>();
+    private static final Map<Long, IndexLabel> INDEXES = new HashMap<>();
+    private static HugeGraph fixtureGraph;
+    private static FixtureSerializer fixtureSerializer;
+    private static final Map<String, String> ROWS = new LinkedHashMap<>();
+
+    public static void main(String[] args) throws Exception {
+        HugeGraph graph = (HugeGraph) Proxy.newProxyInstance(
+            HugeGraph.class.getClassLoader(), new Class<?>[]{HugeGraph.class},
+            (proxy, method, values) -> {
+                switch (method.getName()) {
+                    case "now": return NOW;
+                    case "name": return "legacy-fixture";
+                    case "hugegraph": return proxy;
+                    case "propertyKey": return PROPERTIES.get(((Id) values[0]).asLong());
+                    case "vertexLabel":
+                    case "vertexLabelOrNone": return VERTICES.get(((Id) values[0]).asLong());
+                    case "edgeLabel":
+                    case "edgeLabelOrNone": return EDGES.get(((Id) values[0]).asLong());
+                    case "indexLabel": return INDEXES.get(((Id) values[0]).asLong());
+                    default: throw new AssertionError("Unexpected graph call: " + method);
+                }
+            });
+        fixtureGraph = graph;
+        PropertyKey single = property(graph, 1, "age", Cardinality.SINGLE);
+        PropertyKey list = property(graph, 2, "scores", Cardinality.LIST);
+        PropertyKey set = property(graph, 3, "groups", Cardinality.SET);
+        VertexLabel vertexLabel = new VertexLabel(graph, IdGenerator.of(4L), "person");
+        vertexLabel.ttl(60000L);
+        vertexLabel.properties(single.id(), list.id(), set.id());
+        VERTICES.put(4L, vertexLabel);
+        EdgeLabel edgeLabel = new EdgeLabel(graph, IdGenerator.of(5L), "knows");
+        edgeLabel.ttl(60000L);
+        edgeLabel.frequency(Frequency.MULTIPLE);
+        edgeLabel.links(Pair.of(vertexLabel.id(), vertexLabel.id()));
+        edgeLabel.properties(single.id(), list.id(), set.id());
+        EDGES.put(5L, edgeLabel);
+        HugeVertex source = new HugeVertex(graph, IdGenerator.of(1L), vertexLabel);
+        HugeVertex target = new HugeVertex(graph, IdGenerator.of(2L), vertexLabel);
+        fill(source, single, list, set);
+        source.expiredTime(EXPIRY);
+        FixtureSerializer serializer = new FixtureSerializer();
+        fixtureSerializer = serializer;
+        System.out.println("Row writer loaded from " + BinarySerializer.class.getProtectionDomain()
+                                                               .getCodeSource().getLocation());
+        row("vertex", serializer.writeVertex(source));
+        HugeEdge edge = new HugeEdge(graph,
+            new EdgeId(source.id(), Directions.OUT, edgeLabel.id(), edgeLabel.id(),
+                       "2026!x", target.id()), edgeLabel);
+        edge.vertices(true, source, target);
+        fill(edge, single, list, set);
+        edge.expiredTime(EXPIRY);
+        row("edge.out", serializer.writeEdge(edge));
+        row("edge.in", serializer.writeEdge(edge.switchOwner()));
+        PropertyKey olapKey = property(graph, 9, "rank", Cardinality.SINGLE);
+        olapKey.writeType(WriteType.OLAP_COMMON);
+        HugeVertex olap = new HugeVertex(graph, source.id(), VertexLabel.OLAP_VL);
+        olap.addProperty(olapKey, 42);
+        row("olap", serializer.writeVertex(olap));
+        property(graph, 16L, "weight", Cardinality.SINGLE).dataType(DataType.LONG);
+        property(graph, 17L, "name", Cardinality.SINGLE).dataType(DataType.TEXT);
+        index("index.secondary", graph, serializer, 6L, IndexType.SECONDARY, "alice");
+        index("index.int", graph, serializer, 7L, IndexType.RANGE_INT, 7);
+        index("index.long", graph, serializer, 8L, IndexType.RANGE_LONG, 7L);
+        VertexLabel timeless = new VertexLabel(graph, IdGenerator.of(10L), "timeless");
+        timeless.properties(single.id(), list.id(), set.id());
+        VERTICES.put(10L, timeless);
+        HugeVertex timelessVertex = new HugeVertex(graph, IdGenerator.of(3L), timeless);
+        fill(timelessVertex, single, list, set);
+        row("vertex.untimed", serializer.writeVertex(timelessVertex));
+        EdgeLabel timelessEdgeLabel = new EdgeLabel(graph, IdGenerator.of(11L), "untimed");
+        timelessEdgeLabel.links(Pair.of(vertexLabel.id(), vertexLabel.id()));
+        timelessEdgeLabel.properties(single.id(), list.id(), set.id());
+        EDGES.put(11L, timelessEdgeLabel);
+        HugeEdge timelessEdge = new HugeEdge(graph,
+            new EdgeId(source.id(), Directions.OUT, timelessEdgeLabel.id(), timelessEdgeLabel.id(),
+                       "", target.id()), timelessEdgeLabel);
+        timelessEdge.vertices(true, source, target);
+        fill(timelessEdge, single, list, set);
+        row("edge.untimed", serializer.writeEdge(timelessEdge));
+        index("index.secondary.untimed", graph, serializer, 12L,
+              IndexType.SECONDARY, "alice", 10L);
+        index("index.int.untimed", graph, serializer, 13L, IndexType.RANGE_INT, 7, 10L);
+        index("index.long.untimed", graph, serializer, 14L, IndexType.RANGE_LONG, 7L, 10L);
+        index("index.hashed", graph, serializer, 15L, IndexType.SECONDARY,
+              "long-field-".repeat(20));
+        HugeIndex systemIndex = new HugeIndex(graph, IndexLabel.label(HugeType.VERTEX));
+        systemIndex.fieldValues(4L);
+        systemIndex.elementIds(source.id(), EXPIRY);
+        row("index.system", serializer.writeIndex(systemIndex));
+        HugeIndex edgeSystemIndex = new HugeIndex(graph, IndexLabel.label(HugeType.EDGE));
+        edgeSystemIndex.fieldValues(5L);
+        edgeSystemIndex.elementIds(edge.id(), EXPIRY);
+        row("index.system.edge", serializer.writeIndex(edgeSystemIndex));
+        String producer = Files.readString(Path.of(args[1]), StandardCharsets.UTF_8);
+        String license = producer.substring(0, producer.indexOf("*/") + 2);
+        StringBuilder encoded = new StringBuilder(license.replace("/*", "#")
+            .replace("*/", "#").replace(" *", "#")).append('\n');
+        encoded.append("now=").append(NOW).append('\n');
+        encoded.append("expiry=").append(EXPIRY).append('\n');
+        ROWS.forEach((key, value) -> encoded.append(key).append('=').append(value).append('\n'));
+        Files.createDirectories(Path.of(args[0]));
+        Files.writeString(Path.of(args[0]).resolve("core-rows.properties"), encoded,
+                          StandardCharsets.UTF_8);
+        System.out.println("Generated 15 real legacy BinarySerializer rows");
+    }
+
+    private static PropertyKey property(HugeGraph graph, long id, String name,
+                                        Cardinality cardinality) {
+        PropertyKey key = new PropertyKey(graph, IdGenerator.of(id), name);
+        key.dataType(DataType.INT);
+        key.cardinality(cardinality);
+        PROPERTIES.put(id, key);
+        return key;
+    }
+
+    private static void fill(HugeElement element, PropertyKey single,
+                              PropertyKey list, PropertyKey set) {
+        element.addProperty(single, 7);
+        element.addProperty(list, Arrays.asList(7, -1, 7));
+        element.addProperty(set, Arrays.asList(7, -1));
+    }
+
+    private static void index(String name, HugeGraph graph, BinarySerializer serializer,
+                               long id, IndexType type, Object value) {
+        index(name, graph, serializer, id, type, value, 4L);
+    }
+
+    private static void index(String name, HugeGraph graph, BinarySerializer serializer,
+                               long id, IndexType type, Object value, long baseId) {
+        IndexLabel label = new IndexLabel(graph, IdGenerator.of(id), name);
+        label.indexType(type);
+        label.indexFields(IdGenerator.of(type == IndexType.RANGE_LONG ? 16L :
+                                         type == IndexType.SECONDARY ? 17L : 1L));
+        label.baseType(HugeType.VERTEX_LABEL);
+        label.baseValue(IdGenerator.of(baseId));
+        INDEXES.put(id, label);
+        HugeIndex index = new HugeIndex(graph, label);
+        index.fieldValues(value);
+        index.elementIds(IdGenerator.of(1L), baseId == 4L ? EXPIRY : 0L);
+        row(name, serializer.writeIndex(index));
+    }
+
+    private static void row(String name, BackendEntry entry) {
+        if (entry.type().isVertex()) {
+            HugeVertex decoded = fixtureSerializer.readVertex(fixtureGraph, entry);
+            if (decoded.sizeOfProperties() != 3 ||
+                !Integer.valueOf(7).equals(decoded.getPropertyValue(IdGenerator.of(1L)))) {
+                throw new AssertionError("Legacy vertex self-read failed: " + name);
+            }
+        } else if (entry.type().isEdge()) {
+            HugeEdge decoded = fixtureSerializer.readEdge(fixtureGraph, entry);
+            if (decoded.sizeOfProperties() != 3 ||
+                !Integer.valueOf(7).equals(decoded.getPropertyValue(IdGenerator.of(1L)))) {
+                throw new AssertionError("Legacy edge self-read failed: " + name);
+            }
+        } else if (entry.type() == HugeType.OLAP) {
+            HugeVertex decoded = new HugeVertex(fixtureGraph, IdGenerator.of(1L), VERTICES.get(4L));
+            fixtureSerializer.parseOlap(entry.columns().iterator().next().value, decoded);
+            if (!Integer.valueOf(42).equals(decoded.getPropertyValue(IdGenerator.of(9L)))) {
+                throw new AssertionError("Legacy OLAP self-read failed");
+            }
+        } else if (entry.type().isIndex()) {
+            ConditionQuery query = new ConditionQuery(entry.type());
+            if (name.equals("index.secondary") || name.equals("index.secondary.untimed")) {
+                query.eq(HugeKeys.FIELD_VALUES, "alice");
+            } else if (name.equals("index.hashed")) {
+                query.eq(HugeKeys.FIELD_VALUES, "long-field-".repeat(20));
+            } else if (name.equals("index.system")) {
+                query.eq(HugeKeys.FIELD_VALUES, 4L);
+            } else if (name.equals("index.system.edge")) {
+                query.eq(HugeKeys.FIELD_VALUES, 5L);
+            }
+            HugeIndex decoded = fixtureSerializer.readIndex(fixtureGraph, query, entry);
+            Id expectedElement = name.equals("index.system.edge") ?
+                                 new EdgeId(IdGenerator.of(1L), Directions.OUT,
+                                            IdGenerator.of(5L), IdGenerator.of(5L),
+                                            "2026!x", IdGenerator.of(2L)) : IdGenerator.of(1L);
+            if (!decoded.elementIds().contains(expectedElement)) {
+                throw new AssertionError("Legacy index self-read failed: " + name);
+            }
+        }
+        ROWS.put(name + ".type", entry.type().name());
+        ROWS.put(name + ".id", hex(entry.id().asBytes()));
+        ROWS.put(name + ".ttl", String.valueOf(entry.ttl()));
+        ROWS.put(name + ".columns", String.valueOf(entry.columnsSize()));
+        int number = 0;
+        for (BackendColumn column : entry.columns()) {
+            ROWS.put(name + ".column." + number + ".name", hex(column.name));
+            ROWS.put(name + ".column." + number + ".value", hex(column.value));
+            number++;
+        }
+    }
+
+    private static class FixtureSerializer extends BinarySerializer {
+        private void parseOlap(byte[] bytes, HugeVertex vertex) {
+            super.parseVertexOlap(bytes, vertex);
+        }
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder text = new StringBuilder();
+        for (byte value : bytes) {
+            text.append(String.format("%02x", value & 0xff));
+        }
+        return text.toString();
+    }
+}

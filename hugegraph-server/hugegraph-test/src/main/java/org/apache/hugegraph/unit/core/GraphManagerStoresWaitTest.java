@@ -30,7 +30,7 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.core.GraphManager.Readiness;
 import org.apache.hugegraph.pd.client.PDConfig;

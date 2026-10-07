@@ -29,7 +29,7 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.http.util.TextUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.tinkerpop.shaded.jackson.core.type.TypeReference;

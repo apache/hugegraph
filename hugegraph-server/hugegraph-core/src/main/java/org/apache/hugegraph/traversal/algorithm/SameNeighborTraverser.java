@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.E;

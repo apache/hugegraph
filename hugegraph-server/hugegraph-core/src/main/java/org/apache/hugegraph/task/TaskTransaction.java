@@ -21,17 +21,17 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
@@ -96,7 +96,7 @@ public class TaskTransaction extends GraphTransaction {
             return;
         }
 
-        HugeIndex index = new HugeIndex(this.graph(),
+        Index index = new Index(this.graph(),
                                         IndexLabel.label(vertex.type()));
         index.fieldValues(vertex.schemaLabel().id());
         index.elementIds(vertex.id(), vertex.expiredTime());

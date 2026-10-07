@@ -17,11 +17,11 @@
 
 package org.apache.hugegraph.server;
 
-import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.WorkLoad;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.version.CoreVersion;
 import org.apache.tinkerpop.gremlin.server.util.MetricManager;

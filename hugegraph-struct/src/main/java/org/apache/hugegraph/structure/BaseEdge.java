@@ -26,7 +26,7 @@ import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.id.Id;
-import org.apache.hugegraph.id.SplicingIdGenerator;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.struct.schema.SchemaLabel;
@@ -73,7 +73,8 @@ public class BaseEdge extends BaseElement implements Cloneable {
     @Override
     public String name() {
         if (this.name == null) {
-            this.name = SplicingIdGenerator.concatValues(sortValues());
+            List<Object> values = this.sortValues();
+            this.name = values.isEmpty() ? "" : ConditionQuery.concatValues(values);
         }
         return this.name;
     }
@@ -98,7 +99,11 @@ public class BaseEdge extends BaseElement implements Cloneable {
             BaseProperty<?> property = this.getProperty(sk);
             E.checkState(property != null,
                     "The value of sort key '%s' can't be null", sk);
-            propValues.add(property.propertyKey().serialValue(property.value(), true));
+            Object value = property.serialValue(true);
+            if ("".equals(value)) {
+                value = ConditionQuery.INDEX_VALUE_EMPTY;
+            }
+            propValues.add(value);
         }
         return propValues;
     }
@@ -182,9 +187,9 @@ public class BaseEdge extends BaseElement implements Cloneable {
 
         if (this.fresh()) {
             int len = this.id().length();
-            E.checkArgument(len <= BytesBuffer.BIG_ID_LEN_MAX,
+            E.checkArgument(len <= BytesBuffer.EID_LEN_MAX,
                     "The max length of edge id is %s, but got %s {%s}",
-                    BytesBuffer.BIG_ID_LEN_MAX, len, this.id());
+                    BytesBuffer.EID_LEN_MAX, len, this.id());
         }
     }
     @Override
@@ -238,7 +243,37 @@ public class BaseEdge extends BaseElement implements Cloneable {
         return edge;
     }
 
+    @Override
+    public boolean equals(Object object) {
+        if (this == object) {
+            return true;
+        }
+        if (!(object instanceof BaseEdge) || this.id() == null) {
+            return false;
+        }
+        return this.id().equals(((BaseEdge) object).id());
+    }
+
+    @Override
+    public int hashCode() {
+        return this.id() == null ? System.identityHashCode(this) : this.id().hashCode();
+    }
+
     public static BaseEdge constructEdge(HugeGraphSupplier graph,
+                                         BaseVertex ownerVertex,
+                                         boolean isOutEdge,
+                                         EdgeLabel edgeLabel,
+                                         String sortValues,
+                                         Id otherVertexId) {
+        BaseEdge edge = createEdge(graph, ownerVertex, isOutEdge, edgeLabel,
+                                   sortValues, otherVertexId);
+        ownerVertex.addEdge(edge);
+        edge.otherVertex().addEdge(edge.switchOwner());
+        return edge;
+    }
+
+    /** Create endpoint/schema state; adapters own adjacency attachment. */
+    public static BaseEdge createEdge(HugeGraphSupplier graph,
                                          BaseVertex ownerVertex,
                                          boolean isOutEdge,
                                          EdgeLabel edgeLabel,
@@ -249,18 +284,37 @@ public class BaseEdge extends BaseElement implements Cloneable {
         VertexLabel srcLabel;
         VertexLabel tgtLabel;
         if (graph == null) {
-            srcLabel = new VertexLabel(null, ownerLabelId, "UNDEF");
-            tgtLabel = new VertexLabel(null, otherLabelId, "UNDEF");
-        } else {
-            if (edgeLabel.general()) {
-                srcLabel = VertexLabel.GENERAL;
-                tgtLabel = VertexLabel.GENERAL;
-            } else {
-                srcLabel = graph.vertexLabelOrNone(ownerLabelId);
-                tgtLabel = graph.vertexLabelOrNone(otherLabelId);
-            }
+            return createEdgeWithoutSchema(null, ownerVertex, isOutEdge, edgeLabel,
+                                           sortValues, otherVertexId);
         }
+        if (edgeLabel.general() &&
+            ownerVertex.typeContext() == BaseVertex.TypeContext.STORAGE) {
+            srcLabel = VertexLabel.GENERAL;
+            tgtLabel = VertexLabel.GENERAL;
+        } else {
+            srcLabel = graph.vertexLabelOrNone(ownerLabelId);
+            tgtLabel = graph.vertexLabelOrNone(otherLabelId);
+        }
+        return createEdge(ownerVertex, isOutEdge, edgeLabel, sortValues,
+                          otherVertexId, srcLabel, tgtLabel);
+    }
 
+    /** Resolve no metadata, while retaining an optional supplier for later engine access. */
+    public static BaseEdge createEdgeWithoutSchema(HugeGraphSupplier supplier,
+                                                   BaseVertex ownerVertex,
+                                                   boolean isOutEdge,
+                                                   EdgeLabel edgeLabel,
+                                                   String sortValues,
+                                                   Id otherVertexId) {
+        VertexLabel source = VertexLabel.undefined(supplier, edgeLabel.sourceLabel());
+        VertexLabel target = VertexLabel.undefined(supplier, edgeLabel.targetLabel());
+        return createEdge(ownerVertex, isOutEdge, edgeLabel, sortValues,
+                          otherVertexId, source, target);
+    }
+
+    private static BaseEdge createEdge(BaseVertex ownerVertex, boolean isOutEdge,
+                                       EdgeLabel edgeLabel, String sortValues, Id otherVertexId,
+                                       VertexLabel srcLabel, VertexLabel tgtLabel) {
         VertexLabel otherVertexLabel;
         if (isOutEdge) {
             ownerVertex.correctVertexLabel(srcLabel);
@@ -269,6 +323,14 @@ public class BaseEdge extends BaseElement implements Cloneable {
             ownerVertex.correctVertexLabel(tgtLabel);
             otherVertexLabel = srcLabel;
         }
+        return createEdge(ownerVertex, isOutEdge, edgeLabel, sortValues,
+                          otherVertexId, otherVertexLabel);
+    }
+
+    /** Create an edge after the caller has resolved its endpoint labels. */
+    public static BaseEdge createEdge(BaseVertex ownerVertex, boolean isOutEdge,
+                                      EdgeLabel edgeLabel, String sortValues,
+                                      Id otherVertexId, VertexLabel otherVertexLabel) {
         BaseVertex otherVertex = new BaseVertex(otherVertexId, otherVertexLabel);
 
         ownerVertex.propLoaded(false);
@@ -278,9 +340,6 @@ public class BaseEdge extends BaseElement implements Cloneable {
         edge.name(sortValues);
         edge.vertices(isOutEdge, ownerVertex, otherVertex);
         edge.assignId();
-
-        ownerVertex.addEdge(edge);
-        otherVertex.addEdge(edge.switchOwner());
 
         return edge;
     }

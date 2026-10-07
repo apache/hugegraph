@@ -16,18 +16,27 @@
 # limitations under the License.
 #
 
-BASE_PATH=$(cd "$(dirname $0)" || exit; pwd)
-DEP_PATH=$BASE_PATH/all_dependencies
-FILE_NAME=${1:-known-dependencies.txt}
+set -euo pipefail
 
-if [[ -d $DEP_PATH ]];then
-  echo "rm -r -f DEP_PATH"
-  rm -r -f $DEP_PATH
+BASE_PATH=$(cd "$(dirname "$0")" && pwd)
+ROOT_PATH=$(cd "$BASE_PATH/../../.." && pwd)
+FILE_NAME=${1:-known-dependencies.txt}
+MAVEN_COMMAND=${MAVEN_COMMAND:-mvn}
+
+if [[ "$FILE_NAME" = /* ]]; then
+    OUTPUT_PATH=$FILE_NAME
+else
+    OUTPUT_PATH=$BASE_PATH/$FILE_NAME
 fi
 
-cd "$BASE_PATH"/../../../ || exit
+# Only remove this invocation's new temporary directory, never a shared folder.
+DEPENDENCY_TEMP=$(mktemp -d "${TMPDIR:-/tmp}/hugegraph-dependencies.XXXXXX")
+trap 'rm -rf -- "$DEPENDENCY_TEMP"' EXIT
 
-mvn dependency:copy-dependencies -DincludeScope=runtime -DoutputDirectory=$DEP_PATH
-
-ls $DEP_PATH | egrep -v "^hg|hugegraph|hubble" | sort -n > $BASE_PATH/$FILE_NAME
-rm -r -f $DEP_PATH
+cd "$ROOT_PATH"
+"$MAVEN_COMMAND" -B -ntp dependency:copy-dependencies -DincludeScope=runtime \
+    "-DoutputDirectory=$DEPENDENCY_TEMP/runtime"
+REVISION=$("$MAVEN_COMMAND" -q -DforceStdout help:evaluate -Dexpression=project.version)
+python3 "$BASE_PATH/dependency_inventory.py" collect \
+    --runtime "$DEPENDENCY_TEMP/runtime" --root "$ROOT_PATH" \
+    --revision "$REVISION" --output "$OUTPUT_PATH"

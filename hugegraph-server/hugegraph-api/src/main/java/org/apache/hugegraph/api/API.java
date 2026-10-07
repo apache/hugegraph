@@ -24,7 +24,7 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 import org.apache.commons.lang.mutable.MutableLong;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;

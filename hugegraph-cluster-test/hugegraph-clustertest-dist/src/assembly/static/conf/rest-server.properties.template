@@ -39,6 +39,7 @@ arthas.disabled_commands=jad
 auth.authenticator=org.apache.hugegraph.auth.StandardAuthenticator
 # true if using hstore mode
 usePD=true
+cluster=hg
 pd.peers=$PD_PEERS_LIST$
 
 # default password

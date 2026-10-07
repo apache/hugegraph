@@ -17,16 +17,16 @@
 
 package org.apache.hugegraph.backend.tx;
 
+import java.util.AbstractMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.pd.client.PDClient;
 import org.apache.hugegraph.pd.grpc.Pdpb;
-import org.apache.hugegraph.store.term.HgPair;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
 
@@ -35,7 +35,7 @@ public class IdCounter {
     private static final int TIMES = 10000;
     private static final int DELTA = 10000;
     private static final String DELIMITER = "/";
-    private static final Map<String, HgPair<AtomicLong, AtomicLong>> ids =
+    private static final Map<String, Map.Entry<AtomicLong, AtomicLong>> ids =
         new ConcurrentHashMap<>();
     private final PDClient pdClient;
     private final String graphName;
@@ -68,7 +68,7 @@ public class IdCounter {
     public synchronized void increaseCounter(HugeType type, long lowest) {
         String key = toKey(this.graphName, type);
         getCounterFromPd(type);
-        HgPair<AtomicLong, AtomicLong> idPair = ids.get(key);
+        Map.Entry<AtomicLong, AtomicLong> idPair = ids.get(key);
         AtomicLong currentId = idPair.getKey();
         AtomicLong maxId = idPair.getValue();
         if (currentId.longValue() >= lowest) {
@@ -97,7 +97,7 @@ public class IdCounter {
     public long getCounterFromPd(HugeType type) {
         AtomicLong currentId;
         AtomicLong maxId;
-        HgPair<AtomicLong, AtomicLong> idPair;
+        Map.Entry<AtomicLong, AtomicLong> idPair;
         String key = toKey(this.graphName, type);
         if ((idPair = ids.get(key)) == null) {
             synchronized (ids) {
@@ -105,7 +105,7 @@ public class IdCounter {
                     try {
                         currentId = new AtomicLong(0);
                         maxId = new AtomicLong(0);
-                        idPair = new HgPair<>(currentId, maxId);
+                        idPair = new AbstractMap.SimpleImmutableEntry<>(currentId, maxId);
                         ids.put(key, idPair);
                     } catch (Exception e) {
                         throw new BackendException(String.format(

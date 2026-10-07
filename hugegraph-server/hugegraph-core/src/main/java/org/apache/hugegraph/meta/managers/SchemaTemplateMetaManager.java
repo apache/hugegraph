@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.util.JsonUtil;

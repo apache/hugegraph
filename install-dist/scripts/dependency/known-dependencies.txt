@@ -54,8 +54,6 @@ commons-collections4-4.4.jar
 commons-compress-1.21.jar
 commons-configuration-1.10.jar
 commons-configuration2-2.10.1.jar
-commons-configuration2-2.8.0.jar
-commons-configuration2-2.9.0.jar
 commons-crypto-1.1.0.jar
 commons-io-2.12.0.jar
 commons-io-2.7.jar
@@ -137,7 +135,6 @@ grpc-core-1.28.1.jar
 grpc-core-1.39.0.jar
 grpc-core-1.47.0.jar
 grpc-grpclb-1.39.0.jar
-grpc-netty-1.39.0.jar
 grpc-netty-1.47.0.jar
 grpc-netty-shaded-1.28.0.jar
 grpc-netty-shaded-1.39.0.jar
@@ -162,7 +159,6 @@ guava-32.0.1-android.jar
 hamcrest-2.2.jar
 hamcrest-3.0.jar
 hamcrest-core-1.3.jar
-hanlp-portable-1.5.0.jar
 hanlp-portable-1.8.3.jar
 hbase-client-2.6.5.jar
 hbase-common-2.6.5.jar
@@ -227,7 +223,6 @@ jansi-2.4.0.jar
 javaparser-core-3.26.3.jar
 javapoet-1.13.0.jar
 javassist-3.21.0-GA.jar
-javassist-3.24.0-GA.jar
 javassist-3.25.0-GA.jar
 javassist-3.28.0-GA.jar
 javatuples-1.2.jar
@@ -244,7 +239,6 @@ jcip-annotations-1.0-1.jar
 jcl-over-slf4j-1.7.25.jar
 jcodings-1.0.58.jar
 jcommander-1.30.jar
-jcseg-core-2.2.0.jar
 jcseg-core-2.6.2.jar
 jctools-core-2.1.1.jar
 jedis-2.5.1.jar
@@ -279,11 +273,8 @@ jetty-util-ajax-9.4.51.v20230217.jar
 jetty-webapp-9.4.51.v20230217.jar
 jetty-xml-9.4.51.v20230217.jar
 jieba-analysis-1.0.2.jar
-jjwt-api-0.11.2.jar
 jjwt-api-0.11.5.jar
-jjwt-impl-0.11.2.jar
 jjwt-impl-0.11.5.jar
-jjwt-jackson-0.11.2.jar
 jjwt-jackson-0.11.5.jar
 jline-2.14.6.jar
 jna-5.12.1.jar
@@ -363,13 +354,11 @@ log4j-slf4j-impl-2.18.0.jar
 logging-interceptor-3.12.12.jar
 logging-interceptor-4.10.0.jar
 lombok-1.18.24.jar
+lombok-1.18.30.jar
 lookout-api-1.4.1.jar
-lucene-analyzers-common-5.2.1.jar
 lucene-analyzers-common-8.11.2.jar
-lucene-analyzers-smartcn-7.4.0.jar
 lucene-analyzers-smartcn-8.11.2.jar
 lucene-backward-codecs-5.2.1.jar
-lucene-core-7.4.0.jar
 lucene-core-8.11.2.jar
 lucene-misc-5.2.1.jar
 lucene-queries-4.7.2.jar
@@ -463,15 +452,6 @@ perfmark-api-0.23.0.jar
 perfmark-api-0.25.0.jar
 picocli-4.7.6.jar
 pinyin4j-2.5.0.jar
-powermock-api-mockito2-2.0.0-RC.3.jar
-powermock-api-support-2.0.0-RC.3.jar
-powermock-classloading-base-2.0.0-RC.3.jar
-powermock-classloading-xstream-2.0.0-RC.3.jar
-powermock-core-2.0.0-RC.3.jar
-powermock-module-junit4-2.0.0-RC.3.jar
-powermock-module-junit4-common-2.0.0-RC.3.jar
-powermock-module-junit4-rule-2.0.0-RC.3.jar
-powermock-reflect-2.0.0-RC.3.jar
 proto-google-common-protos-1.17.0.jar
 proto-google-common-protos-2.0.1.jar
 protobuf-java-3.11.0.jar
@@ -517,6 +497,7 @@ spring-boot-2.5.15.jar
 spring-boot-actuator-2.5.15.jar
 spring-boot-actuator-autoconfigure-2.5.15.jar
 spring-boot-autoconfigure-2.5.15.jar
+spring-boot-jarmode-layertools-2.7.1.jar
 spring-boot-starter-2.5.15.jar
 spring-boot-starter-actuator-2.5.15.jar
 spring-boot-starter-jetty-2.5.15.jar
@@ -558,10 +539,7 @@ websocket-common-9.4.51.v20230217.jar
 websocket-server-9.4.51.v20230217.jar
 websocket-servlet-9.4.51.v20230217.jar
 word-1.3.jar
-xmlpull-1.1.3.1.jar
 xmlunit-core-2.8.4.jar
-xpp3_min-1.1.4c.jar
-xstream-1.4.10.jar
 zjsonpatch-0.3.0.jar
 zookeeper-3.8.6.jar
 zookeeper-jute-3.8.6.jar

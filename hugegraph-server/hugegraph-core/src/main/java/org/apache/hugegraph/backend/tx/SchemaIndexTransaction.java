@@ -20,16 +20,16 @@ package org.apache.hugegraph.backend.tx;
 import java.util.Iterator;
 
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.IdQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
@@ -49,7 +49,7 @@ public class SchemaIndexTransaction extends AbstractTransaction {
 
         IndexLabel indexLabel = IndexLabel.label(element.type());
         // Update name index if backend store not supports name-query
-        HugeIndex index = new HugeIndex(this.graph(), indexLabel);
+        Index index = new Index(this.graph(), indexLabel);
         index.fieldValues(element.name());
         index.elementIds(element.id());
 
@@ -96,7 +96,7 @@ public class SchemaIndexTransaction extends AbstractTransaction {
         Iterator<BackendEntry> entries = super.query(indexQuery).iterator();
         try {
             while (entries.hasNext()) {
-                HugeIndex index = this.serializer.readIndex(graph(), indexQuery,
+                Index index = this.serializer.readIndex(graph(), indexQuery,
                                                             entries.next());
                 idQuery.query(index.elementIds());
                 Query.checkForceCapacity(idQuery.idsSize());

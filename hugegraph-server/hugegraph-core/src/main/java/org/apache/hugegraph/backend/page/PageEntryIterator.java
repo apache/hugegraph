@@ -19,7 +19,7 @@ package org.apache.hugegraph.backend.page;
 
 import java.util.Iterator;
 
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
 import org.apache.hugegraph.exception.NotSupportException;

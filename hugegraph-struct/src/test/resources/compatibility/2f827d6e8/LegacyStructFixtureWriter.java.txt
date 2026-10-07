@@ -1,0 +1,74 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.LinkedHashSet;
+import java.util.UUID;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.type.define.Cardinality;
+import org.apache.hugegraph.type.define.DataType;
+
+public class LegacyStructFixtureWriter {
+    private static final StringBuilder OUTPUT = new StringBuilder();
+
+    public static void main(String[] args) throws Exception {
+        System.out.println("Writer loaded from " + BytesBuffer.class.getProtectionDomain()
+                                                               .getCodeSource().getLocation());
+        Path source = Path.of(args[1]);
+        String producer = Files.readString(source, StandardCharsets.UTF_8);
+        String license = producer.substring(0, producer.indexOf("*/") + 2);
+        OUTPUT.append(license.replace("/*", "#").replace("*/", "#")
+                             .replace(" *", "#")).append('\n');
+        scalar(DataType.BOOLEAN, true);
+        scalar(DataType.BYTE, (byte) -7);
+        scalar(DataType.INT, -123456);
+        scalar(DataType.LONG, Long.MIN_VALUE);
+        scalar(DataType.FLOAT, 1.25f);
+        scalar(DataType.DOUBLE, -123.125d);
+        scalar(DataType.DATE, new Date(1609459200123L));
+        scalar(DataType.TEXT, "属性😀\u0000");
+        scalar(DataType.BLOB, new byte[]{0, -1, 1, 127, -128});
+        scalar(DataType.UUID, UUID.fromString("01234567-89ab-cdef-0123-456789abcdef"));
+        PropertyKey key = new PropertyKey(null, IdGenerator.of(101L), "legacy");
+        key.dataType(DataType.INT);
+        key.cardinality(Cardinality.LIST);
+        put("list", BytesBuffer.allocate(64).writeProperty(key, Arrays.asList(7, -1, 7)));
+        key.cardinality(Cardinality.SET);
+        put("set", BytesBuffer.allocate(64).writeProperty(
+            key, new LinkedHashSet<>(Arrays.asList(7, -1))));
+        Files.writeString(Path.of(args[0]).resolve("struct-tagged-properties.hex"),
+                          OUTPUT, StandardCharsets.UTF_8);
+        System.out.println("Generated 12 tagged property fixtures");
+    }
+
+    private static void scalar(DataType type, Object value) {
+        put(type.name(), BytesBuffer.allocate(128).writeProperty(Cardinality.SINGLE, type, value));
+    }
+
+    private static void put(String key, BytesBuffer buffer) {
+        OUTPUT.append(key).append('=');
+        for (byte value : buffer.bytes()) {
+            OUTPUT.append(String.format("%02x", value & 0xff));
+        }
+        OUTPUT.append('\n');
+    }
+}

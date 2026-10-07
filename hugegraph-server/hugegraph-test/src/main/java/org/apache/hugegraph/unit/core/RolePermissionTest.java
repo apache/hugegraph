@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.unit.core;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.HugeProject;
 import org.apache.hugegraph.auth.HugeResource;
@@ -27,8 +27,8 @@ import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.ResourceObject;
 import org.apache.hugegraph.auth.ResourceType;
 import org.apache.hugegraph.auth.RolePermission;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;

@@ -27,8 +27,9 @@ import java.util.NavigableMap;
 import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
 
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;

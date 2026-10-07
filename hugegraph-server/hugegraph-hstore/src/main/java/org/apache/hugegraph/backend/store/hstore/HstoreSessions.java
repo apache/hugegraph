@@ -22,7 +22,8 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendSession.AbstractBackendSession;
@@ -182,6 +183,12 @@ public abstract class HstoreSessions extends BackendSessionPool {
 
         public abstract BackendColumnIterator getWithBatch(String table,
                                                            List<HgOwnerKey> keys);
+
+        public BackendColumnIterator getWithBatchExact(String table, List<HgOwnerKey> keys) {
+            return BackendColumnIterator.wrap(keys.stream().map(key ->
+                    BackendColumn.of(key.getKey(), this.get(table, key.getOwner(), key.getKey())))
+                    .filter(column -> column.value != null && column.value.length != 0).iterator());
+        }
 
         public abstract void merge(String table, byte[] ownerKey,
                                    byte[] key, byte[] value);

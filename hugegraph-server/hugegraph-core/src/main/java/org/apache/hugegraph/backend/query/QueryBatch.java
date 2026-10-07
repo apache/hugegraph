@@ -25,10 +25,11 @@ import java.util.NoSuchElementException;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.iterator.Metadatable;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.type.Idfiable;
 import org.apache.hugegraph.util.InsertionOrderUtil;
 

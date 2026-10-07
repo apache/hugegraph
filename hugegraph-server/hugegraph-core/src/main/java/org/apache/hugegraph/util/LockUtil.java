@@ -29,8 +29,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.concurrent.KeyLock;
 import org.apache.hugegraph.concurrent.LockManager;
 import org.apache.hugegraph.concurrent.RowLock;

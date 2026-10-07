@@ -17,56 +17,64 @@
 
 package org.apache.hugegraph.store.business;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.List;
 import java.util.Set;
 
+import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession.BackendColumn;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 import org.apache.hugegraph.serializer.BytesBuffer;
-import org.apache.hugegraph.type.define.DataType;
-import org.apache.hugegraph.type.define.SerialEnum;
 
 public class SelectIterator implements ScanIterator {
 
-    ScanIterator iter;
-    Set<Integer> properties;
+    private final ScanIterator iter;
+    private final Set<Integer> properties;
+    private final HugeGraphSupplier graph;
+    private final boolean isVertex;
 
-    public SelectIterator(ScanIterator iterator, List<Integer> properties) {
+    public SelectIterator(ScanIterator iterator, List<Integer> properties,
+                          HugeGraphSupplier graph, boolean isVertex) {
         this.iter = iterator;
-        this.properties = new HashSet<>(properties);
+        this.properties = properties == null ? Collections.emptySet() : new HashSet<>(properties);
+        this.graph = this.properties.isEmpty() ? graph : Objects.requireNonNull(graph, "graph");
+        this.isVertex = isVertex;
     }
 
     public BackendColumn select(BackendColumn column) {
-        int size;
-        if (properties == null || (size = properties.size()) == 0) {
+        if (this.properties.isEmpty() || column.value == null || column.value.length == 0) {
             return column;
         }
-        byte[] name = column.name;
-        byte[] value = column.value;
-        BytesBuffer buffer = BytesBuffer.wrap(value);
-        Id labelId = buffer.readId(); // label
-        int bpSize = buffer.readVInt(); // property
-        if (size == bpSize) {
-            return column;
-        }
-        BytesBuffer allocate = BytesBuffer.allocate(8 + 16 * size);
-        allocate.writeId(labelId);
-        allocate.writeVInt(size);
-        for (int i = 0; i < bpSize; i++) {
+        BytesBuffer buffer = BytesBuffer.wrap(column.value);
+        Id labelId = this.isVertex ? buffer.readId() : null;
+        int count = buffer.readVInt();
+        List<byte[]> selected = new ArrayList<>(Math.min(count, this.properties.size()));
+        for (int i = 0; i < count; i++) {
+            int start = buffer.position();
             int propertyId = buffer.readVInt();
-            byte cat = buffer.read(); // cardinality and type
-            byte code = BytesBuffer.getType(cat);
-            DataType dataType = SerialEnum.fromCode(DataType.class, code);
-            Object bpValue = buffer.readProperty(dataType);
-            if (properties.contains(propertyId)) {
-                allocate.writeVInt(propertyId);
-                allocate.write(cat);
-                allocate.writeProperty(dataType, bpValue);
+            buffer.skipSchemaProperty(this.graph.propertyKey(IdGenerator.of(propertyId)));
+            if (this.properties.contains(propertyId)) {
+                // Preserve the stored bytes, including collection ordering and scalar representation.
+                selected.add(Arrays.copyOfRange(column.value, start, buffer.position()));
             }
         }
-        return BackendColumn.of(name, allocate.bytes());
+        BytesBuffer output = BytesBuffer.allocate(column.value.length);
+        if (this.isVertex) {
+            output.writeId(labelId);
+        }
+        output.writeVInt(selected.size());
+        for (byte[] property : selected) {
+            output.write(property);
+        }
+        // TTL belongs to the row, independently of which properties were selected.
+        output.write(buffer.remainingBytes());
+        return BackendColumn.of(column.name, output.bytes());
     }
 
     @Override

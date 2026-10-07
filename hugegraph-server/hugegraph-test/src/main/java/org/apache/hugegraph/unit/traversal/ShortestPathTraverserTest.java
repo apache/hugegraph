@@ -27,9 +27,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.testutil.Assert;

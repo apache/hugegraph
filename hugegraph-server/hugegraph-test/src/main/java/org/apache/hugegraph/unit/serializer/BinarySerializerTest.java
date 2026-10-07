@@ -19,26 +19,139 @@ package org.apache.hugegraph.unit.serializer;
 
 import java.util.Arrays;
 import java.util.Date;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
 import java.util.Set;
 
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.structure.Index;
+import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.IdStrategy;
+import org.apache.hugegraph.type.define.IndexType;
+import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.backend.serializer.BinarySerializer;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.config.HugeConfig;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.Userdata;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
-import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.DateUtil;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 public class BinarySerializerTest extends BaseUnitTest {
+
+    @Test
+    public void testLegacyStoredLabelExpiryReadEliminateAndAppendKeys() throws IOException {
+        Properties core = labelFixtures("core-rows.properties");
+        Properties store = labelFixtures("store-index-rows.properties");
+        long expiry = Long.parseLong(core.getProperty("expiry"));
+        FakeObjects objects = new FakeObjects("legacy-fixture");
+        Mockito.when(objects.graph().now()).thenReturn(expiry + 1L);
+        BinarySerializer serializer = new BinarySerializer();
+        for (String name : new String[]{"system", "system.edge"}) {
+            boolean edge = name.endsWith("edge");
+            HugeType base = edge ? HugeType.EDGE : HugeType.VERTEX;
+            IndexLabel label = IndexLabel.label(base);
+            HugeType indexType = edge ? HugeType.EDGE_LABEL_INDEX : HugeType.VERTEX_LABEL_INDEX;
+            Id element = edge ? new EdgeId(IdGenerator.of(1L), Directions.OUT,
+                                          IdGenerator.of(5L), IdGenerator.of(5L), "2026!x",
+                                          IdGenerator.of(2L)) : IdGenerator.of(1L);
+            byte[] key = Bytes.fromHex(store.getProperty(name + ".name"));
+            byte[] value = Bytes.fromHex(store.getProperty(name + ".value"));
+            byte[] rowId = Bytes.fromHex(core.getProperty("index." + name + ".id"));
+            BinaryBackendEntry stored = new BinaryBackendEntry(indexType, rowId);
+            stored.column(key, value);
+            ConditionQuery query = new ConditionQuery(indexType);
+            query.eq(HugeKeys.FIELD_VALUES, edge ? 5L : 4L);
+            Index read = serializer.readIndex(objects.graph(), query, stored);
+            Assert.assertEquals(element, read.elementId());
+            Assert.assertEquals(expiry, read.expiredTime());
+            Assert.assertFalse(read.hasTtl());
+            Set<IdWithExpiredTime> expired = read.expiredElementIds();
+            Assert.assertEquals(1, expired.size());
+            Assert.assertTrue(read.elementIds().isEmpty());
+            Index removal = read.clone();
+            removal.resetElementIds();
+            for (IdWithExpiredTime record : expired) {
+                removal.elementIds(record.id(), record.expiredTime());
+            }
+            BackendEntry removed = serializer.writeIndex(removal);
+            Assert.assertEquals(1, removed.columnsSize());
+            BackendColumn removedColumn = removed.columns().iterator().next();
+            Assert.assertArrayEquals(key, removedColumn.name);
+            Assert.assertNotNull(removedColumn.value);
+            Assert.assertArrayEquals(BytesBuffer.BYTES_EMPTY, removedColumn.value);
+            Assert.assertTrue(read.elementIds().isEmpty());
+
+            Index append = new Index(objects.graph(), label);
+            append.fieldValues(edge ? 5L : 4L);
+            append.elementIds(element, expiry);
+            BackendEntry appended = serializer.writeIndex(append);
+            BackendColumn appendedColumn = appended.columns().iterator().next();
+            Assert.assertArrayEquals(key, appendedColumn.name);
+            Assert.assertArrayEquals(Bytes.fromHex(core.getProperty(
+                                    "index." + name + ".column.0.name")), appendedColumn.name);
+            Assert.assertNotNull(appendedColumn.value);
+            Assert.assertArrayEquals(Bytes.fromHex(core.getProperty(
+                                    "index." + name + ".column.0.value")), appendedColumn.value);
+            // Core append and TTL elimination address the original Store cell,
+            // so they cannot introduce a second key carrying an expiry suffix.
+            Assert.assertArrayEquals(removedColumn.name, appendedColumn.name);
+            Index appendedRead = serializer.readIndex(objects.graph(), query, appended);
+            Assert.assertEquals(1, appendedRead.elementIds().size());
+            Assert.assertEquals(element, appendedRead.elementId());
+            Assert.assertEquals(0L, appendedRead.expiredTime());
+        }
+    }
+
+    @Test
+    public void testOrdinaryIndexWriterProducesNonNullKvValue() {
+        FakeObjects objects = new FakeObjects();
+        Id fieldId = IdGenerator.of(1L);
+        Id baseId = IdGenerator.of(2L);
+        objects.newPropertyKey(fieldId, "age", DataType.INT, Cardinality.SINGLE);
+        objects.newVertexLabel(baseId, "person", IdStrategy.CUSTOMIZE_NUMBER, fieldId);
+        IndexLabel label = objects.newIndexLabel(IdGenerator.of(3L), "by-age", HugeType.VERTEX_LABEL,
+                                                 baseId, IndexType.SECONDARY, fieldId);
+        Index index = new Index(objects.graph(), label);
+        index.fieldValues("42");
+        index.elementIds(IdGenerator.of(4L));
+
+        BackendEntry entry = new BinarySerializer().writeIndex(index);
+        Assert.assertEquals(1, entry.columnsSize());
+        BackendColumn column = entry.columns().iterator().next();
+        Assert.assertNotNull(column.name);
+        Assert.assertNotNull(column.value);
+        Assert.assertArrayEquals(BytesBuffer.BYTES_EMPTY, column.value);
+    }
+
+    private static Properties labelFixtures(String name) throws IOException {
+        Properties fixtures = new Properties();
+        try (InputStream input = BinarySerializerTest.class.getResourceAsStream(
+                                "/compatibility/2f827d6e8/" + name)) {
+            Assert.assertNotNull(input);
+            fixtures.load(input);
+        }
+        return fixtures;
+    }
 
     @Test
     public void testVertex() {
@@ -58,7 +171,7 @@ public class BinarySerializerTest extends BaseUnitTest {
         assertCollectionEquals(edge.targetVertex().getProperties(),
                                vertex2.getProperties());
 
-        Whitebox.setInternalState(vertex2, "removed", true);
+        vertex2.element().removed(true);
         Assert.assertTrue(vertex2.removed());
         BackendEntry entry3 = ser.writeVertex(vertex2);
         Assert.assertEquals(0, entry3.columnsSize());
@@ -107,7 +220,7 @@ public class BinarySerializerTest extends BaseUnitTest {
         assertCollectionEquals(edge.targetVertex().getProperties(),
                                vertex2.getProperties());
 
-        Whitebox.setInternalState(vertex2, "removed", true);
+        vertex2.element().removed(true);
         Assert.assertTrue(vertex2.removed());
         BackendEntry entry3 = ser.writeVertex(vertex2);
         Assert.assertEquals(0, entry3.columnsSize());

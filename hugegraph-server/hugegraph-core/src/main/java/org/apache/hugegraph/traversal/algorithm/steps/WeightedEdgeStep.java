@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.E;
 

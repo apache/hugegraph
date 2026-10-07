@@ -36,29 +36,29 @@ public final class GremlinServerConfig {
     }
 
     public static void update(Path configPath, String host, int port) {
-        if (port < 0 || port > 65535) {
+        if (port <= 0 || port > 65535) {
             throw new IllegalArgumentException("Invalid Gremlin port: " + port);
         }
 
         try {
             List<String> lines = Files.readAllLines(configPath,
                                                     StandardCharsets.UTF_8);
-            boolean hostUpdated = false;
-            boolean portUpdated = false;
+            int hostSettings = 0;
+            int portSettings = 0;
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i);
                 if (HOST_SETTING.matcher(line).matches()) {
                     lines.set(i, "host: " + host);
-                    hostUpdated = true;
+                    hostSettings++;
                 } else if (PORT_SETTING.matcher(line).matches()) {
                     lines.set(i, "port: " + port);
-                    portUpdated = true;
+                    portSettings++;
                 }
             }
 
-            if (!hostUpdated || !portUpdated) {
+            if (hostSettings != 1 || portSettings != 1) {
                 throw new IllegalStateException(
-                        "Missing host or port setting in " + configPath);
+                        "Expected one top-level host and port in " + configPath);
             }
             Files.write(configPath, lines, StandardCharsets.UTF_8);
         } catch (IOException e) {

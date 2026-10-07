@@ -24,13 +24,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.page.IdHolder.BatchIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.FixedIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.PagingIdHolder;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
-import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.serializer.TextBackendEntry;

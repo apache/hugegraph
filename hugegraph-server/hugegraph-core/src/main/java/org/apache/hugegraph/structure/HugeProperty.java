@@ -19,8 +19,9 @@ package org.apache.hugegraph.structure;
 
 import java.util.NoSuchElementException;
 
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.id.SplicingIdGenerator;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.type.GraphType;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -31,7 +32,7 @@ public abstract class HugeProperty<V> implements Property<V>, GraphType {
 
     protected final HugeElement owner;
     protected final PropertyKey pkey;
-    protected V value;
+    protected BaseProperty<V> property;
 
     public HugeProperty(HugeElement owner, PropertyKey pkey, V value) {
         E.checkArgument(owner != null, "Property owner can't be null");
@@ -40,7 +41,19 @@ public abstract class HugeProperty<V> implements Property<V>, GraphType {
 
         this.owner = owner;
         this.pkey = pkey;
-        this.value = pkey.validValueOrThrow(value);
+        this.property = new BaseProperty<>(pkey, pkey.validValueOrThrow(value));
+    }
+
+    protected HugeProperty(HugeElement owner, BaseProperty<V> property) {
+        E.checkArgument(owner != null, "Property owner can't be null");
+        E.checkArgument(property != null, "Property can't be null");
+        this.owner = owner;
+        this.pkey = property.propertyKey();
+        this.property = property;
+    }
+
+    public BaseProperty<V> baseProperty() {
+        return this.property;
     }
 
     public PropertyKey propertyKey() {
@@ -68,16 +81,16 @@ public abstract class HugeProperty<V> implements Property<V>, GraphType {
 
     @Override
     public V value() throws NoSuchElementException {
-        return this.value;
+        return this.property.value();
     }
 
     public Object serialValue(boolean encodeNumber) {
-        return this.pkey.serialValue(this.value, encodeNumber);
+        return this.property.serialValue(encodeNumber);
     }
 
     @Override
     public boolean isPresent() {
-        return null != this.value;
+        return null != this.value();
     }
 
     public boolean isAggregateType() {

@@ -19,9 +19,9 @@ package org.apache.hugegraph.unit.core;
 
 import java.util.List;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.id.SplicingIdGenerator;
 import org.apache.hugegraph.backend.serializer.TextBackendEntry;
 import org.apache.hugegraph.backend.store.BackendAction;
 import org.apache.hugegraph.backend.store.BackendEntry;

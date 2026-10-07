@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.task;
 
+import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -29,11 +30,11 @@ import java.util.concurrent.FutureTask;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NotFoundException;
@@ -52,6 +53,7 @@ import org.apache.hugegraph.util.StringEncoding;
 import org.apache.tinkerpop.gremlin.structure.Graph.Hidden;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalInterruptedException;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.slf4j.Logger;
 
@@ -346,9 +348,16 @@ public class HugeTask<V> extends FutureTask<V> {
         return cancelled;
     }
 
+    private static boolean isInterrupted(Throwable error) {
+        Throwable cause = HugeException.rootCause(error);
+        return cause instanceof InterruptedException ||
+               cause instanceof TraversalInterruptedException ||
+               cause instanceof InterruptedIOException;
+    }
+
     public boolean fail(Throwable e) {
         E.checkNotNull(e, "exception");
-        if (!(this.cancelled() && HugeException.isInterrupted(e))) {
+        if (!(this.cancelled() && isInterrupted(e))) {
             LOG.warn("An exception occurred when running task: {}",
                      this.id(), e);
             // Update status to FAILED if exception occurred(not interrupted)

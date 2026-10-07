@@ -27,7 +27,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.apache.commons.configuration2.Configuration;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.StandardHugeGraph;
@@ -38,7 +38,7 @@ import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.backend.tx.IndexableTransaction;
 import org.apache.hugegraph.concurrent.LockManager;
 import org.apache.hugegraph.metrics.ServerReporter;
-import org.apache.hugegraph.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.schema.builder.AbstractBuilder;
 import org.apache.hugegraph.schema.builder.EdgeLabelBuilder;

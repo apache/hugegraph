@@ -29,6 +29,11 @@ mvn editorconfig:format
 mvn clean compile -Dmaven.javadoc.skip=true
 ```
 
+The root POM and child modules flatten CI-friendly versions during `process-resources`,
+so installed and deployed POMs use a concrete version instead of `${revision}`. Build the
+reactor with `install` before building modules separately; keep Maven Resolver validation
+enabled, including on Maven 3.10+.
+
 Run the affected module tests and add regression coverage when behavior changes.
 A successful build with skipped tests does not validate behavior; Commons tests require
 `-DskipCommonsTests=false`. For documentation-only changes, verify links and paths and run
@@ -49,6 +54,21 @@ and automatic cancellation and retries. Report what you actually validated and a
   and [release documentation](../install-dist/release-docs/), including bundled license files.
   Update the [dependency inventory](../install-dist/scripts/dependency/known-dependencies.txt)
   using [the regeneration script](../install-dist/scripts/dependency/regenerate_known_dependencies.sh).
+
+Install/package the current reactor before regenerating the inventory:
+
+```bash
+mvn install -DskipTests -Dmaven.javadoc.skip=true
+bash install-dist/scripts/dependency/regenerate_known_dependencies.sh
+```
+
+The build must produce Server, PD and Store distributions for the same current revision.
+It skips tests and is not validation evidence. The inventory combines Maven runtime
+dependencies with flat and nested distribution jars, including Spring Boot `BOOT-INF/lib`
+dependencies inserted by repackaging. Missing distributions fail collection; source or POM
+inspection alone cannot establish the full shipped inventory. Review all additions and
+removals and their license/NOTICE coverage. The dependency check compares the exact inventory;
+repeat it for release platform/profile variants as needed.
 
 ## Submit and review
 

@@ -115,6 +115,9 @@ See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-a
 | [hugegraph-pd](hugegraph-pd/README.md) | Placement Driver for distributed mode - handles meta storage, partition management and cluster scheduling |
 | [hugegraph-store](hugegraph-store/README.md) | Distributed storage with Raft consensus for high availability and horizontal scaling |
 | [hugegraph-commons](hugegraph-commons) | Shared utilities, RPC framework and common components |
+| [hugegraph-struct](hugegraph-struct/README.md) | Shared schema, IDs, base elements, queries and encoding used by Server and Store |
+
+See the [1.8.0 shared-foundation migration guide](docs/shared-foundation-migration.md) for Java API changes, module ownership and coordinated upgrade requirements.
 
 <details>
 <summary><b>📊 Click to view detailed architecture diagram (Mermaid)</b></summary>

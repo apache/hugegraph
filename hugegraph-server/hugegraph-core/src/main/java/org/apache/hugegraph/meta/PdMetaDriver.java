@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.constant.ServiceConstant;
 import org.apache.hugegraph.meta.lock.LockResult;
 import org.apache.hugegraph.meta.lock.PdDistributedLock;

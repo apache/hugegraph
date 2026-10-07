@@ -45,6 +45,13 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- The published test client uses a legacy Commons POM with an
+                 unresolved parent version. Use this reactor's compatible API. -->
+            <dependency>
+                <groupId>org.apache.hugegraph</groupId>
+                <artifactId>hugegraph-common</artifactId>
+                <version>${revision}</version>
+            </dependency>
             <!-- The historical test client brings Commons Text 1.9. Keep its
                  API while disabling the unsafe interpolation defaults. -->
             <dependency>

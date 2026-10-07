@@ -19,8 +19,8 @@ package org.apache.hugegraph.backend.page;
 
 import java.util.Iterator;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.iterator.Metadatable;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;

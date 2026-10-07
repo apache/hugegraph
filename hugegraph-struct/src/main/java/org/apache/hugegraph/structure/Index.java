@@ -37,12 +37,15 @@ import org.apache.hugegraph.type.GraphType;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.HashUtil;
 import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.apache.hugegraph.util.NumericUtil;
 
 import com.google.common.collect.ImmutableSet;
 
 public class Index implements GraphType, Cloneable {
+
+    private static final int HUGE_TYPE_CODE_LENGTH = 1;
 
     private final HugeGraphSupplier graph;
     private Object fieldValues;
@@ -55,13 +58,7 @@ public class Index implements GraphType, Cloneable {
     private IdWithExpiredTime elementId;
 
     public Index(HugeGraphSupplier graph, IndexLabel indexLabel) {
-        E.checkNotNull(graph, "graph");
-        E.checkNotNull(indexLabel, "label");
-        E.checkNotNull(indexLabel.id(), "label id");
-        this.graph = graph;
-        this.indexLabel = indexLabel;
-        this.elementIds = new LinkedHashSet<>();
-        this.fieldValues = null;
+        this(graph, indexLabel, false);
     }
 
     public Index(HugeGraphSupplier graph, IndexLabel indexLabel, boolean write) {
@@ -100,6 +97,10 @@ public class Index implements GraphType, Cloneable {
         return formatIndexId(type(), this.indexLabelId(), this.fieldValues());
     }
 
+    public Id hashId() {
+        return formatIndexHashId(type(), this.indexLabelId(), this.fieldValues());
+    }
+
     public Object fieldValues() {
         return this.fieldValues;
     }
@@ -118,6 +119,7 @@ public class Index implements GraphType, Cloneable {
 
     public IdWithExpiredTime elementIdWithExpiredTime() {
         if (this.elementIds == null) {
+            E.checkState(this.elementId != null, "Expect one element id, actual 0");
             return this.elementId;
         }
         E.checkState(this.elementIds.size() == 1,
@@ -144,13 +146,24 @@ public class Index implements GraphType, Cloneable {
     public Set<IdWithExpiredTime> expiredElementIds() {
         long now = this.graph.now();
         Set<IdWithExpiredTime> expired = InsertionOrderUtil.newSet();
+        if (this.elementIds == null) {
+            if (this.elementId != null && expired(this.elementId, now)) {
+                expired.add(this.elementId);
+                this.elementId = null;
+            }
+            return expired;
+        }
         for (IdWithExpiredTime id : this.elementIds) {
-            if (0L < id.expiredTime && id.expiredTime < now) {
+            if (expired(id, now)) {
                 expired.add(id);
             }
         }
         this.elementIds.removeAll(expired);
         return expired;
+    }
+
+    private static boolean expired(IdWithExpiredTime id, long now) {
+        return 0L < id.expiredTime && id.expiredTime < now;
     }
 
     public void elementIds(Id elementId) {
@@ -166,7 +179,11 @@ public class Index implements GraphType, Cloneable {
     }
 
     public void resetElementIds() {
-        this.elementIds = null;
+        if (this.elementIds == null) {
+            this.elementId = null;
+        } else {
+            this.elementIds = new LinkedHashSet<>();
+        }
     }
 
     public long expiredTime() {
@@ -174,17 +191,10 @@ public class Index implements GraphType, Cloneable {
     }
 
     public boolean hasTtl() {
-        if ((this.indexLabel() == IndexLabel.label(HugeType.VERTEX) ||
-            this.indexLabel() == IndexLabel.label(HugeType.EDGE)) &&
-            this.expiredTime() > 0) {
-            // LabelIndex index, if element has expiration time, then index also has TTL
-            return true;
-        }
-
         if (this.indexLabel.system()) {
             return false;
         }
-        return this.indexLabel.baseElement().ttl() > 0L;
+        return this.indexLabel.baseLabel().ttl() > 0L;
     }
 
     public long ttl() {
@@ -224,6 +234,14 @@ public class Index implements GraphType, Cloneable {
     }
 
 
+    public static Id formatIndexHashId(HugeType type, Id indexLabel,
+                                       Object fieldValues) {
+        E.checkState(!type.isRangeIndex(),
+                     "RangeIndex can't return a hash id");
+        String value = fieldValues == null ? "" : fieldValues.toString();
+        return formatIndexId(type, indexLabel, HashUtil.hash(value));
+    }
+
     public static Id formatIndexId(HugeType type, Id indexLabelId,
                                    Object fieldValues) {
         if (type.isStringIndex()) {
@@ -239,12 +257,11 @@ public class Index implements GraphType, Cloneable {
              */
             String strIndexLabelId = IdGenerator.asStoredString(indexLabelId);
             // Add id prefix according to type
-            return SplicingIdGenerator.splicing(type.string(),  strIndexLabelId, value);
+            return SplicingIdGenerator.splicing(type.string(), strIndexLabelId, value);
         } else {
             assert type.isRangeIndex();
             int length = type.isRange4Index() ? 4 : 8;
-            // 1 is table type, 4 is labelId, length is value
-            BytesBuffer buffer = BytesBuffer.allocate(1 + 4 + length);
+            BytesBuffer buffer = BytesBuffer.allocate(HUGE_TYPE_CODE_LENGTH + 4 + length);
             // Add table type id
             buffer.write(type.code());
 
@@ -276,9 +293,7 @@ public class Index implements GraphType, Cloneable {
             final int labelLength = 4;
             E.checkState(id.length > labelLength, "Invalid range index id");
             BytesBuffer buffer = BytesBuffer.wrap(id);
-            // Read the first byte representing the table type
-            final int hugeTypeCodeLength = 1;
-            byte[] read = buffer.read(hugeTypeCodeLength);
+            buffer.read(HUGE_TYPE_CODE_LENGTH);
 
             Id label = IdGenerator.of(buffer.readInt());
             indexLabel = IndexLabel.label(graph, label);
@@ -289,7 +304,8 @@ public class Index implements GraphType, Cloneable {
                          "Invalid range index field type");
             Class<?> clazz = dataType.isNumber() ?
                              dataType.clazz() : DataType.LONG.clazz();
-            values = bytes2number(buffer.read(id.length - labelLength - hugeTypeCodeLength), clazz);
+            values = bytes2number(buffer.read(id.length - labelLength - HUGE_TYPE_CODE_LENGTH),
+                                  clazz);
         }
         Index index = new Index(graph, indexLabel);
         index.fieldValues(values);

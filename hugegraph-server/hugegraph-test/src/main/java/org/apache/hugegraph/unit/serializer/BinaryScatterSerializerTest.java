@@ -24,7 +24,6 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
-import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.junit.Test;
@@ -49,7 +48,7 @@ public class BinaryScatterSerializerTest extends BaseUnitTest {
         assertCollectionEquals(edge.targetVertex().getProperties(),
                                vertex2.getProperties());
 
-        Whitebox.setInternalState(vertex2, "removed", true);
+        vertex2.element().removed(true);
         Assert.assertTrue(vertex2.removed());
         BackendEntry entry3 = ser.writeVertex(vertex2);
         Assert.assertEquals(0, entry3.columnsSize());

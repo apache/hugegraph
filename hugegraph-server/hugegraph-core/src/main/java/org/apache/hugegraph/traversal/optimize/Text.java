@@ -17,8 +17,8 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 
 public class Text {
 

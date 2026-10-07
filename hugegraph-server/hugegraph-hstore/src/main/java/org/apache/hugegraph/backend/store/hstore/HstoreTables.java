@@ -18,12 +18,28 @@
 package org.apache.hugegraph.backend.store.hstore;
 
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.Collections;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Set;
+import java.nio.ByteBuffer;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.Condition.Relation;
-import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.backend.BinaryId;
+import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.OlapKey;
+import org.apache.hugegraph.iterator.FlatMapperIterator;
+import org.apache.hugegraph.iterator.WrappedIterator;
+import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.Condition.Relation;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.backend.serializer.BinarySerializer;
+import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.hstore.HstoreSessions.Session;
@@ -124,7 +140,7 @@ public class HstoreTables {
              * Regular index delete will call eliminate()
              */
             byte[] ownerKey = super.ownerDelegate.apply(entry);
-            for (BackendEntry.BackendColumn column : entry.columns()) {
+            for (BackendColumn column : entry.columns()) {
                 // Don't assert entry.belongToMe(column), length-prefix is 1*
                 session.deletePrefix(this.table(), ownerKey, column.name);
             }
@@ -197,6 +213,8 @@ public class HstoreTables {
     public static class OlapTable extends HstoreTable {
 
         public static final String TABLE = HugeTableType.OLAP_TABLE.string();
+        private static final int MAX_REQUEST_KEYS = 1024;
+        private static final int MAX_SELECTED_VERTICES = 128;
 
         public OlapTable(String database) {
             // Originally multiple ap_{pk_id} merged into one ap table
@@ -204,8 +222,196 @@ public class HstoreTables {
         }
 
         @Override
+        public void insert(Session session, BackendEntry entry) {
+            E.checkArgumentNotNull(entry.subId(), "Merged OLAP write requires a property ID");
+            byte[] owner = this.getInsertOwner(entry);
+            for (BackendColumn column : entry.columns()) {
+                E.checkArgument(OlapKey.matchesProperty(column.value, entry.subId()),
+                                "OLAP value must match property ID '%s'", entry.subId());
+                session.put(this.table(), owner, OlapKey.format(entry.subId(), entry.originId()), column.value);
+            }
+        }
+
+        @Override
+        public void insert(Session session, BackendEntry entry, boolean isEdge) {
+            this.insert(session, entry);
+        }
+
+        @Override
+        public void delete(Session session, BackendEntry entry) {
+            E.checkArgumentNotNull(entry.subId(), "Merged OLAP delete requires a property ID");
+            byte[] owner = this.getInsertOwner(entry);
+            session.delete(this.table(), owner, OlapKey.format(entry.subId(), entry.originId()));
+            // Delete an old vertex-only record only if it belongs to the requested property.
+            byte[] legacyKey = BytesBuffer.allocate(entry.originId().length() + 9)
+                                         .writeId(entry.originId()).bytes();
+            if (OlapKey.matchesProperty(session.get(this.table(), owner, legacyKey), entry.subId())) {
+                session.delete(this.table(), owner, legacyKey);
+            }
+        }
+
+        @Override
+        public boolean queryExist(Session session, BackendEntry entry) {
+            E.checkArgumentNotNull(entry.subId(), "Merged OLAP existence query requires a property ID");
+            Id key = new BinaryId(OlapKey.format(entry.subId(), entry.originId()), entry.originId());
+            try (BackendColumnIterator result = this.getById(session, key)) {
+                return result.hasNext();
+            }
+        }
+
+        @Override
+        protected BackendColumnIterator queryBy(Session session, Query query) {
+            if (!query.ids().isEmpty() && query.conditions().isEmpty()) {
+                return BackendColumnIterator.wrap(new FlatMapperIterator<>(
+                        query.ids().iterator(), id -> this.getById(session, id)));
+            }
+            return super.queryBy(session, query);
+        }
+
+        @Override
+        protected BackendColumnIterator getById(Session session, Id id) {
+            // This query key is explicitly constructed by HstoreStore for the merged OLAP table.
+            BytesBuffer key = BytesBuffer.wrap(id.asBytes());
+            Id propertyId = key.readId();
+            Id vertexId = key.readId();
+            byte[] owner = this.getOwnerId(id instanceof BinaryId ? ((BinaryId) id).origin() : vertexId);
+            byte[] value = session.get(this.table(), owner, id.asBytes());
+            if (value == null || value.length == 0) {
+                byte[] legacyKey = BytesBuffer.allocate(vertexId.length() + 9).writeId(vertexId).bytes();
+                value = session.get(this.table(), owner, legacyKey);
+            }
+            if (!OlapKey.matchesProperty(value, propertyId)) {
+                return BackendColumnIterator.empty();
+            }
+            // Normalize only the returned key, so the existing OLAP entry parser retains vertex origin.
+            return BackendColumnIterator.iterator(BackendColumn.of(id.asBytes(), value));
+        }
+
+        @Override
         protected BackendColumnIterator queryById(Session session, Id id) {
             return this.getById(session, id);
+        }
+
+        Iterator<BackendEntry> mergeEntries(Session session, Iterator<BackendEntry> entries,
+                                             Set<Id> properties, boolean paging) {
+            if (properties == null || properties.isEmpty()) {
+                return entries;
+            }
+            return new WrappedIterator<BackendEntry>() {
+                private Iterator<BackendEntry> batch = Collections.emptyIterator();
+                private final int batchSize = paging ? 1 : (int) Math.max(1L, Math.min(
+                        MAX_SELECTED_VERTICES, MAX_REQUEST_KEYS / (properties.size() + 1L)));
+                private boolean closed;
+
+                @Override
+                public void close() throws Exception {
+                    if (!this.closed) {
+                        this.closed = true;
+                        this.current = none();
+                        this.batch = Collections.emptyIterator();
+                        super.close();
+                    }
+                }
+
+                @Override
+                protected Iterator<?> originIterator() {
+                    return entries;
+                }
+
+                @Override
+                protected boolean fetch() {
+                    if (this.closed) {
+                        return false;
+                    }
+                    try {
+                        return this.fetchBatch();
+                    } catch (RuntimeException | Error failure) {
+                        try {
+                            this.close();
+                        } catch (Exception closeFailure) {
+                            failure.addSuppressed(closeFailure);
+                        }
+                        throw failure;
+                    }
+                }
+
+                private boolean fetchBatch() {
+                    if (!this.batch.hasNext()) {
+                        List<BackendEntry> selected = new ArrayList<>(this.batchSize);
+                        while (selected.size() < this.batchSize && entries.hasNext()) {
+                            selected.add(entries.next());
+                        }
+                        if (selected.isEmpty()) {
+                            WrappedIterator.close(this);
+                            return false;
+                        }
+                        this.mergeSelected(selected);
+                        this.batch = selected.iterator();
+                    }
+                    this.current = this.batch.next();
+                    return true;
+                }
+
+                private void mergeSelected(List<BackendEntry> selected) {
+                    Map<Id, BackendColumn> legacy = new HashMap<>();
+                    Iterator<Id> remaining = properties.iterator();
+                    boolean firstChunk = true;
+                    do {
+                        int capacity = Math.min(MAX_REQUEST_KEYS,
+                                                selected.size() * (Math.min(properties.size(), MAX_REQUEST_KEYS) + 1));
+                        List<HgOwnerKey> keys = new ArrayList<>(capacity);
+                        if (firstChunk) {
+                            for (BackendEntry entry : selected) {
+                                Id vertexId = entry.originId();
+                                byte[] key = BytesBuffer.allocate(vertexId.length() + 9).writeId(vertexId).bytes();
+                                keys.add(HgOwnerKey.of(OlapTable.this.getOwnerId(vertexId), key));
+                            }
+                        }
+                        int propertyLimit = (MAX_REQUEST_KEYS - keys.size()) / selected.size();
+                        List<Id> requestedProperties = new ArrayList<>(Math.min(propertyLimit, properties.size()));
+                        while (requestedProperties.size() < propertyLimit && remaining.hasNext()) {
+                            Id property = remaining.next();
+                            requestedProperties.add(property);
+                            for (BackendEntry entry : selected) {
+                                Id vertexId = entry.originId();
+                                keys.add(HgOwnerKey.of(OlapTable.this.getOwnerId(vertexId),
+                                                      OlapKey.format(property, vertexId)));
+                            }
+                        }
+                        Map<ByteBuffer, BackendColumn> values = new HashMap<>();
+                        try (BackendColumnIterator columns = session.getWithBatchExact(OlapTable.this.table(), keys)) {
+                            while (columns.hasNext()) {
+                                BackendColumn column = columns.next();
+                                values.put(ByteBuffer.wrap(column.name), column);
+                            }
+                        }
+                        if (firstChunk) {
+                            for (BackendEntry entry : selected) {
+                                Id vertexId = entry.originId();
+                                byte[] key = BytesBuffer.allocate(vertexId.length() + 9).writeId(vertexId).bytes();
+                                legacy.put(vertexId, values.get(ByteBuffer.wrap(key)));
+                            }
+                            firstChunk = false;
+                        }
+                        for (BackendEntry entry : selected) {
+                            Id vertexId = entry.originId();
+                            for (Id property : requestedProperties) {
+                                byte[] key = OlapKey.format(property, vertexId);
+                                BackendColumn column = values.get(ByteBuffer.wrap(key));
+                                if (column == null || column.value == null || column.value.length == 0) {
+                                    column = legacy.get(vertexId);
+                                }
+                                if (column == null || !OlapKey.matchesProperty(column.value, property)) {
+                                    continue;
+                                }
+                                BinaryBackendEntry olap = new BinaryBackendEntry(entry.type(), key, false, true);
+                                olap.columns(BackendColumn.of(key, column.value));
+                                E.checkState(entry.mergeable(olap), "OLAP row must belong to its selected vertex");
+                            }
+                        }
+                    } while (remaining.hasNext());
+                }
+            };
         }
 
         @Override

@@ -22,9 +22,9 @@ import java.util.Map;
 import java.util.function.Function;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;

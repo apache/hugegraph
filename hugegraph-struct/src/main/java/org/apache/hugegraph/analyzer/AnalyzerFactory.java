@@ -1,36 +1,33 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.analyzer;
 
-
-import org.apache.hugegraph.exception.HugeException;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.hugegraph.exception.HugeException;
+
 public class AnalyzerFactory {
 
-    private static Map<String, Class<? extends Analyzer>> analyzers;
+    private static final Map<String, Class<? extends Analyzer>> ANALYZERS;
 
     static {
-        analyzers = new ConcurrentHashMap<>();
+        ANALYZERS = new ConcurrentHashMap<>();
     }
 
     public static Analyzer analyzer(String name, String mode) {
@@ -58,7 +55,7 @@ public class AnalyzerFactory {
     }
 
     private static Analyzer customizedAnalyzer(String name, String mode) {
-        Class<? extends Analyzer> clazz = analyzers.get(name);
+        Class<? extends Analyzer> clazz = ANALYZERS.get(name);
         if (clazz == null) {
             throw new HugeException("Not exists analyzer: %s", name);
         }
@@ -68,12 +65,12 @@ public class AnalyzerFactory {
             return clazz.getConstructor(String.class).newInstance(mode);
         } catch (Exception e) {
             throw new HugeException(
-                      "Failed to construct analyzer '%s' with mode '%s'",
-                      e, name, mode);
+                    "Failed to construct analyzer '%s' with mode '%s'",
+                    e, name, mode);
         }
     }
 
-    @SuppressWarnings({ "rawtypes", "unchecked" })
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public static void register(String name, String classPath) {
         ClassLoader classLoader = AnalyzerFactory.class.getClassLoader();
         Class<?> clazz;
@@ -91,12 +88,12 @@ public class AnalyzerFactory {
         }
 
         // Check exists
-        if (analyzers.containsKey(name)) {
+        if (ANALYZERS.containsKey(name)) {
             throw new HugeException("Exists analyzer: %s(%s)",
-                                    name, analyzers.get(name).getName());
+                                    name, ANALYZERS.get(name).getName());
         }
 
         // Register class
-        analyzers.put(name, (Class) clazz);
+        ANALYZERS.put(name, (Class) clazz);
     }
 }

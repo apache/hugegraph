@@ -29,7 +29,7 @@ import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugeGroup;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.StandardAuthManagerV2;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
 import org.apache.hugegraph.exception.NotFoundException;

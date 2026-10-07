@@ -217,9 +217,9 @@ Apache 2.0 licenses
 The following components are provided under the Apache License. See project link for details.
 The text of each license is the standard Apache 2.0 license.
 
-hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/type/Nameable.java from https://github.com/JanusGraph/janusgraph
-hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/type/define/Cardinality.java from https://github.com/JanusGraph/janusgraph
-hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/util/StringEncoding.java from https://github.com/JanusGraph/janusgraph
+hugegraph-struct/src/main/java/org/apache/hugegraph/type/Namifiable.java from https://github.com/JanusGraph/janusgraph
+hugegraph-struct/src/main/java/org/apache/hugegraph/type/define/Cardinality.java from https://github.com/JanusGraph/janusgraph
+hugegraph-struct/src/main/java/org/apache/hugegraph/util/StringEncoding.java from https://github.com/JanusGraph/janusgraph
 hugegraph-server/hugegraph-core/src/main/java/org/apache/hugegraph/traversal/optimize/HugeScriptTraversal.java from https://github.com/apache/tinkerpop
 hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/tinkerpop/ProcessBasicSuite.java from https://github.com/apache/tinkerpop
 hugegraph-server/hugegraph-test/src/main/java/org/apache/hugegraph/tinkerpop/StructureBasicSuite.java from https://github.com/apache/tinkerpop
@@ -511,7 +511,6 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.apache.commons/commons-collections4/4.4 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-compress/1.21 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.10.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.8.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-configuration2/2.9.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-crypto/1.1.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-lang3/3.12.0 -> Apache 2.0
@@ -636,7 +635,6 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-stacktrace/0.22 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.lab/jvm-attach-api/1.5 -> Apache 2.0
     https://central.sonatype.com/artifact/org.javassist/javassist/3.21.0-GA -> Apache 2.0
-    https://central.sonatype.com/artifact/org.javassist/javassist/3.24.0-GA -> Apache 2.0
     https://central.sonatype.com/artifact/org.javassist/javassist/3.25.0-GA -> Apache 2.0
     https://central.sonatype.com/artifact/org.javassist/javassist/3.28.0-GA -> Apache 2.0
     https://central.sonatype.com/artifact/org.javatuples/javatuples/1.2 -> Apache 2.0
@@ -669,15 +667,6 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr5/0.5 -> Apache 2.0
     https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-jfr6/0.7 -> Apache 2.0
     https://central.sonatype.com/artifact/org.perfkit.sjk.parsers/sjk-nps/0.9 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-api-mockito2/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-api-support/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-classloading-base/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-classloading-xstream/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-core/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-common/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4-rule/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-module-junit4/2.0.0-RC.3 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.powermock/powermock-reflect/2.0.0-RC.3 -> Apache 2.0
     https://central.sonatype.com/artifact/org.roaringbitmap/RoaringBitmap/0.9.38 -> Apache 2.0
     https://central.sonatype.com/artifact/org.roaringbitmap/shims/0.9.38 -> Apache 2.0
     https://central.sonatype.com/artifact/org.rocksdb/rocksdbjni/8.10.2 -> Apache 2.0
@@ -725,7 +714,6 @@ Third party BSD licenses
 The following components are provided under the BSD License. See project link for details.
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
-    https://central.sonatype.com/artifact/com.thoughtworks.xstream/xstream/1.4.10 -> BSD
     https://central.sonatype.com/artifact/dk.brics.automaton/automaton/1.11-8 -> BSD
     https://central.sonatype.com/artifact/jline/jline/2.14.6 -> BSD
     https://central.sonatype.com/artifact/org.hamcrest/hamcrest-core/1.3 -> BSD
@@ -908,14 +896,6 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/junit/junit/4.13.1 -> EPL 1.0
     https://central.sonatype.com/artifact/junit/junit/4.13.2 -> EPL 1.0
 
-========================================================================
-Third party Public Domain licenses
-========================================================================
-The following components are provided under the Public Domain License. See project link for details.
-The text of each license is also included in licenses/LICENSE-[project].txt.
-
-    https://central.sonatype.com/artifact/xmlpull/xmlpull/1.1.3.1 -> Public Domain
-    https://central.sonatype.com/artifact/xpp3/xpp3_min/1.1.4c -> Public Domain
 
 #
 # jansi 2.4.0 (https://github.com/fusesource/jansi)

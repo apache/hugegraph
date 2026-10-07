@@ -34,13 +34,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.Aggregate;
-import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.Aggregate;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.EdgesQueryIterator;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
@@ -50,7 +50,7 @@ import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.iterator.LimitIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.traversal.algorithm.iterator.NestedIterator;
@@ -483,7 +483,7 @@ public class HugeTraverser {
         if (filter != null) {
             ConditionQuery finalFilter = filter;
             edges = new FilterIterator<>(edges, (e) -> {
-                return finalFilter.test((HugeEdge) e);
+                return finalFilter.test(((HugeEdge) e).element());
             });
         }
         return edgeStep.skipSuperNodeIfNeeded(edges);
@@ -544,7 +544,7 @@ public class HugeTraverser {
         ConditionQuery cq = conditions.get(sourceV.schemaLabel().id());
         if (cq != null) {
             sourceV = (HugeVertex) this.graph.vertex(sourceV.id());
-            if (!cq.test(sourceV)) {
+            if (!cq.test(sourceV.element())) {
                 return false;
             }
         }
@@ -552,7 +552,7 @@ public class HugeTraverser {
         cq = conditions.get(targetV.schemaLabel().id());
         if (cq != null) {
             targetV = (HugeVertex) this.graph.vertex(targetV.id());
-            return cq.test(targetV);
+            return cq.test(targetV.element());
         }
         return true;
     }
@@ -565,7 +565,7 @@ public class HugeTraverser {
 
         ConditionQuery cq = conditions.get(edge.schemaLabel().id());
         if (cq != null) {
-            return cq.test(edge);
+            return cq.test(edge.element());
         }
         return true;
     }

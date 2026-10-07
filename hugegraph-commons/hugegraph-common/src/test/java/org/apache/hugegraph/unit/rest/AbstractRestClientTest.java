@@ -17,11 +17,115 @@
 
 package org.apache.hugegraph.unit.rest;
 
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Collections;
+import java.util.concurrent.TimeUnit;
+
 import org.apache.hugegraph.rest.AbstractRestClient;
+import org.apache.hugegraph.rest.RestHeaders;
+import org.apache.hugegraph.testutil.Whitebox;
 import org.junit.Assert;
 import org.junit.Test;
 
+import okhttp3.RequestBody;
+import okio.Buffer;
+import okio.GzipSource;
+
 public class AbstractRestClientTest {
+
+    @Test
+    public void testRequestBodiesWithAsciiDefaultCharset() throws Exception {
+        String java = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+        String classpath = System.getProperty("surefire.test.class.path",
+                                              System.getProperty("java.class.path"));
+        Path output = Files.createTempFile("rest-client-ascii-", ".log");
+        Process process = null;
+        try {
+            process = new ProcessBuilder(java, "-Dfile.encoding=US-ASCII", "-cp", classpath,
+                                         AsciiRequestBodyProbe.class.getName())
+                    .redirectErrorStream(true)
+                    .redirectOutput(output.toFile())
+                    .start();
+            boolean finished = process.waitFor(60, TimeUnit.SECONDS);
+            String diagnostic = Files.readString(output, StandardCharsets.UTF_8);
+            Assert.assertTrue("US-ASCII probe timed out: " + diagnostic, finished);
+            Assert.assertEquals(diagnostic, 0, process.exitValue());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+            Files.deleteIfExists(output);
+        }
+    }
+
+    public static class AsciiRequestBodyProbe {
+
+        public static void main(String[] args) throws IOException {
+            Assert.assertEquals(StandardCharsets.US_ASCII, Charset.defaultCharset());
+            AbstractRestClientTest tests = new AbstractRestClientTest();
+            tests.testJsonRequestBodyUsesUtf8();
+            tests.testGzipRequestBodyUsesUtf8();
+            tests.testRequestBodyRespectsExplicitCharset();
+        }
+    }
+
+    @Test
+    public void testJsonRequestBodyUsesUtf8() throws IOException {
+        String json = "{\"id\":\"\u4f60\u597d\ud83d\ude80\"}";
+        assertUtf8Body(json, null, json, false);
+        assertUtf8Body(Collections.singletonMap("id", "\u4f60\u597d\ud83d\ude80"),
+                       new RestHeaders(), json, false);
+    }
+
+    @Test
+    public void testGzipRequestBodyUsesUtf8() throws IOException {
+        String json = "{\"id\":\"\u4f60\u597d\ud83d\ude80\"}";
+        RestHeaders headers = new RestHeaders().add(RestHeaders.CONTENT_ENCODING, "gzip");
+        assertUtf8Body(json, headers, json, true);
+    }
+
+    @Test
+    public void testRequestBodyRespectsExplicitCharset() throws IOException {
+        RestHeaders headers = new RestHeaders().add(RestHeaders.CONTENT_TYPE,
+                                                    "text/plain; charset=iso-8859-1");
+        RequestBody body = requestBody("caf\u00e9", headers);
+        Buffer buffer = new Buffer();
+        body.writeTo(buffer);
+        Assert.assertEquals(StandardCharsets.ISO_8859_1, body.contentType().charset());
+        Assert.assertArrayEquals("caf\u00e9".getBytes(StandardCharsets.ISO_8859_1),
+                                 buffer.readByteArray());
+    }
+
+    private static void assertUtf8Body(Object value, RestHeaders headers,
+                                      String expected, boolean gzip) throws IOException {
+        RequestBody body = requestBody(value, headers);
+        Assert.assertEquals(StandardCharsets.UTF_8, body.contentType().charset());
+        Buffer buffer = new Buffer();
+        body.writeTo(buffer);
+        if (gzip) {
+            try (GzipSource source = new GzipSource(buffer)) {
+                Buffer decoded = new Buffer();
+                decoded.writeAll(source);
+                Assert.assertArrayEquals(expected.getBytes(StandardCharsets.UTF_8),
+                                         decoded.readByteArray());
+            }
+        } else {
+            Assert.assertArrayEquals(expected.getBytes(StandardCharsets.UTF_8),
+                                     buffer.readByteArray());
+        }
+    }
+
+    private static RequestBody requestBody(Object value, RestHeaders headers) {
+        return Whitebox.invokeStatic(AbstractRestClient.class,
+                                     new Class<?>[]{Object.class, RestHeaders.class},
+                                     "buildRequestBody", value, headers);
+    }
 
     @Test
     public void testEncodeWithSpaces() {

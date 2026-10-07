@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.unit.core;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.StandardHugeGraph;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
 import org.apache.hugegraph.backend.store.BackendStore;

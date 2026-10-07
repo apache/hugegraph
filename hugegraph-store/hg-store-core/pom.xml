@@ -115,11 +115,6 @@
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-core</artifactId>
-            <version>${revision}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
             <artifactId>hg-store-common</artifactId>
             <version>${revision}</version>
         </dependency>

@@ -25,9 +25,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.store.Shard;
+import org.apache.hugegraph.backend.Shard;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.variables.HugeVariables;
 import org.apache.tinkerpop.gremlin.structure.Vertex;

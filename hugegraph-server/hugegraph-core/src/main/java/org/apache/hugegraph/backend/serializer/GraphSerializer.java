@@ -18,14 +18,14 @@
 package org.apache.hugegraph.backend.serializer;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
 import org.apache.hugegraph.type.HugeType;
@@ -49,9 +49,9 @@ public interface GraphSerializer {
 
     CIter<Edge> readEdges(HugeGraph graph, BackendEntry bytesEntry);
 
-    BackendEntry writeIndex(HugeIndex index);
+    BackendEntry writeIndex(Index index);
 
-    HugeIndex readIndex(HugeGraph graph, ConditionQuery query, BackendEntry entry);
+    Index readIndex(HugeGraph graph, ConditionQuery query, BackendEntry entry);
 
     BackendEntry writeId(HugeType type, Id id);
 

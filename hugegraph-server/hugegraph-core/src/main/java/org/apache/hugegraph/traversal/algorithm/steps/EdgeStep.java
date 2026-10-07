@@ -26,8 +26,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser;
 import org.apache.hugegraph.traversal.optimize.TraversalUtil;
 import org.apache.hugegraph.type.define.Directions;

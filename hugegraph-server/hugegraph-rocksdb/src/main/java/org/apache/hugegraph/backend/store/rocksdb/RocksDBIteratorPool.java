@@ -20,7 +20,7 @@ package org.apache.hugegraph.backend.store.rocksdb;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.StringEncoding;

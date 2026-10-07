@@ -30,24 +30,24 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.BackendTable;
-import org.apache.hugegraph.backend.store.Shard;
+import org.apache.hugegraph.backend.Shard;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.struct.schema.Userdata;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
@@ -3176,9 +3176,7 @@ public class EdgeCoreTest extends BaseCoreTest {
 
         // Fill edge properties
         Assert.assertEquals(2, edge.getProperties().size());
-        Whitebox.setInternalState(edge, "propLoaded", false);
-        Whitebox.setInternalState(edge, "properties",
-                                  CollectionFactory.newIntObjectMap());
+        edge.resetProperties();
         Assert.assertEquals(0, edge.getProperties().size());
         Assert.assertEquals(2, edge.getFilledProperties().size());
         Assert.assertEquals(2, edge.getProperties().size());

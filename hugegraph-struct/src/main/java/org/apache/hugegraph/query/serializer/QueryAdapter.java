@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.apache.hugegraph.query.Condition;
 import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.util.LegacyClassNames;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.gson.JsonDeserializationContext;
@@ -35,6 +36,7 @@ import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.reflect.TypeToken;
 
+// Historical query values use Java class names; readers retain their legacy mappings.
 public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
 
     static ImmutableMap<String, Type> cls =
@@ -55,6 +57,13 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
         }
     }
 
+    // Old server queries include Java class names in relation values.
+    // Resolve only the migrated names here; no legacy implementation is needed.
+    private static Class<?> valueClass(String name) throws ClassNotFoundException {
+        Class<?> mapped = LegacyClassNames.lookup(name);
+        return mapped != null ? mapped : Class.forName(name);
+    }
+
     @Override
     public Map<String, Type> validType() {
         return cls;
@@ -72,7 +81,7 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                 if (valueElement.isJsonObject()) {
                     String cls = valueElement.getAsJsonObject().get("cls").getAsString();
                     try {
-                        Class actualClass = Class.forName(cls);
+                        Class actualClass = valueClass(cls);
                         Object obj = context.deserialize(valueElement, actualClass);
                         ((Condition.Relation) condition).value(obj);
                     } catch (ClassNotFoundException e) {
@@ -82,7 +91,7 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                     if (valueElement.isJsonArray()) {
                         String cls = elElement.getAsJsonObject().get("valuecls").getAsString();
                         try {
-                            Class actualClass = Class.forName(cls);
+                            Class actualClass = valueClass(cls);
                             Type type = TypeToken.getParameterized(ArrayList.class, actualClass)
                                                  .getType();
                             Object value = context.deserialize(valueElement, type);
@@ -93,7 +102,7 @@ public class QueryAdapter extends AbstractSerializerAdapter<Condition> {
                     } else {
                         String cls = elElement.getAsJsonObject().get("valuecls").getAsString();
                         try {
-                            Class actualClass = Class.forName(cls);
+                            Class actualClass = valueClass(cls);
                             Object obj = context.deserialize(valueElement, actualClass);
                             ((Condition.Relation) condition).value(obj);
                         } catch (ClassNotFoundException e) {

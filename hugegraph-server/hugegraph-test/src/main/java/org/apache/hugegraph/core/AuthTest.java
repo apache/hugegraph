@@ -27,9 +27,10 @@ import java.util.Objects;
 import javax.security.sasl.AuthenticationException;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.auth.AuthConstant;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAccess;
 import org.apache.hugegraph.auth.HugeBelong;
@@ -41,11 +42,12 @@ import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.StandardAuthManager;
+import org.apache.hugegraph.auth.TokenGenerator;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.cache.Cache;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.JsonUtil;
@@ -1665,6 +1667,25 @@ public class AuthTest extends BaseCoreTest {
         Assert.assertNull(null, userWithRole.userId());
         Assert.assertEquals("test", userWithRole.username());
         Assert.assertNull(userWithRole.role());
+    }
+
+    @Test
+    public void testRejectInvalidAndExpiredTokens() {
+        AuthManager authManager = graph().authManager();
+        TokenGenerator generator = Whitebox.getInternalState(authManager,
+                                                             "tokenGenerator");
+        Map<String, String> claims = ImmutableMap.of(AuthConstant.TOKEN_USER_NAME,
+                                                     "test");
+        String expired = generator.create(claims, -60000L);
+        String wrongKey = new TokenGenerator("abcdefghijklmnopqrstuvwxyz012345")
+                          .create(claims, 60000L);
+
+        for (String token : ImmutableList.of(expired, wrongKey, "123.ansfaf")) {
+            UserWithRole rejected = authManager.validateUser(token);
+            Assert.assertEquals("", rejected.username());
+            Assert.assertNull(rejected.userId());
+            Assert.assertNull(rejected.role());
+        }
     }
 
     @Test

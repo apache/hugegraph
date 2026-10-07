@@ -20,9 +20,9 @@ package org.apache.hugegraph.unit.id;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.Id.IdType;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.Id.IdType;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.hugegraph.util.NumericUtil;

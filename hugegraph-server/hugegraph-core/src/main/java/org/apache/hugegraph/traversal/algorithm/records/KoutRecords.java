@@ -22,7 +22,7 @@ import static org.apache.hugegraph.traversal.algorithm.HugeTraverser.NO_LIMIT;
 import java.util.List;
 import java.util.Stack;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.PathSet;
 import org.apache.hugegraph.traversal.algorithm.records.record.Record;

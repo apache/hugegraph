@@ -19,7 +19,7 @@ package org.apache.hugegraph.k8s;
 
 import com.google.common.base.Strings;
 import io.fabric8.kubernetes.api.model.Namespace;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.Service;

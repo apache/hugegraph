@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph;
 
+import org.apache.hugegraph.exception.HugeException;
+
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
@@ -34,7 +36,7 @@ import org.apache.hugegraph.analyzer.AnalyzerFactory;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.StandardAuthManager;
 import org.apache.hugegraph.auth.StandardAuthManagerV2;
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.LocalCounter;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheNotifier;
@@ -43,12 +45,12 @@ import org.apache.hugegraph.backend.cache.CacheNotifier.SchemaCacheNotifier;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.serializer.SerializerFactory;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendProviderFactory;
@@ -76,13 +78,13 @@ import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Server;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeFeatures;
@@ -1255,7 +1257,7 @@ public class StandardHugeGraph implements HugeGraph {
     }
 
     @Override
-    public boolean sameAs(HugeGraph graph) {
+    public boolean sameAs(HugeGraphSupplier graph) {
         return this == graph;
     }
 

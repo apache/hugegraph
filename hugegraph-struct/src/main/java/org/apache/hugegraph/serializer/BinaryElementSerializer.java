@@ -24,18 +24,19 @@ import static org.apache.hugegraph.struct.schema.SchemaElement.UNDEF;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collection;
-import java.util.Map;
+import java.util.function.BiConsumer;
 
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.BinaryId;
-import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.struct.schema.VertexLabel;
@@ -43,10 +44,14 @@ import org.apache.hugegraph.structure.BaseEdge;
 import org.apache.hugegraph.structure.BaseElement;
 import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.structure.BaseVertex;
+import org.apache.hugegraph.structure.BaseVertex.TypeContext;
 import org.apache.hugegraph.structure.Index;
+import org.apache.hugegraph.serializer.BytesBuffer.IndexColumnName;
+import org.apache.hugegraph.serializer.BytesBuffer.IndexExpiryLayout;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.EdgeLabelType;
+import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
@@ -107,32 +112,46 @@ public class BinaryElementSerializer {
 
 
     protected void parseProperty(HugeGraphSupplier graph, Id pkeyId,
-                                 BytesBuffer buffer,
-                                 BaseElement owner) {
-        PropertyKey pkey = graph != null ?
-                graph.propertyKey(pkeyId) :
-                new PropertyKey(graph, pkeyId, "");
-        // Parse value
-        Object value = buffer.readProperty(pkey);
-        // Set properties of vertex/edge
-        if (pkey.cardinality() == Cardinality.SINGLE) {
-            owner.addProperty(pkey, value);
-        } else {
-            if (!(value instanceof Collection)) {
-                throw new HugeException(
-                        "Invalid value of non-single property: %s", value);
-            }
-            owner.addProperty(pkey, value);
+                                 BytesBuffer buffer, BaseElement owner) {
+        this.parseProperty(graph, pkeyId, buffer, true, owner::addProperty);
+    }
+
+    public void parseSchemaProperty(HugeGraphSupplier graph, Id pkeyId,
+                                    BytesBuffer buffer,
+                                    BiConsumer<PropertyKey, Object> propertySink) {
+        E.checkArgumentNotNull(graph, "Schema property decoding requires a schema supplier");
+        this.parseProperty(graph, pkeyId, buffer, false, propertySink);
+    }
+
+    private void parseProperty(HugeGraphSupplier graph, Id pkeyId,
+                               BytesBuffer buffer, boolean tagged,
+                               BiConsumer<PropertyKey, Object> propertySink) {
+        PropertyKey pkey = graph != null ? graph.propertyKey(pkeyId) :
+                           new PropertyKey(null, pkeyId, "");
+        Object value = tagged ? buffer.readProperty(pkey) : buffer.readSchemaProperty(pkey);
+        if (pkey.cardinality() != Cardinality.SINGLE && !(value instanceof Collection)) {
+            throw new BackendException("Invalid value of non-single property: %s", value);
         }
+        propertySink.accept(pkey, value);
     }
 
     public void parseProperties(HugeGraphSupplier graph, BytesBuffer buffer,
                                 BaseElement owner) {
+        this.parseProperties(graph, buffer, true, owner::addProperty);
+    }
+
+    public void parseSchemaProperties(HugeGraphSupplier graph, BytesBuffer buffer,
+                                      BiConsumer<PropertyKey, Object> propertySink) {
+        E.checkArgumentNotNull(graph, "Schema property decoding requires a schema supplier");
+        this.parseProperties(graph, buffer, false, propertySink);
+    }
+
+    private void parseProperties(HugeGraphSupplier graph, BytesBuffer buffer,
+                                 boolean tagged, BiConsumer<PropertyKey, Object> propertySink) {
         int size = buffer.readVInt();
         assert size >= 0;
         for (int i = 0; i < size; i++) {
-            Id pkeyId = IdGenerator.of(buffer.readVInt());
-            this.parseProperty(graph, pkeyId, buffer, owner);
+            this.parsePropertyRecord(graph, buffer, tagged, propertySink);
         }
     }
 
@@ -145,74 +164,131 @@ public class BinaryElementSerializer {
      */
     public BaseVertex parseVertex(HugeGraphSupplier graph, BackendColumn vertexCol,
                                   BaseVertex vertex) {
+        return this.parseVertex(graph, vertexCol, vertex, true, TypeContext.STORAGE);
+    }
+
+    /** Decode a persisted Server row using schema-supplied property metadata. */
+    public BaseVertex parseSchemaVertex(HugeGraphSupplier graph, BackendColumn vertexCol,
+                                        BaseVertex vertex) {
+        return this.parseSchemaVertex(graph, vertexCol, vertex, TypeContext.STORAGE);
+    }
+
+    public BaseVertex parseSchemaVertex(HugeGraphSupplier graph, BackendColumn vertexCol,
+                                        BaseVertex vertex, TypeContext typeContext) {
+        E.checkArgumentNotNull(graph, "Schema vertex decoding requires a schema supplier");
+        return this.parseVertex(graph, vertexCol, vertex, false, typeContext);
+    }
+
+    private BaseVertex parseVertex(HugeGraphSupplier graph, BackendColumn vertexCol,
+                                   BaseVertex vertex, boolean tagged, TypeContext typeContext) {
         if (vertex == null) {
             BinaryId binaryId =
                     BytesBuffer.wrap(vertexCol.name).parseId(HugeType.VERTEX);
-            vertex = new BaseVertex(binaryId.origin(), VertexLabel.NONE);
+            vertex = new BaseVertex(binaryId.origin(), VertexLabel.NONE, typeContext);
         }
 
         if (ArrayUtils.isEmpty(vertexCol.value)) {
             // No need to parse vertex properties
             return vertex;
         }
-        BytesBuffer buffer = BytesBuffer.wrap(vertexCol.value);
-        Id labelId = buffer.readId();
-        // Parse vertex label
-        if (graph != null) {
-            VertexLabel label = graph.vertexLabelOrNone(labelId);
-            vertex.correctVertexLabel(label);
-        } else {
-            VertexLabel label = new VertexLabel(null, labelId, UNDEF);
-            vertex.correctVertexLabel(label);
-        }
-        // Parse properties
-        this.parseProperties(graph, buffer, vertex);
-
-        // Parse vertex expired time if needed
-        if (buffer.remaining() > 0 /*edge.hasTtl()*/) {
-            this.parseExpiredTime(buffer, vertex);
-        }
+        this.parseVertexValue(graph, vertexCol.value, vertex, tagged, vertex::addProperty);
         return vertex;
+    }
+
+    public void parseSchemaVertexValue(HugeGraphSupplier graph, byte[] value,
+                                       BaseVertex vertex,
+                                       BiConsumer<PropertyKey, Object> propertySink) {
+        E.checkArgumentNotNull(graph, "Schema vertex decoding requires a schema supplier");
+        this.parseVertexValue(graph, value, vertex, false, propertySink);
+    }
+
+    private void parseVertexValue(HugeGraphSupplier graph, byte[] value, BaseVertex vertex,
+                                   boolean tagged, BiConsumer<PropertyKey, Object> propertySink) {
+        BytesBuffer buffer = BytesBuffer.wrap(value);
+        Id labelId = buffer.readId();
+        VertexLabel label = graph != null ? graph.vertexLabelOrNone(labelId) :
+                            new VertexLabel(null, labelId, UNDEF);
+        vertex.correctVertexLabel(label);
+        this.parseElementValue(graph, buffer, vertex, tagged, propertySink);
     }
 
     /**
      * Reverse sequence the vertex kv data into vertices of type BaseVertex
      *
      * @param olapVertexCol It must be a column of vertex data
-     * @param vertex        When vertex==null, it is used for operator sinking to reverse sequence the col data into olapBaseVertex.
-     *                      vertex! When =null, add the col information to olapBaseVertex
+     * @param vertex The destination vertex; null creates one from the OLAP key.
      */
     public BaseVertex parseVertexOlap(HugeGraphSupplier graph,
                                       BackendColumn olapVertexCol, BaseVertex vertex) {
+        return this.parseVertexOlap(graph, olapVertexCol, vertex, true, TypeContext.STORAGE);
+    }
+
+    public BaseVertex parseSchemaVertexOlap(HugeGraphSupplier graph,
+                                          BackendColumn olapVertexCol, BaseVertex vertex) {
+        return this.parseSchemaVertexOlap(graph, olapVertexCol, vertex, TypeContext.STORAGE);
+    }
+
+    public BaseVertex parseSchemaVertexOlap(HugeGraphSupplier graph,
+                                          BackendColumn olapVertexCol, BaseVertex vertex,
+                                          TypeContext typeContext) {
+        E.checkArgumentNotNull(graph, "Schema OLAP decoding requires a schema supplier");
+        return this.parseVertexOlap(graph, olapVertexCol, vertex, false, typeContext);
+    }
+
+    private BaseVertex parseVertexOlap(HugeGraphSupplier graph, BackendColumn olapVertexCol,
+                                       BaseVertex vertex, boolean tagged, TypeContext typeContext) {
         if (vertex == null) {
             BytesBuffer idBuffer = BytesBuffer.wrap(olapVertexCol.name);
-            // read olap property id
-            idBuffer.readId();
-            // read vertex id which olap property belongs to
+            // Transient Store OLAP keys include the property ID; Server's
+            // persisted OLAP column name contains only the vertex ID.
+            if (tagged) {
+                idBuffer.readId();
+            }
             Id vertexId = idBuffer.readId();
-            vertex = new BaseVertex(vertexId, VertexLabel.NONE);
+            vertex = new BaseVertex(vertexId, VertexLabel.NONE, typeContext);
         }
 
-        BytesBuffer buffer = BytesBuffer.wrap(olapVertexCol.value);
-        Id pkeyId = IdGenerator.of(buffer.readVInt());
-        this.parseProperty(graph, pkeyId, buffer, vertex);
+        this.parsePropertyRecord(graph, BytesBuffer.wrap(olapVertexCol.value),
+                                 tagged, vertex::addProperty);
         return vertex;
     }
 
+    public void parseSchemaPropertyRecord(HugeGraphSupplier graph, BytesBuffer buffer,
+                                          BiConsumer<PropertyKey, Object> propertySink) {
+        E.checkArgumentNotNull(graph, "Schema property decoding requires a schema supplier");
+        this.parsePropertyRecord(graph, buffer, false, propertySink);
+    }
+
+    private void parsePropertyRecord(HugeGraphSupplier graph, BytesBuffer buffer,
+                                     boolean tagged, BiConsumer<PropertyKey, Object> propertySink) {
+        Id pkeyId = IdGenerator.of(buffer.readVInt());
+        this.parseProperty(graph, pkeyId, buffer, tagged, propertySink);
+    }
+
     /**
-     * @param cols Deserializing a complete vertex may require multiple cols
-     *             The first col represents the common vertex information in the g+v table, and each subsequent col represents the olap vertices stored in the olap table
+     * @param cols The first column contains vertex data; subsequent columns contain OLAP properties.
      */
     public BaseVertex parseVertexFromCols(HugeGraphSupplier graph,
                                           BackendColumn... cols) {
+        return this.parseVertexFromCols(graph, true, cols);
+    }
+
+    public BaseVertex parseSchemaVertexFromCols(HugeGraphSupplier graph,
+                                               BackendColumn... cols) {
+        E.checkArgumentNotNull(graph, "Schema vertex decoding requires a schema supplier");
+        return this.parseVertexFromCols(graph, false, cols);
+    }
+
+    private BaseVertex parseVertexFromCols(HugeGraphSupplier graph, boolean tagged,
+                                           BackendColumn... cols) {
         assert cols.length > 0;
         BaseVertex vertex = null;
         for (int index = 0; index < cols.length; index++) {
             BackendColumn col = cols[index];
             if (index == 0) {
-                vertex = this.parseVertex(graph, col, vertex);
+                vertex = this.parseVertex(graph, col, vertex, tagged, TypeContext.STORAGE);
             } else {
-                this.parseVertexOlap(graph, col, vertex);
+                this.parseVertexOlap(graph, col, vertex, tagged, TypeContext.STORAGE);
             }
         }
         return vertex;
@@ -235,48 +311,38 @@ public class BinaryElementSerializer {
     }
 
     public BaseEdge parseEdge(HugeGraphSupplier graph, BackendColumn edgeCol,
-                              BaseVertex ownerVertex,
-                              boolean withEdgeProperties) {
-        // owner-vertex + dir + edge-label.id() + subLabel.id() +
-        // + sort-values + other-vertex
+                              BaseVertex ownerVertex, boolean withEdgeProperties) {
+        return this.parseEdge(graph, edgeCol, ownerVertex, withEdgeProperties,
+                              true, TypeContext.STORAGE);
+    }
 
-        BytesBuffer buffer = BytesBuffer.wrap(edgeCol.name);
-        // Consume owner-vertex id
-        Id id = buffer.readId();
+    public BaseEdge parseSchemaEdge(HugeGraphSupplier graph, BackendColumn edgeCol,
+                                    BaseVertex ownerVertex, boolean withEdgeProperties) {
+        return this.parseSchemaEdge(graph, edgeCol, ownerVertex, withEdgeProperties,
+                                    TypeContext.STORAGE);
+    }
+
+    public BaseEdge parseSchemaEdge(HugeGraphSupplier graph, BackendColumn edgeCol,
+                                    BaseVertex ownerVertex, boolean withEdgeProperties,
+                                    TypeContext typeContext) {
+        E.checkArgumentNotNull(graph, "Schema edge decoding requires a schema supplier");
+        return this.parseEdge(graph, edgeCol, ownerVertex, withEdgeProperties,
+                              false, typeContext);
+    }
+
+    private BaseEdge parseEdge(HugeGraphSupplier graph, BackendColumn edgeCol,
+                               BaseVertex ownerVertex, boolean withEdgeProperties,
+                               boolean tagged, TypeContext typeContext) {
+        EdgeId id = BytesBuffer.wrap(edgeCol.name).readEdgeId(true, null);
         if (ownerVertex == null) {
-            ownerVertex = new BaseVertex(id, VertexLabel.NONE);
+            ownerVertex = new BaseVertex(id.ownerVertexId(), VertexLabel.NONE, typeContext);
         }
-
-        E.checkState(buffer.remaining() > 0, "Missing column type");
-
-        byte type = buffer.read();
-        if (type == HugeType.EDGE_IN.code() ||
-                type == HugeType.EDGE_OUT.code()) {
-            E.checkState(true,
-                    "Invalid column(%s) with unknown type(%s): 0x%s",
-                    id, type & 0xff, Bytes.toHex(edgeCol.name));
-        }
-
-        Id labelId = buffer.readId();
-        Id subLabelId = buffer.readId();
-        String sortValues = buffer.readStringWithEnding();
-        Id otherVertexId = buffer.readId();
-        boolean direction = EdgeId.isOutDirectionFromCode(type);
+        boolean direction = id.direction() == Directions.OUT;
+        EdgeLabel edgeLabel = this.edgeLabel(graph, id);
         BaseEdge edge;
-        EdgeLabel edgeLabel;
-        if (graph == null) { /* when calculation sinking */
-            edgeLabel = new EdgeLabel(null, subLabelId, UNDEF);
-            // If not equal here, need to add fatherId for correct operator sinking
-            if (subLabelId != labelId) {
-                edgeLabel.edgeLabelType(EdgeLabelType.SUB);
-                edgeLabel.fatherId(labelId);
-            }
-
-        } else {
-            edgeLabel = graph.edgeLabelOrNone(subLabelId);
-        }
         edge = BaseEdge.constructEdge(graph, ownerVertex, direction,
-                edgeLabel, sortValues, otherVertexId);
+                                      edgeLabel, id.sortValues(), id.otherVertexId());
+        edge.otherVertex().typeContext(typeContext);
 
         if (!withEdgeProperties /*&& !edge.hasTtl()*/) {
             // only skip properties for edge without ttl
@@ -289,19 +355,42 @@ public class BinaryElementSerializer {
             return edge;
         }
 
-        // Parse edge-id + edge-properties
-        buffer = BytesBuffer.wrap(edgeCol.value);
-
-        // Parse edge properties
-        this.parseProperties(graph, buffer, edge);
-
-        /* Skip TTL parsing process first
-         * Can't determine if edge has TTL through edge, need to judge by bytebuffer length */
-//        // Parse edge expired time if needed
-        if (buffer.remaining() > 0 /*edge.hasTtl()*/) {
-            this.parseExpiredTime(buffer, edge);
-        }
+        this.parseElementValue(graph, BytesBuffer.wrap(edgeCol.value), edge,
+                               tagged, edge::addProperty);
         return edge;
+    }
+
+    public EdgeLabel edgeLabel(HugeGraphSupplier graph, EdgeId id) {
+        return this.edgeLabel(graph, id, graph);
+    }
+
+    public EdgeLabel edgeLabel(HugeGraphSupplier lookupGraph, EdgeId id,
+                               HugeGraphSupplier schemaGraph) {
+        if (lookupGraph != null) {
+            return lookupGraph.edgeLabelOrNone(id.subLabelId());
+        }
+        EdgeLabel label = new EdgeLabel(schemaGraph, id.subLabelId(), UNDEF);
+        if (id.subLabelId() != id.edgeLabelId()) {
+            label.edgeLabelType(EdgeLabelType.SUB);
+            label.fatherId(id.edgeLabelId());
+        }
+        return label;
+    }
+
+    public void parseSchemaEdgeValue(HugeGraphSupplier graph, byte[] value,
+                                     BaseEdge edge,
+                                     BiConsumer<PropertyKey, Object> propertySink) {
+        E.checkArgumentNotNull(graph, "Schema edge decoding requires a schema supplier");
+        this.parseElementValue(graph, BytesBuffer.wrap(value), edge, false, propertySink);
+    }
+
+    private void parseElementValue(HugeGraphSupplier graph, BytesBuffer buffer,
+                                    BaseElement element, boolean tagged,
+                                    BiConsumer<PropertyKey, Object> propertySink) {
+        this.parseProperties(graph, buffer, tagged, propertySink);
+        if (tagged ? buffer.remaining() > 0 : element.hasTtl()) {
+            this.parseExpiredTime(buffer, element);
+        }
     }
 
     /**
@@ -310,19 +399,45 @@ public class BinaryElementSerializer {
      */
     public Index parseIndex(HugeGraphSupplier graph, BackendColumn indexCol,
                             Index index) {
+        return this.parseIndex(graph, indexCol, index, false);
+    }
+
+    /** Decode Server index rows, whose optional expiry is in the column name. */
+    public Index parseSchemaIndex(HugeGraphSupplier graph, BackendColumn indexCol) {
+        E.checkArgumentNotNull(graph, "Schema index decoding requires a schema supplier");
+        return this.parseIndex(graph, indexCol, null, true);
+    }
+
+    private Index parseIndex(HugeGraphSupplier graph, BackendColumn indexCol,
+                              Index index, boolean schema) {
         HugeType indexType = parseIndexType(indexCol);
 
-        BytesBuffer buffer = BytesBuffer.wrap(indexCol.name);
-        BinaryId indexId = buffer.readIndexId(indexType);
-        Id elemId = buffer.readId();
-
+        IndexColumnName name = BytesBuffer.wrap(indexCol.name).readIndexColumnName(
+                indexType, true, schema ? IndexExpiryLayout.OPTIONAL : IndexExpiryLayout.NONE);
         if (index == null) {
-            index = Index.parseIndexId(graph, indexType, indexId.asBytes());
+            index = Index.parseIndexId(graph, indexType, name.indexId().asBytes());
         }
 
-        long expiredTime = 0L;
+        long expiredTime = name.expiredTime();
 
-        if (indexCol.value.length > 0) {
+        if (schema) {
+            boolean hasTtl = !index.indexLabel().system() &&
+                             index.indexLabel().baseLabel().ttl() > 0;
+            Long legacyExpiredTime = null;
+            if (!name.hasExpiredTime()) {
+                // Legacy Store writers kept TTL in an exact value envelope.
+                // Only use it after the index/element name fields end, never
+                // search arbitrary field-value bytes for a delimiter.
+                legacyExpiredTime = this.legacyStoreIndexExpiredTime(indexCol.value);
+                E.checkState(!hasTtl || legacyExpiredTime != null,
+                             "Missing TTL in schema index column");
+                expiredTime = legacyExpiredTime == null ? 0L : legacyExpiredTime;
+            }
+            if (legacyExpiredTime == null && indexType.isStringIndex() &&
+                !ArrayUtils.isEmpty(indexCol.value)) {
+                index.fieldValues(StringEncoding.decode(indexCol.value));
+            }
+        } else if (indexCol.value.length > 0) {
 
             // Get delimiter address
             int delimiterIndex =
@@ -355,8 +470,31 @@ public class BinaryElementSerializer {
             }
         }
 
-        index.elementIds(elemId, expiredTime);
+        index.elementIds(name.elementId(), expiredTime);
         return index;
+    }
+
+    /** Decode the existing Store label envelope only at a complete label-index key boundary. */
+    public Long storedLabelIndexExpiredTime(HugeType type, boolean atNameEnd, byte[] value) {
+        return type.isLabelIndex() && atNameEnd ? this.legacyStoreIndexExpiredTime(value) : null;
+    }
+
+    private Long legacyStoreIndexExpiredTime(byte[] value) {
+        // A Store TTL writer emits exactly 0x00 + Base64(long), with no fields.
+        if (value == null || value.length != 13 || value[0] != BytesBuffer.STRING_ENDING_BYTE) {
+            return null;
+        }
+        try {
+            byte[] expiry = Base64.getDecoder().decode(Arrays.copyOfRange(value, 1, value.length));
+            if (expiry.length != Longs.BYTES ||
+                !Arrays.equals(Base64.getEncoder().encode(expiry),
+                               Arrays.copyOfRange(value, 1, value.length))) {
+                return null;
+            }
+            return Longs.fromByteArray(expiry);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     public BackendColumn parseIndex(BackendColumn indexCol) {
@@ -373,21 +511,19 @@ public class BinaryElementSerializer {
         BytesBuffer bufferName = BytesBuffer.allocate(vertex.id().length());
         bufferName.writeId(vertex.id());
 
-        int propsCount = vertex.getProperties().size();
-        BytesBuffer buffer = BytesBuffer.allocate(8 + 16 * propsCount);
+        return BackendColumn.of(bufferName.bytes(), this.formatVertexValue(vertex, true));
+    }
 
-        // Write vertex label
+    public byte[] formatSchemaVertexValue(BaseVertex vertex) {
+        return this.formatVertexValue(vertex, false);
+    }
+
+    private byte[] formatVertexValue(BaseVertex vertex, boolean tagged) {
+        BytesBuffer buffer = BytesBuffer.allocate(8 + 16 * vertex.sizeOfProperties());
         buffer.writeId(vertex.schemaLabel().id());
-
-        // Write all properties of the vertex
-        this.formatProperties(vertex.getProperties().values(), buffer);
-
-        // Write vertex expired time if needed
-        if (vertex.hasTtl()) {
-            this.formatExpiredTime(vertex.expiredTime(), buffer);
-        }
-
-        return BackendColumn.of(bufferName.bytes(), buffer.bytes());
+        this.formatElementProperties(vertex, buffer, tagged);
+        this.formatElementExpiredTime(vertex, buffer);
+        return buffer.bytes();
     }
 
     public BackendColumn writeOlapVertex(BaseVertex vertex) {
@@ -396,18 +532,9 @@ public class BinaryElementSerializer {
         BaseProperty<?> baseProperty = vertex.getProperties().values()
                 .iterator().next();
         PropertyKey propertyKey = baseProperty.propertyKey();
-        buffer.writeVInt(SchemaElement.schemaId(propertyKey.id()));
-        buffer.writeProperty(propertyKey.cardinality(), propertyKey.dataType(),
-                baseProperty.value());
+        this.formatProperty(baseProperty, buffer, true);
 
-        // OLAP table merge, key is {property_key_id}{vertex_id}
-        BytesBuffer bufferName =
-                BytesBuffer.allocate(1 + propertyKey.id().length() + 1 +
-                        vertex.id().length());
-        bufferName.writeId(propertyKey.id());
-        bufferName.writeId(vertex.id()).bytes();
-
-        return BackendColumn.of(bufferName.bytes(), buffer.bytes());
+        return BackendColumn.of(OlapKey.format(propertyKey.id(), vertex.id()), buffer.bytes());
     }
 
     public BackendColumn writeEdge(BaseEdge edge) {
@@ -422,6 +549,49 @@ public class BinaryElementSerializer {
     public BackendColumn writeIndex(Index index) {
         return BackendColumn.of(formatIndexName(index),
                 formatIndexValue(index));
+    }
+
+    /** Write Store-owned rows with stable keys and the existing storage label-expiry envelope. */
+    public BackendColumn writeSchemaIndex(Index index) {
+        BackendColumn column = this.formatSchemaIndex(
+                index.type(), index.indexLabelId(), index.fieldValues(), index.elementId(),
+                true, index.hasTtl(), index.expiredTime());
+        if (this.storageLabelHasTtl(index)) {
+            // Preserve label-index keys so Core append/remove addresses the same row.
+            column.value = this.formatIndexValue(index);
+        }
+        return column;
+    }
+
+    public BackendColumn formatSchemaIndex(HugeType type, Id indexLabelId, Object fieldValues,
+                                           Id elementId, boolean withIdPrefix,
+                                           boolean hasTtl, long expiredTime) {
+        Id rawId = Index.formatIndexId(type, indexLabelId, fieldValues);
+        boolean hashed = !type.isNumericIndex() && indexIdLengthExceedLimit(rawId);
+        Id indexId = schemaIndexId(type, indexLabelId, fieldValues);
+        int capacity = 1 + elementId.length() + (withIdPrefix ? 1 + indexId.length() : 0);
+        BytesBuffer name = BytesBuffer.allocate(capacity);
+        if (withIdPrefix) {
+            name.writeIndexId(indexId, type);
+        }
+        name.writeId(elementId);
+        if (hasTtl) {
+            name.writeVLong(expiredTime);
+        }
+        byte[] value = hashed ? StringEncoding.encode(fieldValues.toString()) : BytesBuffer.BYTES_EMPTY;
+        return BackendColumn.of(name.bytes(), value);
+    }
+
+    public static Id schemaIndexId(HugeType type, Id indexLabelId, Object fieldValues) {
+        Id id = Index.formatIndexId(type, indexLabelId, fieldValues);
+        if (!type.isNumericIndex() && indexIdLengthExceedLimit(id)) {
+            id = Index.formatIndexHashId(type, indexLabelId, fieldValues);
+        }
+        return id;
+    }
+
+    public static boolean indexIdLengthExceedLimit(Id id) {
+        return id.asBytes().length > BytesBuffer.INDEX_HASH_ID_THRESHOLD;
     }
 
     private byte[] formatIndexName(Index index) {
@@ -444,8 +614,13 @@ public class BinaryElementSerializer {
      * @return format
      * | empty(field-value) | 0x00  |  base64(expiredtime) |
      */
+    private boolean storageLabelHasTtl(Index index) {
+        return (index.indexLabel() == IndexLabel.label(HugeType.VERTEX) ||
+                index.indexLabel() == IndexLabel.label(HugeType.EDGE)) && index.expiredTime() > 0;
+    }
+
     private byte[] formatIndexValue(Index index) {
-        if (index.hasTtl()) {
+        if (this.storageLabelHasTtl(index) || index.hasTtl()) {
             BytesBuffer valueBuffer = BytesBuffer.allocate(14);
 
             valueBuffer.write(BytesBuffer.STRING_ENDING_BYTE);
@@ -494,32 +669,64 @@ public class BinaryElementSerializer {
     }
 
     protected byte[] formatEdgeValue(BaseEdge edge) {
-        Map<Id, BaseProperty<?>> properties = edge.getProperties();
-        int propsCount = properties.size();
-        BytesBuffer buffer = BytesBuffer.allocate(4 + 16 * propsCount);
+        return this.formatEdgeValue(edge, true);
+    }
 
-        // Write edge properties
-        this.formatProperties(properties.values(), buffer);
+    public byte[] formatSchemaEdgeValue(BaseEdge edge) {
+        return this.formatEdgeValue(edge, false);
+    }
 
-        // Write edge expired time if needed
-        if (edge.hasTtl()) {
-            this.formatExpiredTime(edge.expiredTime(), buffer);
-        }
-
+    private byte[] formatEdgeValue(BaseEdge edge, boolean tagged) {
+        BytesBuffer buffer = BytesBuffer.allocate(4 + 16 * edge.sizeOfProperties());
+        this.formatElementProperties(edge, buffer, tagged);
+        this.formatElementExpiredTime(edge, buffer);
         return buffer.bytes();
+    }
+
+    private void formatElementProperties(BaseElement element, BytesBuffer buffer,
+                                         boolean tagged) {
+        if (tagged) {
+            this.formatProperties(element.getProperties().values(), buffer);
+        } else {
+            this.formatSchemaProperties(element, buffer);
+        }
+    }
+
+    private void formatElementExpiredTime(BaseElement element, BytesBuffer buffer) {
+        if (element.hasTtl()) {
+            this.formatExpiredTime(element.expiredTime(), buffer);
+        }
     }
 
     public void formatProperties(Collection<BaseProperty<?>> props,
                                  BytesBuffer buffer) {
-        // Write properties size
-        buffer.writeVInt(props.size());
+        this.formatProperties(props, props.size(), buffer, true);
+    }
 
-        // Write properties data
+    public void formatSchemaProperties(BaseElement owner, BytesBuffer buffer) {
+        this.formatProperties(owner.properties().values(), owner.sizeOfProperties(), buffer, false);
+    }
+
+    private void formatProperties(Iterable<? extends BaseProperty<?>> props, int size,
+                                   BytesBuffer buffer, boolean tagged) {
+        buffer.writeVInt(size);
         for (BaseProperty<?> property : props) {
-            PropertyKey pkey = property.propertyKey();
-            buffer.writeVInt(SchemaElement.schemaId(pkey.id()));
-            buffer.writeProperty(pkey.cardinality(), pkey.dataType(),
-                    property.value());
+            this.formatProperty(property, buffer, tagged);
+        }
+    }
+
+    public void formatSchemaProperty(BaseProperty<?> property, BytesBuffer buffer) {
+        this.formatProperty(property, buffer, false);
+    }
+
+    private void formatProperty(BaseProperty<?> property, BytesBuffer buffer,
+                                boolean tagged) {
+        PropertyKey pkey = property.propertyKey();
+        buffer.writeVInt(SchemaElement.schemaId(pkey.id()));
+        if (tagged) {
+            buffer.writeProperty(pkey, property.value());
+        } else {
+            buffer.writeSchemaProperty(pkey, property.value());
         }
     }
 
@@ -527,7 +734,7 @@ public class BinaryElementSerializer {
         buffer.writeVLong(expiredTime);
     }
 
-    protected void parseExpiredTime(BytesBuffer buffer, BaseElement element) {
+    public void parseExpiredTime(BytesBuffer buffer, BaseElement element) {
         element.expiredTime(buffer.readVLong());
     }
 

@@ -17,8 +17,8 @@
 
 package org.apache.hugegraph.structure;
 
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -28,6 +28,10 @@ public class HugeEdgeProperty<V> extends HugeProperty<V> {
 
     public HugeEdgeProperty(HugeElement owner, PropertyKey key, V value) {
         super(owner, key, value);
+    }
+
+    public HugeEdgeProperty(HugeElement owner, BaseProperty<V> property) {
+        super(owner, property);
     }
 
     @Override
@@ -68,6 +72,6 @@ public class HugeEdgeProperty<V> extends HugeProperty<V> {
     public HugeEdgeProperty<V> switchEdgeOwner() {
         assert this.owner instanceof HugeEdge;
         return new HugeEdgeProperty<>(((HugeEdge) this.owner).switchOwner(),
-                                      this.pkey, this.value);
+                                      this.baseProperty());
     }
 }

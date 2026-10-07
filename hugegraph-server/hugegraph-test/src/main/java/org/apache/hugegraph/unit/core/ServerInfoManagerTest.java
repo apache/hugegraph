@@ -18,7 +18,7 @@
 package org.apache.hugegraph.unit.core;
 
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.task.ServerInfoManager;
 import org.apache.hugegraph.testutil.Assert;

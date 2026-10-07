@@ -19,8 +19,8 @@ package org.apache.hugegraph.traversal.optimize;
 
 import java.util.Iterator;
 
-import org.apache.hugegraph.backend.query.Aggregate;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Aggregate;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.iterator.Metadatable;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;

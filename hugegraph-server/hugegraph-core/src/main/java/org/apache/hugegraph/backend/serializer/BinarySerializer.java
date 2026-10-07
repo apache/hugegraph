@@ -17,7 +17,10 @@
 
 package org.apache.hugegraph.backend.serializer;
 
-import static org.apache.hugegraph.schema.SchemaElement.UNDEF;
+import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.BytesBuffer.IndexColumnName;
+import org.apache.hugegraph.serializer.BytesBuffer.IndexExpiryLayout;
+import org.apache.hugegraph.serializer.BinaryElementSerializer;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -27,32 +30,32 @@ import java.util.Map;
 
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageState;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.Condition.RangeConditions;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.IdPrefixQuery;
-import org.apache.hugegraph.backend.query.IdRangeQuery;
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.serializer.BinaryBackendEntry.BinaryId;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.Condition.RangeConditions;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdPrefixQuery;
+import org.apache.hugegraph.query.IdRangeQuery;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.backend.BinaryId;
 import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.iterator.MapperIterator;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
@@ -61,7 +64,6 @@ import org.apache.hugegraph.type.define.AggregateType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
 import org.apache.hugegraph.type.define.Directions;
-import org.apache.hugegraph.type.define.EdgeLabelType;
 import org.apache.hugegraph.type.define.Frequency;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.IdStrategy;
@@ -198,137 +200,55 @@ public class BinarySerializer extends AbstractSerializer {
 
     protected BackendColumn formatProperty(HugeProperty<?> prop) {
         BytesBuffer buffer = BytesBuffer.allocate(BytesBuffer.BUF_PROPERTY);
-        buffer.writeProperty(prop.propertyKey(), prop.value());
+        buffer.writeSchemaProperty(prop.propertyKey(), prop.value());
         return BackendColumn.of(this.formatPropertyName(prop), buffer.bytes());
     }
 
     protected void parseProperty(Id pkeyId, BytesBuffer buffer,
                                  HugeElement owner) {
-        PropertyKey pkey = owner.graph().propertyKey(pkeyId);
-
-        // Parse value
-        Object value = buffer.readProperty(pkey);
-
-        // Set properties of vertex/edge
-        if (pkey.cardinality() == Cardinality.SINGLE) {
-            owner.addProperty(pkey, value);
-        } else {
-            if (!(value instanceof Collection)) {
-                throw new BackendException(
-                        "Invalid value of non-single property: %s", value);
-            }
-            owner.addProperty(pkey, value);
-        }
+        BinaryElementSerializer.getInstance().parseSchemaProperty(
+                owner.graph(), pkeyId, buffer, owner::addProperty);
     }
 
-    protected void formatProperties(Collection<HugeProperty<?>> props,
-                                    BytesBuffer buffer) {
-        // Write properties size
-        buffer.writeVInt(props.size());
-
-        // Write properties data
-        for (HugeProperty<?> property : props) {
-            PropertyKey pkey = property.propertyKey();
-            buffer.writeVInt(SchemaElement.schemaId(pkey.id()));
-            buffer.writeProperty(pkey, property.value());
-        }
+    protected void formatProperties(HugeElement owner, BytesBuffer buffer) {
+        BinaryElementSerializer.getInstance().formatSchemaProperties(owner.element(), buffer);
     }
 
     protected void parseProperties(BytesBuffer buffer, HugeElement owner) {
-        int size = buffer.readVInt();
-        assert size >= 0;
-        for (int i = 0; i < size; i++) {
-            Id pkeyId = IdGenerator.of(buffer.readVInt());
-            this.parseProperty(pkeyId, buffer, owner);
-        }
+        BinaryElementSerializer.getInstance().parseSchemaProperties(
+                owner.graph(), buffer, owner::addProperty);
     }
 
     protected void formatExpiredTime(long expiredTime, BytesBuffer buffer) {
-        buffer.writeVLong(expiredTime);
+        BinaryElementSerializer.getInstance().formatExpiredTime(expiredTime, buffer);
     }
 
     protected void parseExpiredTime(BytesBuffer buffer, HugeElement element) {
-        element.expiredTime(buffer.readVLong());
+        BinaryElementSerializer.getInstance().parseExpiredTime(buffer, element.element());
     }
 
     protected byte[] formatEdgeValue(HugeEdge edge) {
-        int propsCount = edge.sizeOfProperties();
-        BytesBuffer buffer = BytesBuffer.allocate(4 + 16 * propsCount);
-
-        // Write edge id
-        //buffer.writeId(edge.id());
-
-        // Write edge properties
-        this.formatProperties(edge.getProperties(), buffer);
-
-        // Write edge expired time if needed
-        if (edge.hasTtl()) {
-            this.formatExpiredTime(edge.expiredTime(), buffer);
-        }
-
-        return buffer.bytes();
+        return BinaryElementSerializer.getInstance().formatSchemaEdgeValue(edge.element());
     }
 
     protected void parseEdge(BackendColumn col, HugeVertex vertex,
                              HugeGraph graph) {
-        // owner-vertex + dir + edge-label + sort-values + other-vertex
+        EdgeId id = BytesBuffer.wrap(col.name).readEdgeId(this.keyWithIdPrefix, vertex.id());
+        EdgeLabel edgeLabel = BinaryElementSerializer.getInstance().edgeLabel(graph, id, vertex.graph());
+        boolean direction = id.direction() == Directions.OUT;
+        HugeEdge edge = graph == null ?
+                        HugeEdge.constructEdgeWithoutGraph(vertex, direction, edgeLabel,
+                                                          id.sortValues(), id.otherVertexId()) :
+                        HugeEdge.constructEdge(vertex, direction, edgeLabel,
+                                               id.sortValues(), id.otherVertexId());
 
-        BytesBuffer buffer = BytesBuffer.wrap(col.name);
-        if (this.keyWithIdPrefix) {
-            // Consume owner-vertex id
-            buffer.readId();
-        }
-        byte type = buffer.read();
-        Id labelId = buffer.readId();
-        Id subLabelId = buffer.readId();
-        String sortValues = buffer.readStringWithEnding();
-        Id otherVertexId = buffer.readId();
-
-        boolean direction = EdgeId.isOutDirectionFromCode(type);
-
-        HugeEdge edge;
-        if (graph == null) { /* when calculation sinking */
-            EdgeLabel edgeLabel = new EdgeLabel(null, subLabelId, UNDEF);
-            if (subLabelId != labelId) {
-                edgeLabel.edgeLabelType(EdgeLabelType.SUB);
-                edgeLabel.fatherId(labelId);
-            }
-            edge = HugeEdge.constructEdgeWithoutGraph(vertex, direction, edgeLabel,
-                                                      sortValues, otherVertexId);
-        } else {
-            EdgeLabel edgeLabel = graph.edgeLabelOrNone(subLabelId);
-            edge = HugeEdge.constructEdge(vertex, direction, edgeLabel,
-                                          sortValues, otherVertexId);
-        }
-
-        // Parse edge-id + edge-properties
-        buffer = BytesBuffer.wrap(col.value);
-
-        //Id id = buffer.readId();
-
-        // Parse edge properties
-        this.parseProperties(buffer, edge);
-
-        // Parse edge expired time if needed
-        if (edge.hasTtl()) {
-            this.parseExpiredTime(buffer, edge);
-        }
+        BinaryElementSerializer.getInstance().parseSchemaEdgeValue(
+                edge.graph(), col.value, edge.element(), edge::addProperty);
     }
 
     protected void parseVertex(byte[] value, HugeVertex vertex) {
-        BytesBuffer buffer = BytesBuffer.wrap(value);
-
-        // Parse vertex label
-        VertexLabel label = vertex.graph().vertexLabelOrNone(buffer.readId());
-        vertex.correctVertexLabel(label);
-
-        // Parse properties
-        this.parseProperties(buffer, vertex);
-
-        // Parse vertex expired time if needed
-        if (vertex.hasTtl()) {
-            this.parseExpiredTime(buffer, vertex);
-        }
+        BinaryElementSerializer.getInstance().parseSchemaVertexValue(
+                vertex.graph(), value, vertex.element(), vertex::addProperty);
     }
 
     protected void parseColumn(BackendColumn col, HugeVertex vertex) {
@@ -357,48 +277,32 @@ public class BinarySerializer extends AbstractSerializer {
         }
     }
 
-    protected byte[] formatIndexName(HugeIndex index) {
-        BytesBuffer buffer;
-        Id elemId = index.elementId();
-        if (!this.indexWithIdPrefix) {
-            int idLen = 1 + elemId.length();
-            buffer = BytesBuffer.allocate(idLen);
-        } else {
-            Id indexId = index.id();
-            HugeType type = index.type();
-            if (!type.isNumericIndex() && indexIdLengthExceedLimit(indexId)) {
-                indexId = index.hashId();
-            }
-            int idLen = 1 + elemId.length() + 1 + indexId.length();
-            buffer = BytesBuffer.allocate(idLen);
-            // Write index-id
-            buffer.writeIndexId(indexId, type);
-        }
-        // Write element-id
-        buffer.writeId(elemId);
-        // Write expired time if needed
-        if (index.hasTtl()) {
-            buffer.writeVLong(index.expiredTime());
-        }
-
-        return buffer.bytes();
+    protected byte[] formatIndexName(Index index) {
+        return BinaryElementSerializer.getInstance().formatSchemaIndex(
+                index.type(), index.indexLabelId(), index.fieldValues(), index.elementId(),
+                this.indexWithIdPrefix, index.hasTtl(), index.expiredTime()).name;
     }
 
     protected void parseIndexName(HugeGraph graph, ConditionQuery query,
                                   BinaryBackendEntry entry,
-                                  HugeIndex index, Object fieldValues) {
+                                  Index index, Object fieldValues) {
         for (BackendColumn col : entry.columns()) {
-            if (indexFieldValuesUnmatched(col.value, fieldValues)) {
-                // Skip if field-values is not matched (just the same hash)
+            if (!index.type().isLabelIndex() && indexFieldValuesUnmatched(col.value, fieldValues)) {
+                // User-index hash collision filtering remains an engine adapter.
                 continue;
             }
             BytesBuffer buffer = BytesBuffer.wrap(col.name);
-            if (this.indexWithIdPrefix) {
-                buffer.readIndexId(index.type());
+            IndexColumnName name = buffer.readIndexColumnName(
+                    index.type(), this.indexWithIdPrefix,
+                    index.hasTtl() ? IndexExpiryLayout.REQUIRED : IndexExpiryLayout.NONE);
+            Long storedLabelExpiry = BinaryElementSerializer.getInstance().storedLabelIndexExpiredTime(
+                    index.type(), buffer.remaining() == 0, col.value);
+            if (index.type().isLabelIndex() && storedLabelExpiry == null &&
+                indexFieldValuesUnmatched(col.value, fieldValues)) {
+                continue;
             }
-            Id elemId = buffer.readId();
-            long expiredTime = index.hasTtl() ? buffer.readVLong() : 0L;
-            index.elementIds(elemId, expiredTime);
+            index.elementIds(name.elementId(), storedLabelExpiry == null ?
+                                              name.expiredTime() : storedLabelExpiry);
         }
     }
 
@@ -414,25 +318,15 @@ public class BinarySerializer extends AbstractSerializer {
             return entry;
         }
 
-        int propsCount = vertex.sizeOfProperties();
-        BytesBuffer buffer = BytesBuffer.allocate(8 + 16 * propsCount);
-
-        // Write vertex label
-        buffer.writeId(vertex.schemaLabel().id());
-
-        // Write all properties of the vertex
-        this.formatProperties(vertex.getProperties(), buffer);
-
-        // Write vertex expired time if needed
+        byte[] value = BinaryElementSerializer.getInstance().formatSchemaVertexValue(vertex.element());
         if (vertex.hasTtl()) {
             entry.ttl(vertex.ttl());
-            this.formatExpiredTime(vertex.expiredTime(), buffer);
         }
 
-        // Fill column
+        // Backend-specific column keys and entry TTL remain in the adapter.
         byte[] name = this.keyWithIdPrefix ?
                       entry.id().asBytes() : BytesBuffer.BYTES_EMPTY;
-        entry.column(name, buffer.bytes());
+        entry.column(name, value);
 
         return entry;
     }
@@ -451,8 +345,7 @@ public class BinarySerializer extends AbstractSerializer {
         }
         HugeProperty<?> property = properties.iterator().next();
         PropertyKey propertyKey = property.propertyKey();
-        buffer.writeVInt(SchemaElement.schemaId(propertyKey.id()));
-        buffer.writeProperty(propertyKey, property.value());
+        BinaryElementSerializer.getInstance().formatSchemaProperty(property.baseProperty(), buffer);
 
         // Fill column
         byte[] name = this.keyWithIdPrefix ?
@@ -504,9 +397,8 @@ public class BinarySerializer extends AbstractSerializer {
     }
 
     protected void parseVertexOlap(byte[] value, HugeVertex vertex) {
-        BytesBuffer buffer = BytesBuffer.wrap(value);
-        Id pkeyId = IdGenerator.of(buffer.readVInt());
-        this.parseProperty(pkeyId, buffer, vertex);
+        BinaryElementSerializer.getInstance().parseSchemaPropertyRecord(
+                vertex.graph(), BytesBuffer.wrap(value), vertex::addProperty);
     }
 
     @Override
@@ -576,7 +468,7 @@ public class BinarySerializer extends AbstractSerializer {
     }
 
     @Override
-    public BackendEntry writeIndex(HugeIndex index) {
+    public BackendEntry writeIndex(Index index) {
         BinaryBackendEntry entry;
         if (index.fieldValues() == null && index.elementIds().isEmpty()) {
             /*
@@ -586,20 +478,17 @@ public class BinarySerializer extends AbstractSerializer {
              */
             entry = this.formatILDeletion(index);
         } else {
-            Id id = index.id();
             HugeType type = index.type();
-            byte[] value = null;
-            if (!type.isNumericIndex() && indexIdLengthExceedLimit(id)) {
-                id = index.hashId();
-                // Save field-values as column value if the key is a hash string
-                value = StringEncoding.encode(index.fieldValues().toString());
-            }
-
+            Id id = BinaryElementSerializer.schemaIndexId(type, index.indexLabelId(), index.fieldValues());
+            BackendColumn column =
+                    BinaryElementSerializer.getInstance().formatSchemaIndex(
+                            type, index.indexLabelId(), index.fieldValues(), index.elementId(),
+                            this.indexWithIdPrefix, index.hasTtl(), index.expiredTime());
             entry = newBackendEntry(type, id);
             if (index.indexLabel().olap()) {
                 entry.olap(true);
             }
-            entry.column(this.formatIndexName(index), value);
+            entry.columns(column);
             entry.subId(index.elementId());
 
             if (index.hasTtl()) {
@@ -610,7 +499,7 @@ public class BinarySerializer extends AbstractSerializer {
     }
 
     @Override
-    public HugeIndex readIndex(HugeGraph graph, ConditionQuery query,
+    public Index readIndex(HugeGraph graph, ConditionQuery query,
                                BackendEntry bytesEntry) {
         if (bytesEntry == null) {
             return null;
@@ -619,7 +508,7 @@ public class BinarySerializer extends AbstractSerializer {
         BinaryBackendEntry entry = this.convertEntry(bytesEntry);
         // NOTE: index id without length prefix
         byte[] bytes = entry.id().asBytes();
-        HugeIndex index = HugeIndex.parseIndexId(graph, entry.type(), bytes);
+        Index index = Index.parseIndexId(graph, entry.type(), bytes);
 
         Object fieldValues = null;
         if (!index.type().isRangeIndex()) {
@@ -871,7 +760,7 @@ public class BinarySerializer extends AbstractSerializer {
         return new IdRangeQuery(query, start, keyMinEq, max, keyMaxEq);
     }
 
-    private BinaryBackendEntry formatILDeletion(HugeIndex index) {
+    private BinaryBackendEntry formatILDeletion(Index index) {
         Id id = index.indexLabelId();
         BinaryId bid = new BinaryId(id.asBytes(), id);
         BinaryBackendEntry entry = new BinaryBackendEntry(index.type(), bid);
@@ -967,17 +856,14 @@ public class BinarySerializer extends AbstractSerializer {
                                             Object fieldValues,
                                             boolean equal) {
         boolean withEnding = type.isRangeIndex() || equal;
-        Id id = HugeIndex.formatIndexId(type, indexLabel, fieldValues);
-        if (!type.isNumericIndex() && indexIdLengthExceedLimit(id)) {
-            id = HugeIndex.formatIndexHashId(type, indexLabel, fieldValues);
-        }
+        Id id = BinaryElementSerializer.schemaIndexId(type, indexLabel, fieldValues);
         BytesBuffer buffer = BytesBuffer.allocate(1 + id.length());
         byte[] idBytes = buffer.writeIndexId(id, type, withEnding).bytes();
         return new BinaryId(idBytes, id);
     }
 
     protected static boolean indexIdLengthExceedLimit(Id id) {
-        return id.asBytes().length > BytesBuffer.INDEX_HASH_ID_THRESHOLD;
+        return BinaryElementSerializer.indexIdLengthExceedLimit(id);
     }
 
     protected static boolean indexFieldValuesUnmatched(byte[] value,

@@ -65,6 +65,8 @@ import org.apache.hugegraph.unit.core.GraphManagerConfigTest;
 import org.apache.hugegraph.unit.core.GroovyScriptEngineCompatibilityTest;
 import org.apache.hugegraph.unit.core.HugeFeaturesTest;
 import org.apache.hugegraph.unit.core.HstoreSessionsTest;
+import org.apache.hugegraph.unit.core.HugeElementViewTest;
+import org.apache.hugegraph.unit.core.HugePrimaryKeyTest;
 import org.apache.hugegraph.unit.core.IdHolderTest;
 import org.apache.hugegraph.unit.core.LocksTableTest;
 import org.apache.hugegraph.unit.core.PageStateTest;
@@ -198,6 +200,8 @@ import org.junit.runners.Suite;
         HugeGraphAuthProxyTest.class,
         SchemaElementTest.class,
         HugeGraphTestInfrastructureTest.class,
+        HugeElementViewTest.class,
+        HugePrimaryKeyTest.class,
         ShortestPathTraverserTest.class,
 
         /* cmd */

@@ -232,7 +232,11 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         // exists even shut down.
         rpcServer = null;
         // close all db session
-        RocksDBFactory.getInstance().releaseAllGraphDB();
+        try {
+            RocksDBFactory.getInstance().releaseAllGraphDB();
+        } finally {
+            BusinessHandlerImpl.closeSchemaResources();
+        }
     }
 
     public void snapshotForTest() {

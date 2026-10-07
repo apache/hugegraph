@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang3.mutable.MutableFloat;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.SplicingIdGenerator;
 import org.apache.hugegraph.job.UserJob;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.type.define.Directions;

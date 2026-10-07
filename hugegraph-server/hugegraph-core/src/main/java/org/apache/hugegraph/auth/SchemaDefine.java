@@ -26,15 +26,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.auth.HugeTarget.P;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
@@ -298,9 +298,9 @@ public abstract class SchemaDefine {
         protected abstract Object[] asArray();
     }
 
-    // NOTE: travis-ci fails if class Entity implements Nameable
+    // NOTE: travis-ci fails if class Entity implements Namifiable
     public abstract static class Entity extends AuthElement
-            implements org.apache.hugegraph.type.Nameable {
+            implements org.apache.hugegraph.type.Namifiable {
 
         private static final long serialVersionUID = 4113319546914811762L;
 

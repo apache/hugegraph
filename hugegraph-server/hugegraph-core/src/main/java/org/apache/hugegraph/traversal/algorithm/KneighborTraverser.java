@@ -21,8 +21,8 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.traversal.algorithm.records.KneighborRecords;
 import org.apache.hugegraph.traversal.algorithm.steps.Steps;

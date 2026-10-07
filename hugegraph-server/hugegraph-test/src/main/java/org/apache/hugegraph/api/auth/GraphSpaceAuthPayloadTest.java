@@ -27,7 +27,7 @@ import org.apache.hugegraph.auth.HugeBelong;
 import org.apache.hugegraph.auth.HugeGroup;
 import org.apache.hugegraph.auth.HugePermission;
 import org.apache.hugegraph.auth.HugeTarget;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.testutil.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;

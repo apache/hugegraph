@@ -22,11 +22,11 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableList;
 
-import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.HugeGraphSupplier;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.EdgeLabelType;
 import org.apache.hugegraph.type.define.HugeKeys;
@@ -34,7 +34,7 @@ import org.apache.hugegraph.type.define.HugeKeys;
 public class GraphSONSchemaSerializer {
 
     public Map<HugeKeys, Object> writeVertexLabel(VertexLabel vertexLabel) {
-        HugeGraph graph = vertexLabel.graph();
+        HugeGraphSupplier graph = vertexLabel.graph();
         assert graph != null;
 
         Map<HugeKeys, Object> map = new LinkedHashMap<>();
@@ -61,7 +61,7 @@ public class GraphSONSchemaSerializer {
     }
 
     public Map<HugeKeys, Object> writeEdgeLabel(EdgeLabel edgeLabel) {
-        HugeGraph graph = edgeLabel.graph();
+        HugeGraphSupplier graph = edgeLabel.graph();
         assert graph != null;
 
         Map<HugeKeys, Object> map = new LinkedHashMap<>();
@@ -110,7 +110,7 @@ public class GraphSONSchemaSerializer {
     }
 
     public Map<HugeKeys, Object> writePropertyKey(PropertyKey propertyKey) {
-        HugeGraph graph = propertyKey.graph();
+        HugeGraphSupplier graph = propertyKey.graph();
         assert graph != null;
 
         Map<HugeKeys, Object> map = new LinkedHashMap<>();
@@ -128,7 +128,7 @@ public class GraphSONSchemaSerializer {
     }
 
     public Map<HugeKeys, Object> writeIndexLabel(IndexLabel indexLabel) {
-        HugeGraph graph = indexLabel.graph();
+        HugeGraphSupplier graph = indexLabel.graph();
         assert graph != null;
 
         Map<HugeKeys, Object> map = new LinkedHashMap<>();

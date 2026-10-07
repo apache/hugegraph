@@ -84,6 +84,7 @@ public class HgStoreNodeService implements RaftTaskHandler {
             setDataPath(appConfig.getDataPath());
             setRaftPath(appConfig.getRaftPath());
             setPdAddress(appConfig.getPdServerAddress());
+            setPdCluster(appConfig.getPdCluster());
             setFakePD(appConfig.isFakePd());
             setRocksdbConfig(appConfig.getRocksdbConfig());
             setGrpcAddress(appConfig.getStoreServerAddress());

@@ -17,8 +17,8 @@
 
 package org.apache.hugegraph.backend.page;
 
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.StringEncoding;

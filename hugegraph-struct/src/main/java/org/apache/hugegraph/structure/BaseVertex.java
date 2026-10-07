@@ -21,11 +21,13 @@ package org.apache.hugegraph.structure;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.SplicingIdGenerator;
 import org.apache.hugegraph.perf.PerfUtil;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.struct.schema.SchemaLabel;
 import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
@@ -42,6 +44,14 @@ public class BaseVertex extends BaseElement implements Cloneable {
 
 
     protected Collection<BaseEdge> edges;
+    private boolean encodeNumber = true;
+    private TypeContext typeContext = TypeContext.STORAGE;
+
+    /** Classification differs for legacy storage-only and engine system labels. */
+    public enum TypeContext {
+        STORAGE,
+        ENGINE
+    }
 
     public BaseVertex(Id id) {
         this.edges = EMPTY_LIST;
@@ -50,9 +60,27 @@ public class BaseVertex extends BaseElement implements Cloneable {
 
     public BaseVertex(Id id, SchemaLabel label) {
         // Note:
-        // If vertex is OLAP Vertex, id is the id of the vertex that the olap property belongs to, not including the olap property id.
+        // An OLAP vertex uses the owning vertex ID without the OLAP property ID.
         this(id);
         this.schemaLabel(label);
+    }
+
+    public BaseVertex(Id id, SchemaLabel label, TypeContext typeContext) {
+        this(id, label);
+        this.typeContext(typeContext);
+    }
+
+    public TypeContext typeContext() {
+        return this.typeContext;
+    }
+
+    public void typeContext(TypeContext typeContext) {
+        E.checkArgumentNotNull(typeContext, "Vertex type context can't be null");
+        this.typeContext = typeContext;
+    }
+
+    public void encodeNumber(boolean encodeNumber) {
+        this.encodeNumber = encodeNumber;
     }
 
     @Override
@@ -73,7 +101,7 @@ public class BaseVertex extends BaseElement implements Cloneable {
             E.checkState(!propValues.isEmpty(),
                     "Primary values must not be empty " +
                             "(has properties %s)", hasProperties());
-            name = SplicingIdGenerator.concatValues(propValues);
+            name = ConditionQuery.concatValues(propValues);
             E.checkArgument(!name.isEmpty(),
                     "The value of primary key can't be empty");
         }
@@ -94,18 +122,38 @@ public class BaseVertex extends BaseElement implements Cloneable {
         for (Id pk : primaryKeys) {
             BaseProperty<?> property = this.getProperty(pk);
             E.checkState(property != null,
-                    "The value of primary key '%s' can't be null"
-                    /*this.graph().propertyKey(pk).name() complete log*/);
-            propValues.add(property.serialValue(true));
+                    "The value of primary key '%s' can't be null", pk);
+            Object value = property.serialValue(this.encodeNumber);
+            if ("".equals(value)) {
+                value = ConditionQuery.INDEX_VALUE_EMPTY;
+            }
+            propValues.add(value);
         }
         return propValues;
     }
 
-    public void addEdge(BaseEdge edge) {
+    public boolean addEdge(BaseEdge edge) {
         if (this.edges == EMPTY_LIST) {
             this.edges = CollectionFactory.newList(CollectionType.EC);
         }
-        this.edges.add(edge);
+        return this.edges.add(edge);
+    }
+
+    public void resetEdges(boolean unique) {
+        this.edges = unique ? CollectionFactory.newSet(CollectionType.EC) :
+                             CollectionFactory.newList(CollectionType.EC);
+    }
+
+    public BaseEdge removeEdge(BaseEdge edge) {
+        Iterator<BaseEdge> iterator = this.edges.iterator();
+        while (iterator.hasNext()) {
+            BaseEdge current = iterator.next();
+            if (current.equals(edge)) {
+                iterator.remove();
+                return current;
+            }
+        }
+        return null;
     }
 
     public void correctVertexLabel(VertexLabel correctLabel) {
@@ -154,13 +202,17 @@ public class BaseVertex extends BaseElement implements Cloneable {
     }
 
     public HugeType type() {
-        // For Vertex type, when label is task, return TASK type, convenient for getting storage table information based on type
-        /* Magic: ~task ~taskresult ~variables*/
-        if (schemaLabel() != null &&
-            (schemaLabel().name().equals("~task") ||
-             schemaLabel().name().equals("~taskresult") ||
-             schemaLabel().name().equals("~variables"))) {
+        if (this.schemaLabel() == null) {
+            return HugeType.VERTEX;
+        }
+        String label = this.schemaLabel().name();
+        if ("~task".equals(label) || "~taskresult".equals(label) ||
+            this.typeContext == TypeContext.STORAGE && "~variables".equals(label)) {
             return HugeType.TASK;
+        }
+        if (this.typeContext == TypeContext.ENGINE &&
+            ("~server".equals(label) || "~role_data".equals(label))) {
+            return HugeType.SERVER;
         }
         return HugeType.VERTEX;
     }
