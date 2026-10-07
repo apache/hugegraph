@@ -20,7 +20,6 @@ package org.apache.hugegraph.backend.tx;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -31,12 +30,10 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.analyzer.Analyzer;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.page.IdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.BatchIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.FixedIdHolder;
@@ -46,14 +43,15 @@ import org.apache.hugegraph.backend.page.PageIds;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.page.SortByCountIdHolderList;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.Condition.RangeConditions;
-import org.apache.hugegraph.backend.query.Condition.Relation;
-import org.apache.hugegraph.backend.query.Condition.RelationType;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.Condition.RangeConditions;
+import org.apache.hugegraph.query.Condition.Relation;
+import org.apache.hugegraph.query.Condition.RelationType;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQueryFlatten;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.query.MatchedIndex;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
 import org.apache.hugegraph.backend.store.BackendEntry;
@@ -67,15 +65,17 @@ import org.apache.hugegraph.iterator.Metadatable;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.job.system.DeleteExpiredJob;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeIndex;
-import org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime;
+import org.apache.hugegraph.structure.Index;
+import org.apache.hugegraph.structure.builder.IndexBuilder;
+import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
 import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.task.EphemeralJobQueue;
 import org.apache.hugegraph.type.HugeType;
@@ -97,18 +97,17 @@ import com.google.common.collect.ImmutableSet;
 
 public class GraphIndexTransaction extends AbstractTransaction {
 
-    public static final String START_SYMBOL = "(";
-    public static final String END_SYMBOL = ")";
-    public static final String WORD_DELIMITER = "|";
+    public static final String START_SYMBOL = IndexBuilder.START_SYMBOL;
+    public static final String END_SYMBOL = IndexBuilder.END_SYMBOL;
+    public static final String WORD_DELIMITER = IndexBuilder.WORD_DELIMITER;
 
-    private final Analyzer textAnalyzer;
+    private final IndexBuilder indexBuilder;
     private final int indexIntersectThresh;
 
     public GraphIndexTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
 
-        this.textAnalyzer = graph.analyzer();
-        assert this.textAnalyzer != null;
+        this.indexBuilder = new IndexBuilder(this.graph(), graph.analyzer());
 
         final HugeConfig conf = graph.configuration();
         this.indexIntersectThresh =
@@ -137,27 +136,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
             return;
         }
 
-        // Update label index if backend store not supports label-query
-        HugeIndex index = new HugeIndex(this.graph(),
-                                        IndexLabel.label(element.type()));
-        index.fieldValues(element.schemaLabel().id());
-        index.elementIds(element.id(), element.expiredTime());
-
-        if (removed) {
-            this.doEliminate(this.serializer.writeIndex(index));
-        } else {
-            this.doAppend(this.serializer.writeIndex(index));
-        }
-
-        if (element instanceof HugeEdge && ((EdgeLabel) label).hasFather()) {
-            HugeIndex fatherIndex = new HugeIndex(this.graph(), IndexLabel.label(element.type()));
-            fatherIndex.fieldValues(((EdgeLabel) label).fatherId());
-            fatherIndex.elementIds(element.id(), element.expiredTime());
-            if (removed) {
-                this.doEliminate(this.serializer.writeIndex(fatherIndex));
-            } else {
-                this.doAppend(this.serializer.writeIndex(fatherIndex));
-            }
+        for (Index index : this.indexBuilder.buildLabelIndex(element.element())) {
+            this.writeIndex(index, removed);
         }
     }
 
@@ -168,39 +148,20 @@ public class GraphIndexTransaction extends AbstractTransaction {
             return;
         }
         // Update index(only property, no edge) of a vertex
-        for (Id id : vertex.schemaLabel().indexLabels()) {
-            this.updateIndex(id, vertex, removed);
-        }
+        IndexBuilder.forEachIndexLabelId(vertex.element(), this.graph()::edgeLabel,
+                                         id -> this.updateIndex(id, vertex, removed));
     }
 
     @Watched(prefix = "index")
     public void updateEdgeIndex(HugeEdge edge, boolean removed) {
-        // Update index of an edge
-        for (Id id : edge.schemaLabel().indexLabels()) {
-            this.updateIndex(id, edge, removed);
-        }
-
-        EdgeLabel label = edge.schemaLabel();
-        if (label.hasFather()) {
-            for (Id id : graph().edgeLabel(label.fatherId()).indexLabels()) {
-                this.updateIndex(id, edge, removed);
-            }
-        }
+        IndexBuilder.forEachIndexLabelId(edge.element(), this.graph()::edgeLabel,
+                                         id -> this.updateIndex(id, edge, removed));
     }
 
     private void updateVertexOlapIndex(HugeVertex vertex, boolean removed) {
-        Set<Id> propKeys = vertex.getPropertyKeys();
-        E.checkArgument(propKeys.size() == 1,
-                        "Expect only 1 property for olap vertex, but got %s",
-                        propKeys.size());
-        Id pkId = propKeys.iterator().next();
-        List<IndexLabel> indexLabels = this.params().schemaTransaction()
-                                           .getIndexLabels();
-        for (IndexLabel il : indexLabels) {
-            if (il.indexFields().contains(pkId)) {
-                this.updateIndex(il.id(), vertex, removed);
-            }
-        }
+        IndexBuilder.forEachOlapIndexLabelId(vertex.element(),
+                () -> this.params().schemaTransaction().getIndexLabels().iterator(),
+                id -> this.updateIndex(id, vertex, removed));
     }
 
     /**
@@ -216,110 +177,18 @@ public class GraphIndexTransaction extends AbstractTransaction {
         E.checkArgument(indexLabel != null,
                         "Not exist index label with id '%s'", ilId);
 
-        // Collect property values of index fields
-        List<Object> allPropValues = new ArrayList<>();
-        int fieldsNum = indexLabel.indexFields().size();
-        int firstNullField = fieldsNum;
-        for (Id fieldId : indexLabel.indexFields()) {
-            HugeProperty<Object> property = element.getProperty(fieldId);
-            if (property == null) {
-                E.checkState(hasNullableProp(element, fieldId),
-                             "Non-null property '%s' is null for '%s'",
-                             this.graph().propertyKey(fieldId), element);
-                if (firstNullField == fieldsNum) {
-                    firstNullField = allPropValues.size();
-                }
-                allPropValues.add(ConditionQuery.INDEX_VALUE_NULL);
-            } else {
-                allPropValues.add(property.value());
+        this.indexBuilder.forEachIndex(element.element(), indexLabel, index -> {
+            Object value = index.fieldValues();
+            if (indexLabel.indexType().isUnique() && !removed &&
+                this.existUniqueValue(indexLabel, value, element.id())) {
+                throw new IllegalArgumentException(String.format(
+                        "Unique constraint %s conflict is found for %s", indexLabel, element));
             }
-        }
-
-        if (firstNullField == 0 && !indexLabel.indexType().isUnique()) {
-            // The property value of first index field is null
-            return;
-        }
-        // Not build index for record with nullable field (except unique index)
-        List<Object> nnPropValues = allPropValues.subList(0, firstNullField);
-
-        // Expired time
-        long expiredTime = element.expiredTime();
-
-        // Update index for each index type
-        switch (indexLabel.indexType()) {
-            case RANGE_INT:
-            case RANGE_FLOAT:
-            case RANGE_LONG:
-            case RANGE_DOUBLE:
-                E.checkState(nnPropValues.size() == 1,
-                             "Expect only one property in range index");
-                Object value = NumericUtil.convertToNumber(nnPropValues.get(0));
-                this.updateIndex(indexLabel, value, element.id(),
-                                 expiredTime, removed);
-                break;
-            case SEARCH:
-                E.checkState(nnPropValues.size() == 1,
-                             "Expect only one property in search index");
-                value = nnPropValues.get(0);
-                Set<String> words =
-                        this.segmentWords(propertyValueToString(value));
-                for (String word : words) {
-                    this.updateIndex(indexLabel, word, element.id(),
-                                     expiredTime, removed);
-                }
-                break;
-            case SECONDARY:
-                // Secondary index maybe include multi prefix index
-                if (isCollectionIndex(nnPropValues)) {
-                    /*
-                     * Property value is a collection
-                     * we should create index for each item
-                     */
-                    for (Object propValue : (Collection<?>) nnPropValues.get(0)) {
-                        value = ConditionQuery.concatValues(propValue);
-                        this.updateIndex(indexLabel, value, element.id(),
-                                         expiredTime, removed);
-                    }
-                } else {
-                    for (int i = 0, n = nnPropValues.size(); i < n; i++) {
-                        List<Object> prefixValues =
-                                nnPropValues.subList(0, i + 1);
-                        value = ConditionQuery.concatValues(prefixValues);
-                        this.updateIndex(indexLabel, value, element.id(),
-                                         expiredTime, removed);
-                    }
-                }
-                break;
-            case SHARD:
-                value = ConditionQuery.concatValues(nnPropValues);
-                this.updateIndex(indexLabel, value, element.id(),
-                                 expiredTime, removed);
-                break;
-            case UNIQUE:
-                value = ConditionQuery.concatValues(allPropValues);
-                assert !"".equals(value);
-                Id id = element.id();
-                // TODO: add lock for updating unique index
-                if (!removed && this.existUniqueValue(indexLabel, value, id)) {
-                    throw new IllegalArgumentException(String.format(
-                            "Unique constraint %s conflict is found for %s",
-                            indexLabel, element));
-                }
-                this.updateIndex(indexLabel, value, element.id(),
-                                 expiredTime, removed);
-                break;
-            default:
-                throw new AssertionError(String.format(
-                        "Unknown index type '%s'", indexLabel.indexType()));
-        }
+            this.writeIndex(index, removed);
+        });
     }
 
-    private void updateIndex(IndexLabel indexLabel, Object propValue,
-                             Id elementId, long expiredTime, boolean removed) {
-        HugeIndex index = new HugeIndex(this.graph(), indexLabel);
-        index.fieldValues(propValue);
-        index.elementIds(elementId, expiredTime);
-
+    private void writeIndex(Index index, boolean removed) {
         if (removed) {
             this.doEliminate(this.serializer.writeIndex(index));
         } else {
@@ -335,7 +204,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
     private boolean hasEliminateInTx(IndexLabel indexLabel, Object value,
                                      Id elementId) {
-        HugeIndex index = new HugeIndex(this.graph(), indexLabel);
+        Index index = new Index(this.graph(), indexLabel);
         index.fieldValues(value);
         index.elementIds(elementId);
         BackendEntry entry = this.serializer.writeIndex(index);
@@ -351,7 +220,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         try {
             exist = iterator.hasNext();
             if (exist) {
-                HugeIndex index = this.serializer.readIndex(graph(), query,
+                Index index = this.serializer.readIndex(graph(), query,
                                                             iterator.next());
                 this.removeExpiredIndexIfNeeded(index, query.showExpired());
                 // Memory backend might return empty BackendEntry
@@ -507,7 +376,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 holders.addAll(this.doSearchIndex(query, index));
             } else {
                 // Do secondary-index, range-index or shard-index query
-                IndexQueries queries = index.constructIndexQueries(query);
+                IndexQueries queries = constructIndexQueries(query, index);
                 assert !paging || queries.size() <= 1;
                 IdHolder holder = this.doSingleOrJointIndex(queries);
                 holders.add(holder);
@@ -537,7 +406,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 // Increase limit for union operation
                 increaseLimit(q);
             }
-            IndexQueries queries = index.constructIndexQueries(q);
+            IndexQueries queries = constructIndexQueries(q, index);
             assert !query.paging() || queries.size() <= 1;
             IdHolder holder = this.doSingleOrJointIndex(queries);
             // NOTE: ids will be merged into one IdHolder if not in paging
@@ -694,7 +563,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 Set<Id> ids = InsertionOrderUtil.newSet();
                 while ((batch == Query.NO_LIMIT || ids.size() < batch) &&
                        entries.hasNext()) {
-                    HugeIndex index = this.serializer.readIndex(graph(), query,
+                    Index index = this.serializer.readIndex(graph(), query,
                                                                 entries.next());
                     this.removeExpiredIndexIfNeeded(index, query.showExpired());
                     ids.addAll(index.elementIds());
@@ -708,7 +577,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
         }, this.keepBackendIndexOrder(indexLabel, query));
     }
 
-    private void recordIndexValue(ConditionQuery query, HugeIndex index) {
+    private void recordIndexValue(ConditionQuery query, Index index) {
         if (!shouldRecordIndexValue(query, index)) {
             return;
         }
@@ -736,7 +605,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             Set<Id> ids = InsertionOrderUtil.newSet();
             entries = super.query(query).iterator();
             while (entries.hasNext()) {
-                HugeIndex index = this.serializer.readIndex(graph(), query,
+                Index index = this.serializer.readIndex(graph(), query,
                                                             entries.next());
                 this.removeExpiredIndexIfNeeded(index, query.showExpired());
                 ids.addAll(index.elementIds());
@@ -882,8 +751,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 if (key instanceof Id && indexFields.contains(key)) {
                     // This is an index field of search index
                     Id field = (Id) key;
-                    HugeProperty<?> property = element.getProperty(field);
-                    String propValue = propertyValueToString(property.value());
+                    BaseProperty<?> property = element.getProperty(field);
+                    String propValue = IndexBuilder.propertyValueToString(property.value());
                     String fieldValue = (String) query.userpropValue(field);
                     if (this.matchSearchIndexWords(propValue, fieldValue)) {
                         continue;
@@ -907,46 +776,20 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     private Set<String> segmentWords(String text) {
-        /*
-         Support 3 kinds of query:
-         - Text.contains("(word)"): query by user-specified word;
-         - Text.contains("(word1|word2|word3)"): query by user-specified words;
-         - Text.contains("words"): query by words splitted from analyzer;
-         Note: all kinds support words exact match
-         */
-        if (text.startsWith(START_SYMBOL) && text.endsWith(END_SYMBOL)) {
-            String subText = text.substring(1, text.length() - 1);
-            if (subText.contains(WORD_DELIMITER)) {
-                String[] texts = StringUtils.split(subText, WORD_DELIMITER);
-                return ImmutableSet.copyOf(texts);
-            } else {
-                return ImmutableSet.of(subText);
-            }
-        }
-        Set<String> segments = this.textAnalyzer.segment(text);
-
-        /*
-         * Add original text to segments at the insertion stage,
-         * in order to can match fully words at the query stage.
-         */
-        segments.add(text);
-
-        // Ignore unicode \u0000 to \u0003
-        segments.removeAll(ConditionQuery.IGNORE_SYM_SET);
-        return segments;
+        return this.indexBuilder.segmentWords(text);
     }
 
     private boolean needIndexForLabel() {
         return !this.store().features().supportsQueryByLabel();
     }
 
-    private void removeExpiredIndexIfNeeded(HugeIndex index,
+    private void removeExpiredIndexIfNeeded(Index index,
                                             boolean showExpired) {
         if (this.store().features().supportsTtl() || showExpired) {
             return;
         }
         for (IdWithExpiredTime id : index.expiredElementIds()) {
-            HugeIndex removeIndex = index.clone();
+            Index removeIndex = index.clone();
             removeIndex.resetElementIds();
             removeIndex.elementIds(id.id(), id.expiredTime());
             DeleteExpiredJob.asyncDeleteExpiredObject(this.graph(),
@@ -1183,7 +1026,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     private static boolean shouldRecordIndexValue(ConditionQuery query,
-                                                  HugeIndex index) {
+                                                  Index index) {
         // Currently, only range index has problems
         return query.originQuery() instanceof ConditionQuery &&
                index.indexLabel().indexType().isRange();
@@ -1506,20 +1349,6 @@ public class GraphIndexTransaction extends AbstractTransaction {
         return value;
     }
 
-    private static boolean isCollectionIndex(List<Object> propValues) {
-        return propValues.size() == 1 &&
-               propValues.get(0) instanceof Collection;
-    }
-
-    private static String propertyValueToString(Object value) {
-        /*
-         * Join collection items with white space if the value is Collection,
-         * or else keep the origin value.
-         */
-        return value instanceof Collection ?
-               StringUtils.join(((Iterable<?>) value), " ") : value.toString();
-    }
-
     private static NoIndexException noIndexException(HugeGraph graph,
                                                      ConditionQuery query,
                                                      Id label) {
@@ -1557,10 +1386,6 @@ public class GraphIndexTransaction extends AbstractTransaction {
                         indexLabel, indexLabel.status());
     }
 
-    private static boolean hasNullableProp(HugeElement element, Id key) {
-        return element.schemaLabel().nullableKeys().contains(key);
-    }
-
     private static Set<IndexLabel> relatedIndexLabels(HugeElement element) {
         Set<IndexLabel> indexLabels = InsertionOrderUtil.newSet();
         Set<Id> indexLabelIds = element.schemaLabel().indexLabels();
@@ -1586,72 +1411,20 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     protected void removeIndex(IndexLabel indexLabel) {
-        HugeIndex index = new HugeIndex(this.graph(), indexLabel);
+        Index index = new Index(this.graph(), indexLabel);
         this.doRemove(this.serializer.writeIndex(index));
     }
 
-    private static class MatchedIndex {
-
-        private final SchemaLabel schemaLabel;
-        private final Set<IndexLabel> indexLabels;
-
-        public MatchedIndex(SchemaLabel schemaLabel,
-                            Set<IndexLabel> indexLabels) {
-            this.schemaLabel = schemaLabel;
-            this.indexLabels = indexLabels;
+    private static IndexQueries constructIndexQueries(ConditionQuery query, MatchedIndex index) {
+        if (index.indexLabels().size() == 1) {
+            IndexLabel label = index.indexLabels().iterator().next();
+            ConditionQuery indexQuery = constructQuery(query, label);
+            assert indexQuery != null;
+            return IndexQueries.of(label, indexQuery);
         }
-
-        @SuppressWarnings("unused")
-        public SchemaLabel schemaLabel() {
-            return this.schemaLabel;
-        }
-
-        public Set<IndexLabel> indexLabels() {
-            return Collections.unmodifiableSet(this.indexLabels);
-        }
-
-        public IndexQueries constructIndexQueries(ConditionQuery query) {
-            // Condition query => Index Queries
-            if (this.indexLabels().size() == 1) {
-                /*
-                 * Query by single index or composite index
-                 */
-                IndexLabel il = this.indexLabels().iterator().next();
-                ConditionQuery indexQuery = constructQuery(query, il);
-                assert indexQuery != null;
-                return IndexQueries.of(il, indexQuery);
-            } else {
-                /*
-                 * Query by joint indexes
-                 */
-                IndexQueries queries = buildJointIndexesQueries(query, this);
-                assert !queries.isEmpty();
-                return queries;
-            }
-        }
-
-        public boolean containsSearchIndex() {
-            for (IndexLabel il : this.indexLabels) {
-                if (il.indexType().isSearch()) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        @Override
-        public int hashCode() {
-            return this.indexLabels.hashCode();
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof MatchedIndex)) {
-                return false;
-            }
-            Set<IndexLabel> indexLabels = ((MatchedIndex) other).indexLabels;
-            return Objects.equals(this.indexLabels, indexLabels);
-        }
+        IndexQueries queries = buildJointIndexesQueries(query, index);
+        assert !queries.isEmpty();
+        return queries;
     }
 
     private static class IndexQueries
@@ -1832,7 +1605,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
                 AbstractSerializer serializer = this.tx.serializer;
                 for (Object value : indexValues) {
-                    HugeIndex index = new HugeIndex(this.graph(), indexLabel);
+                    Index index = new Index(this.graph(), indexLabel);
                     index.elementIds(element.id());
                     index.fieldValues(value);
                     this.tx.doEliminate(serializer.writeIndex(index));
@@ -1947,7 +1720,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             if (elem == null) {
                 return false;
             }
-            return query.test(elem);
+            return query.test(elem.element());
         }
 
         private boolean deletedByError(HugeElement element,

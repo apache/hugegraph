@@ -19,7 +19,7 @@ package org.apache.hugegraph.backend.store.rocksdbsst;
 
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBSessions;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBStore;

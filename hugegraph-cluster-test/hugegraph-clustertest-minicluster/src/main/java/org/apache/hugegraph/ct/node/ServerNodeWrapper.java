@@ -82,7 +82,7 @@ public class ServerNodeWrapper extends AbstractNodeWrapper {
                     LOCALHOST, this.gremlinPort);
         }
         this.fileNames = new ArrayList<>(List.of(EMPTY_SAMPLE_GROOVY_FILE, EXAMPLE_GROOVY_FILE));
-        this.startLine = "INFO: [HttpServer] Started.";
+        this.startLine = "Channel started at port ";
         createNodeDir(Paths.get(SERVER_PACKAGE_PATH), getNodePath());
         createLogDir();
     }

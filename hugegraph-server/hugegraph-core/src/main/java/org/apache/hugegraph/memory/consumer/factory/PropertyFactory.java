@@ -24,7 +24,7 @@ import org.apache.hugegraph.memory.MemoryManager;
 import org.apache.hugegraph.memory.consumer.impl.property.HugeEdgePropertyOffHeap;
 import org.apache.hugegraph.memory.consumer.impl.property.HugeVertexPropertyOffHeap;
 import org.apache.hugegraph.memory.pool.impl.TaskMemoryPool;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeVertexProperty;

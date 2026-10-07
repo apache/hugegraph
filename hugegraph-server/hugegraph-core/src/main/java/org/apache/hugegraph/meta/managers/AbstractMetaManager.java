@@ -26,11 +26,11 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.auth.SchemaDefine;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.lock.LockResult;
-import org.apache.hugegraph.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.util.JsonUtil;
 
 public class AbstractMetaManager {

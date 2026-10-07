@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.node.grpc.query.stages;
 
+import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.serializer.DirectBinarySerializer;
 import org.apache.hugegraph.store.node.grpc.query.QueryStage;
 import org.apache.hugegraph.store.node.grpc.query.model.PipelineResult;
@@ -31,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 public class TtlCheckStage implements QueryStage {
 
     private boolean isVertex;
+    private HugeGraphSupplier graph;
 
     private final DirectBinarySerializer serializer = new DirectBinarySerializer();
     private long now;
@@ -38,6 +40,7 @@ public class TtlCheckStage implements QueryStage {
     @Override
     public void init(Object... objects) {
         this.isVertex = (boolean) objects[0];
+        this.graph = (HugeGraphSupplier) objects[1];
         now = System.currentTimeMillis();
     }
 
@@ -46,8 +49,8 @@ public class TtlCheckStage implements QueryStage {
         if (result.getResultType() == PipelineResultType.BACKEND_COLUMN) {
             var col = result.getColumn();
             try {
-                var element = isVertex ? serializer.parseVertex(col.name, col.value) :
-                              serializer.parseEdge(col.name, col.value);
+                var element = isVertex ? serializer.parseSchemaVertex(this.graph, col.name, col.value) :
+                              serializer.parseSchemaEdge(this.graph, col.name, col.value);
                 if (element.expiredTime() > 0 && element.expiredTime() < now) {
                     return null;
                 }

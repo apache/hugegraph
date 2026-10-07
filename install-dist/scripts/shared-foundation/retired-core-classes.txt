@@ -1,0 +1,96 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements. See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License. You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+# Shared owners removed from core. Do not reintroduce these FQCNs in core.
+org.apache.hugegraph.HugeException
+org.apache.hugegraph.analyzer.Analyzer
+org.apache.hugegraph.analyzer.AnalyzerFactory
+org.apache.hugegraph.analyzer.AnsjAnalyzer
+org.apache.hugegraph.analyzer.HanLPAnalyzer
+org.apache.hugegraph.analyzer.IKAnalyzer
+org.apache.hugegraph.analyzer.JcsegAnalyzer
+org.apache.hugegraph.analyzer.JiebaAnalyzer
+org.apache.hugegraph.analyzer.MMSeg4JAnalyzer
+org.apache.hugegraph.analyzer.SmartCNAnalyzer
+org.apache.hugegraph.auth.AuthConstant
+org.apache.hugegraph.auth.TokenGenerator
+org.apache.hugegraph.backend.BackendException
+org.apache.hugegraph.backend.id.EdgeId
+org.apache.hugegraph.backend.id.Id
+org.apache.hugegraph.backend.id.IdGenerator
+org.apache.hugegraph.backend.id.IdUtil
+org.apache.hugegraph.backend.id.SplicingIdGenerator
+org.apache.hugegraph.backend.query.Aggregate
+org.apache.hugegraph.backend.query.BatchConditionQuery
+org.apache.hugegraph.backend.query.Condition
+org.apache.hugegraph.backend.query.ConditionQuery
+org.apache.hugegraph.backend.query.IdPrefixQuery
+org.apache.hugegraph.backend.query.IdQuery
+org.apache.hugegraph.backend.query.IdRangeQuery
+org.apache.hugegraph.backend.query.Query
+org.apache.hugegraph.backend.query.serializer.AbstractSerializerAdapter
+org.apache.hugegraph.backend.query.serializer.QueryAdapter
+org.apache.hugegraph.backend.query.serializer.QueryIdAdapter
+org.apache.hugegraph.backend.serializer.BytesBuffer
+org.apache.hugegraph.backend.store.BackendEntry$BackendColumn
+org.apache.hugegraph.backend.store.Shard
+org.apache.hugegraph.backend.tx.GraphIndexTransaction$MatchedIndex
+org.apache.hugegraph.exception.ErrorCodeProvider
+org.apache.hugegraph.exception.LimitExceedException
+org.apache.hugegraph.exception.NotAllowException
+org.apache.hugegraph.exception.NotFoundException
+org.apache.hugegraph.exception.NotSupportException
+org.apache.hugegraph.rpc.RpcServiceConfig4Client
+org.apache.hugegraph.rpc.RpcServiceConfig4Server
+org.apache.hugegraph.schema.EdgeLabel
+org.apache.hugegraph.schema.IndexLabel
+org.apache.hugegraph.schema.PropertyKey
+org.apache.hugegraph.schema.SchemaElement
+org.apache.hugegraph.schema.SchemaLabel
+org.apache.hugegraph.schema.Userdata
+org.apache.hugegraph.schema.VertexLabel
+org.apache.hugegraph.schema.builder.SchemaBuilder
+org.apache.hugegraph.structure.GraphType
+org.apache.hugegraph.structure.HugeIndex
+org.apache.hugegraph.type.HugeType
+org.apache.hugegraph.type.Idfiable
+org.apache.hugegraph.type.Indexable
+org.apache.hugegraph.type.Nameable
+org.apache.hugegraph.type.Propertiable
+org.apache.hugegraph.type.Typeable
+org.apache.hugegraph.type.define.Action
+org.apache.hugegraph.type.define.AggregateType
+org.apache.hugegraph.type.define.Cardinality
+org.apache.hugegraph.type.define.CollectionType
+org.apache.hugegraph.type.define.DataType
+org.apache.hugegraph.type.define.Directions
+org.apache.hugegraph.type.define.EdgeLabelType
+org.apache.hugegraph.type.define.Frequency
+org.apache.hugegraph.type.define.HugeKeys
+org.apache.hugegraph.type.define.IdStrategy
+org.apache.hugegraph.type.define.IndexType
+org.apache.hugegraph.type.define.SchemaStatus
+org.apache.hugegraph.type.define.SerialEnum
+org.apache.hugegraph.type.define.WriteType
+org.apache.hugegraph.util.Blob
+org.apache.hugegraph.util.KryoUtil
+org.apache.hugegraph.util.LZ4Util
+org.apache.hugegraph.util.StringEncoding
+org.apache.hugegraph.util.collection.CollectionFactory
+org.apache.hugegraph.util.collection.IdSet
+org.apache.hugegraph.util.collection.IntIterator
+org.apache.hugegraph.util.collection.IntMap
+org.apache.hugegraph.util.collection.IntSet

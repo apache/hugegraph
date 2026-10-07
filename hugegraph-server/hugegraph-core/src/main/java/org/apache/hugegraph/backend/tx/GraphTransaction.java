@@ -33,24 +33,24 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.SplicingIdGenerator;
 import org.apache.hugegraph.backend.page.IdHolderList;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.QueryList;
-import org.apache.hugegraph.backend.query.Aggregate;
-import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.query.Aggregate;
+import org.apache.hugegraph.query.Aggregate.AggregateFunc;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQueryFlatten;
-import org.apache.hugegraph.backend.query.IdQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.IdQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryBatch;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
@@ -69,17 +69,17 @@ import org.apache.hugegraph.iterator.LimitIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.job.system.DeleteExpiredJob;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.SchemaLabel;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeFeatures.HugeVertexFeatures;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
@@ -547,7 +547,7 @@ public class GraphTransaction extends IndexableTransaction {
     public Number queryNumber(Query query) {
         boolean isConditionQuery = query instanceof ConditionQuery;
         boolean hasUpdate = this.hasUpdate();
-        Aggregate aggregate = query.aggregateNotNull();
+        Aggregate<Number> aggregate = query.aggregateNotNull();
 
         if (hasUpdate && (query.resultType() == HugeType.VERTEX ||
                           query.resultType() == HugeType.EDGE)) {
@@ -1951,7 +1951,7 @@ public class GraphTransaction extends IndexableTransaction {
             }
         }
 
-        if (!context.conditionFilterRequired() || cq.test(elem, context.resultsFilter())) {
+        if (!context.conditionFilterRequired() || cq.test(elem.element(), context.resultsFilter())) {
             if (cq.existLeftIndex(elem.id())) {
                 /*
                  * Both have correct and left index, wo should return true
@@ -2031,7 +2031,7 @@ public class GraphTransaction extends IndexableTransaction {
                 return null;
             }
             // Filter vertices matched conditions
-            return q.test(v) ? v : null;
+            return q.test(v.element()) ? v : null;
         };
         vertices = this.joinTxRecords(query, vertices, matchTxFunc,
                                       this.addedVertices, this.removedVertices,
@@ -2049,7 +2049,7 @@ public class GraphTransaction extends IndexableTransaction {
                 return null;
             }
             // Filter edges matched conditions
-            return q.test(e) ? e : q.test(e = e.switchOwner()) ? e : null;
+            return q.test(e.element()) ? e : q.test((e = e.switchOwner()).element()) ? e : null;
         };
         edges = this.joinTxRecords(query, edges, matchTxFunc,
                                    this.addedEdges, this.removedEdges,
@@ -2063,7 +2063,7 @@ public class GraphTransaction extends IndexableTransaction {
                     (this.addedEdges.containsKey(edge.id()) ||
                      this.updatedEdges.containsKey(edge.id()))) {
                     HugeEdge opposite = edge.switchOwner();
-                    if (query.test(opposite)) {
+                    if (query.test(opposite.element())) {
                         return ImmutableList.of(edge, opposite).iterator();
                     }
                 }
@@ -2214,7 +2214,7 @@ public class GraphTransaction extends IndexableTransaction {
         this.indexTx.updateIndex(ilId, element, removed);
     }
 
-    public void removeIndex(HugeIndex index) {
+    public void removeIndex(Index index) {
         // TODO: use event to replace direct call
         this.checkOwnerThread();
 

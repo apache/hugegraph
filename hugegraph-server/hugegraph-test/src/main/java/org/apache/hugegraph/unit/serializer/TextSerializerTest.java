@@ -21,12 +21,12 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.Set;
 
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.serializer.TextSerializer;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.config.HugeConfig;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.Userdata;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;

@@ -20,7 +20,7 @@ package org.apache.hugegraph.backend.serializer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.config.HugeConfig;
 
 public class SerializerFactory {

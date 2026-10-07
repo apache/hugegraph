@@ -30,7 +30,7 @@ import org.apache.hugegraph.io.HugeGraphIoRegistry;
 import org.apache.hugegraph.io.HugeGraphSONModule;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.testutil.Whitebox;

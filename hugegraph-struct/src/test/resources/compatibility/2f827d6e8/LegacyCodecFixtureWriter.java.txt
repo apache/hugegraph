@@ -1,0 +1,181 @@
+/* Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Map;
+import java.util.UUID;
+import org.apache.hugegraph.backend.id.EdgeId;
+import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.backend.serializer.BinaryBackendEntry.BinaryId;
+import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.Cardinality;
+import org.apache.hugegraph.type.define.Directions;
+import org.apache.hugegraph.type.define.HugeKeys;
+
+public class LegacyCodecFixtureWriter {
+    private static final String LICENSE =
+        "Licensed to the Apache Software Foundation (ASF) under one or more\n" +
+        "contributor license agreements. See the NOTICE file distributed with\n" +
+        "this work for additional information regarding copyright ownership.\n" +
+        "The ASF licenses this file to You under the Apache License, Version 2.0\n" +
+        "(the \"License\"); you may not use this file except in compliance with\n" +
+        "the License. You may obtain a copy of the License at\n\n" +
+        "    http://www.apache.org/licenses/LICENSE-2.0\n\n" +
+        "Unless required by applicable law or agreed to in writing, software\n" +
+        "distributed under the License is distributed on an \"AS IS\" BASIS,\n" +
+        "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n" +
+        "See the License for the specific language governing permissions and\n" +
+        "limitations under the License.\n";
+    private static final Map<String, String> HEX = new LinkedHashMap<>();
+
+    public static void main(String[] args) throws Exception {
+        Path output = Path.of(args[0]);
+        Files.createDirectories(output);
+        System.out.println("Writer loaded from " + BytesBuffer.class.getProtectionDomain()
+                                                               .getCodeSource().getLocation());
+        long[] values = {Long.MIN_VALUE, -16385L, -16384L, -129L, -128L, -1L,
+                         0L, 1L, 127L, 128L, 16383L, 16384L, Long.MAX_VALUE};
+        for (long value : values) {
+            put("id.long." + value, BytesBuffer.allocate(64).writeId(IdGenerator.of(value)));
+            put("vlong." + value, BytesBuffer.allocate(64).writeVLong(value));
+        }
+        int[] ints = {Integer.MIN_VALUE, -129, -1, 0, 127, 128, 16383, 16384,
+                      Integer.MAX_VALUE};
+        for (int value : ints) {
+            put("vint." + value, BytesBuffer.allocate(64).writeVInt(value));
+        }
+        put("id.text", BytesBuffer.allocate(64).writeId(IdGenerator.of("alice")));
+        put("id.unicode", BytesBuffer.allocate(64).writeId(IdGenerator.of("顶点😀")));
+        for (int length : new int[]{1, 64, 65, 256, 257, 16384}) {
+            put("id.text.length." + length,
+                BytesBuffer.allocate(64).writeId(IdGenerator.of("x".repeat(length))));
+        }
+        put("id.uuid", BytesBuffer.allocate(64).writeId(IdGenerator.of(
+            UUID.fromString("01234567-89ab-cdef-0123-456789abcdef"))));
+        Id edge = new EdgeId(IdGenerator.of("alice"), Directions.OUT, IdGenerator.of(3L),
+                             IdGenerator.of(4L), "2026!x", IdGenerator.of(99L));
+        put("edge.out", BytesBuffer.allocate(128).writeEdgeId(edge));
+        edge = new EdgeId(IdGenerator.of(99L), Directions.IN, IdGenerator.of(3L),
+                          IdGenerator.of(4L), "2026!x", IdGenerator.of("alice"));
+        put("edge.in", BytesBuffer.allocate(128).writeEdgeId(edge));
+        scalar("BOOLEAN", DataType.BOOLEAN, true);
+        scalar("BYTE", DataType.BYTE, (byte) -7);
+        scalar("INT", DataType.INT, -123456);
+        scalar("LONG", DataType.LONG, Long.MIN_VALUE);
+        scalar("FLOAT", DataType.FLOAT, 1.25f);
+        scalar("DOUBLE", DataType.DOUBLE, -123.125d);
+        scalar("DATE", DataType.DATE, new Date(1609459200123L));
+        scalar("TEXT", DataType.TEXT, "属性😀\u0000");
+        scalar("BLOB", DataType.BLOB, new byte[]{0, -1, 1, 127, -128});
+        scalar("UUID", DataType.UUID,
+               UUID.fromString("01234567-89ab-cdef-0123-456789abcdef"));
+        scalar("OBJECT", DataType.OBJECT, new ArrayList<>(Arrays.asList("legacy", 7, true)));
+        scalar("UNKNOWN", DataType.UNKNOWN, "legacy-object");
+        scalar("OBJECT_UNSUPPORTED_COLLECTION", DataType.OBJECT, Arrays.asList("legacy", 7, true));
+        PropertyKey propertyKey = new PropertyKey(null, IdGenerator.of(101L), "legacy");
+        propertyKey.dataType(DataType.INT);
+        schemaProperty("single", propertyKey, Cardinality.SINGLE, 7);
+        schemaProperty("list", propertyKey, Cardinality.LIST, Arrays.asList(7, -1, 7));
+        schemaProperty("set", propertyKey, Cardinality.SET,
+                       new LinkedHashSet<>(Arrays.asList(7, -1)));
+        byte[] stringIndex = "label!alice".getBytes(StandardCharsets.UTF_8);
+        put("index.string", BytesBuffer.allocate(64).writeIndexId(
+            new BinaryId(stringIndex, null), HugeType.SECONDARY_INDEX));
+        byte[] intIndex = {(byte) 160, 0, 0, 0, 3, (byte) 128, 0, 0, 7};
+        put("index.int", BytesBuffer.allocate(64).writeIndexId(
+            new BinaryId(intIndex, null), HugeType.RANGE_INT_INDEX));
+        byte[] longIndex = {(byte) 162, 0, 0, 0, 3, (byte) 128, 0, 0, 0, 0, 0, 0, 7};
+        put("index.long", BytesBuffer.allocate(64).writeIndexId(
+            new BinaryId(longIndex, null), HugeType.RANGE_LONG_INDEX));
+        StringBuilder encoded = new StringBuilder("# " + LICENSE.replace("\n", "\n# ") + "\n");
+        for (Map.Entry<String, String> fixture : HEX.entrySet()) {
+            String line = fixture.getKey() + "=" + fixture.getValue();
+            for (int start = 0; start < line.length(); start += 100) {
+                int end = Math.min(start + 100, line.length());
+                encoded.append(line, start, end);
+                if (end < line.length()) {
+                    encoded.append('\\');
+                }
+                encoded.append('\n');
+            }
+        }
+        Files.writeString(output.resolve("core-codecs.hex"), encoded.toString().replaceAll("(?m)[ \t]+$", ""),
+                          StandardCharsets.UTF_8);
+
+        ConditionQuery query = new ConditionQuery(HugeType.VERTEX);
+        query.eq(HugeKeys.LABEL, IdGenerator.of(3L));
+        query.query(Condition.gte(IdGenerator.of(11L), 18));
+        query.query(Condition.in(IdGenerator.of(12L), Arrays.asList(20L, 30L)));
+        query.query(Condition.eq(IdGenerator.of(13L), new Date(1609459200123L)));
+        query.query(Condition.or(Condition.eq(IdGenerator.of(14L), "alice"),
+                                 Condition.eq(IdGenerator.of(14L), "bob")));
+        query.offset(7);
+        query.limit(19);
+        writeQuery(output, "core-query.json.txt", query);
+        ConditionQuery edgeQuery = new ConditionQuery(HugeType.EDGE);
+        edgeQuery.eq(HugeKeys.OWNER_VERTEX, IdGenerator.of("alice"));
+        edgeQuery.eq(HugeKeys.DIRECTION, Directions.OUT);
+        edgeQuery.eq(HugeKeys.LABEL, IdGenerator.of(3L));
+        edgeQuery.page("AQIDBA==");
+        edgeQuery.limit(5);
+        writeQuery(output, "core-edge-query.json.txt", edgeQuery);
+        ConditionQuery countQuery = new ConditionQuery(HugeType.VERTEX);
+        countQuery.aggregate(AggregateFunc.COUNT, null);
+        writeQuery(output, "core-count-query.json.txt", countQuery);
+        ConditionQuery avgQuery = new ConditionQuery(HugeType.VERTEX);
+        avgQuery.eq(HugeKeys.LABEL, IdGenerator.of(3L));
+        avgQuery.aggregate(AggregateFunc.AVG, "age");
+        writeQuery(output, "core-avg-query.json.txt", avgQuery);
+        System.out.println("Generated " + HEX.size() + " byte fixtures and 4 query fixtures");
+    }
+
+    private static void writeQuery(Path output, String name, ConditionQuery query)
+            throws Exception {
+        String prolog = "/*\n" + LICENSE + "*/\n";
+        String payload = new String(query.bytes(), StandardCharsets.UTF_8);
+        Files.writeString(output.resolve(name), prolog + payload + "\n", StandardCharsets.UTF_8);
+    }
+
+    private static void schemaProperty(String name, PropertyKey key,
+                                       Cardinality cardinality, Object value) {
+        key.cardinality(cardinality);
+        put("schema." + name, BytesBuffer.allocate(64).writeProperty(key, value));
+    }
+
+    private static void scalar(String name, DataType type, Object value) {
+        BytesBuffer buffer = BytesBuffer.allocate(128);
+        buffer.writeProperty(type, value);
+        put("property." + name, buffer);
+    }
+
+    private static void put(String name, BytesBuffer buffer) {
+        StringBuilder hex = new StringBuilder();
+        for (byte value : buffer.bytes()) {
+            hex.append(String.format("%02x", value & 0xff));
+        }
+        HEX.put(name, hex.toString());
+    }
+}

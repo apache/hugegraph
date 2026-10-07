@@ -24,8 +24,8 @@ import java.util.Set;
 
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.define.Directions;

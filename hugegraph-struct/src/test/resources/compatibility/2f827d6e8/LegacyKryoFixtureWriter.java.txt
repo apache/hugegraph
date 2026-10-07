@@ -1,0 +1,189 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.lang.reflect.Array;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import org.apache.hugegraph.backend.id.EdgeId;
+import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.Aggregate;
+import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.serializer.BinaryBackendEntry.BinaryId;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.backend.store.Shard;
+import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.schema.IndexLabel;
+import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.structure.GraphType;
+import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.Directions;
+
+public class LegacyKryoFixtureWriter {
+    private static final Map<String, String> OUTPUT = new LinkedHashMap<>();
+
+    public static void main(String[] args) throws Exception {
+        System.out.println("Kryo fixture writer loaded from " + BytesBuffer.class
+            .getProtectionDomain().getCodeSource().getLocation());
+        Id longId = IdGenerator.of(7L);
+        Id stringId = IdGenerator.of("legacy-id");
+        Id uuidId = IdGenerator.of(UUID.fromString("01234567-89ab-cdef-0123-456789abcdef"));
+        Id edgeId = new EdgeId(longId, Directions.OUT, IdGenerator.of(3L),
+                               IdGenerator.of(4L), "sort", stringId);
+        Object[] instances = {longId, stringId, uuidId, edgeId,
+                              new BinaryId(new byte[]{1, 2, 3}, longId),
+                              new Shard("start", "end", 12L),
+                              new PropertyKey(null, IdGenerator.of(11L), "age"),
+                              new VertexLabel(null, IdGenerator.of(12L), "person"),
+                              new EdgeLabel(null, IdGenerator.of(13L), "knows"),
+                              new IndexLabel(null, IdGenerator.of(14L), "by-age")};
+        String[] names = {"long_id", "string_id", "uuid_id", "edge_id", "binary_id", "shard",
+                           "property_key", "vertex_label", "edge_label", "index_label"};
+        for (int i = 0; i < names.length; i++) {
+            capture(names[i], instances[i]);
+        }
+        capture("aggregate_func", Aggregate.AggregateFunc.AVG);
+        capture("relation_type", Condition.RelationType.GTE);
+        capture("condition_type", Condition.ConditionType.OR);
+        capture("query_order", Query.Order.DESC);
+        capture("query_order_type", Query.OrderType.ORDER_STRICT);
+        capture("optimized_type", ConditionQuery.OptimizedType.INDEX_FILTER);
+        capture("id_type", Id.IdType.UUID);
+        capture("graph_type_class", GraphType.class);
+        capture("id_array", new Id[]{null});
+        capture("id_matrix", new Id[][]{new Id[]{null}, new Id[0]});
+        capture("shard_array", new Shard[]{null});
+        capture("schema_array", new PropertyKey[]{null});
+        Userdata userdata = new Userdata();
+        userdata.put("tag", "legacy");
+        userdata.put("count", 7);
+        userdata.put(Userdata.CREATE_TIME, new Date(1609459200123L));
+        capture("userdata", userdata);
+        BackendColumn column = BackendColumn.of(new byte[]{1, 2}, new byte[]{3, 4});
+        capture("backend_column", column);
+        capture("backend_column_array", new BackendColumn[]{column, null});
+        capture("backend_column_class", BackendColumn.class);
+        ArrayList<Class<?>> classes = new ArrayList<>();
+        for (Object instance : instances) {
+            classes.add(instance.getClass());
+        }
+        capture("class_list", classes);
+        String[] contracts = {"org.apache.hugegraph.type.Nameable",
+                              "org.apache.hugegraph.type.Typeable",
+                              "org.apache.hugegraph.type.Indexable",
+                              "org.apache.hugegraph.type.Propertiable",
+                              "org.apache.hugegraph.backend.id.IdUtil",
+                              "org.apache.hugegraph.backend.id.SplicingIdGenerator",
+                              "org.apache.hugegraph.schema.builder.SchemaBuilder",
+                              "org.apache.hugegraph.backend.query.serializer.AbstractSerializerAdapter",
+                              "org.apache.hugegraph.backend.query.serializer.QueryAdapter",
+                              "org.apache.hugegraph.backend.query.serializer.QueryIdAdapter"};
+        ArrayList<Class<?>> contractClasses = new ArrayList<>();
+        for (String contract : contracts) {
+            contractClasses.add(Class.forName(contract));
+        }
+        capture("contract_classes", contractClasses);
+        String[] schemaNames = {"org.apache.hugegraph.schema.SchemaElement$TaskWithSchema",
+                                "org.apache.hugegraph.schema.PropertyKey$P",
+                                "org.apache.hugegraph.schema.VertexLabel$P",
+                                "org.apache.hugegraph.schema.EdgeLabel$P",
+                                "org.apache.hugegraph.schema.IndexLabel$P",
+                                "org.apache.hugegraph.schema.SchemaElement$P",
+                                "org.apache.hugegraph.schema.PropertyKey$Builder",
+                                "org.apache.hugegraph.schema.VertexLabel$Builder",
+                                "org.apache.hugegraph.schema.EdgeLabel$Builder",
+                                "org.apache.hugegraph.schema.IndexLabel$Builder"};
+        ArrayList<Class<?>> schemaClasses = new ArrayList<>();
+        ArrayList<Object> schemaArrays = new ArrayList<>();
+        for (String schemaName : schemaNames) {
+            Class<?> schemaClass = Class.forName(schemaName);
+            schemaClasses.add(schemaClass);
+            schemaArrays.add(Array.newInstance(schemaClass, 1));
+        }
+        capture("schema_nested_classes", schemaClasses);
+        capture("schema_nested_arrays", schemaArrays);
+        capture("index_classes", new ArrayList<>(Arrays.asList(
+            org.apache.hugegraph.structure.HugeIndex.class,
+            org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime.class)));
+        capture("index_array", new org.apache.hugegraph.structure.HugeIndex[]{null});
+        capture("expiry_id_array", new org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime[]{null});
+        capture("expiry_id", new org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime(longId,
+                                                                                           1609459260000L));
+        Map<String, Object> nested = new LinkedHashMap<>();
+        nested.put("classes", classes);
+        nested.put("metadata", userdata);
+        nested.put("ids", new Id[][]{new Id[]{null}, new Id[0]});
+        nested.put("predicate", Condition.RelationType.GTE);
+        nested.put("column", column);
+        capture("nested", nested);
+        capture("unsupported_arrays_list", Arrays.asList("legacy", 7, true));
+        String source = Files.readString(Path.of(args[1]), StandardCharsets.UTF_8);
+        String license = source.substring(0, source.indexOf("*/") + 2);
+        StringBuilder text = new StringBuilder(license.replace("/*", "#")
+            .replace("*/", "#").replace(" *", "#")).append('\n');
+        OUTPUT.forEach((key, value) -> append(text, key + "=" + value));
+        Files.writeString(Path.of(args[0]).resolve("core-kryo-objects.properties"), text,
+                          StandardCharsets.UTF_8);
+    }
+
+    private static void capture(String name, Object value) {
+        BytesBuffer buffer = BytesBuffer.allocate(128);
+        buffer.writeProperty(DataType.OBJECT, value);
+        OUTPUT.put(name + ".hex", hex(buffer.bytes()));
+        try {
+            Object decoded = BytesBuffer.wrap(buffer.bytes()).readProperty(DataType.OBJECT);
+            OUTPUT.put(name + ".baseline_readable", "true");
+            OUTPUT.put(name + ".baseline_type", decoded.getClass().getName());
+            System.out.println(name + ": baseline readable " + decoded.getClass().getName());
+        } catch (RuntimeException error) {
+            OUTPUT.put(name + ".baseline_readable", "false");
+            OUTPUT.put(name + ".baseline_error", error.getClass().getName() + ": " +
+                                                    error.getMessage().replace('\n', ' '));
+            System.out.println(name + ": baseline fails " + error.getMessage().split("\\n")[0]);
+        }
+    }
+
+    private static void append(StringBuilder output, String line) {
+        for (int start = 0; start < line.length(); start += 100) {
+            int end = Math.min(start + 100, line.length());
+            output.append(line, start, end);
+            if (end < line.length()) {
+                output.append('\\');
+            }
+            output.append('\n');
+        }
+    }
+
+    private static String hex(byte[] bytes) {
+        StringBuilder text = new StringBuilder();
+        for (byte value : bytes) {
+            text.append(String.format("%02x", value & 0xff));
+        }
+        return text.toString();
+    }
+}

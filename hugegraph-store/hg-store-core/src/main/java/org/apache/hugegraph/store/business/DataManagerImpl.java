@@ -51,6 +51,7 @@ import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.term.Bits;
 import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.structure.BaseEdge;
 import org.apache.hugegraph.structure.BaseElement;
 import org.apache.hugegraph.structure.BaseVertex;
@@ -292,17 +293,21 @@ public class DataManagerImpl implements DataManager {
 
                 try {
                     if (param.getIsVertexLabel()) {
-                        element = serializer.parseVertex(graphSupplier, column, null);
+                        element = serializer.parseSchemaVertex(graphSupplier, column, null);
                     } else {
-                        element = serializer.parseEdge(graphSupplier, column, null, true);
+                        element = serializer.parseSchemaEdge(graphSupplier, column, null, true);
                     }
                 } catch (Exception e) {
                     log.error("parse element failed, graph:{}, key:{}", graphName, e);
                     continue;
                 }
 
-                // filter by label id
-                if (!element.schemaLabel().id().equals(labelId)) {
+                boolean matchesLabel = element.schemaLabel().id().equals(labelId);
+                if (!matchesLabel && element instanceof BaseEdge) {
+                    EdgeLabel edgeLabel = (EdgeLabel) element.schemaLabel();
+                    matchesLabel = edgeLabel.hasFather() && labelId.equals(edgeLabel.fatherId());
+                }
+                if (!matchesLabel) {
                     continue;
                 }
 
@@ -327,7 +332,7 @@ public class DataManagerImpl implements DataManager {
                 }
 
                 for (var index : array) {
-                    var col = serializer.writeIndex(index);
+                    var col = serializer.writeSchemaIndex(index);
                     int code = PartitionUtils.calcHashcode(KeyUtil.getOwnerId(index.elementId()));
                     // same partition id with element
                     batch.add(partitionId, BatchPutRequest.KV.of(INDEX_TABLE, code, col.name,

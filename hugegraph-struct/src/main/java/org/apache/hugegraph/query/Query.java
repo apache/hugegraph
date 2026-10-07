@@ -81,8 +81,7 @@ public class Query implements Cloneable {
 
     private List<Id> selects = InsertionOrderUtil.newList();
 
-    @Deprecated
-    private transient Aggregate aggregate;
+    private Aggregate<Number> aggregate;
 
     private Query originQuery;
 
@@ -96,10 +95,6 @@ public class Query implements Cloneable {
     public Query() {
 
     }
-
-    private static final ThreadLocal<Long> capacityContext = new ThreadLocal<>();
-
-    private static int indexStringValueLength = 20;
 
     public Query(HugeType resultType) {
         this(resultType, null);
@@ -271,12 +266,12 @@ public class Query implements Cloneable {
         if (fromIndex < 0L) {
             // Skipping offset is overhead, no need to skip
             fromIndex = 0L;
-        } else if (fromIndex > 0L) {
+        }
+        // An index holder yields ids in batches, only count this batch's ids
+        fromIndex = Math.min(fromIndex, elems.size());
+        if (fromIndex > 0L) {
             this.goOffset(fromIndex);
         }
-        E.checkArgument(fromIndex <= Integer.MAX_VALUE,
-                        "Offset must be <= 0x7fffffff, but got '%s'",
-                        fromIndex);
 
         if (fromIndex >= elems.size()) {
             return ImmutableSet.of();
@@ -447,21 +442,21 @@ public class Query implements Cloneable {
         }
     }
 
-    public Aggregate aggregate() {
+    public Aggregate<Number> aggregate() {
         return this.aggregate;
     }
 
-    public Aggregate aggregateNotNull() {
+    public Aggregate<Number> aggregateNotNull() {
         E.checkArgument(this.aggregate != null,
                         "The aggregate must be set for number query");
         return this.aggregate;
     }
 
-    public void aggregate(AggregateFuncDefine func, String property) {
-        this.aggregate = new Aggregate(func, property);
+    public void aggregate(AggregateFuncDefine<Number> func, String property) {
+        this.aggregate = new Aggregate<>(func, property);
     }
 
-    public void aggregate(Aggregate aggregate) {
+    public void aggregate(Aggregate<Number> aggregate) {
         this.aggregate = aggregate;
     }
 
@@ -569,7 +564,6 @@ public class Query implements Cloneable {
                    Objects.hashCode(this.page) ^
                    this.ids().hashCode() ^
                    this.conditions().hashCode() ^
-                   this.selects().hashCode() ^
                    Boolean.hashCode(this.withProperties);
         if (this.resultType == null) {
             return hash;
@@ -665,16 +659,9 @@ public class Query implements Cloneable {
         return false;
     }
 
-    public static int getIndexStringValueLength() {
-        return indexStringValueLength;
-    }
 
-    public static void setIndexStringValueLength(int indexStringValueLengthTmp) {
-        if (indexStringValueLengthTmp <= 1) {
-            indexStringValueLengthTmp = 20;
-        }
-        indexStringValueLength = indexStringValueLengthTmp;
-    }
+
+
 
     public void select(Id id) {
         if (!this.selects.contains(id)) {

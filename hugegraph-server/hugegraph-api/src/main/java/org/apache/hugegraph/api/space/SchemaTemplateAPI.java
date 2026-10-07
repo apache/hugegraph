@@ -23,7 +23,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.api.API;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.api.filter.StatusFilter;

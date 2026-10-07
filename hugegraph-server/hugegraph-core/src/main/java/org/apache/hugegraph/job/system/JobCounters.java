@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 
 public class JobCounters {
 
@@ -43,7 +43,7 @@ public class JobCounters {
 
         private final AtomicInteger jobs;
         private Set<HugeElement> elements;
-        private Set<HugeIndex> indexes;
+        private Set<Index> indexes;
         private final int batchSize;
 
         public JobCounter(int batchSize) {
@@ -69,7 +69,7 @@ public class JobCounters {
             return this.elements;
         }
 
-        public Set<HugeIndex> indexes() {
+        public Set<Index> indexes() {
             return this.indexes;
         }
 
@@ -77,7 +77,7 @@ public class JobCounters {
             if (object instanceof HugeElement) {
                 this.elements = ConcurrentHashMap.newKeySet();
             } else {
-                assert object instanceof HugeIndex;
+                assert object instanceof Index;
                 this.indexes = ConcurrentHashMap.newKeySet();
             }
         }
@@ -85,7 +85,7 @@ public class JobCounters {
         public boolean addAndTriggerDelete(Object object) {
             return object instanceof HugeElement ?
                    addElementAndTriggerDelete((HugeElement) object) :
-                   addIndexAndTriggerDelete((HugeIndex) object);
+                   addIndexAndTriggerDelete((Index) object);
         }
 
         /**
@@ -108,7 +108,7 @@ public class JobCounters {
          * @param index
          * @return true if we should create a new delete job, false otherwise
          */
-        public boolean addIndexAndTriggerDelete(HugeIndex index) {
+        public boolean addIndexAndTriggerDelete(Index index) {
             if (this.indexes.size() >= this.batchSize) {
                 return true;
             }

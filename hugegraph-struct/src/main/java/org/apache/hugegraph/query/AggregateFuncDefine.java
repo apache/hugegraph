@@ -26,7 +26,8 @@ import java.util.Iterator;
  *
  * @param <P>
  */
-public interface AggregateFuncDefine<P extends Object> {
+public interface AggregateFuncDefine<P> {
+
     String string();
 
     P defaultValue();

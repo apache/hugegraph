@@ -37,7 +37,7 @@ scriptEngines: {
       org.apache.tinkerpop.gremlin.jsr223.ImportGremlinPlugin: {
         classImports: [
           java.lang.Math,
-          org.apache.hugegraph.backend.id.IdGenerator,
+          org.apache.hugegraph.id.IdGenerator,
           org.apache.hugegraph.type.define.Directions,
           org.apache.hugegraph.type.define.NodeRole,
           org.apache.hugegraph.masterelection.GlobalMasterInfo,

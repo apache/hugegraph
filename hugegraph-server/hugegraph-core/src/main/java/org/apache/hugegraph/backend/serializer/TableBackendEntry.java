@@ -27,7 +27,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.commons.lang3.NotImplementedException;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
@@ -252,17 +253,17 @@ public class TableBackendEntry implements BackendEntry {
     }
 
     @Override
-    public Collection<BackendEntry.BackendColumn> columns() {
+    public Collection<BackendColumn> columns() {
         throw new NotImplementedException("Not supported by table backend");
     }
 
     @Override
-    public void columns(Collection<BackendEntry.BackendColumn> bytesColumns) {
+    public void columns(Collection<BackendColumn> bytesColumns) {
         throw new NotImplementedException("Not supported by table backend");
     }
 
     @Override
-    public void columns(BackendEntry.BackendColumn bytesColumn) {
+    public void columns(BackendColumn bytesColumn) {
         throw new NotImplementedException("Not supported by table backend");
     }
 

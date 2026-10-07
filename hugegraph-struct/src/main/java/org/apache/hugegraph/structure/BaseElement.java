@@ -28,6 +28,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.apache.hugegraph.id.Id;
@@ -41,6 +44,7 @@ import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.collection.CollectionFactory;
 import org.eclipse.collections.api.map.primitive.MutableIntObjectMap;
@@ -49,16 +53,16 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.slf4j.Logger;
 
 
-public abstract class BaseElement implements GraphType, Idfiable, Serializable {
+public abstract class BaseElement implements GraphType, Idfiable, Serializable, Cloneable {
 
     private static final Logger LOG = Log.logger(BaseElement.class);
 
-    public static final MutableIntObjectMap<BaseProperty<?>> EMPTY_MAP =
-                                                    new IntObjectHashMap<>();
+    private static final MutableIntObjectMap<BaseProperty<?>> EMPTY_MAP =
+            new IntObjectHashMap<BaseProperty<?>>().asUnmodifiable();
 
-    private static final int MAX_PROPERTIES = BytesBuffer.UINT16_MAX;
+    private static final int MAX_PROPERTIES = BytesBuffer.MAX_PROPERTIES;
 
-    MutableIntObjectMap<BaseProperty<?>> properties;
+    private MutableIntObjectMap<BaseProperty<?>> properties;
 
     Id id;
     private SchemaLabel schemaLabel;
@@ -228,7 +232,15 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable {
         }
         return (V) prop.value();
     }
+    /**
+     * Mutable storage for codecs and owning adapters. The empty map is materialized
+     * per element before exposure; callers never receive the shared sentinel.
+     * Direct changes update this container only, without engine transaction callbacks.
+     */
     public MutableIntObjectMap<BaseProperty<?>> properties() {
+        if (this.properties == EMPTY_MAP) {
+            this.properties = CollectionFactory.newIntObjectMap();
+        }
         return this.properties;
     }
 
@@ -240,13 +252,14 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable {
     }
 
     private <V> BaseProperty<V> addProperty(PropertyKey pkey, V value,
-                                            Supplier<Collection<V>> supplier) {
+                                            Supplier<Collection<V>> supplier,
+            BiFunction<PropertyKey, Object, BaseProperty<?>> factory) {
         assert pkey.cardinality().multiple();
         BaseProperty<Collection<V>> property;
         if (this.hasProperty(pkey.id())) {
             property = this.getProperty(pkey.id());
         } else {
-            property = this.newProperty(pkey, supplier.get());
+            property = (BaseProperty<Collection<V>>) factory.apply(pkey, supplier.get());
             this.addProperty(property);
         }
 
@@ -265,36 +278,47 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable {
                 values = CollectionUtil.toList(value);
             }
         }
-        property.value().addAll(values);
+        property.value().addAll(pkey.validValueOrThrow(values));
 
         // Any better ways?
         return (BaseProperty) property;
     }
 
     public <V> BaseProperty<V> addProperty(PropertyKey pkey, V value) {
-        BaseProperty<V> prop = null;
+        return this.addProperty(pkey, value, (key, val) -> this.newProperty(key, val),
+                                prop -> {}, prop -> {});
+    }
+
+    /** Single updates notify before replacement; collection updates notify afterwards. */
+    @SuppressWarnings("unchecked")
+    public <V> BaseProperty<V> addProperty(
+            PropertyKey pkey, V value,
+            BiFunction<PropertyKey, Object, BaseProperty<?>> factory,
+            Consumer<BaseProperty<?>> beforeSingle,
+            Consumer<BaseProperty<?>> afterMultiple) {
+        BaseProperty<V> prop;
         switch (pkey.cardinality()) {
             case SINGLE:
-                prop = this.newProperty(pkey, value);
+                prop = (BaseProperty<V>) factory.apply(pkey, value);
+                beforeSingle.accept(prop);
                 this.addProperty(prop);
                 break;
             case SET:
-                prop = this.addProperty(pkey, value, HashSet::new);
+                prop = this.addProperty(pkey, value, HashSet::new, factory);
+                afterMultiple.accept(prop);
                 break;
             case LIST:
-                prop = this.addProperty(pkey, value, ArrayList::new);
+                prop = this.addProperty(pkey, value, ArrayList::new, factory);
+                afterMultiple.accept(prop);
                 break;
             default:
-                assert false;
-                break;
+                throw new AssertionError("Unknown property cardinality: " + pkey.cardinality());
         }
         return prop;
     }
 
     public <V> BaseProperty<?> addProperty(BaseProperty<V> prop) {
-        if (this.properties == EMPTY_MAP) {
-            this.properties = new IntObjectHashMap<>(); // change to CollectionFactory.newIntObjectMap();
-        }
+        this.properties();
         PropertyKey pkey = prop.propertyKey();
 
         E.checkArgument(this.properties.containsKey(intFromId(pkey.id())) ||
@@ -311,7 +335,11 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable {
     }
 
     public <V> BaseProperty<?> removeProperty(Id key) {
-        return this.properties.remove(intFromId(key));
+        int propertyId = intFromId(key);
+        if (this.properties == EMPTY_MAP) {
+            return null;
+        }
+        return this.properties.remove(propertyId);
     }
 
     /* a util may be should be moved to other place */
@@ -324,7 +352,7 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable {
     public abstract Object sysprop(HugeKeys key);
 
     public Map<Id, Object> getPropertiesMap() {
-        Map<Id, Object> props = new HashMap<>();
+        Map<Id, Object> props = InsertionOrderUtil.newMap();
         for (IntObjectPair<BaseProperty<?>> e : this.properties.keyValuesView()) {
             props.put(IdGenerator.of(e.getOne()), e.getTwo().value());
         }
@@ -345,6 +373,28 @@ public abstract class BaseElement implements GraphType, Idfiable, Serializable {
             }
         }
         return size;
+    }
+
+    public void copyProperties(BaseElement source) {
+        this.properties = source.properties == EMPTY_MAP ? EMPTY_MAP :
+                          CollectionFactory.newIntObjectMap(source.properties);
+        this.propLoaded(true);
+    }
+
+    public void updateDefaultValues(Function<Id, PropertyKey> keys) {
+        if (this.fresh || this.defaultValueUpdated) {
+            return;
+        }
+        this.defaultValueUpdated = true;
+        for (Id id : this.schemaLabel().properties()) {
+            if (!this.hasProperty(id)) {
+                PropertyKey key = keys.apply(id);
+                Object value = key.defaultValue();
+                if (value != null) {
+                    this.addProperty(newProperty(key, value));
+                }
+            }
+        }
     }
 
     @Override

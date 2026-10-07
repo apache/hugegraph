@@ -17,46 +17,42 @@
 
 package org.apache.hugegraph.structure;
 
+import java.util.AbstractCollection;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.SplicingIdGenerator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
-import org.apache.hugegraph.task.HugeTask;
-import org.apache.hugegraph.task.HugeTaskResult;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
-import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.util.E;
-import org.apache.hugegraph.util.collection.CollectionFactory;
-import org.apache.logging.log4j.util.Strings;
+import org.apache.hugegraph.util.TinkerPopUtil;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
-import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty;
@@ -64,32 +60,20 @@ import org.apache.tinkerpop.gremlin.structure.util.ElementHelper;
 import org.apache.tinkerpop.gremlin.structure.util.StringFactory;
 import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyVertexProperty;
 
-import com.google.common.collect.ImmutableList;
 
 public class HugeVertex extends HugeElement implements Vertex, Cloneable {
 
-    private static final List<HugeEdge> EMPTY_LIST = ImmutableList.of();
-
-    /*
-     * Labels of the removed server info and role election vertices. Graphs
-     * created by older versions may still store them.
-     */
-    private static final String LEGACY_SERVER_LABEL = Graph.Hidden.hide("server");
-    private static final String LEGACY_ROLE_DATA_LABEL = Graph.Hidden.hide("role_data");
-
-    private Id id;
-    private VertexLabel label;
-    protected Collection<HugeEdge> edges;
+    private BaseVertex element;
+    private Map<BaseEdge, HugeEdge> edgeWrappers;
 
     public HugeVertex(final HugeGraph graph, Id id, VertexLabel label) {
         super(graph);
 
         E.checkArgumentNotNull(label, "Vertex label can't be null");
-        this.label = label;
-
-        this.id = id;
-        this.edges = EMPTY_LIST;
-        if (this.id != null) {
+        this.element = new BaseVertex(id, label, BaseVertex.TypeContext.ENGINE);
+        this.element.encodeNumber(this.graph().option(CoreOptions.VERTEX_ENCODE_PK_NUMBER));
+        this.edgeWrappers = new IdentityHashMap<>();
+        if (this.element.id() != null) {
             if (label.idStrategy() == IdStrategy.CUSTOMIZE_UUID) {
                 this.assignId(id);
             } else {
@@ -98,56 +82,45 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
         }
     }
 
+    /** Adopt decoded shared state without copying its property values. */
+    public HugeVertex(final HugeGraph graph, BaseVertex element) {
+        super(graph);
+        E.checkArgumentNotNull(element, "Vertex element can't be null");
+        E.checkArgumentNotNull(element.schemaLabel(), "Vertex label can't be null");
+        this.element = element;
+        this.element.typeContext(BaseVertex.TypeContext.ENGINE);
+        this.element.encodeNumber(this.graph().option(CoreOptions.VERTEX_ENCODE_PK_NUMBER));
+        this.edgeWrappers = new IdentityHashMap<>();
+        if (element.id() != null) {
+            this.checkIdLength();
+        }
+    }
+
     @Override
     public HugeType type() {
-        if (label != null &&
-            (label.name().equals(HugeTask.P.TASK) ||
-             label.name().equals(HugeTaskResult.P.TASKRESULT))) {
-            return HugeType.TASK;
-        }
-        if (label != null &&
-            (label.name().equals(LEGACY_SERVER_LABEL) ||
-             label.name().equals(LEGACY_ROLE_DATA_LABEL))) {
-            return HugeType.SERVER;
-        }
-        return HugeType.VERTEX;
+        return this.element.type();
     }
 
     @Override
     public Id id() {
-        return this.id;
+        return this.element.id();
     }
 
     @Override
     public VertexLabel schemaLabel() {
-        assert VertexLabel.OLAP_VL.equals(this.label) ||
-               this.graph().sameAs(this.label.graph());
-        return this.label;
+        assert VertexLabel.OLAP_VL.equals(this.element.schemaLabel()) ||
+               this.graph().sameAs(this.element.schemaLabel().graph());
+        return this.element.schemaLabel();
     }
 
     @Override
     public String name() {
-        E.checkState(this.label.idStrategy() == IdStrategy.PRIMARY_KEY,
-                     "Only primary key vertex has name, " +
-                     "but got '%s' with id strategy '%s'",
-                     this, this.label.idStrategy());
-        String name;
-        if (this.id != null) {
-            String[] parts = SplicingIdGenerator.parse(this.id);
-            E.checkState(parts.length == 2,
-                         "Invalid primary key vertex id '%s'", this.id);
-            name = parts[1];
-        } else {
-            assert this.id == null;
-            List<Object> propValues = this.primaryValues();
-            E.checkState(!propValues.isEmpty(),
-                         "Primary values must not be empty " +
-                         "(has properties %s)", hasProperties());
-            name = ConditionQuery.concatValues(propValues);
-            E.checkArgument(!name.isEmpty(),
-                            "The value of primary key can't be empty");
-        }
-        return name;
+        return this.element.name();
+    }
+
+    @Override
+    public BaseVertex element() {
+        return this.element;
     }
 
     public void assignId(Id id) {
@@ -156,31 +129,31 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
 
     @Watched(prefix = "vertex")
     public void assignId(Id id, boolean force) {
-        IdStrategy strategy = this.label.idStrategy();
+        IdStrategy strategy = this.element.schemaLabel().idStrategy();
         // Generate an id and assign
         switch (strategy) {
             case CUSTOMIZE_STRING:
                 assert !id.number();
-                this.id = id;
+                this.element.id(id);
                 break;
             case CUSTOMIZE_NUMBER:
                 assert id.number();
-                this.id = id;
+                this.element.id(id);
                 break;
             case CUSTOMIZE_UUID:
-                this.id = id.uuid() ? id : IdGenerator.of(id.asString(), true);
+                this.element.id(id.uuid() ? id : IdGenerator.of(id.asString(), true));
                 break;
             case PRIMARY_KEY:
-                this.id = SplicingIdGenerator.instance().generate(this);
+                this.element.id(SplicingIdGenerator.instance().generate(this.element()));
                 break;
             case AUTOMATIC:
                 if (force) {
                     // Resume id for AUTOMATIC id strategy in restoring mode
                     assert id.number();
-                    this.id = id;
+                    this.element.id(id);
                 } else {
-                    this.id = SnowflakeIdGenerator.instance(this.graph())
-                                                  .generate(this);
+                    this.element.id(SnowflakeIdGenerator.instance(this.graph())
+                                                  .generate(this.element()));
                 }
                 break;
             default:
@@ -190,14 +163,14 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     }
 
     protected void checkIdLength() {
-        assert this.id != null;
-        int len = this.id.asBytes().length;
+        assert this.element.id() != null;
+        int len = this.element.id().asBytes().length;
         if (len <= BytesBuffer.ID_LEN_MAX) {
             return;
         }
         E.checkArgument(false,
                         "The max length of vertex id is %s, but got %s {%s}",
-                        BytesBuffer.ID_LEN_MAX, len, this.id);
+                        BytesBuffer.ID_LEN_MAX, len, this.element.id());
     }
 
     @Override
@@ -206,67 +179,67 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     }
 
     public void correctVertexLabel(VertexLabel correctLabel) {
-        E.checkArgumentNotNull(correctLabel, "Vertex label can't be null");
-        if (this.label != null && !this.label.undefined() &&
-            !correctLabel.undefined()) {
-            E.checkArgument(this.label.equals(correctLabel),
-                            "Vertex label can't be changed from '%s' to '%s'",
-                            this.label, correctLabel);
-        }
-        this.label = correctLabel;
+        this.element.correctVertexLabel(correctLabel);
     }
 
     @Watched(prefix = "vertex")
     protected List<Object> primaryValues() {
-        E.checkArgument(this.label.idStrategy() == IdStrategy.PRIMARY_KEY,
-                        "The id strategy '%s' don't have primary keys",
-                        this.label.idStrategy());
-        List<Id> primaryKeys = this.label.primaryKeys();
-        E.checkArgument(!primaryKeys.isEmpty(),
-                        "Primary key can't be empty for id strategy '%s'",
-                        IdStrategy.PRIMARY_KEY);
-
-        boolean encodeNumber = this.graph()
-                                   .option(CoreOptions.VERTEX_ENCODE_PK_NUMBER);
-        List<Object> propValues = new ArrayList<>(primaryKeys.size());
-        for (Id pk : primaryKeys) {
-            HugeProperty<?> property = this.getProperty(pk);
-            E.checkState(property != null,
-                         "The value of primary key '%s' can't be null",
-                         this.graph().propertyKey(pk).name());
-            Object propValue = property.serialValue(encodeNumber);
-            if (Strings.EMPTY.equals(propValue)) {
-                propValue = ConditionQuery.INDEX_VALUE_EMPTY;
-            }
-            propValues.add(propValue);
-        }
-        return propValues;
+        return this.element.primaryValues();
     }
 
     public boolean existsEdges() {
-        return !this.edges.isEmpty();
+        return !this.element.edges().isEmpty();
     }
 
     public Collection<HugeEdge> getEdges() {
-        return Collections.unmodifiableCollection(this.edges);
+        Collection<BaseEdge> edges = this.element.edges();
+        return Collections.unmodifiableCollection(new AbstractCollection<HugeEdge>() {
+            @Override
+            public Iterator<HugeEdge> iterator() {
+                Iterator<BaseEdge> iterator = edges.iterator();
+                return new Iterator<HugeEdge>() {
+                    @Override
+                    public boolean hasNext() {
+                        return iterator.hasNext();
+                    }
+
+                    @Override
+                    public HugeEdge next() {
+                        BaseEdge edge = iterator.next();
+                        return HugeVertex.this.edgeWrappers.computeIfAbsent(
+                                edge, value -> new HugeEdge(HugeVertex.this.graph(), value,
+                                                           HugeVertex.this));
+                    }
+                };
+            }
+
+            @Override
+            public int size() {
+                return edges.size();
+            }
+        });
     }
 
     public void resetEdges() {
-        /*
-         * Use List to hold edges to reduce memory usage and operation time.
-         */
-        this.edges = newList();
+        this.resetEdges(false);
+    }
+
+    protected void resetEdges(boolean unique) {
+        this.element.resetEdges(unique);
+        this.edgeWrappers.clear();
     }
 
     public void removeEdge(HugeEdge edge) {
-        this.edges.remove(edge);
+        BaseEdge removed = this.element.removeEdge(edge.element());
+        if (removed != null) {
+            this.edgeWrappers.remove(removed);
+        }
     }
 
     public void addEdge(HugeEdge edge) {
-        if (this.edges == EMPTY_LIST) {
-            this.edges = newList();
+        if (this.element.addEdge(edge.element())) {
+            this.edgeWrappers.put(edge.element(), edge);
         }
-        this.edges.add(edge);
     }
 
     /**
@@ -381,7 +354,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
 
     public Iterator<Edge> getEdges(Directions direction, String... edgeLabels) {
         List<Edge> list = new LinkedList<>();
-        for (HugeEdge edge : this.edges) {
+        for (HugeEdge edge : this.getEdges()) {
             if (edge.matchDirection(direction) &&
                 edge.belongToLabels(edgeLabels)) {
                 list.add(edge);
@@ -404,7 +377,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     @Watched(prefix = "vertex")
     @Override
     public Iterator<Edge> edges(Direction tinkerpopDir, String... edgeLabels) {
-        Directions direction = Directions.convert(tinkerpopDir);
+        Directions direction = TinkerPopUtil.direction(tinkerpopDir);
         Id[] edgeLabelIds = this.graph().mapElName2Id(edgeLabels);
         Query query = GraphTransaction.constructEdgesQuery(this.id(), direction,
                                                            edgeLabelIds);
@@ -463,17 +436,17 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
          */
         if (cardinality != VertexProperty.Cardinality.single) {
             E.checkArgument(propertyKey.cardinality() ==
-                            Cardinality.convert(cardinality),
+                            TinkerPopUtil.cardinality(cardinality),
                             "Invalid cardinality '%s' for property key '%s', " +
                             "expect '%s'", cardinality, key,
                             propertyKey.cardinality().string());
         }
 
         // Check key in vertex label
-        E.checkArgument(VertexLabel.OLAP_VL.equals(this.label) ||
-                        this.label.properties().contains(propertyKey.id()),
+        E.checkArgument(VertexLabel.OLAP_VL.equals(this.element.schemaLabel()) ||
+                        this.element.schemaLabel().properties().contains(propertyKey.id()),
                         "Invalid property '%s' for vertex label '%s'",
-                        key, this.label);
+                        key, this.element.schemaLabel());
         // Primary-Keys can only be set once
         if (this.schemaLabel().primaryKeys().contains(propertyKey.id())) {
             E.checkArgument(!this.hasProperty(propertyKey.id()),
@@ -499,6 +472,11 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     @Override
     protected <V> HugeVertexProperty<V> newProperty(PropertyKey pkey, V val) {
         return new HugeVertexProperty<>(this, pkey, val);
+    }
+
+    @Override
+    protected <V> HugeVertexProperty<V> wrapProperty(BaseProperty<V> property) {
+        return new HugeVertexProperty<>(this, property);
     }
 
     @Watched(prefix = "vertex")
@@ -543,7 +521,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
         if (vertex == null && !throwIfNotExist) {
             return false;
         }
-        E.checkState(vertex != null, "Vertex '%s' does not exist", this.id);
+        E.checkState(vertex != null, "Vertex '%s' does not exist", this.element.id());
         if (vertex.schemaLabel().undefined() ||
             !vertex.schemaLabel().equals(this.schemaLabel())) {
             // Update vertex label of dangling edge to undefined
@@ -596,20 +574,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
 
     @Override
     public Object sysprop(HugeKeys key) {
-        switch (key) {
-            case ID:
-                return this.id();
-            case LABEL:
-                return this.schemaLabel().id();
-            case PRIMARY_VALUES:
-                return this.name();
-            case PROPERTIES:
-                return this.getPropertiesMap();
-            default:
-                E.checkArgument(false,
-                                "Invalid system property '%s' of Vertex", key);
-                return null;
-        }
+        return this.element.sysprop(key);
     }
 
     public boolean valid() {
@@ -622,14 +587,12 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     }
 
     /**
-     * Clear edges/properties of the cloned vertex, and set `removed` true
+     * Clear edges/properties of the cloned vertex, and set `removed` true.
      *
      * @return a new vertex
      */
     public HugeVertex prepareRemoved() {
-        // NOTE: clear edges/properties of the cloned vertex and return
         HugeVertex vertex = this.clone();
-        // Remove self
         vertex.removed(true);
         vertex.resetEdges();
         vertex.resetProperties();
@@ -637,7 +600,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     }
 
     public boolean olap() {
-        return this.label.olap();
+        return this.element.schemaLabel().olap();
     }
 
     @Override
@@ -650,7 +613,10 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
     @Override
     protected HugeVertex clone() {
         try {
-            return (HugeVertex) super.clone();
+            HugeVertex vertex = (HugeVertex) super.clone();
+            vertex.element = (BaseVertex) this.element.clone();
+            vertex.edgeWrappers = new IdentityHashMap<>(this.edgeWrappers);
+            return vertex;
         } catch (CloneNotSupportedException e) {
             throw new HugeException("Failed to clone HugeVertex", e);
         }
@@ -675,13 +641,7 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
         return new HugeVertex4Insert(tx, id, label);
     }
 
-    private static <V> Set<V> newSet() {
-        return CollectionFactory.newSet(CollectionType.EC);
-    }
 
-    private static <V> List<V> newList() {
-        return CollectionFactory.newList(CollectionType.EC);
-    }
 
     private static final class HugeVertex4Insert extends HugeVertex {
 
@@ -694,22 +654,14 @@ public class HugeVertex extends HugeElement implements Vertex, Cloneable {
              * Use Set to hold edges inserted into vertex
              * to avoid duplicated edges
              */
-            this.edges = newSet();
+            this.resetEdges(true);
             this.tx = tx;
             this.fresh(true);
         }
 
         @Override
         public void resetEdges() {
-            this.edges = newSet();
-        }
-
-        @Override
-        public void addEdge(HugeEdge edge) {
-            if (this.edges == EMPTY_LIST) {
-                this.edges = newSet();
-            }
-            this.edges.add(edge);
+            this.resetEdges(true);
         }
 
         @Override

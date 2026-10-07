@@ -20,7 +20,7 @@ package org.apache.hugegraph.unit.serializer;
 import java.util.Iterator;
 
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.BackendAction;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendMutation;

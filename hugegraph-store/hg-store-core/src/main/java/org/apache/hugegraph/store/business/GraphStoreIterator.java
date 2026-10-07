@@ -83,7 +83,7 @@ public class GraphStoreIterator<T> extends AbstractSelectIterator
 
     public GraphStoreIterator(ScanIterator iterator,
                               ScanPartitionRequest scanRequest) {
-        super();
+        super(BusinessHandlerImpl.getGraphSupplier(scanRequest.getScanRequest().getGraphName()));
         this.iter = iterator;
         this.scanRequest = scanRequest;
         this.request = this.scanRequest.getScanRequest();

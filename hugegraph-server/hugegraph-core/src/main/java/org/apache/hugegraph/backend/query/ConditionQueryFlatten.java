@@ -26,9 +26,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.Condition.Relation;
-import org.apache.hugegraph.backend.query.Condition.SyspropRelation;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.Condition.Relation;
+import org.apache.hugegraph.query.Condition.SyspropRelation;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.InsertionOrderUtil;

@@ -23,12 +23,12 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.SchemaTemplate;
 import org.apache.hugegraph.space.Service;

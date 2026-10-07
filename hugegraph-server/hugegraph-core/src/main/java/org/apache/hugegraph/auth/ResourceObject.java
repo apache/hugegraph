@@ -18,9 +18,9 @@
 package org.apache.hugegraph.auth;
 
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
-import org.apache.hugegraph.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.type.Nameable;
+import org.apache.hugegraph.type.Namifiable;
 import org.apache.hugegraph.util.E;
 
 public class ResourceObject<V> {
@@ -90,12 +90,12 @@ public class ResourceObject<V> {
     }
 
     public static ResourceObject<?> of(String graphSpace, String graph,
-                                       ResourceType type, Nameable elem) {
+                                       ResourceType type, Namifiable elem) {
         return new ResourceObject<>(graphSpace, graph, type, elem);
     }
 
     public static ResourceObject<?> of(String graph, ResourceType type,
-                                       Nameable elem) {
+                                       Namifiable elem) {
         return of("DEFAULT", graph, type, elem);
     }
 

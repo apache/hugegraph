@@ -18,23 +18,45 @@
 package org.apache.hugegraph.backend.store.hstore;
 
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Set;
+import java.util.LinkedHashSet;
+import java.nio.ByteBuffer;
+import java.lang.reflect.Proxy;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.hugegraph.backend.id.Id.IdType;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id.IdType;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.backend.BinaryId;
+import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.backend.serializer.BinarySerializer;
+import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.OlapKey;
+import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.config.ConfigOption;
+import org.apache.hugegraph.iterator.CIter;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.WriteType;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.IdPrefixQuery;
-import org.apache.hugegraph.backend.query.IdRangeQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdPrefixQuery;
+import org.apache.hugegraph.query.IdRangeQuery;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.query.IdQuery;
 import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
@@ -216,6 +238,343 @@ public class HstoreTableTest {
         Assert.assertNull(pushed.originQuery());
     }
 
+    @Test
+    public void testMergedOlapInsertPreservesStandaloneEntryAndIsolatesProperties() {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        BinaryBackendEntry score = olapEntry(9, 1, 99);
+        BinaryBackendEntry rank = olapEntry(10, 1, 123);
+        byte[] standaloneKey = score.columns().iterator().next().name;
+        table.insert(session, score, false); // Actual HstoreStore.mutate entry point.
+        table.insert(session, rank);
+        Assert.assertEquals(2, session.values.size());
+        Assert.assertArrayEquals(standaloneKey, score.columns().iterator().next().name);
+        Assert.assertNull(session.values.get(ByteBuffer.wrap(standaloneKey)));
+        Assert.assertTrue(OlapKey.matchesProperty(session.values.get(ByteBuffer.wrap(
+                OlapKey.format(IdGenerator.of(9), IdGenerator.of(1)))), IdGenerator.of(9)));
+        for (byte[] owner : session.owners) {
+            Assert.assertArrayEquals(IdGenerator.of(1).asBytes(), owner);
+        }
+    }
+
+    @Test
+    public void testOlapPointFallbackAndDeleteValidateLegacyPropertyIdentity() {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        BinaryBackendEntry legacy = olapEntry(9, 1, 42);
+        BackendColumn old = legacy.columns().iterator().next();
+        session.values.put(ByteBuffer.wrap(old.name), old.value);
+        Id scoreKey = new BinaryId(OlapKey.format(IdGenerator.of(9), IdGenerator.of(1)), IdGenerator.of(1));
+        Id rankKey = new BinaryId(OlapKey.format(IdGenerator.of(10), IdGenerator.of(1)), IdGenerator.of(1));
+        try (BackendColumnIterator result = table.getById(session, scoreKey)) {
+            Assert.assertTrue(result.hasNext());
+            Assert.assertArrayEquals(scoreKey.asBytes(), result.next().name);
+        }
+        try (BackendColumnIterator result = table.getById(session, rankKey)) {
+            Assert.assertFalse(result.hasNext());
+        }
+        IdQuery query = new IdQuery(HugeType.VERTEX);
+        query.query(scoreKey);
+        query.query(rankKey);
+        Iterator<BackendEntry> queried = table.queryOlap(session, query);
+        Assert.assertTrue(queried.hasNext());
+        Assert.assertEquals(IdGenerator.of(1), queried.next().originId());
+        Assert.assertFalse(queried.hasNext());
+        table.delete(session, olapEntry(10, 1, 123));
+        Assert.assertNotNull(session.values.get(ByteBuffer.wrap(old.name)));
+        table.delete(session, legacy);
+        Assert.assertNull(session.values.get(ByteBuffer.wrap(old.name)));
+    }
+
+    @Test
+    public void testOlapConditionalUpdatesUsePropertyScopedExistenceForOldAndNewRows() {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        BinaryBackendEntry oldScore = olapEntry(9, 1, 42);
+        BackendColumn old = oldScore.columns().iterator().next();
+        session.values.put(ByteBuffer.wrap(old.name), old.value);
+        BinaryBackendEntry score = olapEntry(9, 1, 99);
+        BinaryBackendEntry rank = olapEntry(10, 1, 123);
+        byte[] scoreKey = OlapKey.format(IdGenerator.of(9), IdGenerator.of(1));
+        byte[] rankKey = OlapKey.format(IdGenerator.of(10), IdGenerator.of(1));
+        Assert.assertTrue(table.queryExist(session, score));
+        Assert.assertFalse(table.queryExist(session, rank));
+        table.updateIfPresent(session, rank);
+        Assert.assertNull(session.values.get(ByteBuffer.wrap(rankKey)));
+        table.updateIfAbsent(session, rank);
+        Assert.assertNotNull(session.values.get(ByteBuffer.wrap(rankKey)));
+        table.updateIfPresent(session, score);
+        Assert.assertArrayEquals(score.columns().iterator().next().value,
+                                session.values.get(ByteBuffer.wrap(scoreKey)));
+        table.updateIfAbsent(session, olapEntry(9, 1, 101));
+        Assert.assertArrayEquals(score.columns().iterator().next().value,
+                                session.values.get(ByteBuffer.wrap(scoreKey)));
+        Assert.assertArrayEquals(old.value, session.values.get(ByteBuffer.wrap(old.name)));
+        table.delete(session, score);
+        Assert.assertFalse(table.queryExist(session, score));
+        Assert.assertTrue(table.queryExist(session, rank));
+        table.updateIfPresent(session, score);
+        Assert.assertNull(session.values.get(ByteBuffer.wrap(scoreKey)));
+        Assert.assertEquals(1, session.values.size());
+    }
+
+    @Test
+    public void testOlapMergeBatchesOnlySelectedVerticesAndPrefersNamespacedRows() throws Exception {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        BinaryBackendEntry legacy = olapEntry(9, 1, 42);
+        BackendColumn old = legacy.columns().iterator().next();
+        session.values.put(ByteBuffer.wrap(old.name), old.value);
+        table.insert(session, olapEntry(9, 1, 99));
+        table.insert(session, olapEntry(10, 1, 123));
+        BackendColumn legacySecond = olapEntry(9, 2, 43).columns().iterator().next();
+        session.values.put(ByteBuffer.wrap(legacySecond.name), legacySecond.value);
+        List<BackendEntry> base = new ArrayList<>();
+        for (int i = 1; i <= 130; i++) {
+            base.add(vertexEntry(i));
+        }
+        EntrySource source = new EntrySource(base);
+        Iterator<BackendEntry> merged = table.mergeEntries(session, source,
+                Set.of(IdGenerator.of(9), IdGenerator.of(10)), false);
+        Assert.assertEquals(3, merged.next().columnsSize());
+        Assert.assertEquals(1, session.batchCalls);
+        Assert.assertEquals(128 * 3, session.requested.get(0).size());
+        for (HgOwnerKey key : session.requested.get(0)) {
+            Assert.assertFalse(Arrays.equals(key.getOwner(), IdGenerator.of(129).asBytes()));
+        }
+        int count = 1;
+        while (merged.hasNext()) {
+            Assert.assertEquals(IdGenerator.of(++count), merged.next().originId());
+        }
+        Assert.assertEquals(130, count);
+        Assert.assertEquals(2, base.get(1).columnsSize()); // Legacy score must not also be merged as rank.
+        Assert.assertEquals(1, base.get(2).columnsSize());
+        Assert.assertEquals(2, session.batchCalls);
+        Assert.assertEquals(2, session.batchCloses);
+        Assert.assertEquals(1, source.closes);
+        BackendColumn score = base.get(0).columns().stream()
+                .filter(column -> Arrays.equals(column.name, OlapKey.format(IdGenerator.of(9), IdGenerator.of(1))))
+                .findFirst().get();
+        Assert.assertArrayEquals(olapEntry(9, 1, 99).columns().iterator().next().value, score.value);
+        // The old row remains unchanged and has not been rewritten during reads.
+        Assert.assertArrayEquals(old.value, session.values.get(ByteBuffer.wrap(old.name)));
+    }
+
+    @Test
+    public void testOlapMergeCapsTotalKeysForManyPropertiesAndRetainsLastChunkRows() throws Exception {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        Set<Id> properties = manyOlapProperties();
+        BackendColumn old = olapEntry(9999, 1, 42).columns().iterator().next();
+        session.values.put(ByteBuffer.wrap(old.name), old.value);
+        table.insert(session, olapEntry(10000, 1, 99));
+        EntrySource source = new EntrySource(List.of(vertexEntry(1), vertexEntry(2)));
+        Iterator<BackendEntry> merged = table.mergeEntries(session, source, properties, false);
+        BackendEntry first = merged.next();
+        Assert.assertEquals(1, source.consumed); // Many properties reduce the selected vertex batch.
+        Assert.assertEquals(3, first.columnsSize());
+        Assert.assertEquals(10, session.batchCalls);
+        Assert.assertEquals(10, session.batchCloses);
+        int oldRequests = 0;
+        for (List<HgOwnerKey> requested : session.requested) {
+            Assert.assertTrue(requested.size() <= 1024);
+            for (HgOwnerKey key : requested) {
+                Assert.assertArrayEquals(IdGenerator.of(1).asBytes(), key.getOwner());
+                if (Arrays.equals(old.name, key.getKey())) {
+                    oldRequests++;
+                }
+            }
+        }
+        Assert.assertEquals(1, oldRequests);
+        BinaryBackendEntry decoded = (BinaryBackendEntry) first;
+        Assert.assertArrayEquals(old.value, decoded.column(
+                OlapKey.format(IdGenerator.of(9999), IdGenerator.of(1))).value);
+        Assert.assertArrayEquals(olapEntry(10000, 1, 99).columns().iterator().next().value,
+                decoded.column(OlapKey.format(IdGenerator.of(10000), IdGenerator.of(1))).value);
+        ((AutoCloseable) merged).close();
+        Assert.assertEquals(1, source.closes);
+        Assert.assertEquals(1, source.consumed);
+    }
+
+    @Test
+    public void testOlapPropertyChunksCloseOnLaterBatchFailureWithoutReadingAhead() {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        session.failBatchAt = 3;
+        EntrySource source = new EntrySource(List.of(vertexEntry(1), vertexEntry(2)));
+        Iterator<BackendEntry> merged = table.mergeEntries(session, source, manyOlapProperties(), true);
+        try {
+            merged.hasNext();
+            Assert.fail("A later property chunk failure must propagate");
+        } catch (IllegalStateException expected) {
+            Assert.assertEquals("batch failed", expected.getMessage());
+        }
+        Assert.assertEquals(1, source.consumed);
+        Assert.assertEquals(1, source.closes);
+        Assert.assertEquals(3, session.batchCalls);
+        Assert.assertEquals(3, session.batchCloses);
+        for (List<HgOwnerKey> requested : session.requested) {
+            Assert.assertTrue(requested.size() <= 1024);
+        }
+    }
+
+    private static Set<Id> manyOlapProperties() {
+        Set<Id> properties = new LinkedHashSet<>();
+        for (int i = 1; i <= 10000; i++) {
+            properties.add(IdGenerator.of(i));
+        }
+        return properties;
+    }
+
+    @Test
+    public void testOlapMergePreservesPagingMetadataAndClosesOnEarlyCloseOrFailure() throws Exception {
+        HstoreTables.OlapTable table = new HstoreTables.OlapTable("g");
+        OlapSession session = new OlapSession();
+        EntrySource source = new EntrySource(List.of(vertexEntry(1), vertexEntry(2)));
+        Iterator<BackendEntry> merged = table.mergeEntries(session, source, Set.of(IdGenerator.of(9)), true);
+        Assert.assertEquals(IdGenerator.of(1), merged.next().originId());
+        Assert.assertEquals(1, source.consumed);
+        Assert.assertEquals(1, ((CIter<?>) merged).metadata("position"));
+        ((AutoCloseable) merged).close();
+        Assert.assertEquals(1, source.closes);
+        Assert.assertEquals(1, session.batchCloses);
+        Assert.assertFalse(merged.hasNext());
+        EntrySource failed = new EntrySource(List.of(vertexEntry(1)));
+        session.failBatch = true;
+        Iterator<BackendEntry> failure = table.mergeEntries(session, failed, Set.of(IdGenerator.of(9)), false);
+        try {
+            failure.hasNext();
+            Assert.fail("Native batch failure must propagate");
+        } catch (IllegalStateException expected) {
+            Assert.assertEquals("batch failed", expected.getMessage());
+        }
+        Assert.assertEquals(1, failed.closes);
+        Assert.assertEquals(2, session.batchCloses);
+        EntrySource empty = new EntrySource(List.of(vertexEntry(1)));
+        Assert.assertSame(empty, table.mergeEntries(session, empty, Set.of(), false));
+        Assert.assertSame(empty, table.mergeEntries(session, empty, null, false));
+        Assert.assertEquals(2, session.batchCalls);
+    }
+
+    private static BinaryBackendEntry vertexEntry(int vertex) {
+        BinaryBackendEntry entry = new BinaryBackendEntry(HugeType.VERTEX,
+                BytesBuffer.allocate(16).writeId(IdGenerator.of(vertex)).bytes());
+        entry.column(entry.id().asBytes(), new byte[]{0});
+        return entry;
+    }
+
+    private static BinaryBackendEntry olapEntry(int property, int vertex, int value) {
+        HugeConfig config = new HugeConfig(Map.of());
+        HugeGraph graph = (HugeGraph) Proxy.newProxyInstance(HugeGraph.class.getClassLoader(),
+                new Class<?>[]{HugeGraph.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("option")) {
+                        return ((ConfigOption<?>) args[0]).defaultValue();
+                    }
+                    if (method.getName().equals("configuration")) {
+                        return config;
+                    }
+                    return null;
+                });
+        PropertyKey key = new PropertyKey(graph, IdGenerator.of(property), "property" + property);
+        key.dataType(DataType.INT);
+        key.writeType(WriteType.OLAP_COMMON);
+        HugeVertex olap = new HugeVertex(graph, IdGenerator.of(vertex), VertexLabel.OLAP_VL);
+        olap.addProperty(key, value);
+        return (BinaryBackendEntry) new BinarySerializer(config).writeOlapVertex(olap);
+    }
+
+    private static final class EntrySource implements CIter<BackendEntry> {
+        private final Iterator<BackendEntry> source;
+        private int consumed;
+        private int closes;
+
+        private EntrySource(List<BackendEntry> entries) {
+            this.source = entries.iterator();
+        }
+
+        @Override
+        public boolean hasNext() {
+            return this.source.hasNext();
+        }
+
+        @Override
+        public BackendEntry next() {
+            this.consumed++;
+            return this.source.next();
+        }
+
+        @Override
+        public void close() {
+            this.closes++;
+        }
+
+        @Override
+        public Object metadata(String meta, Object... args) {
+            return this.consumed;
+        }
+    }
+
+    private static final class OlapSession extends ScanRecordingSession {
+        private final Map<ByteBuffer, byte[]> values = new HashMap<>();
+        private final List<byte[]> owners = new ArrayList<>();
+        private final List<List<HgOwnerKey>> requested = new ArrayList<>();
+        private int batchCalls;
+        private int batchCloses;
+        private boolean failBatch;
+        private int failBatchAt;
+
+        @Override
+        public void put(String table, byte[] owner, byte[] key, byte[] value) {
+            this.owners.add(owner);
+            this.values.put(ByteBuffer.wrap(key), value);
+        }
+
+        @Override
+        public byte[] get(String table, byte[] owner, byte[] key) {
+            this.owners.add(owner);
+            return this.values.get(ByteBuffer.wrap(key));
+        }
+
+        @Override
+        public void delete(String table, byte[] owner, byte[] key) {
+            this.values.remove(ByteBuffer.wrap(key));
+        }
+
+        @Override
+        public BackendColumnIterator getWithBatchExact(String table, List<HgOwnerKey> keys) {
+            this.batchCalls++;
+            this.requested.add(keys);
+            Iterator<BackendColumn> result = keys.stream().filter(key ->
+                    this.values.containsKey(ByteBuffer.wrap(key.getKey())))
+                    .map(key -> BackendColumn.of(key.getKey(), this.values.get(ByteBuffer.wrap(key.getKey()))))
+                    .iterator();
+            return new BackendColumnIterator() {
+                @Override
+                public boolean hasNext() {
+                    if (failBatch || (failBatchAt > 0 && batchCalls == failBatchAt)) {
+                        throw new IllegalStateException("batch failed");
+                    }
+                    return result.hasNext();
+                }
+
+                @Override
+                public BackendColumn next() {
+                    return result.next();
+                }
+
+                @Override
+                public byte[] position() {
+                    return null;
+                }
+
+                @Override
+                public void close() {
+                    batchCloses++;
+                }
+            };
+        }
+    }
+
     private HstoreTable newTestTable() {
         HstoreTable table = new HstoreTable("hugegraph", "g+oe");
         table.ownerByQueryDelegate = (type, id) -> new byte[]{0};
@@ -245,7 +604,7 @@ public class HstoreTableTest {
         return bytes;
     }
 
-    private static final class ScanRecordingSession extends HstoreSessions.Session {
+    private static class ScanRecordingSession extends HstoreSessions.Session {
 
         private boolean scanCalled = false;
         private byte[] lastQueryBytes = null;

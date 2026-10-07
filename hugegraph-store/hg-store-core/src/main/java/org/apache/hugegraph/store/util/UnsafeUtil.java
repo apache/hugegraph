@@ -52,11 +52,7 @@ public class UnsafeUtil {
     public static Object getUnsafe0() {
         Object unsafe;
         try {
-            // Accessing the Unsafe class and its singleton instance
-            final Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
-            final Field unsafeField = unsafeClass.getDeclaredField("theUnsafe");
-            unsafeField.setAccessible(true); // Bypass access checks
-            unsafe = unsafeField.get(null); // Get the Unsafe instance
+            unsafe = org.apache.hugegraph.util.UnsafeUtil.getUnsafe();
         } catch (final Throwable t) {
             // Log a warning if Unsafe is not available
             if (log.isWarnEnabled()) {

@@ -32,7 +32,7 @@ import org.apache.commons.configuration2.io.FileHandler;
 import org.apache.commons.configuration2.tree.ImmutableNode;
 import org.apache.commons.configuration2.tree.NodeHandler;
 import org.apache.commons.configuration2.tree.NodeModel;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.job.ComputerJob;
 import org.apache.hugegraph.job.Job;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser;

@@ -27,12 +27,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.traversal.optimize.TraversalUtil;
-import org.apache.hugegraph.type.Nameable;
-import org.apache.hugegraph.type.Typeable;
+import org.apache.hugegraph.type.Namifiable;
+import org.apache.hugegraph.type.Typifiable;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.tinkerpop.gremlin.structure.Graph.Hidden;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -160,7 +160,7 @@ public class HugeResource {
                 return this.filter((AuthElement) resourceObject.operated());
             }
             if (resType.isSchema() || CHECK_NAME_RESS.contains(resType)) {
-                return this.filter((Nameable) resourceObject.operated());
+                return this.filter((Namifiable) resourceObject.operated());
             }
         }
 
@@ -173,15 +173,15 @@ public class HugeResource {
 
     private boolean filter(AuthElement element) {
         assert this.type.match(element.type());
-        if (element instanceof Nameable) {
-            return this.filter((Nameable) element);
+        if (element instanceof Namifiable) {
+            return this.filter((Namifiable) element);
         }
         return true;
     }
 
-    private boolean filter(Nameable element) {
-        assert !(element instanceof Typeable) || this.type.match(
-                ResourceType.from(((Typeable) element).type()));
+    private boolean filter(Namifiable element) {
+        assert !(element instanceof Typifiable) || this.type.match(
+                ResourceType.from(((Typifiable) element).type()));
 
         return this.matchLabel(element.name());
     }
@@ -288,7 +288,7 @@ public class HugeResource {
     public static boolean allowed(ResourceObject<?> resourceObject) {
         // Allowed to access system(hidden) schema by anyone
         if (resourceObject.type().isSchema()) {
-            Nameable schema = (Nameable) resourceObject.operated();
+            Namifiable schema = (Namifiable) resourceObject.operated();
             return Hidden.isHidden(schema.name());
         }
 
@@ -302,7 +302,7 @@ public class HugeResource {
     public boolean matchProperties(HugeResource other) {
         return matchProperties(other.properties);
     }
-    public static class NameObject implements Nameable {
+    public static class NameObject implements Namifiable {
 
         public static final NameObject ANY = new NameObject("*");
 

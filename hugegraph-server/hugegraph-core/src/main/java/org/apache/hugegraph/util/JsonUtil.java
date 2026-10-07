@@ -20,7 +20,7 @@ package org.apache.hugegraph.util;
 import java.io.IOException;
 import java.util.Date;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.io.HugeGraphSONModule;
 import org.apache.tinkerpop.shaded.jackson.core.JsonGenerator;
 import org.apache.tinkerpop.shaded.jackson.core.JsonProcessingException;

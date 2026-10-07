@@ -19,9 +19,14 @@
 
 package org.apache.hugegraph;
 
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.struct.schema.EdgeLabel;
@@ -31,8 +36,7 @@ import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.util.DateUtil;
 
 /**
- * Actually, it would be better if this interface be called
- * "HugeGraphSchemaSupplier".
+ * Provides shared schema, configuration and time access without requiring a graph engine.
  */
 public interface HugeGraphSupplier {
 
@@ -70,9 +74,33 @@ public interface HugeGraphSupplier {
 
     String name();
 
+    default String spaceGraphName() {
+        return this.name();
+    }
+
     HugeConfig configuration();
 
     default long now() {
         return DateUtil.now().getTime();
+    }
+
+
+    default List<String> mapElId2Name(Collection<Id> ids) {
+        List<String> names = new ArrayList<>(ids.size());
+        for (Id id : ids) {
+            SchemaElement schema = this.edgeLabel(id);
+            names.add(schema.name());
+        }
+        return names;
+    }
+
+    default Set<Pair<String, String>> mapPairId2Name(
+            Set<Pair<Id, Id>> pairs) {
+        Set<Pair<String, String>> results = new HashSet<>(pairs.size());
+        for (Pair<Id, Id> pair : pairs) {
+            results.add(Pair.of(this.vertexLabel(pair.getLeft()).name(),
+                                this.vertexLabel(pair.getRight()).name()));
+        }
+        return results;
     }
 }

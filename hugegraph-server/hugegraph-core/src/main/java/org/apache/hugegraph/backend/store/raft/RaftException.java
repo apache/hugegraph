@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.backend.store.raft;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 
 public class RaftException extends HugeException {
 

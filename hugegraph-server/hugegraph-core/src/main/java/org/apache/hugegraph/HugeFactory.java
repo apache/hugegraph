@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph;
 
+import org.apache.hugegraph.exception.HugeException;
+
 import java.io.File;
 import java.net.URL;
 import java.util.HashMap;

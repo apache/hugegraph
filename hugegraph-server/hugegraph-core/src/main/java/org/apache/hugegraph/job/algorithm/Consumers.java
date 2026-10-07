@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.task.TaskManager.ContextCallable;
 import org.apache.hugegraph.util.ExecutorUtil;
 import org.apache.hugegraph.util.Log;

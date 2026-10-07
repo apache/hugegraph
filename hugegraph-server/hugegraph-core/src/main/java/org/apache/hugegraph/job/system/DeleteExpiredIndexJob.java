@@ -21,10 +21,10 @@ import java.util.Iterator;
 import java.util.Set;
 
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.query.IdQuery;
+import org.apache.hugegraph.query.IdQuery;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
 
@@ -32,9 +32,9 @@ public class DeleteExpiredIndexJob<V> extends DeleteExpiredJob<V> {
 
     private static final String JOB_TYPE = "delete_expired_index";
 
-    private final Set<HugeIndex> indexes;
+    private final Set<Index> indexes;
 
-    public DeleteExpiredIndexJob(Set<HugeIndex> indexes) {
+    public DeleteExpiredIndexJob(Set<Index> indexes) {
         E.checkArgument(indexes != null && !indexes.isEmpty(),
                         "The indexes can't be null or empty");
         this.indexes = indexes;
@@ -52,7 +52,7 @@ public class DeleteExpiredIndexJob<V> extends DeleteExpiredJob<V> {
         HugeGraphParams graph = this.params();
         GraphTransaction tx = graph.graphTransaction();
         try {
-            for (HugeIndex index : this.indexes) {
+            for (Index index : this.indexes) {
                 this.deleteExpiredIndex(graph, index);
             }
             tx.commit();
@@ -70,7 +70,7 @@ public class DeleteExpiredIndexJob<V> extends DeleteExpiredJob<V> {
      * Delete expired element(if exist) of the index,
      * otherwise just delete expired index only
      */
-    private void deleteExpiredIndex(HugeGraphParams graph, HugeIndex index) {
+    private void deleteExpiredIndex(HugeGraphParams graph, Index index) {
         GraphTransaction tx = graph.graphTransaction();
         HugeType type = index.indexLabel().queryType().isVertex() ?
                         HugeType.VERTEX : HugeType.EDGE;

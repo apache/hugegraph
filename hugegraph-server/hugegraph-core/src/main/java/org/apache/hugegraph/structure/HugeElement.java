@@ -17,65 +17,54 @@
 
 package org.apache.hugegraph.structure;
 
-import java.util.ArrayList;
+import java.util.AbstractCollection;
 import java.util.Collection;
-import java.util.Date;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaLabel;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.type.GraphType;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.Idfiable;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.HugeKeys;
-import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.InsertionOrderUtil;
-import org.apache.hugegraph.util.collection.CollectionFactory;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.util.ElementHelper;
 import org.eclipse.collections.api.iterator.IntIterator;
-import org.eclipse.collections.api.map.primitive.MutableIntObjectMap;
 
 public abstract class HugeElement implements Element, GraphType, Idfiable, Comparable<HugeElement> {
 
-    private static final MutableIntObjectMap<HugeProperty<?>> EMPTY_MAP =
-            CollectionFactory.newIntObjectMap();
-
     private final HugeGraph graph;
-    private MutableIntObjectMap<HugeProperty<?>> properties;
-    // TODO: move into properties to keep small object
-    private long expiredTime;
-
-    private boolean removed;
-    private boolean fresh;
-    private boolean propLoaded;
-    private boolean defaultValueUpdated;
 
     public HugeElement(final HugeGraph graph) {
         E.checkArgument(graph != null, "HugeElement graph can't be null");
         this.graph = graph;
-        this.properties = EMPTY_MAP;
-        this.expiredTime = 0L;
-        this.removed = false;
-        this.fresh = false;
-        this.propLoaded = true;
-        this.defaultValueUpdated = false;
     }
+
+    /**
+     * Shared state for internal adapters and codecs. As with setProperty(), mutations
+     * through this view bypass transaction callbacks; application callers must use
+     * the graph/TinkerPop mutation APIs to update persisted elements and indexes.
+     */
+    public abstract BaseElement element();
+
+    protected abstract <V> HugeProperty<V> wrapProperty(BaseProperty<V> property);
 
     public abstract SchemaLabel schemaLabel();
 
@@ -89,22 +78,7 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     protected abstract boolean ensureFilledProperties(boolean throwIfNotExist);
 
     protected void updateToDefaultValueIfNone() {
-        if (this.fresh() || this.defaultValueUpdated) {
-            return;
-        }
-        this.defaultValueUpdated = true;
-        // Set default value if needed
-        for (Id pkeyId : this.schemaLabel().properties()) {
-            if (this.properties.containsKey(intFromId(pkeyId))) {
-                continue;
-            }
-            PropertyKey pkey = this.graph().propertyKey(pkeyId);
-            Object value = pkey.defaultValue();
-            if (value != null) {
-                this.setProperty(this.newProperty(pkey, value));
-            }
-        }
-        this.defaultValueUpdated = true;
+        this.element().updateDefaultValues(this.graph()::propertyKey);
     }
 
     @Override
@@ -113,31 +87,31 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     }
 
     protected void removed(boolean removed) {
-        this.removed = removed;
+        this.element().removed(removed);
     }
 
     public boolean removed() {
-        return this.removed;
+        return this.element().removed();
     }
 
     protected void fresh(boolean fresh) {
-        this.fresh = fresh;
+        this.element().fresh(fresh);
     }
 
     public boolean fresh() {
-        return this.fresh;
+        return this.element().fresh();
     }
 
     public boolean isPropLoaded() {
-        return this.propLoaded;
+        return this.element().propLoaded();
     }
 
     protected void propLoaded() {
-        this.propLoaded = true;
+        this.element().propLoaded(true);
     }
 
     public void propNotLoaded() {
-        this.propLoaded = false;
+        this.element().propLoaded(false);
     }
 
     public void forceLoad() {
@@ -145,59 +119,38 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     }
 
     public void committed() {
-        this.fresh = false;
+        this.element().fresh(false);
         // Set expired time
         this.setExpiredTimeIfNeeded();
     }
 
     public void setExpiredTimeIfNeeded() {
-        SchemaLabel label = this.schemaLabel();
-        if (label.ttl() == 0L) {
-            return;
-        }
-        long now = this.graph.now();
-        if (SchemaLabel.NONE_ID.equals(label.ttlStartTime())) {
-            this.expiredTime(now + label.ttl());
-            return;
-        }
-        Date date = this.getPropertyValue(label.ttlStartTime());
-        if (date == null) {
-            this.expiredTime(now + label.ttl());
-            return;
-        }
-        long expired = date.getTime() + label.ttl();
-        E.checkArgument(expired > now,
-                        "The expired time '%s' of '%s' is prior to now: %s",
-                        new Date(expired), this, now);
-        this.expiredTime(expired);
+        this.element().setExpiredTimeIfNeeded(this.graph.now());
     }
 
     public long expiredTime() {
-        return this.expiredTime;
+        return this.element().expiredTime();
     }
 
     public void expiredTime(long expiredTime) {
-        this.expiredTime = expiredTime;
+        this.element().expiredTime(expiredTime);
     }
 
     public boolean expired() {
-        return 0L < this.expiredTime && this.expiredTime < this.graph.now();
+        return 0L < this.expiredTime() && this.expiredTime() < this.graph.now();
     }
 
     public long ttl() {
-        if (this.expiredTime == 0L || this.expiredTime < this.graph.now()) {
-            return 0L;
-        }
-        return this.expiredTime - this.graph.now();
+        return this.element().ttl(this.graph.now());
     }
 
     public boolean hasTtl() {
-        return this.schemaLabel().ttl() > 0L;
+        return this.element().hasTtl();
     }
 
     public Set<Id> getPropertyKeys() {
         Set<Id> propKeys = InsertionOrderUtil.newSet();
-        IntIterator keys = this.properties.keysView().intIterator();
+        IntIterator keys = this.element().properties().keysView().intIterator();
         while (keys.hasNext()) {
             propKeys.add(IdGenerator.of(keys.next()));
         }
@@ -205,7 +158,39 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     }
 
     public Collection<HugeProperty<?>> getProperties() {
-        return this.properties.values();
+        Collection<BaseProperty<?>> properties = this.element().properties().values();
+        return new AbstractCollection<HugeProperty<?>>() {
+            @Override
+            public Iterator<HugeProperty<?>> iterator() {
+                Iterator<BaseProperty<?>> iterator = properties.iterator();
+                return new Iterator<HugeProperty<?>>() {
+                    @Override
+                    public boolean hasNext() {
+                        return iterator.hasNext();
+                    }
+
+                    @Override
+                    public HugeProperty<?> next() {
+                        return HugeElement.this.wrapProperty(iterator.next());
+                    }
+
+                    @Override
+                    public void remove() {
+                        iterator.remove();
+                    }
+                };
+            }
+
+            @Override
+            public int size() {
+                return properties.size();
+            }
+
+            @Override
+            public void clear() {
+                properties.clear();
+            }
+        };
     }
 
     public Collection<HugeProperty<?>> getFilledProperties() {
@@ -214,17 +199,12 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     }
 
     public Map<Id, Object> getPropertiesMap() {
-        Map<Id, Object> props = InsertionOrderUtil.newMap();
-        for (HugeProperty<?> prop : this.properties.values()) {
-            props.put(prop.propertyKey().id(), prop.value());
-        }
-        // TODO: return MutableIntObjectMap<Object> for this method?
-        return props;
+        return this.element().getPropertiesMap();
     }
 
     public Collection<HugeProperty<?>> getAggregateProperties() {
         List<HugeProperty<?>> aggrProps = InsertionOrderUtil.newList();
-        for (HugeProperty<?> prop : this.properties.values()) {
+        for (HugeProperty<?> prop : this.getProperties()) {
             if (prop.type().isAggregateProperty()) {
                 aggrProps.add(prop);
             }
@@ -232,59 +212,40 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
         return aggrProps;
     }
 
-    @SuppressWarnings("unchecked")
     public <V> HugeProperty<V> getProperty(Id key) {
-        return (HugeProperty<V>) this.properties.get(intFromId(key));
+        BaseProperty<V> property = this.element().getProperty(key);
+        return property == null ? null : this.wrapProperty(property);
     }
 
-    @SuppressWarnings("unchecked")
     public <V> V getPropertyValue(Id key) {
-        HugeProperty<?> prop = this.properties.get(intFromId(key));
-        if (prop == null) {
-            return null;
-        }
-        return (V) prop.value();
+        return this.element().getPropertyValue(key);
     }
 
     public boolean hasProperty(Id key) {
-        return this.properties.containsKey(intFromId(key));
+        return this.element().hasProperty(key);
     }
 
     public boolean hasProperties() {
-        return !this.properties.isEmpty();
+        return this.element().hasProperties();
     }
 
     public int sizeOfProperties() {
-        return this.properties.size();
+        return this.element().sizeOfProperties();
     }
 
     public int sizeOfSubProperties() {
-        int size = 0;
-        for (HugeProperty<?> p : this.properties.values()) {
-            size++;
-            if (p.propertyKey().cardinality() != Cardinality.SINGLE &&
-                p.value() instanceof Collection) {
-                size += ((Collection<?>) p.value()).size();
-            }
-        }
-        return size;
+        return this.element().sizeOfSubProperties();
     }
 
     @Watched(prefix = "element")
     public <V> HugeProperty<?> setProperty(HugeProperty<V> prop) {
-        if (this.properties == EMPTY_MAP) {
-            this.properties = CollectionFactory.newIntObjectMap();
-        }
-        PropertyKey pkey = prop.propertyKey();
-
-        E.checkArgument(this.properties.containsKey(intFromId(pkey.id())) ||
-                        this.properties.size() < BytesBuffer.MAX_PROPERTIES,
-                        "Exceeded the maximum number of properties");
-        return this.properties.put(intFromId(pkey.id()), prop);
+        BaseProperty<?> previous = this.element().addProperty(prop.baseProperty());
+        return previous == null ? null : this.wrapProperty(previous);
     }
 
     public <V> HugeProperty<?> removeProperty(Id key) {
-        return this.properties.remove(intFromId(key));
+        BaseProperty<?> previous = this.element().removeProperty(key);
+        return previous == null ? null : this.wrapProperty(previous);
     }
 
     public <V> HugeProperty<V> addProperty(PropertyKey pkey, V value) {
@@ -292,92 +253,30 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     }
 
     @Watched(prefix = "element")
-    public <V> HugeProperty<V> addProperty(PropertyKey pkey, V value,
-                                           boolean notify) {
-        HugeProperty<V> prop = null;
-        switch (pkey.cardinality()) {
-            case SINGLE:
-                prop = this.newProperty(pkey, value);
-                if (notify) {
-                    /*
-                     * NOTE: this method should be called before setProperty()
-                     * because tx need to delete index without the new property
-                     */
-                    this.onUpdateProperty(pkey.cardinality(), prop);
-                }
-                this.setProperty(prop);
-                break;
-            case SET:
-                prop = this.addProperty(pkey, value, HashSet::new);
-                if (notify) {
-                    this.onUpdateProperty(pkey.cardinality(), prop);
-                }
-                break;
-            case LIST:
-                prop = this.addProperty(pkey, value, ArrayList::new);
-                if (notify) {
-                    this.onUpdateProperty(pkey.cardinality(), prop);
-                }
-                break;
-            default:
-                assert false;
-                break;
-        }
-        return prop;
-    }
-
-    @Watched(prefix = "element")
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private <V> HugeProperty<V> addProperty(PropertyKey pkey, V value,
-                                            Supplier<Collection<V>> supplier) {
-        assert pkey.cardinality().multiple();
-        HugeProperty<Collection<V>> property;
-        if (this.hasProperty(pkey.id())) {
-            property = this.getProperty(pkey.id());
-        } else {
-            property = this.newProperty(pkey, supplier.get());
-            this.setProperty(property);
-        }
-
-        Collection<V> values;
-        if (pkey.cardinality() == Cardinality.SET) {
-            if (value instanceof Set) {
-                values = (Set<V>) value;
-            } else {
-                values = CollectionUtil.toSet(value);
+    public <V> HugeProperty<V> addProperty(PropertyKey pkey, V value, boolean notify) {
+        Consumer<BaseProperty<?>> callback = property -> {
+            if (notify) {
+                this.onUpdateProperty(pkey.cardinality(), this.wrapProperty(property));
             }
-        } else {
-            assert pkey.cardinality() == Cardinality.LIST;
-            if (value instanceof List) {
-                values = (List<V>) value;
-            } else {
-                values = CollectionUtil.toList(value);
-            }
-        }
-        property.value().addAll(pkey.validValueOrThrow(values));
-
-        // Any better ways?
-        return (HugeProperty) property;
+        };
+        BaseProperty<V> property = this.element().addProperty(
+                pkey, value, (key, val) -> this.newProperty(key, val).baseProperty(),
+                callback, callback);
+        return this.wrapProperty(property);
     }
 
     public void resetProperties() {
-        this.properties = CollectionFactory.newIntObjectMap();
-        this.propLoaded = false;
+        this.element().resetProperties();
+        this.element().propLoaded(false);
     }
 
     protected void copyProperties(HugeElement element) {
-        if (element.properties == EMPTY_MAP) {
-            this.properties = EMPTY_MAP;
-        } else {
-            this.properties = CollectionFactory.newIntObjectMap(
-                    element.properties);
-        }
-        this.propLoaded = true;
+        this.element().copyProperties(element.element());
     }
 
     public HugeElement copyAsFresh() {
         HugeElement elem = this.copy();
-        elem.fresh = true;
+        elem.fresh(true);
         return elem;
     }
 
@@ -512,9 +411,7 @@ public abstract class HugeElement implements Element, GraphType, Idfiable, Compa
     }
 
     public static int intFromId(Id id) {
-        E.checkArgument(id instanceof IdGenerator.LongId,
-                        "Can't get number from %s(%s)", id, id.getClass());
-        return ((IdGenerator.LongId) id).intValue();
+        return BaseElement.intFromId(id);
     }
 
     public static final class ElementKeys {

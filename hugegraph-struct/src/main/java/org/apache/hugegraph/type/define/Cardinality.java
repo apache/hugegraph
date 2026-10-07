@@ -14,8 +14,6 @@
 
 package org.apache.hugegraph.type.define;
 
-import org.apache.tinkerpop.gremlin.structure.VertexProperty;
-
 /**
  * The cardinality of the values associated with given key for a particular element.
  *
@@ -39,8 +37,8 @@ public enum Cardinality implements SerialEnum {
      */
     SET(3, "set");
 
-    private byte code = 0;
-    private String name = null;
+    private final byte code;
+    private final String name;
 
     static {
         SerialEnum.register(Cardinality.class);
@@ -69,17 +67,4 @@ public enum Cardinality implements SerialEnum {
         return this == LIST || this == SET;
     }
 
-    public static Cardinality convert(VertexProperty.Cardinality cardinality) {
-        switch (cardinality) {
-            case single:
-                return SINGLE;
-            case list:
-                return LIST;
-            case set:
-                return SET;
-            default:
-                throw new AssertionError(String.format("Unrecognized cardinality: '%s'",
-                                                       cardinality));
-        }
-    }
 }

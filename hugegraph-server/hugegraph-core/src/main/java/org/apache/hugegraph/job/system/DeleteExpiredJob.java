@@ -23,7 +23,7 @@ import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.job.EphemeralJobBuilder;
 import org.apache.hugegraph.job.system.JobCounters.JobCounter;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.task.HugeTask;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
@@ -80,7 +80,7 @@ public abstract class DeleteExpiredJob<T> extends EphemeralJob<T> {
         if (object instanceof HugeElement) {
             return new DeleteExpiredElementJob<>(jobCounter.elements());
         } else {
-            assert object instanceof HugeIndex;
+            assert object instanceof Index;
             return new DeleteExpiredIndexJob<>(jobCounter.indexes());
         }
     }

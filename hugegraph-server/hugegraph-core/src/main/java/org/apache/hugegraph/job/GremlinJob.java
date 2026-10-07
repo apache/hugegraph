@@ -22,7 +22,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.traversal.optimize.HugeScriptTraversal;
 import org.apache.hugegraph.util.E;

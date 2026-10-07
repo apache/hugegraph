@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.auth;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 
 public class UserWithRole {
 

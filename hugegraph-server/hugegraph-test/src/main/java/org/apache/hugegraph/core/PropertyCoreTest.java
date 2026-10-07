@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Utils;

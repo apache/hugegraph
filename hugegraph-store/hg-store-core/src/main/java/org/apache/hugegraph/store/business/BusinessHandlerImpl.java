@@ -61,7 +61,6 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hugegraph.HugeGraphSupplier;
-import org.apache.hugegraph.SchemaGraph;
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.OptionSpace;
@@ -112,6 +111,8 @@ import org.apache.hugegraph.store.pd.PdProvider;
 import org.apache.hugegraph.store.query.QueryTypeParam;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
+import org.apache.hugegraph.store.schema.SchemaDriver;
+import org.apache.hugegraph.store.schema.SchemaGraph;
 import org.apache.hugegraph.store.term.Bits;
 import org.apache.hugegraph.store.term.HgPair;
 import org.apache.hugegraph.store.util.DefaultThreadFactory;
@@ -294,20 +295,32 @@ public class BusinessHandlerImpl implements BusinessHandler {
             return mockGraphSupplier;
         }
 
-        if (GRAPH_SUPPLIER_CACHE.get(graph) == null) {
+        if (graph == null) {
+            throw new HgStoreException("Graph must include graph space and graph name");
+        }
+        HugeGraphSupplier supplier = GRAPH_SUPPLIER_CACHE.get(graph);
+        if (supplier == null) {
             synchronized (BusinessHandlerImpl.class) {
-                if (GRAPH_SUPPLIER_CACHE.get(graph) == null) {
+                supplier = GRAPH_SUPPLIER_CACHE.get(graph);
+                if (supplier == null) {
+                    if (HgStoreEngine.getInstance().isClosing().get()) {
+                        throw new HgStoreException("Store is closing");
+                    }
+                    String[] parts = graph.split("/", -1);
+                    if (parts.length < 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+                        throw new HgStoreException("Graph must include graph space and graph name: " + graph);
+                    }
                     var config =
                             PDConfig.of(HgStoreEngine.getInstance().getOption().getPdAddress());
                     config.setAuthority(DefaultPdProvider.name, DefaultPdProvider.authority);
-                    String[] parts = graph.split("/");
-                    assert (parts.length > 1);
-                    GRAPH_SUPPLIER_CACHE.put(graph, new SchemaGraph(parts[0], parts[1], config));
+                    supplier = new SchemaGraph(parts[0], parts[1], config,
+                                               HgStoreEngine.getInstance().getOption().getPdCluster());
+                    GRAPH_SUPPLIER_CACHE.put(graph, supplier);
                 }
             }
         }
 
-        return GRAPH_SUPPLIER_CACHE.get(graph);
+        return supplier;
     }
 
     @Override
@@ -546,7 +559,17 @@ public class BusinessHandlerImpl implements BusinessHandler {
 
     @Override
     public GraphStoreIterator scan(ScanPartitionRequest spr) throws HgStoreException {
-        return new GraphStoreIterator(scanOriginal(spr), spr);
+        ScanIterator original = scanOriginal(spr);
+        try {
+            return new GraphStoreIterator(original, spr);
+        } catch (RuntimeException failure) {
+            try {
+                original.close();
+            } catch (RuntimeException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
     }
 
     private ToLongFunction<BaseElement> getBaseElementHashFunction() {
@@ -739,7 +762,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
                                                                                 OUT_EDGE_TABLE.equals(
                                                                                         table)) {
                                                                                 element =
-                                                                                        serializer.parseEdge(
+                                                                                        serializer.parseSchemaEdge(
                                                                                                 getGraphSupplier(
                                                                                                         graph),
                                                                                                 BackendColumn.of(
@@ -749,7 +772,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
                                                                                                 false);
                                                                             } else {
                                                                                 element =
-                                                                                        serializer.parseVertex(
+                                                                                        serializer.parseSchemaVertex(
                                                                                                 getGraphSupplier(
                                                                                                         graph),
                                                                                                 BackendColumn.of(
@@ -877,13 +900,12 @@ public class BusinessHandlerImpl implements BusinessHandler {
                      param.getBoundary()) :
                 scanPrefix(graph, param.getCode(), INDEX_TABLE, param.getStart(),
                            param.getBoundary()), column -> {
-            if (filterTTL && isIndexExpire(column, now)) {
+            if (filterTTL && isIndexExpire(graph, column, now)) {
                 return null;
             }
 
-            // todo: Use parseIndex(BackendColumn indexCol) later
-            var index = serializer.parseIndex(getGraphSupplier(graph),
-                                              BackendColumn.of(column.name, column.value), null);
+            var index = serializer.parseSchemaIndex(getGraphSupplier(graph),
+                                                     BackendColumn.of(column.name, column.value));
 
             if (param.getIdPrefix() != null &&
                 !Bytes.prefixWith(index.elementId().asBytes(), param.getIdPrefix())) {
@@ -916,7 +938,7 @@ public class BusinessHandlerImpl implements BusinessHandler {
                      param.getBoundary()) :
                 scanPrefix(graph, param.getCode(), INDEX_TABLE, param.getStart(),
                            param.getBoundary()), column -> {
-            if (filterTTL && isIndexExpire(column, now)) {
+            if (filterTTL && isIndexExpire(graph, column, now)) {
                 return null;
             }
 
@@ -934,8 +956,8 @@ public class BusinessHandlerImpl implements BusinessHandler {
         }, "trans-index-to-base-element");
     }
 
-    private boolean isIndexExpire(RocksDBSession.BackendColumn column, long now) {
-        var e = directBinarySerializer.parseIndex(column.name, column.value);
+    private boolean isIndexExpire(String graph, RocksDBSession.BackendColumn column, long now) {
+        var e = directBinarySerializer.parseSchemaIndex(getGraphSupplier(graph), column.name, column.value);
         return e.expiredTime() > 0 && e.expiredTime() < now;
     }
 
@@ -1131,9 +1153,13 @@ public class BusinessHandlerImpl implements BusinessHandler {
     @Override
     public void closeAll() {
         log.warn("close all db!!! ");
-        factory.getGraphNames().forEach(dbName -> {
-            factory.releaseGraphDB(dbName);
-        });
+        try {
+            factory.getGraphNames().forEach(dbName -> {
+                factory.releaseGraphDB(dbName);
+            });
+        } finally {
+            closeSchemaResources();
+        }
     }
 
     @Override
@@ -1983,7 +2009,15 @@ public class BusinessHandlerImpl implements BusinessHandler {
         }
     }
 
-    public static void clearCache() {
+    public static synchronized void clearCache() {
         GRAPH_SUPPLIER_CACHE.clear();
+    }
+
+    public static synchronized void closeSchemaResources() {
+        try {
+            SchemaDriver.destroy();
+        } finally {
+            GRAPH_SUPPLIER_CACHE.clear();
+        }
     }
 }

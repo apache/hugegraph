@@ -22,10 +22,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdUtil;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.pool.MemoryPool;
 import org.apache.hugegraph.structure.HugeVertex;
@@ -57,7 +55,7 @@ public class EdgeIdOffHeap extends EdgeId implements OffHeapObject {
                          OffHeapObject edgeLabelIdOffHeap,
                          OffHeapObject subLabelIdOffHeap,
                          OffHeapObject otherVertexIdOffHeap) {
-        super(ownerVertex, direction, edgeLabelId, subLabelId, sortValues, otherVertex);
+        super(ownerVertex.id(), direction, edgeLabelId, subLabelId, sortValues, otherVertex.id());
         this.memoryPool = memoryPool;
         this.ownerVertexIdOffHeap = ownerVertexIdOffHeap;
         this.edgeLabelIdOffHeap = edgeLabelIdOffHeap;
@@ -220,23 +218,7 @@ public class EdgeIdOffHeap extends EdgeId implements OffHeapObject {
                 this.cacheOffHeap.resetReaderIndex();
             }
         }
-        String tmpCache;
-        if (this.directed) {
-            tmpCache = SplicingIdGenerator.concat(
-                    IdUtil.writeString((Id) this.ownerVertexIdOffHeap.zeroCopyReadFromByteBuf()),
-                    this.direction.type().string(),
-                    IdUtil.writeLong((Id) this.edgeLabelIdOffHeap.zeroCopyReadFromByteBuf()),
-                    IdUtil.writeLong((Id) this.subLabelIdOffHeap.zeroCopyReadFromByteBuf()),
-                    this.sortValues(),
-                    IdUtil.writeString((Id) this.otherVertexIdOffHeap.zeroCopyReadFromByteBuf()));
-        } else {
-            tmpCache = SplicingIdGenerator.concat(
-                    IdUtil.writeString((Id) this.ownerVertexIdOffHeap.zeroCopyReadFromByteBuf()),
-                    IdUtil.writeLong((Id) this.edgeLabelIdOffHeap.zeroCopyReadFromByteBuf()),
-                    IdUtil.writeLong((Id) this.subLabelIdOffHeap.zeroCopyReadFromByteBuf()),
-                    this.sortValues(),
-                    IdUtil.writeString((Id) this.otherVertexIdOffHeap.zeroCopyReadFromByteBuf()));
-        }
+        String tmpCache = this.formatString();
         byte[] tmpCacheBytes = tmpCache.getBytes(StandardCharsets.UTF_8);
         this.cacheOffHeap = (ByteBuf) memoryPool.requireMemory(tmpCacheBytes.length, memoryPool);
         this.cacheOffHeap.markReaderIndex();

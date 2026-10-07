@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
-import org.apache.hugegraph.backend.query.Condition;
+import org.apache.hugegraph.query.Condition;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 

@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.exception;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 
 public class NoIndexException extends HugeException {
 

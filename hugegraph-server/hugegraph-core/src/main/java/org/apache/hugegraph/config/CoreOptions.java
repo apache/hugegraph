@@ -17,13 +17,13 @@
 
 package org.apache.hugegraph.config;
 
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.Bytes;
 
-import static org.apache.hugegraph.backend.query.Query.COMMIT_BATCH;
+import static org.apache.hugegraph.query.Query.COMMIT_BATCH;
 import static org.apache.hugegraph.config.OptionChecker.*;
 
 public class CoreOptions extends OptionHolder {

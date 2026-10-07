@@ -62,7 +62,7 @@ public class BaseProperty<V> {
     }
 
     public Object serialValue(boolean encodeNumber) {
-        return this.propertyKey.serialValue(this.value, encodeNumber);
+        return this.propertyKey.serialValue(this.value(), encodeNumber);
     }
 
 }

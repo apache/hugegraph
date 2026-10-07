@@ -21,59 +21,15 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.backend.BackendColumn;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.iterator.WrappedIterator;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.Idfiable;
 import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
-import org.apache.hugegraph.util.StringEncoding;
 
 public interface BackendEntry extends Idfiable {
-
-    class BackendColumn implements Comparable<BackendColumn> {
-
-        public byte[] name;
-        public byte[] value;
-
-        public static BackendColumn of(byte[] name, byte[] value) {
-            BackendColumn col = new BackendColumn();
-            col.name = name;
-            col.value = value;
-            return col;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("%s=%s",
-                                 StringEncoding.decode(name),
-                                 StringEncoding.decode(value));
-        }
-
-        @Override
-        public int compareTo(BackendColumn other) {
-            if (other == null) {
-                return 1;
-            }
-            return Bytes.compare(this.name, other.name);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (!(obj instanceof BackendColumn)) {
-                return false;
-            }
-            BackendColumn other = (BackendColumn) obj;
-            return Bytes.equals(this.name, other.name) &&
-                   Bytes.equals(this.value, other.value);
-        }
-
-        public int hashCode() {
-            return this.name.hashCode() ^
-                   this.value.hashCode();
-        }
-
-    }
 
     HugeType type();
 

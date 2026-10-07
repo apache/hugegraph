@@ -23,7 +23,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.hugegraph.backend.store.Shard;
+import org.apache.hugegraph.backend.Shard;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 public interface KvStore {

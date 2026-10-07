@@ -49,4 +49,37 @@ public class GremlinServerConfigTest {
         Assert.assertTrue(updated.toString(), updated.contains("port: 12345"));
         Assert.assertFalse(updated.toString(), updated.contains("port: 8182"));
     }
+
+    @Test
+    public void testRejectInvalidPortsWithoutChangingConfig() throws Exception {
+        File config = temporaryFolder.newFile("invalid-port.yaml");
+        String content = "host: 127.0.0.1\nport: 8182\n";
+        Files.writeString(config.toPath(), content, StandardCharsets.UTF_8);
+
+        for (int port : new int[]{-1, 0, 65536}) {
+            Assert.assertThrows(IllegalArgumentException.class, () -> {
+                GremlinServerConfig.update(config.toPath(), "127.0.0.1", port);
+            });
+            Assert.assertEquals(content, Files.readString(config.toPath(),
+                                                          StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    public void testRequireOneTopLevelHostAndPort() throws Exception {
+        File config = temporaryFolder.newFile("ambiguous-endpoint.yaml");
+        for (String content : new String[]{
+                "host: 127.0.0.1\n",
+                "port: 8182\n",
+                "host: 127.0.0.1\n#host: 0.0.0.0\nport: 8182\n",
+                "host: 127.0.0.1\nport: 8182\n#port: 8183\n"}) {
+            Files.writeString(config.toPath(), content, StandardCharsets.UTF_8);
+            Assert.assertThrows(IllegalStateException.class, () -> {
+                GremlinServerConfig.update(config.toPath(), "127.0.0.1", 12345);
+            });
+            Assert.assertEquals(content, Files.readString(config.toPath(),
+                                                          StandardCharsets.UTF_8));
+        }
+    }
+
 }

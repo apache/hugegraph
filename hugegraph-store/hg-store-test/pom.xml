@@ -164,33 +164,6 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-classloading-xstream</artifactId>
-            <version>2.0.0-RC.3</version>
-        </dependency>
-        <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-module-junit4-rule</artifactId>
-            <version>2.0.0-RC.3</version>
-        </dependency>
-        <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-api-support</artifactId>
-            <version>2.0.0-RC.3</version>
-        </dependency>
-        <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-module-junit4</artifactId>
-            <version>2.0.0-RC.3</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-api-mockito2</artifactId>
-            <version>2.0.0-RC.3</version>
-            <scope>compile</scope>
-        </dependency>
-        <dependency>
             <groupId>org.apache.hugegraph</groupId>
             <artifactId>hg-store-client</artifactId>
         </dependency>
@@ -204,12 +177,6 @@
                     <artifactId>rocksdbjni</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hg-store-node</artifactId>
-            <version>${revision}</version>
-            <scope>compile</scope>
         </dependency>
     </dependencies>
     <build>
@@ -258,6 +225,7 @@
                                 <include>**/PartitionEngineErrorTest.java</include>
                                 <include>**/BatchGraphIsolationTest.java</include>
                                 <include>**/GraphIDManagerTest.java</include>
+                                <include>**/SchemaDriverTest.java</include>
                             </includes>
                         </configuration>
                     </execution>

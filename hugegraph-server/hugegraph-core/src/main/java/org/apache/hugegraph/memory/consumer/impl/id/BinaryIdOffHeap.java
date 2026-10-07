@@ -20,8 +20,8 @@ package org.apache.hugegraph.memory.consumer.impl.id;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.backend.BinaryId;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.pool.MemoryPool;
 import org.apache.hugegraph.util.Bytes;
@@ -30,7 +30,7 @@ import org.apache.hugegraph.util.E;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
 
-public class BinaryIdOffHeap extends BinaryBackendEntry.BinaryId implements OffHeapObject {
+public class BinaryIdOffHeap extends BinaryId implements OffHeapObject {
 
     private final OffHeapObject originId;
     private ByteBuf bytesOffHeap;
@@ -51,8 +51,8 @@ public class BinaryIdOffHeap extends BinaryBackendEntry.BinaryId implements OffH
     }
 
     @Override
-    public BinaryBackendEntry.BinaryId zeroCopyReadFromByteBuf() {
-        return new BinaryBackendEntry.BinaryId(ByteBufUtil.getBytes(bytesOffHeap),
+    public BinaryId zeroCopyReadFromByteBuf() {
+        return new BinaryId(ByteBufUtil.getBytes(bytesOffHeap),
                                                (Id) originId.zeroCopyReadFromByteBuf());
     }
 

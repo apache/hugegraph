@@ -31,14 +31,14 @@ import javax.security.sasl.AuthenticationException;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.auth.HugeUser.P;
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheManager;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.config.AuthOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.type.define.Directions;
@@ -109,7 +109,7 @@ public class StandardAuthManager implements AuthManager {
         this.access = new RelationshipManager<>(this.graph, HugeAccess.P.ACCESS,
                                                 HugeAccess::fromEdge);
 
-        this.tokenGenerator = new TokenGenerator(config);
+        this.tokenGenerator = new TokenGenerator(config.get(AuthOptions.AUTH_TOKEN_SECRET));
         LOG.info("Randomly generate a JWT secret key now");
 
         this.ipWhiteList = new HashSet<>();

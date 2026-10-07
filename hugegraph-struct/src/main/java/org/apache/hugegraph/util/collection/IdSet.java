@@ -1,35 +1,32 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.util.collection;
 
-import org.apache.hugegraph.id.Id;
-import org.apache.hugegraph.id.IdGenerator;
-import org.apache.hugegraph.type.define.CollectionType;
-
-import org.apache.hugegraph.iterator.ExtendableIterator;
-import org.eclipse.collections.api.iterator.MutableLongIterator;
-import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
-
 import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.Set;
+
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.iterator.ExtendableIterator;
+import org.apache.hugegraph.type.define.CollectionType;
+import org.eclipse.collections.api.iterator.MutableLongIterator;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public class IdSet extends AbstractSet<Id> {
 
@@ -67,8 +64,8 @@ public class IdSet extends AbstractSet<Id> {
     @Override
     public Iterator<Id> iterator() {
         return new ExtendableIterator<>(
-               this.nonNumberIds.iterator(),
-               new EcIdIterator(this.numberIds.longIterator()));
+                this.nonNumberIds.iterator(),
+                new EcLongIdIterator(this.numberIds.longIterator()));
     }
 
     @Override
@@ -94,11 +91,11 @@ public class IdSet extends AbstractSet<Id> {
         this.nonNumberIds.clear();
     }
 
-    private static class EcIdIterator implements Iterator<Id> {
+    private static class EcLongIdIterator implements Iterator<Id> {
 
         private final MutableLongIterator iterator;
 
-        public EcIdIterator(MutableLongIterator iter) {
+        public EcLongIdIterator(MutableLongIterator iter) {
             this.iterator = iter;
         }
 

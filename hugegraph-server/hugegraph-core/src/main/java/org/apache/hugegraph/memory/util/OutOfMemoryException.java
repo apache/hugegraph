@@ -16,7 +16,7 @@
  */
 package org.apache.hugegraph.memory.util;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 
 public class OutOfMemoryException extends HugeException {
 
