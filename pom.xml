@@ -253,7 +253,7 @@
                             <exclude>scripts/dev/reviewers</exclude>
                             <exclude>**/*.md</exclude>
                             <exclude>**/dependency-reduced-pom.xml</exclude>
-                            <exclude>**/logs/*.log</exclude>
+                            <exclude>**/logs/**</exclude>
                             <exclude>**/META-INF/**/*</exclude>
                             <exclude>style/*</exclude>
                             <exclude>ChangeLog</exclude>
