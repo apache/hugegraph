@@ -165,33 +165,9 @@ crash_files_exist() {
     return 1
 }
 LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | tr -c 'A-Za-z0-9._-' '_')
-# Each launch records the JVM that owns its heap dump directory in a file named
-# pid, a name the license check already skips: the PID and that process's start
-# time, so a reused PID (common after a container restart) does not look like the
-# old owner. A live JVM's directory stays empty until it runs out of memory, so
-# startup removes a directory only when it holds nothing but that file and that
-# exact process is gone. Directories without a marker, with a dump, or owned by a
-# running process are left alone, and nothing is removed when ps cannot tell.
-process_identity() {
-    # Collapse ps's padding so the value reads back unchanged from pid.
-    ps -o lstart= -p "$1" 2>/dev/null | awk '{$1 = $1; print}'
-}
-remove_unused_heap_dump_dir() {
-    local dir="$1" owner_pid="" owner_start="" entries
-    [[ -f "${dir}/pid" ]] || return 0
-    entries=$(ls -A "${dir}")
-    [[ ${entries} == "pid" ]] || return 0
-    { read -r owner_pid; read -r owner_start; } < "${dir}/pid"
-    [[ -n ${owner_pid} && -n ${owner_start} ]] || return 0
-    [[ $(process_identity "${owner_pid}") == "${owner_start}" ]] && return 0
-    rm -f "${dir}/pid" && rmdir "${dir}" 2>/dev/null
-    return 0
-}
-if command -v ps >/dev/null 2>&1 && [[ -n $(process_identity $$) ]]; then
-    for HEAP_DUMP_DIR in "${LOGS}"/heapdump_"${LAUNCH_HOST}"_*/; do
-        [[ -d ${HEAP_DUMP_DIR} ]] && remove_unused_heap_dump_dir "${HEAP_DUMP_DIR%/}"
-    done
-fi
+# Dump directories are never removed automatically. One stays empty until a JVM
+# using it runs out of memory, and that JVM may be a computer job that outlives
+# the Server, so the launcher cannot tell when a directory is safe to delete.
 LAUNCH_STAMP="${LAUNCH_HOST}_$(date +%Y%m%d-%H%M%S)"
 LAUNCH_ID="${LAUNCH_STAMP}"
 LAUNCH_SUFFIX=0
@@ -204,8 +180,6 @@ mkdir -p "${HEAP_DUMP_DIR}" || {
     report_error "Failed to create heap dump directory ${HEAP_DUMP_DIR}"
     exit 1
 }
-# The script execs java below, so $$ and its start time are the JVM's.
-printf '%s\n%s\n' "$$" "$(process_identity $$)" > "${HEAP_DUMP_DIR}/pid" 2>/dev/null || true
 CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
 CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${HEAP_DUMP_DIR}\""
 CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
