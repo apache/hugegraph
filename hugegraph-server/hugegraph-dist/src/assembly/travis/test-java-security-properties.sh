@@ -235,7 +235,7 @@ cleanup() {
     for dump_dir in "${SERVER_ROOT}"/logs/heapdump_*/; do
         if [[ -d "$dump_dir" ]] &&
            ! grep -Fxq -- "$dump_dir" <<< "$PRE_EXISTING_DUMP_DIRS"; then
-            rm -f "${dump_dir}.owner"
+            rm -f "${dump_dir}pid"
             rmdir "$dump_dir" 2>/dev/null || true
         fi
     done
@@ -641,7 +641,7 @@ assert_effective_flag "$ENABLED_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
 ENABLED_DUMP_DIR=$(effective_flag "$ENABLED_CAPTURE" HeapDumpPath)
 [[ -d "$ENABLED_DUMP_DIR" ]] ||
     fail "launcher did not create the heap dump directory ${ENABLED_DUMP_DIR}"
-[[ -f "${ENABLED_DUMP_DIR}/.owner" ]] ||
+[[ -f "${ENABLED_DUMP_DIR}/pid" ]] ||
     fail "launcher did not record the owner of ${ENABLED_DUMP_DIR}"
 
 # Child JVMs the Server starts inherit JAVA_TOOL_OPTIONS. Two JVMs started with
@@ -737,11 +737,11 @@ add_crash_fixture() {
                 local dead_pid=$!
                 wait "$dead_pid" || true
                 mkdir "$path" &&
-                    printf '%s\n%s\n' "$dead_pid" "Thu Jan  1 00:00:00 1970" > "${path}/.owner" ;;
+                    printf '%s\n%s\n' "$dead_pid" "Thu Jan  1 00:00:00 1970" > "${path}/pid" ;;
             live-owner)
                 mkdir "$path" &&
                     printf '%s\n%s\n' "$$" "$(ps -o lstart= -p $$ | awk '{$1 = $1; print}')" \
-                        > "${path}/.owner" ;;
+                        > "${path}/pid" ;;
         esac
     fi
 }
