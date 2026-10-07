@@ -764,8 +764,9 @@ jobs:
             log_dir="${service#*:}"
             if [[ -d "$log_dir" ]]; then
               mkdir -p "$DIAGNOSTICS_DIR/services/$service_name"
-              cp -a "$log_dir/." \
-                "$DIAGNOSTICS_DIR/services/$service_name/" || true
+              # Skip heap dumps (logs/heapdump_*/): they can be gigabytes.
+              tar -C "$log_dir" --exclude='*.hprof*' -cf - . | \
+                tar -C "$DIAGNOSTICS_DIR/services/$service_name" -xf - || true
             fi
           done
 

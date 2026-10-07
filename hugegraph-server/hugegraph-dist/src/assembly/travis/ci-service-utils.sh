@@ -29,7 +29,10 @@ function dump_service_diagnostics() {
     (ss -ltnp || netstat -ltnp || true) 2>&1
 
     if [ -d "${log_dir}" ]; then
-        find "${log_dir}" -maxdepth 2 -type f | sort | while read -r log_file; do
+        # Heap dumps under logs/heapdump_*/ are binary and can be gigabytes;
+        # list them instead of printing them.
+        find "${log_dir}" -maxdepth 2 -type f -name '*.hprof*' -exec ls -l {} + || true
+        find "${log_dir}" -maxdepth 2 -type f ! -name '*.hprof*' | sort | while read -r log_file; do
             echo "--- tail -n 200 ${log_file} ---"
             tail -n 200 "${log_file}" || true
         done

@@ -57,14 +57,15 @@ USER_OPTION="${SERVER_ARGS[3]:-}"
 GC_OPTION="${SERVER_ARGS[4]:-}"
 OPEN_TELEMETRY="${SERVER_ARGS[5]:-}"
 
-# Fatal launcher errors go to stderr, which reaches the terminal or the container
-# log, and, when possible, to ${OUTPUT}, the log start-hugegraph.sh points
-# operators at.
+# Launcher errors and warnings go to ${OUTPUT} (hugegraph-server.log) when it can
+# be written, and to stderr, which reaches the terminal or the container log. The
+# file comes first so the message is kept even if writing to stderr kills the
+# script (a closed pipe, for example).
 report_error() {
-    echo "$1" >&2
-    if [[ -w "${LOGS}" ]]; then
-        { echo "$1" >> "${OUTPUT}"; } 2>/dev/null || true
+    if [[ -w "${OUTPUT}" || ( ! -e "${OUTPUT}" && -w "${LOGS}" ) ]]; then
+        (printf '%s\n' "$1" >> "${OUTPUT}") 2>/dev/null || true
     fi
+    printf '%s\n' "$1" >&2
 }
 
 ensure_path_writable "$LOGS" report_error
@@ -142,48 +143,6 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     #JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseGCLogFileRotation -XX:GCLogFileSize=10M -XX:NumberOfGCLogFiles=3 \
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
-
-# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. The
-# defaults go first in JAVA_TOOL_OPTIONS, which the JVM reads before the operator's
-# own JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS, the command line (JAVA_OPTIONS and -j)
-# and _JAVA_OPTIONS, so any of those overrides them. The JVM does that parsing
-# itself, including quoted options and @argfiles.
-# Child JVMs the Server starts (computer jobs, for example) inherit these options,
-# so every path must stay unique per JVM. ErrorFile expands %p to each JVM's PID.
-# HeapDumpPath does not expand %p, but when it names an existing directory each JVM
-# writes java_pid<its pid>.hprof inside it, so it points at a directory per launch.
-# A restarted container often reuses the PID, and HotSpot will not overwrite an
-# existing crash log or heap dump, so the names carry the host name (the pod name
-# on Kubernetes, so pods sharing one log volume do not collide), the launch time,
-# and a counter that skips names already used in $LOGS.
-crash_files_exist() {
-    [[ -e "${LOGS}/heapdump_$1" ]] && return 0
-    local file
-    for file in "${LOGS}"/hs_err_pid*_"$1".log; do
-        [[ -e ${file} ]] && return 0
-    done
-    return 1
-}
-LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | tr -c 'A-Za-z0-9._-' '_')
-# Dump directories are never removed automatically. One stays empty until a JVM
-# using it runs out of memory, and that JVM may be a computer job that outlives
-# the Server, so the launcher cannot tell when a directory is safe to delete.
-LAUNCH_STAMP="${LAUNCH_HOST}_$(date +%Y%m%d-%H%M%S)"
-LAUNCH_ID="${LAUNCH_STAMP}"
-LAUNCH_SUFFIX=0
-while crash_files_exist "${LAUNCH_ID}"; do
-    LAUNCH_SUFFIX=$((LAUNCH_SUFFIX + 1))
-    LAUNCH_ID="${LAUNCH_STAMP}-${LAUNCH_SUFFIX}"
-done
-HEAP_DUMP_DIR="${LOGS}/heapdump_${LAUNCH_ID}"
-mkdir -p "${HEAP_DUMP_DIR}" || {
-    report_error "Failed to create heap dump directory ${HEAP_DUMP_DIR}"
-    exit 1
-}
-CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
-CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${HEAP_DUMP_DIR}\""
-CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
-export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
 
 # Using G1GC as the default garbage collector (Recommended for large memory machines)
 # mention: zgc is only available on ARM-Mac with java > 13
@@ -284,7 +243,8 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     fi
 
     # Note: check carefully if multi "javeagent" params are set
-    # Append, so the crash-file defaults and the operator's JAVA_TOOL_OPTIONS stay.
+    # Append, so the operator's JAVA_TOOL_OPTIONS stays; the crash-file defaults
+    # are put in front of all of it below.
     export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-javaagent:${PLUGINS}/${OT_JAR}"
     export OTEL_TRACES_EXPORTER=otlp
     export OTEL_METRICS_EXPORTER=none
@@ -297,13 +257,81 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     export OTEL_RESOURCE_ATTRIBUTES=service.name=server
 fi
 
-if [[ "${STDOUT_MODE:-false}" != "true" ]]; then
-    # Daemon stderr only reaches hugegraph-server-stdout.log, so a bootstrap
-    # rejection of the effective DNS policy (a broken operator override
-    # included) would be invisible in the log start-hugegraph.sh points
-    # operators at. Let the bootstrap mirror its fatal errors there.
-    JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
-fi
+# Let the bootstrap mirror its fatal errors (a rejected DNS policy, a broken
+# operator override included) into hugegraph-server.log. In daemon mode its
+# stderr only reaches hugegraph-server-stdout.log; in STDOUT_MODE it reaches the
+# container log, which keeps a single earlier generation, so the file copy is
+# what survives a crash loop on a mounted logs volume.
+JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
+
+# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. The
+# defaults come first in JAVA_TOOL_OPTIONS, ahead of the operator's own value. The
+# JVM applies JAVA_TOOL_OPTIONS before JDK_JAVA_OPTIONS, the command line
+# (JAVA_OPTIONS and -j) and _JAVA_OPTIONS, and the last occurrence of a flag wins,
+# so any of those overrides a default. The JVM does the parsing itself, including
+# quoted options, and @argfiles in JDK_JAVA_OPTIONS or on the command line.
+# Child JVMs the Server starts (computer jobs, for example) inherit the
+# environment but not the command line, so they get these defaults too, and every
+# path must stay unique per JVM. ErrorFile expands %p to each JVM's PID.
+# HeapDumpPath expands %p only from JDK 25, but on every version, when it names an
+# existing directory, each JVM writes java_pid<its pid>.hprof inside it, so it
+# points at one directory per launch.
+# A restarted container often reuses the PID; HotSpot truncates an existing crash
+# log (JDK 17+) and will not write a heap dump over an existing file. So the names
+# carry the host name (the pod name on Kubernetes, so pods sharing one log volume
+# do not collide), the launch time, and a counter. A plain mkdir claims each name
+# atomically, so concurrent launches never share one. This runs after every
+# preflight check, so a launch that fails before Java starts leaves nothing.
+# Dump directories are never removed automatically: one stays empty until a JVM
+# using it runs out of memory, and that JVM may be a computer job that outlives
+# the Server, so the launcher cannot tell when a directory is safe to delete.
+crash_name_taken() {
+    local name="$1" file restore_failglob taken=1
+    [[ -e "${LOGS}/heapdump_${name}" || -L "${LOGS}/heapdump_${name}" ]] && return 0
+    restore_failglob=$(shopt -p failglob)
+    shopt -u failglob
+    for file in "${LOGS}"/hs_err_pid*_"${name}".log; do
+        if [[ -e ${file} || -L ${file} ]]; then
+            taken=0
+            break
+        fi
+    done
+    eval "${restore_failglob}"
+    return ${taken}
+}
+case "${LOGS}" in
+    *\"*|*%*)
+        # JAVA_TOOL_OPTIONS has no escape for a double quote, and ErrorFile expands %.
+        report_error "WARN: ${LOGS} contains a double quote or %, so the heap dump and crash log\
+ defaults are not set; set -XX:HeapDumpPath and -XX:ErrorFile yourself"
+        ;;
+    *)
+        LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
+        LAUNCH_HOST="${LAUNCH_HOST:0:64}"
+        LAUNCH_STAMP="${LAUNCH_HOST}_$(date +%Y%m%d-%H%M%S)"
+        LAUNCH_ID="${LAUNCH_STAMP}"
+        LAUNCH_SUFFIX=0
+        HEAP_DUMP_PATH=""
+        while [[ -z ${HEAP_DUMP_PATH} ]]; do
+            if ! crash_name_taken "${LAUNCH_ID}" &&
+               mkdir "${LOGS}/heapdump_${LAUNCH_ID}" 2>/dev/null; then
+                HEAP_DUMP_PATH="${LOGS}/heapdump_${LAUNCH_ID}"
+            elif ! crash_name_taken "${LAUNCH_ID}" || [[ ${LAUNCH_SUFFIX} -ge 1000 ]]; then
+                # Not a name clash (a full disk, for example): keep starting, and dump
+                # into $LOGS itself rather than make diagnostics a startup requirement.
+                report_error "WARN: cannot create ${LOGS}/heapdump_${LAUNCH_ID}; heap dumps go to ${LOGS}"
+                HEAP_DUMP_PATH="${LOGS}"
+            else
+                LAUNCH_SUFFIX=$((LAUNCH_SUFFIX + 1))
+                LAUNCH_ID="${LAUNCH_STAMP}-${LAUNCH_SUFFIX}"
+            fi
+        done
+        CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
+        CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${HEAP_DUMP_PATH}\""
+        CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
+        export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
+        ;;
+esac
 
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
