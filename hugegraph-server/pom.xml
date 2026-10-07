@@ -43,7 +43,7 @@
         <log4j2.version>2.17.1</log4j2.version>
         <junit.version>4.13.1</junit.version>
         <tinkerpop.version>3.8.1</tinkerpop.version>
-        <commons.io.version>2.7</commons.io.version>
+        <commons.io.version>2.14.0</commons.io.version>
         <guava.version>25.1-jre</guava.version>
         <httpclient.version>4.5.13</httpclient.version>
         <jersey.version>3.0.3</jersey.version>

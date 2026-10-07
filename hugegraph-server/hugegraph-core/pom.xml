@@ -32,7 +32,7 @@
         <ohc.version>0.7.4</ohc.version>
         <jna.version>5.12.1</jna.version>
         <lz4.version>1.8.1</lz4.version>
-        <commons-compress.version>1.21</commons-compress.version>
+        <commons-compress.version>1.26.0</commons-compress.version>
         <eclipse-collections.version>11.1.0</eclipse-collections.version>
         <fastutil.version>8.5.9</fastutil.version>
         <jjwt.version>0.11.5</jjwt.version>
