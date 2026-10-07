@@ -17,7 +17,9 @@
 
 package org.apache.hugegraph.api;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
+import java.util.Base64;
 import java.util.Map;
 
 import org.apache.hugegraph.testutil.Assert;
@@ -134,6 +136,40 @@ public class LoginApiTest extends BaseApiTest {
         headers.add(HttpHeaders.AUTHORIZATION, "Bearer " + invalidToken);
         r = client().get(path, headers);
         assertResponseStatus(401, r);
+    }
+
+    @Test
+    public void testBasicAuthWithNonAsciiOrColonPassword() {
+        // RFC 7617: the credential is UTF-8 and only the first colon separates the fields
+        String[][] users = {{"utf8user", "\u00e4dminpass1"},
+                            {"coloned", "new:pass1234"}};
+        RestClient noAuthClient = new RestClient(baseUrl(), false);
+        try {
+            for (String[] user : users) {
+                Response r = this.createUser(user[0], user[1]);
+                String result = assertResponseStatus(201, r);
+                String id = (String) JsonUtil.fromJson(result, Map.class).get("id");
+                try {
+                    r = basicAuthGet(noAuthClient, user[0], user[1]);
+                    assertResponseStatus(200, r);
+
+                    r = basicAuthGet(noAuthClient, user[0], "wrong" + user[1]);
+                    assertResponseStatus(401, r);
+                } finally {
+                    this.deleteUser(id);
+                }
+            }
+        } finally {
+            noAuthClient.close();
+        }
+    }
+
+    private static Response basicAuthGet(RestClient client, String name, String password) {
+        byte[] credential = (name + ":" + password).getBytes(StandardCharsets.UTF_8);
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        headers.add(HttpHeaders.AUTHORIZATION,
+                    "Basic " + Base64.getEncoder().encodeToString(credential));
+        return client.get("graphspaces/DEFAULT/graphs", headers);
     }
 
     private Response createUser(String name, String password) {

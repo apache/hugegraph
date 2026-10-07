@@ -20,6 +20,7 @@ package org.apache.hugegraph.api.filter;
 import static org.apache.hugegraph.config.ServerOptions.WHITE_IP_STATUS;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.HashMap;
 import java.util.List;
@@ -39,7 +40,6 @@ import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.server.auth.AuthenticationException;
 import org.glassfish.grizzly.http.server.Request;
-import org.glassfish.grizzly.utils.Charsets;
 import org.gridkit.jvmtool.cmd.AntPathMatcher;
 import org.slf4j.Logger;
 
@@ -184,19 +184,16 @@ public class AuthenticationFilter implements ContainerRequestFilter, ContainerRe
 
         if (auth.startsWith(BASIC_AUTH_PREFIX)) {
             auth = auth.substring(BASIC_AUTH_PREFIX.length());
-            // TODO: decode the Basic credential as UTF-8 and split it on the first colon only.
-            // Decoding as ASCII and splitting on every colon makes a non-ASCII password answer
-            // 401 and a password containing ':' answer 400, although both were accepted at
-            // account creation. The Helm chart (helm/hugegraph) refuses such admin passwords in
-            // its schema and Server wrapper; drop that guard once this is fixed.
-            auth = new String(DatatypeConverter.parseBase64Binary(auth), Charsets.ASCII_CHARSET);
-            String[] values = auth.split(":");
-            if (values.length != 2) {
+            // RFC 7617: the credential is UTF-8, and only the user-id is barred from
+            // containing a colon, so split on the first one and keep the rest as the password
+            auth = new String(DatatypeConverter.parseBase64Binary(auth), StandardCharsets.UTF_8);
+            int colon = auth.indexOf(':');
+            if (colon < 0) {
                 throw new BadRequestException("Invalid syntax for username and password");
             }
 
-            final String username = values[0];
-            final String password = values[1];
+            final String username = auth.substring(0, colon);
+            final String password = auth.substring(colon + 1);
 
             if (StringUtils.isEmpty(username) || StringUtils.isEmpty(password)) {
                 throw new BadRequestException("Invalid syntax for username and password");
