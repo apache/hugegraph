@@ -316,7 +316,10 @@ case "${LOGS}" in
             if ! crash_name_taken "${LAUNCH_ID}" &&
                mkdir "${LOGS}/heapdump_${LAUNCH_ID}" 2>/dev/null; then
                 HEAP_DUMP_PATH="${LOGS}/heapdump_${LAUNCH_ID}"
-            elif ! crash_name_taken "${LAUNCH_ID}" || [[ ${LAUNCH_SUFFIX} -ge 1000 ]]; then
+            elif [[ ${LAUNCH_SUFFIX} -ge 1000 ]]; then
+                report_error "WARN: heap dump names for ${LAUNCH_STAMP} are all taken; heap dumps go to ${LOGS}"
+                HEAP_DUMP_PATH="${LOGS}"
+            elif ! crash_name_taken "${LAUNCH_ID}"; then
                 # Not a name clash (a full disk, for example): keep starting, and dump
                 # into $LOGS itself rather than make diagnostics a startup requirement.
                 report_error "WARN: cannot create ${LOGS}/heapdump_${LAUNCH_ID}; heap dumps go to ${LOGS}"

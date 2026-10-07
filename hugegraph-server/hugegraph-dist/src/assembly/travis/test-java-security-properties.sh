@@ -302,8 +302,8 @@ assert_clean_bootstrap_error() {
     local error_file="$1"
     # Every launcher run now makes the JVM print "Picked up JAVA_TOOL_OPTIONS:",
     # whose paths may contain any host or directory name.
-    if grep -v '^Picked up ' "$error_file" |
-       grep -Eq 'Log4j|NetUtils|UnknownHost|hostname'; then
+    if awk '!/^Picked up / && /Log4j|NetUtils|UnknownHost|hostname/ { found = 1 }
+            END { exit !found }' "$error_file"; then
         fail "bootstrap initialized logging or hostname resolution"
     fi
 }
@@ -628,8 +628,10 @@ effective_flag() {
     fi
     # The value sits between "= " and the trailing "{origin}" columns and may
     # contain spaces.
-    printf '%s\n' "$flags" | awk -v flag="$flag" '$2 == flag {
-        sub(/^[^=]*= /, ""); sub(/ *(\{[^}]*\} *)+$/, ""); print; exit }'
+    # A here-string, not a pipe: awk exits early, which would kill printf with
+    # SIGPIPE under pipefail.
+    awk -v flag="$flag" '$2 == flag {
+        sub(/^[^=]*= /, ""); sub(/ *(\{[^}]*\} *)+$/, ""); print; exit }' <<< "$flags"
 }
 
 assert_effective_flag() {
