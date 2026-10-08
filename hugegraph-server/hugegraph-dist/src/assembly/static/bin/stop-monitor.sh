@@ -25,11 +25,15 @@ function abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
-BIN=`abs_path`
-TOP="$(cd $BIN/../ && pwd)"
+BIN="$(abs_path)"
+TOP="$(cd "$BIN"/../ && pwd)"
 
-. $BIN/util.sh
+. "$BIN"/util.sh
 
-CRONTAB_JOB="$TOP/bin/monitor-hugegraph.sh"
+# Must equal the serialized form start-monitor.sh saved (one quoted shell word),
+# otherwise grep -F cannot match a path containing an apostrophe or space and the
+# job could never be removed. shell_quote (not cron_quote) so removal is not
+# blocked by validation.
+CRONTAB_JOB="$(shell_quote "$TOP/bin/monitor-hugegraph.sh")"
 
 crontab_remove "$CRONTAB_JOB"

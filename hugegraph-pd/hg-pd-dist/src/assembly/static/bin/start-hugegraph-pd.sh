@@ -30,14 +30,18 @@ if [ -z "$DAEMON" ]; then
     DAEMON="true"
 fi
 
-while getopts "d:g:j:y:" arg; do
+while getopts "c:d:g:i:j:l:o:y:" arg; do
     case ${arg} in
+        c) CONF_OVERRIDE="$OPTARG" ;;
         g) GC_OPTION="$OPTARG" ;;
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
         j) USER_OPTION="$OPTARG" ;;
+        l) LOGS_OVERRIDE="$OPTARG" ;;
+        o) PLUGINS_OVERRIDE="$OPTARG" ;;
         # Telemetry is used to collect metrics, traces and logs
         d) DAEMON="$OPTARG" ;;
         y) OPEN_TELEMETRY="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        ?) echo "USAGE: $0 [-c conf_dir] [-d true|false] [-g g1] [-i pid_file] [-j opts] [-l logs_dir] [-o plugins_dir] [-y true|false]" && exit 1 ;;
     esac
 done
 
@@ -53,18 +57,26 @@ function abs_path() {
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
-LIB="$TOP/lib"
-PLUGINS="$TOP/plugins"
-LOGS="$TOP/logs"
-OUTPUT=${LOGS}/hugegraph-pd-stdout.log
-GITHUB="https://github.com"
-PID_FILE="$BIN/pid"
 
 . "$BIN"/util.sh
 
+# Canonicalize relative path overrides to absolute paths.
+CONF_OVERRIDE="$(canonicalize_dir "$CONF_OVERRIDE")" || exit 1
+LOGS_OVERRIDE="$(canonicalize_dir "$LOGS_OVERRIDE")" || exit 1
+PLUGINS_OVERRIDE="$(canonicalize_dir "$PLUGINS_OVERRIDE")" || exit 1
+PID_FILE_OVERRIDE="$(canonicalize_file "$PID_FILE_OVERRIDE")" || exit 1
+
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
+LIB="$TOP/lib"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
+OUTPUT=${LOGS}/hugegraph-pd-stdout.log
+GITHUB="https://github.com"
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
+
 ensure_path_writable "$LOGS"
 ensure_path_writable "$PLUGINS"
+ensure_path_writable "$(dirname "$PID_FILE")"
 
 # The maximum and minimum heap memory that service can use
 MAX_MEM=$((32 * 1024))
@@ -87,7 +99,7 @@ JAVA_VERSION=$($JAVA -version 2>&1 |
                sed 's/^1\.//' | cut -d'.' -f1)
 JAVA_VERSION="${JAVA_VERSION%%[!0-9]*}"
 if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $EXPECT_JDK_VERSION ]]; then
-    echo "Please make sure that the JDK is installed and the version >= $EXPECT_JDK_VERSION"  >> ${OUTPUT}
+    echo "Please make sure that the JDK is installed and the version >= $EXPECT_JDK_VERSION"  >> "${OUTPUT}"
     exit 1
 fi
 
@@ -96,7 +108,7 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     XMX=$(calc_xmx $MIN_MEM $MAX_MEM)
     if [ $? -ne 0 ]; then
         echo "Failed to start HugeGraphPDServer, requires at least ${MIN_MEM}m free memory" \
-             >> ${OUTPUT}
+             >> "${OUTPUT}"
         exit 1
     fi
     JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION}"
@@ -121,7 +133,7 @@ case "$GC_OPTION" in
                                       -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
         ;;
     *)
-        echo "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now" >> ${OUTPUT}
+        echo "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now" >> "${OUTPUT}"
         exit 1
 esac
 
@@ -135,7 +147,7 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
             "${GITHUB}/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.1.0/${OT_JAR}"
 
         if [[ ! -e "${OT_JAR_PATH}" ]]; then
-            echo "## Error: Failed to download ${OT_JAR}." >>${OUTPUT}
+            echo "## Error: Failed to download ${OT_JAR}." >>"${OUTPUT}"
             exit 1
         fi
     fi
@@ -145,8 +157,8 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     actual_md5=$(md5sum "${OT_JAR_PATH}" | awk '{print $1}')
 
     if [[ "${expected_md5}" != "${actual_md5}" ]]; then
-        echo "## Error: MD5 checksum verification failed for ${OT_JAR_PATH}." >>${OUTPUT}
-        echo "## Tips: Remove the file and try again." >>${OUTPUT}
+        echo "## Error: MD5 checksum verification failed for ${OT_JAR_PATH}." >>"${OUTPUT}"
+        echo "## Tips: Remove the file and try again." >>"${OUTPUT}"
         exit 1
     fi
 
@@ -166,22 +178,22 @@ fi
 #if [ "${JMX_EXPORT_PORT}" != "" ] && [ ${JMX_EXPORT_PORT} -ne 0 ] ; then
 #  JAVA_OPTIONS="${JAVA_OPTIONS} -javaagent:${LIB}/jmx_prometheus_javaagent-0.16.1.jar=${JMX_EXPORT_PORT}:${CONF}/jmx_exporter.yml"
 #fi
-if [ $(ps -ef|grep -v grep| grep java|grep -cE ${CONF}) -ne 0 ]; then
+if [ "$(ps -ef | grep -v grep | grep java | grep -cE "${CONF}")" -ne 0 ]; then
    echo "HugeGraphPDServer is already running..."
    exit 0
 fi
 
-JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
+JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Dlogging.config=${CONF}/log4j2.xml -DLOG_PATH=${LOGS} -Dbolt.log.path=${LOGS} -Dlogging.path=${LOGS} -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 # Turn on security check
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphPDServer in daemon mode..."
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
         exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar &
+            -Dspring.config.location="${CONF}"/application.yml ${LIB}/hg-pd-service-*.jar &
     else
         exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1 &
+            -Dspring.config.location="${CONF}"/application.yml ${LIB}/hg-pd-service-*.jar >> "${OUTPUT}" 2>&1 &
     fi
     PID="$!"
     # Write pid to file
@@ -194,9 +206,9 @@ else
     echo "[+pid] $$"
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
         exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar
+            -Dspring.config.location="${CONF}"/application.yml ${LIB}/hg-pd-service-*.jar
     else
         exec ${JAVA} -Dname="HugeGraphPD" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
-            -Dspring.config.location=${CONF}/application.yml ${LIB}/hg-pd-service-*.jar >> ${OUTPUT} 2>&1
+            -Dspring.config.location="${CONF}"/application.yml ${LIB}/hg-pd-service-*.jar >> "${OUTPUT}" 2>&1
     fi
 fi

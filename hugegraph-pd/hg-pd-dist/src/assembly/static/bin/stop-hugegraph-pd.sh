@@ -27,20 +27,27 @@ abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
+while getopts "i:" arg; do
+    case ${arg} in
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
+        ?) echo "USAGE: $0 [-i pid_file]" && exit 1 ;;
+    esac
+done
+
 BIN=$(abs_path)
 TOP="$(cd $BIN/../ && pwd)"
 
 . "$BIN"/util.sh
 
-PID_FILE=$BIN/pid
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 SERVER_SHUTDOWN_TIMEOUT_S=30
 
-if [ ! -f ${PID_FILE} ]; then
+if [ ! -f "${PID_FILE}" ]; then
     echo "The pid file $PID_FILE doesn't exist"
     exit 0
 fi
 
-PID=$(cat $PID_FILE)
+PID=$(cat "$PID_FILE")
 kill_process_and_wait "HugeGraphPDServer" "$PID" "$SERVER_SHUTDOWN_TIMEOUT_S"
 
 if [ $? -eq 0 ]; then
