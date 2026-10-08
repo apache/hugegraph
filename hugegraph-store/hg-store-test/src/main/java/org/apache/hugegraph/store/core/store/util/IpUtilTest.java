@@ -54,6 +54,14 @@ public class IpUtilTest {
     }
 
     @Test
+    public void testConfiguredLinkLocalStays() throws SocketException {
+        String linkLocal = findLocalLinkLocalIpv4();
+        Assume.assumeTrue(linkLocal != null);
+        Assert.assertEquals(linkLocal + ":8510",
+                            IpUtil.getNearestAddress(linkLocal + ":8510"));
+    }
+
+    @Test
     public void testHostnameIsReturnedWithoutError() {
         Logger logger = (Logger) LogManager.getLogger(IpUtil.class);
         MemoryAppender appender = new MemoryAppender();
@@ -73,6 +81,24 @@ public class IpUtilTest {
             logger.setLevel(previous);
             appender.stop();
         }
+    }
+
+    private static String findLocalLinkLocalIpv4() throws SocketException {
+        Enumeration<NetworkInterface> nics = NetworkInterface.getNetworkInterfaces();
+        if (nics == null) {
+            return null;
+        }
+        while (nics.hasMoreElements()) {
+            NetworkInterface nic = nics.nextElement();
+            Enumeration<InetAddress> addresses = nic.getInetAddresses();
+            while (addresses.hasMoreElements()) {
+                InetAddress address = addresses.nextElement();
+                if (address instanceof Inet4Address && address.isLinkLocalAddress()) {
+                    return address.getHostAddress();
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean hasLocalIpv4(String expected, boolean includeLoopback)

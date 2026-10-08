@@ -34,14 +34,13 @@ import lombok.extern.slf4j.Slf4j;
 public class IpUtil {
 
     /**
-     * Get local IPv4 addresses. Link-local is always skipped.
-     * Loopback is included only for the "is this literal bound here" check.
+     * Get local IPv4 addresses.
      *
-     * @param includeLoopback whether 127.0.0.0/8 addresses are collected
+     * @param forFallback whether link-local and loopback addresses are excluded
      * @return ipv4 addr
      * @throws SocketException io error or no network interface
      */
-    private static List<String> getIpAddress(boolean includeLoopback) throws SocketException {
+    private static List<String> getIpAddress(boolean forFallback) throws SocketException {
         List<String> list = new LinkedList<>();
         Enumeration enumeration = NetworkInterface.getNetworkInterfaces();
         while (enumeration.hasMoreElements()) {
@@ -49,11 +48,11 @@ public class IpUtil {
             Enumeration addresses = network.getInetAddresses();
             while (addresses.hasMoreElements()) {
                 InetAddress address = (InetAddress) addresses.nextElement();
-                if (!(address instanceof Inet4Address) ||
-                    address.isLinkLocalAddress()) {
+                if (!(address instanceof Inet4Address)) {
                     continue;
                 }
-                if (!includeLoopback && address.isLoopbackAddress()) {
+                if (forFallback && (address.isLoopbackAddress() ||
+                                    address.isLinkLocalAddress())) {
                     continue;
                 }
                 list.add(address.getHostAddress());
@@ -78,13 +77,13 @@ public class IpUtil {
             // A configured literal that is bound locally stays, including
             // loopback. The default raft address is 127.0.0.1 and the
             // partition engine uses that same value as its PeerId.
-            // Loopback is dropped only from fallback candidates, when the
-            // configured IPv4 is not local.
-            if (getIpAddress(true).contains(tmp[0])) {
+            // Link-local and loopback are dropped only from fallback
+            // candidates, when the configured IPv4 is not local.
+            if (getIpAddress(false).contains(tmp[0])) {
                 return raftAddress;
             }
 
-            List<String> ipv4s = getIpAddress(false);
+            List<String> ipv4s = getIpAddress(true);
             if (ipv4s.size() == 0) {
                 throw new Exception("no available ipv4");
             }
