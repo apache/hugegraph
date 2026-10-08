@@ -91,7 +91,7 @@
         <groovy.version>4.0.25</groovy.version>
         <jackson.version>2.15.2</jackson.version>
         <netty.version>4.1.137.Final</netty.version>
-        <grpc.version>1.55.3</grpc.version>
+        <grpc.version>1.75.0</grpc.version>
         <protobuf.runtime.version>3.22.3</protobuf.runtime.version>
         <snakeyaml.version>2.2</snakeyaml.version>
         <spring-boot.version>2.5.15</spring-boot.version>
