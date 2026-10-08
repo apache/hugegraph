@@ -215,7 +215,6 @@ fi
 TEMP_DIR=$(mktemp -d)
 CRASH_NAME_FIXTURES=()
 LAUNCHER_DUMP_DIRS=()
-OT_FIXTURE_JAR=""
 OOM_DUMP_DIR=""
 SECURITY_PROPERTIES_BACKUP="${TEMP_DIR}/java-security.properties"
 
@@ -228,10 +227,7 @@ cleanup() {
         mv "$SECURITY_PROPERTIES_BACKUP" "$SECURITY_PROPERTIES"
     fi
     # Fixtures the test adds to the distribution; a failed step must not leave
-    # them behind, or a later real telemetry start would skip its download.
-    if [[ -n "${OT_FIXTURE_JAR:-}" ]]; then
-        rm -f "$OT_FIXTURE_JAR"
-    fi
+    # them behind.
     if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
         rm -rf "${CRASH_NAME_FIXTURES[@]}"
     fi
@@ -912,29 +908,27 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 # With telemetry on, the launcher appends its agent to JAVA_TOOL_OPTIONS and
-# keeps both the defaults and the operator's flags there.
+# keeps both the defaults and the operator's flags there. The agent jar fixture
+# lives in a copy of bin/ and conf/ under TEMP_DIR, so the test never writes into
+# the supplied distribution's plugins/ (or through a symlink placed there).
 OT_EXPECTED_MD5=$(grep -E '^ *expected_md5=' "$SERVER_SCRIPT" | cut -d'"' -f2)
 MOCK_MD5_BIN="${TEMP_DIR}/mock-md5-bin"
 mkdir -p "$MOCK_MD5_BIN"
 printf '#!/bin/bash\necho "%s  $1"\n' "$OT_EXPECTED_MD5" > "${MOCK_MD5_BIN}/md5sum"
 chmod +x "${MOCK_MD5_BIN}/md5sum"
-OT_JAR_PATH="${SERVER_ROOT}/plugins/opentelemetry-javaagent.jar"
-if [[ ! -e "$OT_JAR_PATH" ]]; then
-    mkdir -p "${SERVER_ROOT}/plugins"
-    OT_FIXTURE_JAR="$OT_JAR_PATH"
-    : > "$OT_FIXTURE_JAR"
-fi
+TELEMETRY_ROOT="${TEMP_DIR}/telemetry-dist"
+mkdir -p "${TELEMETRY_ROOT}/logs" "${TELEMETRY_ROOT}/plugins"
+cp -R "${SERVER_ROOT}/bin" "${SERVER_ROOT}/conf" "${TELEMETRY_ROOT}/"
+: > "${TELEMETRY_ROOT}/plugins/opentelemetry-javaagent.jar"
 TELEMETRY_CAPTURE="${TEMP_DIR}/telemetry.args"
 CAPTURE_FILE="$TELEMETRY_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
     PATH="${MOCK_MD5_BIN}:${PATH}" \
     JAVA_TOOL_OPTIONS="-XX:ErrorFile=/operator/hs_err.log" \
-    STDOUT_MODE=true "$SERVER_SCRIPT" \
-    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true "" "" true \
-    >/dev/null
-if [[ -n "${OT_FIXTURE_JAR:-}" ]]; then
-    rm -f "$OT_FIXTURE_JAR"
-    OT_FIXTURE_JAR=""
-fi
+    STDOUT_MODE=true "${TELEMETRY_ROOT}/bin/hugegraph-server.sh" \
+    "${TELEMETRY_ROOT}/conf/gremlin-server.yaml" \
+    "${TELEMETRY_ROOT}/conf/rest-server.properties" true "" "" true \
+    >/dev/null 2>"${TEMP_DIR}/telemetry.err" ||
+    fail "launcher failed with telemetry on: $(cat "${TEMP_DIR}/telemetry.err")"
 
 TELEMETRY_TOOL_OPTIONS=$(cat "${TELEMETRY_CAPTURE}.tool-options")
 [[ "$TELEMETRY_TOOL_OPTIONS" == -XX:+HeapDumpOnOutOfMemoryError\ * ]] ||
