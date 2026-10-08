@@ -17,7 +17,12 @@
 
 package org.apache.hugegraph.store.core.store.util;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.List;
 
 import org.apache.hugegraph.store.util.IpUtil;
@@ -28,12 +33,21 @@ import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.config.Property;
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.Test;
 
 public class IpUtilTest {
 
     @Test
-    public void testNearestAddressDoesNotPreferLoopback() {
+    public void testConfiguredLoopbackStays() throws SocketException {
+        Assume.assumeTrue(hasLocalIpv4("127.0.0.1", true));
+        Assert.assertEquals("127.0.0.1:8510",
+                            IpUtil.getNearestAddress("127.0.0.1:8510"));
+    }
+
+    @Test
+    public void testNearestAddressDoesNotPreferLoopback() throws SocketException {
+        Assume.assumeTrue(hasLocalIpv4(null, false));
         String selected = IpUtil.getNearestAddress("127.0.0.2:8510");
         Assert.assertNotEquals("127.0.0.1:8510", selected);
         Assert.assertFalse(selected.startsWith("127."));
@@ -59,6 +73,31 @@ public class IpUtilTest {
             logger.setLevel(previous);
             appender.stop();
         }
+    }
+
+    private static boolean hasLocalIpv4(String expected, boolean includeLoopback)
+            throws SocketException {
+        Enumeration<NetworkInterface> nics = NetworkInterface.getNetworkInterfaces();
+        if (nics == null) {
+            return false;
+        }
+        while (nics.hasMoreElements()) {
+            NetworkInterface nic = nics.nextElement();
+            Enumeration<InetAddress> addresses = nic.getInetAddresses();
+            while (addresses.hasMoreElements()) {
+                InetAddress address = addresses.nextElement();
+                if (!(address instanceof Inet4Address) || address.isLinkLocalAddress()) {
+                    continue;
+                }
+                if (!includeLoopback && address.isLoopbackAddress()) {
+                    continue;
+                }
+                if (expected == null || expected.equals(address.getHostAddress())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private static final class MemoryAppender extends AbstractAppender {
