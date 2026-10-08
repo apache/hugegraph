@@ -47,7 +47,9 @@ public class IpUtil {
             Enumeration addresses = network.getInetAddresses();
             while (addresses.hasMoreElements()) {
                 InetAddress address = (InetAddress) addresses.nextElement();
-                if (address != null && (address instanceof Inet4Address)) {
+                if (address instanceof Inet4Address &&
+                    !address.isLoopbackAddress() &&
+                    !address.isLinkLocalAddress()) {
                     list.add(address.getHostAddress());
                 }
             }
@@ -63,8 +65,12 @@ public class IpUtil {
      */
     public static String getNearestAddress(String raftAddress) {
         try {
-            List<String> ipv4s = getIpAddress();
             String[] tmp = raftAddress.split(":");
+            if (!isDottedIpv4(tmp[0])) {
+                return raftAddress;
+            }
+
+            List<String> ipv4s = getIpAddress();
             if (ipv4s.size() == 0) {
                 throw new Exception("no available ipv4");
             }
@@ -94,8 +100,34 @@ public class IpUtil {
         } catch (SocketException e) {
             log.error("getIpAddress, get ip failed, {}", e.getMessage());
         } catch (Exception e) {
-            log.error("getRaftAddress, got exception, {}", e.getMessage());
+            log.error("getNearestAddress, got exception, {}", e.getMessage());
         }
         return raftAddress;
+    }
+
+    /**
+     * A dotted IPv4 literal is four numeric octets. Hostnames must not be
+     * parsed as addresses; {@code Integer.parseInt} on a DNS label is not a
+     * signal to log or to replace the configured host.
+     */
+    private static boolean isDottedIpv4(String host) {
+        String[] parts = host.split("\\.", -1);
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            if (part.isEmpty() || part.length() > 3) {
+                return false;
+            }
+            for (int i = 0; i < part.length(); i++) {
+                if (!Character.isDigit(part.charAt(i))) {
+                    return false;
+                }
+            }
+            if (Integer.parseInt(part) > 255) {
+                return false;
+            }
+        }
+        return true;
     }
 }
