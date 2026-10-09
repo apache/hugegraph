@@ -138,6 +138,8 @@
             <groupId>org.apdplat</groupId>
             <artifactId>word</artifactId>
             <version>1.3</version>
+            <!-- External optional analyzer; compile/test it without shipping it. -->
+            <scope>provided</scope>
             <exclusions>
                 <exclusion>
                     <groupId>ch.qos.logback</groupId>
