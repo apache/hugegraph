@@ -77,6 +77,8 @@ invalidates planning and final gates. Normal target-branch advancement remains a
 matching non-strict branch protection. An ancestry comparison uses the repository API so
 commits added after checkout do not need to exist locally. A selection/API failure conservatively selects
 all suites. A final metadata outage alone cannot invalidate completed Memory tests.
+Once live metadata identifies a changed target SHA, planning and every final gate require
+a successful ancestry comparison; an unavailable comparison cannot validate that old merge.
 Plans and actual results are diagnostics, not execution credentials for later runs.
 
 ## Protection and retries

@@ -182,7 +182,12 @@ def require_current_pr(plan, fetch):
             or live["base"]["ref"] != plan.get("baseRef")):
         raise StaleInputError("PR inputs changed; refresh the branch and start a new PR run")
     if live["base"]["sha"] != plan["base"]:
-        comparison = fetch(f"repos/{plan['repository']}/compare/{plan['base']}...{live['base']['sha']}")
+        try:
+            comparison = fetch(f"repos/{plan['repository']}/compare/{plan['base']}...{live['base']['sha']}")
+        except (subprocess.SubprocessError, OSError) as error:
+            # The live target already changed. An unavailable comparison cannot
+            # prove that the old merge still belongs to its history.
+            raise StaleInputError("Cannot verify changed PR target history; start a new PR run") from error
         if (comparison.get("status") != "ahead"
                 or comparison.get("merge_base_commit", {}).get("sha") != plan["base"]):
             raise StaleInputError("PR target history changed; start a new PR run")

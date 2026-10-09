@@ -658,7 +658,7 @@ class PolicyTest(unittest.TestCase):
                 with self.assertRaises(policy.StaleInputError):
                     policy.require_current_pr(plan, fetch)
 
-    def test_target_comparison_outage_preserves_memory_outage_policy(self):
+    def test_changed_target_requires_ancestry_when_comparison_is_unavailable(self):
         plan = self.plan()
         live = self.live_pr()
         live["base"]["sha"] = "advanced-base"
@@ -668,9 +668,8 @@ class PolicyTest(unittest.TestCase):
             raise subprocess.CalledProcessError(1, "gh")
         results = {suite: {"result": "success"} for suite in plan["expected"]}
         results["plan"] = {"result": "success"}
-        policy.gate(plan, results, fetch, mode="memory")
-        for mode in ["all", "advisory"]:
-            with self.assertRaises(subprocess.CalledProcessError):
+        for mode in ["all", "memory", "advisory"]:
+            with self.assertRaises(policy.StaleInputError):
                 policy.gate(plan, results, fetch, mode=mode)
 
 
