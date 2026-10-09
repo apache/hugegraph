@@ -83,6 +83,13 @@ public class IpUtilTest {
         }
     }
 
+    @Test
+    public void testNonAsciiDigitsAreReturnedAsHostname() {
+        String unicodeDigits = "\u0661.\u0662.\u0663.\u0664:8510";
+        Assert.assertEquals(unicodeDigits,
+                            IpUtil.getNearestAddress(unicodeDigits));
+    }
+
     private static String findLocalLinkLocalIpv4() throws SocketException {
         Enumeration<NetworkInterface> nics = NetworkInterface.getNetworkInterfaces();
         if (nics == null) {

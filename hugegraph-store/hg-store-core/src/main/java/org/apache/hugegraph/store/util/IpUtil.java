@@ -133,7 +133,8 @@ public class IpUtil {
                 return false;
             }
             for (int i = 0; i < part.length(); i++) {
-                if (!Character.isDigit(part.charAt(i))) {
+                char c = part.charAt(i);
+                if (c < '0' || c > '9') {
                     return false;
                 }
             }
