@@ -172,6 +172,14 @@ validation of HugeGraph's schema list path.
 
 ## Query semantics
 
+### First query after startup
+
+Server initializes the condition-query serializer on its trusted startup thread before
+REST and Gremlin accept requests. A first label-filtered Gremlin query must succeed
+without a preceding REST graph query, and subsequent REST queries must remain usable.
+Gremlin scripts still cannot read restricted system properties such as `java.version`
+or disable the security manager.
+
 ### Predicate and value compatibility
 
 Version-specific handling retains negated predicates and filtering barriers where
