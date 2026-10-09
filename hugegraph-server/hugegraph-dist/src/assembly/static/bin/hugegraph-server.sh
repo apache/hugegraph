@@ -275,7 +275,9 @@ JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
 # path must stay unique per JVM. ErrorFile expands %p to each JVM's PID.
 # HeapDumpPath expands %p only from JDK 25, but on every version, when it names an
 # existing directory, each JVM writes java_pid<its pid>.hprof inside it, so it
-# points at one directory per launch.
+# points at one directory per launch. HotSpot picks that name, so a child JVM that
+# gets a PID reused within the same launch cannot write over an earlier child's
+# dump; the launcher cannot rename HotSpot's dump file.
 # A restarted container often reuses the PID; HotSpot truncates an existing crash
 # log (JDK 17+) and will not write a heap dump over an existing file. So the names
 # carry the host name (the pod name on Kubernetes, so pods sharing one log volume

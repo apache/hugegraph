@@ -19,7 +19,9 @@ set -euo pipefail
 
 SERVER_ROOT_INPUT="${1:?Usage: $0 PATH_TO_SERVER_DIST [SOURCE_ROOT]}"
 SOURCE_ROOT_INPUT="${2:-}"
-SERVER_ROOT=$(cd "$SERVER_ROOT_INPUT" && pwd)
+# Resolve symlinks: the launcher resolves its own location the same way, and the
+# paths it passes to the JVM are compared against this one.
+SERVER_ROOT=$(cd "$SERVER_ROOT_INPUT" && pwd -P)
 SERVER_SCRIPT="${SERVER_ROOT}/bin/hugegraph-server.sh"
 CONF="${SERVER_ROOT}/conf"
 SECURITY_PROPERTIES="${CONF}/java-security.properties"
