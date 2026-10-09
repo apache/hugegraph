@@ -32,7 +32,7 @@ class PolicyTest(unittest.TestCase):
 
     def live_pr(self):
         return {"state": "open", "head": {"sha": "head", "ref": "feature", "repo": {"full_name": "alice/server"}},
-                "base": {"sha": "base", "repo": {"full_name": "apache/server"}}}
+                "base": {"sha": "base", "ref": "master", "repo": {"full_name": "apache/server"}}}
 
     def setUp(self):
         event_sha = patch.dict(os.environ, {"GITHUB_SHA": "merge"})
@@ -193,7 +193,7 @@ class PolicyTest(unittest.TestCase):
 
     def plan(self):
         return {"schema": 1, "project": "server", "repository": "apache/server", "pr": 7,
-                "source": "alice/server", "branch": "feature", "base": "base", "head": "head",
+                "source": "alice/server", "branch": "feature", "baseRef": "master", "base": "base", "head": "head",
                 "testedMergeSHA": "merge", "expected": ["server_memory", "server_rocksdb", "pd_store", "cluster"],
                 "selected": ["server", "pd", "store", "hstore", "cluster"]}
 
@@ -246,7 +246,11 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(["server_memory"], policy.gate(plan, results, unavailable, mode="memory")["executed"])
         advanced = self.live_pr()
         advanced["base"]["sha"] = "advanced"
-        policy.gate(plan, results, lambda _: advanced, mode="memory")
+        def fetch(path):
+            if "/compare/" in path:
+                return {"status": "ahead", "merge_base_commit": {"sha": "base"}}
+            return advanced
+        policy.gate(plan, results, fetch, mode="memory")
         advanced["head"]["sha"] = "new-head"
         with self.assertRaises(policy.StaleInputError):
             policy.gate(plan, results, lambda _: advanced, mode="memory")
@@ -370,7 +374,7 @@ class PolicyTest(unittest.TestCase):
                 self.assertNotEqual(merge, false_merge)
                 git("checkout", "--detach", "-q", merge)
                 live = {"state": "open", "head": {"sha": head, "ref": "feature", "repo": {"full_name": "alice/server"}},
-                        "base": {"sha": base, "repo": {"full_name": "apache/server"}}}
+                        "base": {"sha": base, "ref": "master", "repo": {"full_name": "apache/server"}}}
                 event = {"pull_request": dict(live, number=7)}
                 calls = []
                 def fetch(path):
@@ -476,8 +480,12 @@ class PolicyTest(unittest.TestCase):
             self.assertEqual([], plan["expected"])
             self.assertFalse(plan["server"])
             self.assertFalse(plan["security"])
-            advanced = dict(live, base={"sha": "new-base", "repo": {"full_name": "apache/server"}})
-            self.assertFalse(policy.create_plan("server", event, "apache/server", lambda p: advanced)["server"])
+            advanced = dict(live, base={"sha": "new-base", "ref": "master", "repo": {"full_name": "apache/server"}})
+            def fetch(path):
+                if "/pulls/" in path:
+                    return advanced
+                return {"status": "ahead", "merge_base_commit": {"sha": "base"}}
+            self.assertFalse(policy.create_plan("server", event, "apache/server", fetch)["server"])
             with patch.object(policy, "git", side_effect=lambda *a: "wrong parents" if a[0] == "show" else git(*a)):
                 with self.assertRaises(policy.StaleInputError):
                     policy.create_plan("server", event, "apache/server", lambda p: live)
@@ -552,12 +560,13 @@ class PolicyTest(unittest.TestCase):
                                      "-m", "PR merge after master advanced")
                 git("checkout", "--detach", "-q", advanced_merge)
                 os.environ["GITHUB_SHA"] = advanced_merge
-                advanced_plan = policy.create_plan("server", event, "apache/server", lambda _: live)
+                advanced_live = dict(live, base=dict(live["base"], sha=advanced_base))
+                advanced_plan = policy.create_plan("server", event, "apache/server", lambda _: advanced_live)
                 self.assertEqual(base, event["pull_request"]["base"]["sha"])
                 self.assertEqual(advanced_base, advanced_plan["base"])
                 self.assertEqual(advanced_merge, advanced_plan["testedMergeSHA"])
                 self.assertEqual(plan["changedPaths"], advanced_plan["changedPaths"])
-                policy.gate(advanced_plan, results, lambda _: live)
+                policy.gate(advanced_plan, results, lambda _: advanced_live)
                 with patch.dict(os.environ, {"GITHUB_SHA": ""}):
                     with self.assertRaises(policy.StaleInputError):
                         policy.create_plan("server", event, "apache/server", lambda _: live)
@@ -573,6 +582,96 @@ class PolicyTest(unittest.TestCase):
         plan = dict(self.plan(), pr=0, expected=[], selected=[])
         policy.gate(plan, {"plan": {"result": "success"}},
                     lambda _: self.fail("push gate must not query a PR"))
+
+    def test_real_target_retarget_and_force_push_reject_old_plans(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+            git("init", "-q")
+            git("config", "user.email", "ci@example.invalid")
+            git("config", "user.name", "CI")
+            (root / "README.md").write_text("base")
+            git("add", ".")
+            git("commit", "-qm", "base")
+            base = git("rev-parse", "HEAD")
+            git("checkout", "-qb", "feature")
+            (root / "hugegraph-server").mkdir()
+            (root / "hugegraph-server/A.java").write_text("PR source")
+            git("add", ".")
+            git("commit", "-qm", "head")
+            head = git("rev-parse", "HEAD")
+            merge = git("commit-tree", git("rev-parse", "HEAD^{tree}"),
+                        "-p", base, "-p", head, "-m", "PR merge")
+            base_tree = git("rev-parse", base + "^{tree}")
+            advanced = git("commit-tree", base_tree, "-p", base, "-m", "normal advance")
+            unrelated = git("commit-tree", base_tree, "-m", "rewritten target")
+            git("checkout", "--detach", "-q", merge)
+            live = self.live_pr()
+            live["head"]["sha"], live["base"]["sha"] = head, base
+            event = {"pull_request": dict(live, number=7)}
+            old = os.getcwd()
+            try:
+                os.chdir(root)
+                os.environ["GITHUB_SHA"] = merge
+                plan = policy.create_plan("server", event, "apache/server", lambda _: live)
+                self.assertEqual("master", plan["baseRef"])
+                results = {suite: {"result": "success"} for suite in plan["expected"]}
+                results["plan"] = {"result": "success"}
+                for ref, sha, accepted in [("release-other", base, False),
+                                            ("master", unrelated, False),
+                                            ("master", advanced, True)]:
+                    current = dict(live, base=dict(live["base"], ref=ref, sha=sha))
+                    def fetch(path):
+                        if "/pulls/" in path:
+                            return current
+                        self.assertEqual(f"repos/apache/server/compare/{base}...{sha}", path)
+                        ancestor = git("merge-base", base, sha) if accepted else None
+                        return {"status": "ahead" if accepted else "diverged",
+                                "merge_base_commit": {"sha": ancestor}}
+                    with self.subTest(ref=ref, sha=sha):
+                        if accepted:
+                            policy.create_plan("server", event, "apache/server", fetch)
+                        else:
+                            with self.assertRaises(policy.StaleInputError):
+                                policy.create_plan("server", event, "apache/server", fetch)
+                        for mode in ["all", "memory", "advisory"]:
+                            if accepted:
+                                report = policy.gate(plan, results, fetch, mode=mode)
+                                self.assertEqual("master", report["baseRef"])
+                            else:
+                                with self.assertRaises(policy.StaleInputError):
+                                    policy.gate(plan, results, fetch, mode=mode)
+            finally:
+                os.chdir(old)
+
+    def test_target_rollback_and_inconsistent_comparison_fail_closed(self):
+        plan = self.plan()
+        live = self.live_pr()
+        live["base"]["sha"] = "changed-base"
+        for status, ancestor in [("behind", "changed-base"), ("diverged", "older"),
+                                 ("ahead", "wrong-base"), (None, None)]:
+            def fetch(path):
+                return (live if "/pulls/" in path else
+                        {"status": status, "merge_base_commit": {"sha": ancestor}})
+            with self.subTest(status=status, ancestor=ancestor):
+                with self.assertRaises(policy.StaleInputError):
+                    policy.require_current_pr(plan, fetch)
+
+    def test_target_comparison_outage_preserves_memory_outage_policy(self):
+        plan = self.plan()
+        live = self.live_pr()
+        live["base"]["sha"] = "advanced-base"
+        def fetch(path):
+            if "/pulls/" in path:
+                return live
+            raise subprocess.CalledProcessError(1, "gh")
+        results = {suite: {"result": "success"} for suite in plan["expected"]}
+        results["plan"] = {"result": "success"}
+        policy.gate(plan, results, fetch, mode="memory")
+        for mode in ["all", "advisory"]:
+            with self.assertRaises(subprocess.CalledProcessError):
+                policy.gate(plan, results, fetch, mode=mode)
 
 
 if __name__ == "__main__":

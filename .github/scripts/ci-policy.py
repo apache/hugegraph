@@ -178,14 +178,20 @@ def require_current_pr(plan, fetch):
     if (live.get("state") != "open" or live["head"]["sha"] != plan["head"]
             or live["head"]["repo"]["full_name"] != plan["source"]
             or live["head"]["ref"] != plan["branch"]
-            or live["base"]["repo"]["full_name"] != plan["repository"]):
+            or live["base"]["repo"]["full_name"] != plan["repository"]
+            or live["base"]["ref"] != plan.get("baseRef")):
         raise StaleInputError("PR inputs changed; refresh the branch and start a new PR run")
+    if live["base"]["sha"] != plan["base"]:
+        comparison = fetch(f"repos/{plan['repository']}/compare/{plan['base']}...{live['base']['sha']}")
+        if (comparison.get("status") != "ahead"
+                or comparison.get("merge_base_commit", {}).get("sha") != plan["base"]):
+            raise StaleInputError("PR target history changed; start a new PR run")
 
 
 def create_plan(project, event, repository, fetch=api):
     paths = []
     plan = {"schema": 1, "project": project, "repository": repository, "pr": 0,
-            "source": repository, "branch": "", "base": "", "head": git("rev-parse", "HEAD"),
+            "source": repository, "branch": "", "base": "", "baseRef": "", "head": git("rev-parse", "HEAD"),
             "reason": "affected inputs", "testedMergeSHA": git("rev-parse", "HEAD")}
     try:
         pr = event.get("pull_request")
@@ -196,10 +202,10 @@ def create_plan(project, event, repository, fetch=api):
             # An incomplete PR event must never fall back to a push plan with pr=0.
             try:
                 plan.update(source=pr["head"]["repo"]["full_name"], base=pr["base"]["sha"],
-                            head=pr["head"]["sha"], branch=pr["head"]["ref"])
+                            head=pr["head"]["sha"], branch=pr["head"]["ref"], baseRef=pr["base"]["ref"])
             except (KeyError, TypeError) as error:
                 raise StaleInputError("PR event lacks required input identity") from error
-            if not all(isinstance(plan[key], str) and plan[key] for key in ("source", "base", "head", "branch")):
+            if not all(isinstance(plan[key], str) and plan[key] for key in ("source", "base", "baseRef", "head", "branch")):
                 raise StaleInputError("PR event has an empty input identity")
             parents = git("show", "-s", "--format=%P", plan["testedMergeSHA"]).split()
             if (plan["testedMergeSHA"] != os.environ.get("GITHUB_SHA")
@@ -291,6 +297,7 @@ def gate(plan, results, fetch=None, mode="all"):
     report = {key: plan[key] for key in ["schema", "repository", "project", "pr", "source", "branch", "base",
                                         "head", "testedMergeSHA", "selected"]}
     report["selectionReasons"] = plan.get("selectionReasons", {})
+    report["baseRef"] = plan.get("baseRef", "")
     report.update(runID=int(os.environ.get("GITHUB_RUN_ID", "0")),
                   runAttempt=int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")), executed=expected,
                   results={suite: results.get(suite, {}).get("result", "missing") for suite in expected})
