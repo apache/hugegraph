@@ -33,6 +33,8 @@ import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBSessions;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBStdSessions;
 import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBStore;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBStoreProvider;
 import org.apache.hugegraph.backend.store.rocksdbsst.RocksDBSstSessions;
@@ -305,6 +307,88 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
             Assert.assertArrayEquals(getBytes("after truncate"), olap.session().get(dynamic, getBytes("next")));
         } finally {
             olap.close();
+        }
+    }
+
+    @Test
+    public void testToplingOlapClearKeepsHandleAndOtherTables() throws Exception {
+        this.assertOlapClear(true, false);
+    }
+
+    @Test
+    public void testToplingOlapClearRoutesIndependentDatabase() throws Exception {
+        this.assertOlapClear(true, true);
+    }
+
+    @Test
+    public void testStandardOlapClearRecreatesTable() throws Exception {
+        this.assertOlapClear(false, false);
+    }
+
+    private void assertOlapClear(boolean topling, boolean separate) throws Exception {
+        Id id = IdGenerator.of(123L);
+        String path = DB_PATH + "/olap-clear-" + topling + "-" + separate;
+        RocksDBSessions olap = new RocksDBStdSessions(FakeObjects.newConfig(), "db", "olap", path, path);
+        RocksDBStore.RocksDBGraphStore store = new RocksDBStore.RocksDBGraphStore(
+                new RocksDBStoreProvider(), "db", "store") {
+            @Override
+            protected RocksDBSessions db(HugeType type) {
+                return type == HugeType.OLAP ? olap : super.db(type);
+            }
+        };
+        Whitebox.setInternalState(store, "sessions", separate ? this.rocks : olap);
+        Whitebox.setInternalState(store, "toplingProvider", topling);
+        try {
+            olap.session();
+            store.createOlapTable(id);
+            String table = "store+ap_123";
+            olap.createTable(TABLE, "other-olap");
+            RocksDBSessions.Session session = olap.session();
+            session.put(table, getBytes("m"), getBytes("old"));
+            session.put(table, getBytes("n"), getBytes("old"));
+            session.put("other-olap", getBytes("other"), getBytes("retained"));
+            session.commit();
+            session.put(TABLE, getBytes("main"), getBytes("retained main"));
+            session.commit();
+            AtomicReference<?> owner = Whitebox.getInternalState(olap, "rocksdb");
+            Object opened = owner.get();
+            Map<String, ?> handles = Whitebox.getInternalState(opened, "cfHandles");
+            Object handle = handles.get(table);
+            Assert.assertNotNull(handle);
+            for (int i = 0; i < 2; i++) {
+                // Pending keys lie outside the stored range, or in an empty table.
+                if (topling) {
+                    session.put(table, getBytes("a"), getBytes("pending first"));
+                    session.put(table, getBytes("z"), getBytes("pending last"));
+                }
+                store.clearOlapTable(id);
+                if (topling) {
+                    Assert.assertSame(handle, handles.get(table));
+                } else {
+                    Assert.assertNotSame(handle, handles.get(table));
+                }
+                Assert.assertTrue(olap.existsTable(table));
+                Assert.assertNull(session.keyRange(table));
+                session.commit();
+                Assert.assertNull(session.keyRange(table));
+                Assert.assertArrayEquals(getBytes("retained"), session.get("other-olap", getBytes("other")));
+                Assert.assertArrayEquals(getBytes("retained main"), session.get(TABLE, getBytes("main")));
+            }
+            session.put(table, getBytes("new"), getBytes("after clear"));
+            session.commit();
+            olap.close();
+            RocksDBSessions reopened = new RocksDBStdSessions(FakeObjects.newConfig(), "db", "olap", path, path,
+                                                               ImmutableList.of(TABLE, table, "other-olap"));
+            try {
+                RocksDBSessions.Session reader = reopened.session();
+                Assert.assertArrayEquals(getBytes("after clear"), reader.get(table, getBytes("new")));
+                Assert.assertArrayEquals(getBytes("retained"), reader.get("other-olap", getBytes("other")));
+            } finally {
+                reopened.close();
+            }
+        } finally {
+            olap.close();
+            FileUtils.deleteDirectory(new File(path));
         }
     }
 
