@@ -56,6 +56,87 @@ import com.google.common.collect.ImmutableSet;
 public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
 
     @Test
+    public void testResetWaitsForNativeCloseAndSkipsRetainedClosedSession() throws Exception {
+        CountDownLatch disposed = new CountDownLatch(1);
+        CountDownLatch finishClose = new CountDownLatch(1);
+        CountDownLatch resetStarted = new CountDownLatch(1);
+        CountDownLatch resetFinished = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<RocksDBSessions.Session> closing = new AtomicReference<>();
+        Thread closer = new Thread(() -> {
+            try {
+                RocksDBSessions.Session session = this.rocks.session();
+                closing.set(session);
+                WriteBatch previous = Whitebox.getInternalState(session, "batch");
+                previous.close();
+                WriteBatch guarded = new WriteBatch() {
+                    @Override
+                    public void close() {
+                        super.close();
+                        disposed.countDown();
+                        try {
+                            Assert.assertTrue(finishClose.await(30, TimeUnit.SECONDS));
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(e);
+                        }
+                    }
+
+                    @Override
+                    public void clear() {
+                        // Trap the bad interleaving before calling a freed JNI address.
+                        Assert.assertTrue("Reset touched a disposed native batch", this.isOwningHandle());
+                        super.clear();
+                    }
+                };
+                Whitebox.setInternalState(session, "batch", guarded);
+                this.rocks.close();
+            } catch (Throwable e) {
+                failure.compareAndSet(null, e);
+                disposed.countDown();
+            }
+        }, "session-close");
+        Thread resetter = new Thread(() -> {
+            resetStarted.countDown();
+            try {
+                this.rocks.forceResetSessions();
+            } catch (Throwable e) {
+                failure.compareAndSet(null, e);
+            } finally {
+                resetFinished.countDown();
+            }
+        }, "session-reset");
+        closer.start();
+        try {
+            Assert.assertTrue(disposed.await(30, TimeUnit.SECONDS));
+            Assert.assertNull(failure.get());
+            // Close is still running and the pool still exposes this session.
+            Assert.assertTrue(closing.get().opened());
+            resetter.start();
+            Assert.assertTrue(resetStarted.await(30, TimeUnit.SECONDS));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            while (resetter.getState() != Thread.State.BLOCKED && resetFinished.getCount() != 0 &&
+                   System.nanoTime() < deadline) {
+                Thread.sleep(1L);
+            }
+            Assert.assertNull(failure.get());
+            Assert.assertEquals(Thread.State.BLOCKED, resetter.getState());
+        } finally {
+            finishClose.countDown();
+            closer.join(TimeUnit.SECONDS.toMillis(30));
+            resetter.join(TimeUnit.SECONDS.toMillis(30));
+        }
+        Assert.assertFalse(closer.isAlive());
+        Assert.assertFalse(resetter.isAlive());
+        Assert.assertNull(failure.get());
+        Assert.assertTrue(closing.get().closed());
+        // A reference retained before pool removal must remain safe to reset.
+        closing.get().reset();
+        this.put("after-close", "usable");
+        Assert.assertEquals("usable", this.get("after-close"));
+    }
+
+    @Test
     public void testResetDiscardsPendingWritesWithoutLeakingNativeBatch() throws Exception {
         RocksDBSessions.Session session = this.rocks.session();
         WriteBatch previous = Whitebox.getInternalState(session, "batch");

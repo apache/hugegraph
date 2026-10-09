@@ -732,7 +732,7 @@ public class RocksDBStdSessions extends RocksDBSessions {
         }
 
         @Override
-        public void close() {
+        public synchronized void close() {
             assert this.closeable();
             try {
                 this.batch.close();
@@ -751,8 +751,11 @@ public class RocksDBStdSessions extends RocksDBSessions {
         }
 
         @Override
-        public void reset() {
-            this.batch.clear();
+        public synchronized void reset() {
+            // A pool iterator may retain this session after its final detach.
+            if (this.opened) {
+                this.batch.clear();
+            }
         }
 
         /**
