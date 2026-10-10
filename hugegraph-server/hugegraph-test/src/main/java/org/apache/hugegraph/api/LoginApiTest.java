@@ -141,7 +141,7 @@ public class LoginApiTest extends BaseApiTest {
     @Test
     public void testBasicAuthWithNonAsciiOrColonPassword() {
         // RFC 7617: the credential is UTF-8 and only the first colon separates the fields
-        String[][] users = {{"utf8user", "\u00e4dminpass1"},
+        String[][] users = {{"utf8user", "ädminpass1"},
                             {"coloned", "new:pass1234"}};
         RestClient noAuthClient = new RestClient(baseUrl(), false);
         try {
