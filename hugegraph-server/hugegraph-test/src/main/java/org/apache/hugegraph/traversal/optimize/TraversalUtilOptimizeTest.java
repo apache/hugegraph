@@ -17,6 +17,12 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -25,18 +31,25 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
-import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.structure.BaseVertex;
+import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.tinkerpop.gremlin.process.traversal.GType;
+import org.apache.tinkerpop.gremlin.process.traversal.NotP;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.Scope;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.TextP;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
+import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
@@ -48,9 +61,12 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.InlineFilterStrategy;
+import org.apache.tinkerpop.gremlin.process.traversal.util.ConnectiveP;
 import org.apache.tinkerpop.gremlin.process.traversal.util.TraversalHelper;
 import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.VertexProperty;
+import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -280,6 +296,71 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerKeepsUnsafeLabelAfterPositiveLabelOr() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        PropertyKey city = propertyKey(2L, "city", DataType.TEXT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+        Mockito.when(graph.propertyKey("city")).thenReturn(city);
+        Mockito.when(graph.vertexLabels()).thenReturn(Collections.emptyList());
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("age", P.gt(1))
+                  .or(__.hasLabel("person"), __.hasLabel("software"))
+                  .has(T.label, P.neq("author"))
+                  .has("city", "Beijing"), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsMixedKeyOrUnsafeLabelLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey city = propertyKey(2L, "city", DataType.TEXT);
+        PropertyKey status = propertyKey(3L, "status", DataType.TEXT);
+        Mockito.when(graph.propertyKey("city")).thenReturn(city);
+        Mockito.when(graph.propertyKey("status")).thenReturn(status);
+        Mockito.when(graph.vertexLabels()).thenReturn(Collections.emptyList());
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("city", "Beijing")
+                  .or(__.has(T.label, P.neq("author")),
+                      __.has("status", "active")), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsGlobalChildUnsafeLabelLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey city = propertyKey(2L, "city", DataType.TEXT);
+        Mockito.when(graph.propertyKey("city")).thenReturn(city);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("city", "Beijing")
+                  .union(__.has(T.label, P.neq("author")),
+                         __.identity()), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+    }
+
+    @Test
     public void testExtractHasContainerKeepsUnsupportedOrLabelLocal() {
         Traversal.Admin<?, ?> traversal = __.V()
                                            .has("age", P.gt(18))
@@ -378,6 +459,33 @@ public class TraversalUtilOptimizeTest {
     }
 
     @Test
+    public void testExtractHasContainerKeepsGraphChainWithUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has(T.label, P.neq("author")).barrier()
+                  .has("age", 18), graph);
+        HugeGraphStep<?, ?> newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+
+        traversal = traversal(
+                __.V().has("age", 18).barrier()
+                  .has(T.label, P.neq("author")), graph);
+        newStep = replaceGraphStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+    }
+
+    @Test
     public void testExtractHasContainerKeepsTextRangeVertexHasStep() {
         HugeGraph graph = Mockito.mock(HugeGraph.class);
         PropertyKey name = propertyKey(1L, "name", DataType.TEXT);
@@ -433,6 +541,73 @@ public class TraversalUtilOptimizeTest {
 
         Assert.assertEquals(1, newStep.getHasContainers().size());
         Assert.assertFalse(hasStepExists(traversal));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsVertexChainWithUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().out().has(T.label, P.neq("author")).barrier()
+                  .has("age", 18), graph);
+        HugeVertexStep<?> newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+
+        traversal = traversal(
+                __.V().out().has("age", 18).barrier()
+                  .has(T.label, P.neq("author")), graph);
+        newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertEquals(2, countHasSteps(traversal));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsVertexMixedKeyOrUnsafeLabelLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        PropertyKey city = propertyKey(2L, "city", DataType.TEXT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+        Mockito.when(graph.propertyKey("city")).thenReturn(city);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().out().has("age", 18)
+                  .or(__.has(T.label, P.neq("author")),
+                      __.has("city", "Beijing")), graph);
+        HugeVertexStep<?> newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
+    }
+
+    @Test
+    public void testExtractHasContainerKeepsTrailingUnsafeVertexLabelLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        PropertyKey age = propertyKey(1L, "age", DataType.INT);
+        Mockito.when(graph.propertyKey("age")).thenReturn(age);
+
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().out().has("age", P.gt(18))
+                  .or(__.hasLabel("person"), __.hasLabel("software"))
+                  .has(T.label, P.neq("author")), graph);
+        HugeVertexStep<?> newStep = replaceVertexStep(traversal);
+
+        TraversalUtil.extractHasContainer(newStep, traversal);
+
+        Assert.assertTrue(newStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "age"));
+        Assert.assertTrue(stepExists(traversal, OrStep.class));
     }
 
     @Test
@@ -492,6 +667,677 @@ public class TraversalUtilOptimizeTest {
         Assert.assertFalse(TraversalUtil.isPositiveLabelContainer(
                 new HasContainer(T.label.getAccessor(),
                                  P.within(null, "person"))));
+    }
+
+    @Test
+    public void testPageIsConsumedBeforeUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("~page", "").limit(2).has(T.label, P.neq("author")), graph);
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(graphStep, traversal);
+        Assert.assertTrue(graphStep.queryInfo().paging());
+        Assert.assertFalse(hasStepExists(traversal, "~page"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+
+        traversal = traversal(
+                __.V().outE().has("~page", "").limit(2).has(T.label, P.neq("knows")), graph);
+        HugeVertexStep<?> vertexStep = replaceVertexStep(traversal);
+        TraversalUtil.extractHasContainer(vertexStep, traversal);
+        Assert.assertTrue(vertexStep.queryInfo().paging());
+        Assert.assertFalse(hasStepExists(traversal, "~page"));
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+    }
+
+    @Test
+    public void testLocalSearchWithoutGraphUsesRuntimeAnalyzer() throws Exception {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.searchPredicate("(alpha)")).thenReturn("alpha"::equals);
+        HugeGraph other = Mockito.mock(HugeGraph.class);
+        Mockito.when(other.searchPredicate("(alpha)")).thenReturn("different"::equals);
+        for (P<?> search : new P<?>[]{Text.contains("(alpha)"),
+                Text.contains("(alpha)").or(P.eq("beta")).and(P.neq("excluded"))}) {
+            for (GraphTraversal<?, ?> chain : new GraphTraversal<?, ?>[]{
+                    __.V().has("body", search).limit(10).hasLabel(P.neq("author")),
+                    __.outE().has("body", search).limit(10).hasLabel(P.neq("knows"))}) {
+                Traversal.Admin<?, ?> traversal = chain.asAdmin();
+                Step<?, ?> source;
+                if (traversal.getStartStep() instanceof GraphStep) {
+                    HugeGraphStep<?, ?> step = replaceGraphStep(traversal);
+                    TraversalUtil.extractHasContainer(step, traversal);
+                    source = step;
+                } else {
+                    HugeVertexStep<?> step = replaceVertexStep(traversal);
+                    TraversalUtil.extractHasContainer(step, traversal);
+                    source = step;
+                }
+                Assert.assertTrue(((QueryHolder) source).getHasContainers().isEmpty());
+                HasContainer local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+                Assert.assertEquals(search, local.getPredicate());
+                Assert.assertFalse(Text.contains("(alpha)").test("alpha"));
+                local = roundTrip(local);
+                Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+                Assert.assertFalse(local.test(searchVertex(graph, "alphabet")));
+                Assert.assertEquals(search instanceof ConnectiveP,
+                                    local.test(searchVertex(graph, "beta")));
+                Assert.assertFalse(local.test(searchVertex(graph, "excluded")));
+                HasContainer clone = local.clone();
+                Assert.assertFalse(clone.test(searchVertex(other, "alpha")));
+                Assert.assertTrue(clone.test(searchVertex(other, "different")));
+                Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+            }
+        }
+    }
+
+    @Test
+    public void testPositiveLabelPushdownBeforeUnsafeChild() {
+        HugeGraph graph = positiveLabelGraph();
+        for (P<?> label : new P<?>[]{P.eq("person"), P.within("person", "fan"),
+                                    P.within(Collections.emptyList())}) {
+            Traversal.Admin<?, ?> traversal = traversal(__.V().has(T.label, label).has("age", 18)
+                    .where(__.hasLabel(P.neq("software"))), graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+            TraversalUtil.extractHasContainer(source, traversal);
+            Assert.assertEquals(1, source.getHasContainers().size());
+            Assert.assertEquals(label, source.getHasContainers().get(0).getPredicate());
+            Assert.assertFalse(hasStepExists(traversal, T.label.getAccessor()));
+            Assert.assertTrue(hasStepExists(traversal, "age"));
+            TraversalUtil.extractHasContainer(source, traversal);
+            Assert.assertEquals(1, source.getHasContainers().size());
+        }
+    }
+
+    @Test
+    public void testPositiveLabelPushdownDoesNotCrossRange() {
+        Traversal.Admin<?, ?> traversal = traversal(__.V().hasLabel("person").limit(2)
+                .hasLabel("fan").hasLabel(P.neq("software")), positiveLabelGraph());
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        Assert.assertEquals(1, source.getHasContainers().size());
+        Assert.assertEquals(P.eq("person"), source.getHasContainers().get(0).getPredicate());
+        Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+    }
+
+    @Test
+    public void testPositiveLabelFallbackKeepsUnsupportedCandidatesLocal() {
+        HugeGraph graph = positiveLabelGraph();
+        VertexLabel disabled = new VertexLabel(graph, IdGenerator.of(3L), "disabled");
+        disabled.enableLabelIndex(false);
+        Mockito.when(graph.vertexLabel("disabled")).thenReturn(disabled);
+        Mockito.when(graph.vertexLabel("missing"))
+               .thenThrow(new IllegalArgumentException("Undefined vertex label"));
+        for (P<?> label : new P<?>[]{P.eq("disabled"), P.eq("missing"),
+                P.eq(IdGenerator.of(-1L)), P.within("person", IdGenerator.of(-1L)),
+                P.within("person", "missing"), P.eq(Collections.singletonList("person"))}) {
+            Traversal.Admin<?, ?> traversal = traversal(__.V().has(T.label, label)
+                    .hasLabel(P.neq("software")), graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+            TraversalUtil.extractHasContainer(source, traversal);
+            Assert.assertTrue(source.getHasContainers().isEmpty());
+            Assert.assertTrue(hasStepExists(traversal, T.label.getAccessor()));
+        }
+    }
+
+    private static HugeGraph positiveLabelGraph() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.vertexLabel("person"))
+               .thenReturn(new VertexLabel(graph, IdGenerator.of(1L), "person"));
+        Mockito.when(graph.vertexLabel("fan"))
+               .thenReturn(new VertexLabel(graph, IdGenerator.of(2L), "fan"));
+        return graph;
+    }
+
+    @Test
+    public void testLocalSearchPreservesPredicateAndSerialization() throws Exception {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.searchPredicate("(alpha)")).thenReturn("alpha"::equals);
+        for (P<?> predicate : new P<?>[]{Text.contains("(alpha)"),
+                Text.contains("(alpha)").or(P.eq("beta")).and(P.neq("excluded"))}) {
+            Traversal.Admin<?, ?> traversal = traversal(
+                    __.V().has("body", predicate).limit(10).hasLabel(P.neq("other")), graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+            HasContainer original = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+            TraversalUtil.extractHasContainer(source, traversal);
+            HasContainer local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+            Assert.assertEquals(predicate, local.getPredicate());
+            Assert.assertEquals(original.hashCode(), local.hashCode());
+            Assert.assertEquals(original.toString(), local.toString());
+            HasContainer restored = roundTrip(local);
+            Assert.assertTrue(restored.test(searchVertex(graph, "alpha")));
+            Assert.assertEquals(predicate instanceof ConnectiveP,
+                                restored.test(searchVertex(graph, "beta")));
+            Assert.assertFalse(restored.test(searchVertex(graph, "excluded")));
+            // A warmed matcher must not serialize its graph/analyzer closure.
+            restored = roundTrip(restored);
+            Assert.assertEquals(predicate, restored.getPredicate());
+            Assert.assertTrue(restored.test(searchVertex(graph, "alpha")));
+            Assert.assertTrue(restored.clone().test(searchVertex(graph, "alpha")));
+
+            HugeGraph otherGraph = Mockito.mock(HugeGraph.class);
+            Mockito.when(otherGraph.searchPredicate("(alpha)")).thenReturn("different"::equals);
+            Assert.assertFalse(restored.test(searchVertex(otherGraph, "alpha")));
+            Assert.assertTrue(restored.test(searchVertex(otherGraph, "different")));
+            Assert.assertTrue(restored.clone().test(searchVertex(graph, "alpha")));
+        }
+    }
+
+    @Test
+    public void testLocalSearchSurvivesPredicateConversion() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("body")).thenReturn(propertyKey(1L, "body", DataType.TEXT));
+        Mockito.when(graph.searchPredicate("(alpha)")).thenReturn("alpha"::equals);
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("body", Text.contains("(alpha)"))
+                  .limit(10).hasLabel(P.neq("other")), graph);
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        HasStep<?> filter = (HasStep<?>) source.getNextStep();
+        TraversalUtil.convHasStep(graph, filter);
+        Vertex vertex = searchVertex(graph, "alpha");
+        Assert.assertTrue(HasContainer.testAll(vertex, filter.getHasContainers()));
+        Assert.assertFalse(HasContainer.testAll(searchVertex(graph, "(alpha)"),
+                                                filter.getHasContainers()));
+    }
+
+    @Test
+    public void testNegatedSearchPreservesAnalysisMutationAndSerialization() throws Exception {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.searchPredicate("(alpha)")).thenReturn("alpha"::equals);
+        Mockito.when(graph.searchPredicate("(beta)")).thenReturn("beta"::equals);
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("body", P.not(Text.contains("(alpha)")))
+                  .limit(10).hasLabel(P.neq("other")), graph);
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        HasContainer local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+        Assert.assertFalse(local.test(searchVertex(graph, "alpha")));
+        Assert.assertTrue(local.test(searchVertex(graph, "(alpha)")));
+        HasContainer clone = local.clone();
+        @SuppressWarnings("unchecked")
+        P<Object> child = (P<Object>) ((NotP<?>) local.getPredicate()).negate();
+        child.setValue("(beta)");
+        Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+        Assert.assertFalse(local.test(searchVertex(graph, "beta")));
+        Assert.assertFalse(clone.test(searchVertex(graph, "alpha")));
+        HasContainer restored = roundTrip(local);
+        Assert.assertFalse(restored.test(searchVertex(graph, "beta")));
+        Assert.assertTrue(restored.test(searchVertex(graph, "alpha")));
+
+        traversal = traversal(__.V().has("body", Text.contains("(alpha)")
+                    .or(P.not(Text.contains("(alpha)"))))
+                    .limit(10).hasLabel(P.neq("other")), graph);
+        source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+        Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+        Assert.assertTrue(local.test(searchVertex(graph, "(alpha)")));
+    }
+
+    @Test
+    public void testNegatedLabelCollectionsResolveIdsAndNames() {
+        Id id = IdGenerator.of(12L);
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, id, "person"));
+        for (Object candidate : new Object[]{id, id.asLong(), "person"}) {
+            P<?>[] predicates = {P.not(P.within(candidate)), P.not(P.without(candidate)),
+                                 P.not(P.within(candidate).and(P.eq(candidate)))};
+            boolean[] matches = {false, true, false};
+            for (int i = 0; i < predicates.length; i++) {
+                Traversal.Admin<?, ?> traversal = __.V().has(T.label, predicates[i]).asAdmin();
+                HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+                TraversalUtil.extractHasContainer(source, traversal);
+                HasContainer local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+                Assert.assertEquals(matches[i], local.test(vertex));
+                Assert.assertEquals(matches[i], local.clone().test(vertex));
+            }
+        }
+    }
+
+    private static HasContainer roundTrip(HasContainer container) throws Exception {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(container);
+        }
+        try (ObjectInputStream input = new ObjectInputStream(
+                new ByteArrayInputStream(bytes.toByteArray()))) {
+            return (HasContainer) input.readObject();
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testLocalSearchMatcherTracksPredicateMutation() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.searchPredicate("(alpha)")).thenReturn("alpha"::equals);
+        Mockito.when(graph.searchPredicate("(beta)")).thenReturn("beta"::equals);
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("body", Text.contains("(alpha)"))
+                  .hasLabel(P.neq("other")), graph);
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        HasContainer local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+        Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+        Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+        Mockito.verify(graph, Mockito.times(1)).searchPredicate("(alpha)");
+        HasContainer clone = local.clone();
+        ((P<Object>) local.getPredicate()).setValue("(beta)");
+        Assert.assertFalse(local.test(searchVertex(graph, "alpha")));
+        Assert.assertTrue(local.test(searchVertex(graph, "beta")));
+        Assert.assertTrue(clone.test(searchVertex(graph, "alpha")));
+        Assert.assertFalse(clone.test(searchVertex(graph, "beta")));
+
+        traversal = traversal(__.V().has("body", Text.contains("(alpha)").or(P.eq("gamma")))
+                                   .hasLabel(P.neq("other")), graph);
+        source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        local = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+        Assert.assertTrue(local.test(searchVertex(graph, "alpha")));
+        ConnectiveP<Object> connective = (ConnectiveP<Object>) local.getPredicate();
+        connective.getPredicates().get(0).setValue("(beta)");
+        Assert.assertFalse(local.test(searchVertex(graph, "alpha")));
+        Assert.assertTrue(local.test(searchVertex(graph, "beta")));
+        Assert.assertTrue(local.test(searchVertex(graph, "gamma")));
+        connective.or(P.eq("delta"));
+        Assert.assertTrue(local.test(searchVertex(graph, "delta")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Vertex searchVertex(HugeGraph graph, String value) {
+        Vertex vertex = Mockito.mock(Vertex.class);
+        VertexProperty<Object> property = Mockito.mock(VertexProperty.class);
+        Mockito.when(vertex.graph()).thenReturn(graph);
+        Mockito.when(vertex.properties("body"))
+               .thenAnswer(ignored -> Collections.singletonList(property).iterator());
+        Mockito.when(property.element()).thenReturn(vertex);
+        Mockito.when(property.value()).thenReturn(value);
+        return vertex;
+    }
+
+    @Test
+    public void testLocalLabelIdWithoutGraphAndAfterClone() {
+        Id id = IdGenerator.of(12L);
+        Traversal.Admin<?, ?> traversal = __.V().has(T.label, id).limit(10)
+                                           .hasLabel(P.neq("other")).asAdmin();
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        TraversalUtil.convHasStep(null, (HasStep<?>) source.getNextStep());
+        HasContainer filter = ((HasStep<?>) source.getNextStep()).getHasContainers().get(0);
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, id, "v"));
+        Assert.assertTrue(filter.test(vertex));
+        Assert.assertTrue(filter.clone().test(vertex));
+        Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, IdGenerator.of(13L), "v"));
+        Assert.assertFalse(filter.test(vertex));
+        Assert.assertFalse(filter.clone().test(vertex));
+    }
+
+    @Test
+    public void testSearchPredicateDefaultCompatibility() throws Exception {
+        Assert.assertTrue(HugeGraph.class.getMethod("searchPredicate", String.class).isDefault());
+        HugeGraph graph = (HugeGraph) Proxy.newProxyInstance(
+                HugeGraph.class.getClassLoader(), new Class<?>[]{HugeGraph.class},
+                (proxy, method, args) -> MethodHandles.privateLookupIn(
+                        method.getDeclaringClass(), MethodHandles.lookup())
+                        .unreflectSpecial(method, method.getDeclaringClass())
+                        .bindTo(proxy).invokeWithArguments(args));
+        Assert.assertThrows(UnsupportedOperationException.class, () -> graph.searchPredicate("word"));
+    }
+
+    @Test
+    public void testLocalContainsWithoutGraphAndAfterClone() {
+        Id key = IdGenerator.of(42L);
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("age")).thenReturn(propertyKey(42L, "age", DataType.INT));
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.graph()).thenReturn(graph);
+        Mockito.when(vertex.properties("key")).thenReturn(Collections.emptyIterator());
+        Mockito.when(vertex.properties("value")).thenReturn(Collections.emptyIterator());
+        BaseVertex baseVertex = Mockito.mock(BaseVertex.class);
+        Mockito.when(vertex.element()).thenReturn(baseVertex);
+        Mockito.when(baseVertex.sysprop(HugeKeys.PROPERTIES))
+               .thenReturn(Collections.singletonMap(key, 20));
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().hasKey("age").hasLabel(P.neq("other")),
+                __.V().hasValue(20).hasLabel(P.neq("other"))}) {
+            Traversal.Admin<?, ?> admin = query.asAdmin();
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            @SuppressWarnings("unchecked")
+            HasStep<Vertex> filter = (HasStep<Vertex>) source.getNextStep();
+            @SuppressWarnings("unchecked")
+            Traverser.Admin<Vertex> traverser = Mockito.mock(Traverser.Admin.class);
+            Mockito.when(traverser.get()).thenReturn(vertex);
+            Mockito.when(traverser.bulk()).thenReturn(1L);
+            filter.addStart(traverser);
+            Assert.assertTrue(filter.hasNext());
+            HasStep<Vertex> clone = filter.clone();
+            clone.addStart(traverser);
+            Assert.assertTrue(clone.hasNext());
+        }
+    }
+
+    @Test
+    public void testLocalIdSurvivesPredicateConversionAcrossRange() {
+        for (P<?> predicate : new P<?>[]{P.eq("a").or(P.eq("b")),
+                P.within("a", "b").and(P.neq("b"))}) {
+            Traversal.Admin<?, ?> traversal = __.V().hasId(predicate)
+                    .limit(10).hasLabel(P.neq("other")).asAdmin();
+            HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+            TraversalUtil.extractHasContainer(source, traversal);
+            HasStep<?> step = (HasStep<?>) source.getNextStep();
+            TraversalUtil.convHasStep(null, step);
+            HasContainer local = step.getHasContainers().get(0);
+            Vertex vertex = Mockito.mock(Vertex.class);
+            Mockito.when(vertex.id()).thenReturn(IdGenerator.of("a"));
+            Assert.assertTrue(local.test(vertex));
+            Assert.assertTrue(local.clone().test(vertex));
+            Mockito.when(vertex.id()).thenReturn(IdGenerator.of("z"));
+            Assert.assertFalse(local.test(vertex));
+        }
+    }
+
+    @Test
+    public void testUnsafeLabelKeepsPointLookupPlan() {
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().hasId(1).limit(10).hasLabel(P.neq("other")),
+                EmptyGraph.instance().traversal().E().hasId(1).limit(10).hasLabel(P.neq("other")),
+                __.V().hasId(P.within(1, 2)).hasLabel(P.neq("other"))}) {
+            Traversal.Admin<?, ?> admin = query.asAdmin();
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertTrue(source.getIds().length > 0);
+            Assert.assertEquals(1, source.getIds()[0]);
+            Assert.assertFalse(hasStepExists(admin, T.id.getAccessor()));
+        }
+        Traversal.Admin<?, ?> admin = __.V(1, 2).hasId(2)
+                                       .hasLabel(P.neq("other")).asAdmin();
+        HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(source, admin);
+        Assert.assertEquals(2, source.getIds().length);
+        Assert.assertTrue(hasStepExists(admin, T.id.getAccessor()));
+
+        admin = __.V().hasId(P.neq(1)).hasLabel(P.neq("other")).asAdmin();
+        source = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(source, admin);
+        Assert.assertEquals(0, source.getIds().length);
+        Assert.assertTrue(hasStepExists(admin, T.id.getAccessor()));
+    }
+
+    @Test
+    public void testLabelAfterElementChangeKeepsSourceIndexPlan() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").in().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").both().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").outE().hasLabel(P.neq("knows")),
+                __.V().has("city", "Beijing").outE().hasLabel(P.neq("knows")).dedup(),
+                __.V().has("city", "Beijing").outE().hasLabel(P.neq("knows"))
+                  .order().by("weight"),
+                __.V().has("city", "Beijing").inE().hasLabel(P.neq("knows")),
+                __.V().has("city", "Beijing").bothE().hasLabel(P.neq("knows")),
+                __.V().has("city", "Beijing").out().in().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").both().both().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).count(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).dedup(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .order().by("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .valueMap("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .elementMap("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).fold(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .groupCount(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author"))
+                  .project("n").by("name"),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).id(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).label(),
+                __.V().has("city", "Beijing").out().hasLabel(P.neq("author")).values("age").sum(),
+                __.V().has("city", "Beijing").out().where(__.not(__.hasLabel("author"))).count(),
+                __.V().has("city", "Beijing").out().where(__.not(__.hasLabel("author"))),
+                __.V().has("city", "Beijing").properties().hasLabel(P.neq("author"))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertTrue(hasContainer(source, "city"));
+            Assert.assertFalse(hasStepExists(admin, "city"));
+        }
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").as("a").out().select("a").hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").out().path().unfold().hasLabel(P.neq("author")),
+                __.V().has("city", "Beijing").as("a").out().hasLabel(P.neq("author"))
+                  .dedup().by(__.select("a")),
+                __.V().has("city", "Beijing").as("a").out().hasLabel(P.neq("author"))
+                  .order().by(__.select("a")),
+                __.V().has("city", "Beijing").as("a").out().hasLabel(P.neq("author"))
+                  .project("n").by(__.select("a")),
+                __.V().has("city", "Beijing").out().filter(__.select("a").hasLabel(P.neq("author")))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertFalse(hasContainer(source, "city"));
+            Assert.assertTrue(hasStepExists(admin, "city"));
+        }
+    }
+
+    @Test
+    public void testChildElementChangeKeepsSourceIndexPlan() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").where(__.out().hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").where(__.out().in().hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").where(__.both().both().hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").where(__.outE().hasLabel(P.neq("knows"))),
+                __.V().has("city", "Beijing").where(__.inE().hasLabel(P.neq("knows"))),
+                __.V().has("city", "Beijing").where(__.bothE().hasLabel(P.neq("knows"))),
+                __.V().has("city", "Beijing").filter(__.out().hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").not(__.out().hasLabel("author"))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertTrue(hasContainer(source, "city"));
+            Assert.assertFalse(hasStepExists(admin, "city"));
+        }
+        for (GraphTraversal<?, ?> query : new GraphTraversal<?, ?>[]{
+                __.V().has("city", "Beijing").where(__.hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing").as("a")
+                  .where(__.out().select("a").hasLabel(P.neq("author"))),
+                __.V().has("city", "Beijing")
+                  .where(__.out().path().unfold().hasLabel(P.neq("author")))}) {
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertFalse(hasContainer(source, "city"));
+            Assert.assertTrue(hasStepExists(admin, "city"));
+        }
+    }
+
+    @Test
+    public void testStandardSuffixesKeepRootAndChildSourceIndexPlan() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> suffix : new GraphTraversal<?, ?>[]{
+                __.tail(1), __.values("age").is(P.gt(1)), __.fold().unfold(),
+                __.constant(1), __.sample(2), __.sample(2).by("name"),
+                __.group().by(T.label), __.group().by(T.label).by(__.values("age").fold()),
+                __.aggregate("x"), __.aggregate("x").by("name"),
+                __.group("x").by(T.label),
+                __.groupCount("x").by(T.label), __.simplePath(), __.cyclicPath(),
+                __.simplePath().by("name"), __.coin(0.5d), __.timeLimit(100),
+                __.fold().tail(Scope.local, 1), __.fold().limit(Scope.local, 1),
+                __.fold().order(Scope.local), __.fold().dedup(Scope.local),
+                __.fold().sample(Scope.local, 1), __.fold().count(Scope.local),
+                __.values("age").fold().sum(Scope.local),
+                __.values("age").fold().min(Scope.local),
+                __.values("age").fold().max(Scope.local),
+                __.values("age").fold().mean(Scope.local), __.fold().index(),
+                __.sideEffect(__.values("name")), __.identity().profile("metrics")}) {
+            for (boolean child : new boolean[]{false, true}) {
+                GraphTraversal<?, ?> chain = __.out().hasLabel(P.neq("author"));
+                for (Step<?, ?> step : suffix.asAdmin().getSteps()) {
+                    chain.asAdmin().addStep(step.clone());
+                }
+                GraphTraversal<?, ?> query = __.V().has("city", "Beijing");
+                if (child) {
+                    query.where(chain);
+                } else {
+                    for (Step<?, ?> step : chain.asAdmin().getSteps()) {
+                        query.asAdmin().addStep(step.clone());
+                    }
+                }
+                Traversal.Admin<?, ?> admin = traversal(query, graph);
+                HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+                TraversalUtil.extractHasContainer(source, admin);
+                Assert.assertTrue(query.toString(), hasContainer(source, "city"));
+                Assert.assertFalse(query.toString(), hasStepExists(admin, "city"));
+            }
+        }
+    }
+
+    @Test
+    public void testHistoryAndOpaqueSuffixesKeepSourceFilterLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (GraphTraversal<?, ?> suffix : new GraphTraversal<?, ?>[]{
+                __.group().by(__.select("a")), __.group().by(T.label).by(__.select("a")),
+                __.aggregate("x").by(__.select("a")),
+                __.sample(2).by(__.select("a")), __.simplePath().by(__.select("a")),
+                __.group("x").by(__.select("a")), __.groupCount("x").by(__.select("a")),
+                __.dedup("a"), __.select("a"), __.path().unfold(), __.tree(),
+                __.cap("x").unfold(), __.sack(), __.repeat(__.select("a")).times(1),
+                __.where(P.eq("a")), __.match(__.as("a").out().as("b")),
+                __.map(t -> t.path().get("a")), __.filter(t -> true),
+                __.fold(0, (a, b) -> a), __.sideEffect(t -> { })}) {
+            GraphTraversal<?, ?> query = __.V().has("city", "Beijing").as("a")
+                                          .out().hasLabel(P.neq("author"));
+            for (Step<?, ?> step : suffix.asAdmin().getSteps()) {
+                query.asAdmin().addStep(step.clone());
+            }
+            Traversal.Admin<?, ?> admin = traversal(query, graph);
+            HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+            TraversalUtil.extractHasContainer(source, admin);
+            Assert.assertFalse(query.toString(), hasContainer(source, "city"));
+            Assert.assertTrue(query.toString(), hasStepExists(admin, "city"));
+        }
+    }
+
+    @Test
+    public void testUnknownHasStepSubclassKeepsSourceFilterLocal() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        Traversal.Admin<?, ?> admin = traversal(__.V().has("city", "Beijing")
+                .out().hasLabel(P.neq("author")), graph);
+        admin.addStep(new HasStep<>(admin, new HasContainer("name", P.eq("x"))) { });
+        HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(source, admin);
+        Assert.assertFalse(hasContainer(source, "city"));
+        Assert.assertTrue(hasStepExists(admin, "city"));
+    }
+
+    @Test
+    public void testFilterResultUsesSchemaLabelRepresentations() {
+        Id id = IdGenerator.of(7L);
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.schemaLabel()).thenReturn(new VertexLabel(null, id, "person"));
+        for (P<?> predicate : new P<?>[]{P.eq("person"), P.eq(id), P.eq(id.asLong()),
+                                        P.within(id, "person"), P.neq("other")}) {
+            Assert.assertTrue(TraversalUtil.filterResult(
+                    Collections.singletonList(new HasContainer(T.label.getAccessor(), predicate)),
+                    Collections.singletonList(vertex).iterator()).hasNext());
+        }
+        Assert.assertFalse(TraversalUtil.filterResult(Collections.singletonList(
+                new HasContainer(T.label.getAccessor(), P.eq("other"))),
+                Collections.singletonList(vertex).iterator()).hasNext());
+    }
+
+    @Test
+    public void testEdgeEndpointsKeepSourceLabelFallback() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city"))
+               .thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        for (boolean child : new boolean[]{false, true}) {
+            for (GraphTraversal<?, ?> suffix : new GraphTraversal<?, ?>[]{
+                    __.outE().outV(), __.inE().inV(), __.bothE().bothV(),
+                    __.outE().inV(), __.inE().outV(),
+                    __.outE().barrier().outV(),
+                    __.outE().filter(__.outV().hasLabel(P.neq("author")))}) {
+                suffix.hasLabel(P.neq("author"));
+                GraphTraversal<?, ?> query = __.V().has("city", "Beijing");
+                if (child) {
+                    query.where(suffix);
+                } else {
+                    for (Step<?, ?> step : new ArrayList<Step>(
+                            suffix.asAdmin().getSteps())) {
+                        suffix.asAdmin().removeStep(step);
+                        query.asAdmin().addStep(step);
+                    }
+                }
+                Traversal.Admin<?, ?> admin = traversal(query, graph);
+                HugeGraphStep<?, ?> source = replaceGraphStep(admin);
+                TraversalUtil.extractHasContainer(source, admin);
+                Assert.assertFalse(hasContainer(source, "city"));
+                Assert.assertTrue(hasStepExists(admin, "city"));
+            }
+        }
+    }
+
+    @Test
+    public void testChildSourceKeepsPropertyBeforeParentUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        GraphTraversal<?, ?> child = __.V().has("city", "Beijing");
+        traversal(__.inject(1).union(child).hasLabel(P.neq("author")), graph);
+        Traversal.Admin<?, ?> admin = traversal(child, graph);
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(graphStep, admin);
+        Assert.assertTrue(graphStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(admin, "city"));
+
+        child = __.out().has("city", "Beijing");
+        traversal(__.V().local(child).hasLabel(P.neq("author")), graph);
+        admin = traversal(child, graph);
+        HugeVertexStep<?> vertexStep = replaceVertexStep(admin);
+        TraversalUtil.extractHasContainer(vertexStep, admin);
+        Assert.assertTrue(vertexStep.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(admin, "city"));
+    }
+
+    @Test
+    public void testChildSourceStillExtractsWithoutDownstreamUnsafeLabel() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        GraphTraversal<?, ?> child = __.V().has("city", "Beijing");
+        traversal(__.inject(1).union(child).hasLabel("person"), graph);
+        Traversal.Admin<?, ?> admin = traversal(child, graph);
+        HugeGraphStep<?, ?> graphStep = replaceGraphStep(admin);
+        TraversalUtil.extractHasContainer(graphStep, admin);
+        Assert.assertTrue(hasContainer(graphStep, "city"));
+        Assert.assertFalse(hasStepExists(admin, "city"));
+    }
+
+    @Test
+    public void testNotContextOnlyBlocksLabelDependentPushdown() {
+        HugeGraph graph = Mockito.mock(HugeGraph.class);
+        Mockito.when(graph.propertyKey("city")).thenReturn(propertyKey(2L, "city", DataType.TEXT));
+        Traversal.Admin<?, ?> traversal = traversal(
+                __.V().has("city", "Beijing").not(__.hasLabel("author")), graph);
+        HugeGraphStep<?, ?> source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        Assert.assertTrue(source.getHasContainers().isEmpty());
+        Assert.assertTrue(hasStepExists(traversal, "city"));
+
+        traversal = traversal(__.V().has("city", "Beijing").not(__.has("name", "Tom")), graph);
+        source = replaceGraphStep(traversal);
+        TraversalUtil.extractHasContainer(source, traversal);
+        Assert.assertTrue(hasContainer(source, "city"));
+        Assert.assertFalse(hasStepExists(traversal, "city"));
     }
 
     @Test
@@ -608,12 +1454,17 @@ public class TraversalUtilOptimizeTest {
     }
 
     private static boolean hasStepExists(Traversal.Admin<?, ?> traversal) {
+        return countHasSteps(traversal) > 0;
+    }
+
+    private static int countHasSteps(Traversal.Admin<?, ?> traversal) {
+        int count = 0;
         for (Step<?, ?> step : traversal.getSteps()) {
             if (step instanceof HasStep) {
-                return true;
+                count++;
             }
         }
-        return false;
+        return count;
     }
 
     private static boolean hasStepExists(Traversal.Admin<?, ?> traversal,

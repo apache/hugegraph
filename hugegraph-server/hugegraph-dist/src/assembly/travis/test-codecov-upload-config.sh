@@ -38,7 +38,7 @@ expected_files = {
         "hstore": "${{ env.REPORT_DIR }}/*.xml",
     },
     ".github/workflows/server-tests.yml": {
-        "build-server": "${{ env.REPORT_DIR }}/*.xml",
+        "build-server": "${{ env.REPORT_DIR }}/*.xml,hugegraph-server/target/site/jacoco/jacoco.xml",
     },
 }
 action_pattern = re.compile(

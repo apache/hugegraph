@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.analyzer.Analyzer;
@@ -36,21 +37,16 @@ import org.apache.hugegraph.analyzer.AnalyzerFactory;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.StandardAuthManager;
 import org.apache.hugegraph.auth.StandardAuthManagerV2;
-import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.LocalCounter;
 import org.apache.hugegraph.backend.cache.Cache;
-import org.apache.hugegraph.backend.cache.CacheNotifier;
 import org.apache.hugegraph.backend.cache.CacheNotifier.GraphCacheNotifier;
 import org.apache.hugegraph.backend.cache.CacheNotifier.SchemaCacheNotifier;
+import org.apache.hugegraph.backend.cache.CacheNotifier;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransaction;
 import org.apache.hugegraph.backend.cache.CachedSchemaTransactionV2;
-import org.apache.hugegraph.id.Id;
-import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
-import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
-import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.serializer.SerializerFactory;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendProviderFactory;
@@ -67,7 +63,10 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.TypedOption;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.exception.NotAllowException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.io.HugeGraphIoRegistry;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.kvstore.KvStore;
@@ -76,20 +75,23 @@ import org.apache.hugegraph.memory.MemoryManager;
 import org.apache.hugegraph.memory.util.RoundUtil;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Server;
+import org.apache.hugegraph.schema.SchemaManager;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.struct.schema.SchemaLabel;
-import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeFeatures;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
+import org.apache.hugegraph.structure.builder.IndexBuilder;
 import org.apache.hugegraph.task.EphemeralJobQueue;
 import org.apache.hugegraph.task.ServerInfoManager;
 import org.apache.hugegraph.task.TaskManager;
@@ -729,6 +731,11 @@ public class StandardHugeGraph implements HugeGraph {
         LOG.debug("Loading text analyzer '{}' with mode '{}' for graph '{}'",
                   name, mode, this.spaceGraphName());
         return AnalyzerFactory.analyzer(name, mode);
+    }
+
+    @Override
+    public Predicate<Object> searchPredicate(String text) {
+        return IndexBuilder.searchPredicate(this.analyzer(), text);
     }
 
     protected void reloadRamtable() {

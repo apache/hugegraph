@@ -406,8 +406,9 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
                 List<IdPrefixQuery> queryList = Lists.newArrayList();
                 if (hugeGraph != null) {
                     for (ConditionQuery conditionQuery :
-                        ConditionQueryFlatten.flatten(cq)) {
-                        Id label = conditionQuery.condition(HugeKeys.LABEL);
+                         ConditionQueryFlatten.flatten(cq)) {
+                        Id label = conditionQuery.singleConditionValueOrNull(
+                                HugeKeys.LABEL);
                         /* Parent type + sortKeys: g.V("V.id").outE("parentLabel")
                            .has("sortKey","value") converted to all subtypes + sortKeys */
                         if ((this.subEls == null ||
@@ -463,7 +464,7 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
                                               boolean matchAll,
                                               HugeGraph graph) {
                 assert query.resultType().isEdge();
-                Id label = query.condition(HugeKeys.LABEL);
+                Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
                 if (label == null) {
                     return false;
                 }

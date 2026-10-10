@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeGraphSupplier;
@@ -42,9 +43,10 @@ import org.apache.hugegraph.structure.BaseElement;
 import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.structure.Index;
+import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.E;
-import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.InsertionOrderUtil;
+import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.NumericUtil;
 import org.slf4j.Logger;
 
@@ -314,13 +316,23 @@ public class IndexBuilder {
     }
 
     public Set<String> segmentWords(String text) {
+        return segmentWords(this.textAnalyzer, text);
+    }
+
+    public static Predicate<Object> searchPredicate(Analyzer analyzer, String text) {
+        Set<String> words = segmentWords(analyzer, text);
+        return value -> CollectionUtil.hasIntersection(words,
+                segmentWords(analyzer, propertyValueToString(value)));
+    }
+
+    private static Set<String> segmentWords(Analyzer analyzer, String text) {
         if (text.startsWith(START_SYMBOL) && text.endsWith(END_SYMBOL)) {
             String words = text.substring(1, text.length() - 1);
             return words.contains(WORD_DELIMITER) ?
                    ImmutableSet.copyOf(StringUtils.split(words, WORD_DELIMITER)) : ImmutableSet.of(words);
         }
         Set<String> segments = InsertionOrderUtil.newSet();
-        segments.addAll(this.textAnalyzer.segment(text));
+        segments.addAll(analyzer.segment(text));
         segments.add(text);
         segments.removeAll(ConditionQuery.IGNORE_SYM_SET);
         return segments;

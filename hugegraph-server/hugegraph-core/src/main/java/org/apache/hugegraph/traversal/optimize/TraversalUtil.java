@@ -19,31 +19,36 @@ package org.apache.hugegraph.traversal.optimize;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.backend.page.PageInfo;
+import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.exception.NotFoundException;
+import org.apache.hugegraph.exception.NotSupportException;
 import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
-import org.apache.hugegraph.backend.page.PageInfo;
-import org.apache.hugegraph.backend.page.PageState;
+import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.query.Aggregate;
 import org.apache.hugegraph.query.Condition;
 import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.query.Query;
-import org.apache.hugegraph.exception.NotFoundException;
-import org.apache.hugegraph.exception.NotSupportException;
-import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.SchemaLabel;
@@ -67,26 +72,71 @@ import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
+import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder;
 import org.apache.tinkerpop.gremlin.process.traversal.step.TraversalParent;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.AndStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.ClassFilterStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.CoinStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.DedupGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.FilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.HasStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.IsStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NoneStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.NotStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.OrStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.PathFilterStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.RangeGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.SampleGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TailGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TimeLimitStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.ConstantStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.DedupLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.ElementMapStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.FoldStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.GroupCountStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.GroupStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.IdStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.IndexStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.LabelStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MatchStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MaxGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MaxLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MeanLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MinLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.NoOpBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.OrderLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.ProjectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertiesStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyKeyStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyMapStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.PropertyValueStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.RangeLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.SampleLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumGlobalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.TailLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.UnfoldStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupCountSideEffectStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.ProfileSideEffectStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.SubgraphStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.TraversalSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ElementValueComparator;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.EmptyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.ProfileStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ReducingBarrierStep;
 import org.apache.tinkerpop.gremlin.process.traversal.util.AndP;
 import org.apache.tinkerpop.gremlin.process.traversal.util.ConnectiveP;
@@ -102,6 +152,7 @@ import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.util.empty.EmptyGraph;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 
 public final class TraversalUtil {
 
@@ -109,6 +160,34 @@ public final class TraversalUtil {
             "~hugegraph.connective-label-step";
 
     public static final String P_CALL = "P.";
+
+    // Standard filters, current-value projections/reductions (including local
+    // collection variants), and side effects that return the current traverser.
+    // Exact classes keep extension subclasses conservative. History/state readers
+    // (select/path/tree, sack/cap, labeled where/match), repeat/branches, mutations,
+    // lambdas, custom folds and unknown steps are deliberately not admitted.
+    private static final Set<Class<?>> CURRENT_ELEMENT_SUFFIX_STEPS = ImmutableSet.of(
+            VertexStep.class, HugeVertexStep.class, HugeVertexStepByBatch.class,
+            PropertiesStep.class, HasStep.class, LocalContainsStep.class,
+            AndStep.class, OrStep.class, NotStep.class, TraversalFilterStep.class,
+            IsStep.class, ClassFilterStep.class, NoneStep.class, CoinStep.class,
+            RangeGlobalStep.class, TailGlobalStep.class, SampleGlobalStep.class,
+            DedupGlobalStep.class, PathFilterStep.class, TimeLimitStep.class,
+            NoOpBarrierStep.class, IdentityStep.class,
+            IdStep.class, LabelStep.class, PropertyKeyStep.class, PropertyValueStep.class,
+            PropertyMapStep.class, ElementMapStep.class, ProjectStep.class, ConstantStep.class,
+            FoldStep.class, UnfoldStep.class, IndexStep.class,
+            GroupStep.class, GroupCountStep.class,
+            OrderGlobalStep.class, OrderLocalStep.class, RangeLocalStep.class, TailLocalStep.class,
+            DedupLocalStep.class, SampleLocalStep.class,
+            CountGlobalStep.class, SumGlobalStep.class, MinGlobalStep.class,
+            MaxGlobalStep.class, MeanGlobalStep.class,
+            CountLocalStep.class, SumLocalStep.class, MinLocalStep.class,
+            MaxLocalStep.class, MeanLocalStep.class,
+            AggregateStep.class,
+            GroupSideEffectStep.class, GroupCountSideEffectStep.class,
+            TraversalSideEffectStep.class,
+            SubgraphStep.class, ProfileStep.class, ProfileSideEffectStep.class);
 
     public static HugeGraph getGraph(Step<?, ?> step) {
         HugeGraph graph = tryGetGraph(step);
@@ -179,6 +258,10 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeGraphStep<?, ?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
+        if (hasUnsafeLabelInTraversal(traversal, newStep)) {
+            prepareLocalHasContainers(newStep, traversal);
+            return;
+        }
         Step<?, ?> step = newStep.getNextStep();
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
             Step<?, ?> nextStep = step.getNextStep();
@@ -267,13 +350,8 @@ public final class TraversalUtil {
             return null;
         }
 
-        List<Object> labels = new ArrayList<>();
-        for (Traversal.Admin<?, ?> child : orStep.getLocalChildren()) {
-            if (!collectPositiveLabelValues(child, labels)) {
-                return null;
-            }
-        }
-        if (labels.isEmpty()) {
+        List<Object> labels = positiveLabelValuesOrNull(orStep);
+        if (labels == null) {
             return null;
         }
 
@@ -299,6 +377,16 @@ public final class TraversalUtil {
             return null;
         }
         return (OrStep<?>) next;
+    }
+
+    private static List<Object> positiveLabelValuesOrNull(OrStep<?> orStep) {
+        List<Object> labels = new ArrayList<>();
+        for (Traversal.Admin<?, ?> child : orStep.getLocalChildren()) {
+            if (!collectPositiveLabelValues(child, labels)) {
+                return null;
+            }
+        }
+        return labels.isEmpty() ? null : labels;
     }
 
     private static boolean collectPositiveLabelValues(
@@ -632,6 +720,10 @@ public final class TraversalUtil {
 
     public static void extractHasContainer(HugeVertexStep<?> newStep,
                                            Traversal.Admin<?, ?> traversal) {
+        if (hasUnsafeLabelInTraversal(traversal, newStep)) {
+            prepareLocalHasContainers(newStep, traversal);
+            return;
+        }
         Step<?, ?> step = newStep;
         do {
             Step<?, ?> nextStep = step.getNextStep();
@@ -676,8 +768,524 @@ public final class TraversalUtil {
 
     private static boolean canExtractHasContainers(HugeGraph graph,
                                                    HasContainerHolder<?, ?> holder) {
-        for (HasContainer has : holder.getHasContainers()) {
+        // Keep unsafe labels and their sibling properties for local filtering.
+        if (hasUnsafeLabelPredicate(holder)) {
+            return false;
+        }
+        List<HasContainer> hasContainers = holder.getHasContainers();
+        for (HasContainer has : hasContainers) {
             if (!canExtractHasContainer(graph, has)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void prepareLocalHasContainers(
+            Step<?, ?> source, Traversal.Admin<?, ?> traversal) {
+        QueryHolder query = (QueryHolder) source;
+        Step<?, ?> step = source.getNextStep();
+        while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
+            Step<?, ?> next = step.getNextStep();
+            if (step instanceof HasStep) {
+                HasContainerHolder<?, ?> holder = (HasContainerHolder<?, ?>) step;
+                for (HasContainer has : new ArrayList<>(holder.getHasContainers())) {
+                    // Paging is query metadata, never an element property filter.
+                    if (QueryHolder.SYSPROP_PAGE.equals(has.getKey())) {
+                        query.addHasContainer(has);
+                        holder.removeHasContainer(has);
+                        continue;
+                    }
+                    if (T.id.getAccessor().equals(has.getKey())) {
+                        // ID lookup is complete across labels. Existing source
+                        // IDs and unsupported predicates still filter locally.
+                        if (source instanceof HugeGraphStep &&
+                            GraphStep.processHasContainerIds((HugeGraphStep<?, ?>) source, has)) {
+                            holder.removeHasContainer(has);
+                            continue;
+                        }
+                        holder.removeHasContainer(has);
+                        holder.addHasContainer(new LocalIdHasContainer(localIdPredicate(has.getPredicate())));
+                        continue;
+                    }
+                    if (T.label.getAccessor().equals(has.getKey())) {
+                        holder.removeHasContainer(has);
+                        HasContainer label = new LocalLabelHasContainer(has.getPredicate());
+                        if (source instanceof HugeGraphStep &&
+                            canPushPositiveLabel((HugeGraphStep<?, ?>) source, has)) {
+                            // A positive label conjunct uses the label index,
+                            // independent of per-label property index coverage.
+                            // Keep the runtime label matcher for source-ID queries.
+                            query.addHasContainer(label);
+                        } else {
+                            // Keep unsupported candidates and adjacent-vertex
+                            // labels local, including their paging boundary.
+                            holder.addHasContainer(label);
+                        }
+                        continue;
+                    }
+                    if (keyForContainsKey(has.getKey()) || keyForContainsValue(has.getKey())) {
+                        // Backend CONTAINS support varies and source IDs use
+                        // local filtering too. Preserve HugeGraph's map query
+                        // semantics without treating "key"/"value" as names.
+                        holder.removeHasContainer(has);
+                        traversal.addStep(traversal.getSteps().indexOf(step),
+                                          new LocalContainsStep<>(traversal, has));
+                        continue;
+                    }
+                    if (containsSearchPredicate(has.getPredicate())) {
+                        // Child traversals can be unbound during optimization;
+                        // the matcher resolves the graph from each runtime element.
+                        holder.removeHasContainer(has);
+                        holder.addHasContainer(new LocalSearchHasContainer(
+                                has.getKey(), has.getPredicate()));
+                    }
+                }
+                if (holder.getHasContainers().isEmpty()) {
+                    TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
+                    traversal.removeStep(step);
+                }
+            }
+            step = next;
+        }
+        if (query.queryInfo().paging() && step instanceof RangeGlobalStep) {
+            // Bound the raw backend page even when local filters prevent normal
+            // range extraction. Keep the range step to apply offset/limit after
+            // those filters; a filtered page may contain fewer results.
+            query.setRange(0, ((RangeGlobalStep<?>) step).getHighRange());
+        }
+    }
+
+    private static boolean canPushPositiveLabel(HugeGraphStep<?, ?> source,
+                                                HasContainer has) {
+        if (!isEqInLabelPredicate(has)) {
+            return false;
+        }
+        HugeGraph graph = tryGetGraph(source);
+        if (graph == null) {
+            return false;
+        }
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> predicate : predicates) {
+            Object value = predicate.getValue();
+            BiPredicate<?, ?> bp = predicate.getBiPredicate();
+            if (bp == Contains.within && !(value instanceof Collection)) {
+                return false;
+            }
+            Collection<?> values = bp == Contains.within ?
+                                   (Collection<?>) value : Collections.singletonList(value);
+            for (Object candidate : values) {
+                if (!hasLabelIndex(graph, source.returnsVertex(), candidate)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasLabelIndex(HugeGraph graph, boolean vertex, Object value) {
+        if (value instanceof Number) {
+            value = IdGenerator.of(((Number) value).longValue());
+        }
+        try {
+            SchemaLabel label;
+            if (value instanceof Id) {
+                Id id = (Id) value;
+                // Nonpositive IDs include internal schema objects that aren't
+                // user labels. Preserve their local matching behavior.
+                if (!id.number() || id.asLong() <= 0L) {
+                    return false;
+                }
+                label = vertex ? graph.vertexLabel(id) : graph.edgeLabel(id);
+            } else if (value instanceof String) {
+                label = vertex ? graph.vertexLabel((String) value) : graph.edgeLabel((String) value);
+            } else {
+                return false;
+            }
+            // Do not turn a working local filter into a missing-label/index error.
+            return label != null && label.enableLabelIndex();
+        } catch (IllegalArgumentException | NotFoundException e) {
+            return false;
+        }
+    }
+
+    private static P<?> localIdPredicate(P<?> predicate) {
+        // Keep IDs local to preserve source-ID intersections and step ordering.
+        // UUID/Element values need the same representation as HugeElement.id(). Leave
+        // strings unchanged so HasContainer retains its string-ID comparison.
+        P<?> copy = copyResolvedPredicate(predicate);
+        List<P<Object>> leaves = new ArrayList<>();
+        collectPredicates(leaves, ImmutableList.of(copy));
+        for (P<Object> leaf : leaves) {
+            Object value = leaf.getValue();
+            if (value instanceof Collection) {
+                List<Object> values = new ArrayList<>();
+                for (Object item : (Collection<?>) value) {
+                    values.add(localIdValue(item));
+                }
+                leaf.setValue(values);
+            } else {
+                leaf.setValue(localIdValue(value));
+            }
+        }
+        return copy;
+    }
+
+    private static Object localIdValue(Object value) {
+        if (value instanceof UUID || value instanceof Element) {
+            return HugeElement.getIdValue(HugeType.VERTEX, value);
+        }
+        return value;
+    }
+
+    private static final class LocalLabelHasContainer extends HasContainer {
+
+        private static final long serialVersionUID = 1L;
+
+        private LocalLabelHasContainer(P<?> predicate) {
+            super(T.label.getAccessor(), copyResolvedPredicate(predicate));
+        }
+
+        @Override
+        protected boolean testLabel(Element element) {
+            // Resolve against the actual element, not a graph captured while
+            // strategies run. Child traversals may be unbound or later cloned.
+            return testLabelPredicate(this.getPredicate(), ((HugeElement) element).schemaLabel());
+        }
+    }
+
+    private static final class LocalContainsStep<S extends Element> extends HasStep<S> {
+
+        private static final long serialVersionUID = 1L;
+
+        private LocalContainsStep(Traversal.Admin<?, ?> traversal, HasContainer has) {
+            super(traversal, has.clone());
+            E.checkArgument(has.getPredicate().getBiPredicate() == Compare.eq,
+                            "CONTAINS query with relation '%s' is not supported",
+                            has.getPredicate().getBiPredicate());
+        }
+
+        @Override
+        protected boolean filter(Traverser.Admin<S> traverser) {
+            HugeElement element = (HugeElement) traverser.get();
+            // Adjacent vertices can be ID/label-only shells. Like properties(),
+            // load their properties before evaluating the system property map.
+            element.getFilledProperties();
+            // Keep a HasStep boundary so count/range cannot bypass this filter.
+            // Resolve schema from the runtime element; clone/reset must not
+            // retain a graph or transaction captured during optimization.
+            for (HasContainer has : this.getHasContainers()) {
+                boolean matches = keyForContainsKey(has.getKey()) || keyForContainsValue(has.getKey()) ?
+                                  convContains2Relation(element.graph(), has).test(element.element()) :
+                                  has.test(element);
+                if (!matches) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean testLabelPredicate(P<?> predicate, SchemaLabel label) {
+        if (predicate instanceof NotP) {
+            return !testLabelPredicate(((NotP<?>) predicate).negate(), label);
+        }
+        if (predicate instanceof ConnectiveP) {
+            boolean and = predicate instanceof AndP;
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                if (testLabelPredicate(child, label) != and) {
+                    return !and;
+                }
+            }
+            return and;
+        }
+        BiPredicate<?, ?> bp = predicate.getBiPredicate();
+        Object value = predicate.getValue();
+        if (bp == Contains.within || bp == Contains.without) {
+            for (Object item : (Collection<?>) value) {
+                if (testLabelValue(Compare.eq, label, item)) {
+                    return bp == Contains.within;
+                }
+            }
+            return bp == Contains.without;
+        }
+        return testLabelValue((BiPredicate<Object, Object>) bp, label, value);
+    }
+
+    private static boolean testLabelValue(BiPredicate<Object, Object> predicate,
+                                          SchemaLabel label, Object value) {
+        if (value instanceof Number) {
+            value = IdGenerator.of(((Number) value).longValue());
+        }
+        return predicate.test(value instanceof Id ? label.id() : label.name(), value);
+    }
+
+    private static final class LocalSearchHasContainer extends HasContainer {
+
+        private static final long serialVersionUID = 1L;
+
+        private transient HugeGraph matcherGraph;
+        private transient P<?> matcherPredicate;
+        private transient Predicate<Object> matcher;
+
+        private LocalSearchHasContainer(String key, P<?> predicate) {
+            super(key, copyResolvedPredicate(predicate));
+        }
+
+        @Override
+        protected boolean testValue(Property property) {
+            // Keep the public P tree intact for strategies, hashing and Java
+            // serialization. Resolve the analyzer from the element's graph,
+            // including after cloning, deserialization or graph rebinding.
+            HugeGraph graph = (HugeGraph) property.element().graph();
+            if (this.matcherGraph != graph ||
+                !samePredicateValues(this.getPredicate(), this.matcherPredicate)) {
+                P<?> predicate = copyResolvedPredicate(this.getPredicate());
+                this.matcher = localSearchMatcher(predicate, graph);
+                this.matcherPredicate = predicate;
+                this.matcherGraph = graph;
+            }
+            return this.matcher.test(property.value());
+        }
+
+        @Override
+        public LocalSearchHasContainer clone() {
+            LocalSearchHasContainer clone = (LocalSearchHasContainer) super.clone();
+            clone.matcherGraph = null;
+            clone.matcherPredicate = null;
+            clone.matcher = null;
+            return clone;
+        }
+    }
+
+    private static boolean samePredicateValues(P<?> current, P<?> cached) {
+        // P.equals() compares originalValue, not the value changed by setValue().
+        if (cached == null || current.getClass() != cached.getClass()) {
+            return false;
+        }
+        if (current instanceof NotP) {
+            return samePredicateValues(((NotP<?>) current).negate(), ((NotP<?>) cached).negate());
+        }
+        if (current instanceof ConnectiveP) {
+            List<? extends P<?>> children = ((ConnectiveP<?>) current).getPredicates();
+            List<? extends P<?>> oldChildren = ((ConnectiveP<?>) cached).getPredicates();
+            if (children.size() != oldChildren.size()) {
+                return false;
+            }
+            for (int i = 0; i < children.size(); i++) {
+                if (!samePredicateValues(children.get(i), oldChildren.get(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return current.getBiPredicate().equals(cached.getBiPredicate()) &&
+               Objects.equals(current.getValue(), cached.getValue());
+    }
+
+    private static boolean containsSearchPredicate(P<?> predicate) {
+        if (predicate instanceof NotP) {
+            return containsSearchPredicate(((NotP<?>) predicate).negate());
+        }
+        if (predicate instanceof ConnectiveP) {
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                if (containsSearchPredicate(child)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return predicate.getBiPredicate() == Condition.RelationType.TEXT_CONTAINS;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Predicate<Object> localSearchMatcher(P<?> predicate, HugeGraph graph) {
+        if (predicate instanceof NotP) {
+            Predicate<Object> child = localSearchMatcher(((NotP<?>) predicate).negate(), graph);
+            return value -> !child.test(value);
+        }
+        if (predicate instanceof ConnectiveP) {
+            List<Predicate<Object>> children = new ArrayList<>();
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                children.add(localSearchMatcher(child, graph));
+            }
+            boolean and = predicate instanceof AndP;
+            return value -> {
+                for (Predicate<Object> child : children) {
+                    if (child.test(value) != and) {
+                        return !and;
+                    }
+                }
+                return and;
+            };
+        }
+        if (predicate.getBiPredicate() != Condition.RelationType.TEXT_CONTAINS) {
+            return (P<Object>) predicate;
+        }
+        // Match SEARCH terms in place, preserving range and side-effect ordering.
+        return graph.searchPredicate((String) predicate.getValue());
+    }
+
+    private static boolean hasUnsafeLabelInTraversal(
+            Traversal.Admin<?, ?> traversal, Step<?, ?> sourceStep) {
+        // Partial pushdown can lose candidates before local label filtering.
+        // Scan the remaining traversal, its children and each ancestor's
+        // remaining steps for filters on child output. Arbitrary extension
+        // steps don't reliably expose element identity, so stay conservative.
+        // FIXME(#3201): Restore selective pushdown when every candidate schema label
+        // has compatible index coverage for extracted property predicates.
+        // Outside proven root and child suffixes, negative labels can disable
+        // property pushdown even across element changes (including ancestors
+        // and unknown extension steps), potentially requiring a full scan.
+        List<Step> steps = traversal.getSteps();
+        int start = 0;
+        while (start < steps.size() && steps.get(start) != sourceStep) {
+            start++;
+        }
+        start++;
+        for (int i = start; i < steps.size(); i++) {
+            Step<?, ?> step = steps.get(i);
+            if (changesCurrentElement(step) &&
+                traversal.getParent() instanceof EmptyStep &&
+                onlyCurrentElementSuffix(steps.subList(i, steps.size()))) {
+                return false;
+            }
+            if (step instanceof HasStep) {
+                HasContainerHolder<?, ?> holder = (HasContainerHolder<?, ?>) step;
+                if (hasUnsafeLabelPredicate(holder)) {
+                    return true;
+                }
+            }
+            if (hasUnsafeLabelInChildren(step)) {
+                return true;
+            }
+        }
+        TraversalParent parent = traversal.getParent();
+        if (parent instanceof Step && !(parent instanceof EmptyStep)) {
+            Step<?, ?> parentStep = (Step<?, ?>) parent;
+            // RepeatStep's until/emit siblings can filter this child's output.
+            // This helper only descends, so revisiting the owning step's children
+            // cannot recurse back into this ancestor walk.
+            if (hasUnsafeLabelInChildren(parentStep)) {
+                return true;
+            }
+            return hasUnsafeLabelInTraversal(parentStep.getTraversal(), parentStep);
+        }
+        return false;
+    }
+
+    private static boolean changesCurrentElement(Step<?, ?> step) {
+        // Vertex adjacency is a scope boundary for this label fallback, not
+        // proof that a self-loop or later hop cannot return the source.
+        // Preserve the source property query's existing index/error semantics;
+        // complete cross-label property candidates are tracked in #3201.
+        // Edge endpoints can recover the source (outE().outV(), inE().inV(),
+        // bothV()). Do not admit EdgeVertexStep here or in the suffix allowlist:
+        // checking only that step is too late if outE() already ended the scan.
+        return step instanceof VertexStep || step instanceof PropertiesStep;
+    }
+
+    private static boolean onlyCurrentElementSuffix(List<Step> steps) {
+        for (Step<?, ?> step : steps) {
+            // Check both child traversals and hidden history/lambda inputs.
+            // dedup("a") reads step labels even without a select() child;
+            // fold(seed, function) can run arbitrary code unlike list fold().
+            if (!CURRENT_ELEMENT_SUFFIX_STEPS.contains(step.getClass()) ||
+                step instanceof DedupGlobalStep &&
+                !((DedupGlobalStep<?>) step).getScopeKeys().isEmpty() ||
+                step instanceof FoldStep && !((FoldStep<?, ?>) step).isListFold()) {
+                return false;
+            }
+            if (step instanceof TraversalParent) {
+                TraversalParent parent = (TraversalParent) step;
+                for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+                    if (!onlyCurrentElementSuffix(child.getSteps())) {
+                        return false;
+                    }
+                }
+                for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
+                    if (!onlyCurrentElementSuffix(child.getSteps())) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasUnsafeLabelInChildren(Step<?, ?> step) {
+        return hasUnsafeLabelInChildren(step, false);
+    }
+
+    private static boolean hasUnsafeLabelInChildren(Step<?, ?> step, boolean negated) {
+        if (!(step instanceof TraversalParent)) {
+            return false;
+        }
+        TraversalParent parent = (TraversalParent) step;
+        // Even an EQ label under not() describes a complement, whose property
+        // index coverage is unknown. Stay conservative for nested negations too.
+        negated |= step instanceof NotStep;
+        for (Traversal.Admin<?, ?> child : parent.getLocalChildren()) {
+            if (hasUnsafeLabelInChildTraversal(child, negated)) {
+                return true;
+            }
+        }
+        for (Traversal.Admin<?, ?> child : parent.getGlobalChildren()) {
+            if (hasUnsafeLabelInChildTraversal(child, negated)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUnsafeLabelInChildTraversal(
+            Traversal.Admin<?, ?> traversal, boolean negated) {
+        List<Step> steps = traversal.getSteps();
+        for (int i = 0; i < steps.size(); i++) {
+            Step<?, ?> childStep = steps.get(i);
+            // A child may filter a different element without constraining the
+            // source label. Only stop when the suffix cannot recover the source
+            // through select/path, repeat, or an unknown extension step.
+            if (changesCurrentElement(childStep) &&
+                onlyCurrentElementSuffix(steps.subList(i, steps.size()))) {
+                return false;
+            }
+            if (childStep instanceof HasStep &&
+                hasUnsafeLabelPredicate((HasContainerHolder<?, ?>) childStep, negated)) {
+                return true;
+            }
+            if (hasUnsafeLabelInChildren(childStep, negated)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasUnsafeLabelPredicate(HasContainerHolder<?, ?> holder) {
+        return hasUnsafeLabelPredicate(holder, false);
+    }
+
+    private static boolean hasUnsafeLabelPredicate(HasContainerHolder<?, ?> holder, boolean negated) {
+        for (HasContainer has : holder.getHasContainers()) {
+            if (T.label.getAccessor().equals(has.getKey()) &&
+                (negated || !isEqInLabelPredicate(has))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isEqInLabelPredicate(HasContainer has) {
+        if (has.getPredicate() == null) {
+            return false;
+        }
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> predicate : predicates) {
+            BiPredicate<?, ?> bp = predicate.getBiPredicate();
+            if (bp != Compare.eq && bp != Contains.within) {
                 return false;
             }
         }
@@ -1182,7 +1790,18 @@ public final class TraversalUtil {
             return (Iterator<V>) iterator;
         }
         Iterator<?> result = new FilterIterator<>(iterator, elem -> {
-            return HasContainer.testAll(elem, hasContainers);
+            for (HasContainer has : hasContainers) {
+                // Explicit-ID queries bypass backend label conversion. Keep the
+                // same name/Id/number semantics as backend and fallback queries.
+                boolean matches = T.label.getAccessor().equals(has.getKey()) &&
+                                  elem instanceof HugeElement ?
+                                  testLabelPredicate(has.getPredicate(),
+                                          ((HugeElement) elem).schemaLabel()) : has.test(elem);
+                if (!matches) {
+                    return false;
+                }
+            }
+            return true;
         });
         return (Iterator<V>) result;
     }
@@ -1243,7 +1862,12 @@ public final class TraversalUtil {
             // the caller's bindings or those of a previously cloned traversal.
             P<?> predicate = copyResolvedPredicate(original.getPredicate());
             HasContainer has;
-            if (localIds && T.id.getAccessor().equals(original.getKey())) {
+            if (original instanceof LocalSearchHasContainer) {
+                has = new LocalSearchHasContainer(original.getKey(), predicate);
+            } else if (original instanceof LocalLabelHasContainer) {
+                has = new LocalLabelHasContainer(predicate);
+            } else if (original instanceof LocalIdHasContainer ||
+                       localIds && T.id.getAccessor().equals(original.getKey())) {
                 updateLocalIdPredicate(predicate);
                 has = new LocalIdHasContainer(predicate);
             } else {

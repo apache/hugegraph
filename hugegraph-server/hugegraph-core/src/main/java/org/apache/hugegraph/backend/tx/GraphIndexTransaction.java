@@ -20,6 +20,7 @@ package org.apache.hugegraph.backend.tx;
 import java.nio.CharBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -30,53 +31,53 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.id.Id;
-import org.apache.hugegraph.backend.page.IdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.BatchIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.FixedIdHolder;
 import org.apache.hugegraph.backend.page.IdHolder.PagingIdHolder;
+import org.apache.hugegraph.backend.page.IdHolder;
 import org.apache.hugegraph.backend.page.IdHolderList;
 import org.apache.hugegraph.backend.page.PageIds;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.page.SortByCountIdHolderList;
-import org.apache.hugegraph.query.Condition;
-import org.apache.hugegraph.query.Condition.RangeConditions;
-import org.apache.hugegraph.query.Condition.Relation;
-import org.apache.hugegraph.query.Condition.RelationType;
-import org.apache.hugegraph.query.ConditionQuery;
-import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
 import org.apache.hugegraph.backend.query.ConditionQueryFlatten;
-import org.apache.hugegraph.query.Query;
-import org.apache.hugegraph.query.MatchedIndex;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.exception.NotSupportException;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.iterator.Metadatable;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.job.system.DeleteExpiredJob;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
+import org.apache.hugegraph.query.Condition.RangeConditions;
+import org.apache.hugegraph.query.Condition.Relation;
+import org.apache.hugegraph.query.Condition.RelationType;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.MatchedIndex;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.struct.schema.IndexLabel;
 import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.struct.schema.SchemaLabel;
+import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeElement;
+import org.apache.hugegraph.structure.HugeProperty;
+import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
 import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.structure.builder.IndexBuilder;
-import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
-import org.apache.hugegraph.structure.HugeProperty;
-import org.apache.hugegraph.structure.BaseProperty;
-import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.task.EphemeralJobQueue;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Action;
@@ -282,10 +283,11 @@ public class GraphIndexTransaction extends AbstractTransaction {
 
         // Query by index
         query.optimized(OptimizedType.INDEX);
+        Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
         if (query.allSysprop() && conds.size() == 1 &&
-            query.containsCondition(HugeKeys.LABEL)) {
-            // Query only by label
-            return this.queryByLabel(query);
+            label != null) {
+            // Query only by one EQ/IN-resolved label
+            return this.queryByLabel(query, label);
         } else {
             // Query by userprops (or userprops + label)
             return this.queryByUserprop(query);
@@ -293,13 +295,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     @Watched(prefix = "index")
-    private IdHolderList queryByLabel(ConditionQuery query) {
+    private IdHolderList queryByLabel(ConditionQuery query, Id label) {
         HugeType queryType = query.resultType();
         IndexLabel il = IndexLabel.label(queryType);
         validateIndexLabel(il);
-        Id label = query.condition(HugeKeys.LABEL);
-        assert label != null;
-
         HugeType indexType;
         SchemaLabel schemaLabel;
         if (queryType.isVertex()) {
@@ -362,14 +361,18 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 }
             }
         }
+        boolean paging = query.paging();
+        if (query.containsConditionValues(HugeKeys.LABEL) &&
+            query.conditionValues(HugeKeys.LABEL).isEmpty()) {
+            return IdHolderList.empty(paging);
+        }
         Set<MatchedIndex> indexes = this.collectMatchedIndexes(query);
         if (indexes.isEmpty()) {
-            Id label = query.condition(HugeKeys.LABEL);
+            Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
             throw noIndexException(this.graph(), query, label);
         }
 
         // Value type of Condition not matched
-        boolean paging = query.paging();
         if (!validQueryConditionValues(this.graph(), query)) {
             return IdHolderList.empty(paging);
         }
@@ -650,11 +653,16 @@ public class GraphIndexTransaction extends AbstractTransaction {
     @Watched(prefix = "index")
     private Set<MatchedIndex> collectMatchedIndexes(ConditionQuery query) {
         ISchemaTransaction schema = this.params().schemaTransaction();
-        Id label = query.condition(HugeKeys.LABEL);
+        Set<Object> labels = query.conditionValues(HugeKeys.LABEL);
 
         List<? extends SchemaLabel> schemaLabels;
-        if (label != null) {
-            // Query has LABEL condition
+        if (query.containsConditionValues(HugeKeys.LABEL) && labels.isEmpty()) {
+            // An empty intersection is not an unrestricted label query.
+            return Collections.emptySet();
+        }
+        if (labels.size() == 1) {
+            Id label = (Id) labels.iterator().next();
+            // Query has one resolved LABEL condition
             SchemaLabel schemaLabel;
             if (query.resultType().isVertex()) {
                 schemaLabel = schema.getVertexLabel(label);
@@ -667,7 +675,8 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
             schemaLabels = ImmutableList.of(schemaLabel);
         } else {
-            // Query doesn't have LABEL condition
+            // Query doesn't have LABEL condition or it doesn't resolve
+            // to a single label, so keep the conservative fallback.
             if (query.resultType().isVertex()) {
                 schemaLabels = schema.getVertexLabels();
             } else if (query.resultType().isEdge()) {
@@ -783,9 +792,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
     }
 
     private boolean matchSearchIndexWords(String propValue, String fieldValue) {
-        Set<String> propValues = this.segmentWords(propValue);
-        Set<String> words = this.segmentWords(fieldValue);
-        return CollectionUtil.hasIntersection(propValues, words);
+        return IndexBuilder.searchPredicate(this.params().analyzer(), fieldValue).test(propValue);
     }
 
     private Set<String> segmentWords(String text) {
@@ -1593,7 +1600,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             }
 
             // Check label is matched
-            Id label = query.condition(HugeKeys.LABEL);
+            Id label = query.singleConditionValueOrNull(HugeKeys.LABEL);
             // NOTE: original condition query may not have label condition,
             // which means possibly label == null.
             if (label != null && !element.schemaLabel().id().equals(label)) {
@@ -1628,7 +1635,10 @@ public class GraphIndexTransaction extends AbstractTransaction {
                 Set<Object> indexValues = leftIndex.indexFieldValues();
                 IndexLabel indexLabel = this.findMatchedIndexLabel(query,
                                                                    leftIndex);
-                assert indexLabel != null;
+                if (indexLabel == null) {
+                    // No matching schema index remains for this stale entry.
+                    continue;
+                }
 
                 AbstractSerializer serializer = this.tx.serializer;
                 for (Object value : indexValues) {
