@@ -886,28 +886,47 @@ grep -Fq "WARN: cannot create ${SERVER_ROOT}/logs/heapdump_" "$SERVER_LOG" ||
     fail "launcher did not log that the heap dump directory was not created"
 assert_effective_flag "$NO_DUMP_DIR_CAPTURE" HeapDumpPath "^${LOGS_PATTERN}$"
 
-# A logs path with a double quote or % cannot go into JAVA_TOOL_OPTIONS. Heap
-# dumps must stay on there, on the command line as before this change, with only
-# the crash log default left out. Each case runs in its own copy of bin/ and conf/.
-for ODD_DIR_NAME in 'pct%dir' 'dq"dir'; do
+# A logs path with a double quote or % cannot use the per-launch defaults. Heap
+# dumps must stay on there, still at the front of JAVA_TOOL_OPTIONS (quoted with
+# the quote character the path lacks) so the documented JAVA_TOOL_OPTIONS opt-out
+# keeps winning, with only the crash log default left out. A path with both quote
+# characters gets the warning only. Each case runs in its own copy of bin/ and conf/.
+for ODD_DIR_NAME in 'pct%dir' 'dq"dir' "sq'pct%dir" "both'q\"dir"; do
     mkdir -p "${TEMP_DIR}/${ODD_DIR_NAME}/logs" "${TEMP_DIR}/${ODD_DIR_NAME}/plugins"
     ODD_ROOT=$(cd "${TEMP_DIR}/${ODD_DIR_NAME}" && pwd -P)
     cp -R "${SERVER_ROOT}/bin" "${SERVER_ROOT}/conf" "${ODD_ROOT}/"
-    ODD_CAPTURE="${TEMP_DIR}/odd-path.args"
-    ODD_ERROR="${TEMP_DIR}/odd-path.err"
-    CAPTURE_FILE="$ODD_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" STDOUT_MODE=true \
-        "${ODD_ROOT}/bin/hugegraph-server.sh" \
-        "${ODD_ROOT}/conf/gremlin-server.yaml" "${ODD_ROOT}/conf/rest-server.properties" true \
-        >/dev/null 2>"$ODD_ERROR" ||
-        fail "launcher failed with ${ODD_DIR_NAME} in the logs path: $(cat "$ODD_ERROR")"
-    assert_argument "-XX:+HeapDumpOnOutOfMemoryError" "$ODD_CAPTURE"
-    assert_argument "-XX:HeapDumpPath=${ODD_ROOT}/logs" "$ODD_CAPTURE"
-    assert_no_argument '^-XX:ErrorFile=' "$ODD_CAPTURE"
-    if grep -q -- '-XX:' "${ODD_CAPTURE}.tool-options"; then
-        fail "launcher put crash defaults in JAVA_TOOL_OPTIONS for ${ODD_DIR_NAME}"
-    fi
-    grep -Fq "WARN: ${ODD_ROOT}/logs contains a double quote or %" "$ODD_ERROR" ||
-        fail "launcher did not warn about ${ODD_DIR_NAME} in the logs path"
+    for ODD_OPT_OUT in "" "-XX:-HeapDumpOnOutOfMemoryError"; do
+        ODD_CAPTURE="${TEMP_DIR}/odd-path.args"
+        ODD_ERROR="${TEMP_DIR}/odd-path.err"
+        CAPTURE_FILE="$ODD_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" STDOUT_MODE=true \
+            JAVA_TOOL_OPTIONS="$ODD_OPT_OUT" "${ODD_ROOT}/bin/hugegraph-server.sh" \
+            "${ODD_ROOT}/conf/gremlin-server.yaml" "${ODD_ROOT}/conf/rest-server.properties" true \
+            >/dev/null 2>"$ODD_ERROR" ||
+            fail "launcher failed with ${ODD_DIR_NAME} in the logs path: $(cat "$ODD_ERROR")"
+        assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=)' \
+                           "$ODD_CAPTURE"
+        assert_effective_flag "$ODD_CAPTURE" ErrorFile '^$'
+        case "$ODD_DIR_NAME" in
+            both*)
+                grep -Fq "WARN: ${ODD_ROOT}/logs contains both quote characters" "$ODD_ERROR" ||
+                    fail "launcher did not warn about both quote characters in the logs path"
+                if grep -q -- '-XX:HeapDumpPath' "${ODD_CAPTURE}.tool-options"; then
+                    fail "launcher set a heap dump path it cannot quote for ${ODD_DIR_NAME}"
+                fi
+                ;;
+            *)
+                grep -Fq "WARN: ${ODD_ROOT}/logs contains a double quote or %" "$ODD_ERROR" ||
+                    fail "launcher did not warn about ${ODD_DIR_NAME} in the logs path"
+                [[ "$(effective_flag "$ODD_CAPTURE" HeapDumpPath)" == "${ODD_ROOT}/logs" ]] ||
+                    fail "heap dumps do not go to ${ODD_ROOT}/logs for ${ODD_DIR_NAME}"
+                if [[ -z "$ODD_OPT_OUT" ]]; then
+                    assert_effective_flag "$ODD_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
+                else
+                    assert_effective_flag "$ODD_CAPTURE" HeapDumpOnOutOfMemoryError '^false$'
+                fi
+                ;;
+        esac
+    done
 done
 
 # An unwritable logs/ is reported on stderr, where the container log keeps it.

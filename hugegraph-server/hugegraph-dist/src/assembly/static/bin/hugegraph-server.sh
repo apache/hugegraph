@@ -281,7 +281,8 @@ JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
 # existing directory, each JVM writes java_pid<its pid>.hprof inside it, so it
 # points at one directory per launch. HotSpot picks that name, so a child JVM that
 # gets a PID reused within the same launch cannot write over an earlier child's
-# dump; the launcher cannot rename HotSpot's dump file.
+# dump, and its crash log truncates the earlier child's (ErrorFile only expands
+# %p); the launcher cannot rename HotSpot's files.
 # A restarted container often reuses the PID; HotSpot truncates an existing crash
 # log (JDK 17+) and will not write a heap dump over an existing file. So the names
 # carry the host name (the pod name on Kubernetes, so pods sharing one log volume
@@ -307,13 +308,26 @@ crash_name_taken() {
 }
 case "${LOGS}" in
     *\"*|*%*)
-        # The defaults below cannot carry this path: they quote it with double quotes
-        # inside JAVA_TOOL_OPTIONS, and ErrorFile expands %. Keep the base behaviour
-        # instead: heap dumps into $LOGS on the Server's command line, ahead of
-        # JAVA_OPTIONS so an operator value there still wins, and no ErrorFile default.
-        report_error "WARN: ${LOGS} contains a double quote or %, so heap dumps go to ${LOGS}\
+        # The defaults below cannot carry this path: they quote it with double quotes,
+        # and ErrorFile expands %. Dump into $LOGS itself instead, still from the front
+        # of JAVA_TOOL_OPTIONS so every operator source keeps overriding it, with the
+        # path in whichever quote character it does not contain, and no ErrorFile.
+        if [[ ${LOGS} != *"'"* ]]; then
+            DUMP_QUOTE="'"
+        elif [[ ${LOGS} != *\"* ]]; then
+            DUMP_QUOTE='"'
+        else
+            DUMP_QUOTE=""
+        fi
+        if [[ -n ${DUMP_QUOTE} ]]; then
+            report_error "WARN: ${LOGS} contains a double quote or %, so heap dumps go to ${LOGS}\
  without a per-launch directory and no crash log default is set; set -XX:ErrorFile yourself"
-        JAVA_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${JAVA_OPTIONS}"
+            CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError ${DUMP_QUOTE}-XX:HeapDumpPath=${LOGS}${DUMP_QUOTE}"
+            export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
+        else
+            report_error "WARN: ${LOGS} contains both quote characters, which JAVA_TOOL_OPTIONS\
+ cannot carry, so no heap dump or crash log default is set; set -XX:HeapDumpPath yourself"
+        fi
         ;;
     *)
         LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
