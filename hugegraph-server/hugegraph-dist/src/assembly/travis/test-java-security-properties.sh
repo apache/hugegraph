@@ -19,11 +19,20 @@ set -euo pipefail
 
 SERVER_ROOT_INPUT="${1:?Usage: $0 PATH_TO_SERVER_DIST [SOURCE_ROOT]}"
 SOURCE_ROOT_INPUT="${2:-}"
-SERVER_ROOT=$(cd "$SERVER_ROOT_INPUT" && pwd)
+# Resolve symlinks: the launcher resolves its own location the same way, and the
+# paths it passes to the JVM are compared against this one.
+SERVER_ROOT=$(cd "$SERVER_ROOT_INPUT" && pwd -P)
 SERVER_SCRIPT="${SERVER_ROOT}/bin/hugegraph-server.sh"
 CONF="${SERVER_ROOT}/conf"
 SECURITY_PROPERTIES="${CONF}/java-security.properties"
 JVM_MODULE_OPTIONS="${SERVER_ROOT}/bin/jvm-module.options"
+# The test sets every JVM option source itself; values inherited from the runner
+# would change what a JVM settles on.
+unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
+# Launcher runs create heap dump directories named after the host. A host name
+# unique to this run lets the cleanup tell them from a real Server's directories.
+TEST_HOST="hgtest-$$"
+export HOSTNAME="$TEST_HOST"
 
 fail() {
     echo "FAIL: $1" >&2
@@ -35,6 +44,13 @@ assert_argument() {
     local capture="$2"
     grep -Fxq -- "$argument" "$capture" || \
         fail "missing JVM argument: $argument"
+}
+
+assert_argument_matching() {
+    local pattern="$1"
+    local capture="$2"
+    grep -Eq -- "$pattern" "$capture" || \
+        fail "missing JVM argument matching: $pattern"
 }
 
 assert_no_argument() {
@@ -199,6 +215,8 @@ if [[ "$JAVA_MAJOR" -ge 18 ]]; then
 fi
 
 TEMP_DIR=$(mktemp -d)
+CRASH_NAME_FIXTURES=()
+OOM_DUMP_DIR=""
 SECURITY_PROPERTIES_BACKUP="${TEMP_DIR}/java-security.properties"
 
 cleanup() {
@@ -209,6 +227,24 @@ cleanup() {
           ! -e "$SECURITY_PROPERTIES" ]]; then
         mv "$SECURITY_PROPERTIES_BACKUP" "$SECURITY_PROPERTIES"
     fi
+    # Fixtures the test adds to the distribution; a failed step must not leave
+    # them behind.
+    if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
+        rm -rf "${CRASH_NAME_FIXTURES[@]}"
+    fi
+    if [[ -n "${OOM_DUMP_DIR:-}" ]]; then
+        rm -f "$OOM_DUMP_DIR"/java_pid*.hprof
+    fi
+    # Each launcher run creates a heap dump directory. Every host name this run
+    # uses is TEST_HOST or starts with "${TEST_HOST}-", so these globs match only
+    # this run's directories; remove the empty ones.
+    local dump_dir
+    for dump_dir in "${SERVER_ROOT}"/logs/heapdump_"${TEST_HOST}"_*/ \
+                    "${SERVER_ROOT}"/logs/heapdump_"${TEST_HOST}"-*_*/; do
+        if [[ -d "$dump_dir" && ! -L "${dump_dir%/}" ]]; then
+            rmdir "$dump_dir" 2>/dev/null || true
+        fi
+    done
     rm -rf "$TEMP_DIR"
 }
 
@@ -262,7 +298,10 @@ assert_reached_server_startup() {
 
 assert_clean_bootstrap_error() {
     local error_file="$1"
-    if grep -Eq 'Log4j|NetUtils|UnknownHost|hostname' "$error_file"; then
+    # Every launcher run now makes the JVM print "Picked up JAVA_TOOL_OPTIONS:",
+    # whose paths may contain any host or directory name.
+    if awk '!/^Picked up / && /Log4j|NetUtils|UnknownHost|hostname/ { found = 1 }
+            END { exit !found }' "$error_file"; then
         fail "bootstrap initialized logging or hostname resolution"
     fi
 }
@@ -539,6 +578,9 @@ if [[ " $* " == *" -version "* ]]; then
     exit 0
 fi
 printf '%s\n' "$@" > "$CAPTURE_FILE"
+printf '%s\n' "${JAVA_TOOL_OPTIONS:-}" > "${CAPTURE_FILE}.tool-options"
+printf '%s\n' "${JDK_JAVA_OPTIONS:-}" > "${CAPTURE_FILE}.jdk-java-options"
+printf '%s\n' "${_JAVA_OPTIONS:-}" > "${CAPTURE_FILE}.underscore-java-options"
 MOCK
 chmod +x "${MOCK_JAVA_HOME}/bin/java"
 
@@ -559,6 +601,384 @@ assert_argument "true" "$ENABLED_CAPTURE"
 assert_argument "-Doperator.marker=preserved" "$ENABLED_CAPTURE"
 assert_no_argument '^-D(networkaddress\.cache\.ttl|sun\.net\.inetaddr\.ttl)=' \
                    "$ENABLED_CAPTURE"
+# Heap dump and crash log defaults go first in JAVA_TOOL_OPTIONS, so the JVM's
+# own precedence lets every operator source override them. Check the values a
+# real JVM settles on when started the way a captured launcher run would start
+# it: the JAVA_TOOL_OPTIONS, JDK_JAVA_OPTIONS and _JAVA_OPTIONS the launcher
+# passed on, and the crash-related -XX: arguments of its command line.
+effective_flag() {
+    local capture="$1"
+    local flag="$2"
+    local args=()
+    local line
+    local flags
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=) ]]; then
+            args+=("$line")
+        fi
+    done < "$capture"
+    if ! flags=$(JAVA_TOOL_OPTIONS="$(cat "${capture}.tool-options")" \
+                 JDK_JAVA_OPTIONS="$(cat "${capture}.jdk-java-options")" \
+                 _JAVA_OPTIONS="$(cat "${capture}.underscore-java-options")" \
+                 "$JAVA_BIN" ${args[@]+"${args[@]}"} -XX:+PrintFlagsFinal -version \
+                 2>"${capture}.flags.err"); then
+        fail "JVM rejected the options captured in ${capture}: $(cat "${capture}.flags.err")"
+    fi
+    # The value sits between "= " and the trailing "{origin}" columns and may
+    # contain spaces.
+    # A here-string, not a pipe: awk exits early, which would kill printf with
+    # SIGPIPE under pipefail.
+    awk -v flag="$flag" '$2 == flag {
+        sub(/^[^=]*= /, ""); sub(/ *(\{[^}]*\} *)+$/, ""); print; exit }' <<< "$flags"
+}
+
+assert_effective_flag() {
+    local capture="$1"
+    local flag="$2"
+    local pattern="$3"
+    local value
+    value=$(effective_flag "$capture" "$flag")
+    [[ "$value" =~ $pattern ]] ||
+        fail "effective ${flag} is '${value}', expected to match ${pattern}"
+}
+
+LOGS_PATTERN=$(printf '%s' "${SERVER_ROOT}/logs" | sed 's/[][\.*^$+?(){}|]/\\&/g')
+# The names carry the host name, the launch time and, if needed, a counter,
+# since a restarted container often reuses the PID, pods may share one log
+# volume, HotSpot truncates an existing crash log (JDK 17+), and it will not
+# write a heap dump over an existing file.
+# HeapDumpPath names a directory per launch, so each JVM writes its own
+# java_pid<pid>.hprof there.
+NAME_ID_PATTERN="[A-Za-z0-9._-]+_[0-9]{8}-[0-9]{6}(-[0-9]+)?"
+HEAP_DUMP_PATTERN="^${LOGS_PATTERN}/heapdump_${NAME_ID_PATTERN}$"
+ERROR_FILE_PATTERN="^${LOGS_PATTERN}/hs_err_pid%p_${NAME_ID_PATTERN}\.log$"
+
+assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=)' \
+                   "$ENABLED_CAPTURE"
+assert_effective_flag "$ENABLED_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
+assert_effective_flag "$ENABLED_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN"
+assert_effective_flag "$ENABLED_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
+ENABLED_DUMP_DIR=$(effective_flag "$ENABLED_CAPTURE" HeapDumpPath)
+[[ -d "$ENABLED_DUMP_DIR" ]] ||
+    fail "launcher did not create the heap dump directory ${ENABLED_DUMP_DIR}"
+
+# Child JVMs the Server starts inherit JAVA_TOOL_OPTIONS. Two JVMs started with
+# the launcher's options, like the Server and a computer job, must each write
+# their own heap dump into the launch directory instead of competing for one.
+OOM_SOURCE="${TEMP_DIR}/OomCheck.java"
+cat > "$OOM_SOURCE" <<'JAVA'
+import java.util.ArrayList;
+import java.util.List;
+
+public class OomCheck {
+    public static void main(String[] args) {
+        List<long[]> hold = new ArrayList<>();
+        while (true) {
+            hold.add(new long[1 << 20]);
+        }
+    }
+}
+JAVA
+OOM_DUMP_DIR="$ENABLED_DUMP_DIR"
+for OOM_RUN in 1 2; do
+    JAVA_TOOL_OPTIONS="$(cat "${ENABLED_CAPTURE}.tool-options")" \
+        "$JAVA_BIN" -Xmx64m "$OOM_SOURCE" >"${TEMP_DIR}/oom-${OOM_RUN}.log" 2>&1 || true
+done
+OOM_DUMPS=$(find "$OOM_DUMP_DIR" -maxdepth 1 -name 'java_pid*.hprof' | wc -l)
+if [[ "$OOM_DUMPS" -ne 2 ]]; then
+    ls -l "$OOM_DUMP_DIR" >&2 || true
+    cat "${TEMP_DIR}"/oom-*.log >&2 || true
+    fail "expected a heap dump per JVM in ${OOM_DUMP_DIR}, found ${OOM_DUMPS}"
+fi
+rm -f "$OOM_DUMP_DIR"/java_pid*.hprof
+
+# JAVA_OPTIONS replaces the default heap options; the crash defaults stay, and
+# paths given there win.
+CUSTOM_OPTIONS_CAPTURE="${TEMP_DIR}/custom-java-options.args"
+CAPTURE_FILE="$CUSTOM_OPTIONS_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JAVA_OPTIONS="-Xmx1g -XX:ErrorFile=/operator/hs_err.log \
+                  -XX:HeapDumpPath=/operator/dumps" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_argument "-Xmx1g" "$CUSTOM_OPTIONS_CAPTURE"
+assert_effective_flag "$CUSTOM_OPTIONS_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
+assert_effective_flag "$CUSTOM_OPTIONS_CAPTURE" HeapDumpPath '^/operator/dumps$'
+assert_effective_flag "$CUSTOM_OPTIONS_CAPTURE" ErrorFile '^/operator/hs_err\.log$'
+
+# The JVM, not the launcher, parses the operator's JAVA_TOOL_OPTIONS: a quoted
+# opt-out works, and flag-like text inside a property value changes nothing.
+QUOTED_TOOL_CAPTURE="${TEMP_DIR}/quoted-tool-options.args"
+CAPTURE_FILE="$QUOTED_TOOL_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JAVA_TOOL_OPTIONS='"-XX:-HeapDumpOnOutOfMemoryError" "-Dmarker=-XX:ErrorFile=/nope"' \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$QUOTED_TOOL_CAPTURE" HeapDumpOnOutOfMemoryError '^false$'
+assert_effective_flag "$QUOTED_TOOL_CAPTURE" ErrorFile "$ERROR_FILE_PATTERN"
+
+# JDK_JAVA_OPTIONS, including an @argfile, also overrides the defaults.
+ARGFILE="${TEMP_DIR}/jdk-java-options.args"
+echo '-XX:ErrorFile=/operator/argfile-hs_err.log' > "$ARGFILE"
+ARGFILE_CAPTURE="${TEMP_DIR}/argfile.args"
+CAPTURE_FILE="$ARGFILE_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    JDK_JAVA_OPTIONS="@${ARGFILE}" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$ARGFILE_CAPTURE" ErrorFile '^/operator/argfile-hs_err\.log$'
+assert_effective_flag "$ARGFILE_CAPTURE" HeapDumpPath "$HEAP_DUMP_PATTERN"
+
+# _JAVA_OPTIONS comes after the command line, and -j lands on the command line
+# when JAVA_OPTIONS is unset; both override the defaults.
+UNDERSCORE_CAPTURE="${TEMP_DIR}/underscore-java-options.args"
+CAPTURE_FILE="$UNDERSCORE_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    _JAVA_OPTIONS="-XX:HeapDumpPath=/operator/underscore" \
+    STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
+    "-XX:ErrorFile=/operator/user-option-hs_err.log" >/dev/null
+
+assert_effective_flag "$UNDERSCORE_CAPTURE" HeapDumpPath '^/operator/underscore$'
+assert_effective_flag "$UNDERSCORE_CAPTURE" ErrorFile '^/operator/user-option-hs_err\.log$'
+
+# A launch never reuses a name already taken in logs/, even within the same
+# second: with a fixed clock and host name, the counter moves past an existing
+# heap dump directory, a crash log and a dangling symlink. The launcher never
+# removes dump directories: an empty one from an earlier launch may still be the
+# target of a computer-job JVM that outlived its Server.
+MOCK_DATE_BIN="${TEMP_DIR}/mock-date-bin"
+mkdir -p "$MOCK_DATE_BIN"
+printf '#!/bin/bash\necho 20200101-000000\n' > "${MOCK_DATE_BIN}/date"
+chmod +x "${MOCK_DATE_BIN}/date"
+mkdir -p "${SERVER_ROOT}/logs"
+# Only fixtures this run creates are recorded for removal, so an existing file
+# with the same name in the supplied distribution is left alone.
+add_crash_fixture() {
+    local path="$1"
+    local kind="$2"
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        CRASH_NAME_FIXTURES+=("$path")
+        case "$kind" in
+            file) : > "$path" ;;
+            empty-dir) mkdir "$path" ;;
+            dump-dir) mkdir "$path" && : > "${path}/java_pid1.hprof" ;;
+            dangling-link) ln -s "${TEMP_DIR}/missing-target" "$path" ;;
+        esac
+    fi
+}
+USED_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-a_20200101-000000"
+OLD_EMPTY_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-a_20191231-000000"
+OTHER_HOST_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-c_20191231-000000"
+add_crash_fixture "$USED_DUMP_DIR" dump-dir
+add_crash_fixture "${SERVER_ROOT}/logs/hs_err_pid1_${TEST_HOST}-a_20200101-000000-1.log" file
+add_crash_fixture "${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-a_20200101-000000-2" dangling-link
+add_crash_fixture "$OLD_EMPTY_DUMP_DIR" empty-dir
+add_crash_fixture "$OTHER_HOST_DUMP_DIR" empty-dir
+UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
+CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    HOSTNAME="${TEST_HOST}-a" PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
+    "^${LOGS_PATTERN}/heapdump_${TEST_HOST}-a_20200101-000000-3$"
+assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
+    "^${LOGS_PATTERN}/hs_err_pid%p_${TEST_HOST}-a_20200101-000000-3\.log$"
+[[ -f "${SERVER_ROOT}/logs/hs_err_pid1_${TEST_HOST}-a_20200101-000000-1.log" ]] ||
+    fail "launcher removed an existing crash log"
+[[ -d "$OLD_EMPTY_DUMP_DIR" ]] ||
+    fail "launcher removed an empty heap dump directory from an earlier launch"
+[[ -d "$OTHER_HOST_DUMP_DIR" ]] ||
+    fail "launcher removed another host's heap dump directory"
+[[ -f "${USED_DUMP_DIR}/java_pid1.hprof" ]] ||
+    fail "launcher removed an existing heap dump"
+
+# Another pod sharing the volume gets its own names in the same second, and
+# characters unsafe in a file name are replaced.
+OTHER_HOST_CAPTURE="${TEMP_DIR}/other-host.args"
+CAPTURE_FILE="$OTHER_HOST_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    HOSTNAME="${TEST_HOST}-b/x" PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
+
+assert_effective_flag "$OTHER_HOST_CAPTURE" HeapDumpPath \
+    "^${LOGS_PATTERN}/heapdump_${TEST_HOST}-b_x_20200101-000000$"
+if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
+    rm -rf "${CRASH_NAME_FIXTURES[@]}"
+fi
+CRASH_NAME_FIXTURES=()
+
+# A launcher error before Java starts must reach stderr, which start-hugegraph.sh
+# passes to the terminal or container log, as well as the server log, and the
+# failed launch must not leave a heap dump directory behind.
+: > "$SERVER_LOG"
+PREFLIGHT_ERROR="${TEMP_DIR}/preflight.err"
+PREFLIGHT_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-preflight_20200101-000000"
+if JAVA_HOME="$MOCK_JAVA_HOME" HOSTNAME="${TEST_HOST}-preflight" PATH="${MOCK_DATE_BIN}:${PATH}" \
+   STDOUT_MODE=true "$SERVER_SCRIPT" \
+   "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true "" "bad-gc" \
+   >/dev/null 2>"$PREFLIGHT_ERROR"; then
+    fail "launcher accepted an unknown GC option"
+fi
+grep -Fq "Unrecognized gc option: 'bad-gc'" "$PREFLIGHT_ERROR" ||
+    fail "launcher preflight error did not reach stderr"
+grep -Fq "Unrecognized gc option: 'bad-gc'" "$SERVER_LOG" ||
+    fail "launcher preflight error did not reach the server log"
+[[ ! -e "$PREFLIGHT_DUMP_DIR" ]] ||
+    fail "a launch that failed before Java started left ${PREFLIGHT_DUMP_DIR}"
+
+# The riscv64 libatomic check runs before anything else, and its error must also
+# reach the server log. Mock uname and ldconfig so no libatomic is found; skip if
+# this machine has one at a fixed path the launcher also probes.
+RISCV_LIBATOMIC_FOUND="false"
+for RISCV_CANDIDATE in /lib/riscv64-linux-gnu/libatomic.so.1 \
+                       /usr/lib/riscv64-linux-gnu/libatomic.so.1 \
+                       /lib64/lp64d/libatomic.so.1 /usr/lib64/lp64d/libatomic.so.1 \
+                       /lib64/libatomic.so.1 /usr/lib64/libatomic.so.1; do
+    if [[ -r "$RISCV_CANDIDATE" ]]; then
+        RISCV_LIBATOMIC_FOUND="true"
+    fi
+done
+if [[ "$RISCV_LIBATOMIC_FOUND" == "false" ]]; then
+    MOCK_RISCV_BIN="${TEMP_DIR}/mock-riscv-bin"
+    mkdir -p "$MOCK_RISCV_BIN"
+    printf '#!/bin/bash\ncase "$1" in -s) echo Linux ;; -m) echo riscv64 ;; *) echo Linux ;; esac\n' \
+        > "${MOCK_RISCV_BIN}/uname"
+    printf '#!/bin/bash\nexit 0\n' > "${MOCK_RISCV_BIN}/ldconfig"
+    chmod +x "${MOCK_RISCV_BIN}/uname" "${MOCK_RISCV_BIN}/ldconfig"
+    : > "$SERVER_LOG"
+    RISCV_ERROR="${TEMP_DIR}/riscv.err"
+    if JAVA_HOME="$MOCK_JAVA_HOME" PATH="${MOCK_RISCV_BIN}:${PATH}" LD_PRELOAD="" \
+       STDOUT_MODE=true "$SERVER_SCRIPT" \
+       "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
+       >/dev/null 2>"$RISCV_ERROR"; then
+        fail "launcher started on riscv64 without libatomic"
+    fi
+    grep -Fq "RISC-V RocksDB requires libatomic.so.1" "$RISCV_ERROR" ||
+        fail "the riscv64 libatomic error did not reach stderr"
+    grep -Fq "RISC-V RocksDB requires libatomic.so.1" "$SERVER_LOG" ||
+        fail "the riscv64 libatomic error did not reach the server log"
+fi
+
+# A full or read-only logs volume must not stop the Server: when the dump
+# directory cannot be created, the launcher warns and dumps into logs/ itself.
+FAILING_MKDIR_BIN="${TEMP_DIR}/failing-mkdir-bin"
+mkdir -p "$FAILING_MKDIR_BIN"
+cat > "${FAILING_MKDIR_BIN}/mkdir" <<'MKDIR'
+#!/bin/bash
+for arg in "$@"; do
+    case "$arg" in
+        */heapdump_*) echo "mkdir: ${arg}: No space left on device" >&2; exit 1 ;;
+    esac
+done
+exec /bin/mkdir "$@"
+MKDIR
+chmod +x "${FAILING_MKDIR_BIN}/mkdir"
+: > "$SERVER_LOG"
+NO_DUMP_DIR_CAPTURE="${TEMP_DIR}/no-dump-dir.args"
+NO_DUMP_DIR_ERROR="${TEMP_DIR}/no-dump-dir.err"
+CAPTURE_FILE="$NO_DUMP_DIR_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    PATH="${FAILING_MKDIR_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true \
+    >/dev/null 2>"$NO_DUMP_DIR_ERROR" ||
+    fail "launcher did not start when the heap dump directory could not be created"
+grep -Fq "WARN: cannot create ${SERVER_ROOT}/logs/heapdump_" "$NO_DUMP_DIR_ERROR" ||
+    fail "launcher did not warn on stderr that the heap dump directory was not created"
+grep -Fq "WARN: cannot create ${SERVER_ROOT}/logs/heapdump_" "$SERVER_LOG" ||
+    fail "launcher did not log that the heap dump directory was not created"
+assert_effective_flag "$NO_DUMP_DIR_CAPTURE" HeapDumpPath "^${LOGS_PATTERN}$"
+
+# A logs path with a double quote or % cannot use the per-launch defaults. Heap
+# dumps must stay on there, still at the front of JAVA_TOOL_OPTIONS (quoted with
+# the quote character the path lacks) so the documented JAVA_TOOL_OPTIONS opt-out
+# keeps winning, with only the crash log default left out. A path with both quote
+# characters gets the warning only. Each case runs in its own copy of bin/ and conf/.
+for ODD_DIR_NAME in 'pct%dir' 'dq"dir' "sq'pct%dir" "both'q\"dir"; do
+    mkdir -p "${TEMP_DIR}/${ODD_DIR_NAME}/logs" "${TEMP_DIR}/${ODD_DIR_NAME}/plugins"
+    ODD_ROOT=$(cd "${TEMP_DIR}/${ODD_DIR_NAME}" && pwd -P)
+    cp -R "${SERVER_ROOT}/bin" "${SERVER_ROOT}/conf" "${ODD_ROOT}/"
+    for ODD_OPT_OUT in "" "-XX:-HeapDumpOnOutOfMemoryError"; do
+        ODD_CAPTURE="${TEMP_DIR}/odd-path.args"
+        ODD_ERROR="${TEMP_DIR}/odd-path.err"
+        CAPTURE_FILE="$ODD_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" STDOUT_MODE=true \
+            JAVA_TOOL_OPTIONS="$ODD_OPT_OUT" "${ODD_ROOT}/bin/hugegraph-server.sh" \
+            "${ODD_ROOT}/conf/gremlin-server.yaml" "${ODD_ROOT}/conf/rest-server.properties" true \
+            >/dev/null 2>"$ODD_ERROR" ||
+            fail "launcher failed with ${ODD_DIR_NAME} in the logs path: $(cat "$ODD_ERROR")"
+        assert_no_argument '^-XX:([+-]HeapDumpOnOutOfMemoryError|HeapDumpPath=|ErrorFile=)' \
+                           "$ODD_CAPTURE"
+        assert_effective_flag "$ODD_CAPTURE" ErrorFile '^$'
+        case "$ODD_DIR_NAME" in
+            both*)
+                grep -Fq "WARN: ${ODD_ROOT}/logs contains both quote characters" "$ODD_ERROR" ||
+                    fail "launcher did not warn about both quote characters in the logs path"
+                if grep -q -- '-XX:HeapDumpPath' "${ODD_CAPTURE}.tool-options"; then
+                    fail "launcher set a heap dump path it cannot quote for ${ODD_DIR_NAME}"
+                fi
+                ;;
+            *)
+                grep -Fq "WARN: ${ODD_ROOT}/logs contains a double quote or %" "$ODD_ERROR" ||
+                    fail "launcher did not warn about ${ODD_DIR_NAME} in the logs path"
+                [[ "$(effective_flag "$ODD_CAPTURE" HeapDumpPath)" == "${ODD_ROOT}/logs" ]] ||
+                    fail "heap dumps do not go to ${ODD_ROOT}/logs for ${ODD_DIR_NAME}"
+                if [[ -z "$ODD_OPT_OUT" ]]; then
+                    assert_effective_flag "$ODD_CAPTURE" HeapDumpOnOutOfMemoryError '^true$'
+                else
+                    assert_effective_flag "$ODD_CAPTURE" HeapDumpOnOutOfMemoryError '^false$'
+                fi
+                ;;
+        esac
+    done
+done
+
+# An unwritable logs/ is reported on stderr, where the container log keeps it.
+# Root can write anywhere, so the check only runs for other users.
+if [[ "$(id -u)" -ne 0 ]]; then
+    mkdir -p "${TEMP_DIR}/unwritable-logs-dist/logs" "${TEMP_DIR}/unwritable-logs-dist/plugins"
+    # The launcher reports the resolved path (TEMP_DIR is a symlink on macOS).
+    MINI_ROOT=$(cd "${TEMP_DIR}/unwritable-logs-dist" && pwd -P)
+    cp -R "${SERVER_ROOT}/bin" "${SERVER_ROOT}/conf" "${MINI_ROOT}/"
+    chmod 555 "${MINI_ROOT}/logs"
+    UNWRITABLE_ERROR="${TEMP_DIR}/unwritable-logs.err"
+    if JAVA_HOME="$MOCK_JAVA_HOME" STDOUT_MODE=true "${MINI_ROOT}/bin/hugegraph-server.sh" \
+       "${MINI_ROOT}/conf/gremlin-server.yaml" "${MINI_ROOT}/conf/rest-server.properties" true \
+       >/dev/null 2>"$UNWRITABLE_ERROR"; then
+        chmod 755 "${MINI_ROOT}/logs"
+        fail "launcher started with an unwritable logs directory"
+    fi
+    chmod 755 "${MINI_ROOT}/logs"
+    grep -Fq "No write permission on directory ${MINI_ROOT}/logs" "$UNWRITABLE_ERROR" ||
+        fail "launcher did not report the unwritable logs directory on stderr"
+fi
+
+# With telemetry on, the launcher appends its agent to JAVA_TOOL_OPTIONS and
+# keeps both the defaults and the operator's flags there. The agent jar fixture
+# lives in a copy of bin/ and conf/ under TEMP_DIR, so the test never writes into
+# the supplied distribution's plugins/ (or through a symlink placed there).
+OT_EXPECTED_MD5=$(grep -E '^ *expected_md5=' "$SERVER_SCRIPT" | cut -d'"' -f2)
+MOCK_MD5_BIN="${TEMP_DIR}/mock-md5-bin"
+mkdir -p "$MOCK_MD5_BIN"
+printf '#!/bin/bash\necho "%s  $1"\n' "$OT_EXPECTED_MD5" > "${MOCK_MD5_BIN}/md5sum"
+chmod +x "${MOCK_MD5_BIN}/md5sum"
+TELEMETRY_ROOT="${TEMP_DIR}/telemetry-dist"
+mkdir -p "${TELEMETRY_ROOT}/logs" "${TELEMETRY_ROOT}/plugins"
+cp -R "${SERVER_ROOT}/bin" "${SERVER_ROOT}/conf" "${TELEMETRY_ROOT}/"
+: > "${TELEMETRY_ROOT}/plugins/opentelemetry-javaagent.jar"
+TELEMETRY_CAPTURE="${TEMP_DIR}/telemetry.args"
+CAPTURE_FILE="$TELEMETRY_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
+    PATH="${MOCK_MD5_BIN}:${PATH}" \
+    JAVA_TOOL_OPTIONS="-XX:ErrorFile=/operator/hs_err.log" \
+    STDOUT_MODE=true "${TELEMETRY_ROOT}/bin/hugegraph-server.sh" \
+    "${TELEMETRY_ROOT}/conf/gremlin-server.yaml" \
+    "${TELEMETRY_ROOT}/conf/rest-server.properties" true "" "" true \
+    >/dev/null 2>"${TEMP_DIR}/telemetry.err" ||
+    fail "launcher failed with telemetry on: $(cat "${TEMP_DIR}/telemetry.err")"
+
+TELEMETRY_TOOL_OPTIONS=$(cat "${TELEMETRY_CAPTURE}.tool-options")
+[[ "$TELEMETRY_TOOL_OPTIONS" == -XX:+HeapDumpOnOutOfMemoryError\ * ]] ||
+    fail "telemetry agent setup dropped the crash-file defaults"
+[[ "$TELEMETRY_TOOL_OPTIONS" == *" -XX:ErrorFile=/operator/hs_err.log "* ]] ||
+    fail "telemetry agent setup dropped the operator's JAVA_TOOL_OPTIONS"
+[[ "$TELEMETRY_TOOL_OPTIONS" =~ \ -javaagent:[^\ ]*/opentelemetry-javaagent\.jar$ ]] ||
+    fail "telemetry agent was not added to JAVA_TOOL_OPTIONS"
 
 JDK21_CAPTURE="${TEMP_DIR}/jdk21.args"
 CAPTURE_FILE="$JDK21_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \

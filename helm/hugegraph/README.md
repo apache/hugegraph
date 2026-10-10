@@ -1066,6 +1066,12 @@ kubectl get pods -o wide
 kubectl -n <namespace> describe pod <pod> | grep -A5 "Last State"
 ```
 
+`kubectl -n <namespace> logs <pod> --previous` shows the previous container's
+output, including launcher and bootstrap errors that stopped the Server. The
+chart does not mount a volume at `/hugegraph-server/logs`, so JVM crash logs and
+heap dumps the Server writes there are lost when its container restarts; see
+[Server logs and crash files](../../docker/README.md#server-logs-and-crash-files).
+
 ### Release Name Too Long
 
 Helm itself rejects release names longer than 53 characters, before this chart

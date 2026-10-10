@@ -42,10 +42,21 @@ LOGS="$TOP/logs"
 OUTPUT=${LOGS}/hugegraph-server.log
 GITHUB="https://github.com"
 
+# Launcher errors and warnings go to ${OUTPUT} (hugegraph-server.log) when it can
+# be written, and to stderr, which reaches the terminal or the container log. The
+# file comes first so the message is kept even if writing to stderr kills the
+# script (a closed pipe, for example).
+report_error() {
+    if [[ -w "${OUTPUT}" || ( ! -e "${OUTPUT}" && -w "${LOGS}" ) ]]; then
+        (printf '%s\n' "$1" >> "${OUTPUT}") 2>/dev/null || true
+    fi
+    printf '%s\n' "$1" >&2
+}
+
 export HUGEGRAPH_HOME="$TOP"
 . "${BIN}"/util.sh
 
-configure_riscv64_libatomic || exit 1
+configure_riscv64_libatomic report_error || exit 1
 
 # Parse the server arguments in array way
 SERVER_ARGS=("$@")
@@ -57,8 +68,8 @@ USER_OPTION="${SERVER_ARGS[3]:-}"
 GC_OPTION="${SERVER_ARGS[4]:-}"
 OPEN_TELEMETRY="${SERVER_ARGS[5]:-}"
 
-ensure_path_writable "$LOGS"
-ensure_path_writable "$PLUGINS"
+ensure_path_writable "$LOGS" report_error
+ensure_path_writable "$PLUGINS" report_error
 
 # The maximum and minimum heap memory that service can use
 MAX_MEM=$((32 * 1024))
@@ -111,13 +122,12 @@ JAVA_VERSION=$($JAVA -version 2>&1 |
 # Drop any pre-release suffix, e.g. "24-ea" -> "24"
 JAVA_VERSION="${JAVA_VERSION%%[!0-9]*}"
 if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $MIN_JAVA_VERSION ]]; then
-    echo "Make sure the JDK is installed and the version >= $MIN_JAVA_VERSION, current is $JAVA_VERSION" \
-         >> "${OUTPUT}"
+    report_error "Make sure the JDK is installed and the version >= $MIN_JAVA_VERSION, current is $JAVA_VERSION"
     exit 1
 fi
 
 if [[ ! -r ${JVM_MODULE_OPTIONS} ]]; then
-    echo "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}" >> "${OUTPUT}"
+    report_error "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}"
     exit 1
 fi
 
@@ -125,10 +135,10 @@ fi
 if [ "$JAVA_OPTIONS" = "" ]; then
     XMX=$(calc_xmx $MIN_MEM $MAX_MEM)
     if [ $? -ne 0 ]; then
-        echo "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory" >> "${OUTPUT}"
+        report_error "Failed to start HugeGraphServer, requires at least ${MIN_MEM}MB free memory"
         exit 1
     fi
-    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${USER_OPTION}"
+    JAVA_OPTIONS="-Xms${MIN_MEM}m -Xmx${XMX}m ${USER_OPTION}"
 
     # Rolling out detailed GC logs
     #JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseGCLogFileRotation -XX:GCLogFileSize=10M -XX:NumberOfGCLogFiles=3 \
@@ -155,7 +165,7 @@ case "$GC_OPTION" in
                                       -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
         ;;
     *)
-        echo "Unrecognized gc option: '$GC_OPTION', supported options: g1, ZGC" >> ${OUTPUT}
+        report_error "Unrecognized gc option: '$GC_OPTION', supported options: g1, ZGC"
         exit 1
 esac
 
@@ -170,8 +180,7 @@ Run the server on Java ${MAX_SECURITY_JAVA_VERSION} or lower, or start it with t
 disabled: 'start-hugegraph.sh -s false'.
 EOF
 )
-        echo "${SECURITY_UNSUPPORTED_MSG}" >&2
-        echo "${SECURITY_UNSUPPORTED_MSG}" >> "${OUTPUT}"
+        report_error "${SECURITY_UNSUPPORTED_MSG}"
         exit 1
     fi
 
@@ -199,12 +208,10 @@ EOF
         # The bootstrap validates the effective policy and refuses to start, but
         # its stderr goes to the stdout log in daemon mode. Name the cause here
         # so it also reaches the log start-hugegraph.sh points operators at.
-        cat >> "${OUTPUT}" <<EOF
-ERROR: Missing or unreadable '${SECURITY_PROPERTIES}'.
+        report_error "ERROR: Missing or unreadable '${SECURITY_PROPERTIES}'.
 An upgraded deployment that reuses an older conf/ directory must add this file,
 or supply its own -Djava.security.properties=<file> setting a finite positive
-networkaddress.cache.ttl.
-EOF
+networkaddress.cache.ttl."
     fi
     JVM_OPTIONS="${JVM_OPTIONS} \
                  -Djava.security.properties=${SECURITY_PROPERTIES}"
@@ -224,7 +231,7 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
             "${GITHUB}/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.1.0/${OT_JAR}"
 
         if [[ ! -e "${OT_JAR_PATH}" ]]; then
-            echo "## Error: Failed to download ${OT_JAR}." >>${OUTPUT}
+            report_error "## Error: Failed to download ${OT_JAR}."
             exit 1
         fi
     fi
@@ -234,13 +241,15 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     actual_md5=$(md5sum "${OT_JAR_PATH}" | awk '{print $1}')
 
     if [[ "${expected_md5}" != "${actual_md5}" ]]; then
-        echo "## Error: MD5 checksum verification failed for ${OT_JAR_PATH}." >>${OUTPUT}
-        echo "## Tips: Remove the file and try again." >>${OUTPUT}
+        report_error "## Error: MD5 checksum verification failed for ${OT_JAR_PATH}."
+        report_error "## Tips: Remove the file and try again."
         exit 1
     fi
 
     # Note: check carefully if multi "javeagent" params are set
-    export JAVA_TOOL_OPTIONS="-javaagent:${PLUGINS}/${OT_JAR}"
+    # Append, so the operator's JAVA_TOOL_OPTIONS stays; the crash-file defaults
+    # are put in front of all of it below.
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:+${JAVA_TOOL_OPTIONS} }-javaagent:${PLUGINS}/${OT_JAR}"
     export OTEL_TRACES_EXPORTER=otlp
     export OTEL_METRICS_EXPORTER=none
     export OTEL_LOGS_EXPORTER=none
@@ -252,13 +261,104 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
     export OTEL_RESOURCE_ATTRIBUTES=service.name=server
 fi
 
-if [[ "${STDOUT_MODE:-false}" != "true" ]]; then
-    # Daemon stderr only reaches hugegraph-server-stdout.log, so a bootstrap
-    # rejection of the effective DNS policy (a broken operator override
-    # included) would be invisible in the log start-hugegraph.sh points
-    # operators at. Let the bootstrap mirror its fatal errors there.
-    JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
-fi
+# Let the bootstrap mirror its fatal errors (a rejected DNS policy, a broken
+# operator override included) into hugegraph-server.log. In daemon mode its
+# stderr only reaches hugegraph-server-stdout.log; in STDOUT_MODE it reaches the
+# container log, which keeps a single earlier generation, so the file copy is
+# what survives a crash loop on a mounted logs volume.
+JVM_OPTIONS="${JVM_OPTIONS} -Dhugegraph.bootstrap.error.log=${OUTPUT}"
+
+# Keep heap dumps and JVM crash logs in $LOGS whatever JAVA_OPTIONS holds. The
+# defaults come first in JAVA_TOOL_OPTIONS, ahead of the operator's own value. The
+# JVM applies JAVA_TOOL_OPTIONS before JDK_JAVA_OPTIONS, the command line
+# (JAVA_OPTIONS and -j) and _JAVA_OPTIONS, and the last occurrence of a flag wins,
+# so any of those overrides a default. The JVM does the parsing itself, including
+# quoted options, and @argfiles in JDK_JAVA_OPTIONS or on the command line.
+# Child JVMs the Server starts (computer jobs, for example) inherit the
+# environment but not the command line, so they get these defaults too, and every
+# path must stay unique per JVM. ErrorFile expands %p to each JVM's PID.
+# HeapDumpPath expands %p only from JDK 25, but on every version, when it names an
+# existing directory, each JVM writes java_pid<its pid>.hprof inside it, so it
+# points at one directory per launch. HotSpot picks that name, so a child JVM that
+# gets a PID reused within the same launch cannot write over an earlier child's
+# dump, and its crash log truncates the earlier child's (ErrorFile only expands
+# %p); the launcher cannot rename HotSpot's files.
+# A restarted container often reuses the PID; HotSpot truncates an existing crash
+# log (JDK 17+) and will not write a heap dump over an existing file. So the names
+# carry the host name (the pod name on Kubernetes, so pods sharing one log volume
+# do not collide), the launch time, and a counter. A plain mkdir claims each name
+# atomically, so concurrent launches never share one. This runs after every
+# preflight check, so a launch that fails before Java starts leaves nothing.
+# Dump directories are never removed automatically: one stays empty until a JVM
+# using it runs out of memory, and that JVM may be a computer job that outlives
+# the Server, so the launcher cannot tell when a directory is safe to delete.
+crash_name_taken() {
+    local name="$1" file restore_failglob taken=1
+    [[ -e "${LOGS}/heapdump_${name}" || -L "${LOGS}/heapdump_${name}" ]] && return 0
+    restore_failglob=$(shopt -p failglob)
+    shopt -u failglob
+    for file in "${LOGS}"/hs_err_pid*_"${name}".log; do
+        if [[ -e ${file} || -L ${file} ]]; then
+            taken=0
+            break
+        fi
+    done
+    eval "${restore_failglob}"
+    return ${taken}
+}
+case "${LOGS}" in
+    *\"*|*%*)
+        # The defaults below cannot carry this path: they quote it with double quotes,
+        # and ErrorFile expands %. Dump into $LOGS itself instead, still from the front
+        # of JAVA_TOOL_OPTIONS so every operator source keeps overriding it, with the
+        # path in whichever quote character it does not contain, and no ErrorFile.
+        if [[ ${LOGS} != *"'"* ]]; then
+            DUMP_QUOTE="'"
+        elif [[ ${LOGS} != *\"* ]]; then
+            DUMP_QUOTE='"'
+        else
+            DUMP_QUOTE=""
+        fi
+        if [[ -n ${DUMP_QUOTE} ]]; then
+            report_error "WARN: ${LOGS} contains a double quote or %, so heap dumps go to ${LOGS}\
+ without a per-launch directory and no crash log default is set; set -XX:ErrorFile yourself"
+            CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError ${DUMP_QUOTE}-XX:HeapDumpPath=${LOGS}${DUMP_QUOTE}"
+            export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
+        else
+            report_error "WARN: ${LOGS} contains both quote characters, which JAVA_TOOL_OPTIONS\
+ cannot carry, so no heap dump or crash log default is set; set -XX:HeapDumpPath yourself"
+        fi
+        ;;
+    *)
+        LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
+        LAUNCH_HOST="${LAUNCH_HOST:0:64}"
+        LAUNCH_STAMP="${LAUNCH_HOST}_$(date +%Y%m%d-%H%M%S)"
+        LAUNCH_ID="${LAUNCH_STAMP}"
+        LAUNCH_SUFFIX=0
+        HEAP_DUMP_PATH=""
+        while [[ -z ${HEAP_DUMP_PATH} ]]; do
+            if ! crash_name_taken "${LAUNCH_ID}" &&
+               mkdir "${LOGS}/heapdump_${LAUNCH_ID}" 2>/dev/null; then
+                HEAP_DUMP_PATH="${LOGS}/heapdump_${LAUNCH_ID}"
+            elif [[ ${LAUNCH_SUFFIX} -ge 1000 ]]; then
+                report_error "WARN: heap dump names for ${LAUNCH_STAMP} are all taken; heap dumps go to ${LOGS}"
+                HEAP_DUMP_PATH="${LOGS}"
+            elif ! crash_name_taken "${LAUNCH_ID}"; then
+                # Not a name clash (a full disk, for example): keep starting, and dump
+                # into $LOGS itself rather than make diagnostics a startup requirement.
+                report_error "WARN: cannot create ${LOGS}/heapdump_${LAUNCH_ID}; heap dumps go to ${LOGS}"
+                HEAP_DUMP_PATH="${LOGS}"
+            else
+                LAUNCH_SUFFIX=$((LAUNCH_SUFFIX + 1))
+                LAUNCH_ID="${LAUNCH_STAMP}-${LAUNCH_SUFFIX}"
+            fi
+        done
+        CRASH_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError"
+        CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:HeapDumpPath=${HEAP_DUMP_PATH}\""
+        CRASH_OPTIONS="${CRASH_OPTIONS} \"-XX:ErrorFile=${LOGS}/hs_err_pid%p_${LAUNCH_ID}.log\""
+        export JAVA_TOOL_OPTIONS="${CRASH_OPTIONS}${JAVA_TOOL_OPTIONS:+ ${JAVA_TOOL_OPTIONS}}"
+        ;;
+esac
 
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then

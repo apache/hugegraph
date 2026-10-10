@@ -232,6 +232,36 @@ Standalone stores RocksDB data at `/hugegraph-server/rocksdb-data`. The HStore t
 
 `docker compose down` keeps named-volume data. `docker compose down -v` intentionally deletes it.
 
+### Server logs and crash files
+
+This section describes images built from current master. Images from 1.7.0 and earlier do not set `STDOUT_MODE`: `docker logs` shows only the entrypoint's output, and the service logs stay in `logs/` inside the container.
+
+Both Server images (`hugegraph/hugegraph` and `hugegraph/server`) write the HugeGraph log to container stdout. WARN and above from Hadoop, ZooKeeper, SOFA, Netty and Commons also reaches stdout. INFO from Hadoop, Netty and Commons, the audit log and the slow-query log stay in files only; ZooKeeper and SOFA log nothing below WARN. Errors that `hugegraph-server.sh` reports before Java starts, such as an unsupported JDK or too little free memory, and fatal bootstrap errors go to stderr and, when `logs/` can be written, also to `hugegraph-server.log`. Earlier entrypoint steps, such as `init-store.sh` in the HStore image, report to stderr only. Either way, when a Server exits during startup, `docker logs` or `kubectl logs --previous` shows why. When the JVM starts, it also prints `Picked up JAVA_TOOL_OPTIONS: ...` with the crash-file defaults below; a start that fails its preflight checks exits before that.
+
+`/hugegraph-server/logs` holds `hugegraph-server.log`, JVM crash logs (`hs_err_pid<pid>_<host>_<launch time>.log`) and out-of-memory heap dumps (`heapdump_<host>_<launch time>/java_pid<pid>.hprof`), where `<launch time>` is the container's local time as `YYYYMMDD-HHMMSS`. Each start gets its own `heapdump_*` directory, so the Server and the JVMs it starts, such as computer jobs, write separate dumps. HotSpot names each dump and crash log after the JVM's PID, so a JVM that reuses the PID of an earlier one from the same start cannot write its dump, and its crash log replaces the earlier one's. The host name (on Kubernetes, the pod name, or `spec.hostname` when that is set) and a `-1`, `-2`, ... counter keep names from clashing; the counter also separates pods that share a host name. If the directory cannot be created, for example on a full volume, the Server still starts and dumps go to `logs/` itself as `java_pid<pid>.hprof`. That is best effort: a full volume may have no room for the dump either, and a restarted container that reuses a PID cannot write over an earlier dump with the same name. If the logs path contains a double quote or `%`, the launcher warns and heap dumps go to `logs/` itself, with no per-launch directory and no crash log default; the `JAVA_TOOL_OPTIONS` opt-out below still applies. A path that contains both quote characters gets no heap dump default at all.
+
+Both images declare `VOLUME /hugegraph-server`, so `docker restart` and a Compose recreate keep the files in that anonymous volume. `docker compose down` leaves the volume behind but the next `up` does not attach it, so the files become hard to reach and keep using disk until `docker compose down -v` deletes them; mount a named volume or a bind mount at `/hugegraph-server/logs` to keep them reachable. Kubernetes starts a new container on every restart and does not turn the image's `VOLUME` into a pod volume, so mount an `emptyDir` or a PersistentVolumeClaim at `/hugegraph-server/logs`. Give each pod its own volume, or a per-pod directory on a shared PVC: crash files get distinct names, but `hugegraph-server.log`, the audit log and the slow-query log have fixed names, and pods sharing them would roll them over for each other. For a per-pod directory, pass the pod name in through the Downward API and use it in `subPathExpr` (the Helm chart sets neither):
+
+```yaml
+env:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+volumeMounts:
+  - name: server-logs
+    mountPath: /hugegraph-server/logs
+    subPathExpr: $(POD_NAME)
+```
+
+The Helm chart in [`helm/`](../helm/hugegraph) does not mount a logs volume yet, so with it these files are lost when a container restarts.
+
+A heap dump can be as large as the JVM heap. Every start uses a new directory and the JVMs a Server starts can dump too, so a Server that keeps running out of memory fills the volume with heap-sized files. Size the volume for the dumps you want to keep plus the logs, and keep it within any `ephemeral-storage` limit or `emptyDir` `sizeLimit`: eviction deletes an `emptyDir` together with the dump in it. Do not use an `emptyDir` with `medium: Memory`, which counts against the memory limit. A liveness probe that restarts the pod while a large dump is being written leaves a truncated file.
+
+The launcher never deletes dumps or `heapdump_*` directories. Each start leaves a directory behind, empty unless something ran out of memory; the launcher keeps it because a computer-job JVM can go on using it after its Server exits. Move or delete old directories once no HugeGraph JVM from that launch is running, but never the newest one of a running Server: without its directory, the next dump is written as a file with that name and later dumps from that launch fail.
+
+To turn heap dumps off for every JVM, set `JAVA_TOOL_OPTIONS=-XX:-HeapDumpOnOutOfMemoryError`, which also keeps the image's default `JAVA_OPTS`. Set it in the container's environment, not in the host shell: `docker run -e JAVA_TOOL_OPTIONS=...`, an `environment:` entry on the Server service in Compose (the shipped Compose files do not pass it through), or `env` on the container in Kubernetes. Putting the flag in `JAVA_OPTS` turns dumps off for the Server JVM only, because the JVMs it starts do not see its command line, and setting `JAVA_OPTS` replaces the image default (`-XX:+UseContainerSupport -XX:MaxRAMPercentage=50 ...`), so repeat those flags. Either way, each start still creates its empty `heapdump_*` directory, unless creating it failed or the logs path contains a double quote or `%`.
+
 ## Developers
 
 ### Images and Compose files
