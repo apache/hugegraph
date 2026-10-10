@@ -130,7 +130,7 @@
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java-util</artifactId>
-            <version>3.17.2</version>
+            <version>${protobuf.runtime.version}</version>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -175,6 +175,22 @@
                 <exclusion>
                     <groupId>org.rocksdb</groupId>
                     <artifactId>rocksdbjni</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hg-store-node</artifactId>
+            <version>${revision}</version>
+            <scope>compile</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.springframework</groupId>
+                    <artifactId>spring-web</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.springframework</groupId>
+                    <artifactId>spring-webmvc</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>

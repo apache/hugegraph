@@ -14,6 +14,7 @@ jobs:
       contents: read
 
   build-commons:
+    timeout-minutes: 20
     name: Commons tests (Java ${{ matrix.JAVA_VERSION }})
     needs: java-runtime
     runs-on: ubuntu-latest
@@ -47,7 +48,8 @@ jobs:
 
       - name: Install
         run: |
-          mvn install -Dmaven.javadoc.skip=true -ntp -Dmaven.test.skip=true
+          mvn install -pl hugegraph-commons/hugegraph-common,hugegraph-commons/hugegraph-rpc -am \
+            -Dmaven.javadoc.skip=true -ntp -Dmaven.test.skip=true
 
       - name: Run common test
         run: |
@@ -66,21 +68,3 @@ jobs:
           files: hugegraph-commons/target/jacoco.xml
           disable_search: true
           fail_ci_if_error: false
-
-  # Temporary compatibility check; Commons becomes optional when .asf.yaml takes effect.
-  legacy-commons-required:
-    name: build-commons (11)
-    needs: [ java-runtime, build-commons ]
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
-    permissions: {}
-    steps:
-      - name: Require the runtime configuration and all Commons tests to pass
-        env:
-          RUNTIME_RESULT: ${{ needs.java-runtime.result }}
-          COMMONS_RESULT: ${{ needs.build-commons.result }}
-        run: |
-          if [ "$RUNTIME_RESULT" != "success" ] || [ "$COMMONS_RESULT" != "success" ]; then
-            echo "::error::Runtime configuration: $RUNTIME_RESULT; Commons tests: $COMMONS_RESULT"
-            exit 1
-          fi

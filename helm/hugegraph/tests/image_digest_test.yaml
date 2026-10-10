@@ -17,6 +17,81 @@
 
 suite: Image reference and digest pinning
 tests:
+  - it: keeps the default pd tag on latest until release images are published
+    template: pd-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/pd:latest
+
+  - it: keeps the default store tag on latest until release images are published
+    template: store-statefulset.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/store:latest
+
+  - it: keeps the default server tag on latest until release images are published
+    template: server-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/server:latest
+
+  - it: inherits appVersion for pd when the tag is empty
+    template: pd-statefulset.yaml
+    set:
+      pd.image.tag: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/pd:latest
+
+  - it: inherits appVersion for store when the tag is empty
+    template: store-statefulset.yaml
+    set:
+      store.image.tag: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/store:latest
+
+  - it: overrides appVersion with an explicit store tag
+    template: store-statefulset.yaml
+    set:
+      store.image.tag: pinned-for-test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/store:pinned-for-test
+
+  - it: inherits appVersion for server when the tag is empty
+    template: server-deployment.yaml
+    set:
+      server.image.tag: ""
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/server:latest
+
+  - it: overrides appVersion with an explicit server tag
+    template: server-deployment.yaml
+    set:
+      server.image.tag: pinned-for-test
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/server:pinned-for-test
+
+  - it: keeps Hubble on its independent tag
+    template: hubble-deployment.yaml
+    set:
+      hubble.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: hugegraph/hubble:latest
+
   - it: renders repository and tag when no digest is set
     template: pd-statefulset.yaml
     set:
@@ -29,6 +104,7 @@ tests:
   - it: pins by digest when one is supplied, ignoring the tag
     template: pd-statefulset.yaml
     set:
+      pd.image.tag: pinned-for-test
       pd.image.digest: sha256:43999a5ccda34883a9e4e458e25cb903ce34adbc66782d9f4a5260d68b2b5a82
     asserts:
       - equal:
@@ -41,6 +117,7 @@ tests:
   - it: supports digest pinning on store as well
     template: store-statefulset.yaml
     set:
+      store.image.tag: pinned-for-test
       store.image.digest: sha256:458d77a18542e8a2f7980b075f2fda32026d582200a8983921354398467ff860
     asserts:
       - matchRegex:
@@ -50,6 +127,7 @@ tests:
   - it: supports digest pinning on server as well
     template: server-deployment.yaml
     set:
+      server.image.tag: pinned-for-test
       server.image.digest: sha256:30f99c6b9ab605accf96e9c179434b13495547f532dcb89d840231c54f1cc101
     asserts:
       - matchRegex:

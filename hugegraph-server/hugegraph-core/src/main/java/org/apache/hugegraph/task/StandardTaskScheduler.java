@@ -332,17 +332,58 @@ public class StandardTaskScheduler implements TaskScheduler {
 
     @Override
     public boolean close() {
-        if (!this.taskDbExecutor.isShutdown()) {
-            this.call(() -> {
-                try {
-                    this.tx().close();
-                } catch (ConnectionException ignored) {
-                    // ConnectionException means no connection established
-                }
-                this.graph.closeTx();
-            });
+        // Running tasks still need the task DB transaction to persist done().
+        // Retain the scheduler and its owners until a later close attempt.
+        if (this.pendingTasks() != 0) {
+            return false;
         }
-        return this.serverManager.close();
+        Throwable failure = null;
+        boolean closed = false;
+        try {
+            if (!this.taskDbExecutor.isShutdown()) {
+                this.call(() -> {
+                    Throwable workerFailure = null;
+                    for (Runnable close : new Runnable[]{() -> {
+                        try {
+                            this.tx().close();
+                        } catch (ConnectionException ignored) {
+                            // ConnectionException means no connection established
+                        }
+                    }, this.graph::closeTx}) {
+                        try {
+                            close.run();
+                        } catch (RuntimeException | Error error) {
+                            if (workerFailure == null) {
+                                workerFailure = error;
+                            } else if (workerFailure != error) {
+                                workerFailure.addSuppressed(error);
+                            }
+                        }
+                    }
+                    if (workerFailure instanceof Error) {
+                        throw (Error) workerFailure;
+                    }
+                    if (workerFailure != null) {
+                        throw (RuntimeException) workerFailure;
+                    }
+                });
+            }
+        } catch (RuntimeException | Error error) {
+            failure = error;
+            throw error;
+        } finally {
+            try {
+                closed = this.serverManager.close();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    throw error;
+                }
+                if (failure != error) {
+                    failure.addSuppressed(error);
+                }
+            }
+        }
+        return closed;
     }
 
     @Override
@@ -596,7 +637,7 @@ public class StandardTaskScheduler implements TaskScheduler {
                                                 boolean withResult) {
         return this.call(() -> {
             ConditionQuery query;
-            if (this.graph.backendStoreFeatures().supportsTaskAndServerVertex()) {
+            if (this.tx().storeFeatures().supportsTaskAndServerVertex()) {
                 query = new ConditionQuery(HugeType.TASK);
             } else {
                 query = new ConditionQuery(HugeType.VERTEX);

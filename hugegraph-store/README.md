@@ -3,6 +3,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Version](https://img.shields.io/badge/version-1.7.0-blue)](https://github.com/apache/hugegraph)
 
+<!-- TODO: update the version badge and release examples after 1.8.0 is published. -->
+
 > **Note**: From revision 1.5.0, the HugeGraph-Store code has been adapted to this location.
 
 ## Overview
@@ -20,7 +22,7 @@ HugeGraph Store is a distributed storage backend for HugeGraph that provides hig
 
 ### Technology Stack
 
-- **Storage Engine**: RocksDB 8.10.2 (see the [upgrade guidance](../docs/rocksdb-upgrade.md))
+- **Storage Engine**: RocksDB 8.10.2 (see the [upgrade guidance](../docs/storage-lifecycle.md#runtime-compatibility-and-upgrades))
 - **Consensus Protocol**: Apache JRaft (Ant Financial's Raft implementation)
 - **RPC Framework**: gRPC + Protocol Buffers
 - **Deployment**: Java 17 (currently supported release), Docker/Kubernetes support
@@ -110,6 +112,15 @@ mvn clean package -pl hugegraph-store/hg-store-dist -am -DskipTests
 The assembled distribution will be available at:
 ```
 hugegraph-store/apache-hugegraph-store-<version>/lib/hg-store-node-<version>.jar
+```
+
+The Node module keeps a regular JAR for development dependencies and attaches its
+Spring Boot executable as `hg-store-node-<version>-exec.jar`. The distribution
+uses the executable JAR with the filename shown above, so the start script is
+unchanged. To run the Store server tests through the package phase:
+
+```bash
+mvn clean package -pl hugegraph-store/hg-store-test -am -Pstore-server-test
 ```
 
 ### Configuration
@@ -234,7 +245,10 @@ bin/restart-hugegraph-store.sh
 bin/start-hugegraph-store.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-d DAEMON]
 ```
 
-- `-g`: GC type (`g1` or `ZGC`, default: `g1`)
+- `-g`: Explicit GC selection (`g1`/`G1` or `zgc`/`ZGC`). Without `-g`, JVM defaults or the collector
+  set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
+  unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
+  or `-j`; conflicting selections are rejected by the JVM.
 - `-j`: Custom JVM options (e.g., `-j "-Xmx16g -Xms8g"`)
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.
 
@@ -387,6 +401,9 @@ For Docker and Kubernetes deployment details, see [Deployment Guide](docs/deploy
 ---
 
 ## Documentation
+
+See [RPC and Scan lifecycle](../docs/storage-lifecycle.md#rpc-and-scan-ownership) for request ownership,
+cancellation and feedback semantics.
 
 Comprehensive documentation for HugeGraph Store:
 

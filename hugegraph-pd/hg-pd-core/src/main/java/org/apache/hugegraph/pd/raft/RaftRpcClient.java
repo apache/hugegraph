@@ -45,6 +45,13 @@ public class RaftRpcClient {
         return this.rpcClient.init(null);
     }
 
+    public synchronized void shutdown() {
+        if (this.rpcClient != null) {
+            this.rpcClient.shutdown();
+            this.rpcClient = null;
+        }
+    }
+
     /**
      * Request a snapshot
      */

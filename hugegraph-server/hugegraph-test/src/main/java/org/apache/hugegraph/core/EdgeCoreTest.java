@@ -214,6 +214,48 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testDeleteEdgeWithMissingSchemaLabel() throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+        Vertex author = graph.addVertex(T.label, "author", "id", 1, "name", "James",
+                                        "age", 62, "lived", "Canadian");
+        Vertex book = graph.addVertex(T.label, "book", "name", "Java");
+        Edge edge = author.addEdge("authored", book, "score", 3);
+        graph.tx().commit();
+
+        // Preserve the backend edge while removing its schema metadata.
+        params().schemaTransaction().removeSchema(graph.edgeLabel("authored"));
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+        Edge orphan = graph.edges(edge.id()).next();
+        Assert.assertEquals("~undefined", orphan.label());
+
+        orphan.remove();
+        graph.tx().commit();
+        Assert.assertFalse(graph.edges(edge.id()).hasNext());
+        Assert.assertFalse(graph.vertices(author.id()).next().edges(Direction.OUT).hasNext());
+        Assert.assertFalse(graph.vertices(book.id()).next().edges(Direction.IN).hasNext());
+    }
+
+    @Test
+    public void testDeleteVertexAdjacentToEdgeWithMissingSchemaLabel() throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+        Vertex author = graph.addVertex(T.label, "author", "id", 1, "name", "James",
+                                        "age", 62, "lived", "Canadian");
+        Vertex book = graph.addVertex(T.label, "book", "name", "Java");
+        Edge edge = author.addEdge("authored", book, "score", 3);
+        graph.tx().commit();
+
+        params().schemaTransaction().removeSchema(graph.edgeLabel("authored"));
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+        Assert.assertEquals("~undefined", graph.edges(edge.id()).next().label());
+
+        graph.vertices(author.id()).next().remove();
+        graph.tx().commit();
+        Assert.assertFalse(graph.vertices(author.id()).hasNext());
+        Assert.assertFalse(graph.edges(edge.id()).hasNext());
+        Assert.assertFalse(graph.vertices(book.id()).next().edges(Direction.IN).hasNext());
+    }
+
+    @Test
     public void testAddEdge() {
         HugeGraph graph = graph();
 

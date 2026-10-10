@@ -38,6 +38,11 @@
             <version>${revision}</version>
             <scope>compile</scope>
         </dependency>
+        <!-- Let -am build reactor Commons for the published Client's transitive dependency. -->
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hugegraph-common</artifactId>
+        </dependency>
         <!-- TODO: avoid depending on toolchain -->
         <dependency>
             <groupId>org.apache.hugegraph</groupId>

@@ -6,6 +6,7 @@ on:
       - master
       - 'release-*'
       - 'test-*'
+      - 'tinkerpop-*'
   pull_request:
   workflow_dispatch:
 
@@ -100,13 +101,3 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/ci-policy.py gate --mode memory --plan plan.json --results results.json --output test-results.json
-
-  legacy-server-memory-required:
-    name: build-server (memory, 11)
-    needs: server-memory-required
-    if: ${{ always() }}
-    runs-on: ubuntu-24.04
-    steps:
-      - env:
-          MEMORY_RESULT: ${{ needs.server-memory-required.result }}
-        run: test "$MEMORY_RESULT" = success

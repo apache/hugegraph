@@ -667,6 +667,10 @@ function kill_process_and_wait() {
 }
 
 function exit_with_usage_help(){
-    echo "USAGE: $0 [-d true|false] [-g g1] [-m true|false] [-p true|false] [-s true|false] [-j java_options] [-t timeout] [-y true|false]"
+    echo "USAGE: $0 [-d true|false] [-g g1|G1|zgc|ZGC] [-m true|false] [-p true|false]" \
+         "[-s true|false] [-j java_options] [-t timeout] [-y true|false]"
+    echo "Without -g, JVM/caller collector selection applies. -j applies when JAVA_OPTIONS is empty."
+    echo "Default/G1 tuning precedes caller options, so caller tuning values win."
+    echo "Do not combine -g with a different collector in JAVA_OPTIONS or -j."
     exit 1
 }

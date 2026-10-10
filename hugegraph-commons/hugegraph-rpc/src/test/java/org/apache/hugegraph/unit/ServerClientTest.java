@@ -20,6 +20,8 @@ package org.apache.hugegraph.unit;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.rpc.RpcClientProvider;
@@ -406,118 +408,140 @@ public class ServerClientTest extends BaseUnitTest {
 
     @Test
     public void testLoadBalancer() {
-        // Init 3 servers
-        HugeConfig server3 = config("server3");
-        RpcServer rpcServer3 = new RpcServer(server3);
+        List<Runnable> cleanup = new ArrayList<>();
+        Throwable failure = null;
+        try {
+            // Init 3 servers
+            HugeConfig server3 = config("server3");
+            RpcServer rpcServer3 = new RpcServer(server3);
+            cleanup.add(() -> stopServer(rpcServer3));
 
-        HugeConfig server4 = config("server4");
-        RpcServer rpcServer4 = new RpcServer(server4);
+            HugeConfig server4 = config("server4");
+            RpcServer rpcServer4 = new RpcServer(server4);
+            cleanup.add(() -> stopServer(rpcServer4));
 
-        HugeConfig server5 = config("server5");
-        RpcServer rpcServer5 = new RpcServer(server5);
+            HugeConfig server5 = config("server5");
+            RpcServer rpcServer5 = new RpcServer(server5);
+            cleanup.add(() -> stopServer(rpcServer5));
 
-        GraphHelloServiceImpl s3g1 = new GraphHelloServiceImpl("g1");
-        GraphHelloServiceImpl s4g1 = new GraphHelloServiceImpl("g1");
-        GraphHelloServiceImpl s5g1 = new GraphHelloServiceImpl("g1");
+            GraphHelloServiceImpl s3g1 = new GraphHelloServiceImpl("g1");
+            GraphHelloServiceImpl s4g1 = new GraphHelloServiceImpl("g1");
+            GraphHelloServiceImpl s5g1 = new GraphHelloServiceImpl("g1");
 
-        rpcServer3.config().addService(HelloService.class, s3g1);
-        rpcServer4.config().addService(HelloService.class, s4g1);
-        rpcServer5.config().addService(HelloService.class, s5g1);
+            rpcServer3.config().addService(HelloService.class, s3g1);
+            rpcServer4.config().addService(HelloService.class, s4g1);
+            rpcServer5.config().addService(HelloService.class, s5g1);
 
-        startServer(rpcServer3);
-        startServer(rpcServer4);
-        startServer(rpcServer5);
+            startServer(rpcServer3);
+            startServer(rpcServer4);
+            startServer(rpcServer5);
 
-        // Test LB "consistentHash"
-        HugeConfig clientLB = config("client-lb");
-        RpcClientProvider rpcClientCHash = new RpcClientProvider(clientLB);
-        HelloService cHash = rpcClientCHash.config()
-                                           .serviceProxy(HelloService.class);
+            // Test LB "consistentHash"
+            HugeConfig clientLB = config("client-lb");
+            RpcClientProvider rpcClientCHash = new RpcClientProvider(clientLB);
+            cleanup.add(rpcClientCHash::destroy);
+            HelloService cHash = rpcClientCHash.config()
+                                               .serviceProxy(HelloService.class);
 
-        Assert.assertEquals("g1: load", cHash.echo("load"));
-        Assert.assertEquals(16.8, cHash.sum(10, 6.8), 0.00000001d);
-        Assert.assertEquals(16.8, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            Assert.assertEquals("g1: load", cHash.echo("load"));
+            Assert.assertEquals(16.8, cHash.sum(10, 6.8), 0.00000001d);
+            Assert.assertEquals(16.8, s3g1.result() + s4g1.result() + s5g1.result(),
+                                0.00000001d);
 
-        Assert.assertEquals("g1: load", cHash.echo("load"));
-        Assert.assertEquals(16.8, cHash.sum(10, 6.8), 0.00000001d);
-        Assert.assertEquals(16.8, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            Assert.assertEquals("g1: load", cHash.echo("load"));
+            Assert.assertEquals(16.8, cHash.sum(10, 6.8), 0.00000001d);
+            Assert.assertEquals(16.8, s3g1.result() + s4g1.result() + s5g1.result(),
+                                0.00000001d);
 
-        Assert.assertEquals("g1: load", cHash.echo("load"));
-        Assert.assertEquals(16.8, cHash.sum(10, 6.8), 0.00000001d);
-        Assert.assertEquals(16.8, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            Assert.assertEquals("g1: load", cHash.echo("load"));
+            Assert.assertEquals(16.8, cHash.sum(10, 6.8), 0.00000001d);
+            Assert.assertEquals(16.8, s3g1.result() + s4g1.result() + s5g1.result(),
+                                0.00000001d);
 
-        s3g1.resetResult();
-        s4g1.resetResult();
-        s5g1.resetResult();
+            s3g1.resetResult();
+            s4g1.resetResult();
+            s5g1.resetResult();
 
-        // Test LB "roundRobin"
-        String lbKey = org.apache.hugegraph.config.RpcOptions.RPC_CLIENT_LOAD_BALANCER.name();
-        clientLB.setProperty(lbKey, "roundRobin");
-        RpcClientProvider rpcClientRound = new RpcClientProvider(clientLB);
-        HelloService round = rpcClientRound.config()
-                                           .serviceProxy(HelloService.class);
+            // Test LB "roundRobin"
+            String lbKey = org.apache.hugegraph.config.RpcOptions.RPC_CLIENT_LOAD_BALANCER.name();
+            clientLB.setProperty(lbKey, "roundRobin");
+            RpcClientProvider rpcClientRound = new RpcClientProvider(clientLB);
+            cleanup.add(rpcClientRound::destroy);
+            HelloService round = rpcClientRound.config()
+                                               .serviceProxy(HelloService.class);
 
-        Assert.assertEquals("g1: load", round.echo("load"));
-        Assert.assertEquals(1.1, round.sum(1, 0.1), 0.00000001d);
-        Assert.assertEquals(1.1, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            Assert.assertEquals("g1: load", round.echo("load"));
+            Assert.assertEquals(1.1, round.sum(1, 0.1), 0.00000001d);
+            Assert.assertEquals(1.1, s3g1.result() + s4g1.result() + s5g1.result(),
+                                0.00000001d);
 
-        Assert.assertEquals("g1: load", round.echo("load"));
-        Assert.assertEquals(1.1, round.sum(1, 0.1), 0.00000001d);
-        Assert.assertEquals(2.2, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            Assert.assertEquals("g1: load", round.echo("load"));
+            Assert.assertEquals(1.1, round.sum(1, 0.1), 0.00000001d);
+            Assert.assertEquals(2.2, s3g1.result() + s4g1.result() + s5g1.result(),
+                                0.00000001d);
 
-        Assert.assertEquals("g1: load", round.echo("load"));
-        Assert.assertEquals(1.1, round.sum(1, 0.1), 0.00000001d);
-        Assert.assertEquals(3.3, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            Assert.assertEquals("g1: load", round.echo("load"));
+            Assert.assertEquals(1.1, round.sum(1, 0.1), 0.00000001d);
+            Assert.assertEquals(3.3, s3g1.result() + s4g1.result() + s5g1.result(),
+                                0.00000001d);
 
-        s3g1.resetResult();
-        s4g1.resetResult();
-        s5g1.resetResult();
+            s3g1.resetResult();
+            s4g1.resetResult();
+            s5g1.resetResult();
 
-        // Test LB "random"
-        clientLB.setProperty(lbKey, "random");
-        RpcClientProvider rpcClientRandom = new RpcClientProvider(clientLB);
-        HelloService random = rpcClientRandom.config()
-                                             .serviceProxy(HelloService.class);
+            // Test LB "random"
+            clientLB.setProperty(lbKey, "random");
+            RpcClientProvider rpcClientRandom = new RpcClientProvider(clientLB);
+            cleanup.add(rpcClientRandom::destroy);
+            HelloService random = rpcClientRandom.config()
+                                                 .serviceProxy(HelloService.class);
 
-        Assert.assertEquals("g1: load", random.echo("load"));
-        Assert.assertEquals(1.1, random.sum(1, 0.1), 0.00000001d);
-        Assert.assertEquals(1.1, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
+            // Random routing can legitimately leave some providers unvisited.
+            GraphHelloServiceImpl[] services = {s3g1, s4g1, s5g1};
+            int visited = 0;
+            for (int i = 0; i < 12; i++) {
+                if (i < 3) {
+                    Assert.assertEquals("g1: load", random.echo("load"));
+                }
+                Assert.assertEquals(1.1, random.sum(1, 0.1), 0.00000001d);
+                int currentVisited = 0;
+                for (GraphHelloServiceImpl service : services) {
+                    double result = service.result();
+                    Assert.assertTrue(result == 0.0 || result == 1.1);
+                    if (result != 0.0) {
+                        currentVisited++;
+                    }
+                }
+                Assert.assertTrue(currentVisited > 0);
+                Assert.assertTrue(currentVisited >= visited && currentVisited <= visited + 1);
+                visited = currentVisited;
+            }
 
-        Assert.assertEquals("g1: load", random.echo("load"));
-        Assert.assertEquals(1.1, random.sum(1, 0.1), 0.00000001d);
-        double sum = s3g1.result() + s4g1.result() + s5g1.result();
-        Assert.assertTrue(2.2 == sum || 1.1 == sum);
-
-        Assert.assertEquals("g1: load", random.echo("load"));
-        Assert.assertEquals(1.1, random.sum(1, 0.1), 0.00000001d);
-        double sum2 = s3g1.result() + s4g1.result() + s5g1.result();
-        Assert.assertTrue(sum == sum2 || sum + 1.1 == sum2);
-
-        for (int i = 0; i < 9; i++) {
-            Assert.assertEquals(1.1, random.sum(1, 0.1), 0.00000001d);
+            s3g1.resetResult();
+            s4g1.resetResult();
+            s5g1.resetResult();
+        } catch (RuntimeException | Error e) {
+            failure = e;
+            throw e;
+        } finally {
+            RuntimeException cleanupFailure = null;
+            for (int i = cleanup.size() - 1; i >= 0; i--) {
+                try {
+                    cleanup.get(i).run();
+                } catch (RuntimeException e) {
+                    if (failure != null) {
+                        failure.addSuppressed(e);
+                    } else if (cleanupFailure == null) {
+                        cleanupFailure = e;
+                    } else {
+                        cleanupFailure.addSuppressed(e);
+                    }
+                }
+            }
+            if (cleanupFailure != null) {
+                throw cleanupFailure;
+            }
         }
-        Assert.assertEquals(3.3, s3g1.result() + s4g1.result() + s5g1.result(),
-                            0.00000001d);
-
-        s3g1.resetResult();
-        s4g1.resetResult();
-        s5g1.resetResult();
-
-        // Destroy all
-        rpcClientCHash.destroy();
-        rpcClientRound.destroy();
-        rpcClientRandom.destroy();
-
-        stopServer(rpcServer3);
-        stopServer(rpcServer4);
-        stopServer(rpcServer5);
     }
 
     @Test

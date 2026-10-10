@@ -53,6 +53,38 @@ check_report() {
     fi
 }
 
+# Exercise the actual workflow expressions against representative event branches.
+python3 - "$SCRIPT_DIR" <<'PYBRANCH'
+from pathlib import Path
+import re
+import sys
+from types import SimpleNamespace
+
+root = Path(sys.argv[1]).resolve().parents[4]
+for filename in ("server-tests.yml", "pd-store-ci.yml"):
+    source = (root / ".github/workflows" / filename).read_text()
+    assert "SKIP_TINKERPOP_FOR_CURRENT_PR" not in source, filename
+    expression = re.search(r"RUN_TINKERPOP_TESTS: >-\s*\$\{\{(.*?)\}\}", source, re.S).group(1)
+    expression = " ".join(expression.split()).replace("||", "or")
+    cases = [
+        ("123/merge", "upgrade/1.8.0", "master", False),
+        ("master", "", "", False),
+        ("123/merge", "task/tp381-3-upgrade-validation", "master", False),
+        ("123/merge", "task/tinkerpop-3.7-upgrade", "master", False),
+        ("123/merge", "task/gsoc-phase2-java17", "master", False),
+    ]
+    for prefix in ("release-", "test-", "tinkerpop-"):
+        cases.extend([(prefix + "validation", "", "", True),
+                      ("123/merge", prefix + "validation", "master", True),
+                      ("123/merge", "feature", prefix + "validation", True)])
+    for ref, head, base, expected in cases:
+        github = SimpleNamespace(ref_name=ref, head_ref=head, base_ref=base)
+        actual = eval(expression, {"__builtins__": {}},
+                      {"github": github, "startsWith": str.startswith})
+        assert actual is expected, (filename, ref, head, base, actual)
+print("PASS: TP branch gates exclude ordinary upgrades and old task exceptions")
+PYBRANCH
+
 cd "$TEST_DIR"
 for suite in structure process process-standard process-feature tinkerpop; do
     check_report executed '<testsuite tests="1" skipped="0"/>' 0 "$suite"

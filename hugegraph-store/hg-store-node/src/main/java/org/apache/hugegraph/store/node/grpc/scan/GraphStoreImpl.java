@@ -77,7 +77,7 @@ public class GraphStoreImpl extends GraphStoreImplBase {
     @Override
     public StreamObserver<ScanPartitionRequest> scanPartition(
             StreamObserver<ScanResponse> ro) {
-        return new ScanResponseObserver(ro, getHandler(), getExecutor());
+        return this.storeStream.scanGraphPartition(ro, getHandler());
     }
 
 }

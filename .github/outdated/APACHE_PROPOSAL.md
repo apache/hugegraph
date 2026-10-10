@@ -34,7 +34,7 @@ Although most of the main development of HugeGraph has been completed, there are
 
 #### Meritocracy
 
-HugeGraph was incubated at Baidu in 2016 and open-sourced on [GitHub](https://github.com/hugegraph/hugegraph) in 2018. The project (including sub-projects) now has 30+ contributors from many companies. Some of these contributors become committers, and the project has hundreds of known users around the world. We will follow Apache's Meritocracy way to re-organize the community roles. We have set up the PPMC Team and Committer Team. Of course, contributions are welcomed and highly valued. New contributors are guided and reviewed by existing PMC members. When an active contributor has submitted enough good patches, PMC will start a vote to promote him/her to become a member of the Committer Team or PMC Team.
+HugeGraph was incubated at Baidu in 2016 and open-sourced on [GitHub](https://github.com/apache/hugegraph) in 2018. The project (including sub-projects) now has 30+ contributors from many companies. Some of these contributors become committers, and the project has hundreds of known users around the world. We will follow Apache's Meritocracy way to re-organize the community roles. We have set up the PPMC Team and Committer Team. Of course, contributions are welcomed and highly valued. New contributors are guided and reviewed by existing PMC members. When an active contributor has submitted enough good patches, PMC will start a vote to promote him/her to become a member of the Committer Team or PMC Team.
 
 #### Community
 
@@ -52,7 +52,7 @@ HugeGraph implements the API of [Apache TinkerPop](https://tinkerpop.apache.org/
 
 #### Project Name
 
-We have checked and believe the name is [suitable](https://github.com/hugegraph/hugegraph/issues/1646) and the project has legal permission to continue using its current name. There are no other projects found using this name through Google Search.
+We have checked and believe the name is [suitable](https://github.com/apache/hugegraph/issues/1646) and the project has legal permission to continue using its current name. There are no other projects found using this name through Google Search.
 
 #### Relationship with Titan/Janus Graph
 
@@ -94,10 +94,10 @@ HugeGraph documentation is provided on https://hugegraph.github.io/hugegraph-doc
 
 This project consists of 2 core sub-projects and 2 other sub-projects, all of which are hosted by [GitHub hugegraph organization](https://github.com/orgs/hugegraph/repositories) since 2018. The codes are already under Apache License Version 2.0. The git address of sub-project repositories are as follows:
 
-1. The graph database repository `hugegraph`, core sub-project, including graph server, graph engine, and graph storage: https://github.com/hugegraph/hugegraph
-2. The graph computing repository `hugegraph-computer`, core sub-project, including graph computing and graph algorithms: https://github.com/hugegraph/hugegraph-computer
-3. The common functions repository `hugegraph-commons`: https://github.com/hugegraph/hugegraph-commons
-4. The ecosystem repository `hugegraph-toolchain`, including `hugegraph-client`, `hugegraph-loader`, `hugegraph-tools`, `hugegraph-hubble`, `hugegraph-test`, `hugegraph-doc`: https://github.com/hugegraph/hugegraph-toolchain
+1. The graph database repository `hugegraph`, core sub-project, including graph server, graph engine, and graph storage: https://github.com/apache/hugegraph
+2. The graph computing repository `hugegraph-computer`, core sub-project, including graph computing and graph algorithms: https://github.com/apache/hugegraph-computer
+3. The common functions repository `hugegraph-commons`: https://github.com/apache/hugegraph/tree/master/hugegraph-commons
+4. The ecosystem repository `hugegraph-toolchain`, including `hugegraph-client`, `hugegraph-loader`, `hugegraph-tools`, `hugegraph-hubble`, `hugegraph-test`, `hugegraph-doc`: https://github.com/apache/hugegraph-toolchain
 
 ### Source and Intellectual Property Submission Plan
 
@@ -107,7 +107,7 @@ The code is currently under Apache License Version 2.0, and it was verified ther
 
 As all dependencies are managed by Apache Maven, none of the external libraries need to be packaged in a source distribution. All dependencies have Apache compatible licenses except for 4 dependencies: MySQL Connector (GPL), word (GPL), JBoss Logging 3 (LGPL), and jnr-posix (LGPL+GPL), we will remove these dependencies in the future.
 
-HugeGraph has the following external [dependencies](https://github.com/hugegraph/hugegraph/issues/1632):
+HugeGraph has the following external [dependencies](https://github.com/apache/hugegraph/issues/1632):
 
 - Apache License
 
@@ -263,7 +263,7 @@ None
 
 - hugegraph-dev: [dev@hugegraph.incubator.apache.org](mailto:dev@hugegraph.incubator.apache.org) for development and users discussions.
 - hugegraph-private: [private@hugegraph.incubator.apache.org](mailto:private@hugegraph.incubator.apache.org) for PPMC discussions.
-- hugegraph-commits: [commits@hugegraph.incubator.apache.org](mailto:commits@hugegraph.incubator.apache.org) for commits / [pull requests](https://github.com/hugegraph/hugegraph/pulls) and other notifications like code review comments.
+- hugegraph-commits: [commits@hugegraph.incubator.apache.org](mailto:commits@hugegraph.incubator.apache.org) for commits / [pull requests](https://github.com/apache/hugegraph/pulls) and other notifications like code review comments.
 
 #### Subversion Directory
 
@@ -271,18 +271,18 @@ None
 
 #### Git Repositories
 
-1. `hugegraph`: https://github.com/hugegraph/hugegraph.git
-2. `hugegraph-computer`: https://github.com/hugegraph/hugegraph-computer.git
-3. `hugegraph-commons`: https://github.com/hugegraph/hugegraph-commons.git
-4. `hugegraph-toolchain`: https://github.com/hugegraph/hugegraph-toolchain.git
+1. `hugegraph`: https://github.com/apache/hugegraph.git
+2. `hugegraph-computer`: https://github.com/apache/hugegraph-computer.git
+3. `hugegraph-commons`: https://github.com/apache/hugegraph.git
+4. `hugegraph-toolchain`: https://github.com/apache/hugegraph-toolchain.git
 
 #### Issue Tracking
 
-The community would like to continue using [GitHub Issues](https://github.com/hugegraph/hugegraph/issues) (but will move to github.com/apache/).
+The community would like to continue using [GitHub Issues](https://github.com/apache/hugegraph/issues) (but will move to github.com/apache/).
 
 #### Other Resources
 
-- The community has already chosen [GitHub actions](https://github.com/hugegraph/hugegraph/actions) as continuous integration tools.
+- The community has already chosen [GitHub actions](https://github.com/apache/hugegraph/actions) as continuous integration tools.
 - The community has already used [codecov](https://github.com/marketplace/codecov) to check code coverage.
 - The community has already used [mvn repository](https://mvnrepository.com/search?q=hugegraph) as binary package release platform.
 

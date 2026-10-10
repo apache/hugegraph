@@ -27,8 +27,8 @@ pd:
   replicas: 3
   image:
     repository: hugegraph/pd
-    # Tracks latest until the next HugeGraph release tag is published. Pin the
-    # tag (or digest) and switch to IfNotPresent for production.
+    # TODO: leave tag empty to inherit Chart.appVersion after the 1.8.0
+    # release images are published. Pin a tag or digest for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should
@@ -189,8 +189,8 @@ store:
   replicas: 3
   image:
     repository: hugegraph/store
-    # Tracks latest until the next HugeGraph release tag is published. Pin the
-    # tag (or digest) and switch to IfNotPresent for production.
+    # TODO: leave tag empty to inherit Chart.appVersion after the 1.8.0
+    # release images are published. Pin a tag or digest for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should
@@ -276,8 +276,8 @@ server:
   replicas: 3
   image:
     repository: hugegraph/server
-    # Tracks latest until the next HugeGraph release tag is published. Pin the
-    # tag (or digest) and switch to IfNotPresent for production.
+    # TODO: leave tag empty to inherit Chart.appVersion after the 1.8.0
+    # release images are published. Pin a tag or digest for production.
     tag: latest
     # Optional immutable digest, for example sha256:abc...  When set it wins over
     # tag and the image is pulled by digest, which is what a release gate should

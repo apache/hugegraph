@@ -89,6 +89,27 @@ public class PDPulseSubject {
                                               TimeUnit.SECONDS);
     }
 
+    /** Stop periodic queue work and wait while Raft can still serve its writes. */
+    public static void stopScheduling() {
+        scheduledExecutor.shutdown();
+        boolean interrupted = Thread.interrupted();
+        try {
+            while (!scheduledExecutor.isTerminated()) {
+                try {
+                    if (!scheduledExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        log.warn("Waiting for PD pulse scheduler to stop");
+                    }
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     private static void doSchedule() {
         appendQueue();
         expireQueue();

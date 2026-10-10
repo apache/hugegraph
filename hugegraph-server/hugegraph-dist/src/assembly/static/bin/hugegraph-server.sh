@@ -97,7 +97,8 @@ CP="$CP":$(find -L $PLUGINS -name '*.jar' | sort | tr '\n' ':')
 # (Cygwin only) Use ; classpath separator and reformat paths for Windows ("C:\foo")
 [[ $(uname) = CYGWIN* ]] && CP="$(cygpath -p -w "$CP")"
 
-export CLASSPATH="${CLASSPATH:-}:$CP"
+source "$BIN/preload-topling.sh" || exit 1
+export CLASSPATH="${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}${CLASSPATH:-}:$CP"
 
 # Change to $BIN's parent
 cd "${TOP}" || exit 1
@@ -144,14 +145,17 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
 
-# Using G1GC as the default garbage collector (Recommended for large memory machines)
-# mention: zgc is only available on ARM-Mac with java > 13
+# Keep JVM/caller GC selection by default; explicitly select G1 when requested.
 case "$GC_OPTION" in
-    "")
-        echo "Using G1GC as the default garbage collector"
-        JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+ParallelRefProcEnabled \
-                                      -XX:InitiatingHeapOccupancyPercent=50 \
-                                      -XX:G1RSetUpdatingPauseTimePercent=5"
+    ""|g1|G1)
+        if [[ "$GC_OPTION" == g1 || "$GC_OPTION" == G1 ]]; then
+            echo "Using G1GC"
+            JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseG1GC"
+        else
+            echo "Using JVM garbage collector configuration"
+        fi
+        JAVA_OPTIONS="-XX:+ParallelRefProcEnabled -XX:InitiatingHeapOccupancyPercent=50 \
+                      -XX:G1RSetUpdatingPauseTimePercent=5 ${JAVA_OPTIONS}"
         ;;
     zgc|ZGC)
         echo "Using ZGC as the default garbage collector (requires Java 17 or later)"
@@ -161,7 +165,7 @@ case "$GC_OPTION" in
                                       -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
         ;;
     *)
-        report_error "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now"
+        report_error "Unrecognized gc option: '$GC_OPTION', supported options: g1, ZGC"
         exit 1
 esac
 
@@ -345,12 +349,12 @@ esac
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
     exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
 else
     exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
         >> ${LOGS}/hugegraph-server-stdout.log 2>&1

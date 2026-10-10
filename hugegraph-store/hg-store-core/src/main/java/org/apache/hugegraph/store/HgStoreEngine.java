@@ -207,35 +207,42 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         if (rpcServer == null) {
             return;
         }
-        closing.set(true);
-        heartbeatService.shutdown();
-        metricService.shutdown();
-// Use sequential processing for safer shutdown
-        partitionEngines.values().forEach(pe -> {
-            try {
-                Node raftNode = pe.getRaftNode();
-                if (raftNode.isLeader(false)) {
-                    Status status = raftNode.transferLeadershipTo(PeerId.ANY_PEER);
-                    if (!status.isOk()) {
-                        log.warn("transfer leader error: {}", status);
-                    }
-                }
-            } catch (Exception e) {
-                log.error("transfer leader error: ", e);
-            }
-            pe.shutdown();
-            businessHandler.closeDB(pe.getGroupId());
-        });
-        partitionEngines.clear();
-        rpcServer.shutdown();
-        // HgStoreEngine.init function check rpcServer whether is null, skipped if the instance
-        // exists even shut down.
-        rpcServer = null;
-        // close all db session
+        boolean interrupted = Thread.interrupted();
         try {
-            RocksDBFactory.getInstance().releaseAllGraphDB();
+            closing.set(true);
+            heartbeatService.shutdown();
+            interrupted |= Thread.interrupted();
+            metricService.shutdown();
+            // Use sequential processing so each partition drains before its database closes.
+            for (PartitionEngine pe : partitionEngines.values()) {
+                try {
+                    Node raftNode = pe.getRaftNode();
+                    if (raftNode.isLeader(false)) {
+                        Status status = raftNode.transferLeadershipTo(PeerId.ANY_PEER);
+                        if (!status.isOk()) {
+                            log.warn("transfer leader error: {}", status);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("transfer leader error: ", e);
+                }
+                pe.shutdown();
+                interrupted |= Thread.interrupted();
+                businessHandler.closeDB(pe.getGroupId());
+            }
+            partitionEngines.clear();
+            rpcServer.shutdown();
+            // HgStoreEngine.init skips RPC initialization while this field is non-null.
+            rpcServer = null;
+            try {
+                RocksDBFactory.getInstance().releaseAllGraphDB();
+            } finally {
+                BusinessHandlerImpl.closeSchemaResources();
+            }
         } finally {
-            BusinessHandlerImpl.closeSchemaResources();
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -254,7 +261,13 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         if (newState == Metapb.StoreState.Up) {
             // Status changes to online, record store information
             partitionManager.setStore(store);
-            partitionManager.loadPartition();
+            try {
+                partitionManager.loadPartition();
+            } catch (PartitionManager.InvalidShardException e) {
+                // Never wait for shutdown hooks while owning the state callback lock.
+                heartbeatService.requestExit(0);
+                return;
+            }
             restoreLocalPartitionEngine();
         }
     }

@@ -61,6 +61,21 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
     private final int waitTime;
     private final HgChannel<KvPageRes.Builder> channel;
     private ScanIterator iterator;
+    private final Object cancellationLock = new Object();
+    private final Object responseLock = new Object();
+    private Thread worker;
+    private final ScanLifecycle lifecycle;
+
+    private void cancel() {
+        this.isStop.set(true);
+        this.channel.close();
+        Thread current = Thread.currentThread();
+        synchronized (this.cancellationLock) {
+            if (this.worker != null && this.worker != current) {
+                this.worker.interrupt();
+            }
+        }
+    }
     private long limit = 0;
     private int times = 0;
     private long pageSize = 0;
@@ -72,7 +87,14 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
     ScanStreamResponse(StreamObserver<KvPageRes> responseObserver,
                        HgStoreWrapperEx wrapper,
                        ThreadPoolExecutor executor, AppConfig appConfig) {
-        this.responseObserver = responseObserver;
+        this(responseObserver, wrapper, executor, appConfig, new ScanLifecycle());
+    }
+
+    ScanStreamResponse(StreamObserver<KvPageRes> responseObserver,
+                       HgStoreWrapperEx wrapper, ThreadPoolExecutor executor,
+                       AppConfig appConfig, ScanLifecycle lifecycle) {
+        this.lifecycle = lifecycle;
+        this.responseObserver = lifecycle.response(responseObserver);
         this.wrapper = wrapper;
         this.executor = executor;
         this.config = appConfig;
@@ -91,6 +113,9 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
 
     @Override
     public void onNext(ScanStreamReq request) {
+        if (this.isStop.get()) {
+            return;
+        }
         try {
             this.responseVersion = Math.max(
                     this.responseVersion, ScanUtil.responseVersion(request));
@@ -100,22 +125,20 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
                 next(request);
             }
         } catch (Exception e) {
-            responseObserver.onError(e);
+            this.failServer(e);
         }
     }
 
     @Override
     public void onError(Throwable t) {
-        this.isStop.set(true);
-        this.finishServer();
+        this.cancelServer(false);
         log.warn("onError from client [ graph: {} , table: {}]; Reason: {}]", graph, table,
                  t.getMessage());
     }
 
     @Override
     public void onCompleted() {
-        this.isStop.set(true);
-        this.finishServer();
+        this.cancelServer(false);
     }
 
     private void initIterator(ScanStreamReq request) {
@@ -123,7 +146,6 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
             if (this.isStarted.getAndSet(true)) {
                 return;
             }
-            this.iterator = getIterator(request, this.wrapper);
             this.graph = request.getHeader().getGraph();
             this.table = request.getTable();
             this.limit = request.getLimit();
@@ -143,7 +165,15 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
                 Kv.Builder kvBuilder = Kv.newBuilder();
                 int pageCount = 0;
                 try {
-                    while (iterator.hasNext()) {
+                    synchronized (this.cancellationLock) {
+                        if (this.isStop.get()) {
+                            return;
+                        }
+                        this.worker = Thread.currentThread();
+                    }
+                    this.iterator = getIterator(request, this.wrapper, this.lifecycle::failedCleanup);
+                    while (!this.isStop.get() && !Thread.currentThread().isInterrupted() &&
+                           iterator.hasNext()) {
                         if (limit > 0 && ++this.total > limit) {
                             break;
                         }
@@ -164,32 +194,45 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
                         }
                         dataBuilder.addData(toKv(kvBuilder, iterator.next(), iterator.position()));
                     }
+                    if (this.isStop.get()) {
+                        return;
+                    }
+                    if (Thread.currentThread().isInterrupted()) {
+                        this.failServer(HgGrpc.toErr(Status.Code.CANCELLED, "Scanning interrupted"));
+                        return;
+                    }
                     this.channel.send(dataBuilder);
                 } catch (Throwable t) {
+                    if (this.isStop.get()) {
+                        return;
+                    }
                     String msg = "an exception occurred while scanning data:";
-                    StatusRuntimeException ex =
-                            HgGrpc.toErr(Status.INTERNAL, msg + t.getMessage(), t);
-                    responseObserver.onError(ex);
+                    Status status = t instanceof InterruptedException ||
+                                    Thread.currentThread().isInterrupted() ?
+                                    Status.CANCELLED : Status.INTERNAL;
+                    StatusRuntimeException ex = HgGrpc.toErr(status, msg + t.getMessage(), t);
+                    this.failServer(ex);
                 } finally {
                     try {
-                        this.iterator.close();
+                        if (!this.lifecycle.close(this.iterator)) {
+                            this.failServer(Status.INTERNAL.withDescription("Failed to close scan iterator")
+                                                           .withCause(this.lifecycle.cleanupFailure())
+                                                           .asRuntimeException());
+                        }
+                    } finally {
                         this.channel.close();
-                    } catch (Exception e) {
-
+                        synchronized (this.cancellationLock) {
+                            this.worker = null;
+                        }
                     }
                 }
 
             };
-            this.executor.execute(scanning);
+            this.lifecycle.execute(this.executor, scanning);
         } catch (Exception e) {
-            StatusRuntimeException ex = HgGrpc.toErr(Status.INTERNAL, null, e);
-            responseObserver.onError(ex);
-            try {
-                this.iterator.close();
-                this.channel.close();
-            } catch (Exception exception) {
-
-            }
+            StatusRuntimeException ex = e instanceof StatusRuntimeException ?
+                                        (StatusRuntimeException) e : HgGrpc.toErr(Status.INTERNAL, null, e);
+            this.failServer(ex);
         }
 
         /*** Scanning loop end ***/
@@ -205,19 +248,7 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
     }
 
     private void close() {
-        this.isStop.set(true);
-        this.channel.close();
-        if (!this.finishFlag.get()) {
-            responseObserver.onNext(KvPageRes.newBuilder()
-                                             .addAllData(Collections.EMPTY_LIST)
-                                             .setOver(true)
-                                             .setTimes(++times)
-                                             .setVersion(this.responseVersion)
-                                             .build()
-            );
-        }
-
-        this.finishServer();
+        this.cancelServer(true);
     }
 
     private void next(ScanStreamReq request) {
@@ -225,12 +256,19 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
         KvPageRes.Builder resBuilder;
 
         try {
+            if (this.isStop.get()) {
+                return;
+            }
             resBuilder = this.channel.receive();
             times++;
         } catch (Exception e) {
+            if (this.isStop.get()) {
+                return;
+            }
             String msg = "failed to poll a page of data, cause by:";
+            Status status = Thread.currentThread().isInterrupted() ? Status.CANCELLED : Status.INTERNAL;
             log.error(msg, e);
-            responseObserver.onError(HgGrpc.toErr(msg + e.getMessage()));
+            this.failServer(HgGrpc.toErr(status, msg + e.getMessage(), e));
             return;
         }
         boolean isOver = false;
@@ -239,31 +277,65 @@ public class ScanStreamResponse implements StreamObserver<ScanStreamReq> {
             isOver = true;
             resBuilder = KvPageRes.newBuilder().addAllData(Collections.EMPTY_LIST);
         }
-        if (!this.finishFlag.get()) {
-            responseObserver.onNext(resBuilder.setOver(isOver)
-                                              .setTimes(times)
-                                              .setVersion(this.responseVersion)
-                                              .build());
-        }
+        this.sendPage(resBuilder.setOver(isOver)
+                                .setTimes(times)
+                                .setVersion(this.responseVersion)
+                                .build());
         if (isOver) {
             this.finishServer();
         }
 
     }
 
+    private void cancelServer(boolean sendFinalPage) {
+        // Cancellation can make the worker throw; establish the normal terminal first.
+        boolean complete = this.finishFlag.compareAndSet(false, true);
+        this.cancel();
+        if (complete) {
+            synchronized (this.responseLock) {
+                if (sendFinalPage) {
+                    this.responseObserver.onNext(KvPageRes.newBuilder()
+                                                          .setOver(true)
+                                                          .setTimes(++times)
+                                                          .setVersion(this.responseVersion)
+                                                          .build());
+                }
+                this.responseObserver.onCompleted();
+            }
+        }
+    }
+
+    private void sendPage(KvPageRes page) {
+        synchronized (this.responseLock) {
+            if (!this.finishFlag.get()) {
+                this.responseObserver.onNext(page);
+            }
+        }
+    }
+
+    private void failServer(Throwable failure) {
+        // Claim the terminal signal before waking a receiver on the closed channel.
+        boolean reportFailure = this.finishFlag.compareAndSet(false, true);
+        this.cancel();
+        if (reportFailure) {
+            synchronized (this.responseLock) {
+                this.responseObserver.onError(failure);
+            }
+        }
+    }
+
     private void finishServer() {
         if (!this.finishFlag.getAndSet(true)) {
-            responseObserver.onCompleted();
+            synchronized (this.responseLock) {
+                this.responseObserver.onCompleted();
+            }
         }
     }
 
     private void timeoutSever() {
-        if (!this.finishFlag.getAndSet(true)) {
-            String msg = "server wait time exceeds the threshold[" + waitTime +
-                         "] seconds.";
-            responseObserver.onError(
-                    HgGrpc.toErr(Status.Code.DEADLINE_EXCEEDED, msg));
-        }
+        String msg = "server wait time exceeds the threshold[" + waitTime +
+                     "] seconds.";
+        this.failServer(HgGrpc.toErr(Status.Code.DEADLINE_EXCEEDED, msg));
     }
 
 }

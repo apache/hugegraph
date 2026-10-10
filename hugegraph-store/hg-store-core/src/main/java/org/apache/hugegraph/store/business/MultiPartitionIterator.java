@@ -18,13 +18,13 @@
 package org.apache.hugegraph.store.business;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.function.BiFunction;
-import java.util.stream.Collectors;
 
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 
@@ -45,6 +45,8 @@ public class MultiPartitionIterator implements ScanIterator {
     private Integer curPartitionId;
     private Integer positionPartitionId;
     private byte[] positionKey;
+    private RuntimeException cleanupFailure;
+    private boolean closed;
 
     private MultiPartitionIterator(List<Integer> partitionIds,
                                    BiFunction<Integer, byte[], ScanIterator> supplier) {
@@ -75,35 +77,31 @@ public class MultiPartitionIterator implements ScanIterator {
     }
 
     private ScanIterator getIterator() {
-        if (this.partitions.isEmpty()) {
-            return null;
-        }
-        ScanIterator buf = null;
-        while (!partitions.isEmpty()) {
-            this.curPartitionId = partitions.poll();
+        while (!this.partitions.isEmpty()) {
+            this.curPartitionId = this.partitions.poll();
             if (!this.inPosition(this.curPartitionId)) {
                 continue;
             }
-            buf = supplier.apply(this.curPartitionId, getPositionKey(this.curPartitionId));
-            if (buf == null) {
+            ScanIterator child = this.supplier.apply(this.curPartitionId,
+                                                     getPositionKey(this.curPartitionId));
+            if (child == null) {
                 continue;
             }
-            if (buf.hasNext()) {
-                break;
+            try {
+                if (child.hasNext()) {
+                    return child;
+                }
+            } catch (RuntimeException | Error failure) {
+                closeAfterFailure(child, failure);
+                throw failure;
             }
+            closeCreatedIterator(child);
         }
-        if (buf == null) {
-            return null;
-        }
-        if (!buf.hasNext()) {
-            buf.close();
-            buf = null;
-        }
-        return buf;
+        return null;
     }
 
     private void init() {
-        if (this.iterator == null) {
+        if (!this.closed && this.iterator == null) {
             this.iterator = this.getIterator();
         }
     }
@@ -128,8 +126,7 @@ public class MultiPartitionIterator implements ScanIterator {
         }
         T t = this.iterator.next();
         if (!this.iterator.hasNext()) {
-            this.iterator.close();
-            this.iterator = null;
+            closeCurrentIterator();
         }
         return t;
     }
@@ -137,11 +134,16 @@ public class MultiPartitionIterator implements ScanIterator {
     @Override
     public long count() {
         long count = 0;
-        this.iterator = this.getIterator();
-        while (this.iterator != null) {
-            count += this.iterator.count();
-            // this.iterator.close();
-            this.iterator = this.getIterator();
+        while (this.hasNext()) {
+            try {
+                count += this.iterator.count();
+            } catch (RuntimeException | Error failure) {
+                ScanIterator child = this.iterator;
+                this.iterator = null;
+                closeAfterFailure(child, failure);
+                throw failure;
+            }
+            closeCurrentIterator();
         }
         return count;
     }
@@ -172,8 +174,33 @@ public class MultiPartitionIterator implements ScanIterator {
 
     @Override
     public void close() {
-        if (this.iterator != null) {
-            this.iterator.close();
+        this.closed = true;
+        try {
+            closeCurrentIterator();
+        } catch (RuntimeException | Error failure) {
+            // closeCreatedIterator retains the failure even after ownership is released here.
+            throw this.cleanupFailure;
+        }
+        if (this.cleanupFailure != null) {
+            throw this.cleanupFailure;
+        }
+    }
+
+    private void closeCurrentIterator() {
+        ScanIterator child = this.iterator;
+        this.iterator = null;
+        if (child != null) {
+            closeCreatedIterator(child);
+        }
+    }
+
+    private void closeAfterFailure(ScanIterator child, Throwable failure) {
+        try {
+            closeCreatedIterator(child);
+        } catch (RuntimeException | Error closeFailure) {
+            if (closeFailure != failure) {
+                failure.addSuppressed(closeFailure);
+            }
         }
     }
 
@@ -205,10 +232,50 @@ public class MultiPartitionIterator implements ScanIterator {
      * @return iteration list
      */
     public List<ScanIterator> getIterators() {
-        return this.partitions.stream()
-                              .map(id -> supplier.apply(id, getPositionKey(id)))
-                              .filter(ScanIterator::hasNext)
-                              .collect(Collectors.toList());
+        List<ScanIterator> opened = new ArrayList<>();
+        if (this.closed) {
+            return opened;
+        }
+        try {
+            for (int id : this.partitions) {
+                ScanIterator child = this.supplier.apply(id, getPositionKey(id));
+                if (child == null) {
+                    continue;
+                }
+                opened.add(child);
+                if (!child.hasNext()) {
+                    opened.remove(opened.size() - 1);
+                    closeCreatedIterator(child);
+                }
+            }
+            // Ownership transfers to the caller only when all partitions were opened.
+            return opened;
+        } catch (RuntimeException | Error failure) {
+            for (ScanIterator child : opened) {
+                try {
+                    closeCreatedIterator(child);
+                } catch (RuntimeException | Error closeFailure) {
+                    if (closeFailure != failure) {
+                        failure.addSuppressed(closeFailure);
+                    }
+                }
+            }
+            throw failure;
+        }
+    }
+
+    private void closeCreatedIterator(ScanIterator child) {
+        try {
+            child.close();
+        } catch (RuntimeException | Error failure) {
+            if (this.cleanupFailure == null) {
+                this.cleanupFailure = new IllegalStateException(
+                        "partition iterator cleanup failed", failure);
+            } else {
+                this.cleanupFailure.addSuppressed(failure);
+            }
+            throw failure;
+        }
     }
 
 }

@@ -89,9 +89,6 @@
     </scm>
 
     <properties>
-        <!-- Note: We need also update the version in CommonVersion.java & RpcVersion.java now -->
-        <!-- TODO: Remove the revision property below after verifying parent POM inheritance works correctly -->
-        <revision>1.7.0</revision>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <top.level.dir>${project.basedir}/..</top.level.dir>
         <maven.compiler.release>11</maven.compiler.release>

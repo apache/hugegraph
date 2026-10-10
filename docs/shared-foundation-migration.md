@@ -139,6 +139,21 @@ A vertex-only physical key allowed one OLAP property to overwrite another on the
 
 Readers try the requested property's compound key first, then the legacy vertex-only key if its value contains the matching property ID. Deleting one property removes its compound row and a matching legacy row while preserving other properties. Values already overwritten by the old writer are lost.
 
+Clearing an OLAP property deletes its matching compound and legacy rows while
+retaining its schema. Removing the property deletes those rows before the existing
+schema/index removal job completes. Both operations retain the shared OLAP table,
+other properties and other graphs. Cleanup scans the shared table and commits
+bounded batches; if a batch fails, the task fails and the pending session is rolled
+back. Deletions already committed to Store nodes can remain, so retrying cleanup
+is idempotent; the operation does not promise graph-wide atomicity.
+
+Quiesce writes to the affected OLAP property before clearing or removing it, and
+keep those writes stopped until cleanup completes. The scan and bounded delete
+batches do not coordinate concurrent writers: a new row can be missed, and a
+rewrite of a scanned row can be deleted. An inconsistent compound key/value
+blocks cleanup until the affected row is repaired; the error includes its key
+in hexadecimal, limited to the first 64 bytes.
+
 Mixed-version writes can produce stale reads: an old writer may update a legacy row while a new reader prefers an earlier compound row. Upgrade all Server and Store writers before resuming writes.
 
 ### Match metadata namespaces

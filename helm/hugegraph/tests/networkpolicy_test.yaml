@@ -781,7 +781,43 @@ tests:
     set:
       hubble.enabled: true
     asserts:
+      - hasDocuments:
+          count: 4
       - matchSnapshot: {}
+      # helm-unittest v1.0.0 skips full comparison for matchSnapshot: {}.
+      # Guard release metadata explicitly until that plugin issue is resolved.
+      - equal:
+          path: metadata.labels["app.kubernetes.io/version"]
+          value: "latest"
+        documentIndex: 0
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: hugegraph-0.1.1
+        documentIndex: 0
+      - equal:
+          path: metadata.labels["app.kubernetes.io/version"]
+          value: "latest"
+        documentIndex: 1
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: hugegraph-0.1.1
+        documentIndex: 1
+      - equal:
+          path: metadata.labels["app.kubernetes.io/version"]
+          value: "latest"
+        documentIndex: 2
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: hugegraph-0.1.1
+        documentIndex: 2
+      - equal:
+          path: metadata.labels["app.kubernetes.io/version"]
+          value: "latest"
+        documentIndex: 3
+      - equal:
+          path: metadata.labels["helm.sh/chart"]
+          value: hugegraph-0.1.1
+        documentIndex: 3
 
   - it: appends extra rules verbatim
     values:

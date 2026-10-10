@@ -72,6 +72,7 @@ public class AbstractRestClientTest {
             tests.testJsonRequestBodyUsesUtf8();
             tests.testGzipRequestBodyUsesUtf8();
             tests.testRequestBodyRespectsExplicitCharset();
+            tests.testJsonObjectRequestBodyRespectsExplicitCharset();
         }
     }
 
@@ -102,21 +103,39 @@ public class AbstractRestClientTest {
                                  buffer.readByteArray());
     }
 
+    @Test
+    public void testJsonObjectRequestBodyRespectsExplicitCharset() throws IOException {
+        String value = "\u4f60\u597d\ud83d\ude80";
+        String json = "{\"id\":\"" + value + "\"}";
+        for (Charset charset : new Charset[]{StandardCharsets.UTF_8, StandardCharsets.UTF_16}) {
+            RestHeaders headers = new RestHeaders().add(RestHeaders.CONTENT_TYPE,
+                                                       "application/json; charset=" + charset.name());
+            assertBody(Collections.singletonMap("id", value), headers, json, charset, false);
+            headers.add(RestHeaders.CONTENT_ENCODING, "gzip");
+            assertBody(Collections.singletonMap("id", value), headers, json, charset, true);
+        }
+    }
+
     private static void assertUtf8Body(Object value, RestHeaders headers,
                                       String expected, boolean gzip) throws IOException {
+        assertBody(value, headers, expected, StandardCharsets.UTF_8, gzip);
+    }
+
+    private static void assertBody(Object value, RestHeaders headers, String expected,
+                                   Charset charset, boolean gzip) throws IOException {
         RequestBody body = requestBody(value, headers);
-        Assert.assertEquals(StandardCharsets.UTF_8, body.contentType().charset());
+        Assert.assertEquals(charset, body.contentType().charset());
         Buffer buffer = new Buffer();
         body.writeTo(buffer);
         if (gzip) {
             try (GzipSource source = new GzipSource(buffer)) {
                 Buffer decoded = new Buffer();
                 decoded.writeAll(source);
-                Assert.assertArrayEquals(expected.getBytes(StandardCharsets.UTF_8),
+                Assert.assertArrayEquals(expected.getBytes(charset),
                                          decoded.readByteArray());
             }
         } else {
-            Assert.assertArrayEquals(expected.getBytes(StandardCharsets.UTF_8),
+            Assert.assertArrayEquals(expected.getBytes(charset),
                                      buffer.readByteArray());
         }
     }

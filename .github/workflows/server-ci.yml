@@ -6,6 +6,7 @@ on:
       - master
       - 'release-*'
       - 'test-*'
+      - 'tinkerpop-*'
   pull_request:
   workflow_dispatch:
 
@@ -84,10 +85,9 @@ jobs:
       - name: Check TinkerPop report execution gates
         run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-tinkerpop-reports.sh
 
-  # Required coverage: memory on the project runtime and any additional test JDKs.
+  # RocksDB coverage uses the project runtime and any additional test JDKs.
   # The shared runtime comes from .github/workflows/.java-version, independent of bytecode targets.
   # Keep the job ID for the Codecov configuration validator.
-  # The old required check name is provided by the temporary result job below.
   server-rocksdb:
     needs: [plan, java-runtime]
     if: needs.plan.outputs.server == 'true'

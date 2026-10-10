@@ -148,14 +148,24 @@ public class GraphIndexTransaction extends AbstractTransaction {
             return;
         }
         // Update index(only property, no edge) of a vertex
-        IndexBuilder.forEachIndexLabelId(vertex.element(), this.graph()::edgeLabel,
-                                         id -> this.updateIndex(id, vertex, removed));
+        for (Id id : this.indexLabelIds(vertex.schemaLabel())) {
+            this.updateIndex(id, vertex, removed);
+        }
     }
 
     @Watched(prefix = "index")
     public void updateEdgeIndex(HugeEdge edge, boolean removed) {
-        IndexBuilder.forEachIndexLabelId(edge.element(), this.graph()::edgeLabel,
-                                         id -> this.updateIndex(id, edge, removed));
+        // Update index of an edge
+        for (Id id : this.indexLabelIds(edge.schemaLabel())) {
+            this.updateIndex(id, edge, removed);
+        }
+
+        EdgeLabel label = edge.schemaLabel();
+        if (label.hasFather()) {
+            for (Id id : graph().edgeLabel(label.fatherId()).indexLabels()) {
+                this.updateIndex(id, edge, removed);
+            }
+        }
     }
 
     private void updateVertexOlapIndex(HugeVertex vertex, boolean removed) {
@@ -177,6 +187,9 @@ public class GraphIndexTransaction extends AbstractTransaction {
         E.checkArgument(indexLabel != null,
                         "Not exist index label with id '%s'", ilId);
 
+        if (!(element instanceof HugeVertex && ((HugeVertex) element).olap())) {
+            element.element().schemaLabel(this.currentSchemaLabel(element.schemaLabel()));
+        }
         this.indexBuilder.forEachIndex(element.element(), indexLabel, index -> {
             Object value = index.fieldValues();
             if (indexLabel.indexType().isUnique() && !removed &&
@@ -1386,9 +1399,23 @@ public class GraphIndexTransaction extends AbstractTransaction {
                         indexLabel, indexLabel.status());
     }
 
-    private static Set<IndexLabel> relatedIndexLabels(HugeElement element) {
+    Set<Id> indexLabelIds(SchemaLabel label) {
+        return this.currentSchemaLabel(label).indexLabels();
+    }
+
+    private SchemaLabel currentSchemaLabel(SchemaLabel label) {
+        // Elements can outlive schema cache eviction. Resolve the current index
+        // membership rather than using the schema object retained by an element.
+        ISchemaTransaction schema = this.params().schemaTransaction();
+        SchemaLabel current = label.type() == HugeType.VERTEX_LABEL ?
+                              schema.getVertexLabel(label.id()) : schema.getEdgeLabel(label.id());
+        // Missing schema is represented by an undefined label so orphan records remain removable.
+        return current != null ? current : label;
+    }
+
+    private Set<IndexLabel> relatedIndexLabels(HugeElement element) {
         Set<IndexLabel> indexLabels = InsertionOrderUtil.newSet();
-        Set<Id> indexLabelIds = element.schemaLabel().indexLabels();
+        Set<Id> indexLabelIds = this.indexLabelIds(element.schemaLabel());
 
         for (Id id : indexLabelIds) {
             IndexLabel indexLabel = element.graph().indexLabel(id);
@@ -1643,7 +1670,7 @@ public class GraphIndexTransaction extends AbstractTransaction {
             // Delete unused index
             long count = 0;
             Set<Id> incorrectPkIds;
-            for (IndexLabel il : relatedIndexLabels(deletion)) {
+            for (IndexLabel il : this.tx.relatedIndexLabels(deletion)) {
                 incorrectPkIds = incorrectPKs.keySet().stream()
                                              .map(PropertyKey::id)
                                              .collect(Collectors.toSet());

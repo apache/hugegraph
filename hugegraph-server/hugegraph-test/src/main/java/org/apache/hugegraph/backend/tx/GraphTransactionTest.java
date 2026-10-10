@@ -19,6 +19,7 @@ package org.apache.hugegraph.backend.tx;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.hugegraph.HugeFactory;
@@ -48,6 +49,23 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 public class GraphTransactionTest {
+
+    @Test
+    public void testOlapDeletionDoesNotScanBaseVertexEdges() {
+        GraphTransaction transaction = Mockito.mock(GraphTransaction.class, Mockito.CALLS_REAL_METHODS);
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.schemaLabel()).thenReturn(VertexLabel.OLAP_VL);
+        Id id = IdGenerator.of(1L);
+        Mockito.when(vertex.id()).thenReturn(id);
+
+        // Preserve OLAP's original rejection before any ordinary edge scan.
+        IllegalStateException error = Assert.assertThrows(IllegalStateException.class, () -> {
+            transaction.prepareDeletions(Collections.singletonMap(id, vertex), Collections.emptyMap());
+        });
+        Assert.assertTrue(error.getMessage().startsWith("Graph is null of schema"));
+        Mockito.verify(transaction, Mockito.never()).queryEdgesFromBackend(Mockito.any());
+        Mockito.verify(transaction, Mockito.never()).doRemove(Mockito.any());
+    }
 
     @Test
     public void testBatchDecisionsRemainFixedAfterOriginChanges() {

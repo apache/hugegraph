@@ -33,7 +33,8 @@
 
     <properties>
         <os.plugin.version>1.7.1</os.plugin.version>
-        <grpc.version>1.39.0</grpc.version>
+        <!-- Keep generated sources stable while the runtime follows the root gRPC version. -->
+        <grpc.codegen.version>1.39.0</grpc.codegen.version>
         <protoc.version>3.17.2</protoc.version>
         <protobuf.plugin.version>0.6.1</protobuf.plugin.version>
     </properties>
@@ -90,7 +91,7 @@
                     </protocArtifact>
                     <pluginId>grpc-java</pluginId>
                     <pluginArtifact>
-                        io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}
+                        io.grpc:protoc-gen-grpc-java:${grpc.codegen.version}:exe:${os.detected.classifier}
                     </pluginArtifact>
                     <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
                     <outputDirectory>${project.basedir}/src/main/java</outputDirectory>
@@ -138,14 +139,13 @@
             </activation>
             <properties>
                 <!-- Compatible with the distro generators and Server runtime -->
-                <grpc.version>1.47.0</grpc.version>
-                <riscv64.protobuf.java.version>3.21.7</riscv64.protobuf.java.version>
+                <grpc.codegen.version>1.47.0</grpc.codegen.version>
             </properties>
             <dependencies>
                 <dependency>
                     <groupId>com.google.protobuf</groupId>
                     <artifactId>protobuf-java</artifactId>
-                    <version>${riscv64.protobuf.java.version}</version>
+                    <version>${protobuf.runtime.version}</version>
                 </dependency>
             </dependencies>
             <build>

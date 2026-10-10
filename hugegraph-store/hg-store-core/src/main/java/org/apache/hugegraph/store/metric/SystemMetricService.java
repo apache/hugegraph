@@ -163,8 +163,10 @@ public class SystemMetricService {
         Set<String> names = dbFactory.getGraphNames();
         if (names != null) {
             for (String name : names) {
-                try {
-                    RocksDBSession session = dbFactory.queryGraphDB(name);
+                try (RocksDBSession session = dbFactory.queryGraphDB(name)) {
+                    if (session == null) {
+                        continue;
+                    }
                     Statistics statistics = session.getRocksDbStats();
                     map.put(
                             "rocksdb.graph." + name + "." +

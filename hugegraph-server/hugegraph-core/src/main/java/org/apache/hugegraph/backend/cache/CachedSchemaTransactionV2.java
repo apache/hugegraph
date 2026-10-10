@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -76,6 +77,10 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     private static final String SCHEMA_CACHE_CLEAR_SOURCE =
             UUID.randomUUID().toString();
 
+    private static final ConcurrentMap<String, CacheListenerHolder>
+            SCHEMA_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
+
+    private CacheListenerHolder holder;
     private final Cache<Id, Object> idCache;
     private final Cache<Id, Object> nameCache;
 
@@ -113,8 +118,8 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         return IdGenerator.of(type.string() + "-" + name);
     }
 
+    @Override
     public void close() {
-        this.clearCache(false);
         this.unlistenChanges();
     }
 
@@ -166,10 +171,9 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             }
             return false;
         };
-        this.graphParams().loadGraphStore().provider().listen(this.storeEventListener);
 
         // Listen cache event: "cache"(invalid cache item)
-        this.cacheEventListener = event -> {
+        EventListener listener = event -> {
             LOG.debug("Graph {} received schema cache event: {}",
                       this.graph(), event);
             Object[] args = event.args();
@@ -203,11 +207,28 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             return false;
         };
         EventHub schemaEventHub = this.graphParams().schemaEventHub();
-        if (!schemaEventHub.containsListener(Events.CACHE)) {
-            schemaEventHub.listen(Events.CACHE, this.cacheEventListener);
-        }
-
         listenSchemaCacheClear();
+        CacheListenerHolder acquired = SCHEMA_CACHE_EVENT_LISTENERS.compute(
+                this.graphParams().spaceGraphName(), (key, existing) -> {
+                    if (existing == null || existing.hub != schemaEventHub) {
+                        if (existing != null) {
+                            existing.close();
+                        }
+                        schemaEventHub.listen(Events.CACHE, listener);
+                        this.graphParams().loadGraphStore().provider().listen(this.storeEventListener);
+                        return new CacheListenerHolder(listener, schemaEventHub, () -> {
+                            try {
+                                this.graphParams().loadGraphStore().provider().unlisten(this.storeEventListener);
+                            } finally {
+                                this.clearCache(false);
+                            }
+                        });
+                    }
+                    existing.refCount++;
+                    return existing;
+                });
+        this.holder = acquired;
+        this.cacheEventListener = acquired.listener;
     }
 
     private static void listenSchemaCacheClear() {
@@ -278,13 +299,27 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
     }
 
     private void unlistenChanges() {
-        // Unlisten store event
-        this.graphParams().loadGraphStore().provider()
-            .unlisten(this.storeEventListener);
+        CacheListenerHolder ours = this.holder;
+        if (ours != null) {
+            SCHEMA_CACHE_EVENT_LISTENERS.compute(this.graphParams().spaceGraphName(), (key, existing) -> {
+                if (existing == ours) {
+                    existing.refCount--;
+                }
+                return existing;
+            });
+            this.holder = null;
+            this.cacheEventListener = null;
+        }
+    }
 
-        // Unlisten cache event
-        EventHub schemaEventHub = this.graphParams().schemaEventHub();
-        schemaEventHub.unlisten(Events.CACHE, this.cacheEventListener);
+    public static void closeGraph(HugeGraphParams params) {
+        SCHEMA_CACHE_EVENT_LISTENERS.computeIfPresent(params.spaceGraphName(), (key, existing) -> {
+            if (existing.hub != params.schemaEventHub()) {
+                return existing;
+            }
+            existing.close();
+            return null;
+        });
     }
 
     private CachedTypes cachedTypes() {

@@ -27,6 +27,7 @@ import org.apache.hugegraph.auth.HugeGraphAuthProxy.Context;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy.ContextThreadPoolExecutor;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.event.EventHub;
+import org.apache.hugegraph.server.HugeGraphWsAndHttpChannelizer;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.util.Log;
@@ -35,6 +36,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSo
 import org.apache.tinkerpop.gremlin.server.GraphManager;
 import org.apache.tinkerpop.gremlin.server.GremlinServer;
 import org.apache.tinkerpop.gremlin.server.Settings;
+import org.apache.tinkerpop.gremlin.server.channel.WsAndHttpChannelizer;
 import org.apache.tinkerpop.gremlin.server.util.ThreadFactoryUtil;
 import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.slf4j.Logger;
@@ -58,9 +60,16 @@ public class ContextGremlinServer extends GremlinServer {
         /*
          * pass custom Executor https://github.com/apache/tinkerpop/pull/813
          */
-        super(settings, newGremlinExecutorService(settings));
+        super(configureChannelizer(settings), newGremlinExecutorService(settings));
         this.eventHub = eventHub;
         this.listenChanges();
+    }
+
+    static Settings configureChannelizer(Settings settings) {
+        if (WsAndHttpChannelizer.class.getName().equals(settings.channelizer)) {
+            settings.channelizer = HugeGraphWsAndHttpChannelizer.class.getName();
+        }
+        return settings;
     }
 
     private void listenChanges() {

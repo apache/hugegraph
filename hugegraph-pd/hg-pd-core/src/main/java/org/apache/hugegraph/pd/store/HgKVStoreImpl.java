@@ -62,12 +62,11 @@ public class HgKVStoreImpl implements HgKVStore {
 
     @Override
     public void init(PDConfig config) {
-        dbOptions = new Options().setCreateIfMissing(true);
-
         final Lock writeLock = this.readWriteLock.writeLock();
         writeLock.lock();
         try {
-            this.dbPath = config.getDataPath() + "/rocksdb/";
+            this.dbOptions = new Options().setCreateIfMissing(true);
+            this.dbPath = config.getDataPath() + "/rocksdb";
             File file = new File(this.dbPath);
             if (!file.exists()) {
                 try {
@@ -77,13 +76,14 @@ public class HgKVStoreImpl implements HgKVStore {
                 }
             }
             openRocksDB(dbPath);
-        } catch (PDException e) {
-            // TODO: retry the open and then fail PD startup instead of logging: a held RocksDB LOCK
-            // leaves this PD running uninitialized (/v1/ready answers 503 STATE_UNINITIALIZED
-            // while /v1/health answers 200), and with several PDs nothing restarts it. The Helm
-            // chart (helm/hugegraph) documents this as a limitation; drop that entry once fixed.
+        } catch (PDException | RuntimeException | Error e) {
+            // TODO: retry opening a held RocksDB LOCK before failing PD startup.
             // https://github.com/apache/hugegraph/issues/3226
-            log.error("Failed to open data file,{}", e);
+            if (this.dbOptions != null) {
+                this.dbOptions.close();
+                this.dbOptions = null;
+            }
+            throw new IllegalStateException("Failed to open PD metadata at " + this.dbPath, e);
         } finally {
             writeLock.unlock();
         }
@@ -119,10 +119,10 @@ public class HgKVStoreImpl implements HgKVStore {
     public List<KV> scanPrefix(byte[] prefix) {
         final Lock readLock = this.readWriteLock.readLock();
         readLock.lock();
-        try (ReadOptions options = new ReadOptions()
-                .setIterateLowerBound(new Slice(prefix))) {
+        try (Slice bound = new Slice(prefix);
+             ReadOptions options = new ReadOptions().setIterateLowerBound(bound);
+             RocksIterator iterator = db.newIterator(options)) {
             List<KV> kvs = new ArrayList<>();
-            RocksIterator iterator = db.newIterator(options);
             iterator.seekToFirst();
             while (iterator.isValid() && 0 == Bytes.indexOf(iterator.key(), prefix)) {
                 kvs.add(new KV(iterator.key(), iterator.value()));
@@ -152,9 +152,9 @@ public class HgKVStoreImpl implements HgKVStore {
     public long removeByPrefix(byte[] prefix) throws PDException {
         final Lock readLock = this.readWriteLock.readLock();
         readLock.lock();
-        try (ReadOptions options = new ReadOptions()
-                .setIterateLowerBound(new Slice(prefix))) {
-            RocksIterator iterator = db.newIterator(options);
+        try (Slice bound = new Slice(prefix);
+             ReadOptions options = new ReadOptions().setIterateLowerBound(bound);
+             RocksIterator iterator = db.newIterator(options)) {
             iterator.seekToFirst();
 
             while (iterator.isValid()) {
@@ -309,11 +309,11 @@ public class HgKVStoreImpl implements HgKVStore {
     public List<KV> scanRange(byte[] start, byte[] end) {
         final Lock readLock = this.readWriteLock.readLock();
         readLock.lock();
-        try (ReadOptions options = new ReadOptions()
-                .setIterateLowerBound(new Slice(start))
-                .setIterateUpperBound(new Slice(end))) {
+        try (Slice lower = new Slice(start);
+             Slice upper = new Slice(end);
+             ReadOptions options = new ReadOptions().setIterateLowerBound(lower).setIterateUpperBound(upper);
+             RocksIterator iterator = db.newIterator(options)) {
             List<KV> kvs = new ArrayList<>();
-            RocksIterator iterator = db.newIterator(options);
             iterator.seekToFirst();
             while (iterator.isValid()) {
                 kvs.add(new KV(iterator.key(), iterator.value()));
@@ -327,7 +327,17 @@ public class HgKVStoreImpl implements HgKVStore {
 
     @Override
     public void close() {
-        closeRocksDB();
+        Lock writeLock = this.readWriteLock.writeLock();
+        writeLock.lock();
+        try {
+            closeRocksDB();
+            if (this.dbOptions != null) {
+                this.dbOptions.close();
+                this.dbOptions = null;
+            }
+        } finally {
+            writeLock.unlock();
+        }
     }
 
     private void closeRocksDB() {

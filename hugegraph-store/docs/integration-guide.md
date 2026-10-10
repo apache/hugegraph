@@ -1,5 +1,7 @@
 # Integration Guide
 
+<!-- TODO: update release package, image and dependency examples after 1.8.0 is published. -->
+
 This guide explains how to integrate HugeGraph Store with HugeGraph Server, use the client library, and migrate from other storage backends.
 
 > **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and PD's `auth.secret-key` value as the password. A call without it gets HTTP 401. Export the secret before following a procedure that uses `${PD_SECRET}`:

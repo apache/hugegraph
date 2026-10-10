@@ -25,6 +25,7 @@ import org.apache.hugegraph.unit.config.OptionSpaceTest;
 import org.apache.hugegraph.unit.event.EventHubTest;
 import org.apache.hugegraph.unit.rest.AbstractRestClientTest;
 import org.apache.hugegraph.unit.version.VersionTest;
+import org.apache.hugegraph.unit.util.RocksDBRuntimeTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -72,6 +73,7 @@ import org.apache.hugegraph.unit.util.VersionUtilTest;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        RocksDBRuntimeTest.class,
     LockManagerTest.class,
     LockGroupTest.class,
     AtomicLockTest.class,

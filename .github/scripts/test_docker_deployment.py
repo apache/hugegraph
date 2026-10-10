@@ -17,6 +17,8 @@
 """Reject successful service checks performed against an unrelated image."""
 
 import importlib.util
+import json
+import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -73,18 +75,58 @@ class ImageIdentityTest(unittest.TestCase):
         with patch.object(deployment, "command", side_effect=identities + containers), \
              patch.object(deployment.subprocess, "run") as run, \
              patch.object(deployment, "verify_server") as server, \
-             patch.object(deployment, "verify_storage") as storage:
+             patch.object(deployment, "verify_storage") as storage, \
+             patch.object(deployment, "verify_graph") as graph:
             deployment.smoke("ci-1-1", "docker-compose-hstore.yml", images)
             startup = run.call_args_list[0].args[0]
             self.assertEqual(startup[-3:], ["pd", "store", "server"])
             self.assertNotIn("hubble", startup)
             server.assert_called_once_with()
             storage.assert_called_once_with()
+            graph.assert_called_once_with("hg_pr_ci_1_1_docker_compose_hstore")
             self.assertEqual(run.call_args_list[-1].args[0][-3:], ["down", "-v", "--remove-orphans"])
 
 
+class GraphSmokeTest(unittest.TestCase):
+    def test_reuses_graph_write_read_and_gremlin_checks_with_auth(self):
+        with patch.dict(os.environ, {"PATH": "/existing/tools"}), \
+             patch.object(deployment.subprocess, "run") as run:
+            deployment.verify_graph("ci_1_1")
+            invocation = run.call_args
+            self.assertTrue(invocation.args[0][1].endswith("run-server-e2e-smoke-test.sh"))
+            self.assertEqual(invocation.args[0][2:], ["http://localhost:8080", "create", "ci_1_1"])
+            self.assertTrue(invocation.kwargs["check"])
+            self.assertEqual(invocation.kwargs["timeout"], 960)
+            environment = invocation.kwargs["env"]
+            self.assertEqual(environment["PATH"], "/existing/tools")
+            self.assertEqual(environment["HUGEGRAPH_USERNAME"], "admin")
+            self.assertEqual(environment["HUGEGRAPH_PASSWORD"], deployment.ADMIN_PASSWORD)
+
+    def test_graph_failure_propagates_and_cleans_both_topologies(self):
+        for topology, images in (
+                ("docker-compose.yml", {"server": "hugegraph/hugegraph"}),
+                ("docker-compose-hstore.yml", {"pd": "hugegraph/pd", "store": "hugegraph/store",
+                                              "server": "hugegraph/server"})):
+            identities = [f"sha256:{service}" for service in images]
+            containers = [value for service in images for value in (service, f"sha256:{service}", "healthy")]
+            failure = deployment.subprocess.CalledProcessError(1, "graph smoke")
+            with self.subTest(topology=topology), \
+                 patch.object(deployment, "command", side_effect=identities + containers), \
+                 patch.object(deployment.subprocess, "run") as run, \
+                 patch.object(deployment, "verify_server"), \
+                 patch.object(deployment, "verify_storage"), \
+                 patch.object(deployment, "verify_graph", side_effect=failure) as graph:
+                with self.assertRaises(deployment.subprocess.CalledProcessError) as caught:
+                    deployment.smoke("ci-1-1", topology, images)
+                self.assertIs(caught.exception, failure)
+                graph.assert_called_once()
+                calls = [call.args[0] for call in run.call_args_list]
+                self.assertTrue(any("logs" in args for args in calls))
+                self.assertEqual(calls[-1][-3:], ["down", "-v", "--remove-orphans"])
+
+
 class PayloadTest(unittest.TestCase):
-    VERSIONS = '{"versions":{"version":"v1","core":"1.7.0","gremlin":"3.7.3","api":"0.74"}}'
+    VERSIONS = json.dumps({"versions": deployment.expected_versions()})
     GRAPHS = '{"graphs":["hugegraph"]}'
 
     def test_accepts_public_versions_and_authenticated_graphs(self):
@@ -111,6 +153,26 @@ class PayloadTest(unittest.TestCase):
                  patch.object(deployment, "response", side_effect=[(401, ""), (200, self.GRAPHS), (200, body)]):
                 with self.assertRaisesRegex(RuntimeError, "versions object"):
                     deployment.verify_server()
+
+    def test_rejects_wrong_release_gremlin_and_protocol_versions(self):
+        for key, wrong in (("core", "1.7.0"), ("gremlin", "3.7.3"), ("gremlin", None),
+                           ("api", "1.8.0"), ("version", "v2")):
+            payload = json.loads(self.VERSIONS)
+            payload["versions"][key] = wrong
+            with self.subTest(key=key), self.assertRaisesRegex(RuntimeError, "versions object"):
+                deployment.verify_versions(payload)
+
+    def test_rejects_missing_expected_gremlin_version(self):
+        parse = deployment.ET.parse
+
+        def read_pom(path):
+            if path == Path(deployment.__file__).resolve().parents[2] / "hugegraph-server/pom.xml":
+                return deployment.ET.ElementTree(deployment.ET.Element("project"))
+            return parse(path)
+
+        with patch.object(deployment.ET, "parse", side_effect=read_pom):
+            with self.assertRaisesRegex(RuntimeError, "non-empty expected versions"):
+                deployment.expected_versions()
 
     def test_rejects_unauthenticated_server_access(self):
         with patch.object(deployment, "response", return_value=(200, self.GRAPHS)):

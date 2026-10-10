@@ -87,7 +87,11 @@ jobs:
       - name: Run Codecov upload configuration tests
         run: hugegraph-server/hugegraph-dist/src/assembly/travis/test-codecov-upload-config.sh
 
+      - name: Check TinkerPop branch and report gates
+        run: bash hugegraph-server/hugegraph-dist/src/assembly/travis/test-tinkerpop-reports.sh
+
       - name: Use staged maven repo settings
+        if: ${{ env.USE_STAGE == 'true' }}
         run: |
           cp $HOME/.m2/settings.xml /tmp/settings.xml || true
           mv -vf .github/configs/settings.xml $HOME/.m2/settings.xml
@@ -112,6 +116,7 @@ jobs:
           mvn -U -ntp -pl hugegraph-struct test
 
   pd:
+    timeout-minutes: 30
     needs: struct
     runs-on: ubuntu-latest
     env:
@@ -202,6 +207,11 @@ jobs:
           done
           echo "can_run=true" >> "$GITHUB_OUTPUT"
 
+      - name: Check explicit Topling launcher selection
+        run: |
+          bash $TRAVIS_DIR/test-topling-selection.sh
+          bash hugegraph-store/hg-store-dist/src/assembly/travis/test-store-preloads.sh
+
       - name: Run PD docker entrypoint secret override tests
         run: |
           $TRAVIS_DIR/test-pd-docker-entrypoint.sh
@@ -288,6 +298,7 @@ jobs:
           fail_ci_if_error: false
 
   store:
+    timeout-minutes: 45
     needs: struct
     runs-on: ubuntu-latest
     env:
@@ -420,6 +431,11 @@ jobs:
           mvn test -pl hugegraph-store/hg-store-test -am \
             -P store-core-test -Djacoco.sessionId=store-core-test
 
+      - name: Run server lifecycle test
+        run: |
+          mvn test -pl hugegraph-store/hg-store-test -am \
+            -P store-server-test -Djacoco.sessionId=store-server-test
+
       - name: Generate aggregate coverage report
         run: |
           mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \
@@ -439,6 +455,8 @@ jobs:
             --require-test-report \
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.core.CoreSuiteTest.xml" \
             --require-test-report \
+            "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml" \
+            --require-test-report \
             "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.business.StoredRowIngressTest.xml" \
             --require-covered-group hg-store-common \
             --require-covered-group hg-store-client \
@@ -449,6 +467,7 @@ jobs:
             --require-session store-rocksdb-test \
             --require-session store-raftcore-test \
             --require-session store-core-test \
+            --require-session store-server-test \
             --require-session store-node-test \
             "$REPORT_FILE" \
             hg-store-grpc hg-store-common hg-store-client hg-store-rocksdb hg-store-core
@@ -488,23 +507,18 @@ jobs:
       TRAVIS_DIR: hugegraph-server/hugegraph-dist/src/assembly/travis
       REPORT_DIR: target/site/jacoco
       BACKEND: hstore
-      # TODO: remove this temporary TP skip after the branch investigation.
-      SKIP_TINKERPOP_FOR_CURRENT_PR: ${{ github.head_ref == 'task/tp381-3-upgrade-validation' }}
+      # Long TP suites run only on dedicated validation branches.
       RUN_TINKERPOP_TESTS: >-
         ${{
           startsWith(github.ref_name, 'release-') ||
           startsWith(github.ref_name, 'test-') ||
+          startsWith(github.ref_name, 'tinkerpop-') ||
           startsWith(github.head_ref, 'release-') ||
           startsWith(github.head_ref, 'test-') ||
+          startsWith(github.head_ref, 'tinkerpop-') ||
           startsWith(github.base_ref, 'release-') ||
           startsWith(github.base_ref, 'test-') ||
-          startsWith(github.head_ref, 'task/tp381-3-') ||
-          startsWith(github.ref_name, 'task/tp381-3-') ||
-          startsWith(github.base_ref, 'task/tp381-3-') ||
-          github.base_ref == 'task/tinkerpop-3.7-upgrade' ||
-          github.head_ref == 'task/tinkerpop-3.7-upgrade' ||
-          github.base_ref == 'task/gsoc-phase2-java17' ||
-          github.head_ref == 'task/gsoc-phase2-java17'
+          startsWith(github.base_ref, 'tinkerpop-')
         }}
 
     steps:
@@ -512,12 +526,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 2
-
-      - name: Record temporary TinkerPop exception
-        if: env.SKIP_TINKERPOP_FOR_CURRENT_PR == 'true'
-        run: |
-          echo '## Temporary TP exception for this upgrade branch' >> "$GITHUB_STEP_SUMMARY"
-          echo 'TP suites intentionally skipped by the branch patch; no new TP execution evidence is claimed.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install project JDK
         uses: actions/setup-java@v6
@@ -601,7 +609,7 @@ jobs:
       # service setup above makes its structure/process suites exercise the
       # distributed backend rather than only the memory and RocksDB paths.
       - name: Run TinkerPop structure test
-        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && env.SKIP_TINKERPOP_FOR_CURRENT_PR != 'true' }}
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
         # The HStore suite needs close to one hour before global cleanup, so
         # keep enough headroom to finish cleanup and emit Surefire results.
         timeout-minutes: 120
@@ -655,13 +663,13 @@ jobs:
           PYTHON
 
       - name: Run TinkerPop process standard test
-        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && env.SKIP_TINKERPOP_FOR_CURRENT_PR != 'true' }}
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
         timeout-minutes: 120
         run: |
           $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-standard
 
       - name: Run TinkerPop process feature test
-        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && env.SKIP_TINKERPOP_FOR_CURRENT_PR != 'true' }}
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' }}
         timeout-minutes: 120
         run: |
           $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process-feature

@@ -18,17 +18,16 @@
 package org.apache.hugegraph.store.client.query;
 
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import org.apache.hugegraph.store.client.type.HgStoreClientException;
 
 import io.grpc.stub.StreamObserver;
-import lombok.Data;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -47,7 +46,7 @@ public class CommonKvStreamObserver<R, T> implements StreamObserver<R> {
     private Consumer<Boolean> requestSender;
 
     /**
-     * Handling the case that server has no results, close channel
+     * Close the request stream: true means serialized half-close; false means transport cancellation.
      */
     @Setter
     private Consumer<Boolean> transferComplete;
@@ -61,18 +60,17 @@ public class CommonKvStreamObserver<R, T> implements StreamObserver<R> {
      */
     private final Function<R, ResultState> stateWatcher;
 
-    /**
-     * It can be ended by the client to stop receiving redundant data.
-     */
-    private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final Object stateLock = new Object();
+    // Only outgoing sends and normal half-close share this lock. Cancellation bypasses it.
+    private final Object requestLock = new Object();
+    private volatile ResultState terminal;
+    private volatile int parsing;
+    private volatile boolean closed;
+    private volatile long current = System.nanoTime();
+    private String queryId;
 
     @Setter
     private long timeout = 1800 * 1000;
-
-    /**
-     * Monitor internal state
-     */
-    private final ResultStateWatcher watcher = new ResultStateWatcher();
 
     public CommonKvStreamObserver(Function<R, Iterator<T>> valueExtractor,
                                   Function<R, ResultState> stateWatcher) {
@@ -85,55 +83,89 @@ public class CommonKvStreamObserver<R, T> implements StreamObserver<R> {
      * Send requests
      */
     public void sendRequest() {
-        if (!isServerFinished() && !closed.get()) {
+        synchronized (this.requestLock) {
+            synchronized (this.stateLock) {
+                if (this.closed || this.terminal != null) {
+                    return;
+                }
+                this.current = System.nanoTime();
+            }
             this.requestSender.accept(true);
-            this.watcher.setState(ResultState.WAITING);
         }
     }
 
     public boolean isServerFinished() {
-        return this.watcher.getState() == ResultState.FINISHED
-               || this.watcher.getState() == ResultState.ERROR;
+        ResultState state = this.terminal;
+        return this.closed || state == ResultState.ERROR ||
+               (state == ResultState.FINISHED && this.parsing == 0);
     }
 
     @Override
     public void onNext(R value) {
-        watcher.setState(ResultState.INNER_BUSY);
-        try {
-            var state = stateWatcher.apply(value);
-            log.debug("observer state: {}", state);
-
-            switch (state) {
-                case IDLE:
-                case FINISHED:
-                    if (!this.closed.get()) {
-                        queue.offer(this.valueExtractor.apply(value));
-                    }
-                    // this.stop();
-                    break;
-                default:
-                    queue.offer(new ErrorMessageIterator<>(state.getMessage()));
-                    break;
+        synchronized (this.stateLock) {
+            if (this.closed || this.terminal != null) {
+                return;
             }
-            watcher.setState(state);
-            // sendRequest();
-        } catch (Exception e) {
-            log.error("handling server data, got error: ", e);
-            queue.offer(new ErrorMessageIterator<>(e.getMessage()));
+            this.parsing++;
+            this.current = System.nanoTime();
+        }
+
+        Iterator<T> iterator = null;
+        ResultState result = ResultState.ERROR;
+        try {
+            ResultState responseState = this.stateWatcher.apply(value);
+            if (responseState == ResultState.IDLE || responseState == ResultState.FINISHED) {
+                iterator = Objects.requireNonNull(this.valueExtractor.apply(value), "response iterator");
+                result = responseState;
+            } else {
+                iterator = new ErrorMessageIterator<>(responseState.getMessage());
+                result = ResultState.ERROR;
+            }
+        } catch (Throwable e) {
+            log.error("handling server data for query {}, got error: ", this.queryId, e);
+            result = ResultState.ERROR;
+            iterator = new ErrorMessageIterator<>(e.getMessage());
+            if (e instanceof Error) {
+                throw (Error) e;
+            }
+        } finally {
+            synchronized (this.stateLock) {
+                // Completion can arrive while parsing. Publish before releasing the parsing count.
+                // An error or client close instead discards responses still being parsed.
+                if (!this.closed && this.terminal != ResultState.ERROR) {
+                    if (iterator != null) {
+                        this.queue.offer(iterator);
+                    }
+                    // A failed accepted response overrides completion received during parsing.
+                    if (result == ResultState.ERROR ||
+                        (this.terminal == null && result != ResultState.IDLE)) {
+                        this.terminal = result;
+                    }
+                }
+                this.parsing--;
+                this.current = System.nanoTime();
+            }
         }
     }
 
     public Iterator<T> consume() {
         try {
-            while (!Thread.currentThread().isInterrupted() && (!this.queue.isEmpty() ||
-                                                               !isServerFinished())) {
+            while (!Thread.currentThread().isInterrupted()) {
+                // Read terminal state before the queue, including a concurrently published final batch.
+                if (isServerFinished() && this.queue.isEmpty()) {
+                    return null;
+                }
                 var iterator = this.queue.poll(200, TimeUnit.MILLISECONDS);
                 if (iterator != null) {
                     sendRequest();
                     return iterator;
                 }
 
-                if ((System.nanoTime() - watcher.current) / 1000_000 > this.timeout) {
+                // Read terminal state before the queue: a final batch is published with that state.
+                if (isServerFinished() && this.queue.isEmpty()) {
+                    return null;
+                }
+                if ((System.nanoTime() - this.current) / 1000_000 > this.timeout) {
                     throw new HgStoreClientException("iterator timeout");
                 }
 
@@ -146,48 +178,52 @@ public class CommonKvStreamObserver<R, T> implements StreamObserver<R> {
     }
 
     /**
-     * Send onComplete, stop receiving data
+     * Stop feedback and invoke the request stream's completion or cancellation callback.
      */
     public void clear() {
-        if (!this.closed.get()) {
-            this.closed.set(true);
-            this.transferComplete.accept(true);
+        boolean finished;
+        synchronized (this.stateLock) {
+            if (this.closed) {
+                return;
+            }
+            finished = this.terminal == ResultState.FINISHED && this.parsing == 0;
+            this.closed = true;
+            this.queue.clear();
         }
-        this.queue.clear();
+        if (finished) {
+            synchronized (this.requestLock) {
+                this.transferComplete.accept(true);
+            }
+        } else {
+            // The transport cancellation hook is thread-safe even during a blocked send.
+            this.transferComplete.accept(false);
+        }
     }
 
     @Override
     public void onError(Throwable t) {
+        synchronized (this.stateLock) {
+            if (this.closed || this.terminal != null) {
+                return;
+            }
+            this.queue.offer(new ErrorMessageIterator<>(t.getMessage()));
+            this.terminal = ResultState.ERROR;
+            this.current = System.nanoTime();
+        }
         log.error("StreamObserver got error:", t);
-        this.queue.offer(new ErrorMessageIterator<>(t.getMessage()));
-        this.watcher.setState(ResultState.ERROR);
     }
 
     @Override
     public void onCompleted() {
-        if (watcher.getState() != ResultState.ERROR) {
-            watcher.setState(ResultState.FINISHED);
+        synchronized (this.stateLock) {
+            if (!this.closed && this.terminal == null) {
+                this.terminal = ResultState.FINISHED;
+                this.current = System.nanoTime();
+            }
         }
     }
 
     public void setWatcherQueryId(String queryId) {
-        this.watcher.setQueryId(queryId);
-    }
-
-    @Data
-    private static class ResultStateWatcher {
-
-        private long current = System.nanoTime();
-        private volatile ResultState state = ResultState.IDLE;
-
-        private String queryId;
-
-        public void setState(ResultState state) {
-            log.debug("query Id: {}, COST_STAT: {} -> {}, cost {} ms", this.queryId, this.state,
-                      state,
-                      +(System.nanoTime() - current) * 1.0 / 1000000);
-            this.state = state;
-            this.current = System.nanoTime();
-        }
+        this.queryId = queryId;
     }
 }

@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import javax.annotation.concurrent.NotThreadSafe;
@@ -58,6 +59,11 @@ class ScanUtil {
     private final static Map<String, byte[]> tableKeyMap = new HashMap<>();
 
     static ScanIterator getIterator(ScanStreamReq request, HgStoreWrapperEx wrapper) {
+        return getIterator(request, wrapper, ignored -> { });
+    }
+
+    static ScanIterator getIterator(ScanStreamReq request, HgStoreWrapperEx wrapper,
+                                    Consumer<Throwable> cleanupFailure) {
         boolean ordered = isOrdered(request);
         if (ordered && !request.getPosition().isEmpty()) {
             throw new IllegalArgumentException(
@@ -109,16 +115,19 @@ class ScanUtil {
                     throw new IllegalArgumentException("Property selection requires a vertex or edge table: " + table);
                 }
                 iter = new SelectIterator(iter, properties, BusinessHandlerImpl.getGraphSupplier(graph), isVertex);
-            } catch (RuntimeException failure) {
+            } catch (RuntimeException | Error failure) {
                 try {
                     iter.close();
-                } catch (RuntimeException closeFailure) {
-                    failure.addSuppressed(closeFailure);
+                } catch (RuntimeException | Error closeFailure) {
+                    cleanupFailure.accept(closeFailure);
+                    if (failure != closeFailure) {
+                        failure.addSuppressed(closeFailure);
+                    }
                 }
                 throw failure;
             }
         }
-        iter.seek(request.getPosition().toByteArray());
+        seek(iter, request.getPosition().toByteArray(), cleanupFailure);
         return iter;
     }
 
@@ -137,6 +146,11 @@ class ScanUtil {
     }
 
     static ScanIterator getIterator(ScanQuery sq, HgStoreWrapperEx wrapper) {
+        return getIterator(sq, wrapper, ignored -> { });
+    }
+
+    private static ScanIterator getIterator(ScanQuery sq, HgStoreWrapperEx wrapper,
+                                            Consumer<Throwable> cleanupFailure) {
         if (log.isDebugEnabled()) {
             log.debug("{}", sq);
         }
@@ -161,10 +175,27 @@ class ScanUtil {
             iter = new EmptyIterator();
         }
 
-        iter.seek(sq.position);
+        seek(iter, sq.position, cleanupFailure);
 
         return iter;
 
+    }
+
+    private static void seek(ScanIterator iterator, byte[] position,
+                             Consumer<Throwable> cleanupFailure) {
+        try {
+            iterator.seek(position);
+        } catch (RuntimeException | Error failure) {
+            try {
+                iterator.close();
+            } catch (RuntimeException | Error closing) {
+                cleanupFailure.accept(closing);
+                if (failure != closing) {
+                    failure.addSuppressed(closing);
+                }
+            }
+            throw failure;
+        }
     }
 
     static ScanQuery toSq(ScanStreamReq request) {
@@ -192,7 +223,12 @@ class ScanUtil {
 
     static ScanIterator getIterator(String graph, ScanQueryRequest request,
                                     HgStoreWrapperEx wrapper) {
-        ScanIteratorSupplier supplier = new ScanIteratorSupplier(graph, request, wrapper);
+        return getIterator(graph, request, wrapper, ignored -> { });
+    }
+
+    static ScanIterator getIterator(String graph, ScanQueryRequest request,
+                                   HgStoreWrapperEx wrapper, Consumer<Throwable> cleanupFailure) {
+        ScanIteratorSupplier supplier = new ScanIteratorSupplier(graph, request, wrapper, cleanupFailure);
         return BatchScanIterator.of(supplier, supplier.getLimitSupplier());
     }
 
@@ -200,10 +236,11 @@ class ScanUtil {
      * Support for multi-iterators with parallel reading
      */
     static ScanIterator getParallelIterator(String graph, ScanQueryRequest request,
-                                            HgStoreWrapperEx wrapper, ThreadPoolExecutor executor) {
-        ScanIteratorSupplier supplier = new ScanIteratorSupplier(graph, request, wrapper);
+                                            HgStoreWrapperEx wrapper, ThreadPoolExecutor executor,
+                                            ScanLifecycle lifecycle) {
+        ScanIteratorSupplier supplier = new ScanIteratorSupplier(graph, request, wrapper, lifecycle::failedCleanup);
         return ParallelScanIterator.of(supplier, supplier.getLimitSupplier(),
-                                       request, executor);
+                                       request, executor, lifecycle::failedCleanup);
     }
 
     @NotThreadSafe
@@ -216,6 +253,7 @@ class ScanUtil {
         private final long perKeyMax;
         private final long skipDegree;
         private final HgStoreWrapperEx wrapper;
+        private final Consumer<Throwable> cleanupFailure;
         private long perKeyLimit;
         private List<ScanQuery> sqs = new LinkedList<>();
         private Iterator<ScanQuery> sqIterator;
@@ -223,7 +261,9 @@ class ScanUtil {
         private ScanQueryProducer scanQueryProducer;
         private Iterator<ScanQuery[]> scanQueryIterator;
 
-        ScanIteratorSupplier(String graph, ScanQueryRequest request, HgStoreWrapperEx wrapper) {
+        ScanIteratorSupplier(String graph, ScanQueryRequest request, HgStoreWrapperEx wrapper,
+                             Consumer<Throwable> cleanupFailure) {
+            this.cleanupFailure = cleanupFailure;
             this.graph = graph;
             this.perKeyLimit = request.getPerKeyLimit();
             this.perKeyMax = request.getPerKeyMax();
@@ -311,7 +351,7 @@ class ScanUtil {
             ScanQuery query = null;
             if (this.sqIterator != null && this.sqIterator.hasNext()) {
                 query = this.sqIterator.next();
-                iterator = getIterator(query, this.wrapper);
+                iterator = getIterator(query, this.wrapper, this.cleanupFailure);
             } else {
                 this.sqs.clear();
                 this.sqIterator = null;
@@ -369,7 +409,7 @@ class ScanUtil {
                 if (index + 1 > queries.length) {
                     return null;
                 }
-                return getIterator(queries[index++], wrapper);
+                return getIterator(queries[index++], wrapper, cleanupFailure);
             }
         }
 

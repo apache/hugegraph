@@ -18,8 +18,10 @@
 package org.apache.hugegraph.task;
 
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -122,31 +124,65 @@ public final class TaskManager {
 
     public void closeScheduler(HugeGraphParams graph) {
         TaskScheduler scheduler = this.schedulers.get(graph);
+        Throwable failure = null;
+        boolean drained = scheduler == null;
         if (scheduler != null) {
             /*
-             * Synch close+remove scheduler and iterate scheduler, details:
-             * 'closeScheduler' should sync with 'scheduleOrExecuteJob'.
-             * Because 'closeScheduler' will be called by 'graph.close()' in
-             * main thread and there is gap between 'scheduler.close()'
-             * (will close graph tx) and 'this.schedulers.remove(graph)'.
-             * In this gap 'scheduleOrExecuteJob' may be run in
-             * scheduler-db-thread and 'scheduleOrExecuteJob' will reopen
-             * graph tx. As a result, graph tx will mistakenly not be closed
-             * after 'graph.close()'.
+             * Keep close+remove exclusive with scheduler iteration: in their gap
+             * a scheduler DB worker could otherwise reopen the graph transaction.
              */
             synchronized (scheduler) {
-                if (scheduler.close()) {
-                    this.schedulers.remove(graph);
+                boolean stopped = false;
+                try {
+                    stopped = scheduler.close();
+                } catch (RuntimeException | Error error) {
+                    failure = error;
+                    // Standard closes its server manager in finally; Distributed
+                    // sets its dispatch-stop flag before cancellation/drain begins.
+                    stopped = true;
+                }
+                // A timeout leaves running jobs registered for the next drain attempt.
+                if (stopped && scheduler.pendingTasks() == 0) {
+                    this.schedulers.remove(graph, scheduler);
+                    drained = true;
                 }
             }
         }
-
-        if (!this.taskExecutor.isTerminated()) {
-            this.closeTaskTx(graph);
+        if (!drained) {
+            // A running cron/job must finish before owner callbacks are queued
+            // on its executor. In particular, do not rejoin a timed-out cron.
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            if (failure != null) {
+                throw (RuntimeException) failure;
+            }
+            return;
         }
-
-        if (!this.distributedSchedulerExecutor.isTerminated()) {
-            this.closeDistributedSchedulerTx(graph);
+        for (Runnable close : new Runnable[]{() -> {
+            if (!this.taskExecutor.isTerminated()) {
+                this.closeTaskTx(graph);
+            }
+        }, () -> {
+            if (!this.distributedSchedulerExecutor.isTerminated()) {
+                this.closeDistributedSchedulerTx(graph);
+            }
+        }}) {
+            try {
+                close.run();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    failure = error;
+                } else if (failure != error) {
+                    failure.addSuppressed(error);
+                }
+            }
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure != null) {
+            throw (RuntimeException) failure;
         }
     }
 
@@ -158,16 +194,42 @@ public final class TaskManager {
         final boolean selfIsTaskWorker = Thread.currentThread().getName()
                                                .startsWith(TASK_WORKER_PREFIX);
         final int totalThreads = selfIsTaskWorker ? THREADS - 1 : THREADS;
+        Queue<Throwable> failures = new ConcurrentLinkedQueue<>();
+        Runnable close = () -> {
+            try {
+                graph.closeTx();
+            } catch (RuntimeException | Error error) {
+                // invokeAll() does not inspect worker Futures. Capture failures
+                // here so each worker still completes its execution accounting.
+                failures.add(error);
+                LOG.error("Failed to close task tx in thread '{}'", Thread.currentThread().getName(), error);
+            }
+        };
         try {
             if (selfIsTaskWorker) {
                 // Call closeTx directly if myself is task thread(ignore others)
-                graph.closeTx();
+                close.run();
             } else {
                 Consumers.executeOncePerThread(this.taskExecutor, totalThreads,
-                                               graph::closeTx, TX_CLOSE_TIMEOUT);
+                                               close, TX_CLOSE_TIMEOUT);
             }
-        } catch (Exception e) {
-            throw new HugeException("Exception when closing task tx", e);
+        } catch (Exception error) {
+            failures.add(error);
+            if (error instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        Throwable failure = failures.poll();
+        if (failure != null) {
+            for (Throwable error : failures) {
+                if (error != failure) {
+                    failure.addSuppressed(error);
+                }
+            }
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            throw new HugeException("Exception when closing task tx", failure);
         }
     }
 

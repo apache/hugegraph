@@ -21,7 +21,10 @@ import org.apache.hugegraph.exception.HugeException;
 
 import java.io.File;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,7 +49,7 @@ public class HugeFactory {
     public static final String SYS_GRAPH = Graph.Hidden.hide("sys_graph");
     private static final Logger LOG = Log.logger(HugeFactory.class);
     private static final String NAME_REGEX = "^[A-Za-z][A-Za-z0-9_]{0,47}$";
-    private static final Map<String, HugeGraph> GRAPHS = new HashMap<>();
+    private static final Map<String, StandardHugeGraph> GRAPHS = new HashMap<>();
     private static final AtomicBoolean SHUT_DOWN = new AtomicBoolean(false);
     private static final Thread SHUT_DOWN_HOOK = new Thread(() -> {
         LOG.info("HugeGraph is shutting down");
@@ -85,7 +88,7 @@ public class HugeFactory {
         String graphSpace = config.get(CoreOptions.GRAPH_SPACE);
         name = name.toLowerCase();
         String spaceGraphName = graphSpace + "-" + name;
-        HugeGraph graph = GRAPHS.get(spaceGraphName);
+        StandardHugeGraph graph = GRAPHS.get(spaceGraphName);
         if (graph == null || graph.closed()) {
             graph = new StandardHugeGraph(config);
             GRAPHS.put(spaceGraphName, graph);
@@ -106,9 +109,36 @@ public class HugeFactory {
         return open(getRemoteConfig(url));
     }
 
-    public static void remove(HugeGraph graph) {
+    public static synchronized void remove(HugeGraph graph) {
         String spaceGraphName = graph.spaceGraphName();
         GRAPHS.remove(spaceGraphName);
+    }
+
+    public static void closeCurrentThreadTransactions() {
+        List<StandardHugeGraph> graphs;
+        synchronized (HugeFactory.class) {
+            graphs = new ArrayList<>(GRAPHS.values());
+        }
+        closeCurrentThreadTransactions(graphs);
+    }
+
+    static void closeCurrentThreadTransactions(
+                Collection<? extends StandardHugeGraph> graphs) {
+        Throwable failure = null;
+        for (StandardHugeGraph graph : graphs) {
+            try {
+                graph.closeCurrentThreadTransaction();
+            } catch (Throwable e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw new HugeException("Failed to close current thread transactions", failure);
+        }
     }
 
     public static void checkGraphName(String name, String configFile) {

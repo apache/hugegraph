@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
+import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
 
@@ -56,14 +57,18 @@ public abstract class BackendSessionPool {
     public final BackendSession getOrNewSession() {
         BackendSession session = this.threadLocalSession.get();
         if (session == null) {
-            session = this.newSession();
-            assert session != null;
-            this.threadLocalSession.set(session);
-            assert !this.sessions.containsKey(Thread.currentThread().getId());
-            this.sessions.put(Thread.currentThread().getId(), session);
-            int sessionCount = this.sessionCount.incrementAndGet();
-            LOG.debug("Now(after connect({})) session count is: {}",
-                      this, sessionCount);
+            // Serialize new borrowers with the last-session native close.
+            synchronized (this) {
+                E.checkState(this.opened(), "Backend session pool is closed");
+                session = this.newSession();
+                assert session != null;
+                this.threadLocalSession.set(session);
+                assert !this.sessions.containsKey(Thread.currentThread().getId());
+                this.sessions.put(Thread.currentThread().getId(), session);
+                int sessionCount = this.sessionCount.incrementAndGet();
+                LOG.debug("Now(after connect({})) session count is: {}",
+                          this, sessionCount);
+            }
         } else {
             this.detectSession(session);
         }
@@ -131,7 +136,7 @@ public abstract class BackendSessionPool {
         }
     }
 
-    public boolean close() {
+    public synchronized boolean close() {
         Pair<Integer, Integer> result = Pair.of(-1, -1);
         try {
             result = this.closeSession();

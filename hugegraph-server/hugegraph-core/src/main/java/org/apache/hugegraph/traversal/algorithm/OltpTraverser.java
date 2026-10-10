@@ -73,7 +73,7 @@ public abstract class OltpTraverser extends HugeTraverser
 
     @Override
     public void close() {
-        // pass
+        // The graph's thread-local transaction belongs to the caller.
     }
 
     public static void destroy() {

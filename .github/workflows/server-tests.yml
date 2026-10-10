@@ -26,21 +26,18 @@ jobs:
       HEAD_BRANCH_NAME: ${{ github.head_ref }}
       BASE_BRANCH_NAME: ${{ github.base_ref }}
       TARGET_BRANCH_NAME: ${{ github.base_ref != '' && github.base_ref || github.ref_name }}
-      # TODO: remove this temporary TP skip after the branch investigation.
-      SKIP_TINKERPOP_FOR_CURRENT_PR: ${{ github.head_ref == 'task/tp381-3-upgrade-validation' }}
+      # Long TP suites run only on dedicated validation branches.
       RUN_TINKERPOP_TESTS: >-
         ${{
           startsWith(github.ref_name, 'release-') ||
           startsWith(github.ref_name, 'test-') ||
+          startsWith(github.ref_name, 'tinkerpop-') ||
           startsWith(github.head_ref, 'release-') ||
           startsWith(github.head_ref, 'test-') ||
-          startsWith(github.head_ref, 'task/tp381-3-') ||
-          startsWith(github.ref_name, 'task/tp381-3-') ||
-          startsWith(github.base_ref, 'task/tp381-3-') ||
-          github.base_ref == 'task/tinkerpop-3.7-upgrade' ||
-          github.head_ref == 'task/tinkerpop-3.7-upgrade' ||
-          github.base_ref == 'task/gsoc-phase2-java17' ||
-          github.head_ref == 'task/gsoc-phase2-java17'
+          startsWith(github.head_ref, 'tinkerpop-') ||
+          startsWith(github.base_ref, 'release-') ||
+          startsWith(github.base_ref, 'test-') ||
+          startsWith(github.base_ref, 'tinkerpop-')
         }}
       RAFT_MODE: ${{ startsWith(github.ref_name, 'raft-') || startsWith(github.head_ref, 'raft-') }}
 
@@ -53,13 +50,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 5
-
-      - name: Record temporary TinkerPop exception
-        if: env.SKIP_TINKERPOP_FOR_CURRENT_PR == 'true'
-        run: |
-          echo '## Temporary TP exception for this upgrade branch' >> "$GITHUB_STEP_SUMMARY"
-          echo 'TP suites intentionally skipped by the branch patch; no new TP execution evidence is claimed.' >> "$GITHUB_STEP_SUMMARY"
-
 
       - name: Prepare HBase container
         if: inputs.backend == 'hbase'
@@ -159,6 +149,7 @@ jobs:
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
           bash $TRAVIS_DIR/test-ci-service-utils.sh "$TRAVIS_DIR/ci-service-utils.sh"
+          bash $TRAVIS_DIR/test-launcher-gc.sh "$GITHUB_WORKSPACE"
           bash $TRAVIS_DIR/test-start-hugegraph-signal.sh "$SERVER_DIR/bin/start-hugegraph.sh"
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
 
@@ -191,12 +182,12 @@ jobs:
           $TRAVIS_DIR/run-api-test-for-raft.sh $BACKEND $REPORT_DIR
 
       - name: Run TinkerPop structure test
-        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && env.SKIP_TINKERPOP_FOR_CURRENT_PR != 'true' && (env.BACKEND == 'memory' || env.BACKEND == 'rocksdb') }}
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && (env.BACKEND == 'memory' || env.BACKEND == 'rocksdb') }}
         timeout-minutes: 60
         run: $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND structure
 
       - name: Run TinkerPop process test
-        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && env.SKIP_TINKERPOP_FOR_CURRENT_PR != 'true' && (env.BACKEND == 'memory' || env.BACKEND == 'rocksdb') }}
+        if: ${{ env.RUN_TINKERPOP_TESTS == 'true' && (env.BACKEND == 'memory' || env.BACKEND == 'rocksdb') }}
         timeout-minutes: 180
         run: $TRAVIS_DIR/run-tinkerpop-test.sh $BACKEND process
 
