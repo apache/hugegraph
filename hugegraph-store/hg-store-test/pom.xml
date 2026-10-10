@@ -221,6 +221,7 @@
                             <reuseForks>false</reuseForks>
                             <includes>
                                 <include>**/CoreSuiteTest.java</include>
+                                <include>**/IpUtilTest.java</include>
                                 <include>**/PartitionStateMachineTest.java</include>
                                 <include>**/PartitionEngineErrorTest.java</include>
                                 <include>**/BatchGraphIsolationTest.java</include>
