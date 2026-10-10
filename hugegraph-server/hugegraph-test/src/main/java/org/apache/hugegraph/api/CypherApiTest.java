@@ -19,9 +19,13 @@ package org.apache.hugegraph.api;
 
 import static org.apache.hugegraph.testutil.Assert.assertContains;
 
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 
@@ -30,10 +34,14 @@ import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Before;
 import org.junit.Test;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 
 import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 
 public class CypherApiTest extends BaseApiTest {
@@ -393,6 +401,46 @@ public class CypherApiTest extends BaseApiTest {
     }
 
     @Test
+    public void testBasicAuthWithColonPassword() {
+        // CypherAPI parses the Basic header itself, apart from AuthenticationFilter
+        String user = "cypher_colon_user";
+        String password = "a:b:c";
+        Deque<String[]> created = new ArrayDeque<>();
+        RestClient noAuthClient = new RestClient(baseUrl(), false);
+        try {
+            String userId = this.createAuth(created, "graphspaces/DEFAULT/auth/users", String.format(
+                    "{\"user_name\":\"%s\",\"user_password\":\"%s\"}", user, password));
+            String groupId = this.createAuth(created, "auth/groups",
+                                             "{\"group_name\":\"cypher_colon_group\"}");
+            String targetId = this.createAuth(created, "graphspaces/DEFAULT/auth/targets",
+                                              "{\"target_name\":\"cypher_colon_target\"," +
+                                              "\"target_graph\":\"hugegraph\"," +
+                                              "\"target_url\":\"127.0.0.1:8080\"," +
+                                              "\"target_resources\":[{\"type\":\"ALL\"}]}");
+            this.createAuth(created, "graphspaces/DEFAULT/auth/belongs", String.format(
+                    "{\"user\":\"%s\",\"group\":\"%s\"}", userId, groupId));
+            for (String permission : ImmutableList.of("READ", "EXECUTE")) {
+                this.createAuth(created, "graphspaces/DEFAULT/auth/accesses", String.format(
+                        "{\"group\":\"%s\",\"target\":\"%s\",\"access_permission\":\"%s\"}",
+                        groupId, targetId, permission));
+            }
+
+            Response r = basicAuthCypher(noAuthClient, user, password);
+            assertColumn(assertCypherSuccessData(assertResponseStatus(200, r)),
+                         "name", "marko", "peter");
+
+            r = basicAuthCypher(noAuthClient, user, "wrong" + password);
+            assertResponseStatus(401, r);
+        } finally {
+            noAuthClient.close();
+            while (!created.isEmpty()) {
+                String[] entry = created.pop();
+                client().delete(entry[0], entry[1]);
+            }
+        }
+    }
+
+    @Test
     public void testSpecifiedGraphRouting() {
         assumeStandaloneMode();
         String graph = "cypher_route_test";
@@ -409,6 +457,23 @@ public class CypherApiTest extends BaseApiTest {
             assertResponseStatus(204, client().delete(path, ImmutableMap.of(
                     "confirm_message", "I'm sure to drop the graph")));
         }
+    }
+
+    private String createAuth(Deque<String[]> created, String path, String body) {
+        String content = assertResponseStatus(201, client().post(path, body));
+        String id = assertJsonContains(content, "id");
+        created.push(new String[]{path, id});
+        return id;
+    }
+
+    private static Response basicAuthCypher(RestClient client, String user, String password) {
+        // Built by hand: Jersey's HttpAuthenticationFeature encodes the credential as ISO-8859-1
+        byte[] credential = (user + ":" + password).getBytes(StandardCharsets.UTF_8);
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        headers.add(HttpHeaders.AUTHORIZATION,
+                    "Basic " + Base64.getEncoder().encodeToString(credential));
+        return client.target().path(PATH).queryParam("cypher", QUERY)
+                     .request().headers(headers).get();
     }
 
     private List<?> query(String cypher) {

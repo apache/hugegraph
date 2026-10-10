@@ -221,7 +221,7 @@ public class CypherAPI extends API {
             String encoded = auth.substring(basic.length());
             byte[] userPass = this.decoder.decode(encoded);
             String authorization = new String(userPass, UTF8);
-            split = authorization.split(":");
+            split = authorization.split(":", 2);
         } catch (Exception e) {
             LOG.error("Failed convert auth to credential.", e);
             return null;
