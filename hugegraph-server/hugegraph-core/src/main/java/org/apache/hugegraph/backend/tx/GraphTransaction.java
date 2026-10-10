@@ -765,7 +765,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     public Iterator<Vertex> queryTaskInfos(Object... vertexIds) {
-        if (this.graph().backendStoreFeatures().supportsTaskAndServerVertex()) {
+        if (this.storeFeatures().supportsTaskAndServerVertex()) {
             return this.queryVerticesByIds(vertexIds, false, false,
                                            HugeType.TASK);
         }

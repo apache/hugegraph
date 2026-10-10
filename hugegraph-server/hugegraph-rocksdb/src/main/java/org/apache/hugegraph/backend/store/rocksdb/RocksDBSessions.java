@@ -58,6 +58,11 @@ public abstract class RocksDBSessions extends BackendSessionPool {
 
     public abstract String hardLinkSnapshot(String snapshotPath) throws RocksDBException;
 
+    // Only paths returned by this invocation of hardLinkSnapshot may be passed here.
+    void cleanupSnapshot(String snapshotPath) {
+        throw new UnsupportedOperationException("cleanupSnapshot");
+    }
+
     public abstract void reloadRocksDB() throws RocksDBException;
 
     public abstract void forceCloseRocksDB();

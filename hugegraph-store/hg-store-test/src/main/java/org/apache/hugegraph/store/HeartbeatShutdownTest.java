@@ -23,6 +23,7 @@ import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.grpc.Pdpb.ErrorType;
+import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.PartitionManager;
 import org.apache.hugegraph.store.meta.Store;
@@ -46,6 +48,8 @@ import org.apache.hugegraph.store.util.PartitionMetaStoreWrapper;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.Mockito;
+import org.rocksdb.Options;
+import org.rocksdb.RocksDB;
 
 import com.alipay.sofa.jraft.rpc.RpcServer;
 
@@ -70,6 +74,11 @@ public class HeartbeatShutdownTest {
         for (int code : new int[]{ErrorType.STORE_ID_NOT_EXIST_VALUE, ErrorType.STORE_HAS_BEEN_REMOVED_VALUE}) {
             assertFatalExit("heartbeat", code);
         }
+    }
+
+    @Test
+    public void testInterruptedEngineShutdownFinishesNativeTeardown() throws Exception {
+        assertFatalExit("interrupted-shutdown", 0);
     }
 
     private static void assertFatalExit(String phase, int code) throws Exception {
@@ -99,7 +108,9 @@ public class HeartbeatShutdownTest {
             }
             Assert.assertTrue("Fatal heartbeat did not exit; child log: " + output + "\n" + Files.readString(output),
                               exited);
-            Assert.assertEquals(Files.readString(output), "recovery".equals(phase) ? 0 : 255, process.exitValue());
+            Assert.assertEquals(Files.readString(output),
+                                "recovery".equals(phase) || "interrupted-shutdown".equals(phase) ? 0 : 255,
+                                process.exitValue());
             Assert.assertEquals("joined", Files.readString(marker));
             if ("recovery".equals(phase)) {
                 String log = Files.readString(output);
@@ -120,6 +131,17 @@ public class HeartbeatShutdownTest {
         Path marker = Path.of(args[2]);
         if ("recovery".equals(phase)) {
             runInvalidShardRecovery(marker);
+            return;
+        }
+        if ("interrupted-shutdown".equals(phase)) {
+            try {
+                runInterruptedEngineShutdown(marker);
+            } catch (Exception | AssertionError failure) {
+                failure.printStackTrace();
+                System.exit(1);
+            }
+            // RocksDBFactory owns a process-wide scheduler; this isolated probe has finished.
+            System.exit(0);
             return;
         }
         CountDownLatch producersStarted = new CountDownLatch(1);
@@ -223,6 +245,62 @@ public class HeartbeatShutdownTest {
         service.onStateChanged(Metapb.StoreState.Up);
     }
 
+    private static void runInterruptedEngineShutdown(Path marker) throws Exception {
+        RocksDB.loadLibrary();
+        Options nativeOptions = new Options().setCreateIfMissing(true);
+        RocksDB nativeDatabase = RocksDB.open(nativeOptions, marker.resolveSibling("native-store").toString());
+        Constructor<HgStoreEngine> constructor = HgStoreEngine.class.getDeclaredConstructor();
+        constructor.setAccessible(true);
+        HgStoreEngine engine = constructor.newInstance();
+        Fixture heartbeat = new Fixture(false);
+        heartbeat.start();
+        Assert.assertTrue(heartbeat.entered.await(5, TimeUnit.SECONDS));
+        RpcServer rpc = Mockito.mock(RpcServer.class);
+        BusinessHandler handler = Mockito.mock(BusinessHandler.class);
+        PartitionEngine partition = Mockito.mock(PartitionEngine.class);
+        Mockito.when(partition.getGroupId()).thenReturn(1);
+        Mockito.when(partition.getRaftNode()).thenReturn(Mockito.mock(com.alipay.sofa.jraft.Node.class));
+        Mockito.doAnswer(invocation -> {
+            Assert.assertFalse(Thread.currentThread().isInterrupted());
+            Thread.currentThread().interrupt();
+            return null;
+        }).when(partition).shutdown();
+        Mockito.doAnswer(invocation -> {
+            Assert.assertFalse("Raft's restored interrupt must not escape into native cleanup",
+                               Thread.currentThread().isInterrupted());
+            Assert.assertFalse(heartbeat.storeThread.isAlive());
+            Assert.assertFalse(heartbeat.partitionThread.isAlive());
+            nativeDatabase.close();
+            return null;
+        }).when(handler).closeDB(1);
+        setField(HgStoreEngine.class, engine, "heartbeatService", heartbeat);
+        setField(HgStoreEngine.class, engine, "metricService", Mockito.mock(HgMetricService.class));
+        setField(HgStoreEngine.class, engine, "rpcServer", rpc);
+        setField(HgStoreEngine.class, engine, "businessHandler", handler);
+        Field partitionsField = HgStoreEngine.class.getDeclaredField("partitionEngines");
+        partitionsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<Integer, PartitionEngine> partitions = (Map<Integer, PartitionEngine>) partitionsField.get(engine);
+        partitions.put(1, partition);
+        try {
+            Thread.currentThread().interrupt();
+            engine.shutdown();
+            Assert.assertTrue("restore the listener's interrupt after all teardown",
+                              Thread.currentThread().isInterrupted());
+            Assert.assertTrue(partitions.isEmpty());
+            Mockito.verify(handler).closeDB(1);
+            Assert.assertFalse("engine teardown must reach actual native database close",
+                               nativeDatabase.isOwningHandle());
+            Mockito.verify(rpc).shutdown();
+            Files.writeString(marker, "joined");
+        } finally {
+            Thread.interrupted();
+            heartbeat.shutdown();
+            nativeDatabase.close();
+            nativeOptions.close();
+        }
+    }
+
     private static void setField(Class<?> owner, Object object, String name, Object value) throws Exception {
         Field field = owner.getDeclaredField(name);
         field.setAccessible(true);
@@ -307,20 +385,16 @@ public class HeartbeatShutdownTest {
     }
 
     @Test
-    public void testInterruptedShutdownDoesNotAllowDatabaseClose() throws Exception {
+    public void testInterruptedShutdownKeepsWaitingForBothProducers() throws Exception {
         Fixture service = new Fixture(true);
         CountDownLatch closing = new CountDownLatch(1);
         AtomicBoolean databaseClosed = new AtomicBoolean();
-        AtomicBoolean interruptedFailure = new AtomicBoolean();
+        AtomicBoolean interruptPreserved = new AtomicBoolean();
         Thread closer = new Thread(() -> {
             closing.countDown();
-            try {
-                service.shutdown();
-                // HgStoreEngine only closes native owners after this call succeeds.
-                databaseClosed.set(true);
-            } catch (IllegalStateException expected) {
-                interruptedFailure.set(Thread.currentThread().isInterrupted());
-            }
+            service.shutdown();
+            databaseClosed.set(true);
+            interruptPreserved.set(Thread.currentThread().isInterrupted());
         });
         try {
             service.start();
@@ -328,10 +402,18 @@ public class HeartbeatShutdownTest {
             closer.start();
             Assert.assertTrue(closing.await(5, TimeUnit.SECONDS));
             closer.interrupt();
+            closer.join(100);
+            Assert.assertTrue("interruption must not abandon producer drain", closer.isAlive());
+            Assert.assertFalse(databaseClosed.get());
+            service.storeRelease.countDown();
+            closer.join(100);
+            Assert.assertTrue("both producers must drain", closer.isAlive());
+            Assert.assertFalse(databaseClosed.get());
+            service.partitionRelease.countDown();
             closer.join(5000);
             Assert.assertFalse(closer.isAlive());
-            Assert.assertTrue(interruptedFailure.get());
-            Assert.assertFalse(databaseClosed.get());
+            Assert.assertTrue(databaseClosed.get());
+            Assert.assertTrue(interruptPreserved.get());
         } finally {
             service.storeRelease.countDown();
             service.partitionRelease.countDown();

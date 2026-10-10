@@ -177,7 +177,7 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         this.checkOpened();
         this.sessions.close();
 

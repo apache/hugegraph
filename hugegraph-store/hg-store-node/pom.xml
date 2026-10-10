@@ -169,6 +169,7 @@
                             <goal>repackage</goal>
                         </goals>
                         <configuration>
+                            <classifier>exec</classifier>
                             <mainClass>
                                 org.apache.hugegraph.store.node.StoreNodeApplication
                             </mainClass>

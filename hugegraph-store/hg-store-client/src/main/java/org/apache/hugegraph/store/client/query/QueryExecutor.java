@@ -61,6 +61,8 @@ import org.apache.hugegraph.structure.KvElement;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.stub.ClientCallStreamObserver;
+import io.grpc.stub.ClientResponseObserver;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -237,10 +239,35 @@ public class QueryExecutor {
 
         );
 
-        var reqStream = stub.query(observer);
         observer.setWatcherQueryId(request.getQueryId() + '-' + address);
-        observer.setRequestSender(r -> reqStream.onNext(request));
-        observer.setTransferComplete(r -> reqStream.onCompleted());
+        stub.query(new ClientResponseObserver<QueryRequest, QueryResponse>() {
+            @Override
+            public void beforeStart(ClientCallStreamObserver<QueryRequest> requestStream) {
+                observer.setRequestSender(ignored -> requestStream.onNext(request));
+                observer.setTransferComplete(finished -> {
+                    if (finished) {
+                        requestStream.onCompleted();
+                    } else {
+                        requestStream.cancel("Query iterator closed", null);
+                    }
+                });
+            }
+
+            @Override
+            public void onNext(QueryResponse response) {
+                observer.onNext(response);
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                observer.onError(error);
+            }
+
+            @Override
+            public void onCompleted() {
+                observer.onCompleted();
+            }
+        });
         observer.setTimeout(this.timeout);
 
         var itr = new StreamKvIterator<>(b -> observer.clear(), observer::consume);

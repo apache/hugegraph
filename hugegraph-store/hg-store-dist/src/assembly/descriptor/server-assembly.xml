@@ -68,11 +68,12 @@
         <!-- code jars -->
         <dependencySet>
             <outputDirectory>/lib</outputDirectory>
+            <outputFileNameMapping>${artifact.artifactId}-${artifact.version}.jar</outputFileNameMapping>
             <unpack>false</unpack>
             <scope>runtime</scope>
             <useProjectArtifact>false</useProjectArtifact>
             <includes>
-                <include>org.apache.hugegraph:${executable.jar.name}:jar:*</include>
+                <include>org.apache.hugegraph:${executable.jar.name}:jar:exec:*</include>
             </includes>
         </dependencySet>
     </dependencySets>

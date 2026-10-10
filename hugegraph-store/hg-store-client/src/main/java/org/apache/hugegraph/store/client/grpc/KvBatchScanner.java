@@ -40,6 +40,7 @@ import org.apache.hugegraph.store.grpc.common.Header;
 import org.apache.hugegraph.store.grpc.common.ScanOrderType;
 import org.apache.hugegraph.store.grpc.stream.HgStoreStreamGrpc;
 import org.apache.hugegraph.store.grpc.stream.KvStream;
+import org.apache.hugegraph.store.grpc.stream.ScanCancelRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanReceiptRequest;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamBatchReq;
 
@@ -167,12 +168,16 @@ public class KvBatchScanner implements Closeable {
      * Data reception ended
      */
     public void dataComplete() {
-        close();
+        close(false);
     }
 
     // Flow is closed
     @Override
     public void close() {
+        close(true);
+    }
+
+    private void close(boolean cancel) {
         try {
             if (notifier.unregisterScanner(this) < 0) {
                 notifier.dataArrived(this, NO_DATA); // Task finished, wake up the queue
@@ -183,6 +188,12 @@ public class KvBatchScanner implements Closeable {
         synchronized (this.sender) {
             try {
                 if (running) {
+                    running = false;
+                    if (cancel) {
+                        sender.onNext(ScanStreamBatchReq.newBuilder()
+                                    .setHeader(Header.newBuilder().setGraph(graphName))
+                                    .setCancelRequest(ScanCancelRequest.getDefaultInstance()).build());
+                    }
                     sender.onCompleted();
                 }
             } catch (Exception e) {
@@ -344,7 +355,7 @@ public class KvBatchScanner implements Closeable {
 
         private void close() {
             if (scanner != null) {
-                scanner.close();
+                scanner.dataComplete();
             }
         }
     }

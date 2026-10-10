@@ -37,7 +37,7 @@ while getopts "d:g:j:y:" arg; do
         # Telemetry is used to collect metrics, traces and logs
         d) DAEMON="$OPTARG" ;;
         y) OPEN_TELEMETRY="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-d true|false] [-g g1] [-j xxx] [-y true|false]" && exit 1 ;;
+        ?) echo "USAGE: $0 [-d true|false] [-g g1|ZGC] [-j xxx] [-y true|false]" && exit 1 ;;
     esac
 done
 
@@ -106,12 +106,17 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
 
-# Using G1GC as the default garbage collector (Recommended for large memory machines)
+# Keep JVM/caller GC selection by default; explicitly select G1 when requested.
 case "$GC_OPTION" in
-    "")
-        echo "Using G1GC as the default garbage collector"
-        JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+ParallelRefProcEnabled \
-                      -XX:InitiatingHeapOccupancyPercent=50 -XX:G1RSetUpdatingPauseTimePercent=5"
+    ""|g1|G1)
+        if [[ "$GC_OPTION" == g1 || "$GC_OPTION" == G1 ]]; then
+            echo "Using G1GC"
+            JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseG1GC"
+        else
+            echo "Using JVM garbage collector configuration"
+        fi
+        JAVA_OPTIONS="-XX:+ParallelRefProcEnabled -XX:InitiatingHeapOccupancyPercent=50 \
+                      -XX:G1RSetUpdatingPauseTimePercent=5 ${JAVA_OPTIONS}"
         ;;
     zgc|ZGC)
         echo "Using ZGC as the default garbage collector (requires Java 17 or later)"
@@ -121,7 +126,7 @@ case "$GC_OPTION" in
                                       -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
         ;;
     *)
-        echo "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now" >> ${OUTPUT}
+        echo "Unrecognized gc option: '$GC_OPTION', supported options: g1, ZGC" >> ${OUTPUT}
         exit 1
 esac
 

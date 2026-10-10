@@ -52,13 +52,11 @@ remain. This changes CI preparation, not product support or backend deprecation 
 TinkerPop suites run only when the source, target or push/manual branch starts with
 `release-`, `test-` or `tinkerpop-`. PRs run no TP suites when neither source nor target
 branch matches these prefixes, including `upgrade/1.8.0` targeting `master`.
-Historical task-branch exceptions and the temporary TP skip are removed. Executed TP suites
-still require non-empty reports with actual executed tests.
+Executed TP suites require non-empty reports with actual executed tests.
 
-PD, Store and Commons have total job budgets of 30, 45 and 20 minutes, respectively,
-based on six recent successful master runs across Org and ASF. Cluster has 120 minutes,
-preserving its two existing 45-minute test windows and allowing build/diagnostic time.
-Server and HStore budgets remain unchanged pending complete TP execution history.
+PD, Store and Commons have total job budgets of 30, 45 and 20 minutes, respectively.
+Cluster has 120 minutes for its two 45-minute test windows and build/diagnostic time.
+Server and HStore budgets are defined in their workflow job settings.
 
 ## Documentation and freshness
 
@@ -80,9 +78,8 @@ Plans and actual results are diagnostics, not execution credentials for later ru
 
 `.asf.yaml` requests only `check-license` and `Server memory tests`. Keep these required check
 names stable. The Memory workflow runs real unit, core and API tests on the project runtime
-and reports their results through `Server memory tests`; the former Java 11 placeholder is
-removed. The former `build-commons (11)` placeholder is also removed; real Commons tests
-remain advisory and install only the Commons reactor and its upstream modules.
+and reports their results through `Server memory tests`. Commons tests remain advisory
+and install only the Commons reactor and its upstream modules.
 `affected-module-tests` and CodeQL remain advisory. Verify live branch protection
 when changing required checks; do not forge a successful result or leave retired contexts required.
 
@@ -90,20 +87,3 @@ Only failed push runs of License Checker and Server Memory CI automatically retr
 twice. The trusted checker verifies the workflow path, attempt, repository and unchanged branch
 head before and after the delay. PRs and advisory workflows never automatically retry.
 Use a manual rerun when appropriate; a rerun retains its original commit and event.
-
-## Follow-up work
-
-These changes need separate CI policy decisions or broader validation:
-
-- Split compatibility selection by backend, native code, JDK and shared startup/core impact,
-  retaining Server/PD/Store/Cluster coverage and periodic complete compatibility checks.
-- Narrow PD/Store/HStore/Cluster reactors only after verifying every required distribution;
-  evaluate sharing artifacts between jobs separately.
-- Choose an explicit RocksDB comparison baseline for the first push to a new release-/test-
-  branch, where `before` is all zeros. Do not silently compare a commit with itself.
-- Revisit RISC-V `continue-on-error`; it remains advisory and is not a required check.
-- Consider merging runtime resolution into planning and extracting long diagnostic scripts.
-- Replace broad push failure reruns with bounded retries at known transient operations;
-  preserve workflow, repository, attempt and unchanged-head checks.
-- Set total timeouts only where complete test history supports a budget, including diagnostics.
-  Do not size HStore or Server TP budgets from runs that skipped TP suites.

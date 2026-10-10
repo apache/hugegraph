@@ -20,6 +20,7 @@ package org.apache.hugegraph.backend.store.hstore;
 import org.apache.hugegraph.backend.BinaryId;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -38,6 +39,7 @@ import java.util.stream.Collectors;
 import com.google.common.collect.Lists;
 
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
@@ -47,9 +49,11 @@ import org.apache.hugegraph.query.IdPrefixQuery;
 import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
 import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.OlapKey;
 import org.apache.hugegraph.backend.store.AbstractBackendStore;
 import org.apache.hugegraph.backend.store.BackendAction;
 import org.apache.hugegraph.backend.store.BackendEntry;
+import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
@@ -64,6 +68,7 @@ import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Action;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.HugeKeys;
+import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
@@ -232,7 +237,7 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         this.checkOpened();
         this.sessions.close();
 
@@ -696,6 +701,8 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
 
     public static class HstoreGraphStore extends HstoreStore {
 
+        private static final int OLAP_DELETE_BATCH_SIZE = 1024;
+
         public HstoreGraphStore(BackendStoreProvider provider,
                                 String namespace, String store) {
             super(provider, namespace, store);
@@ -765,16 +772,84 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
 
         @Override
         public void clearOlapTable(Id pkId) {
+            this.deleteOlapData(pkId);
         }
 
         @Override
         public void removeOlapTable(Id pkId) {
+            // Every OLAP property shares this table and its registered manager.
+            this.deleteOlapData(pkId);
+        }
+
+        private void deleteOlapData(Id pkId) {
+            E.checkArgumentNotNull(pkId, "OLAP property ID");
+            Session session = this.session(HugeType.OLAP);
+            String tableName = this.table(HugeType.OLAP).table();
+            E.checkState(!session.hasChanges(), "Can't clear OLAP data with pending graph mutations");
+            E.checkState(super.sessions.existsTable(tableName), "Not exist table '%s'", tableName);
+            byte[] propertyPrefix = BytesBuffer.allocate(pkId.length() + 9).writeId(pkId).bytes();
+            int pending = 0;
+            try {
+                // A property prefix alone also matches legacy vertex-only keys from other properties.
+                try (BackendColumnIterator columns = session.scan(tableName)) {
+                    while (columns.hasNext()) {
+                        BackendColumn column = columns.next();
+                        if (!OlapKey.matchesProperty(column.value, pkId)) {
+                            boolean targetCompound = column.name != null &&
+                                                     column.name.length > propertyPrefix.length &&
+                                                     Bytes.prefixWith(column.name, propertyPrefix);
+                            if (targetCompound) {
+                                E.checkState(false, "OLAP value at key '%s' must match property '%s'",
+                                             olapKeyDiagnostic(column.name), pkId);
+                            }
+                            continue;
+                        }
+                        BytesBuffer key = BytesBuffer.wrap(column.name);
+                        Id first = key.readId();
+                        Id vertexId = first;
+                        if (key.remaining() != 0) {
+                            if (!pkId.equals(first)) {
+                                E.checkState(false, "OLAP key '%s' must match property '%s'",
+                                             olapKeyDiagnostic(column.name), pkId);
+                            }
+                            vertexId = key.readId();
+                            if (key.remaining() != 0) {
+                                E.checkState(false,
+                                             "Unexpected trailing bytes in OLAP key '%s' for property '%s'",
+                                             olapKeyDiagnostic(column.name), pkId);
+                            }
+                        }
+                        session.delete(tableName, vertexId.asBytes(), column.name);
+                        if (++pending == OLAP_DELETE_BATCH_SIZE) {
+                            session.commit();
+                            pending = 0;
+                        }
+                    }
+                }
+                if (pending != 0) {
+                    session.commit();
+                }
+            } catch (RuntimeException | Error failure) {
+                try {
+                    session.rollback();
+                } catch (RuntimeException | Error rollbackFailure) {
+                    if (rollbackFailure != failure) {
+                        failure.addSuppressed(rollbackFailure);
+                    }
+                }
+                throw failure;
+            }
+        }
+
+        private static String olapKeyDiagnostic(byte[] key) {
+            int maxBytes = 64;
+            return key.length <= maxBytes ? Bytes.toHex(key) :
+                   Bytes.toHex(Arrays.copyOf(key, maxBytes)) + "...";
         }
 
         @Override
         public boolean existOlapTable(Id pkId) {
-            String tableName = this.olapTableName(pkId);
-            return super.sessions.existsTable(tableName);
+            return super.sessions.existsTable(this.table(HugeType.OLAP).table());
         }
     }
 }

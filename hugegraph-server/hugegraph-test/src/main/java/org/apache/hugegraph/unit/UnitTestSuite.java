@@ -17,14 +17,17 @@
 
 package org.apache.hugegraph.unit;
 
+import org.apache.hugegraph.HugeFactoryTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.api.cypher.CypherClientTest;
 import org.apache.hugegraph.auth.ContextGremlinServerHttpTest;
 import org.apache.hugegraph.auth.HttpGremlinRequestHandlerTest;
+import org.apache.hugegraph.auth.ContextTaskTest;
 import org.apache.hugegraph.auth.StandardAuthManagerV2Test;
 import org.apache.hugegraph.auth.WsAndHttpBasicAuthHandlerTest;
 import org.apache.hugegraph.backend.page.QueryListTest;
+import org.apache.hugegraph.backend.store.rocksdb.RocksDBSnapshotRestoreTest;
 import org.apache.hugegraph.backend.tx.GraphIndexTransactionTest;
 import org.apache.hugegraph.backend.tx.GraphTransactionTest;
 import org.apache.hugegraph.meta.EtcdMetaDriverTest;
@@ -53,6 +56,7 @@ import org.apache.hugegraph.unit.config.GremlinConfigCompatibilityTest;
 import org.apache.hugegraph.unit.config.GraphBinarySchemaCompatibilityTest;
 import org.apache.hugegraph.unit.config.K8sResourceQuotaYamlTest;
 import org.apache.hugegraph.unit.core.AnalyzerTest;
+import org.apache.hugegraph.unit.core.BackendSessionPoolTest;
 import org.apache.hugegraph.unit.core.BackendMutationTest;
 import org.apache.hugegraph.unit.core.BackendProviderFactoryTest;
 import org.apache.hugegraph.unit.core.BackendStoreInfoTest;
@@ -141,6 +145,8 @@ import org.junit.runners.Suite;
         GraphSpaceGroupAPITest.class,
         GraphSpaceAuthPayloadTest.class,
         StandardAuthManagerV2Test.class,
+        ContextTaskTest.class,
+        HugeFactoryTest.class,
         AuthMetaManagerTest.class,
 
         /* api space */
@@ -178,6 +184,7 @@ import org.junit.runners.Suite;
         RowLockTest.class,
         AnalyzerTest.class,
         BackendMutationTest.class,
+        BackendSessionPoolTest.class,
         BackendProviderFactoryTest.class,
         ConditionTest.class,
         GroovyScriptEngineCompatibilityTest.class,
@@ -233,6 +240,7 @@ import org.junit.runners.Suite;
         K8sResourceQuotaYamlTest.class,
         /* rocksdb */
         RocksDBSessionsTest.class,
+        RocksDBSnapshotRestoreTest.class,
         RocksDBSessionTest.class,
         RocksDBCountersTest.class,
         RocksDBTableQueryByIdsTest.class,

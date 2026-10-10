@@ -41,6 +41,7 @@ public final class BatchScanIterator implements ScanIterator {
     private final AtomicBoolean closed = new AtomicBoolean();
     private ScanIterator iterator;
     private boolean hasNext = false;
+    private Throwable cleanupFailure;
     private long curCount;
     private long curLimit;
 
@@ -65,13 +66,14 @@ public final class BatchScanIterator implements ScanIterator {
 
         do {
             buf = this.batchSupplier.get().getValue();
+            this.iterator = buf;
 
             if (buf == null) {
                 break;
             }
 
             if (!buf.hasNext()) {
-                buf.close();
+                closeIterator();
                 buf = null;
             }
 
@@ -99,13 +101,17 @@ public final class BatchScanIterator implements ScanIterator {
     @Override
     public boolean hasNext() {
 
+        rethrowCleanupFailure();
+        if (this.closed.get()) {
+            return false;
+        }
         if (this.iterator == null) {
             this.iterator = this.getIterator();
         } else if (!this.iterator.hasNext()) {
-            this.iterator.close();
+            closeIterator();
             this.iterator = this.getIterator();
         } else if (this.curCount == this.curLimit) {
-            this.iterator.close();
+            closeIterator();
             this.iterator = this.getIterator();
         }
 
@@ -135,9 +141,30 @@ public final class BatchScanIterator implements ScanIterator {
     @Override
     public void close() {
         if (!this.closed.getAndSet(true)) {
-            if (this.iterator != null) {
-                this.iterator.close();
+            closeIterator();
+        }
+        rethrowCleanupFailure();
+    }
+
+    private void closeIterator() {
+        ScanIterator current = this.iterator;
+        this.iterator = null;
+        if (current != null) {
+            try {
+                current.close();
+            } catch (RuntimeException | Error failure) {
+                this.cleanupFailure = failure;
             }
+        }
+        rethrowCleanupFailure();
+    }
+
+    private void rethrowCleanupFailure() {
+        if (this.cleanupFailure instanceof RuntimeException) {
+            throw (RuntimeException) this.cleanupFailure;
+        }
+        if (this.cleanupFailure != null) {
+            throw (Error) this.cleanupFailure;
         }
     }
 

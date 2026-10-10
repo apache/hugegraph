@@ -38,9 +38,10 @@ public class GRpcServerConfig extends GRpcServerBuilderConfigurer {
     @Override
     public void configure(ServerBuilder<?> serverBuilder) {
         AppConfig.ThreadPoolGrpc grpc = appConfig.getThreadPoolGrpc();
+        // Terminal callbacks must still be queued when all dispatch threads are busy.
         serverBuilder.executor(
                 HgExecutorUtil.createExecutor(EXECUTOR_NAME, grpc.getCore(), grpc.getMax(),
-                                              grpc.getQueue())
+                                              Integer.MAX_VALUE)
         );
     }
 

@@ -18,10 +18,15 @@
 package org.apache.hugegraph.store.client;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,14 +40,71 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
+import org.apache.hugegraph.store.HgOwnerKey;
 import org.apache.hugegraph.store.HgStoreSession;
 import org.apache.hugegraph.store.client.type.HgStoreClientException;
+import org.apache.hugegraph.store.term.HgTriple;
 import org.junit.Test;
 
 import io.grpc.Status;
 
 public class NodeTxExecutorTest {
+
+    @Test
+    public void testRollbackDiscardsQueuedActions() {
+        assertRollbackDiscardsQueuedActions(false);
+    }
+
+    @Test
+    public void testFailedRollbackDiscardsQueuedActions() {
+        assertRollbackDiscardsQueuedActions(true);
+    }
+
+    private static void assertRollbackDiscardsQueuedActions(boolean rollbackFails) {
+        NodeTxSessionProxy proxy = mock(NodeTxSessionProxy.class);
+        HgStoreNode node = mock(HgStoreNode.class);
+        HgStoreNodeSession session = mock(HgStoreNodeSession.class);
+        when(node.getNodeId()).thenReturn(1L);
+        when(node.openSession("graph")).thenReturn(session);
+        when(session.getStoreNode()).thenReturn(node);
+        when(session.isTx()).thenReturn(true);
+        when(session.put(anyString(), any(HgOwnerKey.class), any(byte[].class))).thenReturn(true);
+        when(proxy.doAction(anyString(), any(HgOwnerKey.class), any(HgOwnerKey.class),
+                            any())).thenAnswer(invocation -> {
+                                Function<NodeTkv, Boolean> action = invocation.getArgument(3);
+                                return action.apply(null);
+                            });
+        NodeTxExecutor executor = NodeTxExecutor.graphOf("graph", proxy);
+        HgOwnerKey key = HgOwnerKey.of(new byte[]{1}, new byte[]{2});
+        byte[] abandonedValue = new byte[]{3};
+        byte[] currentValue = new byte[]{4};
+        executor.setTx(true);
+        executor.prepareTx(new HgTriple<>("ap", key, null),
+                           ignored -> executor.openNodeSession(node).put("ap", key, abandonedValue));
+        // A read can open a node session before the queued writes are sent.
+        executor.openNodeSession(node);
+        if (rollbackFails) {
+            RuntimeException failure = new RuntimeException("rollback transport failure");
+            doThrow(failure).doNothing().when(session).rollback();
+            assertSame(failure, assertThrows(RuntimeException.class, executor::rollbackTx));
+        } else {
+            executor.rollbackTx();
+        }
+        assertFalse(executor.isTx());
+        verify(session).rollback();
+
+        executor.setTx(true);
+        executor.prepareTx(new HgTriple<>("ap", key, null),
+                           ignored -> executor.openNodeSession(node).put("ap", key, currentValue));
+        executor.commitTx();
+        assertFalse(executor.isTx());
+        verify(session, never()).put("ap", key, abandonedValue);
+        verify(session).put("ap", key, currentValue);
+        verify(node, times(2)).openSession("graph");
+        verify(session).commit();
+    }
 
     @Test
     public void testRetryReplacesSessionFromEvictedNode() {

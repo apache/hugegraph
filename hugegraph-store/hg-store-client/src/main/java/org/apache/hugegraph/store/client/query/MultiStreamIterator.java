@@ -17,7 +17,12 @@
 
 package org.apache.hugegraph.store.client.query;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -27,38 +32,72 @@ public class MultiStreamIterator<E> implements HgKvIterator<E> {
 
     private HgKvIterator<E> currentIterator = null;
 
+    private final List<HgKvIterator<E>> iterators;
     private final Iterator<HgKvIterator<E>> listIterator;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     public MultiStreamIterator(List<HgKvIterator<E>> iterators) {
-        this.listIterator = iterators.iterator();
+        this.iterators = new ArrayList<>(iterators);
+        this.listIterator = this.iterators.iterator();
     }
 
     @Override
     public byte[] key() {
+        checkOpen();
         return currentIterator.key();
     }
 
     @Override
     public byte[] value() {
+        checkOpen();
         return currentIterator.value();
     }
 
     @Override
     public void close() {
-        //Todo is syntax correct?
-        if (currentIterator != null && currentIterator.hasNext()) {
-            currentIterator.close();
+        if (!this.closed.compareAndSet(false, true)) {
+            return;
+        }
+        Throwable failure = null;
+        Set<HgKvIterator<E>> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (HgKvIterator<E> iterator : this.iterators) {
+            if (!visited.add(iterator)) {
+                continue;
+            }
+            try {
+                iterator.close();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    failure = error;
+                } else if (failure != error) {
+                    failure.addSuppressed(error);
+                }
+            }
+        }
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure != null) {
+            throw (RuntimeException) failure;
         }
     }
 
     @Override
     public byte[] position() {
+        checkOpen();
         return currentIterator.position();
     }
 
     @Override
     public void seek(byte[] position) {
+        checkOpen();
         this.currentIterator.seek(position);
+    }
+
+    private void checkOpen() {
+        if (this.closed.get()) {
+            throw new IllegalStateException("Iterator is closed");
+        }
     }
 
     private void getNextIterator() {
@@ -76,13 +115,16 @@ public class MultiStreamIterator<E> implements HgKvIterator<E> {
 
     @Override
     public boolean hasNext() {
+        if (this.closed.get()) {
+            return false;
+        }
         getNextIterator();
         return currentIterator != null && currentIterator.hasNext();
     }
 
     @Override
     public E next() {
-        if (currentIterator == null || !currentIterator.hasNext()) {
+        if (this.closed.get() || currentIterator == null || !currentIterator.hasNext()) {
             throw new NoSuchElementException();
         }
         return currentIterator.next();

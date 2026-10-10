@@ -398,14 +398,19 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
     @Override
     public void shutdown() {
         log.info("HeartbeatService shutdown");
-        stopProducers();
-        joinHeartbeat(storeHeartbeatThread);
-        joinHeartbeat(partitionHeartbeatThread);
-        // Producers may have submitted callbacks that create partition owners.
-        // Never hold this monitor while joining the producer threads.
-        synchronized (stateChangeLock) {
-            if (Thread.currentThread().isInterrupted()) {
-                throw new IllegalStateException("Interrupted while stopping store state callbacks");
+        boolean interrupted = Thread.interrupted();
+        try {
+            stopProducers();
+            interrupted |= joinHeartbeat(storeHeartbeatThread);
+            interrupted |= joinHeartbeat(partitionHeartbeatThread);
+            // Producers may have submitted callbacks that create partition owners.
+            // Never hold this monitor while joining the producer threads.
+            synchronized (stateChangeLock) {
+                // Acquiring the monitor waits for any in-flight state callback to finish.
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
     }
@@ -434,19 +439,24 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
         }
     }
 
-    private static void joinHeartbeat(Thread thread) {
+    private static boolean joinHeartbeat(Thread thread) {
         if (thread == null) {
-            return;
+            return false;
         }
         if (thread == Thread.currentThread()) {
             throw new IllegalStateException("Cannot close the store from its heartbeat thread");
         }
-        try {
-            thread.join();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while stopping store heartbeat", e);
+        boolean interrupted = false;
+        boolean joined = false;
+        while (!joined) {
+            try {
+                thread.join();
+                joined = true;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
         }
+        return interrupted;
     }
 
     @Override

@@ -143,7 +143,7 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
     @Override
     protected boolean opened() {
-        return this.session != null;
+        return this.session.opened();
     }
 
     @Override

@@ -149,6 +149,7 @@ jobs:
           VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SERVER_DIR=hugegraph-server/apache-hugegraph-server-$VERSION/
           bash $TRAVIS_DIR/test-ci-service-utils.sh "$TRAVIS_DIR/ci-service-utils.sh"
+          bash $TRAVIS_DIR/test-launcher-gc.sh "$GITHUB_WORKSPACE"
           bash $TRAVIS_DIR/test-start-hugegraph-signal.sh "$SERVER_DIR/bin/start-hugegraph.sh"
           $TRAVIS_DIR/test-start-hugegraph.sh $SERVER_DIR
 

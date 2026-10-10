@@ -22,6 +22,7 @@ import org.apache.hugegraph.exception.HugeException;
 import java.io.File;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -118,6 +119,11 @@ public class HugeFactory {
         synchronized (HugeFactory.class) {
             graphs = new ArrayList<>(GRAPHS.values());
         }
+        closeCurrentThreadTransactions(graphs);
+    }
+
+    static void closeCurrentThreadTransactions(
+                Collection<? extends StandardHugeGraph> graphs) {
         Throwable failure = null;
         for (StandardHugeGraph graph : graphs) {
             try {

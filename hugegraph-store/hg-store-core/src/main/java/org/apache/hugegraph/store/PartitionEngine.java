@@ -95,7 +95,6 @@ import com.alipay.sofa.jraft.storage.log.RocksDBSegmentLogStorage;
 import com.alipay.sofa.jraft.util.Endpoint;
 import com.alipay.sofa.jraft.util.ThreadId;
 import com.alipay.sofa.jraft.util.Utils;
-import com.alipay.sofa.jraft.util.internal.ThrowUtil;
 import com.google.protobuf.CodedInputStream;
 
 import lombok.Getter;
@@ -565,16 +564,28 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         if (!this.started) {
             return;
         }
-        if (this.raftGroupService != null) {
-            this.raftGroupService.shutdown();
-            try {
-                this.raftGroupService.join();
-            } catch (final InterruptedException e) {
-                ThrowUtil.throwException(e);
+        boolean interrupted = false;
+        try {
+            if (this.raftGroupService != null) {
+                this.raftGroupService.shutdown();
+                boolean terminated = false;
+                while (!terminated) {
+                    try {
+                        this.raftGroupService.join();
+                        terminated = true;
+                    } catch (InterruptedException e) {
+                        // Storage remains in use until Raft and its callbacks have stopped.
+                        interrupted = true;
+                    }
+                }
+            }
+            this.started = false;
+            log.info("PartitionEngine shutdown successfully: {}.", this);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
-        this.started = false;
-        log.info("PartitionEngine shutdown successfully: {}.", this);
     }
 
     /**

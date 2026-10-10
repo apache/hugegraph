@@ -316,8 +316,10 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
                                             walPath, tableNames);
         } catch (RocksDBException e) {
             RocksDBSessions origin = this.dbs.get(dataPath);
-            if (origin != null) {
-                if (e.getMessage().contains("No locks available")) {
+            if (origin != null &&
+                e instanceof RocksDBStdSessions.RecoveryLockException &&
+                ((RocksDBStdSessions.RecoveryLockException) e).isContention()) {
+                synchronized (origin) {
                     /*
                      * Open twice, copy a RocksDBSessions reference, since from
                      * v0.11.2 release we don't support multi graphs share
@@ -326,11 +328,16 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
                      * so each graph has its independent data paths, but multi
                      * CFs may share same optimized disk(or optimized disk path).
                      */
-                    sessions = origin.copy(config, this.database, this.store);
+                    // Keep checking, copying and opening atomic with native restore.
+                    if (origin.databaseOpened()) {
+                        sessions = origin.copy(config, this.database, this.store);
+                        return this.registerOpenedSessions(dataPath, sessions);
+                    }
                 }
             }
 
-            if (e.getMessage().contains("Column family not found")) {
+            if (!(e instanceof RocksDBStdSessions.RecoveryLockException) &&
+                e.getMessage().contains("Column family not found")) {
                 if (this.isSchemaStore()) {
                     LOG.info("Failed to open RocksDB '{}' with database '{}'," +
                              " try to init CF later", dataPath, this.database);
@@ -363,13 +370,14 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
             }
         }
 
-        if (sessions != null) {
-            // May override the original session pool
-            this.dbs.put(dataPath, sessions);
-            sessions.session().open();
-            LOG.debug("Store opened: {}", dataPath);
-        }
+        return this.registerOpenedSessions(dataPath, sessions);
+    }
 
+    private RocksDBSessions registerOpenedSessions(String dataPath, RocksDBSessions sessions) {
+        sessions.session().open();
+        // May override the original session pool after the new session opened.
+        this.dbs.put(dataPath, sessions);
+        LOG.debug("Store opened: {}", dataPath);
         return sessions;
     }
 
@@ -411,9 +419,11 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         LOG.debug("Store close: {}", this.store);
-        this.checkOpened();
+        // A failed restore may close the native owner while sessions still need
+        // releasing. Native availability is not a prerequisite for lease cleanup.
+        this.checkDbOpened();
         this.closeSessions();
     }
 
@@ -753,8 +763,10 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
 
     @Override
     public void resumeSnapshot(String snapshotPrefix, boolean deleteSnapshot) {
-        Lock readLock = this.storeLock.readLock();
-        readLock.lock();
+        Lock writeLock = this.storeLock.writeLock();
+        Map<String, RocksDBSessions> temporarySnapshots = new HashMap<>();
+        Throwable failure = null;
+        writeLock.lock();
         try {
             if (!this.opened()) {
                 return;
@@ -766,6 +778,7 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
                 LOG.debug("The origin data path: {}", entry.getKey());
                 if (!deleteSnapshot) {
                     snapshotPath = sessions.hardLinkSnapshot(snapshotPath);
+                    temporarySnapshots.put(snapshotPath, sessions);
                 }
                 LOG.debug("The snapshot data path: {}", snapshotPath);
                 snapshotPaths.put(snapshotPath, sessions);
@@ -787,9 +800,30 @@ public abstract class RocksDBStore extends AbstractBackendStore<RocksDBSessions.
             }
             LOG.info("The store '{}' resume snapshot successfully", this);
         } catch (RocksDBException | IOException e) {
-            throw new BackendException("Failed to resume snapshot", e);
+            BackendException wrapped = new BackendException("Failed to resume snapshot", e);
+            failure = wrapped;
+            throw wrapped;
+        } catch (RuntimeException | Error e) {
+            failure = e;
+            throw e;
         } finally {
-            readLock.unlock();
+            try {
+                for (Map.Entry<String, RocksDBSessions> entry : temporarySnapshots.entrySet()) {
+                    try {
+                        entry.getValue().cleanupSnapshot(entry.getKey());
+                    } catch (RuntimeException | Error cleanupFailure) {
+                        if (failure != null) {
+                            if (cleanupFailure != failure) {
+                                failure.addSuppressed(cleanupFailure);
+                            }
+                        } else {
+                            LOG.warn("Failed to clean temporary checkpoint {}", entry.getKey(), cleanupFailure);
+                        }
+                    }
+                }
+            } finally {
+                writeLock.unlock();
+            }
         }
     }
 

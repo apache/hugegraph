@@ -1291,11 +1291,17 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     static class ContextTask implements Runnable {
 
         private final Runnable runner;
+        private final Runnable cleanup;
         private final Context context;
 
         public ContextTask(Runnable runner) {
+            this(runner, HugeFactory::closeCurrentThreadTransactions);
+        }
+
+        ContextTask(Runnable runner, Runnable cleanup) {
             this.context = getContext();
             this.runner = runner;
+            this.cleanup = cleanup;
         }
 
         @Override
@@ -1305,7 +1311,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                 this.runner.run();
             } finally {
                 try {
-                    HugeFactory.closeCurrentThreadTransactions();
+                    this.cleanup.run();
                 } catch (Throwable e) {
                     LOG.error("Failed to close Gremlin worker transactions", e);
                 } finally {

@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -65,6 +66,7 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
      * the status of scheduler
      */
     private final AtomicBoolean closed = new AtomicBoolean(true);
+    private volatile boolean closeCompleted;
 
     private final ConcurrentHashMap<Id, HugeTask<?>> runningTasks = new ConcurrentHashMap<>();
     private final Set<Id> deletingTasks = ConcurrentHashMap.newKeySet();
@@ -525,7 +527,8 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
 
     @Override
     public boolean close() {
-        if (this.closed.get()) {
+        // Dispatch stopped does not imply running jobs and owners have drained.
+        if (this.closeCompleted) {
             return true;
         }
 
@@ -545,11 +548,19 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             barrier.get(schedulePeriod + 5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             LOG.warn("Cron task did not complete in time when closing scheduler");
+            return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOG.warn("Interrupted while waiting for cron task to complete", e);
+            return false;
         } catch (ExecutionException e) {
             LOG.warn("Exception while waiting for cron task to complete", e);
+            return false;
+        } catch (RejectedExecutionException e) {
+            if (!this.schedulerExecutor.isTerminated()) {
+                LOG.warn("Scheduler executor has not drained when closing scheduler", e);
+                return false;
+            }
         }
 
         // cancel all running tasks
@@ -566,19 +577,54 @@ public class DistributedTaskScheduler extends TaskAndResultScheduler {
             return false;
         }
 
-        if (!this.taskDbExecutor.isShutdown()) {
-            this.call(() -> {
-                try {
-                    this.tx().close();
-                } catch (ConnectionException ignored) {
-                    // ConnectionException means no connection established
+        Throwable failure = null;
+        boolean closed = false;
+        try {
+            if (!this.taskDbExecutor.isShutdown()) {
+                this.call(() -> {
+                    Throwable workerFailure = null;
+                    for (Runnable close : new Runnable[]{() -> {
+                        try {
+                            this.tx().close();
+                        } catch (ConnectionException ignored) {
+                            // ConnectionException means no connection established
+                        }
+                    }, this.graph::closeTx}) {
+                        try {
+                            close.run();
+                        } catch (RuntimeException | Error error) {
+                            if (workerFailure == null) {
+                                workerFailure = error;
+                            } else if (workerFailure != error) {
+                                workerFailure.addSuppressed(error);
+                            }
+                        }
+                    }
+                    if (workerFailure instanceof Error) {
+                        throw (Error) workerFailure;
+                    }
+                    if (workerFailure != null) {
+                        throw (RuntimeException) workerFailure;
+                    }
+                });
+            }
+        } catch (RuntimeException | Error error) {
+            failure = error;
+            throw error;
+        } finally {
+            try {
+                closed = this.serverManager().close();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    throw error;
                 }
-                this.graph.closeTx();
-            });
+                if (failure != error) {
+                    failure.addSuppressed(error);
+                }
+            }
         }
-
-        // TODO: serverInfoManager section should be removed in the future.
-        return this.serverManager().close();
+        this.closeCompleted = closed;
+        return closed;
     }
 
     @Override

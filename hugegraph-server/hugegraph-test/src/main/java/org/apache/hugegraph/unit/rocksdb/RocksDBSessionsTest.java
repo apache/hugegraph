@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.commons.io.FileUtils;
@@ -378,7 +379,8 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
         }
         this.rocks.session().put("single", new byte[]{(byte) 0xff}, new byte[]{43});
         this.commit();
-        Object opened = Whitebox.getInternalState(this.rocks, "rocksdb");
+        AtomicReference<?> owner = Whitebox.getInternalState(this.rocks, "rocksdb");
+        Object opened = owner.get();
         Map<String, ?> handles = Whitebox.getInternalState(opened, "cfHandles");
         Map<String, ?> before = new HashMap<>(handles);
         RocksDBStore store = this.adapterStore(topling, tables);
@@ -427,7 +429,8 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
         this.rocks.session().put(brokenTable, getBytes("z"), getBytes("last"));
         this.commit();
         RocksDBStore store = this.adapterStore(true, ImmutableList.of(TABLE, brokenTable));
-        Object opened = Whitebox.getInternalState(this.rocks, "rocksdb");
+        AtomicReference<?> owner = Whitebox.getInternalState(this.rocks, "rocksdb");
+        Object opened = owner.get();
         RocksDB realDB = Whitebox.getInternalState(opened, "rocksdb");
         Map<String, ?> handles = Whitebox.getInternalState(opened, "cfHandles");
         ColumnFamilyHandle brokenHandle = Whitebox.getInternalState(handles.get(brokenTable), "handle");
@@ -470,6 +473,23 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
         // This fixture also runs unchanged with the externally loaded TP JNI on Linux.
         Whitebox.setInternalState(store, "toplingProvider", topling);
         return store;
+    }
+
+    @Test
+    public void testDatabaseOpenedDoesNotCreateSession() throws RocksDBException {
+        HugeConfig config = FakeObjects.newConfig();
+        String path = DB_PATH + "/opened";
+        RocksDBSessions sessions =
+                new RocksDBStdSessions(config, "db", "store", path, path);
+        AtomicInteger sessionCount =
+                Whitebox.getInternalState(sessions, "sessionCount");
+
+        Assert.assertEquals(0, sessionCount.get());
+        Assert.assertTrue(sessions.databaseOpened());
+        Assert.assertEquals(0, sessionCount.get());
+
+        sessions.forceCloseRocksDB();
+        Assert.assertFalse(sessions.databaseOpened());
     }
 
     @Test
@@ -567,6 +587,159 @@ public class RocksDBSessionsTest extends BaseRocksDBUnitTest {
             if (snapshotFile.exists()) {
                 FileUtils.forceDelete(snapshotFile);
             }
+        }
+    }
+
+    @Test
+    public void testSnapshotWithSeparateWalDirectory() throws Exception {
+        String dataPath = DB_PATH + "/separate-data";
+        String walPath = DB_PATH + "/separate-wal";
+        String snapshotPath = SNAPSHOT_PATH + "/separate-rocks";
+        FileUtils.deleteDirectory(FileUtils.getFile(dataPath));
+        FileUtils.deleteDirectory(FileUtils.getFile(walPath));
+        FileUtils.deleteDirectory(FileUtils.getFile(snapshotPath));
+        HugeConfig config = FakeObjects.newConfig();
+        RocksDBSessions sessions = new RocksDBStdSessions(config, "db", "store",
+                                                          dataPath, walPath);
+        try {
+            sessions.createTable(TABLE);
+            sessions.session().put(TABLE, getBytes("person:1gname"),
+                                   getBytes("James"));
+            sessions.session().put(TABLE, getBytes("person:2gname"),
+                                   getBytes("Lisa"));
+            sessions.session().commit();
+
+            sessions.createSnapshot(snapshotPath);
+
+            sessions.session().put(TABLE, getBytes("person:1gname"),
+                                   getBytes("James2"));
+            sessions.session().put(TABLE, getBytes("person:3gname"),
+                                   getBytes("After"));
+            sessions.session().commit();
+            Assert.assertEquals("James2", getString(sessions.session().get(
+                    TABLE, getBytes("person:1gname"))));
+
+            sessions.resumeSnapshot(snapshotPath);
+
+            Assert.assertEquals("James", getString(sessions.session().get(
+                    TABLE, getBytes("person:1gname"))));
+            Assert.assertEquals("Lisa", getString(sessions.session().get(
+                    TABLE, getBytes("person:2gname"))));
+            Assert.assertNull(sessions.session().get(TABLE,
+                                                     getBytes("person:3gname")));
+            Assert.assertEquals(0, readWalLogs(dataPath).size());
+            assertNoResumeResidue(dataPath);
+        } finally {
+            sessions.close();
+            FileUtils.deleteDirectory(FileUtils.getFile(dataPath));
+            FileUtils.deleteDirectory(FileUtils.getFile(walPath));
+            File snapshotFile = FileUtils.getFile(SNAPSHOT_PATH);
+            if (snapshotFile.exists()) {
+                FileUtils.forceDelete(snapshotFile);
+            }
+        }
+    }
+
+
+    @Test
+    public void testResumeWhenDataDirectoryIsInsideWal() throws Exception {
+        String walPath = nestedRoot("parent-wal");
+        String dataPath = walPath + "/nested-data";
+        resumeNestedAndExpectSnapshot(dataPath, walPath);
+    }
+
+    @Test
+    public void testResumeWhenWalDirectoryIsInsideData() throws Exception {
+        String dataPath = nestedRoot("parent-data");
+        String walPath = dataPath + "/nested-wal";
+        resumeNestedAndExpectSnapshot(dataPath, walPath);
+    }
+
+
+    private static String nestedRoot(String name) {
+        return System.getProperty("java.io.tmpdir") + "/nested-wal-closure/" + name;
+    }
+
+    private void resumeNestedAndExpectSnapshot(String dataPath, String walPath)
+                                                throws Exception {
+        String snapshotPath = SNAPSHOT_PATH + "/nested-rocks";
+        FileUtils.deleteDirectory(FileUtils.getFile(dataPath));
+        FileUtils.deleteDirectory(FileUtils.getFile(walPath));
+        FileUtils.forceMkdir(FileUtils.getFile(walPath).getParentFile());
+        FileUtils.forceMkdir(FileUtils.getFile(dataPath).getParentFile());
+        HugeConfig config = FakeObjects.newConfig();
+        RocksDBSessions sessions = new RocksDBStdSessions(config, "db", "store",
+                                                          dataPath, walPath);
+        try {
+            sessions.createTable(TABLE);
+            sessions.session().put(TABLE, getBytes("person:1gname"),
+                                   getBytes("James"));
+            sessions.session().commit();
+            sessions.createSnapshot(snapshotPath);
+            sessions.session().put(TABLE, getBytes("person:1gname"),
+                                   getBytes("James2"));
+            sessions.session().commit();
+            sessions.resumeSnapshot(snapshotPath);
+            Assert.assertEquals("James", getString(sessions.session().get(
+                    TABLE, getBytes("person:1gname"))));
+        } finally {
+            sessions.close();
+            FileUtils.deleteDirectory(FileUtils.getFile(dataPath));
+            FileUtils.deleteDirectory(FileUtils.getFile(walPath));
+            File snapshotFile = FileUtils.getFile(SNAPSHOT_PATH);
+            if (snapshotFile.exists()) {
+                FileUtils.forceDelete(snapshotFile);
+            }
+        }
+    }
+
+    private static Map<String, byte[]> readWalLogs(String directory) throws IOException {
+        Map<String, byte[]> logs = new HashMap<>();
+        File dir = FileUtils.getFile(directory);
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return logs;
+        }
+        for (File child : children) {
+            String name = child.getName();
+            int dot = name.lastIndexOf('.');
+            if (!child.isFile() || dot <= 0 || !".log".equals(name.substring(dot))) {
+                continue;
+            }
+            boolean digits = true;
+            for (int i = 0; i < dot; i++) {
+                if (!Character.isDigit(name.charAt(i))) {
+                    digits = false;
+                    break;
+                }
+            }
+            if (digits) {
+                logs.put(name, FileUtils.readFileToByteArray(child));
+            }
+        }
+        return logs;
+    }
+
+    @Test
+    public void testResumeResidueAssertionDetectsPendingMarker() throws IOException {
+        String data = DB_PATH + "/residue-data";
+        File marker = FileUtils.getFile(data + ".resume-pending");
+        try {
+            FileUtils.writeByteArrayToFile(marker, new byte[]{1});
+            Assert.assertThrows(AssertionError.class, () -> assertNoResumeResidue(data));
+        } finally {
+            FileUtils.forceDelete(marker);
+        }
+    }
+
+    private static void assertNoResumeResidue(String dataPath) {
+        File data = FileUtils.getFile(dataPath).getAbsoluteFile();
+        File[] children = data.getParentFile().listFiles();
+        Assert.assertNotNull(children);
+        for (File child : children) {
+            String name = child.getName();
+            Assert.assertFalse(name.startsWith(data.getName() + ".resume-staging-"));
+            Assert.assertFalse(name.equals(data.getName() + ".resume-pending"));
         }
     }
 

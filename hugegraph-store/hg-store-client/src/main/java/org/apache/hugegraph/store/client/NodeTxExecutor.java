@@ -115,6 +115,7 @@ final class NodeTxExecutor {
             throw t;
         } finally {
             this.isTx = false;
+            this.entries.clear();
             this.sessions.clear();
         }
     }

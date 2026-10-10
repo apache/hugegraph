@@ -15,12 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# test-start-hugegraph-store.sh — Tests for start-hugegraph-store.sh foreground mode fix
+# test-start-hugegraph-store.sh — Foreground mode and GC option regression tests
 #
-# Baseline (unmodified code):  Test 1 PASS — Tests 2, 3, 4 FAIL
-# After chunk 3 fix:           All 4 tests PASS
-#
-# Usage: ./test-start-hugegraph-store.sh [path-to-store-dist-root]
+# Usage: ./test-start-hugegraph-store.sh [path-to-store-dist-root] [--gc-only]
 
 set -uo pipefail
 
@@ -115,7 +112,7 @@ wait_script_exit() {
 # ── preflight ─────────────────────────────────────────────────────────────────
 
 echo ""
-echo "start-hugegraph-store.sh chunk 3 test suite"
+echo "start-hugegraph-store.sh test suite"
 echo "root: $STORE_ROOT"
 echo ""
 
@@ -125,10 +122,100 @@ if [[ ! -f "$START_SCRIPT" ]]; then
     exit 1
 fi
 
-if [[ "$(uname)" == "Darwin" ]]; then
-    _prereq_tools="lsof curl java"
+# Exercise the shipped launcher in an isolated fixture, without JNI or a service.
+# This checks shell selection/argv only; the tests below check real JVM startup.
+check_gc_options() {
+    local fixture option capture status jvm_options
+    fixture=$(mktemp -d) || { fail "could not create GC test fixture"; return 1; }
+    if ! mkdir -p "$fixture/bin" "$fixture/conf" "$fixture/lib" "$fixture/jdk/bin" ||
+       ! cp "$START_SCRIPT" "$BIN/util.sh" "$BIN/preload-topling.sh" "$fixture/bin/"; then
+        fail "could not prepare GC test fixture"
+        rm -rf "$fixture"
+        return 1
+    fi
+    touch "$fixture/lib/hg-store-node-test.jar"
+    cat > "$fixture/jdk/bin/java" <<'JAVA'
+#!/bin/bash
+if [[ "$1" == "-version" ]]; then
+    echo 'openjdk version "17.0.1"' >&2
 else
-    _prereq_tools="fuser curl java"
+    printf '%s\n' "$@" > "$CAPTURE_FILE"
+fi
+JAVA
+    # Avoid the Store allocator download, which is unrelated to GC selection.
+    printf '%s\n' '#!/bin/sh' 'echo launcher-test' > "$fixture/jdk/bin/uname"
+    chmod +x "$fixture/jdk/bin/"* "$fixture/bin/start-hugegraph-store.sh"
+    for option in default default-serial default-zgc g1 G1 zgc ZGC invalid; do
+        capture="$fixture/$option.args"
+        local -a args=(-d false)
+        jvm_options="-Xms64m -Xmx64m"
+        case "$option" in
+            default) ;;
+            default-serial) jvm_options="$jvm_options -XX:+UseSerialGC" ;;
+            default-zgc) jvm_options="$jvm_options -XX:+UseZGC" ;;
+            *) args+=(-g "$option") ;;
+        esac
+        env -u GC_OPTION -u JAVA_TOOL_OPTIONS -u LD_PRELOAD \
+            -u TOPLINGDB_ROCKSDB_PROVIDER -u TOPLING_RUNTIME_CLASSPATH -u TOPLING_ACTIVE_NATIVE \
+            JAVA_HOME="$fixture/jdk" JAVA_OPTIONS="$jvm_options" \
+            OPEN_TELEMETRY=false STDOUT_MODE=true CAPTURE_FILE="$capture" \
+            PATH="$fixture/jdk/bin:$PATH" \
+            bash "$fixture/bin/start-hugegraph-store.sh" "${args[@]}" > "$fixture/output" 2>&1
+        status=$?
+        if [[ "$option" == invalid ]]; then
+            if [[ $status -eq 1 && ! -e "$capture" ]] && \
+               grep -Fq "Unrecognized gc option: 'invalid'" "$fixture/logs/hugegraph-store-server.log"; then
+                pass "invalid GC is rejected before application launch"
+            else
+                fail "invalid GC was not rejected correctly"
+            fi
+        elif [[ $status -ne 0 || ! -s "$capture" ]]; then
+            fail "GC '$option' did not reach Java (exit $status)"
+        elif [[ "$option" == zgc || "$option" == ZGC ]]; then
+            if grep -Fxq -- '-XX:+UseZGC' "$capture" && \
+               ! grep -Fxq -- '-XX:InitiatingHeapOccupancyPercent=50' "$capture"; then
+                pass "GC '$option' selects ZGC without G1 tuning"
+            else
+                fail "GC '$option' selected incorrect JVM options"
+            fi
+        elif [[ "$option" == g1 || "$option" == G1 ]]; then
+            if grep -Fxq -- '-XX:+UseG1GC' "$capture" &&
+               grep -Fxq -- '-XX:InitiatingHeapOccupancyPercent=50' "$capture" &&
+               ! grep -Fxq -- '-XX:+UseZGC' "$capture"; then
+                pass "GC '$option' explicitly selects G1"
+            else
+                fail "GC '$option' did not explicitly select G1"
+            fi
+        elif grep -Fxq -- '-XX:InitiatingHeapOccupancyPercent=50' "$capture" &&
+             ! grep -Fxq -- '-XX:+UseG1GC' "$capture"; then
+            if [[ "$option" == default-serial ]] &&
+               ! grep -Fxq -- '-XX:+UseSerialGC' "$capture"; then
+                fail "default GC selection dropped the caller's Serial GC"
+            elif [[ "$option" == default-zgc ]] &&
+                 ! grep -Fxq -- '-XX:+UseZGC' "$capture"; then
+                fail "default GC selection dropped the caller's ZGC"
+            elif [[ "$option" == default ]] && grep -Fxq -- '-XX:+UseZGC' "$capture"; then
+                fail "default GC selection unexpectedly enabled ZGC"
+            else
+                pass "GC '$option' preserves JVM/caller collector selection"
+            fi
+        else
+            fail "GC '$option' selected incorrect JVM options"
+        fi
+    done
+    rm -rf "$fixture"
+}
+
+section "GC option selection (isolated launcher fixture)"
+check_gc_options
+if [[ "${2:-}" == --gc-only ]]; then
+    [[ $FAIL -eq 0 ]] && exit 0 || exit 1
+fi
+
+if [[ "$(uname)" == "Darwin" ]]; then
+    _prereq_tools="lsof curl java jcmd"
+else
+    _prereq_tools="fuser curl java jcmd"
 fi
 for tool in $_prereq_tools; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -206,8 +293,8 @@ cleanup
 
 section "Test 2 — foreground mode blocks until Java exits"
 
-info "Starting in foreground mode (-d false)..."
-"$START_SCRIPT" -d false >/dev/null 2>&1 &
+info "Starting in foreground mode (-d false -g g1)..."
+"$START_SCRIPT" -d false -g g1 >/dev/null 2>&1 &
 SCRIPT_PID=$!
 
 info "Waiting up to ${STARTUP_WAIT}s for Store to come up..."
@@ -232,6 +319,17 @@ else
     info "pid file not written (expected before chunk 3 fix)"
 fi
 
+if [[ -n "$FG_PID" ]] && ps -p "$FG_PID" >/dev/null 2>&1; then
+    if GC_FLAGS=$(jcmd "$FG_PID" VM.flags 2>&1) &&
+       grep -Fq -- '-XX:+UseG1GC' <<<"$GC_FLAGS"; then
+        pass "explicit -g g1 runs the JVM with G1GC"
+    else
+        fail "explicit -g g1 did not run the JVM with G1GC: $GC_FLAGS"
+    fi
+else
+    fail "no running JVM available to verify explicit -g g1"
+fi
+
 if [[ -n "$FG_PID" ]]; then
     kill "$FG_PID" 2>/dev/null || true
 else
@@ -251,8 +349,8 @@ cleanup
 
 section "Test 3 — exit code propagates from Java"
 
-info "Starting in foreground mode (-d false)..."
-"$START_SCRIPT" -d false >/dev/null 2>&1 &
+info "Starting in foreground mode (-d false -g ZGC)..."
+"$START_SCRIPT" -d false -g ZGC >/dev/null 2>&1 &
 SCRIPT_PID=$!
 
 info "Waiting up to ${STARTUP_WAIT}s for Store..."

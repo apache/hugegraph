@@ -31,13 +31,13 @@ public class InnerKeyFilter<T extends BackendColumn> implements ScanIterator {
     final boolean codeFilter;
     ScanIterator iterator;
     T current = null;
+    private boolean initialized;
 
     public InnerKeyFilter(ScanIterator iterator) {
         this.iterator = iterator;
         this.codeFrom = Integer.MIN_VALUE;
         this.codeTo = Integer.MAX_VALUE;
         this.codeFilter = false;
-        moveNext();
     }
 
     public InnerKeyFilter(ScanIterator iterator, boolean codeFilter) {
@@ -45,7 +45,6 @@ public class InnerKeyFilter<T extends BackendColumn> implements ScanIterator {
         this.codeFrom = Integer.MIN_VALUE;
         this.codeTo = Integer.MAX_VALUE;
         this.codeFilter = codeFilter;
-        moveNext();
     }
 
     public InnerKeyFilter(ScanIterator iterator, int codeFrom, int codeTo) {
@@ -53,7 +52,14 @@ public class InnerKeyFilter<T extends BackendColumn> implements ScanIterator {
         this.codeFrom = codeFrom;
         this.codeTo = codeTo;
         this.codeFilter = true;
-        moveNext();
+    }
+
+    private void init() {
+        if (!this.initialized) {
+            // Publish the wrapper to its owner before prefetch can close or fail on the raw iterator.
+            this.initialized = true;
+            moveNext();
+        }
     }
 
     private void moveNext() {
@@ -76,16 +82,19 @@ public class InnerKeyFilter<T extends BackendColumn> implements ScanIterator {
 
     @Override
     public boolean hasNext() {
+        init();
         return current != null;
     }
 
     @Override
     public boolean isValid() {
+        init();
         return iterator.isValid();
     }
 
     @Override
     public T next() {
+        init();
         T column = current;
         if (!codeFilter)
         // Remove the image ID and hash suffix
@@ -103,11 +112,13 @@ public class InnerKeyFilter<T extends BackendColumn> implements ScanIterator {
 
     @Override
     public void close() {
+        this.initialized = true;
         iterator.close();
     }
 
     @Override
     public long count() {
+        init();
         return iterator.count();
     }
 }

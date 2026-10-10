@@ -41,6 +41,7 @@ public class RocksDBScanIterator<T> implements ScanIterator {
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final RocksDBSession.RefCounter iterReference;
     private final Consumer<Boolean> closeOp;
+    private Throwable closeFailure;
     private byte[] key;
     private boolean matched;
 
@@ -225,13 +226,26 @@ public class RocksDBScanIterator<T> implements ScanIterator {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         if (!this.closed.getAndSet(true)) {
-            if (this.rawIt.isOwningHandle()) {
-                this.rawIt.close();
+            try {
+                if (this.rawIt.isOwningHandle()) {
+                    this.rawIt.close();
+                }
+                this.closeOp.accept(true);
+                this.iterReference.release();
+            } catch (RuntimeException | Error failure) {
+                this.closeFailure = failure;
+                throw failure;
             }
-            this.closeOp.accept(true);
-            this.iterReference.release();
+        }
+        // Automatic exhaustion can initiate close before its owner enters finally.
+        // A repeated close must wait for that release and retain any failure, without retrying JNI.
+        if (this.closeFailure instanceof RuntimeException) {
+            throw (RuntimeException) this.closeFailure;
+        }
+        if (this.closeFailure instanceof Error) {
+            throw (Error) this.closeFailure;
         }
     }
 
