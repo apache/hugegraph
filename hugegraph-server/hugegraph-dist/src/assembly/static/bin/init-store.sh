@@ -56,6 +56,8 @@ echo "Initializing HugeGraph Store..."
 CP=$(find -L "${LIB}" -name 'hugegraph*.jar' | sort | tr '\n' ':')
 CP="$CP":$(find -L "${LIB}" -name '*.jar' \! -name 'hugegraph*' | sort | tr '\n' ':')
 CP="$CP":$(find -L "${PLUGINS}" -name '*.jar' | sort | tr '\n' ':')
+source "$BIN/preload-topling.sh" || exit 1
+CP="${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}$CP"
 "${JAVA}" @"${JVM_MODULE_OPTIONS}" -cp "$CP" \
 org.apache.hugegraph.cmd.InitStore "${CONF}"/rest-server.properties
 INIT_STORE_STATUS=$?

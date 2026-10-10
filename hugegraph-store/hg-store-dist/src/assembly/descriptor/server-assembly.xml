@@ -46,6 +46,24 @@
         </fileSet>
     </fileSets>
 
+    <files>
+        <file>
+            <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/prepare-topling.sh</source>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>755</fileMode>
+        </file>
+        <file>
+            <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/bin/preload-topling.sh</source>
+            <outputDirectory>bin</outputDirectory>
+            <fileMode>755</fileMode>
+        </file>
+        <file>
+            <source>${project.basedir}/../../hugegraph-server/hugegraph-dist/src/assembly/static/conf/toplingdb.yaml</source>
+            <outputDirectory>conf</outputDirectory>
+            <fileMode>644</fileMode>
+        </file>
+    </files>
+
     <dependencySets>
         <!-- code jars -->
         <dependencySet>

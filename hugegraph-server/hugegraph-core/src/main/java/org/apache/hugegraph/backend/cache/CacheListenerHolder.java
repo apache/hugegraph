@@ -19,23 +19,37 @@ package org.apache.hugegraph.backend.cache;
 
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.event.EventListener;
+import org.apache.hugegraph.util.Events;
 
 /*
- * Listener lifetime must cover all active transactions for the graph.
- * The holder is removed from the registry and unregistered from EventHub
- * only when the last transaction releases it.
+ * Caches and listeners belong to the graph, including between request leases.
+ * Transaction close releases a lease; graph close disposes the holder.
  */
 final class CacheListenerHolder {
 
     final EventListener listener;
     final EventHub hub;
+    final Runnable cleanup;
     // Must only be read or written inside ConcurrentMap.compute() for the
     // enclosing registry; ConcurrentHashMap.compute() serialises per-key access.
     int refCount;
 
     CacheListenerHolder(EventListener listener, EventHub hub) {
+        this(listener, hub, () -> { });
+    }
+
+    CacheListenerHolder(EventListener listener, EventHub hub, Runnable cleanup) {
         this.listener = listener;
         this.hub = hub;
+        this.cleanup = cleanup;
         this.refCount = 1;
+    }
+
+    void close() {
+        try {
+            this.hub.unlisten(Events.CACHE, this.listener);
+        } finally {
+            this.cleanup.run();
+        }
     }
 }

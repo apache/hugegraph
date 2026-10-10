@@ -15,75 +15,120 @@
  * limitations under the License.
  */
 
-
 package org.apache.hugegraph.pd.boot;
 
-import org.apache.hugegraph.pd.service.MetadataService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
-public class ShutdownHook extends Thread {
+import org.apache.hugegraph.pd.TaskScheduleService;
+import org.apache.hugegraph.pd.meta.MetadataFactory;
+import org.apache.hugegraph.pd.raft.RaftEngine;
+import org.apache.hugegraph.pd.pulse.PDPulseSubject;
+import org.apache.hugegraph.pd.service.KvServiceGrpcImpl;
+import org.apache.hugegraph.pd.service.MetadataService;
+import org.apache.hugegraph.pd.service.PDService;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.context.ApplicationListener;
+import org.lognet.springboot.grpc.context.GRpcServerInitializedEvent;
 
-    private static Logger log = LoggerFactory.getLogger(ShutdownHook.class);
-    private static String msg = "there are still uninterruptible jobs that have not been completed and" +
-                                " will wait for them to complete";
-    private Thread main;
+import io.grpc.Server;
+import org.springframework.stereotype.Component;
 
-    public ShutdownHook(Thread main) {
-        super();
-        this.main = main;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Spring stops its transports before destroying singleton beans. The PDService
+ * dependency keeps its metadata owners available until this cleanup completes.
+ */
+@Slf4j
+@Component
+public class ShutdownHook implements DisposableBean, ApplicationListener<GRpcServerInitializedEvent> {
+
+    private final PDService service;
+    private final KvServiceGrpcImpl kvService;
+    private Server grpcServer;
+
+    public ShutdownHook(PDService service, KvServiceGrpcImpl kvService) {
+        this.service = service;
+        this.kvService = kvService;
     }
 
     @Override
-    public void run() {
-        log.info("shutdown signal received");
-        main.interrupt();
-        waitForShutdown();
-        try {
-            main.join();
-        } catch (InterruptedException e) {
+    public void onApplicationEvent(GRpcServerInitializedEvent event) {
+        this.grpcServer = event.getServer();
+    }
+
+    @Override
+    public void destroy() {
+        // The starter's default stop initiates shutdown without waiting.
+        awaitGrpcTermination();
+        this.kvService.stopScheduling();
+        closeOwners(this.service);
+    }
+
+    public static void closeOwners(PDService service) {
+        log.info("Closing PD background work and native owners");
+        TaskScheduleService tasks = service.getTaskService();
+        if (tasks != null) {
+            tasks.shutDown();
         }
-        log.info("shutdown completed");
+        PDPulseSubject.stopScheduling();
+        RaftEngine raft = RaftEngine.getInstance();
+        raft.stopLeaderCallbacks();
+        // Raft may still submit snapshot saves while its shutdown is joining.
+        raft.shutDown();
+        awaitUninterruptibleJobs();
+        // A failed join must not release the database out from under Raft.
+        MetadataFactory.shutdownStore();
+        log.info("PD native owners closed");
     }
 
-    private void waitForShutdown() {
-        checkUninterruptibleJobs();
-    }
-
-    private void checkUninterruptibleJobs() {
-        ThreadPoolExecutor jobs = MetadataService.getUninterruptibleJobs();
+    private void awaitGrpcTermination() {
+        if (this.grpcServer == null) {
+            return;
+        }
+        // End long-lived watch/pulse streams as well as accepting no new calls.
+        this.grpcServer.shutdownNow();
+        boolean interrupted = Thread.interrupted();
         try {
-            if (jobs != null) {
-                long lastPrint = System.currentTimeMillis() - 5000;
-                log.info("check for ongoing background jobs that cannot be interrupted, active:{}, queue:{}.",
-                         jobs.getActiveCount(), jobs.getQueue().size());
-                while (jobs.getActiveCount() != 0 || jobs.getQueue().size() != 0) {
-                    synchronized (ShutdownHook.class) {
-                        if (System.currentTimeMillis() - lastPrint > 5000) {
-                            log.warn(msg);
-                            lastPrint = System.currentTimeMillis();
-                        }
-                        try {
-                            ShutdownHook.class.wait(200);
-                        } catch (InterruptedException e) {
-                            log.error("close jobs with error:", e);
-                        }
+            while (!this.grpcServer.isTerminated()) {
+                try {
+                    if (!this.grpcServer.awaitTermination(5, TimeUnit.SECONDS)) {
+                        log.warn("Waiting for PD gRPC transport to terminate");
                     }
+                } catch (InterruptedException e) {
+                    interrupted = true;
                 }
-                log.info("all ongoing background jobs have been completed and the shutdown will continue");
             }
-
-        } catch (Exception e) {
-            log.error("close jobs with error:", e);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
+    }
+
+    private static void awaitUninterruptibleJobs() {
+        ThreadPoolExecutor jobs = MetadataService.getUninterruptibleJobs();
+        if (jobs == null) {
+            return;
+        }
+        jobs.shutdown();
+        boolean interrupted = Thread.interrupted();
         try {
-            if (jobs != null) {
-                jobs.shutdownNow();
+            while (!jobs.isTerminated()) {
+                try {
+                    if (!jobs.awaitTermination(5, TimeUnit.SECONDS)) {
+                        log.warn("Waiting for PD metadata jobs, active: {}, queued: {}",
+                                 jobs.getActiveCount(), jobs.getQueue().size());
+                    }
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
             }
-        } catch (Exception e) {
-            log.error("close jobs with error:", e);
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }

@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.hugegraph.exception.HugeException;
@@ -72,6 +73,7 @@ import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.DateUtil;
+import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -196,6 +198,23 @@ public class VertexCoreTest extends BaseCoreTest {
               .secondary().by("cpu", "ram", "band")
               .ifNotExist()
               .create();
+    }
+
+    @Test
+    public void testDeleteVertexWithMissingSchemaLabel() throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+        Vertex vertex = graph.addVertex(T.label, "author", "id", 1, "name", "James");
+        graph.tx().commit();
+
+        // Simulate schema loss while the committed backend record remains.
+        params().schemaTransaction().removeSchema(graph.vertexLabel("author"));
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+        Vertex orphan = graph.vertices(vertex.id()).next();
+        Assert.assertEquals("~undefined", orphan.label());
+
+        orphan.remove();
+        graph.tx().commit();
+        Assert.assertFalse(graph.vertices(vertex.id()).hasNext());
     }
 
     @Test

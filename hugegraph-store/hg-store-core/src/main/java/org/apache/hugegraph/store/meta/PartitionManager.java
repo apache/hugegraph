@@ -100,6 +100,15 @@ public class PartitionManager extends GlobalMetaStore {
         deletedFileManager.load();
     }
 
+    public static final class InvalidShardException extends IllegalStateException {
+
+        private static final long serialVersionUID = 1L;
+
+        private InvalidShardException() {
+            super("Local partition does not belong to this store");
+        }
+    }
+
     public void loadPartition() {
         loadPartitions();
     }
@@ -299,7 +308,7 @@ public class PartitionManager extends GlobalMetaStore {
                     // businessHandler.dbCompaction(graph, partId);
                     log.error("partition {}-{} is illegal. store id {} not in valid shard group:{}",
                               graph, partId, getStore().getId(), shards2Peers(shards));
-                    System.exit(0);
+                    throw new InvalidShardException();
                 }
             }
 

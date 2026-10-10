@@ -3,6 +3,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Version](https://img.shields.io/badge/version-1.7.0-blue)](https://github.com/apache/hugegraph)
 
+<!-- TODO: update the version badge and release examples after 1.8.0 is published. -->
+
 ## Overview
 
 HugeGraph PD (Placement Driver) is a meta server that provides cluster management and coordination services for HugeGraph distributed deployments. It serves as the central control plane responsible for:

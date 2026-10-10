@@ -46,6 +46,16 @@ WORKFLOWS = {
                   "spark-connector-ci.yml": ["spark"], "hubble-ci.yml": ["hubble"],
                   "codeql-analysis.yml": []},
 }
+# Exact maintenance inputs have no product consumers; their checks run in the planner.
+MAINTENANCE_INPUTS = {
+    ".github/PULL_REQUEST_TEMPLATE.md": [],
+    ".github/dependabot.yml": [],
+    ".github/scripts/check-rerun.py": [],
+    ".github/scripts/test_check_rerun.py": [],
+    ".github/scripts/check-docker-images.sh": ["docker"],
+    ".github/scripts/docker-deployment.py": ["docker"],
+    ".github/scripts/test_docker_deployment.py": ["docker"],
+}
 DEPENDENTS = {
     "server": {"commons": ["server", "pd", "store", "hstore", "cluster"],
                "struct": ["server", "pd", "store", "hstore", "cluster"],
@@ -96,6 +106,9 @@ def select(project, paths):
     for path in paths:
         if documentation(path):
             continue
+        if project == "server" and path in MAINTENANCE_INPUTS:
+            selected.update(MAINTENANCE_INPUTS[path])
+            continue
         if project == "server" and (Path(path).name == "pom.xml" or path.startswith("install-dist/")):
             selected.add("dependency_license")
         if path.startswith(".github/workflows/") and Path(path).name in WORKFLOWS[project]:
@@ -110,7 +123,7 @@ def select(project, paths):
             selected.update(["client", "go"])
             continue
         if project == "server":
-            if path == "hugegraph-server/hugegraph-api/pom.xml":
+            if path in {"hugegraph-server/pom.xml", "hugegraph-server/hugegraph-api/pom.xml"}:
                 selected.add("docker")
             if path.startswith(("hugegraph-pd/hg-pd-dist/", "hugegraph-store/hg-store-dist/")):
                 selected.add("docker")
@@ -189,8 +202,11 @@ def create_plan(project, event, repository, fetch=api):
             if not all(isinstance(plan[key], str) and plan[key] for key in ("source", "base", "head", "branch")):
                 raise StaleInputError("PR event has an empty input identity")
             parents = git("show", "-s", "--format=%P", plan["testedMergeSHA"]).split()
-            if parents != [plan["base"], plan["head"]]:
+            if (plan["testedMergeSHA"] != os.environ.get("GITHUB_SHA")
+                    or len(parents) != 2 or parents[1] != plan["head"]):
                 raise StaleInputError("checkout is not the event PR merge; start a new PR run")
+            # The event base may lag the synthetic merge after the target branch advances.
+            plan["base"] = parents[0]
             require_current_pr(plan, fetch)
             # head/base objects must exist locally; workflow fetches both before planning.
             ancestor = git("merge-base", plan["base"], plan["head"])

@@ -26,7 +26,7 @@ matches the reviewed cluster plus Hubble render:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/name: hugegraph
         app.kubernetes.io/version: latest
-        helm.sh/chart: hugegraph-0.1.0
+        helm.sh/chart: hugegraph-0.1.1
       name: RELEASE-NAME-hugegraph-pd
     spec:
       egress:
@@ -97,7 +97,7 @@ matches the reviewed cluster plus Hubble render:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/name: hugegraph
         app.kubernetes.io/version: latest
-        helm.sh/chart: hugegraph-0.1.0
+        helm.sh/chart: hugegraph-0.1.1
       name: RELEASE-NAME-hugegraph-store
     spec:
       egress:
@@ -174,7 +174,7 @@ matches the reviewed cluster plus Hubble render:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/name: hugegraph
         app.kubernetes.io/version: latest
-        helm.sh/chart: hugegraph-0.1.0
+        helm.sh/chart: hugegraph-0.1.1
       name: RELEASE-NAME-hugegraph-server
     spec:
       egress:
@@ -238,7 +238,7 @@ matches the reviewed cluster plus Hubble render:
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/name: hugegraph
         app.kubernetes.io/version: latest
-        helm.sh/chart: hugegraph-0.1.0
+        helm.sh/chart: hugegraph-0.1.1
       name: RELEASE-NAME-hugegraph-hubble
     spec:
       egress:

@@ -125,9 +125,10 @@ public abstract class AbstractRestClient implements RestClient {
     }
 
     private static RequestBody buildRequestBody(Object body, RestHeaders headers) {
-        String contentType = parseContentType(headers);
+        MediaType contentType = MediaType.parse(parseContentType(headers));
         String bodyContent;
-        if (RestHeaders.APPLICATION_JSON.equals(contentType)) {
+        if (contentType != null && "application".equals(contentType.type()) &&
+            "json".equals(contentType.subtype())) {
             if (body == null) {
                 bodyContent = "{}";
             } else if (body instanceof String) {
@@ -138,8 +139,7 @@ public abstract class AbstractRestClient implements RestClient {
         } else {
             bodyContent = String.valueOf(body);
         }
-        RequestBody requestBody = RequestBody.create(bodyContent,
-                                                     MediaType.parse(contentType));
+        RequestBody requestBody = RequestBody.create(bodyContent, contentType);
 
         if (headers != null &&
             "gzip".equals(headers.get(RestHeaders.CONTENT_ENCODING))) {

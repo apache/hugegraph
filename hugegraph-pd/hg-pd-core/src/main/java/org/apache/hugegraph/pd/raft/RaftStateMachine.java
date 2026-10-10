@@ -80,6 +80,9 @@ public class RaftStateMachine extends StateMachineAdapter {
     }
     private List<RaftTaskHandler> taskHandlers;
     private List<RaftStateListener> stateListeners;
+    private final Object callbackMonitor = new Object();
+    private int callbacks;
+    private boolean stoppingCallbacks;
 
     public RaftStateMachine() {
         this.taskHandlers = new CopyOnWriteArrayList<>();
@@ -150,6 +153,54 @@ public class RaftStateMachine extends StateMachineAdapter {
         super.onShutdown();
     }
 
+    private void notifyStateListeners() {
+        synchronized (this.callbackMonitor) {
+            if (this.stoppingCallbacks || CollectionUtils.isEmpty(this.stateListeners)) {
+                return;
+            }
+            this.callbacks++;
+        }
+        try {
+            Utils.runInThread(() -> {
+                try {
+                    this.stateListeners.forEach(RaftStateListener::onRaftLeaderChanged);
+                } finally {
+                    callbackFinished();
+                }
+            });
+        } catch (RuntimeException | Error failure) {
+            callbackFinished();
+            throw failure;
+        }
+    }
+
+    private void callbackFinished() {
+        synchronized (this.callbackMonitor) {
+            this.callbacks--;
+            this.callbackMonitor.notifyAll();
+        }
+    }
+
+    void stopLeaderCallbacks() {
+        boolean interrupted = false;
+        synchronized (this.callbackMonitor) {
+            this.stoppingCallbacks = true;
+            while (this.callbacks != 0) {
+                try {
+                    this.callbackMonitor.wait(5000L);
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+                if (this.callbacks != 0) {
+                    log.warn("Waiting for PD leader callbacks to finish");
+                }
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     @Override
     public void onLeaderStart(final long term) {
         this.leaderTerm.set(term);
@@ -157,11 +208,7 @@ public class RaftStateMachine extends StateMachineAdapter {
         super.onLeaderStart(term);
 
         log.info("Raft becomes leader");
-        Utils.runInThread(() -> {
-            if (!CollectionUtils.isEmpty(stateListeners)) {
-                stateListeners.forEach(RaftStateListener::onRaftLeaderChanged);
-            }
-        });
+        notifyStateListeners();
     }
 
     @Override
@@ -182,11 +229,7 @@ public class RaftStateMachine extends StateMachineAdapter {
     public void onStartFollowing(final LeaderChangeContext ctx) {
         this.probeView = new ProbeView(State.STATE_FOLLOWER, true);
         super.onStartFollowing(ctx);
-        Utils.runInThread(() -> {
-            if (!CollectionUtils.isEmpty(stateListeners)) {
-                stateListeners.forEach(RaftStateListener::onRaftLeaderChanged);
-            }
-        });
+        notifyStateListeners();
     }
 
     @Override

@@ -18,8 +18,8 @@ jobs:
           PERSONAL_ACCESS_TOKEN : ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         with:
           path-to-signatures: '.github/cla-signatures/cla.json'
-          path-to-document: 'https://github.com/hugegraph/hugegraph-doc/blob/master/CLA.md' # e.g. a CLA or a DCO document
-          custom-allsigned-prcomment: '**Good**! All Contributors have signed the [CLA](https://github.com/hugegraph/hugegraph-doc/blob/master/CLA.md).'
+          path-to-document: 'https://www.apache.org/licenses/contributor-agreements.html' # e.g. a CLA or a DCO document
+          custom-allsigned-prcomment: '**Good**! All Contributors have signed the [CLA](https://www.apache.org/licenses/contributor-agreements.html).'
           # branch should not be protected
           branch: 'cla-assist'
           allowlist: bot*

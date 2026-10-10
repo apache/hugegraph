@@ -16,7 +16,7 @@
 
 ---
 
-**Quick Navigation:** [Architecture](#architecture) • [Quick Start](#quick-start) • [Module Map](#module-map) • [Ecosystem](#ecosystem) • [For Contributors](#for-contributors) • [Community](#community)
+**Quick Navigation:** [Architecture](#architecture) • [Quick Start](#quick-start) • [Module Map](#module-map) • [Ecosystem](#ecosystem) • [For Contributors](#contributing) • [Community](#community)
 
 ---
 
@@ -100,6 +100,8 @@ HugeGraph supports both **standalone** and **distributed** deployments:
 
 See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility) for lifecycle and historical compatibility guidance.
 
+To use ToplingDB with the RocksDB backend, follow the [three-step switching guide](docs/toplingdb.md).
+
 ### Deployment Mode Comparison
 
 | Mode | Components | Use Case | Data Scale | High Availability |
@@ -160,6 +162,8 @@ flowchart TB
 
 ## Quick Start
 
+<!-- TODO: update release downloads, package names, image tags and version examples after 1.8.0 is published. -->
+
 ### 5 Minutes Quick Start
 
 ```bash
@@ -186,7 +190,7 @@ The launch scripts reject Java versions older than 17. That minimum-version
 check does not qualify later Java releases; use Java 17 unless another release
 is explicitly listed as supported.
 
-For this upgrade, read the [TinkerPop 3.8.1 migration guide](docs/upgrade-tinkerpop-3.8.md)
+Read the [Server runtime guide](docs/server-runtime.md#runtime-and-client-configuration)
 for client configuration and query compatibility checks.
 
 ### Option 1: Docker (Fastest)
@@ -312,6 +316,8 @@ gremlin> :> g.V().limit(5)
 ```
 
 For comprehensive documentation, visit the [HugeGraph Documentation](https://hugegraph.apache.org/docs/).
+
+See [standalone RocksDB snapshot recovery](docs/rocksdb-recovery.md) before restoring data or mounting store directories.
 
 For an existing deployment, read the [RocksDB upgrade guidance](docs/rocksdb-upgrade.md) before upgrading the storage runtime.
 

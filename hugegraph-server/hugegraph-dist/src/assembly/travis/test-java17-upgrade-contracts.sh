@@ -166,10 +166,11 @@ MODULE_OPTIONS="${SERVER_ROOT}/bin/jvm-module.options"
 SERVER_SCRIPT="${SERVER_ROOT}/bin/hugegraph-server.sh"
 INIT_STORE_SCRIPT="${SERVER_ROOT}/bin/init-store.sh"
 UTIL_SCRIPT="${SERVER_ROOT}/bin/util.sh"
+PRELOAD_SCRIPT="${SERVER_ROOT}/bin/preload-topling.sh"
 CONF_SOURCE="${SERVER_ROOT}/conf"
 
 for source_file in "$MODULE_OPTIONS" "$SERVER_SCRIPT" \
-                   "$INIT_STORE_SCRIPT" "$UTIL_SCRIPT"; do
+                   "$INIT_STORE_SCRIPT" "$UTIL_SCRIPT" "$PRELOAD_SCRIPT"; do
     [[ -f "$source_file" ]] || fail "runtime asset is missing: $source_file"
 done
 [[ -d "$CONF_SOURCE" ]] || fail "server conf is missing: $CONF_SOURCE"
@@ -182,7 +183,7 @@ MOCK_JAVA_HOME="${TEMP_DIR}/mock-java-home"
 mkdir -p "${DIST_ROOT}"/{bin,conf,ext,lib,logs,plugins} \
          "${MOCK_JAVA_HOME}/bin"
 cp "$MODULE_OPTIONS" "$SERVER_SCRIPT" "$INIT_STORE_SCRIPT" "$UTIL_SCRIPT" \
-   "${DIST_ROOT}/bin/"
+   "$PRELOAD_SCRIPT" "${DIST_ROOT}/bin/"
 cp -R "${CONF_SOURCE}/." "${DIST_ROOT}/conf/"
 
 # Model a full pre-Phase-2 conf/ directory: it has no module argfile. Both

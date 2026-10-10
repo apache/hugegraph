@@ -22,7 +22,7 @@
 #
 # Usage: ./test-start-hugegraph-pd.sh [path-to-pd-dist-root]
 #   path-to-pd-dist-root: path to extracted PD dist e.g.
-#                         hugegraph-pd/apache-hugegraph-pd-1.7.0/
+#                         hugegraph-pd/apache-hugegraph-pd-1.8.0/
 #                         defaults to current directory if not provided
 
 set -uo pipefail

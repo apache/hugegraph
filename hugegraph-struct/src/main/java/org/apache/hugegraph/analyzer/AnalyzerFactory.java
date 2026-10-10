@@ -20,6 +20,7 @@ package org.apache.hugegraph.analyzer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.apache.hugegraph.config.ConfigException;
 import org.apache.hugegraph.exception.HugeException;
 
 public class AnalyzerFactory {
@@ -34,7 +35,12 @@ public class AnalyzerFactory {
         name = name.toLowerCase();
         switch (name) {
             case "word":
-                return new WordAnalyzer(mode);
+                try {
+                    return new WordAnalyzer(mode);
+                } catch (NoClassDefFoundError e) {
+                    throw new ConfigException("The word analyzer requires the optional " +
+                                              "org.apdplat:word:1.3 dependency on the runtime classpath", e);
+                }
             case "ansj":
                 return new AnsjAnalyzer(mode);
             case "hanlp":

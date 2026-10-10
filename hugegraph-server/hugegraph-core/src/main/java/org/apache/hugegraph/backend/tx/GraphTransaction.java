@@ -370,7 +370,12 @@ public class GraphTransaction extends IndexableTransaction {
                                     Map<Id, HugeEdge> removedEdges) {
         // Remove related edges of each vertex
         for (HugeVertex v : removedVertices.values()) {
-            if (!v.schemaLabel().existsLinkLabel()) {
+            // System edge labels may be absent from schema enumeration after
+            // request cleanup, so always scan auth/system vertex relations.
+            // OLAP shares its ID with a base vertex and must keep its original
+            // path rather than scan that base vertex's ordinary edges.
+            VertexLabel label = v.schemaLabel();
+            if ((!label.system() || label.olap()) && !label.existsLinkLabel()) {
                 continue;
             }
             // Query all edges of the vertex and remove them
@@ -638,7 +643,7 @@ public class GraphTransaction extends IndexableTransaction {
             this.locksTable.lockReads(LockUtil.VERTEX_LABEL_DELETE,
                                       vertex.schemaLabel().id());
             this.locksTable.lockReads(LockUtil.INDEX_LABEL_DELETE,
-                                      vertex.schemaLabel().indexLabels());
+                                      this.indexTx.indexLabelIds(vertex.schemaLabel()));
             // Ensure vertex label still exists from vertex-construct to lock
             this.graph().vertexLabel(vertex.schemaLabel().id());
             /*
@@ -711,7 +716,7 @@ public class GraphTransaction extends IndexableTransaction {
         // Override vertices in local `addedVertices`
         this.addedVertices.remove(vertex.id());
         // Force load vertex to ensure all properties are loaded (refer to #2181)
-        if (!vertex.schemaLabel().indexLabels().isEmpty()) {
+        if (!this.indexTx.indexLabelIds(vertex.schemaLabel()).isEmpty()) {
             vertex.forceLoad();
         }
         // Collect the removed vertex
@@ -760,7 +765,7 @@ public class GraphTransaction extends IndexableTransaction {
     }
 
     public Iterator<Vertex> queryTaskInfos(Object... vertexIds) {
-        if (this.graph().backendStoreFeatures().supportsTaskAndServerVertex()) {
+        if (this.storeFeatures().supportsTaskAndServerVertex()) {
             return this.queryVerticesByIds(vertexIds, false, false,
                                            HugeType.TASK);
         }
@@ -905,7 +910,7 @@ public class GraphTransaction extends IndexableTransaction {
             this.locksTable.lockReads(LockUtil.EDGE_LABEL_DELETE,
                                       edge.schemaLabel().id());
             this.locksTable.lockReads(LockUtil.INDEX_LABEL_DELETE,
-                                      edge.schemaLabel().indexLabels());
+                                      this.indexTx.indexLabelIds(edge.schemaLabel()));
             // Ensure edge label still exists from edge-construct to lock
             this.graph().edgeLabel(edge.schemaLabel().id());
             /*
@@ -1844,7 +1849,7 @@ public class GraphTransaction extends IndexableTransaction {
 
         Id pkey = prop.propertyKey().id();
         Set<Id> indexIds = new HashSet<>();
-        for (Id il : schemaLabel.indexLabels()) {
+        for (Id il : this.indexTx.indexLabelIds(schemaLabel)) {
             if (graph().indexLabel(il).indexFields().contains(pkey)) {
                 indexIds.add(il);
             }

@@ -39,6 +39,17 @@ PID_FILE="$BIN/pid"
 
 . "$BIN"/util.sh
 
+# Keep caller preloads visible to the runtime selector, including conflicting JNI.
+function preload_jemalloc() {
+    local inherited="${LD_PRELOAD//:/ }" entry
+    local -a preloads
+    read -r -a preloads <<< "${inherited//$'\n'/ }"
+    for entry in "${preloads[@]-}"; do
+        [ "$entry" != "$1" ] || return 0
+    done
+    export LD_PRELOAD="$1${LD_PRELOAD:+:$LD_PRELOAD}"
+}
+
 arch=$(uname -m)
 echo "Current arch: $arch"
 
@@ -47,7 +58,7 @@ if [[ $arch == "aarch64" || $arch == "arm64" ]]; then
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc_aarch64.so"
     expected_md5="2a631d2f81837f9d5864586761c5e380"
     if download_and_verify "$download_url" "$lib_file" "$expected_md5"; then
-        export LD_PRELOAD="$lib_file"
+        preload_jemalloc "$lib_file"
     else
         echo "Failed to verify or download $lib_file, skip it"
     fi
@@ -56,7 +67,7 @@ elif [[ $arch == "x86_64" ]]; then
     download_url="${GITHUB}/apache/hugegraph-doc/raw/binary-1.5/dist/server/libjemalloc.so"
     expected_md5="fd61765eec3bfea961b646c269f298df"
     if download_and_verify "$download_url" "$lib_file" "$expected_md5"; then
-        export LD_PRELOAD="$lib_file"
+        preload_jemalloc "$lib_file"
     else
         echo "Failed to verify or download $lib_file, skip it"
     fi
@@ -229,17 +240,28 @@ fi
 
 echo "Starting HG-StoreServer..."
 
+source "$BIN/preload-topling.sh" || exit 1
+BOOT_JARS=("${LIB}"/hg-store-node-*.jar)
+if [ "${#BOOT_JARS[@]}" -ne 1 ] || [ ! -f "${BOOT_JARS[0]}" ]; then
+    echo "Error: expected one component executable JAR in $LIB" >&2
+    exit 1
+fi
+JAVA_MAIN=(-jar "${BOOT_JARS[0]}")
+if [ -n "${TOPLING_RUNTIME_CLASSPATH:-}" ]; then
+    JAVA_MAIN=(-cp "${TOPLING_RUNTIME_CLASSPATH}:${BOOT_JARS[0]}" org.springframework.boot.loader.JarLauncher)
+fi
+
 # Turn on security check
 if [[ $DAEMON == "true" ]]; then
     echo "Starting HugeGraphStoreServer in daemon mode..."
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
             -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar &
+            "${JAVA_MAIN[@]}" "$@" &
     else
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
             -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1 &
+            "${JAVA_MAIN[@]}" "$@" >> ${OUTPUT} 2>&1 &
     fi
     PID="$!"
     # Write pid to file
@@ -251,12 +273,12 @@ else
     echo "$$" > "$PID_FILE"
     echo "[+pid] $$"
     if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
             -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar
+            "${JAVA_MAIN[@]}" "$@"
     else
-        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} -jar \
+        exec ${JAVA} -Dname="HugeGraphStore" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
             -Dspring.config.location=${CONF}/application.yml \
-            ${LIB}/hg-store-node-*.jar >> ${OUTPUT} 2>&1
+            "${JAVA_MAIN[@]}" "$@" >> ${OUTPUT} 2>&1
     fi
 fi

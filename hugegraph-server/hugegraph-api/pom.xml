@@ -44,9 +44,7 @@
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-netty-shaded</artifactId>
-            <!-- Keep consistent with grpc dependency version (pd/store) -->
-            <!-- <version>1.39.0</version>-->
-            <version>1.47.0</version>
+            <version>${grpc.version}</version>
         </dependency>
 
         <dependency>

@@ -254,7 +254,13 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         if (newState == Metapb.StoreState.Up) {
             // Status changes to online, record store information
             partitionManager.setStore(store);
-            partitionManager.loadPartition();
+            try {
+                partitionManager.loadPartition();
+            } catch (PartitionManager.InvalidShardException e) {
+                // Never wait for shutdown hooks while owning the state callback lock.
+                heartbeatService.requestExit(0);
+                return;
+            }
             restoreLocalPartitionEngine();
         }
     }

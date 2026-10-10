@@ -1,5 +1,7 @@
 # Deployment Guide
 
+<!-- TODO: update release package, image and dependency examples after 1.8.0 is published. -->
+
 This guide provides comprehensive instructions for deploying HugeGraph Store in various environments, from development to production clusters.
 
 > **PD REST credential.** Calls to a PD REST endpoint on port 8620, other than `/v1/health`, `/v1/ready`, `/actuator/**` and `/v1/prom/targets/*`, need HTTP Basic auth: one of the internal service names (`hg`, `store`, `hubble`, `vermeer`) and PD's `auth.secret-key` value as the password. A call without it gets HTTP 401 and a `{"status":-1,"error":"Unauthorized"}` body, not the payloads shown below. Export the secret before following a step that uses `${PD_SECRET}`:

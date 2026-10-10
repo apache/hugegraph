@@ -53,6 +53,7 @@ import org.apache.hugegraph.pd.StoreMonitorDataService;
 import org.apache.hugegraph.pd.StoreNodeService;
 import org.apache.hugegraph.pd.StoreStatusListener;
 import org.apache.hugegraph.pd.TaskScheduleService;
+import org.apache.hugegraph.pd.boot.ShutdownHook;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.config.PDConfig;
@@ -177,6 +178,22 @@ public class PDService extends PDGrpc.PDImplBase implements RaftStateListener {
      */
     @PostConstruct
     public void init() throws PDException {
+        try {
+            initService();
+        } catch (PDException | RuntimeException | Error failure) {
+            // Failed @PostConstruct beans are not registered for destruction.
+            try {
+                ShutdownHook.closeOwners(this);
+            } catch (RuntimeException | Error cleanup) {
+                if (cleanup != failure) {
+                    failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
+        }
+    }
+
+    private void initService() throws PDException {
         log.info("PDService init………… {}", pdConfig);
         configService = new ConfigService(pdConfig);
 

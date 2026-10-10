@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.common.PDRuntimeException;
@@ -63,11 +64,15 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
     private final List<StoreStateListener> stateListeners;
     private final Object partitionThreadLock = new Object();
     private final Object storeThreadLock = new Object();
+    private final Object stateChangeLock = new Object();
     private int heartbeatFailCount = 0;
     private int reportErrCount = 0;
     // Thread sleep time
     private volatile int timerNextDelay = 1000;
     private volatile boolean terminated = false;
+    private final AtomicBoolean fatalExitRequested = new AtomicBoolean();
+    private Thread storeHeartbeatThread;
+    private Thread partitionHeartbeatThread;
 
     public HeartbeatService(HgStoreEngine storeEngine) {
         this.storeEngine = storeEngine;
@@ -90,8 +95,10 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
         storeInfo.setDeployPath(HeartbeatService.class.getResource("/").getPath());
         storeInfo.setDataPath(options.getDataPath());
         this.pdProvider = options.getPdProvider();
-        new Thread(() -> doStoreHeartbeat(), PoolNames.HEARTBEAT).start();
-        new Thread(() -> doPartitionHeartbeat(), PoolNames.P_HEARTBEAT).start();
+        storeHeartbeatThread = new Thread(this::doStoreHeartbeat, PoolNames.HEARTBEAT);
+        partitionHeartbeatThread = new Thread(this::doPartitionHeartbeat, PoolNames.P_HEARTBEAT);
+        storeHeartbeatThread.start();
+        partitionHeartbeatThread.start();
         return true;
     }
 
@@ -137,7 +144,9 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
 
                 }
                 synchronized (storeThreadLock) {
-                    storeThreadLock.wait(timerNextDelay);
+                    if (!terminated) {
+                        storeThreadLock.wait(timerNextDelay);
+                    }
                 }
             } catch (Throwable e) {
                 if (e instanceof PDRuntimeException &&
@@ -145,6 +154,9 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
                     log.error("store heartbeat error: PD UNREACHABLE");
                     synchronized (storeThreadLock) {
                         try {
+                            if (terminated) {
+                                break;
+                            }
                             if (timerNextDelay < 10000) {
                                 storeThreadLock.wait(timerNextDelay);
                             } else {
@@ -171,7 +183,9 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
             }
             try {
                 synchronized (partitionThreadLock) {
-                    partitionThreadLock.wait(options.getPartitionHBInterval() * 1000L);
+                    if (!terminated) {
+                        partitionThreadLock.wait(options.getPartitionHBInterval() * 1000L);
+                    }
                 }
             } catch (InterruptedException e) {
                 log.error("doPartitionHeartbeat error: ", e);
@@ -215,15 +229,18 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
             if (exceptCode == ErrorType.STORE_ID_NOT_EXIST_VALUE) {
                 log.error("The store ID {} does not match the PD. Check that the correct PD is " +
                           "connected, " + "and then delete the store ID!!!", storeInfo.getId());
-                System.exit(-1);
+                requestFatalExit();
+                return;
             } else if (exceptCode == ErrorType.STORE_HAS_BEEN_REMOVED_VALUE) {
                 log.error("The store ID {} has been removed, please delete all data and restart!",
                           storeInfo.getId());
-                System.exit(-1);
+                requestFatalExit();
+                return;
             } else if (exceptCode == ErrorType.STORE_PROHIBIT_DUPLICATE_VALUE) {
                 log.error("The store ID {} maybe duplicated, please check out store raft address " +
                           "and restart later!", storeInfo.getId());
-                System.exit(-1);
+                requestFatalExit();
+                return;
             }
         }
     }
@@ -240,11 +257,13 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
             if (exceptCode == ErrorType.STORE_ID_NOT_EXIST_VALUE) {
                 log.error("The store ID {} does not match the PD. Check that the correct PD is " +
                           "connected, and then delete the store ID!!!", storeInfo.getId());
-                System.exit(-1);
+                requestFatalExit();
+                return;
             } else if (exceptCode == ErrorType.STORE_HAS_BEEN_REMOVED_VALUE) {
                 log.error("The store ID {} has been removed, please delete all data and restart!",
                           storeInfo.getId());
-                System.exit(-1);
+                requestFatalExit();
+                return;
             }
         }
         if (clusterStats == null || clusterStats.getState() == null) {
@@ -279,11 +298,19 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
     }
 
     protected synchronized void onStateChanged(Metapb.StoreState newState) {
+        if (terminated) {
+            return;
+        }
         Utils.runInThread(() -> {
-            Metapb.StoreState oldState = this.storeInfo.getState();
-            this.storeInfo.setState(newState);
-            stateListeners.forEach((e) ->
-                                           e.stateChanged(this.storeInfo, oldState, newState));
+            synchronized (stateChangeLock) {
+                if (terminated) {
+                    return;
+                }
+                Metapb.StoreState oldState = this.storeInfo.getState();
+                this.storeInfo.setState(newState);
+                stateListeners.forEach((e) ->
+                                               e.stateChanged(this.storeInfo, oldState, newState));
+            }
         });
     }
 
@@ -371,9 +398,54 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
     @Override
     public void shutdown() {
         log.info("HeartbeatService shutdown");
+        stopProducers();
+        joinHeartbeat(storeHeartbeatThread);
+        joinHeartbeat(partitionHeartbeatThread);
+        // Producers may have submitted callbacks that create partition owners.
+        // Never hold this monitor while joining the producer threads.
+        synchronized (stateChangeLock) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new IllegalStateException("Interrupted while stopping store state callbacks");
+            }
+        }
+    }
+
+    private void requestFatalExit() {
+        requestExit(-1);
+    }
+
+    void requestExit(int status) {
+        if (!fatalExitRequested.compareAndSet(false, true)) {
+            return;
+        }
+        stopProducers();
+        // Hooks join producers and wait for state callbacks to release their lock.
+        // Let the requesting producer or callback return before shutdown waits.
+        new Thread(() -> System.exit(status), "store-fatal-exit").start();
+    }
+
+    private void stopProducers() {
         terminated = true;
+        synchronized (storeThreadLock) {
+            storeThreadLock.notifyAll();
+        }
         synchronized (partitionThreadLock) {
-            partitionThreadLock.notify();
+            partitionThreadLock.notifyAll();
+        }
+    }
+
+    private static void joinHeartbeat(Thread thread) {
+        if (thread == null) {
+            return;
+        }
+        if (thread == Thread.currentThread()) {
+            throw new IllegalStateException("Cannot close the store from its heartbeat thread");
+        }
+        try {
+            thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while stopping store heartbeat", e);
         }
     }
 

@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   cluster-test:
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.

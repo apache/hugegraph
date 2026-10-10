@@ -96,3 +96,7 @@ partition:
   # The default maximum number of replicas per machine
   # the initial number of partitions= store-max-shard-count * store-number / default-shard-count
   store-max-shard-count: 12
+
+# Match the explicit launcher opt-in when enabling Topling.
+rocksdb:
+  provider: rocksdb

@@ -685,6 +685,10 @@ curl http://192.168.1.10:8620/v1/partitionsAndStatus
 
 ## Rolling Upgrades
 
+<!-- TODO: verify the 1.8.0 package examples after publication; retain historical source-version and rollback paths. -->
+
+The 1.8.0 package paths below illustrate a future release upgrade. Run these steps only after that release is published.
+
 ### Upgrade Strategy
 
 **Goal**: Upgrade cluster with zero downtime

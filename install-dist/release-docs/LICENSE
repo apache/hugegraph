@@ -258,7 +258,9 @@ Third party Apache 2.0 licenses
 The following components are provided under the Apache 2.0 License. See project link for details.
 Per-component LICENSE-[project].txt files are included only when additional
 non-Apache-2.0 license text is required for a bundled component.
-The Netty 4.1.137.Final modules share licenses/LICENSE-netty-4.1.137.Final.txt.
+The Netty modules share licenses/LICENSE-netty-4.1.137.Final.txt; tcnative
+modules use licenses/LICENSE-netty-tcnative-2.0.81.Final.txt.
+The shaded gRPC transport uses licenses/LICENSE-grpc-netty-shaded-1.55.3.txt.
 Paths referenced by upstream licenses are reproduced as labeled sections in
 the corresponding per-component license file.
 
@@ -315,16 +317,19 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/com.google.android/annotations/4.1.1.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/1.17.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/2.0.1 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.api.grpc/proto-google-common-protos/2.9.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.auto.service/auto-service-annotations/1.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.code.findbugs/jsr305/3.0.1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.code.findbugs/jsr305/3.0.2 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.code.gson/gson/2.8.6 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.code.gson/gson/2.8.9 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.code.gson/gson/2.9.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.1.3 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.10.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.18.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.3.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.4.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.11.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.errorprone/error_prone_annotations/2.48.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.guava/failureaccess/1.0.1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.guava/guava/25.1-jre -> Apache 2.0
@@ -333,6 +338,8 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/com.google.guava/guava/30.1-android -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.guava/guava/31.0.1-android -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.guava/guava/32.0.1-android -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/31.1-android -> Apache 2.0
+    https://central.sonatype.com/artifact/com.google.guava/guava/31.1-jre -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.guava/listenablefuture/9999.0-empty-to-avoid-conflict-with-guava -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.j2objc/j2objc-annotations/1.1 -> Apache 2.0
     https://central.sonatype.com/artifact/com.google.j2objc/j2objc-annotations/1.3 -> Apache 2.0
@@ -401,29 +408,16 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/io.github.hakky54/ayza-for-netty/10.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.github.hakky54/ayza/10.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/io.github.lognet/grpc-spring-boot-starter/4.5.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-api/1.28.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-api/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-api/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-context/1.28.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-context/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-context/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-core/1.28.1 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-core/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-core/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-grpclb/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.28.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.47.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf-lite/1.28.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf-lite/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.28.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-services/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.28.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.39.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.47.0 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-api/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-context/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-core/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-grpclb/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-netty/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-netty-shaded/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-protobuf-lite/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-services/1.55.3 -> Apache 2.0
+    https://central.sonatype.com/artifact/io.grpc/grpc-stub/1.55.3 -> Apache 2.0
     https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-api/0.11.2 -> Apache 2.0
     https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-api/0.11.5 -> Apache 2.0
     https://central.sonatype.com/artifact/io.jsonwebtoken/jjwt-impl/0.11.2 -> Apache 2.0
@@ -635,7 +629,6 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.gridkit.jvmtool/sjk-stacktrace/0.22 -> Apache 2.0
     https://central.sonatype.com/artifact/org.gridkit.lab/jvm-attach-api/1.5 -> Apache 2.0
     https://central.sonatype.com/artifact/org.javassist/javassist/3.21.0-GA -> Apache 2.0
-    https://central.sonatype.com/artifact/org.javassist/javassist/3.25.0-GA -> Apache 2.0
     https://central.sonatype.com/artifact/org.javassist/javassist/3.28.0-GA -> Apache 2.0
     https://central.sonatype.com/artifact/org.javatuples/javatuples/1.2 -> Apache 2.0
     https://central.sonatype.com/artifact/org.jctools/jctools-core/2.1.1 -> Apache 2.0
@@ -757,6 +750,8 @@ The text of each license is also included in licenses/LICENSE-[project].txt.
     https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.17 -> MIT
     https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.18 -> MIT
     https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.19 -> MIT
+    https://central.sonatype.com/artifact/org.codehaus.mojo/animal-sniffer-annotations/1.21 -> MIT
+    https://central.sonatype.com/artifact/org.mockito/mockito-core/3.3.3 -> MIT
     https://central.sonatype.com/artifact/org.jruby.jcodings/jcodings/1.0.58 -> MIT
     https://central.sonatype.com/artifact/org.jruby.joni/joni/2.2.1 -> MIT
     https://central.sonatype.com/artifact/org.mockito/mockito-core/3.9.0 -> MIT
@@ -822,10 +817,12 @@ The following components are provided under the BSD-3-Clause License. See projec
 The text of each license is also included in licenses/LICENSE-[project].txt.
 
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java-util/3.17.2 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java-util/3.22.3 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.11.0 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.17.2 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.21.7 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.5.1 -> BSD-3-Clause
+    https://central.sonatype.com/artifact/com.google.protobuf/protobuf-java/3.22.3 -> BSD-3-Clause
     https://central.sonatype.com/artifact/com.sun.activation/jakarta.activation/2.0.0 -> BSD-3-Clause
     https://central.sonatype.com/artifact/org.abego.treelayout/org.abego.treelayout.core/1.0.3 -> BSD-3-Clause
     https://central.sonatype.com/artifact/org.antlr/antlr4-runtime/4.9.1 -> BSD-3-Clause

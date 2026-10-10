@@ -17,12 +17,14 @@
 
 package org.apache.hugegraph.server;
 
+import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.WorkLoad;
 import org.apache.hugegraph.event.EventHub;
 import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.version.CoreVersion;
 import org.apache.tinkerpop.gremlin.server.util.MetricManager;
 import org.glassfish.hk2.api.Factory;
@@ -35,6 +37,7 @@ import org.glassfish.jersey.server.monitoring.ApplicationEvent;
 import org.glassfish.jersey.server.monitoring.ApplicationEventListener;
 import org.glassfish.jersey.server.monitoring.RequestEvent;
 import org.glassfish.jersey.server.monitoring.RequestEventListener;
+import org.slf4j.Logger;
 
 import com.codahale.metrics.MetricRegistry;
 import com.codahale.metrics.jersey3.InstrumentedResourceMethodApplicationListener;
@@ -64,6 +67,9 @@ import jakarta.ws.rs.core.Context;
 )
 @ApplicationPath("/")
 public class ApplicationConfig extends ResourceConfig {
+
+    private static final Logger LOG = Log.logger(ApplicationConfig.class);
+
     @Context
     private ServletConfig servletConfig;
 
@@ -195,7 +201,15 @@ public class ApplicationConfig extends ResourceConfig {
 
                 @Override
                 public RequestEventListener onRequest(RequestEvent event) {
-                    return null;
+                    return request -> {
+                        if (request.getType() == RequestEvent.Type.FINISHED) {
+                            try {
+                                HugeFactory.closeCurrentThreadTransactions();
+                            } catch (RuntimeException e) {
+                                LOG.error("Failed to release REST request transactions", e);
+                            }
+                        }
+                    };
                 }
             });
         }

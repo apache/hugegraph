@@ -29,6 +29,7 @@ import org.apache.hugegraph.analyzer.Analyzer;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendStore;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.id.EdgeId;
 import org.apache.hugegraph.query.ConditionQuery;
@@ -230,6 +231,10 @@ public class GraphIndexTransactionTest {
         Mockito.doReturn(objects.graph().configuration()).when(params).configuration();
         Mockito.when(params.serializer()).thenReturn(serializer);
         Mockito.when(params.schemaTransaction()).thenReturn(schema);
+        Mockito.when(schema.getVertexLabel(Mockito.any(Id.class)))
+               .thenAnswer(call -> objects.graph().vertexLabel((Id) call.getArgument(0)));
+        Mockito.when(schema.getEdgeLabel(Mockito.any(Id.class)))
+               .thenAnswer(call -> objects.graph().edgeLabel((Id) call.getArgument(0)));
         Mockito.when(schema.getIndexLabels()).thenReturn(labels);
         Mockito.when(params.analyzer()).thenReturn(analyzer);
         for (IndexLabel label : labels) {

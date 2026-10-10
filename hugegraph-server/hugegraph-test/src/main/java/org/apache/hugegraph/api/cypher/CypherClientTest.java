@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.api.cypher;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,9 +28,34 @@ import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.apache.tinkerpop.gremlin.process.traversal.Path;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.MutablePath;
+import org.apache.tinkerpop.gremlin.util.Tokens;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
 import org.junit.Test;
 
 public class CypherClientTest extends BaseUnitTest {
+
+    @Test
+    public void testRequestPreservesQueryAndParameterValues() {
+        String query = "MATCH (n:person) WHERE n.name = $name RETURN n.name";
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("name", "quote'\"\nRETURN 999 //");
+        parameters.put("age", 29);
+        parameters.put("active", true);
+
+        RequestMessage request = CypherClient.createRequest(query, parameters);
+
+        Assert.assertEquals("cypher", request.getProcessor());
+        Assert.assertEquals(query, request.getArgs().get(Tokens.ARGS_GREMLIN));
+        Assert.assertEquals(parameters, request.getArgs().get(Tokens.ARGS_BINDINGS));
+    }
+
+    @Test
+    public void testRequestAcceptsEmptyParameters() {
+        RequestMessage request = CypherClient.createRequest("RETURN 1", Collections.emptyMap());
+
+        Assert.assertEquals(Collections.emptyMap(), request.getArgs().get(Tokens.ARGS_BINDINGS));
+    }
+
 
     @Test
     public void testNormalizeHandlesNullMapAndArrayValues() {

@@ -24,6 +24,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 
 ADMIN_PASSWORD = "ci-compose-password"
@@ -59,6 +60,33 @@ def expect_response(url, expected=200, credentials=None):
     return body
 
 
+def expected_versions():
+    root = Path(__file__).resolve().parents[2]
+    ns = {"m": "http://maven.apache.org/POM/4.0.0"}
+    revision = ET.parse(root / "pom.xml").findtext("m:properties/m:revision", namespaces=ns)
+    gremlin = ET.parse(root / "hugegraph-server/pom.xml").findtext(
+        "m:properties/m:tinkerpop.version", namespaces=ns)
+    properties = dict(line.split("=", 1) for line in
+                      (root / "hugegraph-commons/hugegraph-common/src/main/resources/version.properties")
+                      .read_text().splitlines() if "=" in line and not line.startswith("#"))
+    if properties["VersionInBash"] != revision:
+        raise RuntimeError("VersionInBash does not match the project revision")
+    # Packaged API classes use their manifest version before the resource fallback.
+    api = ET.parse(root / "hugegraph-server/hugegraph-api/pom.xml").findtext(
+        ".//m:manifestEntries/m:Implementation-Version", namespaces=ns) or properties["ApiVersion"]
+    expected = {"version": "v1", "core": revision, "gremlin": gremlin, "api": api}
+    if any(not isinstance(value, str) or not value for value in expected.values()):
+        raise RuntimeError("Source POMs did not define non-empty expected versions")
+    return expected
+
+
+def verify_versions(payload):
+    versions = payload.get("versions") if isinstance(payload, dict) else None
+    expected = expected_versions()
+    if not isinstance(versions, dict) or any(versions.get(key) != value for key, value in expected.items()):
+        raise RuntimeError(f"Server did not return the expected versions object: {expected}; got {versions}")
+
+
 def verify_server():
     url = "http://localhost:8080"
     expect_response(url + "/graphspaces/DEFAULT/graphs", 401)
@@ -68,11 +96,7 @@ def verify_server():
     if not isinstance(names, list) or "hugegraph" not in names:
         raise RuntimeError("Server did not return its initialized hugegraph in the graphs array")
     payload = json.loads(expect_response(url + "/versions"))
-    versions = payload.get("versions") if isinstance(payload, dict) else None
-    if not isinstance(versions, dict) or versions.get("version") != "v1" or any(
-            not isinstance(versions.get(key), str) or not versions[key]
-            for key in ("core", "gremlin", "api")):
-        raise RuntimeError("Server did not return the expected versions object")
+    verify_versions(payload)
 
 
 def verify_storage():
@@ -89,6 +113,15 @@ def verify_storage():
     if (not isinstance(data, dict) or payload.get("status") != 0 or
             not isinstance(data.get("stores"), list) or not data["stores"]):
         raise RuntimeError("Authenticated PD did not return its registered stores array")
+
+
+def verify_graph(run_id):
+    root = Path(__file__).resolve().parents[2]
+    script = root / "hugegraph-server/hugegraph-dist/src/assembly/travis/run-server-e2e-smoke-test.sh"
+    environment = dict(os.environ, HUGEGRAPH_USERNAME="admin", HUGEGRAPH_PASSWORD=ADMIN_PASSWORD)
+    # Reuse the write/read/Gremlin assertions; allow its readiness and bounded HTTP requests.
+    subprocess.run(["bash", str(script), "http://localhost:8080", "create", run_id],
+                   check=True, timeout=960, env=environment)
 
 
 def smoke(tag, topology, images):
@@ -113,6 +146,7 @@ def smoke(tag, topology, images):
         verify_server()
         if "pd" in images:
             verify_storage()
+        verify_graph(project.replace("-", "_"))
     except BaseException:
         failed = True
         for args in (["ps"], ["logs", "--no-color", "--tail", "200"]):

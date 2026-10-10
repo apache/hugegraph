@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 
 import org.apache.hugegraph.pd.KvService;
 import org.apache.hugegraph.pd.common.PDException;
@@ -84,6 +85,32 @@ public class KvServiceGrpcImpl extends KvServiceGrpc.KvServiceImplBase implement
                 subjects.keepClientAlive();
             }
         }, 0, KvWatchSubject.WATCH_TTL * 1 / 3, TimeUnit.MILLISECONDS);
+    }
+
+    /** Stop periodic watch work and wait while Raft can still serve its writes. */
+    @PreDestroy
+    public void stopScheduling() {
+        ScheduledExecutorService current = this.executor;
+        if (current == null) {
+            return;
+        }
+        current.shutdown();
+        boolean interrupted = Thread.interrupted();
+        try {
+            while (!current.isTerminated()) {
+                try {
+                    if (!current.awaitTermination(5, TimeUnit.SECONDS)) {
+                        log.warn("Waiting for PD KV watch scheduler to stop");
+                    }
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     /**

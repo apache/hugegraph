@@ -86,7 +86,8 @@ CP="$CP":$(find -L $PLUGINS -name '*.jar' | sort | tr '\n' ':')
 # (Cygwin only) Use ; classpath separator and reformat paths for Windows ("C:\foo")
 [[ $(uname) = CYGWIN* ]] && CP="$(cygpath -p -w "$CP")"
 
-export CLASSPATH="${CLASSPATH:-}:$CP"
+source "$BIN/preload-topling.sh" || exit 1
+export CLASSPATH="${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}${CLASSPATH:-}:$CP"
 
 # Change to $BIN's parent
 cd "${TOP}" || exit 1
@@ -259,12 +260,12 @@ fi
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
     exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
 else
     exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
         >> ${LOGS}/hugegraph-server-stdout.log 2>&1

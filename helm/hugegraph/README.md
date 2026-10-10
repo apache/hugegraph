@@ -172,8 +172,9 @@ A fresh install seeds PD with a partition shard count of 3 when
 default of 1. The seed applies at first bootstrap only; see Partition
 Sharding below.
 
-The component image tags and `appVersion` track `latest` until the next
-HugeGraph release tag is published. For production, pin the image tags (or
+The component image tags and `appVersion` stay at `latest` until the 1.8.0
+release images are published. Empty component tags inherit `appVersion`;
+explicit image tags still override it. For production, pin the image tags (or
 digests) and switch the component pull policies to `IfNotPresent`.
 
 Verify the release:

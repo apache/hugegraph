@@ -18,6 +18,7 @@
 package org.apache.hugegraph.api.cypher;
 
 import java.lang.reflect.Array;
+import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -67,20 +68,25 @@ public final class CypherClient {
     }
 
     public CypherModel submitQuery(String cypherQuery, @Nullable Map<String, String> aliases) {
-        E.checkArgument(cypherQuery != null && !cypherQuery.isEmpty(),
-                        "The cypher-query parameter can't be null or empty");
+        return this.submitQuery(cypherQuery, aliases, Collections.emptyMap());
+    }
 
+    public CypherModel submitQuery(String cypherQuery, @Nullable Map<String, String> aliases,
+                                   Map<String, Object> parameters) {
+        E.checkArgument(cypherQuery != null && !cypherQuery.isBlank(),
+                        "The cypher-query parameter must be a nonblank string");
+        E.checkArgument(parameters != null, "The parameters parameter must be an object");
+
+        RequestMessage request = createRequest(cypherQuery, parameters);
         Cluster cluster = Cluster.open(getConfig());
-        Client client = cluster.connect();
-
-        if (aliases != null && !aliases.isEmpty()) {
-            client = client.alias(aliases);
-        }
-
-        RequestMessage request = createRequest(cypherQuery);
+        Client client = null;
         CypherModel res;
 
         try {
+            client = cluster.connect();
+            if (aliases != null && !aliases.isEmpty()) {
+                client = client.alias(aliases);
+            }
             List<Object> list = this.doQueryList(client, request);
             res = CypherModel.dataOf(request.getRequestId().toString(), list);
         } catch (Exception e) {
@@ -88,17 +94,23 @@ public final class CypherClient {
                                     cypherQuery), e);
             res = CypherModel.failOf(request.getRequestId().toString(), e.getMessage());
         } finally {
-            client.close();
-            cluster.close();
+            try {
+                if (client != null) {
+                    client.close();
+                }
+            } finally {
+                cluster.close();
+            }
         }
 
         return res;
     }
 
-    private RequestMessage createRequest(String cypherQuery) {
+    static RequestMessage createRequest(String cypherQuery, Map<String, Object> parameters) {
         return RequestMessage.build(Tokens.OPS_EVAL)
                              .processor("cypher")
                              .add(Tokens.ARGS_GREMLIN, cypherQuery)
+                             .add(Tokens.ARGS_BINDINGS, parameters)
                              .create();
     }
 

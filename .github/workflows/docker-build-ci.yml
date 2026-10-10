@@ -128,5 +128,5 @@ jobs:
       - name: Verify deployment checker contracts
         run: python3 -m unittest discover -s .github/scripts -p 'test_docker_deployment.py'
 
-      - name: Start the exact PR images and verify health and authentication
+      - name: Verify exact PR images, authentication and graph read/write
         run: python3 .github/scripts/docker-deployment.py "$IMAGE_TAG"

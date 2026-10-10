@@ -87,10 +87,12 @@
 
     <properties>
         <fabric8.version>5.6.0</fabric8.version>
-        <revision>1.7.0</revision>
+        <revision>1.8.0</revision>
         <groovy.version>4.0.25</groovy.version>
         <jackson.version>2.15.2</jackson.version>
         <netty.version>4.1.137.Final</netty.version>
+        <grpc.version>1.55.3</grpc.version>
+        <protobuf.runtime.version>3.22.3</protobuf.runtime.version>
         <snakeyaml.version>2.2</snakeyaml.version>
         <spring-boot.version>2.5.15</spring-boot.version>
         <spring-framework.version>5.3.27</spring-framework.version>
@@ -113,6 +115,7 @@
         <argLine />
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <shell-executable>bash</shell-executable>
+        <!-- TODO: align the client after Toolchain 1.8.0 artifacts are available. -->
         <toolchain.vision>1.5.0</toolchain.vision>
         <rocksdb.version>8.10.2</rocksdb.version>
     </properties>
@@ -129,6 +132,20 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-bom</artifactId>
+                <version>${protobuf.runtime.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <!-- Keep YAML, JSON and Fabric8 on one compatible Jackson API. -->
             <dependency>
                 <groupId>com.fasterxml.jackson</groupId>
