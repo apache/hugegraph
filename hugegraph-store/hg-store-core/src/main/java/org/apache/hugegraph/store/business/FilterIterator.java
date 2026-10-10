@@ -18,6 +18,7 @@
 package org.apache.hugegraph.store.business;
 
 import org.apache.commons.lang3.ArrayUtils;
+import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
@@ -34,20 +35,32 @@ public class FilterIterator<T extends RocksDBSession.BackendColumn> extends
     private final ConditionQuery query;
     T current = null;
 
-    public FilterIterator(ScanIterator iterator, ConditionQuery query) {
-        super();
+    public FilterIterator(ScanIterator iterator, ConditionQuery query, HugeGraphSupplier graph) {
+        super(graph);
         this.iterator = iterator;
         this.query = query;
         // log.info("operator sinking is used to filter data:{}",
         //         query.toString());
     }
 
-    public static ScanIterator of(ScanIterator it, byte[] conditionQuery) {
+    public static ScanIterator of(ScanIterator it, byte[] conditionQuery, String graph) {
         if (ArrayUtils.isEmpty(conditionQuery)) {
             return it;
         }
-        ConditionQuery query = ConditionQuery.fromBytes(conditionQuery);
-        return new FilterIterator(it, query);
+        try {
+            ConditionQuery query = ConditionQuery.fromBytes(conditionQuery);
+            if (!query.resultType().isVertex() && !query.resultType().isEdge()) {
+                return it;
+            }
+            return new FilterIterator(it, query, BusinessHandlerImpl.getGraphSupplier(graph));
+        } catch (RuntimeException failure) {
+            try {
+                it.close();
+            } catch (RuntimeException closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
+            throw failure;
+        }
     }
 
     @Override
@@ -60,11 +73,11 @@ public class FilterIterator<T extends RocksDBSession.BackendColumn> extends
                 current = iterator.next();
                 BaseElement element;
                 if (this.query.resultType().isVertex()) {
-                    element = serializer.parseVertex(null,
+                    element = serializer.parseSchemaVertex(this.graph,
                                                      BackendColumn.of(current.name, current.value),
                                                      null);
                 } else {
-                    element = serializer.parseEdge(null,
+                    element = serializer.parseSchemaEdge(this.graph,
                                                    BackendColumn.of(current.name, current.value),
                                                    null, true);
                 }

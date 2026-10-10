@@ -25,7 +25,7 @@ import java.util.Set;
 import javax.security.sasl.AuthenticationException;
 
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 
 public interface AuthManager {
 

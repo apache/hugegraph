@@ -17,13 +17,15 @@
 
 package org.apache.hugegraph.memory.consumer.factory;
 
+import org.apache.hugegraph.backend.BinaryId;
+
 import java.util.UUID;
 
 import org.apache.hugegraph.backend.cache.CachedBackendStore;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
 import org.apache.hugegraph.memory.MemoryManager;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
@@ -50,7 +52,7 @@ public class IdFactory {
     /**
      * If using off-heap mode, param id must be OffHeapObject
      */
-    public BinaryBackendEntry.BinaryId newBinaryId(byte[] bytes, Id id) {
+    public BinaryId newBinaryId(byte[] bytes, Id id) {
         switch (memoryMode) {
             case ENABLE_ON_HEAP_MANAGEMENT:
             case ENABLE_OFF_HEAP_MANAGEMENT:
@@ -63,7 +65,7 @@ public class IdFactory {
                                            (OffHeapObject) id);
             case DISABLE_MEMORY_MANAGEMENT:
             default:
-                return new BinaryBackendEntry.BinaryId(bytes, id);
+                return new BinaryId(bytes, id);
         }
     }
 
@@ -238,8 +240,8 @@ public class IdFactory {
                 );
             case DISABLE_MEMORY_MANAGEMENT:
             default:
-                return new EdgeId(ownerVertex, direction, edgeLabelId, subLabelId, sortValues,
-                                  otherVertex);
+                return new EdgeId(ownerVertex.id(), direction, edgeLabelId, subLabelId, sortValues,
+                                  otherVertex.id());
         }
     }
 

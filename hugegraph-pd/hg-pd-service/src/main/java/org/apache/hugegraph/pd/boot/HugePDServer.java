@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.pd.boot;
 
+import org.apache.hugegraph.util.RocksDBRuntime;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ComponentScan;
@@ -37,8 +38,10 @@ public class HugePDServer {
             System.setProperty("logging.path", "logs");
             System.setProperty("com.alipay.remoting.client.log.level", "error");
         }
-        Runtime.getRuntime().addShutdownHook(new ShutdownHook(Thread.currentThread()));
-        SpringApplication.run(HugePDServer.class);
+        SpringApplication application = new SpringApplication(HugePDServer.class);
+        application.addInitializers(context -> RocksDBRuntime.verify(
+                context.getEnvironment().getProperty("rocksdb.provider", "rocksdb")));
+        application.run(args);
         System.out.println("Hugegraph-pd started.");
     }
 }

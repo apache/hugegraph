@@ -21,7 +21,7 @@ import java.util.Date;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.util.E;

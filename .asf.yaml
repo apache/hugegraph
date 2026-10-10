@@ -38,11 +38,8 @@ github:
         strict: false
         # contexts are the names of checks that must pass (now only enable the basic check)
         contexts:
-          - Analyze (java)
-          - CodeQL
           - check-license
-          - build-server (memory, 11)
-          - build-commons (11)
+          - Server memory tests
       required_pull_request_reviews:
         dismiss_stale_reviews: true
         require_code_owner_reviews: false

@@ -27,9 +27,10 @@ import java.util.Objects;
 import javax.security.sasl.AuthenticationException;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.auth.AuthConstant;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAccess;
 import org.apache.hugegraph.auth.HugeBelong;
@@ -41,11 +42,14 @@ import org.apache.hugegraph.auth.HugeTarget;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.StandardAuthManager;
+import org.apache.hugegraph.auth.TokenGenerator;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.cache.Cache;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.exception.NotFoundException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.JsonUtil;
@@ -139,8 +143,7 @@ public class AuthTest extends BaseCoreTest {
         }
 
         //FIXME: support project in hstore
-        boolean isHstore = Objects.equals("hstore", System.getProperty("backend")) ||
-                           (System.getProperty("backend") == null);
+        boolean isHstore = Objects.equals("hstore", graph.backend());
 
         if (!isHstore) {
             for (HugeProject project : authManager.listAllProject(-1)) {
@@ -1668,6 +1671,25 @@ public class AuthTest extends BaseCoreTest {
     }
 
     @Test
+    public void testRejectInvalidAndExpiredTokens() {
+        AuthManager authManager = graph().authManager();
+        TokenGenerator generator = Whitebox.getInternalState(authManager,
+                                                             "tokenGenerator");
+        Map<String, String> claims = ImmutableMap.of(AuthConstant.TOKEN_USER_NAME,
+                                                     "test");
+        String expired = generator.create(claims, -60000L);
+        String wrongKey = new TokenGenerator("abcdefghijklmnopqrstuvwxyz012345")
+                          .create(claims, 60000L);
+
+        for (String token : ImmutableList.of(expired, wrongKey, "123.ansfaf")) {
+            UserWithRole rejected = authManager.validateUser(token);
+            Assert.assertEquals("", rejected.username());
+            Assert.assertNull(rejected.userId());
+            Assert.assertNull(rejected.role());
+        }
+    }
+
+    @Test
     public void testLogout() throws AuthenticationException {
         AuthManager authManager = graph().authManager();
 
@@ -1755,6 +1777,90 @@ public class AuthTest extends BaseCoreTest {
         Assert.assertThrows(Exception.class, () -> {
             authManager.getTarget(IdGenerator.of(deletedProject.targetId()));
         });
+    }
+
+    @Test
+    public void testProjectCleanupRepeatsWithoutBackendSystemProperty() {
+        Assume.assumeTrue("skip this test for hstore", !Objects.equals("hstore", graph().backend()));
+        String previous = System.getProperty("backend");
+        try {
+            System.clearProperty("backend");
+            for (int attempt = 0; attempt < 2; attempt++) {
+                this.testDeleteProjectAfterRequestCleanup();
+                this.clearAll();
+                Assert.assertEquals(0, graph().authManager().listAllProject(-1).size());
+            }
+        } finally {
+            if (previous == null) {
+                System.clearProperty("backend");
+            } else {
+                System.setProperty("backend", previous);
+            }
+        }
+    }
+
+    @Test
+    public void testDeleteProjectAfterRequestCleanup() {
+        Assume.assumeTrue("skip this test for hstore", !Objects.equals("hstore", graph().backend()));
+        AuthManager authManager = graph().authManager();
+        HugeProject project = makeProject("cleanup_project", "");
+        Id projectId = authManager.createProject(project);
+        HugeProject saved = authManager.getProject(projectId);
+        Id retainedId = authManager.createProject(makeProject("retained_project", ""));
+        HugeProject retained = authManager.getProject(retainedId);
+        Assert.assertEquals(3, authManager.listAccessByTarget(saved.targetId(), -1).size());
+        Id userId = authManager.createUser(makeUser("membership_user", "pass"));
+        authManager.createBelong(makeBelong(userId, saved.adminGroupId()));
+        Id retainedBelongId = authManager.createBelong(makeBelong(userId, retained.adminGroupId()));
+
+        // Match FINISHED cleanup between REST creation and deletion requests.
+        HugeFactory.closeCurrentThreadTransactions();
+        authManager.deleteProject(projectId);
+        HugeFactory.closeCurrentThreadTransactions();
+
+        Assert.assertEquals(0, authManager.listAccessByGroup(saved.adminGroupId(), -1).size());
+        Assert.assertEquals(0, authManager.listAccessByGroup(saved.opGroupId(), -1).size());
+        Assert.assertEquals(0, authManager.listAccessByTarget(saved.targetId(), -1).size());
+        Assert.assertEquals(3, authManager.listAccessByTarget(retained.targetId(), -1).size());
+        Assert.assertEquals(0, authManager.listBelongByGroup(saved.adminGroupId(), -1).size());
+        Assert.assertEquals(1, authManager.listBelongByUser(userId, -1).size());
+        Assert.assertEquals(retainedBelongId, authManager.getBelong(retainedBelongId).id());
+        Assert.assertEquals(userId, authManager.getUser(userId).id());
+        Assert.assertEquals(projectId, authManager.createProject(makeProject("cleanup_project", "")));
+        Assert.assertEquals(0, authManager.listBelongByGroup(saved.adminGroupId(), -1).size());
+    }
+
+    @Test
+    public void testDeleteUserWithRelationsAfterRequestCleanup() {
+        Assume.assumeTrue("skip this test for hstore", !Objects.equals("hstore", graph().backend()));
+        AuthManager authManager = graph().authManager();
+        Id deletedUser = authManager.createUser(makeUser("deleted_member", "pass"));
+        Id retainedUser = authManager.createUser(makeUser("retained_member", "pass"));
+        Id group = authManager.createGroup(makeGroup("shared_group"));
+        authManager.createBelong(makeBelong(deletedUser, group));
+        Id retainedBelong = authManager.createBelong(makeBelong(retainedUser, group));
+
+        HugeFactory.closeCurrentThreadTransactions();
+        authManager.deleteUser(deletedUser);
+        HugeFactory.closeCurrentThreadTransactions();
+
+        Assert.assertThrows(NotFoundException.class, () -> authManager.getUser(deletedUser));
+        Assert.assertEquals(0, authManager.listBelongByUser(deletedUser, -1).size());
+        Assert.assertEquals(1, authManager.listBelongByGroup(group, -1).size());
+        Assert.assertEquals(retainedBelong, authManager.getBelong(retainedBelong).id());
+        Assert.assertEquals(retainedUser, authManager.getUser(retainedUser).id());
+    }
+
+    @Test
+    public void testDeleteUserWithoutRelationsAfterRequestCleanup() {
+        Assume.assumeTrue("skip this test for hstore", !Objects.equals("hstore", graph().backend()));
+        AuthManager authManager = graph().authManager();
+        Id userId = authManager.createUser(makeUser("isolated_user", "pass"));
+        HugeFactory.closeCurrentThreadTransactions();
+        authManager.deleteUser(userId);
+        HugeFactory.closeCurrentThreadTransactions();
+        Assert.assertThrows(NotFoundException.class, () -> authManager.getUser(userId));
+        Assert.assertEquals(0, authManager.listBelongByUser(userId, -1).size());
     }
 
     @Test

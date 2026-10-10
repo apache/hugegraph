@@ -17,7 +17,11 @@
 
 package org.apache.hugegraph.api.cypher;
 
+import java.lang.reflect.Array;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -29,20 +33,23 @@ import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
 import org.apache.commons.configuration2.Configuration;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.driver.Client;
 import org.apache.tinkerpop.gremlin.driver.Cluster;
 import org.apache.tinkerpop.gremlin.driver.Result;
 import org.apache.tinkerpop.gremlin.driver.ResultSet;
-import org.apache.tinkerpop.gremlin.driver.Tokens;
-import org.apache.tinkerpop.gremlin.driver.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.process.traversal.Path;
+import org.apache.tinkerpop.gremlin.util.Tokens;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
 import org.slf4j.Logger;
 
 @ThreadSafe
 public final class CypherClient {
 
     private static final Logger LOG = Log.logger(CypherClient.class);
+    private static final int NORMALIZE_MAX_DEPTH = 32;
     private final Supplier<Configuration> configurationSupplier;
     private String userName;
     private String password;
@@ -61,20 +68,25 @@ public final class CypherClient {
     }
 
     public CypherModel submitQuery(String cypherQuery, @Nullable Map<String, String> aliases) {
-        E.checkArgument(cypherQuery != null && !cypherQuery.isEmpty(),
-                        "The cypher-query parameter can't be null or empty");
+        return this.submitQuery(cypherQuery, aliases, Collections.emptyMap());
+    }
 
+    public CypherModel submitQuery(String cypherQuery, @Nullable Map<String, String> aliases,
+                                   Map<String, Object> parameters) {
+        E.checkArgument(cypherQuery != null && !cypherQuery.isBlank(),
+                        "The cypher-query parameter must be a nonblank string");
+        E.checkArgument(parameters != null, "The parameters parameter must be an object");
+
+        RequestMessage request = createRequest(cypherQuery, parameters);
         Cluster cluster = Cluster.open(getConfig());
-        Client client = cluster.connect();
-
-        if (aliases != null && !aliases.isEmpty()) {
-            client = client.alias(aliases);
-        }
-
-        RequestMessage request = createRequest(cypherQuery);
+        Client client = null;
         CypherModel res;
 
         try {
+            client = cluster.connect();
+            if (aliases != null && !aliases.isEmpty()) {
+                client = client.alias(aliases);
+            }
             List<Object> list = this.doQueryList(client, request);
             res = CypherModel.dataOf(request.getRequestId().toString(), list);
         } catch (Exception e) {
@@ -82,17 +94,23 @@ public final class CypherClient {
                                     cypherQuery), e);
             res = CypherModel.failOf(request.getRequestId().toString(), e.getMessage());
         } finally {
-            client.close();
-            cluster.close();
+            try {
+                if (client != null) {
+                    client.close();
+                }
+            } finally {
+                cluster.close();
+            }
         }
 
         return res;
     }
 
-    private RequestMessage createRequest(String cypherQuery) {
+    static RequestMessage createRequest(String cypherQuery, Map<String, Object> parameters) {
         return RequestMessage.build(Tokens.OPS_EVAL)
                              .processor("cypher")
                              .add(Tokens.ARGS_GREMLIN, cypherQuery)
+                             .add(Tokens.ARGS_BINDINGS, parameters)
                              .create();
     }
 
@@ -105,10 +123,100 @@ public final class CypherClient {
 
         while (iter.hasNext()) {
             Result data = iter.next();
-            list.add(data.getObject());
+            list.add(normalize(data.getObject()));
         }
 
         return list;
+    }
+
+    static Object normalize(Object value) {
+        return normalize(value, 0, new IdentityHashMap<>());
+    }
+
+    private static Object normalize(Object value, int depth,
+                                    IdentityHashMap<Object, Boolean> seen) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Id) {
+            return ((Id) value).asObject();
+        }
+        boolean composite = value instanceof Map || value instanceof Path ||
+                            value instanceof Iterable ||
+                            value.getClass().isArray();
+        if (!composite) {
+            return value;
+        }
+        if (depth >= NORMALIZE_MAX_DEPTH) {
+            throw new IllegalArgumentException(
+                      "Exceeded max normalization depth 32");
+        }
+        if (value instanceof Map) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            Map<Object, Object> normalized = new LinkedHashMap<>();
+            try {
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    normalized.put(normalize(entry.getKey(), depth + 1, seen),
+                                   normalize(entry.getValue(), depth + 1, seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value instanceof Path) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            try {
+                Path path = (Path) value;
+                normalized.put("labels",
+                               normalize(path.labels(), depth + 1, seen));
+                normalized.put("objects",
+                               normalize(path.objects(), depth + 1, seen));
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value instanceof Iterable) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            List<Object> normalized = new LinkedList<>();
+            try {
+                for (Object item : (Iterable<?>) value) {
+                    normalized.add(normalize(item, depth + 1, seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        if (value.getClass().isArray()) {
+            if (seen.put(value, Boolean.TRUE) != null) {
+                throw new IllegalArgumentException(
+                          "Detected cyclic Cypher result");
+            }
+            List<Object> normalized = new LinkedList<>();
+            try {
+                int length = Array.getLength(value);
+                for (int i = 0; i < length; i++) {
+                    normalized.add(normalize(Array.get(value, i), depth + 1,
+                                             seen));
+                }
+            } finally {
+                seen.remove(value);
+            }
+            return normalized;
+        }
+        return value;
     }
 
     /**

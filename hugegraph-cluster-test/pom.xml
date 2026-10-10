@@ -39,11 +39,28 @@
     </modules>
 
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <final.name>apache-${release.name}-ct-${project.version}</final.name>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- The published test client uses a legacy Commons POM with an
+                 unresolved parent version. Use this reactor's compatible API. -->
+            <dependency>
+                <groupId>org.apache.hugegraph</groupId>
+                <artifactId>hugegraph-common</artifactId>
+                <version>${revision}</version>
+            </dependency>
+            <!-- The historical test client brings Commons Text 1.9. Keep its
+                 API while disabling the unsafe interpolation defaults. -->
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-text</artifactId>
+                <version>1.10.0</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -96,7 +113,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>simple-cluster-test</id>
@@ -120,7 +136,6 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
-                        <version>2.20</version>
                         <executions>
                             <execution>
                                 <id>multi-cluster-test</id>

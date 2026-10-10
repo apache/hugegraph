@@ -24,7 +24,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.CacheManager;
 import org.apache.hugegraph.backend.store.BackendFeatures;
-import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.schema.SchemaManager;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.util.Log;

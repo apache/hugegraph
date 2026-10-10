@@ -30,8 +30,8 @@ import java.util.function.Consumer;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.query.EdgesQueryIterator;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.iterator.FilterIterator;
@@ -73,7 +73,7 @@ public abstract class OltpTraverser extends HugeTraverser
 
     @Override
     public void close() {
-        // pass
+        // The graph's thread-local transaction belongs to the caller.
     }
 
     public static void destroy() {

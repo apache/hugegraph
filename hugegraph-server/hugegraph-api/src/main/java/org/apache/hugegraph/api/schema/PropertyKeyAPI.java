@@ -25,15 +25,14 @@ import java.util.Map;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.define.Checkable;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.Userdata;
 import org.apache.hugegraph.type.define.AggregateType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
@@ -78,7 +77,6 @@ public class PropertyKeyAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
                                    "$action=property_key_write"})
-    @RedirectFilter.RedirectMasterRole
     public String create(@Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
@@ -102,7 +100,6 @@ public class PropertyKeyAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
                                    "$action=property_key_write"})
-    @RedirectFilter.RedirectMasterRole
     public String update(@Context GraphManager manager,
                          @Parameter(description = "The graph space name")
                          @PathParam("graphspace") String graphSpace,
@@ -205,7 +202,6 @@ public class PropertyKeyAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$graphspace=$graphspace $owner=$graph " +
                                    "$action=property_key_delete"})
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> delete(@Context GraphManager manager,
                                   @Parameter(description = "The graph space name")
                                   @PathParam("graphspace") String graphSpace,

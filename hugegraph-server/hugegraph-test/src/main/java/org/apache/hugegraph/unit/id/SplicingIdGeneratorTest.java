@@ -19,17 +19,14 @@ package org.apache.hugegraph.unit.id;
 
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
-import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.id.SplicingIdGenerator;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.IdStrategy;
-import org.apache.hugegraph.unit.FakeObjects;
 import org.junit.Test;
-import org.mockito.Mockito;
 
 import com.google.common.collect.ImmutableList;
 
@@ -37,15 +34,9 @@ public class SplicingIdGeneratorTest {
 
     @Test
     public void testGenerate() {
-        FakeObjects fakeObjects = new FakeObjects();
-        PropertyKey name = fakeObjects.newPropertyKey(IdGenerator.of(1),
-                                                      "name");
-        VertexLabel vertexLabel = fakeObjects.newVertexLabel(
-                IdGenerator.of(1L), "fake",
-                IdStrategy.PRIMARY_KEY, name.id());
-        HugeVertex vertex = Mockito.mock(HugeVertex.class);
-        Mockito.when(vertex.schemaLabel()).thenReturn(vertexLabel);
-        Mockito.when(vertex.name()).thenReturn("marko");
+        VertexLabel vertexLabel = new VertexLabel(null, IdGenerator.of(1L), "fake");
+        vertexLabel.idStrategy(IdStrategy.PRIMARY_KEY);
+        BaseVertex vertex = new BaseVertex(IdGenerator.of("1:marko"), vertexLabel);
         Id vid = SplicingIdGenerator.instance().generate(vertex);
         Assert.assertEquals(IdGenerator.of("1:marko"), vid);
     }

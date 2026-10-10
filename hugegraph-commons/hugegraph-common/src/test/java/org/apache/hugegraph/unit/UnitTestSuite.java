@@ -19,11 +19,13 @@ package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.testutil.AssertTest;
 import org.apache.hugegraph.testutil.WhiteboxTest;
+import org.apache.hugegraph.unit.auth.TokenGeneratorTest;
 import org.apache.hugegraph.unit.config.HugeConfigTest;
 import org.apache.hugegraph.unit.config.OptionSpaceTest;
 import org.apache.hugegraph.unit.event.EventHubTest;
 import org.apache.hugegraph.unit.rest.AbstractRestClientTest;
 import org.apache.hugegraph.unit.version.VersionTest;
+import org.apache.hugegraph.unit.util.RocksDBRuntimeTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -71,6 +73,7 @@ import org.apache.hugegraph.unit.util.VersionUtilTest;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        RocksDBRuntimeTest.class,
     LockManagerTest.class,
     LockGroupTest.class,
     AtomicLockTest.class,
@@ -78,6 +81,7 @@ import org.apache.hugegraph.unit.util.VersionUtilTest;
     RowLockTest.class,
     PausableScheduledThreadPoolTest.class,
 
+    TokenGeneratorTest.class,
     HugeConfigTest.class,
     OptionSpaceTest.class,
     SafeDateFormatTest.class,

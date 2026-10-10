@@ -30,13 +30,13 @@ import java.util.UUID;
 
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.id.IdGenerator.UuidId;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.id.IdGenerator.UuidId;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
@@ -921,77 +921,77 @@ public class BytesBufferTest extends BaseUnitTest {
         PropertyKey pkey = genPkey(DataType.BOOLEAN);
         Object value = true;
         byte[] bytes = genBytes("01");
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         value = false;
         bytes = genBytes("00");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.BYTE);
         value = (byte) 127;
         bytes = genBytes("7f");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.INT);
         value = 127;
         bytes = genBytes("7f");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.INT);
         value = 128;
         bytes = genBytes("8100");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.FLOAT);
         value = 1.0f;
         bytes = genBytes("3f800000");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.FLOAT);
         value = 3.14f;
         bytes = genBytes("4048f5c3");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.FLOAT);
         value = -1.0f;
         bytes = genBytes("bf800000");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.FLOAT);
         value = Float.MAX_VALUE;
         bytes = genBytes("7f7fffff");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.LONG);
         value = 127L;
         bytes = genBytes("7f");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.DOUBLE);
         value = 3.14d;
         bytes = genBytes("40091eb851eb851f");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.DATE);
         Calendar c = Calendar.getInstance(TimeZone.getTimeZone("Beijing"));
@@ -999,53 +999,53 @@ public class BytesBufferTest extends BaseUnitTest {
         value = c.getTime();
         bytes = genBytes("adc9a098e22a");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.TEXT);
         value = "abc";
         bytes = genBytes("03616263");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.BLOB);
         value = genBytes("001199aabbcc");
         bytes = genBytes("06001199aabbcc");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
         Assert.assertEquals(Blob.wrap((byte[]) value),
-                            BytesBuffer.wrap(bytes).readProperty(pkey));
+                            BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.UUID);
         value = UUID.fromString("3cfcafc8-7906-4ab7-a207-4ded056f58de");
         bytes = genBytes("3cfcafc879064ab7a2074ded056f58de");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.OBJECT);
         value = new Point(3, 8);
         bytes = genBytes("1301006a6176612e6177742e506f696ef4010610");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.OBJECT);
         value = UUID.fromString("3cfcafc8-7906-4ab7-a207-4ded056f58de");
         bytes = genBytes("2101006a6176612e7574696c2e555549c401" +
                          "3cfcafc879064ab7a2074ded056f58de");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genPkey(DataType.OBJECT);
         value = new int[]{1, 3, 8};
         bytes = genBytes("0901005bc90104020610");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
         Assert.assertArrayEquals((int[]) value, (int[])
-                BytesBuffer.wrap(bytes).readProperty(pkey));
+                BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
     }
 
     @Test
@@ -1054,50 +1054,50 @@ public class BytesBufferTest extends BaseUnitTest {
         PropertyKey pkey = genListPkey(DataType.BOOLEAN);
         Object value = ImmutableList.of(true, false);
         byte[] bytes = genBytes("020100");
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.BYTE);
         value = ImmutableList.of();
         bytes = genBytes("00");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.BYTE);
         value = ImmutableList.of((byte) 127, (byte) 128);
         bytes = genBytes("027f8fffffff00");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.INT);
         value = ImmutableList.of(127, 128);
         bytes = genBytes("027f8100");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.FLOAT);
         value = ImmutableList.of(1.0f, 3.14f);
         bytes = genBytes("023f8000004048f5c3");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.LONG);
         value = ImmutableList.of(127L, 128L);
         bytes = genBytes("027f8100");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.DOUBLE);
         value = ImmutableList.of(1.0d, 3.14d);
         bytes = genBytes("023ff000000000000040091eb851eb851f");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.DATE);
         Calendar c = Calendar.getInstance(TimeZone.getTimeZone("Beijing"));
@@ -1105,22 +1105,22 @@ public class BytesBufferTest extends BaseUnitTest {
         value = ImmutableList.of(c.getTime(), c.getTime());
         bytes = genBytes("02adc9a098e22aadc9a098e22a");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.TEXT);
         value = ImmutableList.of("abc", "123");
         bytes = genBytes("020361626303313233");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.BLOB);
         value = ImmutableList.of(genBytes("001199aabbcc"), genBytes("5566"));
         bytes = genBytes("0206001199aabbcc025566");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        List<?> list = (List<?>) BytesBuffer.wrap(bytes).readProperty(pkey);
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        List<?> list = (List<?>) BytesBuffer.wrap(bytes).readSchemaProperty(pkey);
         Assert.assertEquals(Blob.wrap(genBytes("001199aabbcc")), list.get(0));
         Assert.assertEquals(Blob.wrap(genBytes("5566")), list.get(1));
 
@@ -1130,23 +1130,23 @@ public class BytesBufferTest extends BaseUnitTest {
         bytes = genBytes("023cfcafc879064ab7a2074ded056f58de" +
                          "3cfcafc879064ab7a2074ded056f58de");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.OBJECT);
         value = ImmutableList.of(new Point(3, 8), new Point(3, 9));
         bytes = genBytes("021301006a6176612e6177742e506f696ef4010610" +
                          "1301006a6176612e6177742e506f696ef4010612");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genListPkey(DataType.OBJECT);
         value = ImmutableList.of(new int[]{1, 3}, new int[]{2, 5});
         bytes = genBytes("020801005bc9010302060801005bc90103040a");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        list = (List<?>) BytesBuffer.wrap(bytes).readProperty(pkey);
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        list = (List<?>) BytesBuffer.wrap(bytes).readSchemaProperty(pkey);
         Assert.assertArrayEquals(new int[]{1, 3}, (int[]) list.get(0));
         Assert.assertArrayEquals(new int[]{2, 5}, (int[]) list.get(1));
     }
@@ -1157,50 +1157,50 @@ public class BytesBufferTest extends BaseUnitTest {
         PropertyKey pkey = genSetPkey(DataType.BOOLEAN);
         Object value = ImmutableSet.of(true, false);
         byte[] bytes = genBytes("020100");
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.BYTE);
         value = ImmutableSet.of();
         bytes = genBytes("00");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.BYTE);
         value = ImmutableSet.of((byte) 127, (byte) 128);
         bytes = genBytes("027f8fffffff00");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.INT);
         value = ImmutableSet.of(127, 128);
         bytes = genBytes("027f8100");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.FLOAT);
         value = ImmutableSet.of(1.0f, 3.14f);
         bytes = genBytes("023f8000004048f5c3");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.LONG);
         value = ImmutableSet.of(127L, 128L);
         bytes = genBytes("027f8100");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.DOUBLE);
         value = ImmutableSet.of(1.0d, 3.14d);
         bytes = genBytes("023ff000000000000040091eb851eb851f");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.DATE);
         Calendar c = Calendar.getInstance(TimeZone.getTimeZone("Beijing"));
@@ -1208,22 +1208,22 @@ public class BytesBufferTest extends BaseUnitTest {
         value = ImmutableSet.of(c.getTime(), c.getTime());
         bytes = genBytes("01adc9a098e22a");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.TEXT);
         value = ImmutableSet.of("abc", "123");
         bytes = genBytes("020361626303313233");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.BLOB);
         value = ImmutableSet.of(genBytes("001199aabbcc"), genBytes("5566"));
         bytes = genBytes("0206001199aabbcc025566");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Set<?> set = (Set<?>) BytesBuffer.wrap(bytes).readProperty(pkey);
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Set<?> set = (Set<?>) BytesBuffer.wrap(bytes).readSchemaProperty(pkey);
         Iterator<?> iterator = set.iterator();
         Assert.assertEquals(Blob.wrap(genBytes("001199aabbcc")),
                             iterator.next());
@@ -1234,23 +1234,23 @@ public class BytesBufferTest extends BaseUnitTest {
         value = ImmutableSet.of(uuid, uuid);
         bytes = genBytes("013cfcafc879064ab7a2074ded056f58de");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.OBJECT);
         value = ImmutableSet.of(new Point(3, 8), new Point(3, 9));
         bytes = genBytes("021301006a6176612e6177742e506f696ef4010610" +
                          "1301006a6176612e6177742e506f696ef4010612");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readProperty(pkey));
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        Assert.assertEquals(value, BytesBuffer.wrap(bytes).readSchemaProperty(pkey));
 
         pkey = genSetPkey(DataType.OBJECT);
         value = ImmutableSet.of(new int[]{1, 3}, new int[]{2, 5});
         bytes = genBytes("020801005bc9010302060801005bc90103040a");
         buf.forReadWritten();
-        Assert.assertArrayEquals(bytes, buf.writeProperty(pkey, value).bytes());
-        set = (Set<?>) BytesBuffer.wrap(bytes).readProperty(pkey);
+        Assert.assertArrayEquals(bytes, buf.writeSchemaProperty(pkey, value).bytes());
+        set = (Set<?>) BytesBuffer.wrap(bytes).readSchemaProperty(pkey);
         iterator = set.iterator();
         Assert.assertArrayEquals(new int[]{1, 3}, (int[]) iterator.next());
         Assert.assertArrayEquals(new int[]{2, 5}, (int[]) iterator.next());

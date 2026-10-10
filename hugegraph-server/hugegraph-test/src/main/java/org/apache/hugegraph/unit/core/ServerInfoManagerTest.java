@@ -17,10 +17,8 @@
 
 package org.apache.hugegraph.unit.core;
 
-import java.util.concurrent.ExecutorService;
-
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.task.ServerInfoManager;
 import org.apache.hugegraph.testutil.Assert;
@@ -44,24 +42,8 @@ public class ServerInfoManagerTest {
         Mockito.when(hugegraphParams.spaceGraphName())
                .thenReturn("DEFAULT-hugegraph");
 
-        ExecutorService executor = Mockito.mock(ExecutorService.class);
-
-        this.sysGraphManager = new ServerInfoManager(sysGraphParams, executor);
-        this.hugegraphManager = new ServerInfoManager(hugegraphParams, executor);
-    }
-
-    @Test
-    public void testInitDoesNotAccessBackendStore() {
-        HugeGraphParams graphParams = Mockito.mock(HugeGraphParams.class);
-        ExecutorService executor = Mockito.mock(ExecutorService.class);
-        ServerInfoManager manager = new ServerInfoManager(graphParams, executor);
-
-        manager.init();
-
-        Mockito.verify(graphParams, Mockito.never()).systemTransaction();
-        Mockito.verify(graphParams, Mockito.never()).backendStoreFeatures();
-        Mockito.verify(graphParams, Mockito.never()).graph();
-        Mockito.verify(graphParams, Mockito.never()).closeTx();
+        this.sysGraphManager = new ServerInfoManager(sysGraphParams);
+        this.hugegraphManager = new ServerInfoManager(hugegraphParams);
     }
 
     @Test

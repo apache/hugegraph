@@ -380,9 +380,9 @@ public class VertexLabel extends SchemaLabel {
                     vertexLabel.idStrategy(idStrategy);
                     break;
                 case P.PRIMARY_KEYS:
-                    ids = ((List<Integer>) entry.getValue()).stream().map(
-                            IdGenerator::of).collect(Collectors.toSet());
-                    vertexLabel.primaryKeys(ids.toArray(new Id[0]));
+                    List<Id> orderedIds = ((List<Integer>) entry.getValue()).stream().map(
+                            IdGenerator::of).collect(Collectors.toList());
+                    vertexLabel.primaryKeys(orderedIds.toArray(new Id[0]));
                     break;
                 default:
                     throw new AssertionError(String.format(

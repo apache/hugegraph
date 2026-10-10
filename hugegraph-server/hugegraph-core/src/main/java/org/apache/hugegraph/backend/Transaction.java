@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.backend;
 
+import org.apache.hugegraph.exception.BackendException;
+
 public interface Transaction {
 
     void commit() throws BackendException;

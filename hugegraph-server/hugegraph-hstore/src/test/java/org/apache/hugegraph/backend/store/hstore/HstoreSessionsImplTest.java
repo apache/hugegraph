@@ -20,14 +20,19 @@ package org.apache.hugegraph.backend.store.hstore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.NoSuchElementException;
 
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.store.HgKvEntry;
+import org.apache.hugegraph.store.HgStoreSession;
+import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.serializer.OlapKey;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.junit.Assert;
 import org.junit.Test;
@@ -69,6 +74,30 @@ public class HstoreSessionsImplTest {
         iterator.next();
         Assert.assertFalse(iterator.hasNext());
         Assert.assertNull(iterator.position());
+    }
+
+    @Test
+    public void testExactOlapBatchUsesNativePointKeysAndOwnerRouting() {
+        byte[] vertexOwner = IdGenerator.of(9).asBytes();
+        byte[] namespaced = OlapKey.format(IdGenerator.of(9), IdGenerator.of(9));
+        List<HgOwnerKey> keys = List.of(HgOwnerKey.of(vertexOwner, namespaced));
+        int[] calls = {0};
+        HgStoreSession graph = (HgStoreSession) Proxy.newProxyInstance(HgStoreSession.class.getClassLoader(),
+                new Class<?>[]{HgStoreSession.class}, (proxy, method, args) -> {
+                    Assert.assertEquals("batchGetOwner", method.getName());
+                    Assert.assertEquals("g+olap", args[0]);
+                    Assert.assertSame(keys, args[1]);
+                    Assert.assertArrayEquals(vertexOwner, keys.get(0).getOwner());
+                    Assert.assertArrayEquals(namespaced, keys.get(0).getKey());
+                    calls[0]++;
+                    return List.of(new TestEntry(namespaced));
+                });
+        try (BackendColumnIterator result = HstoreSessionsImpl.getWithBatchExact(graph, "g+olap", keys)) {
+            Assert.assertTrue(result.hasNext());
+            Assert.assertArrayEquals(namespaced, result.next().name);
+            Assert.assertFalse(result.hasNext());
+        }
+        Assert.assertEquals(1, calls[0]);
     }
 
     private static BackendColumnIterator newColumnIterator(

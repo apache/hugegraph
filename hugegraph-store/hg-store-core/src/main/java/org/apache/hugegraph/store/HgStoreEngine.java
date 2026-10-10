@@ -207,32 +207,43 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         if (rpcServer == null) {
             return;
         }
-        closing.set(true);
-        heartbeatService.shutdown();
-        metricService.shutdown();
-// Use sequential processing for safer shutdown
-        partitionEngines.values().forEach(pe -> {
-            try {
-                Node raftNode = pe.getRaftNode();
-                if (raftNode.isLeader(false)) {
-                    Status status = raftNode.transferLeadershipTo(PeerId.ANY_PEER);
-                    if (!status.isOk()) {
-                        log.warn("transfer leader error: {}", status);
+        boolean interrupted = Thread.interrupted();
+        try {
+            closing.set(true);
+            heartbeatService.shutdown();
+            interrupted |= Thread.interrupted();
+            metricService.shutdown();
+            // Use sequential processing so each partition drains before its database closes.
+            for (PartitionEngine pe : partitionEngines.values()) {
+                try {
+                    Node raftNode = pe.getRaftNode();
+                    if (raftNode.isLeader(false)) {
+                        Status status = raftNode.transferLeadershipTo(PeerId.ANY_PEER);
+                        if (!status.isOk()) {
+                            log.warn("transfer leader error: {}", status);
+                        }
                     }
+                } catch (Exception e) {
+                    log.error("transfer leader error: ", e);
                 }
-            } catch (Exception e) {
-                log.error("transfer leader error: ", e);
+                pe.shutdown();
+                interrupted |= Thread.interrupted();
+                businessHandler.closeDB(pe.getGroupId());
             }
-            pe.shutdown();
-            businessHandler.closeDB(pe.getGroupId());
-        });
-        partitionEngines.clear();
-        rpcServer.shutdown();
-        // HgStoreEngine.init function check rpcServer whether is null, skipped if the instance
-        // exists even shut down.
-        rpcServer = null;
-        // close all db session
-        RocksDBFactory.getInstance().releaseAllGraphDB();
+            partitionEngines.clear();
+            rpcServer.shutdown();
+            // HgStoreEngine.init skips RPC initialization while this field is non-null.
+            rpcServer = null;
+            try {
+                RocksDBFactory.getInstance().releaseAllGraphDB();
+            } finally {
+                BusinessHandlerImpl.closeSchemaResources();
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     public void snapshotForTest() {
@@ -250,7 +261,13 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
         if (newState == Metapb.StoreState.Up) {
             // Status changes to online, record store information
             partitionManager.setStore(store);
-            partitionManager.loadPartition();
+            try {
+                partitionManager.loadPartition();
+            } catch (PartitionManager.InvalidShardException e) {
+                // Never wait for shutdown hooks while owning the state callback lock.
+                heartbeatService.requestExit(0);
+                return;
+            }
             restoreLocalPartitionEngine();
         }
     }
@@ -260,6 +277,12 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, StoreStat
      * 1. Need to check the partition saved this time, delete the invalid partitions.
      */
     public void restoreLocalPartitionEngine() {
+        // TODO: surface the outcome of this restore (a per-group ready signal, or a failed state
+        // reported to PD) instead of logging only; a Store is marked Up before this runs and a
+        // failed restore leaves it Up with missing shard groups. Paired with the TODO in
+        // StoreNodeService, which also says why this signal alone does not retire the manual
+        // Store rollout barrier in the Helm chart (helm/hugegraph) cluster preset.
+        // https://github.com/apache/hugegraph/issues/3229
         try {
             if (!options.isFakePD()) {  // FakePD mode does not require synchronization
                 partitionManager.syncPartitionsFromPD(partition -> {

@@ -19,7 +19,7 @@ package org.apache.hugegraph.unit.core;
 
 import java.util.Arrays;
 
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.testutil.Assert;
 import org.junit.Test;

@@ -26,7 +26,6 @@ TRAVIS_DIR=$(cd "$(dirname "$0")" && pwd)
 SERVER_DIR=$(cd "$1" && pwd)
 SERVER_URL=${SERVER_URL:-http://127.0.0.1:8080}
 EXPECTED_ARCH=${EXPECTED_ARCH:-riscv64}
-EXPECTED_JAVA_MAJOR=${EXPECTED_JAVA_MAJOR:-11}
 SERVER_START_ATTEMPTED=false
 SERVER_STARTUP_TIMEOUT=${SERVER_STARTUP_TIMEOUT:-300}
 SERVER_START_COMMAND_TIMEOUT=$((SERVER_STARTUP_TIMEOUT + 30))
@@ -34,13 +33,13 @@ STORE_DUMP_TIMEOUT=${STORE_DUMP_TIMEOUT:-120}
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/hugegraph-native-runtime-smoke.XXXXXX")
 RUN_ID="$(date +%s)_$$"
 
-export EXPECTED_ARCH EXPECTED_JAVA_MAJOR
+export EXPECTED_ARCH
 
 cleanup() {
     local status=$?
     trap - EXIT
     if [[ "$SERVER_START_ATTEMPTED" == "true" ]]; then
-        "$SERVER_DIR/bin/stop-hugegraph.sh" -m false >/dev/null 2>&1 || status=1
+        "$SERVER_DIR/bin/stop-hugegraph.sh" -m false || status=1
     fi
     rm -rf "$WORK_DIR"
     exit "$status"

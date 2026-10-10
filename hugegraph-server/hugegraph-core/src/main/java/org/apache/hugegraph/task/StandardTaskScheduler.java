@@ -28,13 +28,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.page.PageInfo;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.config.CoreOptions;
@@ -43,8 +43,8 @@ import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.job.EphemeralJob;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.task.HugeTask.P;
 import org.apache.hugegraph.task.TaskCallable.SysTaskCallable;
@@ -74,8 +74,7 @@ public class StandardTaskScheduler implements TaskScheduler {
 
     public StandardTaskScheduler(HugeGraphParams graph,
                                  ExecutorService taskExecutor,
-                                 ExecutorService taskDbExecutor,
-                                 ExecutorService serverInfoDbExecutor) {
+                                 ExecutorService taskDbExecutor) {
         E.checkNotNull(graph, "graph");
         E.checkNotNull(taskExecutor, "taskExecutor");
         E.checkNotNull(taskDbExecutor, "dbExecutor");
@@ -84,7 +83,7 @@ public class StandardTaskScheduler implements TaskScheduler {
         this.taskExecutor = taskExecutor;
         this.taskDbExecutor = taskDbExecutor;
 
-        this.serverManager = new ServerInfoManager(graph, serverInfoDbExecutor);
+        this.serverManager = new ServerInfoManager(graph);
         this.tasks = new ConcurrentHashMap<>();
 
         this.taskTx = null;
@@ -333,17 +332,58 @@ public class StandardTaskScheduler implements TaskScheduler {
 
     @Override
     public boolean close() {
-        if (!this.taskDbExecutor.isShutdown()) {
-            this.call(() -> {
-                try {
-                    this.tx().close();
-                } catch (ConnectionException ignored) {
-                    // ConnectionException means no connection established
-                }
-                this.graph.closeTx();
-            });
+        // Running tasks still need the task DB transaction to persist done().
+        // Retain the scheduler and its owners until a later close attempt.
+        if (this.pendingTasks() != 0) {
+            return false;
         }
-        return this.serverManager.close();
+        Throwable failure = null;
+        boolean closed = false;
+        try {
+            if (!this.taskDbExecutor.isShutdown()) {
+                this.call(() -> {
+                    Throwable workerFailure = null;
+                    for (Runnable close : new Runnable[]{() -> {
+                        try {
+                            this.tx().close();
+                        } catch (ConnectionException ignored) {
+                            // ConnectionException means no connection established
+                        }
+                    }, this.graph::closeTx}) {
+                        try {
+                            close.run();
+                        } catch (RuntimeException | Error error) {
+                            if (workerFailure == null) {
+                                workerFailure = error;
+                            } else if (workerFailure != error) {
+                                workerFailure.addSuppressed(error);
+                            }
+                        }
+                    }
+                    if (workerFailure instanceof Error) {
+                        throw (Error) workerFailure;
+                    }
+                    if (workerFailure != null) {
+                        throw (RuntimeException) workerFailure;
+                    }
+                });
+            }
+        } catch (RuntimeException | Error error) {
+            failure = error;
+            throw error;
+        } finally {
+            try {
+                closed = this.serverManager.close();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    throw error;
+                }
+                if (failure != error) {
+                    failure.addSuppressed(error);
+                }
+            }
+        }
+        return closed;
     }
 
     @Override
@@ -597,7 +637,7 @@ public class StandardTaskScheduler implements TaskScheduler {
                                                 boolean withResult) {
         return this.call(() -> {
             ConditionQuery query;
-            if (this.graph.backendStoreFeatures().supportsTaskAndServerVertex()) {
+            if (this.tx().storeFeatures().supportsTaskAndServerVertex()) {
                 query = new ConditionQuery(HugeType.TASK);
             } else {
                 query = new ConditionQuery(HugeType.VERTEX);

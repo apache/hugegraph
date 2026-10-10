@@ -89,9 +89,22 @@ public class TaskAPI extends API {
         }
     }
 
-    @GetMapping(value = "/balanceLeaders")
-    public Map<Integer, Long> balanceLeaders() throws PDException {
-        return pdRestService.balancePartitionLeader();
+    // TODO: make the task routes tell a real run from a no-op and a follower answer (a follower
+    // returns an empty success without doing anything), and return a body that names what was
+    // scheduled. Part 1 (#3233) replaced the bare 500 with a refusal body; this is part 2. The
+    // Helm chart (helm/hugegraph) documents the leader-first sequence and the 180 s spacing in its
+    // README until then.
+    // https://github.com/apache/hugegraph/issues/3231
+    @GetMapping(value = "/balanceLeaders", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public String balanceLeaders() {
+        try {
+            Map<Integer, Long> leaders = pdRestService.balancePartitionLeader();
+            return toJSON(leaders);
+        } catch (PDException e) {
+            e.printStackTrace();
+            return toJSON(e);
+        }
     }
 
     @GetMapping(value = "/compact")

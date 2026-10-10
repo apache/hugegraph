@@ -31,7 +31,6 @@ fi
 
 case $BACKEND in
     hbase)
-        # TODO: replace it with hbase2.3+ to avoid java8 env
         "$TRAVIS_DIR"/install-hbase.sh
         ;;
     hstore)

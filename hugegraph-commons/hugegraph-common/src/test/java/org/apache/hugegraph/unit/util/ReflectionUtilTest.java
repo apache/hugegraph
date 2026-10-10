@@ -94,7 +94,7 @@ public class ReflectionUtilTest extends BaseUnitTest {
         @SuppressWarnings("unchecked")
         List<ClassInfo> classes = IteratorUtils.toList(ReflectionUtil.classes(
                                   "org.apache.hugegraph.util"));
-        Assert.assertEquals(19, classes.size());
+        Assert.assertEquals(20, classes.size());
         classes.sort(Comparator.comparing(ClassInfo::getName));
         Assert.assertEquals("org.apache.hugegraph.util.Bytes",
                             classes.get(0).getName());

@@ -18,11 +18,14 @@
 package org.apache.hugegraph.core;
 
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.auth.BackendLeaseCleanupTest;
+import org.apache.hugegraph.auth.TransactionLifecycleTest;
 import org.apache.hugegraph.constant.ServiceConstant;
 import org.apache.hugegraph.dist.RegisterUtil;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
+import org.apache.hugegraph.task.StandardTaskSchedulerTxTest;
 import org.apache.hugegraph.task.TaskAndResultSchedulerTest;
 import org.apache.hugegraph.testutil.Utils;
 import org.apache.hugegraph.util.Log;
@@ -34,6 +37,7 @@ import org.slf4j.Logger;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
+        BackendLeaseCleanupTest.class,
         PropertyKeyCoreTest.class,
         VertexLabelCoreTest.class,
         EdgeLabelCoreTest.class,
@@ -41,6 +45,8 @@ import org.slf4j.Logger;
         VertexCoreTest.class,
         EdgeCoreTest.class,
         CountStrategyCoreTest.class,
+        IdPredicateCoreTest.class,
+        TinkerPop37StepsCoreTest.class,
         PrimaryKeyStrategyCoreTest.class,
         ParentAndSubEdgeCoreTest.class,
         PropertyCoreTest.VertexPropertyCoreTest.class,
@@ -48,7 +54,9 @@ import org.slf4j.Logger;
         RestoreCoreTest.class,
         TaskCoreTest.class,
         TaskAndResultSchedulerTest.class,
+        StandardTaskSchedulerTxTest.class,
         AuthTest.class,
+        TransactionLifecycleTest.class,
         MultiGraphsTest.class,
         RamTableTest.class
 })

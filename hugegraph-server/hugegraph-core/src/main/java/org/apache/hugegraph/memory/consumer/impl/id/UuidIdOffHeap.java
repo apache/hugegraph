@@ -17,16 +17,16 @@
 
 package org.apache.hugegraph.memory.consumer.impl.id;
 
-import static org.apache.hugegraph.backend.id.IdGenerator.compareType;
+import static org.apache.hugegraph.id.IdGenerator.compareType;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.pool.MemoryPool;
 import org.apache.hugegraph.memory.util.FurySerializationUtil;

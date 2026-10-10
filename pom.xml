@@ -87,14 +87,37 @@
 
     <properties>
         <fabric8.version>5.6.0</fabric8.version>
-        <revision>1.7.0</revision>
+        <revision>1.8.0</revision>
+        <groovy.version>4.0.25</groovy.version>
+        <jackson.version>2.15.2</jackson.version>
+        <netty.version>4.1.137.Final</netty.version>
+        <grpc.version>1.55.3</grpc.version>
+        <protobuf.runtime.version>3.22.3</protobuf.runtime.version>
+        <snakeyaml.version>2.2</snakeyaml.version>
+        <spring-boot.version>2.5.15</spring-boot.version>
+        <spring-framework.version>5.3.27</spring-framework.version>
         <lombok.version>1.18.30</lombok.version>
+        <!-- JRaft 1.3.14 supports the RocksDB 8.x table options API. -->
+        <jraft.version>1.3.14</jraft.version>
         <release.name>hugegraph</release.name>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.release>17</maven.compiler.release>
+        <!-- Java 17 is the only qualified build/runtime release. Expand this
+             range only after CI qualifies another JDK release. -->
+        <java.supported.version.range>[17,18)</java.supported.version.range>
+        <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
+        <maven.surefire.plugin.version>3.5.6</maven.surefire.plugin.version>
+        <!-- -Dtest also reaches upstream modules selected by -am. Named leaf
+             test executions override this, while selected reactor tests verify
+             their expected Surefire reports. -->
+        <surefire.failIfNoSpecifiedTests>false</surefire.failIfNoSpecifiedTests>
+        <jacoco.maven.plugin.version>0.8.15</jacoco.maven.plugin.version>
+        <maven.enforcer.plugin.version>3.6.2</maven.enforcer.plugin.version>
+        <argLine />
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <shell-executable>bash</shell-executable>
+        <!-- TODO: align the client after Toolchain 1.8.0 artifacts are available. -->
         <toolchain.vision>1.5.0</toolchain.vision>
+        <rocksdb.version>8.10.2</rocksdb.version>
     </properties>
 
     <modules>
@@ -109,6 +132,71 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.google.protobuf</groupId>
+                <artifactId>protobuf-bom</artifactId>
+                <version>${protobuf.runtime.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Keep YAML, JSON and Fabric8 on one compatible Jackson API. -->
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.groovy</groupId>
+                <artifactId>groovy-bom</artifactId>
+                <version>${groovy.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework</groupId>
+                <artifactId>spring-framework-bom</artifactId>
+                <version>${spring-framework.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- The gRPC starter otherwise selects older Boot YAML loaders. -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-autoconfigure</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.yaml</groupId>
+                <artifactId>snakeyaml</artifactId>
+                <version>${snakeyaml.version}</version>
+            </dependency>
+            <!-- Groovy Grape must not inherit the vulnerable Ivy version. -->
+            <dependency>
+                <groupId>org.apache.ivy</groupId>
+                <artifactId>ivy</artifactId>
+                <version>2.6.0</version>
+            </dependency>
             <dependency>
                 <groupId>org.projectlombok</groupId>
                 <artifactId>lombok</artifactId>
@@ -225,35 +313,13 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-enforcer-plugin</artifactId>
-                    <executions>
-                        <execution>
-                            <id>enforce-version</id>
-                            <goals>
-                                <goal>enforce</goal>
-                            </goals>
-                            <!-- no need to execute in child POMs -->
-                            <inherited>false</inherited>
-                            <configuration>
-                                <rules>
-                                    <!-- TODO: uncomment for checking dependency conflicts -->
-                                    <!-- <DependencyConvergence/> -->
-                                    <requireJavaVersion>
-                                        <version>[11,)</version>
-                                    </requireJavaVersion>
-                                    <requireMavenVersion>
-                                        <version>[3.5.0,)</version>
-                                    </requireMavenVersion>
-                                </rules>
-                            </configuration>
-                        </execution>
-                    </executions>
+                    <version>${maven.enforcer.plugin.version}</version>
                 </plugin>
                 <plugin>
                     <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.1</version>
+                    <version>${maven.compiler.plugin.version}</version>
                     <configuration>
-                        <source>${maven.compiler.source}</source>
-                        <target>${maven.compiler.target}</target>
+                        <release>${maven.compiler.release}</release>
                         <compilerArguments>
                             <Xmaxerrs>500</Xmaxerrs>
                         </compilerArguments>
@@ -261,6 +327,21 @@
                             <arg>-Xlint:unchecked</arg>
                         </compilerArgs>
                     </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>${maven.surefire.plugin.version}</version>
+                    <configuration>
+                        <failIfNoSpecifiedTests>
+                            ${surefire.failIfNoSpecifiedTests}
+                        </failIfNoSpecifiedTests>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>${jacoco.maven.plugin.version}</version>
                 </plugin>
                 <plugin>
                     <artifactId>maven-remote-resources-plugin</artifactId>
@@ -274,6 +355,56 @@
         </pluginManagement>
 
         <plugins>
+            <!-- Publish concrete versions throughout the dependency/parent model chain. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.3.0</version>
+                <configuration>
+                    <updatePomFile>true</updatePomFile>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-version</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- TODO: uncomment for checking dependency conflicts -->
+                                <!-- <DependencyConvergence/> -->
+                                <requireJavaVersion>
+                                    <version>${java.supported.version.range}</version>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>[3.6.3,)</version>
+                                </requireMavenVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.rat</groupId>
                 <artifactId>apache-rat-plugin</artifactId>

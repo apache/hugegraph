@@ -34,23 +34,25 @@ import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
-import org.apache.hugegraph.backend.query.Aggregate;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.exception.NotSupportException;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.iterator.FilterIterator;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.query.Aggregate;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
+import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.type.HugeType;
@@ -62,9 +64,12 @@ import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
 import org.apache.tinkerpop.gremlin.process.traversal.Compare;
+import org.apache.tinkerpop.gremlin.process.traversal.CompareType;
 import org.apache.tinkerpop.gremlin.process.traversal.Contains;
+import org.apache.tinkerpop.gremlin.process.traversal.NotP;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
@@ -87,8 +92,8 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.filter.SampleGlobalSt
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TailGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TimeLimitStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.filter.TraversalFilterStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.ConstantStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountGlobalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.CountLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.DedupLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.ElementMapStep;
@@ -121,11 +126,10 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.SumLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.TailLocalStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.UnfoldStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.VertexStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateGlobalStep;
-import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateLocalStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AggregateStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupCountSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.GroupSideEffectStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.IdentityStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.ProfileSideEffectStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.SubgraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.TraversalSideEffectStep;
@@ -180,7 +184,7 @@ public final class TraversalUtil {
             MaxGlobalStep.class, MeanGlobalStep.class,
             CountLocalStep.class, SumLocalStep.class, MinLocalStep.class,
             MaxLocalStep.class, MeanLocalStep.class,
-            AggregateGlobalStep.class, AggregateLocalStep.class,
+            AggregateStep.class,
             GroupSideEffectStep.class, GroupCountSideEffectStep.class,
             TraversalSideEffectStep.class,
             SubgraphStep.class, ProfileStep.class, ProfileSideEffectStep.class);
@@ -262,7 +266,8 @@ public final class TraversalUtil {
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
             Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
-                HasContainerHolder holder = (HasContainerHolder) step;
+                HasContainerHolder<?, ?> holder =
+                        (HasContainerHolder<?, ?>) step;
                 boolean connectiveLabelStep =
                         removeConnectiveLabelStep(step);
                 /*
@@ -408,7 +413,7 @@ public final class TraversalUtil {
     private static void addPositiveLabelValues(HasContainer has,
                                                List<Object> labels) {
         P<?> predicate = has.getPredicate();
-        BiPredicate<?, ?> bp = predicate.getBiPredicate();
+        PBiPredicate<?, ?> bp = predicate.getBiPredicate();
         if (bp == Compare.eq) {
             labels.add(predicate.getValue());
         } else {
@@ -418,7 +423,7 @@ public final class TraversalUtil {
     }
 
     private static boolean hasLabelAfterUnusablePredicate(HugeGraphStep<?, ?> step,
-                                                          HasContainerHolder holder) {
+                                                          HasContainerHolder<?, ?> holder) {
         HugeGraph graph = tryGetGraph(step);
         boolean seenUnusablePredicate = false;
         for (HasContainer has : holder.getHasContainers()) {
@@ -434,7 +439,7 @@ public final class TraversalUtil {
     }
 
     private static boolean hasUnsupportedLabelContainer(
-            HasContainerHolder holder) {
+            HasContainerHolder<?, ?> holder) {
         for (HasContainer has : holder.getHasContainers()) {
             if (isLabelContainer(has) && !isPositiveLabelContainer(has)) {
                 return true;
@@ -456,7 +461,7 @@ public final class TraversalUtil {
     }
 
     private static List<HasContainer> extractLabelHasContainers(
-            HugeGraphStep<?, ?> step, HasContainerHolder holder) {
+            HugeGraphStep<?, ?> step, HasContainerHolder<?, ?> holder) {
         List<HasContainer> extracted = new ArrayList<>();
         for (HasContainer has : holder.getHasContainers()) {
             if (!isPositiveLabelContainer(has)) {
@@ -475,12 +480,12 @@ public final class TraversalUtil {
     }
 
     static boolean isPositiveLabelContainer(HasContainer has) {
-        if (!isLabelContainer(has)) {
+        if (!isLabelContainer(has) || hasNullLabelValue(has)) {
             return false;
         }
 
         P<?> predicate = has.getPredicate();
-        BiPredicate<?, ?> bp = predicate.getBiPredicate();
+        PBiPredicate<?, ?> bp = predicate.getBiPredicate();
         if (bp == Compare.eq) {
             return true;
         }
@@ -494,7 +499,7 @@ public final class TraversalUtil {
     }
 
     private static boolean hasMatchIndexSensitivePredicate(
-            HasContainerHolder holder) {
+            HasContainerHolder<?, ?> holder) {
         for (HasContainer has : holder.getHasContainers()) {
             if (hasMatchIndexSensitivePredicate(has)) {
                 return true;
@@ -504,7 +509,7 @@ public final class TraversalUtil {
     }
 
     private static boolean hasUnusableMatchPredicate(HugeGraphStep<?, ?> step,
-                                                     HasContainerHolder holder) {
+                                                     HasContainerHolder<?, ?> holder) {
         HugeGraph graph = tryGetGraph(step);
         for (HasContainer has : holder.getHasContainers()) {
             if (!hasMatchIndexSensitivePredicate(has)) {
@@ -518,7 +523,7 @@ public final class TraversalUtil {
     }
 
     private static List<HasContainer> extractUsableHasContainers(
-            HugeGraphStep<?, ?> step, HasContainerHolder holder) {
+            HugeGraphStep<?, ?> step, HasContainerHolder<?, ?> holder) {
         List<HasContainer> extracted = new ArrayList<>();
         HugeGraph graph = tryGetGraph(step);
         for (HasContainer has : holder.getHasContainers()) {
@@ -544,7 +549,7 @@ public final class TraversalUtil {
         List<P<Object>> predicates = new ArrayList<>();
         collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
         for (P<Object> pred : predicates) {
-            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            PBiPredicate<?, ?> bp = pred.getBiPredicate();
             if (bp == Compare.neq ||
                 bp == Compare.gt || bp == Compare.gte ||
                 bp == Compare.lt || bp == Compare.lte) {
@@ -631,6 +636,29 @@ public final class TraversalUtil {
         return false;
     }
 
+    private static boolean hasNullLabelValue(HasContainer has) {
+        if (!isLabelContainer(has)) {
+            return false;
+        }
+
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> pred : predicates) {
+            Object value = pred.getValue();
+            if (value == null) {
+                return true;
+            }
+            if (value instanceof Collection) {
+                for (Object label : (Collection<?>) value) {
+                    if (label == null) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     private static boolean hasBooleanIndex(HugeGraph graph,
                                            SchemaLabel schemaLabel,
                                            PropertyKey pkey) {
@@ -681,7 +709,7 @@ public final class TraversalUtil {
         List<P<Object>> predicates = new ArrayList<>();
         collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
         for (P<Object> pred : predicates) {
-            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            PBiPredicate<?, ?> bp = pred.getBiPredicate();
             if (bp != Compare.gt && bp != Compare.gte &&
                 bp != Compare.lt && bp != Compare.lte) {
                 return false;
@@ -701,7 +729,8 @@ public final class TraversalUtil {
             Step<?, ?> nextStep = step.getNextStep();
             if (step instanceof HasStep) {
                 removeConnectiveLabelStep(step);
-                HasContainerHolder holder = (HasContainerHolder) step;
+                HasContainerHolder<?, ?> holder =
+                        (HasContainerHolder<?, ?>) step;
                 if (extractHasContainers(newStep, holder)) {
                     TraversalHelper.copyLabels(step, step.getPreviousStep(), false);
                     traversal.removeStep(step);
@@ -712,7 +741,7 @@ public final class TraversalUtil {
     }
 
     private static boolean extractHasContainers(HugeGraphStep<?, ?> newStep,
-                                                HasContainerHolder holder) {
+                                                HasContainerHolder<?, ?> holder) {
         HugeGraph graph = TraversalUtil.tryGetGraph(newStep);
         if (!canExtractHasContainers(graph, holder)) {
             return false;
@@ -726,7 +755,7 @@ public final class TraversalUtil {
     }
 
     private static boolean extractHasContainers(HugeVertexStep<?> newStep,
-                                                HasContainerHolder holder) {
+                                                HasContainerHolder<?, ?> holder) {
         HugeGraph graph = TraversalUtil.tryGetGraph(newStep);
         if (!canExtractHasContainers(graph, holder)) {
             return false;
@@ -738,7 +767,7 @@ public final class TraversalUtil {
     }
 
     private static boolean canExtractHasContainers(HugeGraph graph,
-                                                   HasContainerHolder holder) {
+                                                   HasContainerHolder<?, ?> holder) {
         // Keep unsafe labels and their sibling properties for local filtering.
         if (hasUnsafeLabelPredicate(holder)) {
             return false;
@@ -759,7 +788,7 @@ public final class TraversalUtil {
         while (step instanceof HasStep || step instanceof NoOpBarrierStep) {
             Step<?, ?> next = step.getNextStep();
             if (step instanceof HasStep) {
-                HasContainerHolder holder = (HasContainerHolder) step;
+                HasContainerHolder<?, ?> holder = (HasContainerHolder<?, ?>) step;
                 for (HasContainer has : new ArrayList<>(holder.getHasContainers())) {
                     // Paging is query metadata, never an element property filter.
                     if (QueryHolder.SYSPROP_PAGE.equals(has.getKey())) {
@@ -776,7 +805,7 @@ public final class TraversalUtil {
                             continue;
                         }
                         holder.removeHasContainer(has);
-                        holder.addHasContainer(new LocalIdHasContainer(has.getPredicate()));
+                        holder.addHasContainer(new LocalIdHasContainer(localIdPredicate(has.getPredicate())));
                         continue;
                     }
                     if (T.label.getAccessor().equals(has.getKey())) {
@@ -804,10 +833,7 @@ public final class TraversalUtil {
                                           new LocalContainsStep<>(traversal, has));
                         continue;
                     }
-                    List<P<Object>> predicates = new ArrayList<>();
-                    collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
-                    if (predicates.stream().anyMatch(p ->
-                            p.getBiPredicate() == Condition.RelationType.TEXT_CONTAINS)) {
+                    if (containsSearchPredicate(has.getPredicate())) {
                         // Child traversals can be unbound during optimization;
                         // the matcher resolves the graph from each runtime element.
                         holder.removeHasContainer(has);
@@ -888,7 +914,7 @@ public final class TraversalUtil {
         // Keep IDs local to preserve source-ID intersections and step ordering.
         // UUID/Element values need the same representation as HugeElement.id(). Leave
         // strings unchanged so HasContainer retains its string-ID comparison.
-        P<?> copy = predicate.clone();
+        P<?> copy = copyResolvedPredicate(predicate);
         List<P<Object>> leaves = new ArrayList<>();
         collectPredicates(leaves, ImmutableList.of(copy));
         for (P<Object> leaf : leaves) {
@@ -913,49 +939,12 @@ public final class TraversalUtil {
         return value;
     }
 
-    private static final class LocalIdHasContainer extends HasContainer {
-
-        private static final long serialVersionUID = 1L;
-
-        private LocalIdHasContainer(P<?> predicate) {
-            super(T.id.getAccessor(), localIdPredicate(predicate));
-        }
-
-        @Override
-        protected boolean testId(Element element) {
-            return testLocalIdPredicate(this.getPredicate(), element.id());
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static boolean testLocalIdPredicate(P<?> predicate, Object id) {
-        if (predicate instanceof ConnectiveP) {
-            boolean and = predicate instanceof AndP;
-            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
-                if (testLocalIdPredicate(child, id) != and) {
-                    return !and;
-                }
-            }
-            return and;
-        }
-        Object value = predicate.getValue();
-        Object first = value;
-        if (value instanceof Collection) {
-            Collection<?> values = (Collection<?>) value;
-            first = values.isEmpty() ? null : values.iterator().next();
-        }
-        // HasContainer decides string-ID comparison from only the top-level
-        // P value. ConnectiveP has no such value; decide separately per leaf.
-        Object actual = first instanceof String ? id.toString() : id;
-        return ((BiPredicate<Object, Object>) predicate.getBiPredicate()).test(actual, value);
-    }
-
     private static final class LocalLabelHasContainer extends HasContainer {
 
         private static final long serialVersionUID = 1L;
 
         private LocalLabelHasContainer(P<?> predicate) {
-            super(T.label.getAccessor(), predicate.clone());
+            super(T.label.getAccessor(), copyResolvedPredicate(predicate));
         }
 
         @Override
@@ -988,7 +977,7 @@ public final class TraversalUtil {
             // retain a graph or transaction captured during optimization.
             for (HasContainer has : this.getHasContainers()) {
                 boolean matches = keyForContainsKey(has.getKey()) || keyForContainsValue(has.getKey()) ?
-                                  convContains2Relation(element.graph(), has).test(element) :
+                                  convContains2Relation(element.graph(), has).test(element.element()) :
                                   has.test(element);
                 if (!matches) {
                     return false;
@@ -1000,6 +989,9 @@ public final class TraversalUtil {
 
     @SuppressWarnings("unchecked")
     private static boolean testLabelPredicate(P<?> predicate, SchemaLabel label) {
+        if (predicate instanceof NotP) {
+            return !testLabelPredicate(((NotP<?>) predicate).negate(), label);
+        }
         if (predicate instanceof ConnectiveP) {
             boolean and = predicate instanceof AndP;
             for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
@@ -1039,7 +1031,7 @@ public final class TraversalUtil {
         private transient Predicate<Object> matcher;
 
         private LocalSearchHasContainer(String key, P<?> predicate) {
-            super(key, predicate.clone());
+            super(key, copyResolvedPredicate(predicate));
         }
 
         @Override
@@ -1050,7 +1042,7 @@ public final class TraversalUtil {
             HugeGraph graph = (HugeGraph) property.element().graph();
             if (this.matcherGraph != graph ||
                 !samePredicateValues(this.getPredicate(), this.matcherPredicate)) {
-                P<?> predicate = this.getPredicate().clone();
+                P<?> predicate = copyResolvedPredicate(this.getPredicate());
                 this.matcher = localSearchMatcher(predicate, graph);
                 this.matcherPredicate = predicate;
                 this.matcherGraph = graph;
@@ -1073,6 +1065,9 @@ public final class TraversalUtil {
         if (cached == null || current.getClass() != cached.getClass()) {
             return false;
         }
+        if (current instanceof NotP) {
+            return samePredicateValues(((NotP<?>) current).negate(), ((NotP<?>) cached).negate());
+        }
         if (current instanceof ConnectiveP) {
             List<? extends P<?>> children = ((ConnectiveP<?>) current).getPredicates();
             List<? extends P<?>> oldChildren = ((ConnectiveP<?>) cached).getPredicates();
@@ -1090,8 +1085,27 @@ public final class TraversalUtil {
                Objects.equals(current.getValue(), cached.getValue());
     }
 
+    private static boolean containsSearchPredicate(P<?> predicate) {
+        if (predicate instanceof NotP) {
+            return containsSearchPredicate(((NotP<?>) predicate).negate());
+        }
+        if (predicate instanceof ConnectiveP) {
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                if (containsSearchPredicate(child)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return predicate.getBiPredicate() == Condition.RelationType.TEXT_CONTAINS;
+    }
+
     @SuppressWarnings("unchecked")
     private static Predicate<Object> localSearchMatcher(P<?> predicate, HugeGraph graph) {
+        if (predicate instanceof NotP) {
+            Predicate<Object> child = localSearchMatcher(((NotP<?>) predicate).negate(), graph);
+            return value -> !child.test(value);
+        }
         if (predicate instanceof ConnectiveP) {
             List<Predicate<Object>> children = new ArrayList<>();
             for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
@@ -1139,7 +1153,7 @@ public final class TraversalUtil {
                 return false;
             }
             if (step instanceof HasStep) {
-                HasContainerHolder holder = (HasContainerHolder) step;
+                HasContainerHolder<?, ?> holder = (HasContainerHolder<?, ?>) step;
                 if (hasUnsafeLabelPredicate(holder)) {
                     return true;
                 }
@@ -1239,7 +1253,7 @@ public final class TraversalUtil {
                 return false;
             }
             if (childStep instanceof HasStep &&
-                hasUnsafeLabelPredicate((HasContainerHolder) childStep, negated)) {
+                hasUnsafeLabelPredicate((HasContainerHolder<?, ?>) childStep, negated)) {
                 return true;
             }
             if (hasUnsafeLabelInChildren(childStep, negated)) {
@@ -1249,13 +1263,13 @@ public final class TraversalUtil {
         return false;
     }
 
-    private static boolean hasUnsafeLabelPredicate(HasContainerHolder holder) {
+    private static boolean hasUnsafeLabelPredicate(HasContainerHolder<?, ?> holder) {
         return hasUnsafeLabelPredicate(holder, false);
     }
 
-    private static boolean hasUnsafeLabelPredicate(HasContainerHolder holder, boolean negated) {
+    private static boolean hasUnsafeLabelPredicate(HasContainerHolder<?, ?> holder, boolean negated) {
         for (HasContainer has : holder.getHasContainers()) {
-            if (has.getKey().equals(T.label.getAccessor()) &&
+            if (T.label.getAccessor().equals(has.getKey()) &&
                 (negated || !isEqInLabelPredicate(has))) {
                 return true;
             }
@@ -1264,6 +1278,9 @@ public final class TraversalUtil {
     }
 
     private static boolean isEqInLabelPredicate(HasContainer has) {
+        if (has.getPredicate() == null) {
+            return false;
+        }
         List<P<Object>> predicates = new ArrayList<>();
         collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
         for (P<Object> predicate : predicates) {
@@ -1277,6 +1294,10 @@ public final class TraversalUtil {
 
     static boolean canExtractHasContainer(HugeGraph graph,
                                           HasContainer has) {
+        if (has.getKey() == null || has.getPredicate() == null ||
+            hasNullLabelValue(has) || !hasSupportedPredicate(has)) {
+            return false;
+        }
         if (isSysProp(has.getKey())) {
             return true;
         }
@@ -1300,9 +1321,25 @@ public final class TraversalUtil {
         List<P<Object>> predicates = new ArrayList<>();
         collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
         for (P<Object> pred : predicates) {
-            BiPredicate<?, ?> bp = pred.getBiPredicate();
+            PBiPredicate<?, ?> bp = pred.getBiPredicate();
             if (bp == Compare.gt || bp == Compare.gte ||
                 bp == Compare.lt || bp == Compare.lte) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean hasSupportedPredicate(HasContainer has) {
+        List<P<Object>> predicates = new ArrayList<>();
+        collectPredicates(predicates, ImmutableList.of(has.getPredicate()));
+        for (P<Object> predicate : predicates) {
+            // Keep this set aligned with convHas2Condition(). Other predicates
+            // (including NotP, TextP and typeOf) must execute in HasStep.
+            PBiPredicate<?, ?> bp = predicate.getBiPredicate();
+            if (!(bp instanceof Compare) &&
+                !(bp instanceof Contains) &&
+                !(bp instanceof Condition.RelationType)) {
                 return false;
             }
         }
@@ -1462,7 +1499,7 @@ public final class TraversalUtil {
     public static Condition convHas2Condition(HasContainer has, HugeType type, HugeGraph graph) {
         P<?> p = has.getPredicate();
         E.checkArgument(p != null, "The predicate of has(%s) is null", has);
-        BiPredicate<?, ?> bp = p.getBiPredicate();
+        PBiPredicate<?, ?> bp = p.getBiPredicate();
         Condition condition;
         if (keyForContainsKeyOrValue(has.getKey())) {
             condition = convContains2Relation(graph, has);
@@ -1535,7 +1572,7 @@ public final class TraversalUtil {
                                                   HugeType type,
                                                   HasContainer has) {
         assert type.isGraph();
-        BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
+        PBiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
 
         return isSysProp(has.getKey()) ?
@@ -1546,7 +1583,7 @@ public final class TraversalUtil {
     private static Condition.Relation convCompare2SyspropRelation(HugeGraph graph,
                                                                   HugeType type,
                                                                   HasContainer has) {
-        BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
+        PBiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
 
         HugeKeys key = token2HugeKey(has.getKey());
@@ -1574,7 +1611,7 @@ public final class TraversalUtil {
     private static Condition convCompare2UserpropRelation(HugeGraph graph,
                                                           HugeType type,
                                                           HasContainer has) {
-        BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
+        PBiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Compare;
 
         String key = has.getKey();
@@ -1634,7 +1671,7 @@ public final class TraversalUtil {
                                                        HugeType type,
                                                        HasContainer has) {
         assert type.isGraph();
-        BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
+        PBiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Condition.RelationType;
 
         String key = has.getKey();
@@ -1647,7 +1684,7 @@ public final class TraversalUtil {
     public static Condition convIn2Relation(HugeGraph graph,
                                             HugeType type,
                                             HasContainer has) {
-        BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
+        PBiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         assert bp instanceof Contains;
         Collection<?> values = (Collection<?>) has.getValue();
 
@@ -1690,7 +1727,7 @@ public final class TraversalUtil {
     public static Condition convContains2Relation(HugeGraph graph,
                                                   HasContainer has) {
         // Convert contains-key or contains-value
-        BiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
+        PBiPredicate<?, ?> bp = has.getPredicate().getBiPredicate();
         E.checkArgument(bp == Compare.eq, "CONTAINS query with relation " +
                                           "'%s' is not supported", bp);
 
@@ -1719,6 +1756,9 @@ public final class TraversalUtil {
     }
 
     public static HugeKeys token2HugeKey(String key) {
+        if (key == null) {
+            return null;
+        }
         if (key.equals(T.label.getAccessor())) {
             return HugeKeys.LABEL;
         } else if (key.equals(T.id.getAccessor())) {
@@ -1811,16 +1851,154 @@ public final class TraversalUtil {
     }
 
     public static void convHasStep(HugeGraph graph, HasStep<?> step) {
-        HasContainerHolder holder = step;
-        for (HasContainer has : holder.getHasContainers()) {
-            convPredicateValue(graph, has);
+        HasContainerHolder<?, ?> holder = step;
+        List<HasContainer> containers = new ArrayList<>(holder.getHasContainers());
+        // Use the existing extraction contract to identify a whole local HasStep.
+        boolean localIds = !canExtractHasContainers(graph, holder);
+        for (int i = 0; i < containers.size(); i++) {
+            HasContainer original = containers.get(i);
+            // P.clone() shares named bindings in TP 3.8. Resolve into a fresh
+            // execution predicate before conversion so setValue() cannot clear
+            // the caller's bindings or those of a previously cloned traversal.
+            P<?> predicate = copyResolvedPredicate(original.getPredicate());
+            HasContainer has;
+            if (original instanceof LocalSearchHasContainer) {
+                has = new LocalSearchHasContainer(original.getKey(), predicate);
+            } else if (original instanceof LocalLabelHasContainer) {
+                has = new LocalLabelHasContainer(predicate);
+            } else if (original instanceof LocalIdHasContainer ||
+                       localIds && T.id.getAccessor().equals(original.getKey())) {
+                updateLocalIdPredicate(predicate);
+                has = new LocalIdHasContainer(predicate);
+            } else {
+                has = new HasContainer(original.getKey(), predicate);
+                convPredicateValue(graph, has);
+            }
+            containers.set(i, has);
+        }
+        for (HasContainer has : new ArrayList<>(holder.getHasContainers())) {
+            holder.removeHasContainer(has);
+        }
+        for (HasContainer has : containers) {
+            holder.addHasContainer(has);
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static P<?> copyResolvedPredicate(P<?> predicate) {
+        if (predicate == null) {
+            return null;
+        }
+        if (predicate instanceof NotP) {
+            return new NotP(copyResolvedPredicate(((NotP<?>) predicate).negate()));
+        }
+        if (predicate instanceof ConnectiveP) {
+            List<P<Object>> children = new ArrayList<>();
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                children.add((P<Object>) copyResolvedPredicate(child));
+            }
+            return predicate instanceof AndP ? new AndP<>(children) : new OrP<>(children);
+        }
+        if (!predicate.isParameterized()) {
+            // Preserve TextP and custom literal predicate implementations.
+            // Their empty bindings can be shared safely: setValue() replaces
+            // the clone's literals without changing the original's values.
+            return predicate.clone();
+        }
+        Object value = predicate.getValue();
+        if (value instanceof Collection) {
+            value = new ArrayList<>((Collection<?>) value);
+        }
+        return new P((PBiPredicate) predicate.getBiPredicate(), value);
+    }
+
+    private static final class LocalIdHasContainer extends HasContainer {
+
+        private LocalIdHasContainer(P<?> predicate) {
+            super(T.id.getAccessor(), predicate);
+        }
+
+        @Override
+        protected boolean testId(Element element) {
+            return testIdPredicate(this.getPredicate(), element);
+        }
+
+        @Override
+        protected boolean testIdAsString(Element element) {
+            return testIdPredicate(this.getPredicate(), element);
+        }
+
+        private static boolean testIdPredicate(P<?> predicate, Element element) {
+            if (predicate instanceof NotP) {
+                return !testIdPredicate(((NotP<?>) predicate).negate(), element);
+            }
+            if (predicate instanceof ConnectiveP) {
+                boolean conjunction = predicate instanceof AndP;
+                for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                    if (testIdPredicate(child, element) != conjunction) {
+                        return !conjunction;
+                    }
+                }
+                return conjunction;
+            }
+            if (predicate.getBiPredicate() instanceof Contains) {
+                Collection<?> values = (Collection<?>) predicate.getValue();
+                boolean stringIds = values.stream().allMatch(value -> value == null || value instanceof String);
+                if (!stringIds) {
+                    // Mixed collections use typed IDs. Keep numeric operands as
+                    // Numbers so Compare.eq() does not truncate fractional IDs.
+                    Object id = element.id();
+                    for (Object value : values) {
+                        Object actual = id instanceof IdGenerator.StringId && value instanceof String ?
+                                        ((Id) id).asString() : id;
+                        // Edge lookup accepts its serialized ID as well as EdgeId.
+                        // Preserve that contract in local mixed-ID filters without
+                        // collapsing numeric and string vertex IDs.
+                        Object expected = id instanceof EdgeId &&
+                                          value instanceof String ? HugeEdge.getIdValue(value, true) : value;
+                        if (Compare.eq.test(actual, expected)) {
+                            return predicate.getBiPredicate() == Contains.within;
+                        }
+                    }
+                    return predicate.getBiPredicate() == Contains.without;
+                }
+            }
+            // Pure String collections use the standard string-ID mode.
+            // Numeric, custom and type predicates retain their native operand.
+            return new HasContainer(T.id.getAccessor(), predicate).test(element);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void updateLocalIdPredicate(P<?> predicate) {
+        if (predicate instanceof NotP) {
+            // negate() exposes NotP's child without removing the wrapper.
+            updateLocalIdPredicate(((NotP<?>) predicate).negate());
+        } else if (predicate instanceof ConnectiveP) {
+            for (P<?> child : ((ConnectiveP<?>) predicate).getPredicates()) {
+                updateLocalIdPredicate(child);
+            }
+        } else if (predicate.getBiPredicate() instanceof Compare ||
+                   predicate.getBiPredicate() instanceof Contains) {
+            P<Object> leaf = (P<Object>) predicate;
+            Object value = leaf.getValue();
+            if (value instanceof UUID) {
+                leaf.setValue(IdGenerator.of((UUID) value));
+            } else if (value instanceof Collection) {
+                List<Object> values = new ArrayList<>();
+                for (Object item : (Collection<?>) value) {
+                    values.add(item instanceof UUID ?
+                               IdGenerator.of((UUID) item) : item);
+                }
+                leaf.setValue(values);
+            }
         }
     }
 
     private static void convPredicateValue(HugeGraph graph,
                                            HasContainer has) {
         // No need to convert if key is sys-prop
-        if (isSysProp(has.getKey())) {
+        if (has.getKey() == null || isSysProp(has.getKey())) {
             return;
         }
         PropertyKey pkey = graph.propertyKey(has.getKey());
@@ -1831,13 +2009,34 @@ public final class TraversalUtil {
         List<P<Object>> leafPredicates = new ArrayList<>();
         collectPredicates(leafPredicates, ImmutableList.of(predicate));
         for (P<Object> pred : leafPredicates) {
-            if (pred.getBiPredicate() == Compare.neq &&
-                pred.getValue() == null) {
+            if (isNullInequalityPredicate(pred)) {
+                continue;
+            }
+            if (pred instanceof NotP) {
+                updatePredicateValue(((NotP<?>) pred).negate(), pkey);
+                continue;
+            }
+            if (pred.getBiPredicate() instanceof CompareType) {
+                // GType, Class and type-name operands describe the value's
+                // type; they are not values of the property's schema type.
                 continue;
             }
             Object value = validPropertyValue(pred.getValue(), pkey);
             pred.setValue(value);
         }
+    }
+
+    private static boolean isNullInequalityPredicate(P<?> predicate) {
+        if (predicate.getValue() != null) {
+            return false;
+        }
+        if (predicate.getBiPredicate() == Compare.neq) {
+            return true;
+        }
+        if (!(predicate instanceof NotP)) {
+            return false;
+        }
+        return ((NotP<?>) predicate).negate().getBiPredicate() == Compare.eq;
     }
 
     private static boolean isSysProp(String key) {

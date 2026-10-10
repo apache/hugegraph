@@ -41,15 +41,17 @@ import java.util.function.Supplier;
 import javax.security.sasl.AuthenticationException;
 
 import org.apache.commons.configuration2.Configuration;
+import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
+import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.auth.HugeAuthenticator.RolePerm;
 import org.apache.hugegraph.auth.HugeAuthenticator.User;
 import org.apache.hugegraph.auth.SchemaDefine.AuthElement;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheManager;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
@@ -62,16 +64,15 @@ import org.apache.hugegraph.iterator.FilterIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
 import org.apache.hugegraph.kvstore.KvStore;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Server;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeFeatures;
@@ -83,7 +84,7 @@ import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.traversal.optimize.HugeScriptTraversal;
 import org.apache.hugegraph.type.HugeType;
-import org.apache.hugegraph.type.Nameable;
+import org.apache.hugegraph.type.Namifiable;
 import org.apache.hugegraph.type.define.GraphMode;
 import org.apache.hugegraph.type.define.GraphReadMode;
 import org.apache.hugegraph.util.E;
@@ -745,7 +746,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     }
 
     @Override
-    public boolean sameAs(HugeGraph graph) {
+    public boolean sameAs(HugeGraphSupplier graph) {
         if (graph instanceof HugeGraphAuthProxy) {
             graph = ((HugeGraphAuthProxy) graph).hugegraph;
         }
@@ -876,12 +877,6 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     public AuthManager authManager() {
         // Just return proxy
         return this.authManager;
-    }
-
-    @Override
-    public RoleElectionStateMachine roleElectionStateMachine() {
-        this.verifyAdminPermission();
-        return this.hugegraph.roleElectionStateMachine();
     }
 
     @Override
@@ -1067,7 +1062,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                 LOG.debug("Using requestGraphSpace: {}", graphSpace);
             }
 
-            Nameable elem = HugeResource.NameObject.ANY;
+            Namifiable elem = HugeResource.NameObject.ANY;
             return ResourceObject.of(graphSpace, graph, resType, elem);
         });
     }
@@ -1161,7 +1156,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
                                       ResourceType resType, String name) {
         verifyResPermission(actionPerm, true, () -> {
             String graph = this.hugegraph.name();
-            Nameable elem = HugeResource.NameObject.of(name);
+            Namifiable elem = HugeResource.NameObject.of(name);
 
             // For global resources like USER_GROUP, use request graph space from HugeGraphAuthProxy
             // instead of the graph space where authManager is located
@@ -1303,11 +1298,17 @@ public final class HugeGraphAuthProxy implements HugeGraph {
     static class ContextTask implements Runnable {
 
         private final Runnable runner;
+        private final Runnable cleanup;
         private final Context context;
 
         public ContextTask(Runnable runner) {
+            this(runner, HugeFactory::closeCurrentThreadTransactions);
+        }
+
+        ContextTask(Runnable runner, Runnable cleanup) {
             this.context = getContext();
             this.runner = runner;
+            this.cleanup = cleanup;
         }
 
         @Override
@@ -1316,7 +1317,13 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             try {
                 this.runner.run();
             } finally {
-                resetContext();
+                try {
+                    this.cleanup.run();
+                } catch (Throwable e) {
+                    LOG.error("Failed to close Gremlin worker transactions", e);
+                } finally {
+                    resetContext();
+                }
             }
         }
     }
@@ -1527,7 +1534,7 @@ public final class HugeGraphAuthProxy implements HugeGraph {
             Object r = verifyResPermission(actionPerm, throwIfNoPerm, () -> {
                 String graph = HugeGraphAuthProxy.this.hugegraph.name();
                 String name = task.id().toString();
-                Nameable elem = HugeResource.NameObject.of(name);
+                Namifiable elem = HugeResource.NameObject.of(name);
                 return ResourceObject.of(graphSpace(), graph, ResourceType.TASK, elem);
             }, () -> {
                 return hasTaskPermission(task);

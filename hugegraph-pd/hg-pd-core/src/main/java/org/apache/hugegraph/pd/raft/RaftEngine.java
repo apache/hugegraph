@@ -58,7 +58,6 @@ import com.alipay.sofa.jraft.rpc.RaftRpcServerFactory;
 import com.alipay.sofa.jraft.rpc.RpcServer;
 import com.alipay.sofa.jraft.rpc.impl.BoltRpcServer;
 import com.alipay.sofa.jraft.util.Endpoint;
-import com.alipay.sofa.jraft.util.internal.ThrowUtil;
 
 import io.netty.channel.ChannelHandler;
 import lombok.extern.slf4j.Slf4j;
@@ -195,43 +194,68 @@ public class RaftEngine {
         }
     }
 
-    public void shutDown() {
-        if (this.alivePeersRefresher != null) {
-            this.alivePeersRefresher.shutdownNow();
-            try {
-                // Best effort: shutdownNow only interrupts, and a refresh parked in
-                // listAlivePeers waits on a lock acquire the interrupt does not break,
-                // for up to the raft rpc connect timeout per unreachable peer. A refresh
-                // that outlives this wait may publish one stale count over the reset
-                // below; acceptable while shutDown has no production caller.
-                if (!this.alivePeersRefresher.awaitTermination(1, TimeUnit.SECONDS)) {
-                    log.warn("Raft alive-peers refresher still running after shutdown; " +
-                             "hg_raft_alive_peers may briefly report a stale value");
+    // Call while Raft can still complete metadata work already issued by a listener.
+    public void stopLeaderCallbacks() {
+        this.stateMachine.stopLeaderCallbacks();
+    }
+
+    public synchronized void shutDown() {
+        boolean interrupted = Thread.interrupted();
+        try {
+            if (this.alivePeersRefresher != null) {
+                this.alivePeersRefresher.shutdownNow();
+                while (!this.alivePeersRefresher.isTerminated()) {
+                    try {
+                        if (!this.alivePeersRefresher.awaitTermination(5, TimeUnit.SECONDS)) {
+                            log.warn("Waiting for PD Raft alive-peers refresher to stop");
+                        }
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
                 }
-            } catch (InterruptedException e) {
+                this.alivePeersRefresher = null;
+            }
+            this.alivePeerCount = -1;
+            if (this.raftGroupService != null) {
+                this.raftGroupService.shutdown();
+                boolean joined = false;
+                while (!joined) {
+                    try {
+                        this.raftGroupService.join();
+                        joined = true;
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
+                }
+                this.raftGroupService = null;
+                this.raftNode = null;
+            } else if (this.raftNode != null) {
+                this.raftNode.shutdown();
+                boolean joined = false;
+                while (!joined) {
+                    try {
+                        this.raftNode.join();
+                        joined = true;
+                    } catch (InterruptedException e) {
+                        interrupted = true;
+                    }
+                }
+                this.raftNode = null;
+            }
+            if (this.rpcServer != null) {
+                this.rpcServer.shutdown();
+                this.rpcServer = null;
+            }
+            if (this.raftRpcClient != null) {
+                this.raftRpcClient.shutdown();
+                this.raftRpcClient = null;
+            }
+            log.info("PD Raft shutdown joined");
+        } finally {
+            if (interrupted) {
                 Thread.currentThread().interrupt();
             }
-            this.alivePeersRefresher = null;
         }
-        this.alivePeerCount = -1;
-        if (this.raftGroupService != null) {
-            this.raftGroupService.shutdown();
-            try {
-                this.raftGroupService.join();
-            } catch (final InterruptedException e) {
-                this.raftNode = null;
-                ThrowUtil.throwException(e);
-            }
-            this.raftGroupService = null;
-        }
-        if (this.rpcServer != null) {
-            this.rpcServer.shutdown();
-            this.rpcServer = null;
-        }
-        if (this.raftNode != null) {
-            this.raftNode.shutdown();
-        }
-        this.raftNode = null;
     }
 
     public boolean isLeader() {

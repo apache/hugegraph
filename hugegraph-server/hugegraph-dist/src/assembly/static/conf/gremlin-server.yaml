@@ -28,7 +28,7 @@ graphs: {
 scriptEngines: {
   gremlin-groovy: {
     staticImports: [
-      org.opencypher.gremlin.process.traversal.CustomPredicates.*',
+      org.apache.hugegraph.opencypher.CypherGremlinPredicates.*,
       org.opencypher.gremlin.traversal.CustomFunctions.*
     ],
     plugins: {
@@ -37,7 +37,7 @@ scriptEngines: {
       org.apache.tinkerpop.gremlin.jsr223.ImportGremlinPlugin: {
         classImports: [
           java.lang.Math,
-          org.apache.hugegraph.backend.id.IdGenerator,
+          org.apache.hugegraph.id.IdGenerator,
           org.apache.hugegraph.type.define.Directions,
           org.apache.hugegraph.type.define.NodeRole,
           org.apache.hugegraph.masterelection.GlobalMasterInfo,
@@ -67,11 +67,11 @@ scriptEngines: {
           org.apache.hugegraph.traversal.optimize.Text,
           org.apache.hugegraph.traversal.optimize.TraversalUtil,
           org.opencypher.gremlin.traversal.CustomFunctions,
-          org.opencypher.gremlin.traversal.CustomPredicate
+          org.apache.hugegraph.opencypher.CypherGremlinPredicates
         ],
         methodImports: [
           java.lang.Math#*,
-          org.opencypher.gremlin.traversal.CustomPredicate#*,
+          org.apache.hugegraph.opencypher.CypherGremlinPredicates#*,
           org.opencypher.gremlin.traversal.CustomFunctions#*
         ]
       },
@@ -82,30 +82,49 @@ scriptEngines: {
   }
 }
 serializers:
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphBinaryMessageSerializerV1,
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphBinaryMessageSerializerV1,
+     config: {
+       serializeResultToString: false,
+       builder: org.apache.hugegraph.io.HugeGraphTypeSerializerRegistryBuilder,
+       ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
+     }
+  }
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV1,
+     config: {
+       serializeResultToString: false,
+       ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry,
+                      org.apache.hugegraph.io.HugeGraphSONV1MessageIoRegistry]
+     }
+  }
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV2,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV1d0,
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONUntypedMessageSerializerV3,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV2d0,
+  # Keep untyped GraphSON before typed GraphSON so application/json stays
+  # mapped to untyped V1. Typed V1 is disabled because it accepts Java class names.
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV2,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
-  - {className: org.apache.tinkerpop.gremlin.driver.ser.GraphSONMessageSerializerV3d0,
+  - {className: org.apache.tinkerpop.gremlin.util.ser.GraphSONMessageSerializerV3,
      config: {
        serializeResultToString: false,
        ioRegistries: [org.apache.hugegraph.io.HugeGraphIoRegistry]
      }
   }
+# Typed GraphSON remains fallback scope for File/Id/simple typed values.
+# Full HugeGraph internal object typed GraphSON for schema/Vertex/Edge/Path
+# remains follow-up scope; keep untyped serializers for normal remote objects.
 metrics: {
   consoleReporter: {enabled: false, interval: 180000},
   csvReporter: {enabled: false, interval: 180000, fileName: ./metrics/gremlin-server-metrics.csv},

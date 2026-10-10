@@ -370,12 +370,12 @@ def goals(plugin):
 def check_module(module, test_module):
     parent = ET.parse(ROOT / module / "pom.xml").getroot()
     parent_plugin = jacoco_plugin(parent.find(NS + "build"))
-    assert child_text(parent_plugin, "version") == "0.8.8"
+    assert child_text(parent_plugin, "version") == "", "inherit the managed JaCoCo version"
     assert child_text(parent_plugin.find(NS + "configuration"), "append") == "true"
 
     test = ET.parse(ROOT / module / test_module / "pom.xml").getroot()
     default_plugin = jacoco_plugin(test.find(NS + "build"))
-    assert child_text(default_plugin, "version") == "0.8.8"
+    assert child_text(default_plugin, "version") == "", "inherit the managed JaCoCo version"
     assert "report-aggregate" not in goals(default_plugin)
 
     profile = None
@@ -385,13 +385,18 @@ def check_module(module, test_module):
             break
     assert profile is not None
     profile_plugin = jacoco_plugin(profile.find(NS + "build"))
-    assert child_text(profile_plugin, "version") == "0.8.8"
+    assert child_text(profile_plugin, "version") == "", "inherit the managed JaCoCo version"
     executions = profile_plugin.findall(".//" + NS + "execution")
     aggregates = [execution for execution in executions
                   if "report-aggregate" in goals(execution)]
     assert len(aggregates) == 1
     assert child_text(aggregates[0], "phase") == "verify"
 
+
+root_pom = ET.parse(ROOT / "pom.xml").getroot()
+managed_plugin = jacoco_plugin(root_pom.find(NS + "build/" + NS + "pluginManagement"))
+assert child_text(managed_plugin, "version") == "${jacoco.maven.plugin.version}"
+assert child_text(root_pom.find(NS + "properties"), "jacoco.maven.plugin.version") == "0.8.15"
 
 check_module("hugegraph-pd", "hg-pd-test")
 check_module("hugegraph-store", "hg-store-test")
@@ -425,8 +430,8 @@ def validation_command(job):
 
 def reports_for_option(job, option):
     pattern = re.escape(option) + (
-        r'\s+\\?\s*"\$TEST_REPORT_DIR/'
-        r'(TEST-[A-Za-z0-9_.]+SuiteTest[.]xml)"'
+        r'\s+\\?\s*"[^"]*/'
+        r'(TEST-[A-Za-z0-9_.]+Test[.]xml)"'
     )
     return set(re.findall(pattern, validation_command(job)))
 
@@ -487,9 +492,12 @@ assert_order(store_job, [
     "-P store-client-test -Djacoco.sessionId=store-client-test",
     "-P store-rocksdb-test -Djacoco.sessionId=store-rocksdb-test",
     "-P store-raftcore-test -Djacoco.sessionId=store-raftcore-test",
+    "-P store-core-test -Djacoco.sessionId=store-core-test",
+    "-P store-server-test -Djacoco.sessionId=store-server-test",
     "mvn verify", "--require-session store-common-test",
     "--require-session store-client-test", "--require-session store-rocksdb-test",
-    "--require-session store-raftcore-test", "codecov/codecov-action",
+    "--require-session store-raftcore-test", "--require-session store-core-test",
+    "--require-session store-server-test", "codecov/codecov-action",
 ])
 assert store_job.count("mvn clean") == 1
 assert "hugegraph-store/hg-store-test/target/site/jacoco/jacoco.xml" in store_job
@@ -499,7 +507,7 @@ assert "mvn verify -pl hugegraph-store/hg-store-test -am -P jacoco \\ " \
        "-DskipTests -Deditorconfig.skip=true -ntp" in " ".join(store_job.split())
 assert selected_profiles(store_job, "store") == {
     "store-common-test", "store-client-test", "store-rocksdb-test",
-    "store-raftcore-test", "store-core-test",
+    "store-raftcore-test", "store-core-test", "store-server-test",
 }
 assert reports_for_option(store_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.store.common.CommonSuiteTest.xml",
@@ -507,8 +515,11 @@ assert reports_for_option(store_job, "--require-test-report") == {
     "TEST-org.apache.hugegraph.store.rocksdb.RocksDbSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.raftcore.RaftSuiteTest.xml",
     "TEST-org.apache.hugegraph.store.core.CoreSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml",
+    "TEST-org.apache.hugegraph.store.business.StoredRowIngressTest.xml",
 }
 assert not reports_for_option(store_job, "--require-suite-report")
+assert values_for_option(store_job, "--require-session") == (selected_profiles(store_job, "store") | {"store-node-test"})
 assert values_for_option(store_job, "--require-covered-group") == {
     "hg-store-common", "hg-store-client", "hg-store-rocksdb", "hg-store-core",
 }

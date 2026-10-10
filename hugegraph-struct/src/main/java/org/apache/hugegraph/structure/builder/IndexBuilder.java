@@ -22,7 +22,11 @@ package org.apache.hugegraph.structure.builder;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hugegraph.HugeGraphSupplier;
@@ -39,10 +43,14 @@ import org.apache.hugegraph.structure.BaseElement;
 import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.structure.Index;
+import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.InsertionOrderUtil;
 import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.NumericUtil;
 import org.slf4j.Logger;
+
+import com.google.common.collect.ImmutableSet;
 
 public class IndexBuilder {
     private static final Logger LOG = Log.logger(IndexBuilder.class);
@@ -50,10 +58,14 @@ public class IndexBuilder {
     private final HugeGraphSupplier graph;
     private final Analyzer textAnalyzer;
 
+    public static final String START_SYMBOL = "(";
+    public static final String END_SYMBOL = ")";
+    public static final String WORD_DELIMITER = "|";
 
-    public static final String INDEX_SYM_NULL = "\u0001";
-    public static final String INDEX_SYM_EMPTY = "\u0002";
-    public static final char INDEX_SYM_MAX = '\u0003';
+
+    public static final String INDEX_SYM_NULL = ConditionQuery.INDEX_SYM_NULL;
+    public static final String INDEX_SYM_EMPTY = ConditionQuery.INDEX_SYM_EMPTY;
+    public static final char INDEX_SYM_MAX = ConditionQuery.INDEX_SYM_MAX;
 
     private static final String TEXT_ANALYZER = "search.text_analyzer";
     private static final String TEXT_ANALYZER_MODE =
@@ -63,18 +75,21 @@ public class IndexBuilder {
     private static final String DEFAULT_TEXT_ANALYZER_MODE = "smart";
 
     public IndexBuilder(HugeGraphSupplier graph) {
-        this.graph = graph;
+        this(graph, createAnalyzer(graph));
+    }
 
+    public IndexBuilder(HugeGraphSupplier graph, Analyzer textAnalyzer) {
+        this.graph = Objects.requireNonNull(graph, "graph");
+        this.textAnalyzer = Objects.requireNonNull(textAnalyzer, "textAnalyzer");
+    }
+
+    private static Analyzer createAnalyzer(HugeGraphSupplier graph) {
         String name = graph.configuration().get(String.class, TEXT_ANALYZER);
-        String mode = graph.configuration().get(String.class,
-                                                TEXT_ANALYZER_MODE);
-
+        String mode = graph.configuration().get(String.class, TEXT_ANALYZER_MODE);
         name = name == null ? DEFAULT_TEXT_ANALYZER : name;
         mode = mode == null ? DEFAULT_TEXT_ANALYZER_MODE : mode;
-
-        LOG.debug("Loading text analyzer '{}' with mode '{}' for graph '{}'",
-                  name, mode, graph.name());
-        this.textAnalyzer = AnalyzerFactory.analyzer(name, mode);
+        LOG.debug("Loading text analyzer '{}' with mode '{}' for graph '{}'", name, mode, graph.name());
+        return AnalyzerFactory.analyzer(name, mode);
     }
 
     public List<Index> buildLabelIndex(BaseElement element) {
@@ -107,19 +122,17 @@ public class IndexBuilder {
         return indexList;
     }
 
-    public List<Index> buildVertexOlapIndex(BaseVertex vertex) {
-
-        List<Index> indexs = new ArrayList<>();
-
-        Id pkId = vertex.getProperties().keySet().iterator().next();
-        Collection<IndexLabel> indexLabels = graph.indexLabels();
-        for (IndexLabel il : indexLabels) {
-            if (il.indexFields().contains(pkId)) {
-                indexs.addAll(this.buildIndex(vertex, il));
+    public static void forEachOlapIndexLabelId(BaseVertex vertex, Iterable<IndexLabel> candidates,
+                                                Consumer<Id> sink) {
+        int properties = vertex.sizeOfProperties();
+        E.checkArgument(properties == 1,
+                        "Expect only 1 property for olap vertex, but got %s", properties);
+        Id propertyId = vertex.properties().values().iterator().next().propertyKey().id();
+        for (IndexLabel label : candidates) {
+            if (label.indexFields().contains(propertyId)) {
+                sink.accept(label.id());
             }
         }
-
-        return indexs;
     }
 
     public List<Index> buildVertexIndex(BaseVertex vertex) {
@@ -131,9 +144,8 @@ public class IndexBuilder {
             indexs.addAll(this.buildLabelIndex(vertex));
         }
 
-        for (Id il : label.indexLabels()) {
-            indexs.addAll(this.buildIndex(vertex,  graph.indexLabel(il)));
-        }
+        forEachIndexLabelId(vertex, this.graph::edgeLabel,
+                            id -> this.forEachIndex(vertex, this.graph.indexLabel(id), indexs::add));
 
         return indexs;
     }
@@ -148,11 +160,26 @@ public class IndexBuilder {
         }
 
 
-        for (Id il : label.indexLabels()) {
-            indexs.addAll(this.buildIndex(edge, graph.indexLabel(il)));
-        }
+        forEachIndexLabelId(edge, this.graph::edgeLabel,
+                            id -> this.forEachIndex(edge, this.graph.indexLabel(id), indexs::add));
 
         return indexs;
+    }
+
+    public static void forEachIndexLabelId(BaseElement element, Function<Id, EdgeLabel> edgeLabelLookup,
+                                            Consumer<Id> sink) {
+        for (Id id : element.schemaLabel().indexLabels()) {
+            sink.accept(id);
+        }
+        if (element instanceof BaseEdge) {
+            EdgeLabel label = (EdgeLabel) element.schemaLabel();
+            if (label.hasFather()) {
+                // Preserve child-first order and repeated IDs from the engine's existing loops.
+                for (Id id : edgeLabelLookup.apply(label.fatherId()).indexLabels()) {
+                    sink.accept(id);
+                }
+            }
+        }
     }
 
     /**
@@ -163,10 +190,14 @@ public class IndexBuilder {
      * @param element    the properties owner
      */
     public List<Index> buildIndex(BaseElement element, IndexLabel indexLabel) {
-        E.checkArgument(indexLabel != null,
-                        "Not exist index label with id '%s'", indexLabel.id());
+        List<Index> indexes = new ArrayList<>();
+        this.forEachIndex(element, indexLabel, indexes::add);
+        return indexes;
+    }
 
-        List<Index> indexs = new ArrayList<>();
+    public void forEachIndex(BaseElement element, IndexLabel indexLabel, Consumer<Index> sink) {
+        E.checkArgumentNotNull(indexLabel, "Index label cannot be null");
+        Objects.requireNonNull(sink, "sink");
 
         // Collect property values of index fields
         List<Object> allPropValues = new ArrayList<>();
@@ -181,18 +212,15 @@ public class IndexBuilder {
                 if (firstNullField == fieldsNum) {
                     firstNullField = allPropValues.size();
                 }
-                allPropValues.add(INDEX_SYM_NULL);
+                allPropValues.add(ConditionQuery.INDEX_VALUE_NULL);
             } else {
-                E.checkArgument(!INDEX_SYM_NULL.equals(property.value()),
-                                "Illegal value of index property: '%s'",
-                                INDEX_SYM_NULL);
                 allPropValues.add(property.value());
             }
         }
 
         if (firstNullField == 0 && !indexLabel.indexType().isUnique()) {
             // The property value of first index field is null
-            return indexs;
+            return;
         }
         // Not build index for record with nullable field (except unique index)
         List<Object> propValues = allPropValues.subList(0, firstNullField);
@@ -209,7 +237,7 @@ public class IndexBuilder {
                 E.checkState(propValues.size() == 1,
                              "Expect only one property in range index");
                 Object value = NumericUtil.convertToNumber(propValues.get(0));
-                indexs.add(this.buildIndex(indexLabel, value, element.id(),
+                sink.accept(this.buildIndex(indexLabel, value, element.id(),
                                            expiredTime));
                 break;
             case SEARCH:
@@ -219,7 +247,7 @@ public class IndexBuilder {
                 Set<String> words =
                         this.segmentWords(propertyValueToString(value));
                 for (String word : words) {
-                    indexs.add(this.buildIndex(indexLabel, word, element.id(),
+                    sink.accept(this.buildIndex(indexLabel, word, element.id(),
                                                expiredTime));
                 }
                 break;
@@ -232,10 +260,9 @@ public class IndexBuilder {
                      */
                     for (Object propValue :
                             (Collection<Object>) propValues.get(0)) {
-                        value = ConditionQuery.concatValuesLimitLength(
+                        value = ConditionQuery.concatValues(
                                 propValue);
-                        value = escapeIndexValueIfNeeded((String) value);
-                        indexs.add(this.buildIndex(indexLabel, value,
+                        sink.accept(this.buildIndex(indexLabel, value,
                                                    element.id(),
                                                    expiredTime));
                     }
@@ -243,25 +270,23 @@ public class IndexBuilder {
                     for (int i = 0, n = propValues.size(); i < n; i++) {
                         List<Object> prefixValues =
                                 propValues.subList(0, i + 1);
-                        value = ConditionQuery.concatValuesLimitLength(
+                        value = ConditionQuery.concatValues(
                                 prefixValues);
-                        value = escapeIndexValueIfNeeded((String) value);
-                        indexs.add(this.buildIndex(indexLabel, value,
+                        sink.accept(this.buildIndex(indexLabel, value,
                                                    element.id(),
                                                    expiredTime));
                     }
                 }
                 break;
             case SHARD:
-                value = ConditionQuery.concatValuesLimitLength(propValues);
-                value = escapeIndexValueIfNeeded((String) value);
-                indexs.add(this.buildIndex(indexLabel, value, element.id(),
+                value = ConditionQuery.concatValues(propValues);
+                sink.accept(this.buildIndex(indexLabel, value, element.id(),
                                            expiredTime));
                 break;
             case UNIQUE:
-                value = ConditionQuery.concatValuesLimitLength(allPropValues);
+                value = ConditionQuery.concatValues(allPropValues);
                 assert !"".equals(value);
-                indexs.add(this.buildIndex(indexLabel, value, element.id(),
+                sink.accept(this.buildIndex(indexLabel, value, element.id(),
                                            expiredTime));
                 break;
             default:
@@ -269,7 +294,6 @@ public class IndexBuilder {
                         "Unknown index type '%s'", indexLabel.indexType()));
         }
 
-        return indexs;
     }
 
     private Index buildIndex(IndexLabel indexLabel, Object propValue,
@@ -282,26 +306,6 @@ public class IndexBuilder {
     }
 
 
-    private static String escapeIndexValueIfNeeded(String value) {
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (ch <= INDEX_SYM_MAX) {
-                /*
-                 * Escape symbols can't be used due to impossible to parse,
-                 * and treat it as illegal value for the origin text property
-                 */
-                E.checkArgument(false, "Illegal char '\\u000%s' " +
-                                       "in index property: '%s'", (int) ch,
-                                value);
-            }
-        }
-        if (value.isEmpty()) {
-            // Escape empty String to INDEX_SYM_EMPTY (char `\u0002`)
-            value = INDEX_SYM_EMPTY;
-        }
-        return value;
-    }
-
     private static boolean hasNullableProp(BaseElement element, Id key) {
         return element.schemaLabel().nullableKeys().contains(key);
     }
@@ -311,17 +315,30 @@ public class IndexBuilder {
                propValues.get(0) instanceof Collection;
     }
 
-    private Set<String> segmentWords(String text) {
-        return this.textAnalyzer.segment(text);
+    public Set<String> segmentWords(String text) {
+        return segmentWords(this.textAnalyzer, text);
     }
 
-    private static String propertyValueToString(Object value) {
-        /*
-         * Join collection items with white space if the value is Collection,
-         * or else keep the origin value.
-         */
-        return value instanceof Collection ?
-               StringUtils.join(((Collection<Object>) value).toArray(), " ") :
-               value.toString();
+    public static Predicate<Object> searchPredicate(Analyzer analyzer, String text) {
+        Set<String> words = segmentWords(analyzer, text);
+        return value -> CollectionUtil.hasIntersection(words,
+                segmentWords(analyzer, propertyValueToString(value)));
+    }
+
+    private static Set<String> segmentWords(Analyzer analyzer, String text) {
+        if (text.startsWith(START_SYMBOL) && text.endsWith(END_SYMBOL)) {
+            String words = text.substring(1, text.length() - 1);
+            return words.contains(WORD_DELIMITER) ?
+                   ImmutableSet.copyOf(StringUtils.split(words, WORD_DELIMITER)) : ImmutableSet.of(words);
+        }
+        Set<String> segments = InsertionOrderUtil.newSet();
+        segments.addAll(analyzer.segment(text));
+        segments.add(text);
+        segments.removeAll(ConditionQuery.IGNORE_SYM_SET);
+        return segments;
+    }
+
+    public static String propertyValueToString(Object value) {
+        return value instanceof Collection ? StringUtils.join((Iterable<?>) value, " ") : value.toString();
     }
 }

@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.core;
 
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -26,19 +27,19 @@ import java.util.Objects;
 import org.apache.commons.configuration2.BaseConfiguration;
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBOptions;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Utils;
 import org.apache.tinkerpop.gremlin.structure.T;
@@ -373,7 +374,7 @@ public class MultiGraphsTest extends BaseCoreTest {
     }
 
     @Test
-    public void testOpenGraphWithDeprecatedTaskSchedulerType() {
+    public void testOpenGraphWithRemovedTaskSchedulerType() {
         HugeGraph graph = openGraphWithBackend("legacySchedulerType",
                                                "rocksdb", "binary",
                                                "task.scheduler_type", "local");
@@ -396,12 +397,14 @@ public class MultiGraphsTest extends BaseCoreTest {
                                          "[g/range_int_index:rocksdb-index1]");
             g2[0].initBackend();
         }, e -> {
-            Throwable root = HugeException.rootCause(e);
-            Assert.assertInstanceOf(RocksDBException.class, root);
+            RocksDBException failure = rocksDBCause(e);
+            Assert.assertNotNull(failure.getCause());
             Assert.assertContains("lock hold by current process",
-                                  root.getMessage());
+                                  failure.getMessage());
             Assert.assertContains("No locks available",
-                                  root.getMessage());
+                                  failure.getMessage());
+            Assert.assertInstanceOf(OverlappingFileLockException.class,
+                                    HugeException.rootCause(failure));
         });
 
         final HugeGraph[] g3 = new HugeGraph[1];
@@ -411,13 +414,23 @@ public class MultiGraphsTest extends BaseCoreTest {
                                          "[g/secondary_index:/]");
             g3[0].initBackend();
         }, e -> {
-            Throwable root = HugeException.rootCause(e);
-            Assert.assertInstanceOf(RocksDBException.class, root);
-            Assert.assertContains("While mkdir if missing",
-                                  root.getMessage());
+            RocksDBException failure = rocksDBCause(e);
+            Assert.assertNotNull(failure.getCause());
+            Assert.assertContains("Cannot lock database for open/recovery",
+                                  failure.getMessage());
+            Assert.assertContains("/g", failure.getMessage());
         });
 
         destroyGraphs(ImmutableList.of(g1));
+    }
+
+    private static RocksDBException rocksDBCause(Throwable exception) {
+        Throwable cause = exception;
+        while (cause != null && !(cause instanceof RocksDBException)) {
+            cause = cause.getCause();
+        }
+        Assert.assertInstanceOf(RocksDBException.class, cause);
+        return (RocksDBException) cause;
     }
 
     private static List<HugeGraph> openGraphs(String... graphNames) {

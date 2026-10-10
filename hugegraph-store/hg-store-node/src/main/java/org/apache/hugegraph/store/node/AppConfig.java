@@ -40,6 +40,9 @@ public class AppConfig {
     @Value("${pdserver.address}")
     private String pdServerAddress;
 
+    @Value("${pd.cluster:hg}")
+    private String pdCluster = "hg";
+
     @Value("${grpc.host}")
     private String host;
 

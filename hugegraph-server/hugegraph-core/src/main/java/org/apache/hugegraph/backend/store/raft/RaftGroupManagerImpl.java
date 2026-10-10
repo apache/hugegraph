@@ -20,7 +20,7 @@ package org.apache.hugegraph.backend.store.raft;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.store.raft.rpc.RaftRequests.AddPeerRequest;
 import org.apache.hugegraph.backend.store.raft.rpc.RaftRequests.ListPeersRequest;
 import org.apache.hugegraph.backend.store.raft.rpc.RaftRequests.ListPeersResponse;

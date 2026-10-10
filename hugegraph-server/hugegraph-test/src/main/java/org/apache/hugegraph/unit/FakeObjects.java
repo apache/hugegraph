@@ -22,17 +22,17 @@ import java.util.Date;
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.config.HugeConfig;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.config.TypedOption;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
-import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
@@ -53,6 +53,10 @@ public final class FakeObjects {
     public FakeObjects() {
         this.graph = Mockito.mock(HugeGraph.class);
         Mockito.doReturn(newConfig()).when(this.graph).configuration();
+        Mockito.doAnswer(invocation -> {
+            TypedOption<?, ?> option = invocation.getArgument(0);
+            return this.graph.configuration().get(option);
+        }).when(this.graph).option(Mockito.any());
         Mockito.doReturn(true).when(this.graph).sameAs(this.graph);
     }
 
@@ -159,8 +163,7 @@ public final class FakeObjects {
         Id id = EdgeId.parse("L123456>1>1>>L987654");
         HugeEdge edge = new HugeEdge(this.graph(), id, el);
 
-        Whitebox.setInternalState(edge, "sourceVertex", source);
-        Whitebox.setInternalState(edge, "targetVertex", target);
+        edge.vertices(true, source, target);
         edge.assignId();
         edge.addProperty(date, new Date());
         edge.addProperty(weight, 0.75);
@@ -202,8 +205,7 @@ public final class FakeObjects {
         Id id = EdgeId.parse("L123456>1>1>>L987654");
         HugeEdge edge = new HugeEdge(this.graph(), id, el);
 
-        Whitebox.setInternalState(edge, "sourceVertex", source);
-        Whitebox.setInternalState(edge, "targetVertex", target);
+        edge.vertices(true, source, target);
         edge.assignId();
         edge.addProperty(date, new Date());
         edge.addProperty(weight, 0.75);

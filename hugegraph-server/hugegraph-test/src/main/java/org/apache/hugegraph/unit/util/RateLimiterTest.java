@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.unit.util;
 
+import java.lang.reflect.Constructor;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.atomic.LongAdder;
 
 import org.apache.hugegraph.testutil.Assert;
@@ -72,6 +75,55 @@ public abstract class RateLimiterTest {
         @Override
         public RateLimiter newRateLimiter(int rate) {
             return new FixedTimerWindowRateLimiter(rate);
+        }
+
+        @Test
+        public void testInitialTimerWindow() throws Exception {
+            try (RecordingTimer timer = new RecordingTimer()) {
+                Constructor<FixedTimerWindowRateLimiter> constructor =
+                        FixedTimerWindowRateLimiter.class.getDeclaredConstructor(int.class, Timer.class);
+                constructor.setAccessible(true);
+                RateLimiter limiter = constructor.newInstance(400, timer);
+
+                // The initial reset must wait for a complete window, even if the timer thread starts late.
+                Assert.assertEquals(RateLimiter.RESET_PERIOD, timer.delay);
+                Assert.assertEquals(RateLimiter.RESET_PERIOD, timer.period);
+                for (int i = 0; i < 400; i++) {
+                    Assert.assertTrue(limiter.tryAcquire());
+                }
+                LongAdder count = Whitebox.getInternalState(limiter, "count");
+                Assert.assertEquals(400, count.intValue());
+                Assert.assertFalse(limiter.tryAcquire());
+
+                timer.task.run();
+                Assert.assertEquals(0, count.intValue());
+                Assert.assertTrue(limiter.tryAcquire());
+                timer.task.run();
+                Assert.assertEquals(1, count.intValue());
+            }
+        }
+
+        private static class RecordingTimer extends Timer implements AutoCloseable {
+
+            private TimerTask task;
+            private long delay;
+            private long period;
+
+            private RecordingTimer() {
+                super("RateLimiterTest", true);
+            }
+
+            @Override
+            public void schedule(TimerTask task, long delay, long period) {
+                this.task = task;
+                this.delay = delay;
+                this.period = period;
+            }
+
+            @Override
+            public void close() {
+                this.cancel();
+            }
         }
 
         @Test

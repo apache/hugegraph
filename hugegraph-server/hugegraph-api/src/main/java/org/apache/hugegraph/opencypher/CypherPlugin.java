@@ -40,15 +40,14 @@ import org.apache.tinkerpop.gremlin.jsr223.DefaultImportCustomizer;
 import org.apache.tinkerpop.gremlin.jsr223.GremlinPlugin;
 import org.apache.tinkerpop.gremlin.jsr223.ImportCustomizer;
 import org.opencypher.gremlin.traversal.CustomFunctions;
-import org.opencypher.gremlin.traversal.CustomPredicate;
 
 public class CypherPlugin implements GremlinPlugin {
 
     private static final ImportCustomizer IMPORTS =
             DefaultImportCustomizer.build()
-                                   .addClassImports(CustomPredicate.class)
+                                   .addClassImports(CypherGremlinPredicates.class)
                                    .addMethodImports(
-                                           getDeclaredPublicMethods(CustomPredicate.class))
+                                           getDeclaredPublicMethods(CypherGremlinPredicates.class))
                                    .addClassImports(CustomFunctions.class)
                                    .addMethodImports(
                                            getDeclaredPublicMethods(CustomFunctions.class))
@@ -57,7 +56,8 @@ public class CypherPlugin implements GremlinPlugin {
     private static List<Method> getDeclaredPublicMethods(Class<?> klass) {
         Method[] declaredMethods = klass.getDeclaredMethods();
         return Stream.of(declaredMethods)
-                     .filter(method -> Modifier.isPublic(method.getModifiers()))
+                     .filter(method -> Modifier.isPublic(method.getModifiers()) &&
+                                       Modifier.isStatic(method.getModifiers()))
                      .collect(Collectors.toList());
     }
 

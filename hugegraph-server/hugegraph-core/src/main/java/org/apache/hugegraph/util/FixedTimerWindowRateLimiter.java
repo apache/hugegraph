@@ -34,7 +34,11 @@ public class FixedTimerWindowRateLimiter implements RateLimiter {
     private final int limit;
 
     public FixedTimerWindowRateLimiter(int limitPerSecond) {
-        this.timer = new Timer("RateAuditLog", true);
+        this(limitPerSecond, new Timer("RateAuditLog", true));
+    }
+
+    FixedTimerWindowRateLimiter(int limitPerSecond, Timer timer) {
+        this.timer = timer;
         this.count = new LongAdder();
         this.limit = limitPerSecond;
         // Count will be reset if hit limit (run once per 1000ms)
@@ -45,7 +49,7 @@ public class FixedTimerWindowRateLimiter implements RateLimiter {
                     count.reset();
                 }
             }
-        }, 0L, RESET_PERIOD);
+        }, RESET_PERIOD, RESET_PERIOD);
     }
 
     @Override

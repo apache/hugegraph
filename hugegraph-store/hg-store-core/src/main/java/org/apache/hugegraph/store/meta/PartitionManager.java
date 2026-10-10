@@ -100,6 +100,15 @@ public class PartitionManager extends GlobalMetaStore {
         deletedFileManager.load();
     }
 
+    public static final class InvalidShardException extends IllegalStateException {
+
+        private static final long serialVersionUID = 1L;
+
+        private InvalidShardException() {
+            super("Local partition does not belong to this store");
+        }
+    }
+
     public void loadPartition() {
         loadPartitions();
     }
@@ -299,7 +308,7 @@ public class PartitionManager extends GlobalMetaStore {
                     // businessHandler.dbCompaction(graph, partId);
                     log.error("partition {}-{} is illegal. store id {} not in valid shard group:{}",
                               graph, partId, getStore().getId(), shards2Peers(shards));
-                    System.exit(0);
+                    throw new InvalidShardException();
                 }
             }
 
@@ -879,6 +888,41 @@ public class PartitionManager extends GlobalMetaStore {
             }
         });
         return result[0];
+    }
+
+    /**
+     * According to raft address to find Store, checked against PD's current shard group.
+     * A Store rebuilt with an empty disk at the same raft address registers under a new id,
+     * so the id held locally for that address may no longer be in PD's group; use PD's id then.
+     */
+    public Store getStoreByRaftEndpoint(ShardGroup group, Metapb.ShardGroup pdGroup,
+                                        String endpoint) {
+        Store store = getStoreByRaftEndpoint(group, endpoint);
+        if (pdGroup == null ||
+            pdGroup.getShardsList().stream().anyMatch(s -> s.getStoreId() == store.getId())) {
+            return store;
+        }
+        Long pdStoreId = shardIdsByEndpoint(pdGroup.getShardsList()).get(endpoint.toLowerCase());
+        if (pdStoreId == null) {
+            return store;
+        }
+        log.info("Raft {} endpoint {} is store {} locally but {} in PD, using PD",
+                 pdGroup.getId(), endpoint, store.getId(), pdStoreId);
+        return getStore(pdStoreId);
+    }
+
+    /**
+     * Raft address (lower case) to store id, for the shards whose store PD can still resolve
+     */
+    public Map<String, Long> shardIdsByEndpoint(List<Metapb.Shard> shards) {
+        Map<String, Long> result = new HashMap<>();
+        for (Metapb.Shard shard : shards) {
+            Store store = getStore(shard.getStoreId());
+            if (store != null && !store.getRaftAddress().isEmpty()) {
+                result.put(store.getRaftAddress().toLowerCase(), shard.getStoreId());
+            }
+        }
+        return result;
     }
 
     public Shard getShardByEndpoint(ShardGroup group, String endpoint) {

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.auth.AuthManager;
 import org.apache.hugegraph.auth.HugeAuthenticator;
@@ -34,8 +35,8 @@ import org.apache.hugegraph.auth.ResourceObject;
 import org.apache.hugegraph.auth.RolePermission;
 import org.apache.hugegraph.auth.UserWithRole;
 import org.apache.hugegraph.backend.cache.Cache;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.config.AuthOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.task.TaskManager;
@@ -43,6 +44,7 @@ import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.unit.BaseUnitTest;
+import org.apache.hugegraph.util.Reflection;
 import org.apache.hugegraph.util.RateLimiter;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
@@ -59,6 +61,43 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 public class HugeGraphAuthProxyTest extends BaseUnitTest {
+
+    @Test
+    public void testJdk17ReflectionFilters() {
+        Reflection.registerFieldsToFilter(ReflectionFilterTarget.class, "field");
+        Reflection.registerMethodsToFilter(ReflectionFilterTarget.class, "method");
+
+        Assert.assertThrows(NoSuchFieldException.class,
+                            () -> ReflectionFilterTarget.class.getDeclaredField("field"));
+        Assert.assertThrows(NoSuchMethodException.class,
+                            () -> ReflectionFilterTarget.class.getDeclaredMethod("method"));
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> Reflection.registerFieldsToFilter(
+                                    ReflectionFilterTarget.class, "field"));
+    }
+
+    @Test
+    public void testJdk17ReflectionFilterFailureCause() {
+        Throwable exception = Assert.assertThrows(
+                HugeException.class,
+                () -> Reflection.registerFieldsToFilter(
+                        ReflectionFailureTarget.class, (String) null));
+
+        Assert.assertInstanceOf(NullPointerException.class, exception.getCause());
+    }
+
+    private static class ReflectionFailureTarget {
+    }
+
+    private static class ReflectionFilterTarget {
+
+        @SuppressWarnings("unused")
+        private String field;
+
+        @SuppressWarnings("unused")
+        private void method() {
+        }
+    }
 
     private static HugeGraphAuthProxy.Context setContext(
             HugeGraphAuthProxy.Context context) {

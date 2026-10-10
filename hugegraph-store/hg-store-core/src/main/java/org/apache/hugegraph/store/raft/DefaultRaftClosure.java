@@ -19,9 +19,12 @@ package org.apache.hugegraph.store.raft;
 
 import com.alipay.sofa.jraft.Status;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * @date 2023/9/8
  **/
+@Slf4j
 public class DefaultRaftClosure implements RaftClosure {
 
     private RaftOperation operation;
@@ -34,7 +37,17 @@ public class DefaultRaftClosure implements RaftClosure {
 
     @Override
     public void run(Status status) {
-        closure.run(status);
+        try {
+            closure.run(status);
+        } catch (Throwable t) {
+            // Response delivery must not turn an applied entry into an apply failure.
+            log.error("Raft completion callback failed", t);
+        }
+    }
+
+    @Override
+    public void onLeaderChanged(Integer partId, Long storeId) {
+        closure.onLeaderChanged(partId, storeId);
     }
 
     public RaftClosure getClosure() {

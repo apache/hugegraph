@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.backend.store.hstore;
 
+import org.apache.hugegraph.backend.BinaryId;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -29,25 +31,25 @@ import java.util.function.Supplier;
 
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.page.PageState;
-import org.apache.hugegraph.backend.query.Aggregate;
-import org.apache.hugegraph.backend.query.Aggregate.AggregateFunc;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.Condition.Relation;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.IdPrefixQuery;
-import org.apache.hugegraph.backend.query.IdRangeQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Aggregate;
+import org.apache.hugegraph.query.Aggregate.AggregateFunc;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.Condition.Relation;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdPrefixQuery;
+import org.apache.hugegraph.query.IdRangeQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.serializer.BinaryBackendEntry;
 import org.apache.hugegraph.backend.serializer.BinaryEntryIterator;
 import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
 import org.apache.hugegraph.backend.store.BackendTable;
-import org.apache.hugegraph.backend.store.Shard;
+import org.apache.hugegraph.backend.Shard;
 import org.apache.hugegraph.backend.store.hstore.HstoreSessions.Countable;
 import org.apache.hugegraph.backend.store.hstore.HstoreSessions.Session;
 import org.apache.hugegraph.exception.NotSupportException;
@@ -210,8 +212,8 @@ public class HstoreTable extends BackendTable<Session, BackendEntry> {
      * @return
      */
     protected byte[] getOwnerId(Id id) {
-        if (id instanceof BinaryBackendEntry.BinaryId) {
-            id = ((BinaryBackendEntry.BinaryId) id).origin();
+        if (id instanceof BinaryId) {
+            id = ((BinaryId) id).origin();
         }
         if (id != null && id.edge()) {
             id = ((EdgeId) id).ownerVertexId();

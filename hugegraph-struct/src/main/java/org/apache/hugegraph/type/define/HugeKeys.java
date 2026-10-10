@@ -1,20 +1,18 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.type.define;
@@ -53,7 +51,6 @@ public enum HugeKeys {
     EDGELABEL_TYPE(87, "edgelabel_type"),
     PARENT_LABEL(89, "parent_label"),
 
-
     /* Column names of schema type (PropertyKey) */
     DATA_TYPE(120, "data_type"),
     CARDINALITY(121, "cardinality"),
@@ -82,11 +79,10 @@ public enum HugeKeys {
     SORT_VALUES(206, "sort_values"),
     PRIMARY_VALUES(207, "primary_values"),
     EXPIRED_TIME(208, "expired_time"),
-    SUB_LABEL(211,"sub_label"),
+    SUB_LABEL(211, "sub_label"),
 
     PROPERTY_TYPE(249, "property_type"),
-    AGGREGATE_PROPERTIES(250, "aggregate_properties"),
-    ;
+    AGGREGATE_PROPERTIES(250, "aggregate_properties");
 
     public static final long NORMAL_PROPERTY_ID = 0L;
 

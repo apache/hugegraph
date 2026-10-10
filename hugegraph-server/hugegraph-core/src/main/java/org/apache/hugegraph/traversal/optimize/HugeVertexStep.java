@@ -17,6 +17,8 @@
 
 package org.apache.hugegraph.traversal.optimize;
 
+import org.apache.hugegraph.util.TinkerPopUtil;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -24,12 +26,12 @@ import java.util.Iterator;
 import java.util.List;
 
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
-import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.process.traversal.Traverser;
@@ -42,7 +44,7 @@ import org.apache.tinkerpop.gremlin.structure.util.StringFactory;
 import org.slf4j.Logger;
 
 public class HugeVertexStep<E extends Element>
-        extends VertexStep<E> implements QueryHolder {
+        extends VertexStep<E> implements QueryHolder<Vertex, E> {
 
     private static final long serialVersionUID = -7850636388424382454L;
 
@@ -132,7 +134,7 @@ public class HugeVertexStep<E extends Element>
         boolean withVertexCond = this.withVertexCondition();
 
         Id vertex = (Id) traverser.get().id();
-        Directions direction = Directions.convert(this.getDirection());
+        Directions direction = TinkerPopUtil.direction(this.getDirection());
         EdgeLabel[] els = graph.mapElName2El(this.getEdgeLabels());
 
         LOG.debug("HugeVertexStep.edges(): vertex={}, direction={}, " +

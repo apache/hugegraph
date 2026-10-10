@@ -25,16 +25,20 @@ import java.util.NoSuchElementException;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.query.QueryBatch.BatchIterator;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.iterator.CIter;
 import org.apache.hugegraph.iterator.ListIterator;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.Idfiable;
 
 /** A lazy stream of query batches. Only the final consumer flattens the stream. */
 public class QueryResults<R> {
+
+    private static final Query EMPTY_QUERY = new Query(HugeType.UNKNOWN);
 
     private final BatchIterator<QueryBatch<R>> batches;
     private final Object metadata;
@@ -346,7 +350,7 @@ public class QueryResults<R> {
     }
 
     public static <T> QueryResults<T> empty() {
-        return new QueryResults<T>(QueryResults.<T>emptyIterator(), Query.NONE);
+        return new QueryResults<T>(QueryResults.<T>emptyIterator(), EMPTY_QUERY);
     }
 
     public static <T> Iterator<T> emptyIterator() {

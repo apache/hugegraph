@@ -1,0 +1,153 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Official Helm chart test hook — only runs with: helm test <release>
+# Not an install-time hook. Safe with --wait (no init Job in no-init design).
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "hugegraph.test.name" . }}"
+  labels:
+    {{- include "hugegraph.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    # Not hook-succeeded: Helm deletes a succeeded hook Pod before
+    # `helm test --logs` reads it, which turns a passing release check into
+    # exit 1 with "pods not found". The completed Pod stays until the next
+    # run replaces it, so both forms exit 0 and a failed Pod keeps its logs.
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: curl
+      image: {{ .Values.server.waitImage | quote }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 100
+      {{- with .Values.server.testResources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.server.auth.enabled }}
+      env:
+        - name: PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "hugegraph.server.authSecretName" . | quote }}
+              key: {{ include "hugegraph.server.authSecretKey" . | quote }}
+      {{- end }}
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          SVC="{{ include "hugegraph.server.name" . }}"
+          HEADLESS="{{ include "hugegraph.server.headlessName" . }}"
+          PORT="{{ .Values.server.port }}"
+          FLOOR="{{ include "hugegraph.server.replicaFloor" . }}"
+          DEADLINE_S="${HG_TEST_DEADLINE_S:-150}"
+          BODY='{"gremlin":"graph.traversal().V().limit(1).count()","aliases":{"graph":"DEFAULT-hugegraph"}}'
+          {{- if .Values.server.auth.enabled }}
+          AUTH_HEADER=$(printf 'admin:%s' "${PASSWORD}" | base64 | tr -d '\r\n')
+          request() {
+            printf 'header = "Authorization: Basic %s"\n' "${AUTH_HEADER}" |
+              curl --config - -fsS --connect-timeout 3 --max-time 20 "$1"
+          }
+          gremlin() {
+            printf 'header = "Authorization: Basic %s"\n' "${AUTH_HEADER}" |
+              curl --config - -sS --compressed --connect-timeout 3 --max-time 20 \
+                -H 'Content-Type: application/json' -X POST -d "${BODY}" \
+                -w '\n%{http_code}\n' "$1" 2>&1
+          }
+          {{- else }}
+          request() {
+            curl -fsS --connect-timeout 3 --max-time 20 "$1"
+          }
+          gremlin() {
+            curl -sS --compressed --connect-timeout 3 --max-time 20 \
+              -H 'Content-Type: application/json' -X POST -d "${BODY}" \
+              -w '\n%{http_code}\n' "$1" 2>&1
+          }
+          {{- end }}
+          echo "helm test: GET http://${SVC}:${PORT}/versions"
+          request "http://${SVC}:${PORT}/versions"
+          echo
+          echo "helm test: GET http://${SVC}:${PORT}/graphs"
+          request "http://${SVC}:${PORT}/graphs"
+          echo
+          # A Server that started while PD was rolling can pass readiness and
+          # serve REST while every Gremlin call on it fails, so the Service
+          # checks above cannot see a bad replica. Resolve the headless
+          # Service to the individual Ready Pods and require a graph-bound
+          # Gremlin answer from every one of them, and from at least FLOOR
+          # Pods, retrying until the deadline so a transient PD election is
+          # not misread as a broken Pod.
+          echo "helm test: Gremlin on every Server Pod via ${HEADLESS} (floor ${FLOOR})"
+          START=$(date +%s)
+          while :; do
+            # The headless Service answers with every Ready Pod's addresses,
+            # one per address family on a dual-stack cluster, so counting
+            # addresses would count each Pod twice and let two Pods satisfy
+            # a floor of three. Keep one family per Pod: IPv4 when any Pod
+            # publishes one, otherwise IPv6.
+            ALL=$(getent ahosts "${HEADLESS}" 2>/dev/null | awk '{print $1}' | sort -u) || ALL=""
+            IPS=$(printf '%s\n' ${ALL} | grep -v ':' || true)
+            if [ -z "${IPS}" ]; then
+              IPS=$(printf '%s\n' ${ALL} | grep ':' || true)
+            fi
+            COUNT=$(printf '%s\n' ${IPS} | grep -c . || true)
+            # Every attempt is a complete sweep. A Pod that answered in an
+            # earlier attempt is queried again, so the test passes only when
+            # one attempt sees every Pod healthy at the same time, never by
+            # adding up successes from different attempts.
+            FAILED=""
+            for IP in ${IPS}; do
+              case "${IP}" in *:*) TARGET="[${IP}]" ;; *) TARGET="${IP}" ;; esac
+              OUT=$(gremlin "http://${TARGET}:${PORT}/gremlin") || true
+              CODE=$(printf '%s\n' "${OUT}" | grep -E '^[0-9][0-9][0-9]$' | tail -1) || CODE=""
+              if [ "${CODE}" = "200" ]; then
+                echo "helm test: Gremlin OK on ${IP}"
+              else
+                FAILED="${FAILED}${IP}(${CODE:-no-response}) "
+                printf 'helm test: Gremlin failed on %s code=%s body: %.400s\n' \
+                  "${IP}" "${CODE:-no-response}" "${OUT}"
+              fi
+            done
+            if [ -z "${FAILED}" ] && [ "${COUNT}" -ge "${FLOOR}" ]; then
+              echo "helm test: OK (${COUNT} Server Pods, all Gremlin-bound)"
+              exit 0
+            fi
+            if [ $(( $(date +%s) - START )) -ge "${DEADLINE_S}" ]; then
+              echo "helm test: FAILED after ${DEADLINE_S}s: pods=${COUNT} floor=${FLOOR} failing=${FAILED:-none}" >&2
+              exit 1
+            fi
+            sleep 5
+          done

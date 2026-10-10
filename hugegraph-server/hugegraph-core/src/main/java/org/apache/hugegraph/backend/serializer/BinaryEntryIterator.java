@@ -20,7 +20,7 @@ package org.apache.hugegraph.backend.serializer;
 import java.util.function.BiFunction;
 
 import org.apache.hugegraph.backend.page.PageState;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;

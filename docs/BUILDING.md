@@ -3,10 +3,46 @@ Building HugeGraph
 
 Required:
 
-* Java 11
-* Maven 3.5+
+* Java 17 (currently the only supported Java release)
+* Maven 3.6.3+
+
+The launch scripts enforce Java 17 as the minimum runtime. This check does not
+qualify later Java releases; build HugeGraph with Java 17 unless another
+release is explicitly listed as supported.
+
+The published `hugegraph-common` and `hugegraph-rpc` libraries use Java 11
+bytecode for downstream compatibility. Their build and tests still run on
+Java 17; this library bytecode target does not lower HugeGraph's runtime
+requirement.
+
+See the [Server runtime guide](server-runtime.md#runtime-and-client-configuration) for the
+upgraded runtime, client configuration and compatibility checks.
 
 To build without executing tests: `mvn clean package -Dmaven.test.skip=true`
+
+## Optional word analyzer
+
+The standard distribution does not include `org.apdplat:word:1.3`. It is a
+provided dependency used to compile and test the optional `word` analyzer.
+The default analyzer remains `ikanalyzer`; the shipped graph configurations
+use `jieba`, and neither requires the word library.
+
+Obtain the GPLv3-licensed external component from
+[Maven Central](https://repo.maven.apache.org/maven2/org/apdplat/word/1.3/word-1.3.jar).
+
+To use `word`, supply `word-1.3.jar` separately in the Server's `lib/` directory
+and restart the Server. Select it in the graph configuration with a supported
+mode, for example:
+
+```properties
+search.text_analyzer=word
+search.text_analyzer_mode=PureEnglish
+```
+
+Selecting `word` without its external library fails with a configuration error
+identifying the missing optional dependency. Other analyzers remain available.
+Applications using Struct directly must add the same dependency to their
+runtime classpath when selecting `word`.
 
 ## Building in IDEA
 
@@ -38,4 +74,3 @@ To build without executing tests:
 To find the Java binary in your environment, run the appropriate command for your operating system:
 * Linux/macOS: `which java`
 * Windows: `for %i in (java.exe) do @echo. %~$PATH:i`
-

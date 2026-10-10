@@ -1,36 +1,33 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.id;
 
+import java.util.Objects;
+import java.util.UUID;
+
+import org.apache.hugegraph.id.Id.IdType;
 import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.structure.BaseVertex;
-import org.apache.hugegraph.util.StringEncoding;
-import com.google.common.primitives.Longs;
-
+import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.hugegraph.util.NumericUtil;
-
-import java.nio.charset.Charset;
-import java.util.Objects;
-import java.util.UUID;
+import org.apache.hugegraph.util.StringEncoding;
 
 public abstract class IdGenerator {
 
@@ -38,19 +35,19 @@ public abstract class IdGenerator {
 
     public abstract Id generate(BaseVertex vertex);
 
-    public final static Id of(String id) {
+    public static Id of(String id) {
         return new StringId(id);
     }
 
-    public final static Id of(UUID id) {
+    public static Id of(UUID id) {
         return new UuidId(id);
     }
 
-    public final static Id of(String id, boolean uuid) {
+    public static Id of(String id, boolean uuid) {
         return uuid ? new UuidId(id) : new StringId(id);
     }
 
-    public final static Id of(long id) {
+    public static Id of(long id) {
         return new LongId(id);
     }
 
@@ -67,7 +64,7 @@ public abstract class IdGenerator {
         return new ObjectId(id);
     }
 
-    public final static Id of(byte[] bytes, Id.IdType type) {
+    public static Id of(byte[] bytes, IdType type) {
         switch (type) {
             case LONG:
                 return new LongId(bytes);
@@ -80,13 +77,13 @@ public abstract class IdGenerator {
         }
     }
 
-    public final static Id ofStoredString(String id, Id.IdType type) {
+    public static Id ofStoredString(String id, IdType type) {
         switch (type) {
             case LONG:
                 return of(LongEncoding.decodeSignedB64(id));
             case UUID:
                 byte[] bytes = StringEncoding.decodeBase64(id);
-                return of(bytes, Id.IdType.UUID);
+                return of(bytes, IdType.UUID);
             case STRING:
                 return of(id);
             default:
@@ -94,7 +91,7 @@ public abstract class IdGenerator {
         }
     }
 
-    public final static String asStoredString(Id id) {
+    public static String asStoredString(Id id) {
         switch (id.type()) {
             case LONG:
                 return LongEncoding.encodeSignedB64(id.asLong());
@@ -107,40 +104,45 @@ public abstract class IdGenerator {
         }
     }
 
-    public final static Id.IdType idType(Id id) {
+    public static IdType idType(Id id) {
         if (id instanceof LongId) {
-            return Id.IdType.LONG;
+            return IdType.LONG;
         }
         if (id instanceof UuidId) {
-            return Id.IdType.UUID;
+            return IdType.UUID;
         }
         if (id instanceof StringId) {
-            return Id.IdType.STRING;
+            return IdType.STRING;
         }
         if (id instanceof EdgeId) {
-            return Id.IdType.EDGE;
+            return IdType.EDGE;
         }
-        return Id.IdType.UNKNOWN;
+        return IdType.UNKNOWN;
     }
 
-    private final static int compareType(Id id1, Id id2) {
+    public static int compareType(Id id1, Id id2) {
         return idType(id1).ordinal() - idType(id2).ordinal();
     }
 
     /****************************** id defines ******************************/
 
-    public static final class StringId implements Id {
+    public static class StringId implements Id {
 
-        private final String id;
-        private static final Charset CHARSET = Charset.forName("UTF-8");
+        protected String id;
+        protected byte[] bytes;
 
         public StringId(String id) {
-            E.checkArgument(!id.isEmpty(), "The id can't be empty");
+            E.checkArgument(id != null && !id.isEmpty(),
+                            "The id can't be null or empty");
             this.id = id;
+            this.bytes = null;
         }
 
         public StringId(byte[] bytes) {
-            this.id = StringEncoding.decode(bytes);
+            E.checkArgument(bytes != null && bytes.length > 0,
+                            "The id bytes can't be null or empty");
+            this.bytes = bytes;
+            this.id = null;
         }
 
         @Override
@@ -150,27 +152,35 @@ public abstract class IdGenerator {
 
         @Override
         public Object asObject() {
-            return this.id;
+            return this.asString();
         }
 
         @Override
         public String asString() {
+            if (this.id == null) {
+                assert this.bytes != null;
+                this.id = StringEncoding.decode(this.bytes);
+            }
             return this.id;
         }
 
         @Override
         public long asLong() {
-            return Long.parseLong(this.id);
+            return Long.parseLong(this.asString());
         }
 
         @Override
         public byte[] asBytes() {
-            return this.id.getBytes(CHARSET);
+            if (this.bytes == null) {
+                assert this.id != null;
+                this.bytes = StringEncoding.encode(this.id);
+            }
+            return this.bytes;
         }
 
         @Override
         public int length() {
-            return this.id.length();
+            return this.asString().length();
         }
 
         @Override
@@ -179,33 +189,41 @@ public abstract class IdGenerator {
             if (cmp != 0) {
                 return cmp;
             }
-            return this.id.compareTo(other.asString());
+            return this.asString().compareTo(other.asString());
         }
 
         @Override
         public int hashCode() {
-            return this.id.hashCode();
+            return this.asString().hashCode();
         }
 
         @Override
-        public boolean equals(Object other) {
-            if (!(other instanceof StringId)) {
+        public boolean equals(Object obj) {
+            if (!(obj instanceof StringId)) {
                 return false;
             }
-            return this.id.equals(((StringId) other).id);
+            StringId other = (StringId) obj;
+            if (this.id != null) {
+                return this.id.equals(other.asString());
+            } else if (other.bytes == null) {
+                return this.asString().equals(other.asString());
+            } else {
+                assert this.bytes != null;
+                return Bytes.equals(this.bytes, other.asBytes());
+            }
         }
 
         @Override
         public String toString() {
-            return this.id;
+            return this.asString();
         }
     }
 
-    public static final class LongId extends Number implements Id {
+    public static class LongId extends Number implements Id {
 
         private static final long serialVersionUID = -7732461469037400190L;
 
-        private final long id;
+        protected Long id;
 
         public LongId(long id) {
             this.id = id;
@@ -238,8 +256,7 @@ public abstract class IdGenerator {
 
         @Override
         public byte[] asBytes() {
-            return Longs.toByteArray(this.id);
-            // return NumericUtil.longToBytes(this.id);
+            return NumericUtil.longToBytes(this.id);
         }
 
         @Override
@@ -264,24 +281,9 @@ public abstract class IdGenerator {
         @Override
         public boolean equals(Object other) {
             if (!(other instanceof Number)) {
-                if (idDigitalObject(other)) {
-                    return this.id == (long) Double.parseDouble(other.toString());
-                }
                 return false;
             }
             return this.id == ((Number) other).longValue();
-        }
-
-        private static boolean idDigitalObject(Object object) {
-            String string = object.toString();
-            for (int i = string.length(); --i >= 0; ) {
-                char c = string.charAt(i);
-                if (!Character.isDigit(c) &&
-                    '.' != c) {
-                    return false;
-                }
-            }
-            return true;
         }
 
         @Override
@@ -291,7 +293,7 @@ public abstract class IdGenerator {
 
         @Override
         public int intValue() {
-            return (int) this.id;
+            return this.id.intValue();
         }
 
         @Override
@@ -310,9 +312,9 @@ public abstract class IdGenerator {
         }
     }
 
-    public static final class UuidId implements Id {
+    public static class UuidId implements Id {
 
-        private final UUID uuid;
+        protected UUID uuid;
 
         public UuidId(String string) {
             this(StringEncoding.uuid(string));
@@ -400,9 +402,9 @@ public abstract class IdGenerator {
     /**
      * This class is just used by backend store for wrapper object as Id
      */
-    public static final class ObjectId implements Id {
+    public static class ObjectId implements Id {
 
-        private final Object object;
+        protected Object object;
 
         public ObjectId(Object object) {
             E.checkNotNull(object, "object");

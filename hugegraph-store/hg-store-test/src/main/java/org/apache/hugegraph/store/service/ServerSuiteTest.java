@@ -17,7 +17,12 @@
 
 package org.apache.hugegraph.store.service;
 
+import org.apache.hugegraph.rocksdb.access.RocksDBScanIteratorCloseTest;
 import org.apache.hugegraph.store.business.OrderedMultiPartitionIteratorTest;
+import org.apache.hugegraph.store.node.grpc.query.AggregativeQueryLifecycleTest;
+import org.apache.hugegraph.store.node.grpc.query.AggregativeQueryShutdownTest;
+import org.apache.hugegraph.store.node.grpc.query.UnaryQueryLifecycleTest;
+import org.apache.hugegraph.store.node.grpc.BatchScanHalfCloseTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -25,7 +30,21 @@ import lombok.extern.slf4j.Slf4j;
 
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
-        OrderedMultiPartitionIteratorTest.class
+        RocksDBScanIteratorCloseTest.class,
+        OrderedMultiPartitionIteratorTest.class,
+        ScanContextCleanupTest.class,
+        ContextClosedListenerTest.class,
+        TTLCleanerCleanupTest.class,
+        GrpcShutdownBarrierTest.class,
+        PartitionEngineShutdownTest.class,
+        AggregativeQueryLifecycleTest.class,
+        AggregativeQueryShutdownTest.class,
+        UnaryQueryLifecycleTest.class,
+        BatchScanHalfCloseTest.class,
+        ScanLifecycleTest.class,
+        ScanShutdownTest.class,
+        GraphPartitionScanLifecycleTest.class,
+        GraphPartitionScanShutdownTest.class
 })
 
 @Slf4j

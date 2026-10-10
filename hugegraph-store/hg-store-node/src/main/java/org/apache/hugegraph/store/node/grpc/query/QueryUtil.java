@@ -42,6 +42,7 @@ import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.grpc.query.AggregationType;
 import org.apache.hugegraph.store.grpc.query.DeDupOption;
 import org.apache.hugegraph.store.grpc.query.QueryRequest;
+import org.apache.hugegraph.store.grpc.query.QueryResultFormat;
 import org.apache.hugegraph.store.grpc.query.ScanType;
 import org.apache.hugegraph.store.grpc.query.ScanTypeParam;
 import org.apache.hugegraph.store.node.grpc.EmptyIterator;
@@ -100,12 +101,12 @@ public class QueryUtil {
         } else {
             if (request.getCheckTtl()) {
                 var ttl = QueryStages.ofTtlCheckStage();
-                ttl.init(isVertex(request.getTable()));
+                ttl.init(isVertex(request.getTable()), getGraphSupplier(request.getGraph()));
                 plan.addStage(ttl);
             }
 
             // when to de-serialization ?
-            if (needDeserialize(request)) {
+            if (QueryResultFormat.requiresElementDeserialization(request)) {
                 var deserializeStage = QueryStages.ofDeserializationStage();
                 deserializeStage.init(request.getTable(),
                                       getGraphSupplier(request.getGraph()));
@@ -197,18 +198,6 @@ public class QueryUtil {
     }
 
     /**
-     * Determine whether deserialization is needed.
-     *
-     * @param request query request object.
-     * @return true if deserialization is needed, false otherwise.
-     */
-    private static boolean needDeserialize(QueryRequest request) {
-        return !isEmpty(request.getOrderByList()) || !isEmpty(request.getPropertyList())
-               || !request.getCondition().isEmpty() || !isEmpty(request.getFunctionsList())
-                                                       && !request.getGroupBySchemaLabel();
-    }
-
-    /**
      * Get a scan iterator.
      *
      * @param request query request object.
@@ -295,14 +284,14 @@ public class QueryUtil {
                                          BackendColumn column,
                                          boolean isVertex) {
         if (isVertex) {
-            return serializer.parseVertex(graph, column, null);
+            return serializer.parseSchemaVertex(graph, column, null);
         } else {
-            return serializer.parseEdge(graph, column, null, true);
+            return serializer.parseSchemaEdge(graph, column, null, true);
         }
     }
 
-    public static BaseElement parseOlap(BackendColumn column, BaseVertex vertex) {
-        return serializer.parseVertexOlap(null, column, vertex);
+    public static BaseElement parseOlap(HugeGraphSupplier graph, BackendColumn column, BaseVertex vertex) {
+        return serializer.parseSchemaVertexOlap(graph, column, vertex);
     }
 
     /**
@@ -312,9 +301,13 @@ public class QueryUtil {
      * @param olap         olap vertex
      * @return new vertex
      */
-    public static BackendColumn combineColumn(BackendColumn vertexColumn,
+    public static BackendColumn combineColumn(HugeGraphSupplier graph, BackendColumn vertexColumn,
                                               List<BackendColumn> olap) {
-        return serializer.mergeCols(vertexColumn, olap.toArray(new BackendColumn[0]));
+        BaseVertex vertex = serializer.parseSchemaVertex(graph, vertexColumn, null);
+        for (BackendColumn column : olap) {
+            serializer.parseSchemaVertexOlap(graph, column, vertex);
+        }
+        return BackendColumn.of(vertexColumn.name, serializer.formatSchemaVertexValue(vertex));
     }
 
     public static AggregationFunction createFunc(AggregationType funcType, String genericType) {

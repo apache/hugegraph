@@ -24,10 +24,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.core.BaseCoreTest;
 import org.apache.hugegraph.structure.HugeVertex;
@@ -209,14 +209,12 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
         private final ExecutorService olapTaskExecutor;
         private final ExecutorService gremlinTaskExecutor;
         private final ExecutorService ephemeralTaskExecutor;
-        private final ExecutorService serverInfoDbExecutor;
         private final AtomicInteger resultReadCount;
         private volatile boolean forbidResultRead;
         private volatile boolean failNextTaskResultDelete;
 
         TestDistributedTaskScheduler(HugeGraphParams graph) {
             this(graph, new ScheduledThreadPoolExecutor(1),
-                 Executors.newSingleThreadExecutor(),
                  Executors.newSingleThreadExecutor(),
                  Executors.newSingleThreadExecutor(),
                  Executors.newSingleThreadExecutor(),
@@ -231,18 +229,15 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
                 ExecutorService schemaTaskExecutor,
                 ExecutorService olapTaskExecutor,
                 ExecutorService gremlinTaskExecutor,
-                ExecutorService ephemeralTaskExecutor,
-                ExecutorService serverInfoDbExecutor) {
+                ExecutorService ephemeralTaskExecutor) {
             super(graph, schedulerExecutor, taskDbExecutor, schemaTaskExecutor,
-                  olapTaskExecutor, gremlinTaskExecutor, ephemeralTaskExecutor,
-                  serverInfoDbExecutor);
+                  olapTaskExecutor, gremlinTaskExecutor, ephemeralTaskExecutor);
             this.schedulerExecutor = schedulerExecutor;
             this.taskDbExecutor = taskDbExecutor;
             this.schemaTaskExecutor = schemaTaskExecutor;
             this.olapTaskExecutor = olapTaskExecutor;
             this.gremlinTaskExecutor = gremlinTaskExecutor;
             this.ephemeralTaskExecutor = ephemeralTaskExecutor;
-            this.serverInfoDbExecutor = serverInfoDbExecutor;
             this.resultReadCount = new AtomicInteger();
             this.forbidResultRead = false;
             this.failNextTaskResultDelete = false;
@@ -327,7 +322,6 @@ public class TaskAndResultSchedulerTest extends BaseCoreTest {
                 this.olapTaskExecutor.shutdownNow();
                 this.gremlinTaskExecutor.shutdownNow();
                 this.ephemeralTaskExecutor.shutdownNow();
-                this.serverInfoDbExecutor.shutdownNow();
             }
         }
 

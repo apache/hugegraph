@@ -31,7 +31,7 @@ public class CoreVersion {
     /**
      * Update it when the gremlin version changed, search "tinkerpop.version" in pom
      */
-    public static final String GREMLIN_VERSION = "3.5.1";
+    public static final String GREMLIN_VERSION = "3.8.1";
 
     static {
         // Check versions of the dependency packages

@@ -33,18 +33,18 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.apache.hugegraph.HugeException;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.id.IdGenerator.LongId;
-import org.apache.hugegraph.backend.id.IdGenerator.StringId;
-import org.apache.hugegraph.backend.id.IdGenerator.UuidId;
-import org.apache.hugegraph.backend.store.Shard;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.exception.HugeException;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.id.IdGenerator.LongId;
+import org.apache.hugegraph.id.IdGenerator.StringId;
+import org.apache.hugegraph.id.IdGenerator.UuidId;
+import org.apache.hugegraph.backend.Shard;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.structure.HugeEdge;
@@ -57,7 +57,6 @@ import org.apache.hugegraph.util.Log;
 import org.apache.hugegraph.util.SafeDateUtil;
 import org.apache.tinkerpop.gremlin.process.traversal.Path;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.Tree;
-import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONIo;
 import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONTokens;
 import org.apache.tinkerpop.gremlin.structure.io.graphson.TinkerPopJacksonModule;
@@ -103,12 +102,14 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
         TYPE_DEFINITIONS = new ConcurrentHashMap<>();
 
         TYPE_DEFINITIONS.put(Optional.class, "Optional");
+        TYPE_DEFINITIONS.put(File.class, "File");
         TYPE_DEFINITIONS.put(Date.class, "Date");
         TYPE_DEFINITIONS.put(UUID.class, "UUID");
 
         // HugeGraph id serializer
         TYPE_DEFINITIONS.put(StringId.class, "StringId");
         TYPE_DEFINITIONS.put(LongId.class, "LongId");
+        TYPE_DEFINITIONS.put(UuidId.class, "UuidId");
         TYPE_DEFINITIONS.put(EdgeId.class, "EdgeId");
 
         // HugeGraph schema serializer
@@ -171,6 +172,7 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
         module.addSerializer(Shard.class, new ShardSerializer());
 
         module.addSerializer(File.class, new FileSerializer());
+        module.addDeserializer(File.class, new FileDeserializer());
 
         boolean useTimestamp = false;
         module.addSerializer(Date.class,
@@ -222,8 +224,14 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
          */
         module.addSerializer(HugeVertex.class, new HugeVertexSerializer());
         module.addSerializer(HugeEdge.class, new HugeEdgeSerializer());
+    }
 
+    public static void registerTraversalSerializers(SimpleModule module) {
         module.addSerializer(Path.class, new PathSerializer());
+        registerLegacyTreeSerializer(module);
+    }
+
+    public static void registerLegacyTreeSerializer(SimpleModule module) {
         module.addSerializer(Tree.class, new TreeSerializer());
     }
 
@@ -641,8 +649,8 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
                 String idValue = ctxt.readValue(jsonParser, String.class);
                 return (T) IdGenerator.of(idValue);
             } else if (clazz.equals(UuidId.class)) {
-                UUID idValue = ctxt.readValue(jsonParser, UUID.class);
-                return (T) IdGenerator.of(idValue);
+                String idValue = ctxt.readValue(jsonParser, String.class);
+                return (T) IdGenerator.of(UUID.fromString(idValue));
             } else {
                 assert clazz.equals(EdgeId.class);
                 String idValue = ctxt.readValue(jsonParser, String.class);
@@ -883,9 +891,8 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
         public void serialize(Tree tree, JsonGenerator jsonGenerator,
                               SerializerProvider provider) throws IOException {
             jsonGenerator.writeStartArray();
-            @SuppressWarnings("unchecked")
-            Set<Map.Entry<Element, Tree>> set = tree.entrySet();
-            for (Map.Entry<Element, Tree> entry : set) {
+            for (Object item : tree.entrySet()) {
+                Map.Entry<?, ?> entry = (Map.Entry<?, ?>) item;
                 jsonGenerator.writeStartObject();
                 jsonGenerator.writeObjectField(GraphSONTokens.KEY,
                                                entry.getKey());
@@ -924,8 +931,64 @@ public class HugeGraphSONModule extends TinkerPopJacksonModule {
         public void serialize(File file, JsonGenerator jsonGenerator,
                               SerializerProvider provider) throws IOException {
             jsonGenerator.writeStartObject();
-            jsonGenerator.writeStringField("file", file.getName());
+            this.writeFields(file, jsonGenerator);
             jsonGenerator.writeEndObject();
+        }
+
+        @Override
+        public void serializeWithType(File file,
+                                      JsonGenerator jsonGenerator,
+                                      SerializerProvider provider,
+                                      TypeSerializer typeSer)
+                throws IOException {
+            WritableTypeId typeId = typeSer.typeId(
+                    file, JsonToken.VALUE_EMBEDDED_OBJECT);
+            typeSer.writeTypePrefix(jsonGenerator, typeId);
+            this.serialize(file, jsonGenerator, provider);
+            typeSer.writeTypeSuffix(jsonGenerator, typeId);
+        }
+
+        private void writeFields(File file, JsonGenerator jsonGenerator)
+                throws IOException {
+            jsonGenerator.writeStringField("file", file.getName());
+        }
+    }
+
+    private static class FileDeserializer extends StdDeserializer<File> {
+
+        public FileDeserializer() {
+            super(File.class);
+        }
+
+        @Override
+        public File deserialize(JsonParser jsonParser,
+                                DeserializationContext ctxt)
+                throws IOException {
+            JsonToken token = jsonParser.currentToken();
+            if (token == null) {
+                token = jsonParser.nextToken();
+            }
+            if (token == JsonToken.VALUE_STRING) {
+                return new File(jsonParser.getValueAsString());
+            }
+            if (token == JsonToken.START_OBJECT) {
+                String file = null;
+                while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
+                    String field = jsonParser.currentName();
+                    jsonParser.nextToken();
+                    if ("file".equals(field)) {
+                        file = jsonParser.getValueAsString();
+                    } else {
+                        jsonParser.skipChildren();
+                    }
+                }
+                if (file == null) {
+                    return (File) ctxt.handleUnexpectedToken(File.class,
+                                                             jsonParser);
+                }
+                return new File(file);
+            }
+            return (File) ctxt.handleUnexpectedToken(File.class, jsonParser);
         }
     }
 

@@ -17,23 +17,32 @@
 
 package org.apache.hugegraph.unit.core;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.Userdata;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.commons.lang3.tuple.Pair;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.Userdata;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.EdgeLabelType;
+import org.apache.hugegraph.type.define.Frequency;
+import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.unit.FakeObjects;
 import org.apache.hugegraph.util.DateUtil;
+import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Test;
 
 public class SchemaElementTest {
@@ -270,4 +279,73 @@ public class SchemaElementTest {
             Assert.assertContains("userdata", e.getMessage());
         });
     }
+
+    @Test
+    public void testEdgeLabelMetadataJsonRoundTrip() {
+        for (EdgeLabelType type : new EdgeLabelType[]{EdgeLabelType.NORMAL,
+                                                     EdgeLabelType.PARENT,
+                                                     EdgeLabelType.SUB}) {
+            for (boolean multipleLinks : new boolean[]{false, true}) {
+                EdgeLabel label = new EdgeLabel(null, IdGenerator.of(3), "knows");
+                label.edgeLabelType(type);
+                label.frequency(Frequency.SINGLE);
+                label.links(Pair.of(IdGenerator.of(1), IdGenerator.of(2)));
+                if (multipleLinks) {
+                    label.links(Pair.of(IdGenerator.of(2), IdGenerator.of(4)));
+                }
+                if (type.sub()) {
+                    label.fatherId(IdGenerator.of(5));
+                }
+                String json = JsonUtil.toJson(label.asMap());
+                Map<String, Object> decoded = JsonUtil.fromJson(json, Map.class);
+                Assert.assertEquals(!multipleLinks, decoded.containsKey(EdgeLabel.P.SOURCE_LABEL));
+                Assert.assertEquals(!multipleLinks, decoded.containsKey(EdgeLabel.P.TARGET_LABEL));
+                Assert.assertTrue(decoded.containsKey(EdgeLabel.P.LINKS));
+
+                // Metadata JSON key order must not select setter execution order.
+                List<String> keys = new ArrayList<>(decoded.keySet());
+                Collections.reverse(keys);
+                Map<String, Object> reordered = new LinkedHashMap<>();
+                reordered.put(EdgeLabel.P.LINKS, decoded.get(EdgeLabel.P.LINKS));
+                for (String key : keys) {
+                    reordered.put(key, decoded.get(key));
+                }
+                for (Map<String, Object> input : Arrays.asList(decoded, reordered)) {
+                    EdgeLabel restored = EdgeLabel.fromMap(input, null);
+                    Assert.assertEquals(label.links(), restored.links());
+                    Assert.assertEquals(label.edgeLabelType(), restored.edgeLabelType());
+                    Assert.assertEquals(label.fatherId(), restored.fatherId());
+                    Assert.assertEquals(label.frequency(), restored.frequency());
+                    Assert.assertEquals(label.status(), restored.status());
+                    Assert.assertEquals(label.asMap(), restored.asMap());
+                }
+            }
+        }
+    }
+
+
+    @Test
+    public void testOrderedSchemaFieldsSurviveMetadataJson() {
+        for (int[] values : new int[][]{{17, 2}, {2, 17}, {2, 17, 2}}) {
+            VertexLabel vertex = new VertexLabel(null, IdGenerator.of(1), "person");
+            vertex.idStrategy(IdStrategy.PRIMARY_KEY);
+            EdgeLabel edge = new EdgeLabel(null, IdGenerator.of(3), "knows");
+            edge.frequency(Frequency.SINGLE);
+            edge.links(Pair.of(IdGenerator.of(1), IdGenerator.of(2)));
+            for (int value : values) {
+                vertex.primaryKey(IdGenerator.of(value));
+                edge.sortKey(IdGenerator.of(value));
+            }
+            String vertexJson = JsonUtil.toJson(vertex.asMap());
+            String edgeJson = JsonUtil.toJson(edge.asMap());
+            VertexLabel restoredVertex = VertexLabel.fromMap(
+                    JsonUtil.fromJson(vertexJson, Map.class), null);
+            EdgeLabel restoredEdge = EdgeLabel.fromMap(JsonUtil.fromJson(edgeJson, Map.class), null);
+            Assert.assertEquals(vertex.primaryKeys(), restoredVertex.primaryKeys());
+            Assert.assertEquals(edge.sortKeys(), restoredEdge.sortKeys());
+            Assert.assertEquals(vertex.asMap(), restoredVertex.asMap());
+            Assert.assertEquals(edge.asMap(), restoredEdge.asMap());
+        }
+    }
+
 }

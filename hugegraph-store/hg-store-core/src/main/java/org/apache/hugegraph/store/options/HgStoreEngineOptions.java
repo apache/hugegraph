@@ -53,6 +53,8 @@ public class HgStoreEngineOptions {
     private QueryPushDownOption queryPushDownOption = new QueryPushDownOption();
     // pd server address
     private String pdAddress;
+    // PD metadata namespace; must match Server cluster/pd.cluster.
+    private String pdCluster = "hg";
     // External service address
     private String grpcAddress;
     // Raft external service address

@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.backend.cache;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.type.HugeType;
 
 public interface CacheNotifier extends AutoCloseable {

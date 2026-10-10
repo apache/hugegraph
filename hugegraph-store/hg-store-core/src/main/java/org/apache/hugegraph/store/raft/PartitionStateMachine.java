@@ -33,6 +33,7 @@ import com.alipay.sofa.jraft.Iterator;
 import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.conf.Configuration;
 import com.alipay.sofa.jraft.core.StateMachineAdapter;
+import com.alipay.sofa.jraft.entity.EnumOutter.ErrorType;
 import com.alipay.sofa.jraft.entity.LeaderChangeContext;
 import com.alipay.sofa.jraft.entity.RaftOutter;
 import com.alipay.sofa.jraft.error.RaftError;
@@ -87,7 +88,7 @@ public class PartitionStateMachine extends StateMachineAdapter {
                         // Leader branch, call locally
                         RaftOperation operation = done.getOperation();
                         if (handler.invoke(groupId, operation.getOp(), operation.getReq(),
-                                           done.getClosure())) {
+                                           done)) {
                             done.run(Status.OK());
                             break;
                         }
@@ -105,6 +106,9 @@ public class PartitionStateMachine extends StateMachineAdapter {
                               done.getOperation().getOp(),
                               done.getOperation().getReq());
                 }
+                iter.setErrorAndRollback(1, new Status(RaftError.ESTATEMACHINE, "%s", t.getMessage()));
+                // Do not publish the failed entry as applied.
+                return;
             }
             committedIndex = iter.getIndex();
             stateListeners.forEach(listener -> listener.onDataCommitted(committedIndex));
@@ -128,9 +132,14 @@ public class PartitionStateMachine extends StateMachineAdapter {
     @Override
     public void onError(final RaftException e) {
         log.error(String.format("Raft %s StateMachine on error {}", groupId), e);
-        Utils.runInThread(() -> {
-            stateListeners.forEach(listener -> listener.onError(e));
-        });
+        Runnable notifyListeners = () -> stateListeners.forEach(listener -> listener.onError(e));
+        if (e.getType() == ErrorType.ERROR_TYPE_STATE_MACHINE) {
+            // Latch the terminal error before JRaft marks the node inactive for activity checks.
+            notifyListeners.run();
+        } else {
+            // Other errors can restart the node and must not join the FSM thread here.
+            Utils.runInThread(notifyListeners);
+        }
     }
 
     @Override

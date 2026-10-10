@@ -26,10 +26,9 @@ import java.util.stream.Collectors;
 
 import org.apache.groovy.util.Maps;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.task.HugeTask;
@@ -153,7 +152,6 @@ public class TaskAPI extends API {
     @DELETE
     @Timed
     @Path("{id}")
-    @RedirectFilter.RedirectMasterRole
     public void delete(@Context GraphManager manager,
                        @Parameter(description = "The graphspace name")
                        @PathParam("graphspace") String graphSpace,
@@ -176,7 +174,6 @@ public class TaskAPI extends API {
     @Path("{id}")
     @Status(Status.ACCEPTED)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Object> update(@Context GraphManager manager,
                                       @Parameter(description = "The graphspace name")
                                       @PathParam("graphspace")

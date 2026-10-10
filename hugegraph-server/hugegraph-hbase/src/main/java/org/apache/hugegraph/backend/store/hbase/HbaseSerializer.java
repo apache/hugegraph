@@ -19,7 +19,7 @@ package org.apache.hugegraph.backend.store.hbase;
 
 import java.util.Arrays;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.serializer.BinarySerializer;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.type.HugeType;

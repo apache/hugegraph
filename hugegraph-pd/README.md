@@ -3,6 +3,8 @@
 [![License](https://img.shields.io/badge/license-Apache%202-0E78BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Version](https://img.shields.io/badge/version-1.7.0-blue)](https://github.com/apache/hugegraph)
 
+<!-- TODO: update the version badge and release examples after 1.8.0 is published. -->
+
 ## Overview
 
 HugeGraph PD (Placement Driver) is a meta server that provides cluster management and coordination services for HugeGraph distributed deployments. It serves as the central control plane responsible for:
@@ -36,8 +38,8 @@ For detailed architecture and design, see [Architecture Documentation](docs/arch
 
 ### Prerequisites
 
-- **Java**: 11 or higher
-- **Maven**: 3.5 or higher
+- **Java**: 17 (currently the only supported release)
+- **Maven**: 3.6.3 or higher
 - **Disk Space**: At least 1GB for PD data directory
 
 ### Build
@@ -81,7 +83,10 @@ bin/stop-hugegraph-pd.sh
 bin/start-hugegraph-pd.sh [-g GC_TYPE] [-j "JVM_OPTIONS"] [-y ENABLE_OTEL] [-d DAEMON]
 ```
 
-- `-g`: GC type (`g1` or `ZGC`, default: `g1`)
+- `-g`: Explicit GC selection (`g1`/`G1` or `zgc`/`ZGC`). Without `-g`, JVM defaults or the collector
+  set in `JAVA_OPTIONS` apply. Explicit `-g g1` selects G1 even when JVM ergonomics would choose Serial GC;
+  unknown values are rejected. When using explicit `-g`, do not select another collector in `JAVA_OPTIONS`
+  or `-j`; conflicting selections are rejected by the JVM.
 - `-j`: Custom JVM options (e.g., `-j "-Xmx4g -Xms4g"`)
 - `-y`: Enable OpenTelemetry tracing (`true` or `false`, default: `false`)
 - `-d`: Daemon mode (`true` = daemon, `false` = foreground; default: `true`). Set to `false` when running under Docker or a process supervisor so the container exits if Java dies.

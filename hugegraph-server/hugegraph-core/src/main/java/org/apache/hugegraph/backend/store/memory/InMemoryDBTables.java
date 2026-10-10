@@ -29,21 +29,21 @@ import java.util.NavigableMap;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.Condition.RangeConditions;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.IdQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.Condition.RangeConditions;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.serializer.TextBackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendSession;
 import org.apache.hugegraph.iterator.ExtendableIterator;
-import org.apache.hugegraph.structure.HugeIndex;
+import org.apache.hugegraph.structure.Index;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
@@ -429,7 +429,7 @@ public class InMemoryDBTables {
             }
             assert fieldValue != null && indexLabelId != null;
 
-            Id id = HugeIndex.formatIndexId(query.resultType(),
+            Id id = Index.formatIndexId(query.resultType(),
                                             indexLabelId, fieldValue);
             IdQuery q = new IdQuery(query, id);
             q.offset(query.offset());
@@ -502,7 +502,7 @@ public class InMemoryDBTables {
 
             RangeConditions range = new RangeConditions(relations);
             if (range.keyEq() != null) {
-                Id id = HugeIndex.formatIndexId(query.resultType(),
+                Id id = Index.formatIndexId(query.resultType(),
                                                 indexLabelId, range.keyEq());
                 IdQuery q = new IdQuery(query, id);
                 q.offset(query.offset());
@@ -529,7 +529,7 @@ public class InMemoryDBTables {
                 // Field value < keyMax
                 keyMin = NumericUtil.minValueOf(keyMax.getClass());
             }
-            Id min = HugeIndex.formatIndexId(type, indexLabelId, keyMin);
+            Id min = Index.formatIndexId(type, indexLabelId, keyMin);
 
             if (keyMax == null) {
                 // Field value > keyMin
@@ -537,7 +537,7 @@ public class InMemoryDBTables {
                 indexLabelId = IdGenerator.of(indexLabelId.asLong() + 1L);
                 keyMax = NumericUtil.minValueOf(keyMin.getClass());
             }
-            Id max = HugeIndex.formatIndexId(type, indexLabelId, keyMax);
+            Id max = Index.formatIndexId(type, indexLabelId, keyMax);
 
             max = keyMaxEq ? rs.floorKey(max) : rs.lowerKey(max);
             if (max == null) {
@@ -569,9 +569,9 @@ public class InMemoryDBTables {
                 return;
             }
             Id indexLabelId = IdGenerator.of(Long.parseLong(indexLabel));
-            Id min = HugeIndex.formatIndexId(entry.type(), indexLabelId, 0L);
+            Id min = Index.formatIndexId(entry.type(), indexLabelId, 0L);
             indexLabelId = IdGenerator.of(indexLabelId.asLong() + 1L);
-            Id max = HugeIndex.formatIndexId(entry.type(), indexLabelId, 0L);
+            Id max = Index.formatIndexId(entry.type(), indexLabelId, 0L);
             SortedMap<Id, BackendEntry> subStore;
             subStore = this.store().subMap(min, max);
             Iterator<Entry<Id, BackendEntry>> iter;

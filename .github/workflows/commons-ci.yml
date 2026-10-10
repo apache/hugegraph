@@ -1,16 +1,22 @@
 name: "HugeGraph-Commons CI"
 
 on:
+  workflow_call:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-      - 'release-*'
-      - 'test-*'
-  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
+  java-runtime:
+    uses: ./.github/workflows/java-runtime.yml
+    permissions:
+      contents: read
+
   build-commons:
+    timeout-minutes: 20
+    name: Commons tests (Java ${{ matrix.JAVA_VERSION }})
+    needs: java-runtime
     runs-on: ubuntu-latest
     env:
       USE_STAGE: 'false' # Whether to include the stage repository.
@@ -18,26 +24,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        JAVA_VERSION: ['11']
+        JAVA_VERSION: ${{ fromJSON(needs.java-runtime.outputs.versions || '["unavailable"]') }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
       - name: Install JDK ${{ matrix.JAVA_VERSION }}
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v6
         with:
           java-version: ${{ matrix.JAVA_VERSION }}
           distribution: 'zulu'
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 2
+          cache: maven
+          cache-jdk: false
 
       - name: Use staged maven repo settings
         if: ${{ env.USE_STAGE == 'true' }}
@@ -47,18 +48,21 @@ jobs:
 
       - name: Install
         run: |
-          mvn install -Dmaven.javadoc.skip=true -ntp -Dmaven.test.skip=true
+          mvn install -pl hugegraph-commons/hugegraph-common,hugegraph-commons/hugegraph-rpc -am \
+            -Dmaven.javadoc.skip=true -ntp -Dmaven.test.skip=true
 
       - name: Run common test
         run: |
-          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite -DskipCommonsTests=false
+          mvn test -pl hugegraph-commons/hugegraph-common -Dtest=UnitTestSuite \
+            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
       - name: Run rpc test
         run: |
-          mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite -DskipCommonsTests=false
+          mvn test -pl hugegraph-commons/hugegraph-rpc -Dtest=UnitTestSuite \
+            -DskipCommonsTests=false -Dsurefire.failIfNoSpecifiedTests=true
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: hugegraph-commons/target/jacoco.xml

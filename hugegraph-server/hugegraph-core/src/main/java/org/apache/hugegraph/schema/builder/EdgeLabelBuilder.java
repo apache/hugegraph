@@ -28,16 +28,17 @@ import java.util.Set;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.backend.tx.ISchemaTransaction;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.exception.NotFoundException;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.Userdata;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.Userdata;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Action;
 import org.apache.hugegraph.type.define.EdgeLabelType;
@@ -91,7 +92,7 @@ public class EdgeLabelBuilder extends AbstractBuilder
                             HugeGraph graph, EdgeLabel copy) {
         super(transaction, graph);
         E.checkNotNull(copy, "copy");
-        HugeGraph origin = copy.graph();
+        HugeGraphSupplier origin = copy.graph();
         this.id = null;
         this.name = copy.name();
         this.links = mapPairId2Name(origin, copy.links());
@@ -206,7 +207,6 @@ public class EdgeLabelBuilder extends AbstractBuilder
             this.checkNullableKeys(Action.INSERT);
             Userdata.check(this.userdata, Action.INSERT);
             this.checkTTL();
-            this.checkUserdata(Action.INSERT);
 
             edgeLabel = this.build();
             assert edgeLabel.name().equals(name);
@@ -731,42 +731,26 @@ public class EdgeLabelBuilder extends AbstractBuilder
                         "but got '%s(%s)'", this.ttlStartTime, pkey.dataType());
     }
 
-    private void checkUserdata(Action action) {
-        switch (action) {
-            case INSERT:
-            case APPEND:
-                for (Map.Entry<String, Object> e : this.userdata.entrySet()) {
-                    if (e.getValue() == null) {
-                        throw new NotAllowException(
-                                "Not allowed pass null userdata value when " +
-                                "create or append edge label");
-                    }
-                }
-                break;
-            case ELIMINATE:
-            case DELETE:
-                // pass
-                break;
-            default:
-                throw new AssertionError(String.format(
-                        "Unknown schema action '%s'", action));
-        }
-    }
 
-    private static Set<String> mapPkId2Name(HugeGraph graph, Set<Id> ids) {
+    private static Set<String> mapPkId2Name(HugeGraphSupplier graph, Set<Id> ids) {
         return new HashSet<>(graph.mapPkId2Name(ids));
     }
 
-    private static List<String> mapPkId2Name(HugeGraph graph, List<Id> ids) {
+    private static List<String> mapPkId2Name(HugeGraphSupplier graph, List<Id> ids) {
         return graph.mapPkId2Name(ids);
     }
 
-    private static String mapElId2Name(HugeGraph graph, Id fatherId) {
-        return graph.mapElId2Name(ImmutableList.of(fatherId)).get(0);
+    private static String mapElId2Name(HugeGraphSupplier graph, Id fatherId) {
+        return graph.edgeLabel(fatherId).name();
     }
 
-    private static Set<Pair<String, String>> mapPairId2Name(HugeGraph graph,
+    private static Set<Pair<String, String>> mapPairId2Name(HugeGraphSupplier graph,
                                                             Set<Pair<Id, Id>> pairs) {
-        return graph.mapPairId2Name(pairs);
+        Set<Pair<String, String>> names = new HashSet<>();
+        for (Pair<Id, Id> pair : pairs) {
+            names.add(Pair.of(graph.vertexLabel(pair.getLeft()).name(),
+                              graph.vertexLabel(pair.getRight()).name()));
+        }
+        return names;
     }
 }

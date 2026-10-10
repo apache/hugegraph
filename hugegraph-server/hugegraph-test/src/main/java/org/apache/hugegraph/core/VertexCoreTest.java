@@ -32,34 +32,35 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.backend.Shard;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.Id.IdType;
-import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
 import org.apache.hugegraph.backend.page.IdHolderList;
 import org.apache.hugegraph.backend.page.PageInfo;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.BackendTable;
-import org.apache.hugegraph.backend.store.Shard;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.exception.NotAllowException;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.id.Id.IdType;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.id.SplicingIdGenerator;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.Userdata;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.serializer.BytesBuffer;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.Userdata;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.FakeObjects;
@@ -76,6 +77,7 @@ import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.Blob;
 import org.apache.hugegraph.util.CollectionUtil;
 import org.apache.hugegraph.util.DateUtil;
+import org.apache.hugegraph.util.Events;
 import org.apache.hugegraph.util.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
@@ -205,6 +207,23 @@ public class VertexCoreTest extends BaseCoreTest {
               .secondary().by("cpu", "ram", "band")
               .ifNotExist()
               .create();
+    }
+
+    @Test
+    public void testDeleteVertexWithMissingSchemaLabel() throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+        Vertex vertex = graph.addVertex(T.label, "author", "id", 1, "name", "James");
+        graph.tx().commit();
+
+        // Simulate schema loss while the committed backend record remains.
+        params().schemaTransaction().removeSchema(graph.vertexLabel("author"));
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+        Vertex orphan = graph.vertices(vertex.id()).next();
+        Assert.assertEquals("~undefined", orphan.label());
+
+        orphan.remove();
+        graph.tx().commit();
+        Assert.assertFalse(graph.vertices(vertex.id()).hasNext());
     }
 
     @Test
@@ -3281,6 +3300,24 @@ public class VertexCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByNullKeyAndLabel() {
+        HugeGraph graph = graph();
+        init10Vertices();
+
+        Assert.assertFalse(graph.traversal().V()
+                                .has((String) null, "test-null-key")
+                                .hasNext());
+        Assert.assertFalse(graph.traversal().V()
+                                .hasLabel((String) null)
+                                .hasNext());
+
+        List<Vertex> vertices = graph.traversal().V()
+                                     .hasLabel(null, "book")
+                                     .toList();
+        Assert.assertEquals(5, vertices.size());
+    }
+
+    @Test
     public void testQueryByLabelWithLimit() {
         HugeGraph graph = graph();
         this.init10VerticesAndCommit();
@@ -4058,6 +4095,35 @@ public class VertexCoreTest extends BaseCoreTest {
             Assert.assertContains("Invalid data type of query value",
                                   e.getMessage());
         });
+    }
+
+    @Test
+    public void testQueryByNegatedNullPredicate() {
+        HugeGraph graph = graph();
+
+        graph.addVertex(T.label, "person", "name", "marko",
+                        "city", "Beijing", "age", 29);
+        graph.addVertex(T.label, "person", "name", "vadas",
+                        "city", "Beijing", "age", 27);
+        graph.addVertex(T.label, "person", "name", "lop",
+                        "city", "Shanghai");
+        this.commitTx();
+
+        List<Object> negatedNull = graph.traversal().V()
+                                        .hasLabel("person")
+                                        .has("age", P.not(P.eq(null)))
+                                        .values("name")
+                                        .toList();
+        List<Object> notEqualNull = graph.traversal().V()
+                                         .hasLabel("person")
+                                         .has("age", P.neq(null))
+                                         .values("name")
+                                         .toList();
+
+        Set<Object> expected = ImmutableSet.of("marko", "vadas");
+        Assert.assertEquals(expected, ImmutableSet.copyOf(negatedNull));
+        Assert.assertEquals(expected, ImmutableSet.copyOf(notEqualNull));
+        Assert.assertEquals(notEqualNull.size(), negatedNull.size());
     }
 
     @Test
@@ -4923,14 +4989,10 @@ public class VertexCoreTest extends BaseCoreTest {
                  .and(P.lt(29).or(P.eq(35)).or(P.gt(45)))
         ).values("name").toList();
 
-        // There is duplicate results with OR condition
-        Assert.assertEquals(5, vertices.size());
-
         Set<String> names = ImmutableSet.of("Hebe", "James",
                                             "Tom Cat", "Lisa");
-        for (Object name : vertices) {
-            Assert.assertTrue(names.contains(name));
-        }
+        Assert.assertEquals(names.size(), vertices.size());
+        Assert.assertEquals(names, ImmutableSet.copyOf(vertices));
     }
 
     @Test
@@ -7838,7 +7900,7 @@ public class VertexCoreTest extends BaseCoreTest {
             Iterator<Vertex> iterator = graph.vertices(query);
             while (iterator.hasNext()) {
                 Vertex vertex = iterator.next();
-                Assert.assertTrue(query.test((HugeElement) vertex));
+                Assert.assertTrue(query.test(((HugeElement) vertex).element()));
                 vertices.add(vertex);
             }
             page = PageInfo.pageInfo(iterator);

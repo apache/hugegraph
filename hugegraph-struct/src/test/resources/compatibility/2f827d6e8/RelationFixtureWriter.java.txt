@@ -1,0 +1,49 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import org.apache.tinkerpop.shaded.kryo.Kryo;
+import org.apache.tinkerpop.shaded.kryo.io.Output;
+import org.apache.hugegraph.backend.query.Condition.RelationType;
+public class RelationFixtureWriter {
+ public static void main(String[] args) {
+  System.out.println("legacy.names=" + String.join(",", Arrays.stream(RelationType.values()).map(Enum::name).toArray(String[]::new)));
+  for (RelationType value : RelationType.values()) write("enum." + value, value);
+  write("array", RelationType.values());
+  write("matrix", new RelationType[][]{RelationType.values(), null, new RelationType[0]});
+  Map<String,Object> nested = new LinkedHashMap<>();
+  nested.put("values", new ArrayList<>(Arrays.asList(RelationType.values())));
+  nested.put("array", RelationType.values()); nested.put("last", RelationType.SCAN);
+  write("nested", nested);
+  RelationType[] oldArray = {RelationType.SCAN, null, RelationType.TEXT_CONTAINS};
+  org.apache.hugegraph.query.Condition.RelationType[] currentArray = {
+   org.apache.hugegraph.query.Condition.RelationType.TEXT_PREFIX, null,
+   org.apache.hugegraph.query.Condition.RelationType.TEXT_REGEX};
+  write("interleaved", new ArrayList<>(Arrays.asList(RelationType.SCAN,
+   org.apache.hugegraph.query.Condition.RelationType.TEXT_PREFIX,
+   RelationType.TEXT_CONTAINS, org.apache.hugegraph.query.Condition.RelationType.TEXT_REGEX,
+   oldArray, currentArray, oldArray, currentArray)));
+ }
+ private static void write(String name, Object value) {
+  Output output = new Output(4096); new Kryo().writeClassAndObject(output, value);
+  StringBuilder hex = new StringBuilder();
+  for (byte b : output.toBytes()) hex.append(String.format("%02x", b & 255));
+  System.out.println(name + ".hex=" + hex);
+ }
+}

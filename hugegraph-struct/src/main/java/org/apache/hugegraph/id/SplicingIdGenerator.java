@@ -1,20 +1,18 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.id;
@@ -74,8 +72,9 @@ public class SplicingIdGenerator extends IdGenerator {
 
     /**
      * Concat multiple ids into one composite id with IDS_SPLITOR
+     *
      * @param ids the string id values to be concatted
-     * @return    concatted string value
+     * @return concatted string value
      */
     public static String concat(String... ids) {
         // NOTE: must support string id when using this method
@@ -84,8 +83,9 @@ public class SplicingIdGenerator extends IdGenerator {
 
     /**
      * Split a composite id into multiple ids with IDS_SPLITOR
+     *
      * @param ids the string id value to be splitted
-     * @return    splitted string values
+     * @return splitted string values
      */
     public static String[] split(String ids) {
         return IdUtil.unescape(ids, IDS_SPLITOR_STR, ESCAPE_STR);
@@ -93,8 +93,9 @@ public class SplicingIdGenerator extends IdGenerator {
 
     /**
      * Concat property values with NAME_SPLITOR
+     *
      * @param values the property values to be concatted
-     * @return       concatted string value
+     * @return concatted string value
      */
     public static String concatValues(List<?> values) {
         // Convert the object list to string array
@@ -108,8 +109,9 @@ public class SplicingIdGenerator extends IdGenerator {
 
     /**
      * Concat property values with NAME_SPLITOR
+     *
      * @param values the property values to be concatted
-     * @return       concatted string value
+     * @return concatted string value
      */
     public static String concatValues(Object... values) {
         return concatValues(Arrays.asList(values));
@@ -117,8 +119,9 @@ public class SplicingIdGenerator extends IdGenerator {
 
     /**
      * Concat multiple parts into a single id with ID_SPLITOR
+     *
      * @param parts the string id values to be spliced
-     * @return      spliced id object
+     * @return spliced id object
      */
     public static Id splicing(String... parts) {
         String escaped = IdUtil.escape(ID_SPLITOR, ESCAPE, parts);
@@ -141,8 +144,9 @@ public class SplicingIdGenerator extends IdGenerator {
 
     /**
      * Parse a single id into multiple parts with ID_SPLITOR
+     *
      * @param id the id object to be parsed
-     * @return   parsed string id parts
+     * @return parsed string id parts
      */
     public static String[] parse(Id id) {
         return IdUtil.unescape(id.asString(), ID_SPLITOR_STR, ESCAPE_STR);

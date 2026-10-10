@@ -19,7 +19,7 @@ package org.apache.hugegraph.backend.store.raft.rpc;
 
 import java.util.concurrent.ExecutionException;
 
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.store.raft.RaftClosure;
 import org.apache.hugegraph.backend.store.raft.RaftContext;
 import org.apache.hugegraph.backend.store.raft.RaftStoreClosure;

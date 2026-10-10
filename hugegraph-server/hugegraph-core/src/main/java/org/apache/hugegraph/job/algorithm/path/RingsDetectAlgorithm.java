@@ -20,7 +20,7 @@ package org.apache.hugegraph.job.algorithm.path;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.job.UserJob;
 import org.apache.hugegraph.job.algorithm.AbstractAlgorithm;
 import org.apache.hugegraph.job.algorithm.Consumers.StopExecution;

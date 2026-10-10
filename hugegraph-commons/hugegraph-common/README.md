@@ -5,10 +5,25 @@
 [![codecov](https://codecov.io/gh/hugegraph/hugegraph-common/branch/master/graph/badge.svg)](https://codecov.io/gh/hugegraph/hugegraph-common)
 [![Maven Central](https://maven-badges.herokuapp.com/maven-central/org.apache.hugegraph/hugegraph-common/badge.svg)](https://mvnrepository.com/artifact/org.apache.hugegraph/hugegraph-common)
 
-hugegraph-common is a common module for [HugeGraph](https://github.com/hugegraph/hugegraph) and its peripheral components.
+hugegraph-common is a common module for [HugeGraph](https://github.com/apache/hugegraph) and its peripheral components.
 hugegraph-common encapsulates locks, configurations, events, iterators, rest and some 
 numeric or collection util classes to simplify the development of HugeGraph and 
 its components.
+
+## REST request encoding
+
+The shared REST client encodes request bodies using the charset declared in
+`Content-Type`, or UTF-8 when no charset is declared. JSON and text requests do
+not depend on the JVM's default charset. Gzip compresses those same encoded bytes.
+
+## HTTPS certificate verification
+
+A custom trust store configures which certificate authorities or certificates the
+REST client trusts. It does not disable server identity verification: the
+certificate must also contain a Subject Alternative Name matching the requested
+DNS name or IP address. Certificates with a different identity or no matching
+Subject Alternative Name are rejected, including certificates explicitly trusted
+by the configured store. This uses OkHttp's default hostname verifier.
 
 ## Components
 

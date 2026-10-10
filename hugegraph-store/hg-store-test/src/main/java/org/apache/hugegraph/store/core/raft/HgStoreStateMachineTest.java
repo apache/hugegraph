@@ -131,6 +131,11 @@ public class HgStoreStateMachineTest {
             Task task;
 
             @Override
+            public void setAutoCommitPerLog(boolean autoCommit) {
+                // This test iterator does not model commit behavior.
+            }
+
+            @Override
             public ByteBuffer getData() {
                 return task.getData();
             }
@@ -153,6 +158,16 @@ public class HgStoreStateMachineTest {
             @Override
             public void setErrorAndRollback(long ntail, Status st) {
 
+            }
+
+            @Override
+            public boolean commit() {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public void commitAndSnapshotSync(Closure done) {
+                throw new UnsupportedOperationException();
             }
 
             @Override

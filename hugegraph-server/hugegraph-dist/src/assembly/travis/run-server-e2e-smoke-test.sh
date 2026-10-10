@@ -144,7 +144,16 @@ verify_graph() {
 
 wait_for_server
 request GET /versions 200
-assert_json 'type == "object" and length > 0'
+ROOT_DIR=$(cd "$(dirname "$0")/../../../../.." && pwd)
+EXPECTED_CORE_VERSION=$(sed -n 's:.*<revision>\([^<]*\)</revision>.*:\1:p' "$ROOT_DIR/pom.xml")
+EXPECTED_GREMLIN_VERSION=$(sed -n 's:.*<tinkerpop.version>\([^<]*\)</tinkerpop.version>.*:\1:p' \
+    "$ROOT_DIR/hugegraph-server/pom.xml")
+EXPECTED_API_VERSION=$(sed -n 's:.*<Implementation-Version>\([^<]*\)</Implementation-Version>.*:\1:p' \
+    "$ROOT_DIR/hugegraph-server/hugegraph-api/pom.xml")
+assert_json '.versions.version == "v1" and .versions.core == $core and
+             .versions.gremlin == $gremlin and .versions.api == $api' \
+    --arg core "$EXPECTED_CORE_VERSION" --arg gremlin "$EXPECTED_GREMLIN_VERSION" \
+    --arg api "$EXPECTED_API_VERSION"
 
 if [[ "$MODE" == "create" ]]; then
     request POST "$GRAPH_PATH/schema/propertykeys" 202 \

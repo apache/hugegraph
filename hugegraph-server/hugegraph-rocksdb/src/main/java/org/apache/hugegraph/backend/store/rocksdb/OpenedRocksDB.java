@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.store.rocksdb.RocksDBIteratorPool.ReusedRocksIterator;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
@@ -44,9 +44,18 @@ public class OpenedRocksDB implements AutoCloseable {
     private final RocksDB rocksdb;
     private final Map<String, CFHandle> cfHandles;
     private final SstFileManager sstFileManager;
+    private RecoveryLock recoveryLock;
+    private boolean nativeClosed;
+    private Throwable nativeCloseFailure;
 
     public OpenedRocksDB(RocksDB rocksdb, Map<String, CFHandle> cfHandles,
                          SstFileManager sstFileManager) {
+        this(rocksdb, cfHandles, sstFileManager, null);
+    }
+
+    OpenedRocksDB(RocksDB rocksdb, Map<String, CFHandle> cfHandles,
+                 SstFileManager sstFileManager, RecoveryLock recoveryLock) {
+        this.recoveryLock = recoveryLock;
         this.rocksdb = rocksdb;
         this.cfHandles = cfHandles;
         this.sstFileManager = sstFileManager;
@@ -81,16 +90,49 @@ public class OpenedRocksDB implements AutoCloseable {
     }
 
     @Override
-    public void close() {
-        if (!this.isOwningHandle()) {
+    public synchronized void close() {
+        this.closeNative();
+        RocksDBSnapshotRestore.unlock(this.recoveryLock);
+        this.recoveryLock = null;
+    }
+
+    synchronized boolean ownsRecoveryLock() {
+        return this.recoveryLock != null && this.recoveryLock.isOpen();
+    }
+
+    // Transfer the existing lock to the replacement DB without an unlocked gap.
+    synchronized RecoveryLock closeForRestore() {
+        this.closeNative();
+        E.checkState(this.recoveryLock == null || this.recoveryLock.isOpen(),
+                     "Cannot transfer a recovery lock after close failed");
+        RecoveryLock transferred = this.recoveryLock;
+        this.recoveryLock = null;
+        return transferred;
+    }
+
+    private void closeNative() {
+        if (this.nativeCloseFailure instanceof RuntimeException) {
+            throw (RuntimeException) this.nativeCloseFailure;
+        }
+        if (this.nativeCloseFailure instanceof Error) {
+            throw (Error) this.nativeCloseFailure;
+        }
+        if (this.nativeClosed) {
             return;
         }
-        for (CFHandle cf : this.cfHandles.values()) {
-            cf.close();
+        try {
+            for (CFHandle cf : this.cfHandles.values()) {
+                cf.close();
+            }
+            this.cfHandles.clear();
+            // JNI clears isOwningHandle before disposal completes. Only a normal
+            // return proves closure; a failed close must never release or transfer the lease.
+            this.rocksdb.close();
+            this.nativeClosed = true;
+        } catch (RuntimeException | Error e) {
+            this.nativeCloseFailure = e;
+            throw e;
         }
-        this.cfHandles.clear();
-
-        this.rocksdb.close();
     }
 
     public long totalSize() {

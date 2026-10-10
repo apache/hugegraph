@@ -19,24 +19,22 @@ package org.apache.hugegraph.opencypher;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Optional.empty;
-import static org.apache.tinkerpop.gremlin.driver.message.ResponseStatusCode.SERVER_ERROR;
+import static org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode.SERVER_ERROR;
 import static org.opencypher.gremlin.translation.StatementOption.EXPLAIN;
 import static org.slf4j.LoggerFactory.getLogger;
 
+import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.tinkerpop.gremlin.driver.Tokens;
-import org.apache.tinkerpop.gremlin.driver.message.RequestMessage;
-import org.apache.tinkerpop.gremlin.driver.message.ResponseMessage;
-import org.apache.tinkerpop.gremlin.driver.message.ResponseStatusCode;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.DefaultGraphTraversal;
@@ -49,24 +47,32 @@ import org.apache.tinkerpop.gremlin.server.OpProcessor;
 import org.apache.tinkerpop.gremlin.server.op.AbstractEvalOpProcessor;
 import org.apache.tinkerpop.gremlin.server.op.OpProcessorException;
 import org.apache.tinkerpop.gremlin.structure.Graph;
+import org.apache.tinkerpop.gremlin.util.Tokens;
 import org.apache.tinkerpop.gremlin.util.function.ThrowingConsumer;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode;
 import org.opencypher.gremlin.translation.CypherAst;
 import org.opencypher.gremlin.translation.groovy.GroovyPredicate;
 import org.opencypher.gremlin.translation.ir.TranslationWriter;
 import org.opencypher.gremlin.translation.ir.model.GremlinStep;
 import org.opencypher.gremlin.translation.translator.Translator;
+import org.opencypher.gremlin.translation.traversal.TraversalGremlinBindings;
+import org.opencypher.gremlin.translation.traversal.TraversalGremlinSteps;
 import org.opencypher.gremlin.traversal.ParameterNormalizer;
 import org.opencypher.gremlin.traversal.ProcedureContext;
 import org.opencypher.gremlin.traversal.ReturnNormalizer;
+import org.opencypher.v9_0.expressions.Parameter;
 import org.slf4j.Logger;
 
 import io.netty.channel.ChannelHandlerContext;
+import scala.Product;
 import scala.collection.Seq;
 
 /**
  * Description of the modifications:
  * <p>
- * 1) Changed the method signature to adopt the gremlin-server 3.5.1.
+ * 1) Changed the method signature to adopt the gremlin-server Context API.
  * <pre>
  * public Optional<ThrowingConsumer<Context>> selectOther(RequestMessage requestMessage)
  * -->
@@ -100,10 +106,72 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
     private static final String DEFAULT_TRANSLATOR_DEFINITION =
             "gremlin+cfog_server_extensions+inline_parameters";
 
+    // translation 1.0.4 uses this string as null and cannot preserve it as bound data.
+    private static final String RESERVED_NULL_VALUE = "  cypher.null";
+
     private static final Logger logger = getLogger(CypherOpProcessor.class);
 
     public CypherOpProcessor() {
         super(true);
+    }
+
+    @Override
+    protected Optional<ThrowingConsumer<Context>> validateEvalMessage(RequestMessage message)
+            throws OpProcessorException {
+        Object query = message.getArgs().get(Tokens.ARGS_GREMLIN);
+        String error = null;
+        if (!(query instanceof String) || ((String) query).isBlank()) {
+            error = "The Cypher query must be a nonblank string";
+        } else if (message.getArgs().containsKey(Tokens.ARGS_BINDINGS)) {
+            Object supplied = message.getArgs().get(Tokens.ARGS_BINDINGS);
+            if (!(supplied instanceof Map)) {
+                error = "Cypher bindings must be a map";
+            } else {
+                Map<?, ?> bindings = (Map<?, ?>) supplied;
+                if (bindings.size() > this.maxParameters) {
+                    error = "Cypher bindings exceed the maximum parameter count " + this.maxParameters;
+                } else {
+                    // Cypher parameters do not enter the Gremlin script namespace.
+                    for (Object key : bindings.keySet()) {
+                        if (!(key instanceof String)) {
+                            error = "Cypher binding keys must be nonnull strings";
+                            break;
+                        }
+                    }
+                    if (error == null && containsReservedNullValue(bindings)) {
+                        error = "Cypher bindings contain a string reserved for null by the translator";
+                    }
+                }
+            }
+        }
+        if (error != null) {
+            throw new OpProcessorException(error, ResponseMessage.build(message)
+                    .code(ResponseStatusCode.REQUEST_ERROR_INVALID_REQUEST_ARGUMENTS)
+                    .statusMessage(error).create());
+        }
+        return empty();
+    }
+
+    private static boolean containsReservedNullValue(Map<?, ?> bindings) {
+        Deque<Iterator<?>> pending = new ArrayDeque<>();
+        pending.push(bindings.values().iterator());
+        while (!pending.isEmpty()) {
+            Iterator<?> values = pending.peek();
+            if (!values.hasNext()) {
+                pending.pop();
+                continue;
+            }
+            Object value = values.next();
+            if (RESERVED_NULL_VALUE.equals(value)) {
+                return true;
+            }
+            if (value instanceof Map) {
+                pending.push(((Map<?, ?>) value).values().iterator());
+            } else if (value instanceof Collection) {
+                pending.push(((Collection<?>) value).iterator());
+            }
+        }
+        return false;
     }
 
     @Override
@@ -131,6 +199,7 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         Map<String, Object> parameters = ParameterNormalizer.normalize(getParameters(args));
         ProcedureContext procedureContext = ProcedureContext.global();
         CypherAst ast = CypherAst.parse(cypher, parameters, procedureContext.getSignatures());
+        validateParameters(ast, parameters);
 
         String translatorDefinition = getTranslatorDefinition(context);
 
@@ -139,7 +208,9 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
                                                                       .build(translatorDefinition);
 
         Translator<GraphTraversal, P> traversalTranslator = Translator.builder()
-                                                                      .traversal(g)
+                                                                      .custom(new TraversalGremlinSteps(g),
+                                                                              new CypherGremlinPredicates(),
+                                                                              new TraversalGremlinBindings())
                                                                       .build(translatorDefinition);
 
         Seq<GremlinStep> ir = ast.translate(strTranslator.flavor(),
@@ -157,24 +228,36 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
                                                                  parameters);
         ReturnNormalizer returnNormalizer = ReturnNormalizer.create(ast.getReturnTypes());
         Iterator normalizedTraversal = returnNormalizer.normalize(traversal);
-        inTransaction(gts, () -> handleIterator(context, normalizedTraversal));
+        handleTraversal(context, normalizedTraversal, traversal);
     }
 
-    private void inTransaction(GraphTraversalSource gts, Runnable runnable) {
-        Graph graph = gts.getGraph();
-        boolean supportsTransactions = graph.features().graph().supportsTransactions();
-        if (!supportsTransactions) {
-            runnable.run();
-            return;
-        }
-
-        try {
-            graph.tx().open();
-            runnable.run();
-            graph.tx().commit();
-        } catch (Exception e) {
-            if (graph.tx().isOpen()) {
-                graph.tx().rollback();
+    private static void validateParameters(CypherAst ast, Map<String, Object> parameters) {
+        // Inspect parsed parameter nodes: dollar signs in literals/comments are not bindings.
+        // The upstream translator otherwise silently turns an absent binding into null.
+        Deque<Object> pending = new ArrayDeque<>();
+        pending.push(ast.statement());
+        while (!pending.isEmpty()) {
+            Object node = pending.pop();
+            if (node instanceof Parameter) {
+                String name = ((Parameter) node).name();
+                if (!parameters.containsKey(name)) {
+                    throw new IllegalArgumentException("Missing Cypher parameter: " + name);
+                }
+                continue;
+            }
+            scala.collection.Iterator<?> children;
+            if (node instanceof scala.collection.Iterable) {
+                children = ((scala.collection.Iterable<?>) node).iterator();
+            } else if (node instanceof Product) {
+                children = ((Product) node).productIterator();
+            } else {
+                continue;
+            }
+            while (children.hasNext()) {
+                Object child = children.next();
+                if (child != null) {
+                    pending.push(child);
+                }
             }
         }
     }
@@ -217,22 +300,45 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
                                                                      .create());
     }
 
-    @Override
-    protected void handleIterator(Context context, Iterator traversal) {
+    private void handleTraversal(Context context, Iterator traversal,
+                                 GraphTraversal<?, ?> source) {
         RequestMessage msg = context.getRequestMessage();
         final long timeout = msg.getArgs().containsKey(Tokens.ARGS_EVAL_TIMEOUT)
                              ? ((Number) msg.getArgs().get(Tokens.ARGS_EVAL_TIMEOUT)).longValue()
                              : context.getSettings().evaluationTimeout;
 
         FutureTask<Void> evalFuture = new FutureTask<>(() -> {
-            try {
+            try (GraphTraversal<?, ?> ignored = source) {
+                // The parent commits before sending the terminal success response. Both
+                // iteration and failure rollback must run on this transaction-owning thread.
                 super.handleIterator(context, traversal);
+            } catch (Error error) {
+                try {
+                    attemptRollback(msg, context.getGraphManager(),
+                                    context.getSettings().strictTransactionManagement);
+                } catch (Exception rollbackFailure) {
+                    error.addSuppressed(rollbackFailure);
+                }
+                // FutureTask retains the error, so send a terminal response here as well.
+                // This also covers errors raised after a timeout has cancelled the task.
+                logger.error("Fatal error during traversal iteration", error);
+                context.writeAndFlush(ResponseMessage.build(msg)
+                                                     .code(SERVER_ERROR)
+                                                     .statusMessage(error.getMessage())
+                                                     .statusAttributeException(error)
+                                                     .create());
+                throw error;
             } catch (Exception ex) {
+                try {
+                    attemptRollback(msg, context.getGraphManager(),
+                                    context.getSettings().strictTransactionManagement);
+                } catch (Exception rollbackFailure) {
+                    ex.addSuppressed(rollbackFailure);
+                }
                 String errorMessage = getErrorMessage(msg, ex);
 
                 logger.error("Error during traversal iteration", ex);
-                ChannelHandlerContext ctx = context.getChannelHandlerContext();
-                ctx.writeAndFlush(ResponseMessage.build(msg)
+                context.writeAndFlush(ResponseMessage.build(msg)
                                                  .code(SERVER_ERROR)
                                                  .statusMessage(errorMessage)
                                                  .statusAttributeException(ex)
@@ -242,11 +348,10 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
         }
         );
 
-        final Future<?> executionFuture = context.getGremlinExecutor()
-                                                 .getExecutorService().submit(evalFuture);
+        context.getGremlinExecutor().getExecutorService().execute(evalFuture);
         if (timeout > 0) {
             context.getScheduledExecutorService().schedule(
-                    () -> executionFuture.cancel(true)
+                    () -> evalFuture.cancel(true)
                     , timeout, TimeUnit.MILLISECONDS);
         }
 

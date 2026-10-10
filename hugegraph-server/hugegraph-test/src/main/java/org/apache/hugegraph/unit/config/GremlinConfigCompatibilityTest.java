@@ -1,0 +1,1515 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.hugegraph.unit.config;
+
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.io.HugeGraphIoRegistry;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.structure.HugeEdge;
+import org.apache.hugegraph.structure.HugeFeatures;
+import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.testutil.Assert;
+import org.apache.hugegraph.unit.BaseUnitTest;
+import org.apache.hugegraph.unit.FakeObjects;
+import org.apache.hugegraph.util.Blob;
+import org.apache.hugegraph.util.JsonUtil;
+import org.apache.tinkerpop.gremlin.driver.Result;
+import org.apache.tinkerpop.gremlin.groovy.jsr223.GremlinGroovyScriptEngine;
+import org.apache.tinkerpop.gremlin.jsr223.ImportGremlinPlugin;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.MutablePath;
+import org.apache.tinkerpop.gremlin.process.traversal.step.util.Tree;
+import org.apache.tinkerpop.gremlin.server.Settings;
+import org.apache.tinkerpop.gremlin.structure.Edge;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
+import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONMapper;
+import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONVersion;
+import org.apache.tinkerpop.gremlin.structure.io.graphson.TypeInfo;
+import org.apache.tinkerpop.gremlin.structure.util.detached.DetachedEdge;
+import org.apache.tinkerpop.gremlin.structure.util.detached.DetachedProperty;
+import org.apache.tinkerpop.gremlin.structure.util.detached.DetachedVertex;
+import org.apache.tinkerpop.gremlin.structure.util.detached.DetachedVertexProperty;
+import org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceEdge;
+import org.apache.tinkerpop.gremlin.structure.util.reference.ReferenceVertex;
+import org.apache.tinkerpop.gremlin.util.MessageSerializer;
+import org.apache.tinkerpop.gremlin.util.message.RequestMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseMessage;
+import org.apache.tinkerpop.gremlin.util.message.ResponseStatusCode;
+import org.apache.tinkerpop.gremlin.util.ser.GraphBinaryMessageSerializerV1;
+import org.apache.tinkerpop.gremlin.util.ser.MessageTextSerializer;
+import org.junit.Test;
+
+import groovy.lang.GString;
+import groovy.lang.GroovyShell;
+import org.mockito.Mockito;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.error.YAMLException;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+
+public class GremlinConfigCompatibilityTest extends BaseUnitTest {
+
+    @Test
+    public void testGremlinSettingsRejectsJavaObjectTags() {
+        UnexpectedYamlType.constructions = 0;
+        String yaml = "host: localhost\nscriptEngines:\n  gremlin-groovy:\n" +
+                      "    config:\n      value: !!" + UnexpectedYamlType.class.getName() + " {}\n";
+        Assert.assertThrows(YAMLException.class, () -> Settings.read(
+                new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8))));
+        Assert.assertEquals(0, UnexpectedYamlType.constructions);
+    }
+
+    public static class UnexpectedYamlType {
+
+        private static int constructions;
+
+        public UnexpectedYamlType() {
+            constructions++;
+        }
+    }
+
+    private static final Pattern CLASS_NAME =
+            Pattern.compile("className:\\s*([^,}\\s]+)");
+    private static final Pattern XML_COMMENT =
+            Pattern.compile("<!--.*?-->", Pattern.DOTALL);
+    private static final Pattern TINKERPOP_DEPENDENCY = Pattern.compile(
+            "<dependency>\\s*<groupId>org\\.apache\\.tinkerpop</groupId>" +
+            "(.*?)</dependency>", Pattern.DOTALL);
+    private static final Pattern DEPENDENCY_VERSION =
+            Pattern.compile("<version>(.*?)</version>", Pattern.DOTALL);
+    private static final Pattern TINKERPOP_VERSION_PROPERTY = Pattern.compile(
+            "<tinkerpop\\.version>(.*?)</tinkerpop\\.version>");
+    private static final Pattern GUICE_DEPENDENCY = Pattern.compile(
+            "<dependency>\\s*<groupId>com\\.google\\.inject</groupId>" +
+            "(.*?)</dependency>", Pattern.DOTALL);
+    private static final String SUPPORTED_TINKERPOP_VERSION = "3.8.1";
+    /* Must match the guice.version property of the TinkerPop parent pom
+     * (gremlin-test declares guice as a provided dependency, so HugeGraph
+     * must supply the version TinkerPop itself was built against). */
+    private static final String SUPPORTED_GUICE_VERSION = "4.2.3";
+    private static final String SERIALIZER_PACKAGE =
+            "org.apache.tinkerpop.gremlin.util.ser.";
+    private static final String GRAPHSON_UNTYPED_V1 =
+            SERIALIZER_PACKAGE + "GraphSONUntypedMessageSerializerV1";
+    private static final String GRAPHBINARY_V1 =
+            SERIALIZER_PACKAGE + "GraphBinaryMessageSerializerV1";
+    private static final String GRAPHBINARY_BUILDER =
+            "org.apache.hugegraph.io.HugeGraphTypeSerializerRegistryBuilder";
+    private static final String IO_REGISTRY =
+            "org.apache.hugegraph.io.HugeGraphIoRegistry";
+    private static final String GREMLIN_SERVER_CONFIG = "gremlin-server.yaml";
+    private static final String REMOTE_OBJECTS_CONFIG = "remote-objects.yaml";
+    private static final List<String> GREMLIN_SERVER_CONFIG_VARIANTS =
+            Arrays.asList(
+                    "static/conf/gremlin-server.yaml",
+                    "travis/conf-raft1/gremlin-server.yaml",
+                    "travis/conf-raft2/gremlin-server.yaml",
+                    "travis/conf-raft3/gremlin-server.yaml"
+            );
+    private static final List<String> DRIVER_CONFIGS = Arrays.asList(
+            "gremlin-driver-settings.yaml", "remote.yaml"
+    );
+    private static final List<String> REMOTE_CONFIGS = Arrays.asList(
+            "gremlin-driver-settings.yaml",
+            "remote.yaml",
+            REMOTE_OBJECTS_CONFIG
+    );
+    private static final List<String> TYPED_FALLBACK_SERIALIZERS =
+            Arrays.asList(
+                    SERIALIZER_PACKAGE + "GraphSONMessageSerializerV2",
+                    SERIALIZER_PACKAGE + "GraphSONMessageSerializerV3"
+            );
+    private static final List<String> TYPED_GRAPHSON_MIME_TYPES =
+            Arrays.asList(
+                    "application/vnd.gremlin-v2.0+json",
+                    "application/vnd.gremlin-v3.0+json"
+            );
+    private static final List<String> UNTYPED_GRAPHSON_MIME_TYPES =
+            Arrays.asList(
+                    "application/vnd.gremlin-v1.0+json;types=false",
+                    "application/vnd.gremlin-v2.0+json;types=false",
+                    "application/vnd.gremlin-v3.0+json;types=false"
+            );
+
+    @Test
+    public void testGremlinServerSerializersUseTinkerPopUtilPackage() throws IOException {
+        String content = readConfig(GREMLIN_SERVER_CONFIG);
+
+        assertUsesHugeGraphIoRegistry(GREMLIN_SERVER_CONFIG, content);
+        assertSerializerClassNamesUseUtilPackage(GREMLIN_SERVER_CONFIG,
+                                                 content);
+    }
+
+    @Test
+    public void testTinkerPopPomVersionsUseSupportedVersion()
+            throws IOException {
+        List<String> mismatches = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(repositoryRoot())) {
+            files.filter(path -> "pom.xml".equals(
+                         path.getFileName().toString()))
+                 .forEach(path -> collectTinkerPopVersionMismatches(
+                         path, mismatches));
+        }
+
+        Assert.assertTrue("TinkerPop dependencies must use " +
+                          SUPPORTED_TINKERPOP_VERSION + " and guice must " +
+                          "use " + SUPPORTED_GUICE_VERSION + ": " + mismatches,
+                          mismatches.isEmpty());
+    }
+
+    @Test
+    public void testRemoteSerializersUseTinkerPopUtilPackage() throws IOException {
+        for (String file : REMOTE_CONFIGS) {
+            String content = readConfig(file);
+
+            assertUsesHugeGraphIoRegistry(file, content);
+            assertSerializerClassNamesUseUtilPackage(file, content);
+        }
+    }
+
+    @Test
+    public void testConfiguredSerializerClassesAreLoadable() throws Exception {
+        assertConfiguredSerializerClassesAreLoadable(
+                GREMLIN_SERVER_CONFIG, readConfig(GREMLIN_SERVER_CONFIG));
+        for (String file : REMOTE_CONFIGS) {
+            assertConfiguredSerializerClassesAreLoadable(file,
+                                                         readConfig(file));
+        }
+    }
+
+    @Test
+    public void testGremlinServerConfigVariantsSupportGraphSONMimeTypes()
+            throws Exception {
+        Path assembly = serverAssemblyPath();
+
+        for (String variant : GREMLIN_SERVER_CONFIG_VARIANTS) {
+            Settings settings = Settings.read(assembly.resolve(variant)
+                                                   .toString());
+
+            assertSupportsTypedAndUntypedGraphSONMimeTypes(variant,
+                                                           graphSONMimeTypes(settings));
+        }
+    }
+
+    @Test
+    public void testGremlinServerConfigVariantsRejectTypedGraphSONV1() throws Exception {
+        String javaType = UnexpectedGraphSONType.class.getName();
+        String requestJson = "{\"requestId\":\"" + UUID.randomUUID() +
+                             "\",\"op\":\"eval\",\"processor\":\"\",\"args\":{" +
+                             "\"gremlin\":\"1\",\"bindings\":{\"value\":{\"@class\":\"" +
+                             javaType + "\"}}}}";
+        for (String variant : GREMLIN_SERVER_CONFIG_VARIANTS) {
+            Settings settings = Settings.read(serverAssemblyPath().resolve(variant).toString());
+            Map<String, String> mimeTypes = graphSONMimeTypes(settings);
+            Assert.assertFalse(variant + " must not expose Java class-name typing",
+                               mimeTypes.containsKey("application/vnd.gremlin-v1.0+json"));
+            for (Settings.SerializerSettings setting : settings.serializers) {
+                Assert.assertNotEquals(variant, SERIALIZER_PACKAGE + "GraphSONMessageSerializerV1",
+                                       setting.className);
+                if (!GRAPHSON_UNTYPED_V1.equals(setting.className)) {
+                    continue;
+                }
+                MessageTextSerializer<?> serializer = newTextSerializer(setting.className);
+                serializer.configure(config(setting.config), Collections.emptyMap());
+                UnexpectedGraphSONType.constructions = 0;
+                RequestMessage request = serializer.deserializeRequest(requestJson);
+                Map<?, ?> bindings = (Map<?, ?>) request.getArgs().get("bindings");
+                Assert.assertEquals(variant, Map.of("@class", javaType), bindings.get("value"));
+                Assert.assertEquals(variant, 0, UnexpectedGraphSONType.constructions);
+            }
+            Assert.assertEquals(variant, GRAPHSON_UNTYPED_V1, mimeTypes.get("application/json"));
+        }
+    }
+
+    public static class UnexpectedGraphSONType {
+
+        private static int constructions;
+
+        public UnexpectedGraphSONType() {
+            constructions++;
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testGremlinServerConfigVariantsImportCompatibleCypherFactories() throws Exception {
+        String factory = "org.apache.hugegraph.opencypher.CypherGremlinPredicates";
+        for (String variant : GREMLIN_SERVER_CONFIG_VARIANTS) {
+            Settings settings = Settings.read(serverAssemblyPath().resolve(variant).toString());
+            Map<String, Object> imports = settings.scriptEngines.get("gremlin-groovy")
+                                                  .plugins.get(ImportGremlinPlugin.class.getName());
+            Collection<String> classes = (Collection<String>) imports.get("classImports");
+            Collection<String> methods = (Collection<String>) imports.get("methodImports");
+            Assert.assertTrue(variant, classes.contains(factory));
+            Assert.assertTrue(variant, methods.contains(factory + "#*"));
+            Assert.assertFalse(variant, classes.contains("org.opencypher.gremlin.traversal.CustomPredicate"));
+            ImportGremlinPlugin plugin = ImportGremlinPlugin.build().classImports(classes)
+                                                           .methodImports(methods).create();
+            GremlinGroovyScriptEngine engine = new GremlinGroovyScriptEngine(
+                    plugin.getCustomizers("gremlin-groovy").orElseThrow());
+            Assert.assertEquals(variant, Arrays.asList(true, true, false, false),
+                                engine.eval("[cypherRegex('mar.*').test('marko'), " +
+                                            "cypherIsString().test('marko'), " +
+                                            "cypherIsNode().test(null), " +
+                                            "cypherIsRelationship().test(null)]"));
+        }
+    }
+
+    @Test
+    public void testGremlinServerConfigVariantsUseHugeGraphBinaryBuilder()
+            throws Exception {
+        Path assembly = serverAssemblyPath();
+
+        for (String variant : GREMLIN_SERVER_CONFIG_VARIANTS) {
+            Settings settings = Settings.read(assembly.resolve(variant)
+                                                   .toString());
+            boolean found = false;
+            for (Settings.SerializerSettings serializer :
+                 settings.serializers) {
+                if (!serializer.className.startsWith(SERIALIZER_PACKAGE +
+                                                     "GraphBinary")) {
+                    continue;
+                }
+                Assert.assertNotNull(variant, serializer.config);
+                Assert.assertEquals(variant, GRAPHBINARY_BUILDER,
+                                    serializer.config.get("builder"));
+                found = true;
+            }
+            Assert.assertTrue("No GraphBinary serializer in " + variant,
+                              found);
+        }
+    }
+
+    private static void assertSupportsTypedAndUntypedGraphSONMimeTypes(
+            String fileName, Map<String, String> graphSONMimeTypes) {
+        for (String mimeType : UNTYPED_GRAPHSON_MIME_TYPES) {
+            Assert.assertTrue(fileName + " should support untyped " +
+                              "GraphSON MIME " + mimeType,
+                              graphSONMimeTypes.containsKey(mimeType));
+        }
+        for (String mimeType : TYPED_GRAPHSON_MIME_TYPES) {
+            Assert.assertTrue(fileName + " should support typed GraphSON " +
+                              "MIME " + mimeType,
+                              graphSONMimeTypes.containsKey(mimeType));
+        }
+        Assert.assertEquals(fileName + " should keep application/json " +
+                            "mapped to the untyped V1 serializer",
+                            GRAPHSON_UNTYPED_V1,
+                            graphSONMimeTypes.get("application/json"));
+    }
+
+    @Test
+    public void testConfiguredGraphSONSerializersCanSerializeHugeGraphTypes()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        List<String> typedSerializers = new ArrayList<>();
+        boolean foundUntyped = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphSON")) {
+                continue;
+            }
+
+            MessageTextSerializer<?> serializer =
+                    newTextSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            boolean typed = !serializerSettings.className.startsWith(
+                    SERIALIZER_PACKAGE + "GraphSONUntyped");
+            if (typed) {
+                typedSerializers.add(serializerSettings.className);
+            } else {
+                foundUntyped = true;
+            }
+            assertCanSerializeHugeGraphTypes(serializer, typed);
+        }
+
+        Assert.assertTrue("No untyped GraphSON serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, foundUntyped);
+        Assert.assertEquals("Configured typed GraphSON serializers should " +
+                            "match the fallback set",
+                            TYPED_FALLBACK_SERIALIZERS, typedSerializers);
+    }
+
+    @Test
+    public void testTypedFallbackSerializersCanRoundTripHugeGraphIds()
+            throws Exception {
+        Map<String, Object> config = graphSONV1Config(
+                readGremlinServerSettings());
+
+        for (String serializer : TYPED_FALLBACK_SERIALIZERS) {
+            MessageTextSerializer<?> textSerializer =
+                    newTextSerializer(serializer);
+
+            textSerializer.configure(config(config), Collections.emptyMap());
+            assertCanRoundTripHugeGraphIds(serializer, textSerializer);
+        }
+    }
+
+    @Test
+    public void testConfiguredGraphBinarySerializersCanRoundTripStandardPredicate()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphBinary")) {
+                continue;
+            }
+
+            MessageSerializer<?> serializer =
+                    newMessageSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            assertCanRoundTripStandardPredicate(serializerSettings.className,
+                                                serializer);
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphBinary serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testConfiguredGraphBinarySerializersCanRoundTripElementProperties()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphBinary")) {
+                continue;
+            }
+
+            MessageSerializer<?> serializer =
+                    newMessageSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            assertCanRoundTripElementProperties(serializerSettings.className,
+                                                serializer);
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphBinary serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testConfiguredGraphBinarySerializersCanRoundTripHugeGraphElements()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphBinary")) {
+                continue;
+            }
+
+            MessageSerializer<?> serializer =
+                    newMessageSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            assertCanRoundTripHugeGraphElements(serializerSettings.className,
+                                                serializer);
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphBinary serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testConfiguredGraphBinarySerializersUsePrimitiveHugeGraphIds()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphBinary")) {
+                continue;
+            }
+
+            MessageSerializer<?> serializer =
+                    newMessageSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            assertUsesPrimitiveHugeGraphIds(serializerSettings.className,
+                                            serializer);
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphBinary serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testConfiguredGraphBinarySerializersCanRoundTripReferenceElements()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphBinary")) {
+                continue;
+            }
+
+            MessageSerializer<?> serializer =
+                    newMessageSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            assertCanRoundTripReferenceElements(serializerSettings.className,
+                                                serializer);
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphBinary serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testConfiguredGraphSONSerializersIncludeElementProperties()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphSON")) {
+                continue;
+            }
+
+            MessageTextSerializer<?> serializer =
+                    newTextSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            assertIncludesElementProperties(serializerSettings.className,
+                                            serializer);
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphSON serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testConfiguredGraphSONSerializersIncludeTreeElementProperties()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        boolean found = false;
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphSON")) {
+                continue;
+            }
+
+            MessageTextSerializer<?> serializer =
+                    newTextSerializer(serializerSettings.className);
+            serializer.configure(config(serializerSettings.config),
+                                 Collections.emptyMap());
+            String tree = serializeResponse(serializer, elementTree());
+            Assert.assertTrue(serializerSettings.className,
+                              tree.contains("properties"));
+            Assert.assertTrue(serializerSettings.className,
+                              tree.contains("marko"));
+            Assert.assertTrue(serializerSettings.className,
+                              tree.contains("weight"));
+            found = true;
+        }
+
+        Assert.assertTrue("No GraphSON serializer settings found in " +
+                          GREMLIN_SERVER_CONFIG, found);
+    }
+
+    @Test
+    public void testDefaultGraphSONSerializerIncludesHugeGraphElementProperties()
+            throws Exception {
+        Settings settings = readGremlinServerSettings();
+        Map<String, Object> config = graphSONV1Config(settings);
+        MessageTextSerializer<?> serializer =
+                newTextSerializer(GRAPHSON_UNTYPED_V1);
+        serializer.configure(config(config), Collections.emptyMap());
+
+        HugeEdge edge = hugeGraphEdgeWithProperties();
+        HugeVertex vertex = (HugeVertex) edge.outVertex();
+        String vertexJson = serializeResponse(serializer, vertex);
+        String edgeJson = serializeResponse(serializer, edge);
+        String pathJson = serializeResponse(
+                serializer, elementPath(vertex, edge));
+
+        Assert.assertContains("properties", vertexJson);
+        Assert.assertContains("name", vertexJson);
+        Assert.assertContains("tom", vertexJson);
+        Assert.assertContains("age", vertexJson);
+        Assert.assertContains("18", vertexJson);
+        Assert.assertContains("properties", edgeJson);
+        Assert.assertContains("weight", edgeJson);
+        Assert.assertContains("0.75", edgeJson);
+        Assert.assertContains("properties", pathJson);
+        Assert.assertContains("tom", pathJson);
+        Assert.assertContains("0.75", pathJson);
+    }
+
+    @Test
+    public void testDriverConfigsReturnEvaluatedGroovyStrings() throws Exception {
+        Object value = new GroovyShell().evaluate("def value = 42; \"r3-value:${value}\"");
+        Assert.assertInstanceOf(GString.class, value);
+        Settings.SerializerSettings serverSettings = readGremlinServerSettings().serializers.get(0);
+        MessageSerializer<?> server = newMessageSerializer(serverSettings.className);
+        server.configure(config(serverSettings.config), Collections.emptyMap());
+        List<Object> response = List.of(value, List.of(value), Map.of("value", value));
+        List<Object> expected = List.of("r3-value:42", List.of("r3-value:42"),
+                                       Map.of("value", "r3-value:42"));
+        for (String config : DRIVER_CONFIGS) {
+            RemoteSerializerSettings settings = readRemoteSerializerSettings(config);
+            MessageSerializer<?> client = newMessageSerializer(settings.className);
+            client.configure(config(settings.config), Collections.emptyMap());
+            Assert.assertEquals(config, expected,
+                                roundTripBinaryResponse(server, client, response).getResult().getData());
+        }
+        Assert.assertEquals(expected,
+                            roundTripBinaryResponse(server, new GraphBinaryMessageSerializerV1(), response)
+                            .getResult().getData());
+    }
+
+    @Test
+    public void testUntypedGraphsonKeepsEvaluatedGroovyStringBean() throws Exception {
+        Object value = new GroovyShell().evaluate("def value = 42; \"r3-value:${value}\"");
+        Settings.SerializerSettings settings = readGremlinServerSettings().serializers.stream()
+                                              .filter(s -> s.className.endsWith(
+                                                      "GraphSONUntypedMessageSerializerV1"))
+                                              .findFirst().orElseThrow();
+        MessageTextSerializer<?> serializer = (MessageTextSerializer<?>) newMessageSerializer(settings.className);
+        serializer.configure(config(settings.config), Collections.emptyMap());
+        Object result = roundTripResponse(serializer, value).getResult().getData();
+        Assert.assertInstanceOf(Map.class, result);
+        Map<?, ?> bean = (Map<?, ?>) result;
+        Assert.assertEquals(List.of(42), bean.get("values"));
+        Assert.assertEquals(List.of("r3-value:", ""), bean.get("strings"));
+    }
+
+    @Test
+    public void testDriverConfigsReturnOptionalAndFile() throws Exception {
+        Settings.SerializerSettings serverSettings = readGremlinServerSettings()
+                                                    .serializers.get(0);
+        MessageSerializer<?> server = newMessageSerializer(serverSettings.className);
+        server.configure(config(serverSettings.config), Collections.emptyMap());
+        File file = new File("some/directory/test.text");
+        List<Object> values = Arrays.asList(Optional.of("present"), Optional.empty(),
+                                           file, Optional.of(file),
+                                           Optional.of(Optional.of("nested")));
+        List<Object> expected = Arrays.asList("present", null,
+                                             Map.of("file", "test.text"),
+                                             Map.of("file", "test.text"), "nested");
+        List<Object> response = Arrays.asList(values, Map.of("values", values));
+        for (String config : DRIVER_CONFIGS) {
+            RemoteSerializerSettings settings = readRemoteSerializerSettings(config);
+            MessageSerializer<?> client = newMessageSerializer(settings.className);
+            client.configure(config(settings.config), Collections.emptyMap());
+            List<?> results = (List<?>) roundTripBinaryResponse(server, client, response)
+                                       .getResult().getData();
+            Assert.assertEquals(config, expected, results.get(0));
+            Assert.assertEquals(config, Map.of("values", expected), results.get(1));
+        }
+    }
+
+    @Test
+    public void testDriverConfigsReturnSchemaAndBlob() throws Exception {
+        Settings.SerializerSettings serverSettings = readGremlinServerSettings()
+                                                    .serializers.get(0);
+        MessageSerializer<?> server = newMessageSerializer(serverSettings.className);
+        server.configure(config(serverSettings.config), Collections.emptyMap());
+        PropertyKey schema = new FakeObjects().newPropertyKey(IdGenerator.of(1L), "name");
+        byte[] bytes = new byte[]{0, 1, (byte) 255};
+        Blob blob = Blob.wrap(bytes);
+        DetachedVertex vertex = DetachedVertex.build().setId("blob-one").setLabel("document")
+                .addProperty(DetachedVertexProperty.build().setId(1L)
+                        .setLabel("blob").setValue(blob).create()).create();
+        schema.userdata("nested", Map.of("kind", DataType.BLOB, "values", Arrays.asList(DataType.TEXT, blob)));
+        DetachedEdge edge = DetachedEdge.build().setId("blob-edge").setLabel("link")
+                .setOutV(vertex).setInV(vertex)
+                .addProperty(new DetachedProperty<>("blob", blob)).create();
+        List<Object> expected = Arrays.asList(schema, blob, vertex,
+                                             Collections.singletonMap("nested", Arrays.asList(schema, blob)), edge);
+        for (String file : DRIVER_CONFIGS) {
+            RemoteSerializerSettings settings = readRemoteSerializerSettings(file);
+            MessageSerializer<?> client = newMessageSerializer(settings.className);
+            client.configure(config(settings.config), Collections.emptyMap());
+            List<?> results = (List<?>) roundTripBinaryResponse(server, client, expected)
+                                       .getResult().getData();
+            Map<?, ?> actualSchema = (Map<?, ?>) results.get(0);
+            Assert.assertEquals(file, "name", actualSchema.get("name"));
+            Assert.assertEquals(file, "TEXT", actualSchema.get("data_type"));
+            Assert.assertEquals(file, 1L, actualSchema.get("id"));
+            Map<?, ?> userdata = (Map<?, ?>) ((Map<?, ?>) actualSchema.get("user_data")).get("nested");
+            Assert.assertEquals("BLOB", userdata.get("kind"));
+            Assert.assertEquals(Arrays.asList("TEXT", ByteBuffer.wrap(bytes)), userdata.get("values"));
+            Assert.assertEquals(ByteBuffer.wrap(bytes), results.get(1));
+            Vertex actualVertex = new Result(results.get(2)).getVertex();
+            Assert.assertEquals(file, "blob-one", actualVertex.id());
+            Assert.assertEquals(ByteBuffer.wrap(bytes), actualVertex.value("blob"));
+            List<?> nested = (List<?>) ((Map<?, ?>) results.get(3)).get("nested");
+            Assert.assertEquals(file, actualSchema, nested.get(0));
+            Assert.assertEquals(ByteBuffer.wrap(bytes), nested.get(1));
+            Edge actualEdge = new Result(results.get(4)).getEdge();
+            Assert.assertEquals("blob-edge", actualEdge.id());
+            Assert.assertEquals(ByteBuffer.wrap(bytes), actualEdge.value("blob"));
+        }
+    }
+
+    @Test
+    public void testDefaultGraphSONTreeRetainsArrayShapeAndScalarKeys() throws Exception {
+        MessageTextSerializer<?> serializer = newTextSerializer(GRAPHSON_UNTYPED_V1);
+        serializer.configure(config(graphSONV1Config(readGremlinServerSettings())), Collections.emptyMap());
+        Tree<Object> scalar = new Tree<>();
+        scalar.put("marko", new Tree<>());
+        Map<?, ?> response = JsonUtil.fromJson(serializeResponse(serializer, scalar), Map.class);
+        Object data = ((Map<?, ?>) response.get("result")).get("data");
+        Assert.assertEquals(Collections.singletonList(Map.of("key", "marko", "value", Collections.emptyList())),
+                            data);
+        response = JsonUtil.fromJson(serializeResponse(serializer, elementTree()), Map.class);
+        List<?> entries = (List<?>) ((Map<?, ?>) response.get("result")).get("data");
+        Assert.assertEquals(1, entries.size());
+        Map<?, ?> entry = (Map<?, ?>) entries.get(0);
+        Assert.assertEquals(Set.of("key", "value"), entry.keySet());
+        Assert.assertEquals("person", ((Map<?, ?>) entry.get("key")).get("label"));
+        Assert.assertContains("marko", serializeResponse(serializer, elementTree()));
+        List<?> children = (List<?>) entry.get("value");
+        Assert.assertEquals(1, children.size());
+        Assert.assertEquals(Collections.emptyList(), ((Map<?, ?>) children.get(0)).get("value"));
+    }
+
+    @Test
+    public void testTypedGraphSONTreesRoundTripScalarElementAndNestedKeys() throws Exception {
+        Tree<Object> scalar = new Tree<>();
+        Tree<Object> nested = new Tree<>();
+        nested.put(123L, new Tree<>());
+        scalar.put("marko", nested);
+        int serializers = 0;
+        for (Settings.SerializerSettings setting : readGremlinServerSettings().serializers) {
+            if (!setting.className.startsWith(SERIALIZER_PACKAGE + "GraphSONMessageSerializer")) {
+                continue;
+            }
+            MessageTextSerializer<?> serializer = newTextSerializer(setting.className);
+            serializer.configure(config(setting.config), Collections.emptyMap());
+            Object data = roundTripResponse(serializer, scalar).getResult().getData();
+            Assert.assertInstanceOf(Tree.class, data);
+            Assert.assertEquals(scalar, data);
+            Tree<?> elements = (Tree<?>) roundTripResponse(serializer, elementTree()).getResult().getData();
+            Assert.assertEquals(1, elements.size());
+            Vertex vertex = (Vertex) elements.keySet().iterator().next();
+            Assert.assertEquals("marko", vertex.value("name"));
+            Tree<?> children = (Tree<?>) elements.get(vertex);
+            Assert.assertEquals(1, children.size());
+            Edge edge = (Edge) children.keySet().iterator().next();
+            Assert.assertEquals(0.5D, (Double) edge.value("weight"), 0.0D);
+            serializers++;
+        }
+        Assert.assertEquals(2, serializers);
+    }
+
+    @Test
+    public void testStandardGraphSONV1IoTreeRetainsIdKeyedMap() throws Exception {
+        org.apache.tinkerpop.shaded.jackson.databind.ObjectMapper mapper = GraphSONMapper.build()
+                .version(GraphSONVersion.V1_0).typeInfo(TypeInfo.NO_TYPES)
+                .addRegistry(HugeGraphIoRegistry.instance()).create().createMapper();
+        Tree<Object> tree = elementTree();
+        String json = mapper.writeValueAsString(tree);
+        Map<?, ?> result = mapper.readValue(json, HashMap.class);
+        String id = ((Vertex) tree.keySet().iterator().next()).id().toString();
+        Assert.assertEquals(Collections.singleton(id), result.keySet());
+        Map<?, ?> entry = (Map<?, ?>) result.get(id);
+        Assert.assertEquals(Set.of("key", "value"), entry.keySet());
+        Assert.assertEquals("person", ((Map<?, ?>) entry.get("key")).get("label"));
+        Assert.assertInstanceOf(Map.class, entry.get("value"));
+    }
+
+    @Test
+    public void testLegacyTreeRegistryIsOnlyUsedByUntypedGraphSONV1() throws Exception {
+        String registry = "org.apache.hugegraph.io.HugeGraphSONV1MessageIoRegistry";
+        for (String variant : GREMLIN_SERVER_CONFIG_VARIANTS) {
+            Settings settings = Settings.read(serverAssemblyPath().resolve(variant).toString());
+            for (Settings.SerializerSettings serializer : settings.serializers) {
+                List<?> registries = (List<?>) serializer.config.get("ioRegistries");
+                Assert.assertEquals(variant + ": " + serializer.className,
+                                    GRAPHSON_UNTYPED_V1.equals(serializer.className),
+                                    registries.contains(registry));
+            }
+        }
+    }
+
+    @Test
+    public void testDriverConfigsSupportTypedResultAccess() throws Exception {
+        Settings.SerializerSettings serverSettings = readGremlinServerSettings()
+                                                    .serializers.get(0);
+        Assert.assertEquals(GRAPHBINARY_V1, serverSettings.className);
+        MessageSerializer<?> server = newMessageSerializer(serverSettings.className);
+        server.configure(config(serverSettings.config), Collections.emptyMap());
+
+        HugeEdge expectedEdge = hugeGraphEdgeWithProperties();
+        HugeVertex expectedVertex = (HugeVertex) expectedEdge.outVertex();
+        UUID uuid = UUID.fromString("3cfcafc8-7906-4ab7-a207-4ded056f58de");
+        List<Object> expected = Arrays.asList(
+                expectedVertex, expectedEdge,
+                elementPath(expectedVertex, expectedEdge),
+                IdGenerator.of(uuid), IdGenerator.of("marko"),
+                IdGenerator.of(123L), expectedEdge.id());
+
+        for (String file : DRIVER_CONFIGS) {
+            RemoteSerializerSettings settings = readRemoteSerializerSettings(file);
+            Assert.assertEquals(file, GRAPHBINARY_V1, settings.className);
+            Assert.assertEquals(file, false, settings.config.get("serializeResultToString"));
+            Assert.assertEquals(file, GRAPHBINARY_BUILDER, settings.config.get("builder"));
+            Assert.assertEquals(file, Collections.singletonList(IO_REGISTRY),
+                                settings.config.get("ioRegistries"));
+            MessageSerializer<?> client = newMessageSerializer(settings.className);
+            client.configure(config(settings.config), Collections.emptyMap());
+
+            Object data = roundTripBinaryResponse(server, client, expected)
+                          .getResult().getData();
+            Assert.assertInstanceOf(List.class, data);
+            List<?> results = (List<?>) data;
+            Assert.assertEquals(file, expected.size(), results.size());
+
+            Vertex vertex = new Result(results.get(0)).getVertex();
+            Assert.assertEquals(file, expectedVertex.id().asLong(), vertex.id());
+            Assert.assertEquals(file, "person", vertex.label());
+            Assert.assertEquals(file, "tom", vertex.value("name"));
+            Assert.assertEquals(file, 18, ((Number) vertex.value("age")).intValue());
+
+            Edge edge = new Result(results.get(1)).getEdge();
+            Assert.assertEquals(file, expectedEdge.id().asString(), edge.id());
+            Assert.assertEquals(file, "knows", edge.label());
+            Assert.assertEquals(file, vertex.id(), edge.outVertex().id());
+            Assert.assertEquals(file, 0.75D, (Double) edge.value("weight"), 0.0D);
+
+            org.apache.tinkerpop.gremlin.process.traversal.Path path =
+                    new Result(results.get(2)).getPath();
+            Assert.assertEquals(file, Arrays.asList(Set.of("v"), Set.of("e")), path.labels());
+            Assert.assertEquals(file, "tom", ((Vertex) path.get(0)).value("name"));
+            Assert.assertEquals(file, edge.id(), ((Edge) path.get(1)).id());
+            Assert.assertEquals(file, uuid, new Result(results.get(3)).get(UUID.class));
+            Assert.assertEquals(file, "marko", new Result(results.get(4)).getString());
+            Assert.assertEquals(file, 123L, new Result(results.get(5)).getLong());
+            Assert.assertEquals(file, expectedEdge.id().asString(),
+                                new Result(results.get(6)).getString());
+        }
+    }
+
+    @Test
+    public void testRemoteObjectsSerializerKeepsJsonResultShape() throws Exception {
+        RemoteSerializerSettings settings = readRemoteSerializerSettings(REMOTE_OBJECTS_CONFIG);
+        Assert.assertEquals(GRAPHSON_UNTYPED_V1, settings.className);
+        Assert.assertEquals(false, settings.config.get("serializeResultToString"));
+        Assert.assertEquals(Arrays.asList(IO_REGISTRY, IO_REGISTRY),
+                            settings.config.get("ioRegistries"));
+        MessageTextSerializer<?> serializer = newTextSerializer(settings.className);
+        serializer.configure(config(settings.config), Collections.emptyMap());
+
+        HugeEdge edge = hugeGraphEdgeWithProperties();
+        Object vertex = roundTripResponse(serializer, edge.outVertex())
+                        .getResult().getData();
+        Assert.assertInstanceOf(Map.class, vertex);
+        Assert.assertEquals("person", ((Map<?, ?>) vertex).get("label"));
+        Assert.assertTrue(((Map<?, ?>) vertex).containsKey("properties"));
+        UUID uuid = UUID.fromString("3cfcafc8-7906-4ab7-a207-4ded056f58de");
+        Object id = roundTripResponse(serializer, IdGenerator.of(uuid))
+                    .getResult().getData();
+        Assert.assertEquals(uuid.toString(), id);
+    }
+
+    @Test
+    public void testRemoteObjectsSerializerCanSerializePathShape()
+            throws Exception {
+        RemoteSerializerSettings settings =
+                readRemoteSerializerSettings(REMOTE_OBJECTS_CONFIG);
+        MessageTextSerializer<?> serializer =
+                newTextSerializer(settings.className);
+
+        serializer.configure(config(settings.config), Collections.emptyMap());
+
+        String json = serializeResponse(serializer, testPath());
+
+        Assert.assertContains("\"labels\"", json);
+        Assert.assertContains("\"objects\"", json);
+        Assert.assertContains("marko", json);
+        Assert.assertContains("lop", json);
+        Assert.assertContains("\"a\"", json);
+        Assert.assertContains("\"b\"", json);
+        Assert.assertContains("\"software\"", json);
+    }
+
+    private static Settings readGremlinServerSettings() throws Exception {
+        return Settings.read(configPath(GREMLIN_SERVER_CONFIG).toString());
+    }
+
+    private static String readConfig(String fileName) throws IOException {
+        return Files.readString(configPath(fileName), StandardCharsets.UTF_8);
+    }
+
+    private static Path configPath(String fileName) {
+        return findConfDir().resolve(fileName);
+    }
+
+    private static Path serverAssemblyPath() {
+        return findConfDir().getParent().getParent();
+    }
+
+    private static Path repositoryRoot() {
+        Path current = Paths.get(System.getProperty("user.dir"))
+                            .toAbsolutePath();
+        while (current != null) {
+            if (Files.isDirectory(current.resolve("hugegraph-server")) &&
+                Files.isDirectory(current.resolve("hugegraph-pd"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+
+        Assert.fail("Can't find HugeGraph repository root from " +
+                    System.getProperty("user.dir"));
+        return Paths.get(System.getProperty("user.dir"));
+    }
+
+    private static void collectTinkerPopVersionMismatches(
+            Path pom, List<String> mismatches) {
+        try {
+            String content = Files.readString(pom, StandardCharsets.UTF_8);
+            content = XML_COMMENT.matcher(content).replaceAll("");
+
+            Matcher property = TINKERPOP_VERSION_PROPERTY.matcher(content);
+            while (property.find()) {
+                collectVersionMismatch(pom, property.group(1), mismatches);
+            }
+
+            Matcher dependency = TINKERPOP_DEPENDENCY.matcher(content);
+            while (dependency.find()) {
+                Matcher version = DEPENDENCY_VERSION.matcher(
+                        dependency.group(1));
+                if (version.find()) {
+                    collectVersionMismatch(pom, version.group(1), mismatches);
+                }
+            }
+
+            Matcher guice = GUICE_DEPENDENCY.matcher(content);
+            while (guice.find()) {
+                Matcher version = DEPENDENCY_VERSION.matcher(
+                        guice.group(1));
+                if (version.find()) {
+                    collectGuiceVersionMismatch(pom, version.group(1),
+                                                mismatches);
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read " + pom, e);
+        }
+    }
+
+    private static void collectGuiceVersionMismatch(Path pom, String version,
+                                                    List<String> mismatches) {
+        String actual = version.trim();
+        if (SUPPORTED_GUICE_VERSION.equals(actual)) {
+            return;
+        }
+        mismatches.add(repositoryRoot().relativize(pom) + "=guice:" + actual);
+    }
+
+    private static void collectVersionMismatch(Path pom, String version,
+                                               List<String> mismatches) {
+        String actual = version.trim();
+        if (SUPPORTED_TINKERPOP_VERSION.equals(actual) ||
+            "${tinkerpop.version}".equals(actual)) {
+            return;
+        }
+        mismatches.add(repositoryRoot().relativize(pom) + "=" + actual);
+    }
+
+    private static Path findConfDir() {
+        String configuredDir = System.getProperty("hugegraph.conf.dir");
+        Path configuredPath = resolveConfiguredDir(configuredDir);
+        if (configuredPath != null) {
+            return configuredPath;
+        }
+
+        String envDir = System.getenv("HUGEGRAPH_CONF_DIR");
+        Path envPath = resolveConfiguredDir(envDir);
+        if (envPath != null) {
+            return envPath;
+        }
+
+        Path userDir = Paths.get(System.getProperty("user.dir"));
+        List<Path> candidates = new ArrayList<>();
+
+        Path parent = userDir.getParent();
+        if (parent != null) {
+            candidates.add(parent.resolve("hugegraph-dist")
+                                 .resolve("src")
+                                 .resolve("assembly")
+                                 .resolve("static")
+                                 .resolve("conf"));
+        }
+        candidates.add(userDir.resolve("hugegraph-server")
+                              .resolve("hugegraph-dist")
+                              .resolve("src")
+                              .resolve("assembly")
+                              .resolve("static")
+                              .resolve("conf"));
+
+        for (Path candidate : candidates) {
+            if (Files.isDirectory(candidate)) {
+                return candidate;
+            }
+        }
+
+        Assert.fail(String.format("Can't find hugegraph-dist static conf from" +
+                                  " %s (hugegraph.conf.dir=%s," +
+                                  " HUGEGRAPH_CONF_DIR=%s, candidates=%s)",
+                                  userDir, configuredDir, envDir, candidates));
+        return userDir;
+    }
+
+    private static Path resolveConfiguredDir(String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        Path configured = Paths.get(path);
+        if (Files.isDirectory(configured)) {
+            return configured;
+        }
+        return null;
+    }
+
+    private static void assertUsesHugeGraphIoRegistry(String fileName,
+                                                      String content) {
+        Assert.assertTrue(fileName + " should keep HugeGraphIoRegistry",
+                          content.contains(IO_REGISTRY));
+    }
+
+    private static void assertSerializerClassNamesUseUtilPackage(
+            String fileName, String content) {
+        Assert.assertFalse(content.contains(
+                "org.apache.tinkerpop.gremlin.driver.ser."));
+        Assert.assertFalse(content.contains(
+                "org.apache.tinkerpop.gremlin.server.ser."));
+
+        Matcher matcher = CLASS_NAME.matcher(content);
+        boolean found = false;
+        while (matcher.find()) {
+            found = true;
+            String className = matcher.group(1);
+            Assert.assertTrue(fileName + " has outdated serializer " +
+                              className,
+                              className.startsWith(SERIALIZER_PACKAGE));
+        }
+        Assert.assertTrue("No serializer className found in " + fileName,
+                          found);
+    }
+
+    private static void assertConfiguredSerializerClassesAreLoadable(
+            String fileName, String content) throws ClassNotFoundException {
+        Matcher matcher = CLASS_NAME.matcher(content);
+        boolean found = false;
+        while (matcher.find()) {
+            found = true;
+            Class.forName(matcher.group(1));
+        }
+        Assert.assertTrue("No serializer className found in " + fileName,
+                          found);
+    }
+
+    private static Map<String, String> graphSONMimeTypes(Settings settings)
+            throws Exception {
+        Map<String, String> mimeTypes = new HashMap<>();
+
+        for (Settings.SerializerSettings serializerSettings :
+             settings.serializers) {
+            if (!serializerSettings.className.startsWith(SERIALIZER_PACKAGE +
+                                                         "GraphSON")) {
+                continue;
+            }
+
+            MessageSerializer<?> serializer =
+                    newMessageSerializer(serializerSettings.className);
+            for (String mimeType : serializer.mimeTypesSupported()) {
+                mimeTypes.putIfAbsent(mimeType, serializerSettings.className);
+            }
+        }
+
+        return mimeTypes;
+    }
+
+    private static MessageTextSerializer<?> newTextSerializer(String className)
+            throws Exception {
+        MessageSerializer<?> serializer = newMessageSerializer(className);
+
+        Assert.assertTrue(className + " should be a MessageTextSerializer",
+                          serializer instanceof MessageTextSerializer);
+        return (MessageTextSerializer<?>) serializer;
+    }
+
+    private static MessageSerializer<?> newMessageSerializer(String className)
+            throws Exception {
+        Object serializer = Class.forName(className)
+                                 .getDeclaredConstructor()
+                                 .newInstance();
+
+        Assert.assertTrue(className + " should be a MessageSerializer",
+                          serializer instanceof MessageSerializer);
+        return (MessageSerializer<?>) serializer;
+    }
+
+    private static String serializeResponse(MessageTextSerializer<?> serializer,
+                                            Object result)
+            throws Exception {
+        ResponseMessage response = ResponseMessage.build(UUID.randomUUID())
+                                                  .code(ResponseStatusCode.SUCCESS)
+                                                  .result(result)
+                                                  .create();
+
+        return serializer.serializeResponseAsString(response,
+                                                    ByteBufAllocator.DEFAULT);
+    }
+
+    private static ResponseMessage roundTripResponse(
+            MessageTextSerializer<?> serializer, Object result)
+            throws Exception {
+        ResponseMessage response = ResponseMessage.build(UUID.randomUUID())
+                                                  .code(ResponseStatusCode.SUCCESS)
+                                                  .result(result)
+                                                  .create();
+        String json = serializer.serializeResponseAsString(
+                response, ByteBufAllocator.DEFAULT);
+        return serializer.deserializeResponse(json);
+    }
+
+    private static ResponseMessage roundTripBinaryResponse(
+            MessageSerializer<?> serializer, Object result)
+            throws Exception {
+        return roundTripBinaryResponse(serializer, serializer, result);
+    }
+
+    private static ResponseMessage roundTripBinaryResponse(
+            MessageSerializer<?> serverSerializer,
+            MessageSerializer<?> clientSerializer, Object result)
+            throws Exception {
+        ResponseMessage response = ResponseMessage.build(UUID.randomUUID())
+                                                  .code(ResponseStatusCode.SUCCESS)
+                                                  .result(result)
+                                                  .create();
+        ByteBuf buffer = serverSerializer.serializeResponseAsBinary(
+                response, ByteBufAllocator.DEFAULT);
+        try {
+            return clientSerializer.deserializeResponse(buffer);
+        } finally {
+            buffer.release();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static RemoteSerializerSettings readRemoteSerializerSettings(
+            String fileName) throws IOException {
+        try (InputStream input = Files.newInputStream(configPath(fileName))) {
+            Map<String, Object> root = new Yaml().load(input);
+            Map<String, Object> serializer =
+                    (Map<String, Object>) root.get("serializer");
+
+            Assert.assertNotNull("No serializer in " + fileName, serializer);
+            String className = (String) serializer.get("className");
+            Map<String, Object> config =
+                    (Map<String, Object>) serializer.get("config");
+
+            Assert.assertNotNull("No serializer className in " + fileName,
+                                 className);
+            Assert.assertNotNull("No serializer config in " + fileName,
+                                 config);
+            return new RemoteSerializerSettings(className, config);
+        }
+    }
+
+    private static Map<String, Object> graphSONV1Config(Settings settings) {
+        for (Settings.SerializerSettings serializer : settings.serializers) {
+            if (GRAPHSON_UNTYPED_V1.equals(serializer.className)) {
+                Assert.assertNotNull(serializer.config);
+                return serializer.config;
+            }
+        }
+
+        Assert.fail("No " + GRAPHSON_UNTYPED_V1 + " found in " +
+                    GREMLIN_SERVER_CONFIG);
+        return Collections.emptyMap();
+    }
+
+    private static Map<String, Object> config(Map<String, Object> config) {
+        if (config == null) {
+            return Collections.emptyMap();
+        }
+        return new HashMap<>(config);
+    }
+
+    private static org.apache.tinkerpop.gremlin.process.traversal.Path testPath() {
+        return MutablePath.make()
+                          .extend(IdGenerator.of("marko"), Set.of("a"))
+                          .extend(IdGenerator.of("lop"),
+                                  Set.of("b", "software"));
+    }
+
+    private static void assertCanSerializeHugeGraphTypes(
+            MessageTextSerializer<?> serializer, boolean typed)
+            throws Exception {
+        Object id = IdGenerator.of("marko");
+        Object uuidId = IdGenerator.of(
+                UUID.fromString("3cfcafc8-7906-4ab7-a207-4ded056f58de"));
+        Object edgeId = EdgeId.parse("S1>2>3>4>L6");
+        String fileJson = serializeResponse(serializer, new File("test.text"));
+        String idJson = serializeResponse(serializer, id);
+        String uuidJson = serializeResponse(serializer, uuidId);
+        String edgeJson = serializeResponse(serializer, edgeId);
+
+        Assert.assertContains("\"file\"", fileJson);
+        Assert.assertContains("test.text", fileJson);
+        Assert.assertContains("marko", idJson);
+        Assert.assertContains("3cfcafc8-7906-4ab7-a207-4ded056f58de",
+                              uuidJson);
+        Assert.assertContains("S1>2>3>4>L6", edgeJson);
+
+        if (typed) {
+            assertContainsGraphSONType(fileJson, "hugegraph:File");
+            assertContainsGraphSONType(idJson, "hugegraph:StringId");
+            assertContainsGraphSONType(uuidJson, "hugegraph:UuidId");
+            assertContainsGraphSONType(edgeJson, "hugegraph:EdgeId");
+        }
+    }
+
+    private static void assertCanRoundTripHugeGraphIds(
+            String serializerName, MessageTextSerializer<?> serializer)
+            throws Exception {
+        List<Object> ids = Arrays.asList(
+                IdGenerator.of("marko"),
+                IdGenerator.of(123L),
+                IdGenerator.of(UUID.fromString(
+                        "3cfcafc8-7906-4ab7-a207-4ded056f58de")),
+                EdgeId.parse("S1>2>3>4>L6")
+        );
+
+        for (Object expected : ids) {
+            ResponseMessage response = roundTripResponse(serializer, expected);
+            Object actual = response.getResult().getData();
+            String message = serializerName + " should round-trip " +
+                             expected.getClass().getSimpleName();
+            Assert.assertEquals(message, expected.getClass(),
+                                actual.getClass());
+            Assert.assertEquals(message, expected, actual);
+        }
+    }
+
+    private static void assertCanRoundTripStandardPredicate(
+            String serializerName, MessageSerializer<?> serializer)
+            throws Exception {
+        P<String> expected = P.eq("marko");
+        ResponseMessage response = roundTripBinaryResponse(serializer,
+                                                           expected);
+        Object actual = response.getResult().getData();
+        String message = serializerName +
+                         " should round-trip a standard predicate";
+        Assert.assertInstanceOf(P.class, actual);
+        Assert.assertEquals(message, expected, actual);
+    }
+
+    private static void assertCanRoundTripElementProperties(
+            String serializerName, MessageSerializer<?> serializer)
+            throws Exception {
+        ResponseMessage vertexResponse = roundTripBinaryResponse(
+                serializer, vertexWithProperties());
+        Object vertexResult = vertexResponse.getResult().getData();
+        Assert.assertInstanceOf(Vertex.class, vertexResult);
+        Vertex vertex = (Vertex) vertexResult;
+        Assert.assertEquals(serializerName, 1, vertex.id());
+        Assert.assertEquals(serializerName, "person", vertex.label());
+        Assert.assertEquals(serializerName, "marko", vertex.value("name"));
+        Assert.assertEquals(serializerName, 29,
+                            ((Number) vertex.value("age")).intValue());
+
+        ResponseMessage edgeResponse = roundTripBinaryResponse(
+                serializer, edgeWithProperties());
+        Object edgeResult = edgeResponse.getResult().getData();
+        Assert.assertInstanceOf(Edge.class, edgeResult);
+        Edge edge = (Edge) edgeResult;
+        Assert.assertEquals(serializerName, 7, edge.id());
+        Assert.assertEquals(serializerName, "knows", edge.label());
+        Assert.assertEquals(serializerName, 0.5D,
+                            (Double) edge.value("weight"), 0.0D);
+
+        org.apache.tinkerpop.gremlin.process.traversal.Path sourcePath =
+                elementPath(vertexWithProperties(), edgeWithProperties());
+        Object pathResult = roundTripBinaryResponse(serializer, sourcePath)
+                            .getResult().getData();
+        Assert.assertInstanceOf(
+                org.apache.tinkerpop.gremlin.process.traversal.Path.class,
+                pathResult);
+        org.apache.tinkerpop.gremlin.process.traversal.Path path =
+                (org.apache.tinkerpop.gremlin.process.traversal.Path)
+                        pathResult;
+        Vertex pathVertex = path.get(0);
+        Edge pathEdge = path.get(1);
+        Assert.assertEquals(serializerName, "marko",
+                            pathVertex.value("name"));
+        Assert.assertEquals(serializerName, 0.5D,
+                            (Double) pathEdge.value("weight"), 0.0D);
+    }
+
+    private static void assertCanRoundTripHugeGraphElements(
+            String serializerName, MessageSerializer<?> serializer)
+            throws Exception {
+        HugeEdge expectedEdge = hugeGraphEdgeWithProperties();
+        HugeVertex expectedVertex = (HugeVertex) expectedEdge.outVertex();
+        MessageSerializer<?> standardClient =
+                new GraphBinaryMessageSerializerV1();
+
+        Object vertexResult = roundTripBinaryResponse(serializer,
+                                                      standardClient,
+                                                      expectedVertex)
+                              .getResult().getData();
+        Assert.assertInstanceOf(Vertex.class, vertexResult);
+        Vertex vertex = (Vertex) vertexResult;
+        Assert.assertEquals(serializerName, expectedVertex.id().asLong(),
+                            ((Number) vertex.id()).longValue());
+        Assert.assertEquals(serializerName, "person", vertex.label());
+        Assert.assertEquals(serializerName, "tom", vertex.value("name"));
+        Assert.assertEquals(serializerName, 18,
+                            ((Number) vertex.value("age")).intValue());
+
+        Object edgeResult = roundTripBinaryResponse(serializer, standardClient,
+                                                    expectedEdge)
+                            .getResult().getData();
+        Assert.assertInstanceOf(Edge.class, edgeResult);
+        Edge edge = (Edge) edgeResult;
+        Assert.assertEquals(serializerName, expectedEdge.id().asString(),
+                            edge.id().toString());
+        Assert.assertEquals(serializerName, "knows", edge.label());
+        Assert.assertEquals(serializerName, 0.75D,
+                            (Double) edge.value("weight"), 0.0D);
+
+        Object pathResult = roundTripBinaryResponse(
+                serializer, standardClient,
+                elementPath(expectedVertex, expectedEdge))
+                .getResult().getData();
+        Assert.assertInstanceOf(
+                org.apache.tinkerpop.gremlin.process.traversal.Path.class,
+                pathResult);
+        org.apache.tinkerpop.gremlin.process.traversal.Path path =
+                (org.apache.tinkerpop.gremlin.process.traversal.Path)
+                        pathResult;
+        Vertex pathVertex = path.get(0);
+        Edge pathEdge = path.get(1);
+        Assert.assertEquals(serializerName, "tom",
+                            pathVertex.value("name"));
+        Assert.assertEquals(serializerName, 0.75D,
+                            (Double) pathEdge.value("weight"), 0.0D);
+    }
+
+    private static void assertUsesPrimitiveHugeGraphIds(
+            String serializerName, MessageSerializer<?> serializer)
+            throws Exception {
+        List<Id> ids = Arrays.asList(
+                IdGenerator.of("marko"),
+                IdGenerator.of(123L),
+                IdGenerator.of(UUID.fromString(
+                        "3cfcafc8-7906-4ab7-a207-4ded056f58de")),
+                EdgeId.parse("S1>2>3>4>L6")
+        );
+        MessageSerializer<?> standardClient =
+                new GraphBinaryMessageSerializerV1();
+
+        for (Id id : ids) {
+            Object actual = roundTripBinaryResponse(serializer, standardClient,
+                                                    id)
+                            .getResult().getData();
+            Assert.assertEquals(serializerName, id.asObject(), actual);
+        }
+    }
+
+    private static void assertCanRoundTripReferenceElements(
+            String serializerName, MessageSerializer<?> serializer)
+            throws Exception {
+        ReferenceVertex marko = new ReferenceVertex(1, "person");
+        ReferenceVertex vadas = new ReferenceVertex(2, "person");
+        ReferenceEdge knows = new ReferenceEdge(7, "knows", marko, vadas);
+
+        Object vertexResult = roundTripBinaryResponse(serializer, marko)
+                              .getResult().getData();
+        Assert.assertInstanceOf(Vertex.class, vertexResult);
+        Assert.assertFalse(serializerName,
+                           ((Vertex) vertexResult).properties().hasNext());
+
+        Object edgeResult = roundTripBinaryResponse(serializer, knows)
+                            .getResult().getData();
+        Assert.assertInstanceOf(Edge.class, edgeResult);
+        Assert.assertFalse(serializerName,
+                           ((Edge) edgeResult).properties().hasNext());
+
+        org.apache.tinkerpop.gremlin.process.traversal.Path sourcePath =
+                elementPath(marko, knows);
+        Object pathResult = roundTripBinaryResponse(serializer, sourcePath)
+                            .getResult().getData();
+        Assert.assertInstanceOf(
+                org.apache.tinkerpop.gremlin.process.traversal.Path.class,
+                pathResult);
+        org.apache.tinkerpop.gremlin.process.traversal.Path path =
+                (org.apache.tinkerpop.gremlin.process.traversal.Path)
+                        pathResult;
+        Assert.assertFalse(serializerName,
+                           ((Vertex) path.get(0)).properties().hasNext());
+        Assert.assertFalse(serializerName,
+                           ((Edge) path.get(1)).properties().hasNext());
+    }
+
+    private static void assertIncludesElementProperties(
+            String serializerName, MessageTextSerializer<?> serializer)
+            throws Exception {
+        String vertex = serializeResponse(serializer, vertexWithProperties());
+        Assert.assertTrue(serializerName, vertex.contains("properties"));
+        Assert.assertTrue(serializerName, vertex.contains("name"));
+        Assert.assertTrue(serializerName, vertex.contains("marko"));
+        Assert.assertTrue(serializerName, vertex.contains("age"));
+        Assert.assertTrue(serializerName, vertex.contains("29"));
+
+        String edge = serializeResponse(serializer, edgeWithProperties());
+        Assert.assertTrue(serializerName, edge.contains("properties"));
+        Assert.assertTrue(serializerName, edge.contains("weight"));
+        Assert.assertTrue(serializerName, edge.contains("0.5"));
+
+        String path = serializeResponse(
+                serializer,
+                elementPath(vertexWithProperties(), edgeWithProperties()));
+        Assert.assertTrue(serializerName, path.contains("properties"));
+        Assert.assertTrue(serializerName, path.contains("marko"));
+        Assert.assertTrue(serializerName, path.contains("weight"));
+    }
+
+    private static DetachedVertex vertexWithProperties() {
+        return DetachedVertex.build()
+                             .setId(1)
+                             .setLabel("person")
+                             .addProperty(new DetachedVertexProperty<>(
+                                     11, "name", "marko",
+                                     Collections.emptyMap()))
+                             .addProperty(new DetachedVertexProperty<>(
+                                     12, "age", 29,
+                                     Collections.emptyMap()))
+                             .create();
+    }
+
+    private static org.apache.tinkerpop.gremlin.process.traversal.Path
+            elementPath(Vertex vertex, Edge edge) {
+        return MutablePath.make()
+                          .extend(vertex, Set.of("v"))
+                          .extend(edge, Set.of("e"));
+    }
+
+    private static Tree<Object> elementTree() {
+        Tree<Object> tree = new Tree<>();
+        Tree<Object> children = new Tree<>();
+        children.put(edgeWithProperties(), new Tree<>());
+        tree.put(vertexWithProperties(), children);
+        return tree;
+    }
+
+    private static HugeEdge hugeGraphEdgeWithProperties() {
+        FakeObjects objects = new FakeObjects();
+        Mockito.doReturn(new HugeFeatures(objects.graph(), false))
+               .when(objects.graph()).features();
+        return objects.newEdge(123, 456);
+    }
+
+    private static DetachedEdge edgeWithProperties() {
+        DetachedVertex marko = DetachedVertex.build()
+                                              .setId(1)
+                                              .setLabel("person")
+                                              .create();
+        DetachedVertex vadas = DetachedVertex.build()
+                                              .setId(2)
+                                              .setLabel("person")
+                                              .create();
+        return DetachedEdge.build()
+                           .setId(7)
+                           .setLabel("knows")
+                           .setOutV(marko)
+                           .setInV(vadas)
+                           .addProperty(new DetachedProperty<>("weight", 0.5D))
+                           .create();
+    }
+
+    private static void assertContainsGraphSONType(String json,
+                                                   String graphSONType) {
+        Assert.assertContains("\"@type\"", json);
+        Assert.assertContains(graphSONType, json);
+    }
+
+    private static final class RemoteSerializerSettings {
+
+        private final String className;
+        private final Map<String, Object> config;
+
+        private RemoteSerializerSettings(String className,
+                                         Map<String, Object> config) {
+            this.className = className;
+            this.config = config;
+        }
+    }
+}

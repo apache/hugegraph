@@ -38,7 +38,7 @@ import jakarta.ws.rs.core.Response;
  * MultiNode Test generate the cluster env with 3 pd node + 3 store node + 3 server node.
  * Or you can set different num of nodes by using env = new MultiNodeEnv(pdNum, storeNum, serverNum)
  * All nodes are deployed in ports generated randomly, the application of nodes are stored
- * in /apache-hugegraph-ct-1.7.0, you can visit each node with rest api.
+ * in /apache-hugegraph-ct-1.8.0, you can visit each node with rest api.
  */
 public class BaseMultiClusterTest {
 
@@ -115,8 +115,21 @@ public class BaseMultiClusterTest {
     public static Response createAndAssert(RestClient client, String path,
                                            String body,
                                            int status) {
-        Response r = client.post(path, body);
-        assertResponseStatus(status, r);
-        return r;
+        try {
+            Response r = client.post(path, body);
+            assertResponseStatus(status, r);
+            return r;
+        } catch (RuntimeException | AssertionError e) {
+            System.out.printf("[cluster-test] POST %s%s failed: %s%n",
+                              client.target().getUri(), path, e.getMessage());
+            try {
+                env.dumpClusterStatus();
+            } catch (Throwable diagnosticError) {
+                if (diagnosticError != e) {
+                    e.addSuppressed(diagnosticError);
+                }
+            }
+            throw e;
+        }
     }
 }

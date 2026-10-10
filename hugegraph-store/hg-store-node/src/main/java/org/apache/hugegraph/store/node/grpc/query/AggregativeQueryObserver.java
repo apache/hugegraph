@@ -21,13 +21,18 @@ import static org.apache.hugegraph.store.node.grpc.query.AggregativeQueryService
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
@@ -47,6 +52,8 @@ import org.apache.hugegraph.structure.BaseVertex;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.Context;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
 
@@ -65,18 +72,193 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
     private volatile ScanIterator iterator = null;
     private QueryPlan plan = null;
     private String queryId;
+    private final Consumer<AggregativeQueryObserver> completion;
+    private final Set<Thread> workers = new HashSet<>();
+    private int pendingTasks;
+    private boolean finished;
+    private volatile boolean requestCompleted;
+    private final Object responseLock = new Object();
+    private boolean responseFinished;
+    private boolean completeResponse = true;
+    private QueryResponse finalResponse;
+    private boolean errorReported;
+    private final AtomicReference<Throwable> cleanupFailure = new AtomicReference<>();
 
     public AggregativeQueryObserver(StreamObserver<QueryResponse> sender,
                                     ExecutorService threadPool, long timeout,
                                     int batchSize) {
+        this(sender, threadPool, timeout, batchSize, ignored -> { });
+    }
+
+    AggregativeQueryObserver(StreamObserver<QueryResponse> sender,
+                             ExecutorService threadPool, long timeout, int batchSize,
+                             Consumer<AggregativeQueryObserver> completion) {
         this.sender = sender;
         this.threadPool = threadPool;
         this.batchSize = batchSize;
         this.timeout = timeout;
+        this.completion = completion;
+    }
+
+    ScanIterator getIterator(QueryRequest request) {
+        return QueryUtil.getIterator(request);
+    }
+
+    ScanIterator getCountIterator(QueryRequest request) {
+        return new QueryUtil().getHandler().scanAll(request.getGraph(), request.getTable());
+    }
+
+    void runUnary(QueryRequest request, boolean countOnly) {
+        synchronized (this) {
+            if (this.finished || this.clientCanceled.get()) {
+                return;
+            }
+            this.queryId = request.getQueryId();
+            this.pendingTasks = 1;
+            this.workers.add(Thread.currentThread());
+        }
+        Context context = Context.current();
+        Context.CancellationListener cancellation = ignored -> onTransportCancel();
+        Throwable failure = null;
+        try {
+            // Unary callbacks occupy the call executor while reading. Context cancellation
+            // must interrupt that read without waiting for the queued onCancel callback.
+            context.addListener(cancellation, Runnable::run);
+            if (this.clientCanceled.get()) {
+                return;
+            }
+            this.iterator = countOnly ? getCountIterator(request) : getIterator(request);
+            QueryResponse.Builder response = getBuilder();
+            Kv.Builder kv = getKvBuilder();
+            long count = countOnly ? countPartitions() : 0;
+            while (!countOnly && !this.clientCanceled.get() && this.iterator.hasNext()) {
+                Object next = this.iterator.next();
+                if (next != null) {
+                    RocksDBSession.BackendColumn column = (RocksDBSession.BackendColumn) next;
+                    response.addData(kv.setKey(ByteString.copyFrom(column.name))
+                                       .setValue(column.value == null ? ByteString.EMPTY :
+                                                 ByteString.copyFrom(column.value)).build());
+                }
+            }
+            if (countOnly) {
+                List<Object> counts = new ArrayList<>();
+                for (int i = 0; i < request.getFunctionsCount(); i++) {
+                    counts.add(new AtomicLong(count));
+                }
+                response.addData(kv.setKey(ByteString.copyFrom(KvSerializer.toBytes(List.of())))
+                                   .setValue(ByteString.copyFrom(KvSerializer.toBytes(counts))).build());
+            }
+            synchronized (this.responseLock) {
+                this.finalResponse = response.setQueryId(this.queryId).setIsOk(true)
+                                             .setIsFinished(true).build();
+            }
+        } catch (RuntimeException | Error e) {
+            failure = e;
+            synchronized (this.responseLock) {
+                this.finalResponse = errorResponse(getBuilder(), this.queryId, e);
+            }
+        } finally {
+            try {
+                context.removeListener(cancellation);
+            } finally {
+                workerFinished(failure);
+            }
+        }
+    }
+
+    private long countIterator(ScanIterator source) {
+        long count = 0;
+        while (!this.clientCanceled.get() && source.hasNext()) {
+            source.next();
+            count++;
+        }
+        return count;
+    }
+
+    private long countPartitions() {
+        if (!(this.iterator instanceof MultiPartitionIterator)) {
+            return countIterator(this.iterator);
+        }
+        List<ScanIterator> children = ((MultiPartitionIterator) this.iterator).getIterators();
+        CountDownLatch completed = new CountDownLatch(children.size());
+        AtomicLong total = new AtomicLong();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        synchronized (this) {
+            this.pendingTasks += children.size();
+        }
+        int submitted = 0;
+        try {
+            for (ScanIterator child : children) {
+                this.threadPool.execute(() -> {
+                    taskStarted();
+                    try {
+                        total.addAndGet(countIterator(child));
+                    } catch (RuntimeException | Error e) {
+                        recordCountFailure(failure, e);
+                    } finally {
+                        try {
+                            cleanup(child::close);
+                        } finally {
+                            workerFinished();
+                            completed.countDown();
+                        }
+                    }
+                });
+                submitted++;
+            }
+        } catch (RuntimeException | Error e) {
+            recordCountFailure(failure, e);
+            for (int i = submitted; i < children.size(); i++) {
+                ScanIterator child = children.get(i);
+                try {
+                    cleanup(child::close);
+                } finally {
+                    taskFinished();
+                    completed.countDown();
+                }
+            }
+        }
+        boolean interrupted = false;
+        for (;;) {
+            try {
+                completed.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        Throwable error = failure.get();
+        if (error instanceof RuntimeException) {
+            throw (RuntimeException) error;
+        }
+        if (error instanceof Error) {
+            throw (Error) error;
+        }
+        return total.get();
+    }
+
+    private static void recordCountFailure(AtomicReference<Throwable> failure, Throwable error) {
+        synchronized (failure) {
+            if (failure.get() == null) {
+                failure.set(error);
+            } else if (failure.get() != error) {
+                failure.get().addSuppressed(error);
+            }
+        }
+    }
+
+    QueryPlan buildPlan(QueryRequest request) {
+        return QueryUtil.buildPlan(request);
     }
 
     @Override
-    public void onNext(QueryRequest request) {
+    public synchronized void onNext(QueryRequest request) {
+        if (this.clientCanceled.get() || this.finished || this.requestCompleted) {
+            return;
+        }
         if (this.queryId == null) {
             log.debug("got request: {}", request);
             this.queryId = request.getQueryId();
@@ -85,9 +267,23 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
         // the first request, start the sending thread
         if (iterator == null) {
             long current = System.nanoTime();
-            iterator = QueryUtil.getIterator(request);
-            plan = QueryUtil.buildPlan(request);
-            threadPool.submit(this::sendData);
+            this.pendingTasks = 1;
+            try {
+                iterator = getIterator(request);
+                plan = buildPlan(request);
+                threadPool.execute(this::sendData);
+            } catch (RuntimeException | Error e) {
+                // The framework must report the original synchronous failure, not normal completion.
+                synchronized (this.responseLock) {
+                    this.completeResponse = false;
+                }
+                taskFinished();
+                Throwable failure = this.cleanupFailure.get();
+                if (failure != null && failure != e) {
+                    e.addSuppressed(failure);
+                }
+                throw e;
+            }
             log.debug("query id: {}, init data cost: {} ms", queryId,
                       (System.nanoTime() - current) * 1.0 / 1000000);
         } else {
@@ -98,18 +294,162 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
 
     @Override
     public void onError(Throwable t) {
-        // Stop calculating when channel got error
-        this.clientCanceled.set(true);
+        onTransportCancel();
         log.error("AggregativeQueryService, query id: {},  got error", this.queryId, t);
     }
 
+    void onTransportCancel() {
+        // Both transport cancellation and request onError can report the same event.
+        synchronized (this.responseLock) {
+            if (this.responseFinished) {
+                return;
+            }
+            this.completeResponse = false;
+            this.responseFinished = true;
+        }
+        cancel();
+    }
+
     @Override
-    public void onCompleted() {
-        // client my be cancelled earlier
+    public synchronized void onCompleted() {
+        // Half-close ends feedback, not work already supported by its existing credit.
+        this.requestCompleted = true;
+        if (this.pendingTasks == 0 && !this.finished) {
+            this.finished = true;
+            finishResponse();
+        }
+    }
+
+    void cancelForShutdown() {
+        try {
+            synchronized (this.responseLock) {
+                if (!this.responseFinished) {
+                    this.responseFinished = true;
+                    this.completeResponse = false;
+                    this.sender.onError(Status.UNAVAILABLE.withDescription("Store queries are stopping")
+                                                          .asRuntimeException());
+                }
+            }
+        } finally {
+            cancel();
+        }
+    }
+
+    public void cancel() {
         this.clientCanceled.set(true);
+        synchronized (this) {
+            for (Thread worker : this.workers) {
+                worker.interrupt();
+            }
+            // An RPC with no first request has no iterator or cleanup task.
+            if (this.pendingTasks == 0 && !this.finished) {
+                this.finished = true;
+                finishResponse();
+            }
+        }
+    }
+
+    private synchronized void taskStarted() {
+        this.workers.add(Thread.currentThread());
+    }
+
+    private void workerFinished() {
+        workerFinished(null);
+    }
+
+    private void workerFinished(Throwable failure) {
+        synchronized (this) {
+            this.workers.remove(Thread.currentThread());
+        }
+        taskFinished(failure);
+    }
+
+    private void taskFinished() {
+        taskFinished(null);
+    }
+
+    private void taskFinished(Throwable primaryFailure) {
+        boolean cleanup;
+        synchronized (this) {
+            cleanup = --this.pendingTasks == 0;
+            if (cleanup) {
+                this.finished = true;
+            }
+        }
+        if (cleanup) {
+            if (this.plan != null) {
+                cleanup(this.plan::clear);
+            }
+            if (this.iterator != null) {
+                cleanup(this.iterator::close);
+            }
+            Throwable releaseFailure = this.cleanupFailure.get();
+            if (primaryFailure != null && releaseFailure != null && primaryFailure != releaseFailure) {
+                primaryFailure.addSuppressed(releaseFailure);
+            }
+            finishResponse();
+        }
+    }
+
+    private void cleanup(Runnable release) {
+        try {
+            release.run();
+        } catch (RuntimeException | Error failure) {
+            synchronized (this.cleanupFailure) {
+                Throwable first = this.cleanupFailure.get();
+                if (first == null) {
+                    this.cleanupFailure.set(failure);
+                } else if (first != failure) {
+                    first.addSuppressed(failure);
+                }
+            }
+            log.error("Aggregate query {} failed to release resources; Store shutdown remains blocked",
+                      this.queryId, failure);
+        }
+    }
+
+    private void finishResponse() {
+        try {
+            synchronized (this.responseLock) {
+                if (this.completeResponse && !this.responseFinished) {
+                    this.responseFinished = true;
+                    Throwable failure = this.cleanupFailure.get();
+                    if (this.finalResponse != null && !this.finalResponse.getIsOk() &&
+                        !this.clientCanceled.get()) {
+                        this.sender.onNext(this.finalResponse);
+                    } else if (failure != null && !this.errorReported) {
+                        this.sender.onNext(errorResponse(getBuilder(), this.queryId, failure));
+                    } else if (failure == null && this.finalResponse != null &&
+                               !this.clientCanceled.get()) {
+                        this.sender.onNext(this.finalResponse);
+                    }
+                    this.sender.onCompleted();
+                }
+            }
+        } finally {
+            // A terminal RPC does not prove that its native resources were released.
+            if (this.cleanupFailure.get() == null) {
+                this.completion.accept(this);
+            }
+        }
+    }
+
+    private void sendResponse(QueryResponse response) {
+        synchronized (this.responseLock) {
+            if (!this.responseFinished && !this.clientCanceled.get()) {
+                if (response.getIsOk() && response.getIsFinished()) {
+                    // The client treats this batch as success; publish it only after cleanup.
+                    this.finalResponse = response;
+                } else {
+                    this.errorReported |= !response.getIsOk();
+                    this.sender.onNext(response);
+                }
+            }
+        }
     }
 
     public void sendData() {
+        taskStarted();
         try {
             long lastSend = System.currentTimeMillis();
             var responseBuilder = getBuilder();
@@ -118,12 +458,18 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
             while (!this.clientCanceled.get()) {
                 // produces more result than consumer, just waiting
                 if (sendCount.get() - consumeCount.get() >= RESULT_COUNT) {
+                    if (this.requestCompleted) {
+                        sendResponse(errorResponse(getBuilder(), queryId,
+                                                   new IllegalStateException(
+                                                           "Request completed without enough feedback")));
+                        cancel();
+                        return;
+                    }
                     // read timeout, takes long time not to read data
                     if (System.currentTimeMillis() - lastSend > timeout) {
-                        this.sender.onNext(errorResponse(getBuilder(), queryId,
-                                                         new RuntimeException(
-                                                                 "sending-timeout, server closed")));
-                        this.sender.onCompleted();
+                        sendResponse(errorResponse(getBuilder(), queryId,
+                                                   new RuntimeException("sending-timeout, server closed")));
+                        cancel();
                         return;
                     }
 
@@ -141,23 +487,33 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
                 } else {
                     try {
                         builder.setQueryId(queryId);
-                        sender.onNext(builder.build());
+                        sendResponse(builder.build());
                         this.sendCount.incrementAndGet();
                         lastSend = System.currentTimeMillis();
                     } catch (Exception e) {
                         log.error("send data got error: ", e);
+                        cancel();
                         break;
                     }
                 }
 
-                if (builder.getIsFinished() || !builder.getIsOk()) {
+                if (!builder.getIsOk()) {
+                    // Report the internal error before cancelling remaining partition work.
+                    cancel();
+                    break;
+                }
+                if (builder.getIsFinished()) {
                     break;
                 }
             }
+        } catch (Exception e) {
+            try {
+                sendResponse(errorResponse(getBuilder(), queryId, e));
+            } finally {
+                cancel();
+            }
         } finally {
-            this.plan.clear();
-            this.iterator.close();
-            this.sender.onCompleted();
+            workerFinished();
         }
     }
 
@@ -188,32 +544,64 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
                     return builder;
                 } else if (this.plan.hasIteratorResult()) {
                     checkIterator = false;
-                    AtomicReference<Exception> exception = new AtomicReference<>();
+                    AtomicReference<Throwable> exception = new AtomicReference<>();
                     if (this.iterator instanceof MultiPartitionIterator) {
                         var iterators = ((MultiPartitionIterator) this.iterator).getIterators();
                         CountDownLatch latch = new CountDownLatch(iterators.size());
-                        for (var itr2 : iterators) {
-                            threadPool.execute(() -> {
-                                try {
-                                    execute(itr2);
-                                } catch (Exception e) {
-                                    exception.set(e);
-                                } finally {
-                                    // MultiPartitionIterator close() not working
-                                    itr2.close();
-                                    latch.countDown();
-                                }
-                            });
+                        synchronized (this) {
+                            this.pendingTasks += iterators.size();
                         }
-                        latch.await(timeout, TimeUnit.MILLISECONDS);
+                        int submitted = 0;
+                        try {
+                            for (var itr2 : iterators) {
+                                threadPool.execute(() -> {
+                                    taskStarted();
+                                    try {
+                                        execute(itr2);
+                                    } catch (RuntimeException | Error e) {
+                                        exception.compareAndSet(null, e);
+                                    } finally {
+                                        try {
+                                            cleanup(itr2::close);
+                                            Throwable failure = this.cleanupFailure.get();
+                                            if (failure != null) {
+                                                exception.compareAndSet(null, new RuntimeException(
+                                                        "partition iterator cleanup failed", failure));
+                                            }
+                                        } finally {
+                                            latch.countDown();
+                                            workerFinished();
+                                        }
+                                    }
+                                });
+                                submitted++;
+                            }
+                        } catch (RuntimeException | Error failure) {
+                            // Rejection must also release iterators whose tasks were not accepted.
+                            for (int i = submitted; i < iterators.size(); i++) {
+                                try {
+                                    cleanup(iterators.get(i)::close);
+                                } finally {
+                                    latch.countDown();
+                                    taskFinished();
+                                }
+                            }
+                            throw failure;
+                        }
+                        if (!latch.await(timeout, TimeUnit.MILLISECONDS)) {
+                            throw new TimeoutException("partition query timed out");
+                        }
                         if (exception.get() != null) {
-                            throw exception.get();
+                            throw new RuntimeException("partition query failed", exception.get());
                         }
                     } else {
                         // can't be parallel, but has agg like stage
                         execute(this.iterator);
                     }
 
+                    if (this.clientCanceled.get()) {
+                        return builder.setIsOk(false).setIsFinished(false);
+                    }
                     try {
                         // last empty element
                         itr = (ScanIterator) plan.execute(PipelineResult.EMPTY);
@@ -227,7 +615,7 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
             builder.clear();
 
             List<Kv> batchResult = new ArrayList<>();
-            while (itr.hasNext() && !this.clientCanceled.get()) {
+            while (!this.clientCanceled.get() && itr.hasNext()) {
                 if (count >= batchSize) {
                     break;
                 }
@@ -265,6 +653,9 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
 
             builder.addAllData(batchResult);
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             log.error("readBatchData got error: ", e);
             return builder.setIsOk(false).setIsFinished(false).setMessage("Store Server Error: "
                                                                           + Arrays.toString(
@@ -273,7 +664,7 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
 
         if (checkIterator) {
             // check the iterator
-            finish = !itr.hasNext();
+            finish = this.clientCanceled.get() || !itr.hasNext();
         }
         log.debug("query id: {}, finished batch, with size :{}, finish:{}, cost: {} ms", queryId,
                   count,
@@ -320,7 +711,7 @@ public class AggregativeQueryObserver implements StreamObserver<QueryRequest> {
     private void execute(ScanIterator itr) {
         long recordCount = 0;
         long current = System.nanoTime();
-        while (itr.hasNext() && !this.clientCanceled.get()) {
+        while (!this.clientCanceled.get() && itr.hasNext()) {
             try {
                 recordCount++;
                 executePipeline(itr.next());

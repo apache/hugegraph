@@ -17,16 +17,29 @@
 
 package org.apache.hugegraph.unit.rest;
 
-import java.security.NoSuchAlgorithmException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.KeyStore;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BiFunction;
+import java.util.stream.Stream;
 
+import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSession;
-import javax.net.ssl.SSLSessionContext;
 
 import org.apache.hugegraph.rest.AbstractRestClient;
 import org.apache.hugegraph.rest.ClientException;
@@ -43,6 +56,8 @@ import org.mockito.Mockito;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.net.HttpHeaders;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
 
 import lombok.SneakyThrows;
 import okhttp3.HttpUrl;
@@ -145,30 +160,112 @@ public class RestClientTest {
     }
 
     @Test
-    public void testHostNameVerifier() {
-        BiFunction<String, String, Boolean> verifer = (url, hostname) -> {
-            AbstractRestClient.HostNameVerifier verifier;
-            SSLSession session;
-            try {
-                SSLSessionContext sc = SSLContext.getDefault()
-                                                 .getClientSessionContext();
-                session = sc.getSession(new byte[]{11});
-                verifier = new AbstractRestClient.HostNameVerifier(url);
-            } catch (NoSuchAlgorithmException e) {
-                throw new RuntimeException(e);
+    public void testHttpsCertificateIdentity() throws Exception {
+        Path directory = Files.createTempDirectory("rest-client-tls-");
+        try {
+            Path validStore = createServerStore(directory, "valid", "dns:localhost,ip:127.0.0.1");
+            Path wrongStore = createServerStore(directory, "wrong", "dns:other.example");
+            Path noSanStore = createServerStore(directory, "no-san", null);
+            assertHttpsRequest(validStore, validStore, "localhost", null);
+            assertHttpsRequest(validStore, validStore, "127.0.0.1", null);
+            assertHttpsRequest(wrongStore, wrongStore, "localhost", SSLPeerUnverifiedException.class);
+            assertHttpsRequest(noSanStore, noSanStore, "localhost", SSLPeerUnverifiedException.class);
+            assertHttpsRequest(validStore, wrongStore, "localhost", SSLHandshakeException.class);
+        } finally {
+            try (Stream<Path> paths = Files.walk(directory)) {
+                for (Path path : (Iterable<Path>) paths.sorted(Comparator.reverseOrder())::iterator) {
+                    Files.deleteIfExists(path);
+                }
             }
-            return verifier.verify(hostname, session);
-        };
+        }
+    }
 
-        Assert.assertTrue(verifer.apply("http://baidu.com", "baidu.com"));
-        Assert.assertTrue(verifer.apply("http://test1.baidu.com", "baidu.com"));
-        Assert.assertTrue(verifer.apply("http://test2.baidu.com", "baidu.com"));
-        Assert.assertFalse(verifer.apply("http://baidu2.com", "baidu.com"));
-        Assert.assertTrue(verifer.apply("http://baidu.com", ""));
-        Assert.assertTrue(verifer.apply("baidu.com", "baidu.com"));
-        Assert.assertTrue(verifer.apply("http://baidu.com/test", "baidu.com"));
-        Assert.assertTrue(verifer.apply("baidu.com/test/abc", "baidu.com"));
-        Assert.assertFalse(verifer.apply("baidu.com.sina.com", "baidu.com"));
+    private static Path createServerStore(Path directory, String name, String san) throws Exception {
+        Path store = directory.resolve(name + ".p12");
+        List<String> command = new ArrayList<>(Arrays.asList(
+                Paths.get(System.getProperty("java.home"), "bin", "keytool").toString(),
+                "-genkeypair", "-alias", "server", "-keyalg", "RSA", "-keysize", "2048",
+                "-validity", "2", "-dname", "CN=localhost", "-storetype", "PKCS12",
+                "-keystore", store.toString(), "-storepass", "test-password",
+                "-keypass", "test-password", "-noprompt"));
+        if (san != null) {
+            command.addAll(Arrays.asList("-ext", "SAN=" + san));
+        }
+        Path log = directory.resolve(name + ".log");
+        Process process = new ProcessBuilder(command).redirectErrorStream(true)
+                                                     .redirectOutput(log.toFile()).start();
+        try {
+            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+            Assert.assertTrue("keytool timed out", finished);
+            Assert.assertEquals(Files.readString(log, StandardCharsets.UTF_8), 0, process.exitValue());
+        } finally {
+            if (process.isAlive()) {
+                process.destroyForcibly();
+                process.waitFor(5, TimeUnit.SECONDS);
+            }
+        }
+        return store;
+    }
+
+    private static KeyStore readStore(Path path) throws Exception {
+        KeyStore store = KeyStore.getInstance("PKCS12");
+        try (InputStream input = Files.newInputStream(path)) {
+            store.load(input, "test-password".toCharArray());
+        }
+        return store;
+    }
+
+    private static void assertHttpsRequest(Path serverStore, Path trustedStore, String hostname,
+                                           Class<? extends Throwable> failure) throws Exception {
+        KeyStore keys = readStore(serverStore);
+        KeyManagerFactory keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        keyManagers.init(keys, "test-password".toCharArray());
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(keyManagers.getKeyManagers(), null, null);
+        HttpsServer server = HttpsServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.setHttpsConfigurator(new HttpsConfigurator(context));
+        server.createContext("/probe", exchange -> {
+            byte[] response = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream output = exchange.getResponseBody()) {
+                output.write(response);
+            }
+        });
+        Path trustStore = Files.createTempFile(serverStore.getParent(), "trust-", ".jks");
+        server.start();
+        try {
+            KeyStore trusted = KeyStore.getInstance("JKS");
+            trusted.load(null, null);
+            trusted.setCertificateEntry("server", readStore(trustedStore).getCertificate("server"));
+            try (OutputStream output = Files.newOutputStream(trustStore)) {
+                trusted.store(output, "test-password".toCharArray());
+            }
+            RestClientConfig config = RestClientConfig.builder().timeout(5000)
+                    .trustStoreFile(trustStore.toString()).trustStorePassword("test-password").build();
+            String url = "https://" + hostname + ":" + server.getAddress().getPort();
+            RestClient client = new AbstractRestClient(url, config) {
+                @Override
+                protected void checkStatus(Response response, int... statuses) {
+                    Assert.assertEquals(200, response.code());
+                }
+            };
+            try {
+                if (failure == null) {
+                    Assert.assertEquals(200, client.get("probe").status());
+                } else {
+                    org.junit.Assert.assertThrows(failure, () -> client.get("probe"));
+                }
+            } finally {
+                client.close();
+            }
+            SSLSession session = Mockito.mock(SSLSession.class);
+            Mockito.when(session.getPeerCertificates()).thenReturn(keys.getCertificateChain("server"));
+            Assert.assertEquals(failure != SSLPeerUnverifiedException.class,
+                                new AbstractRestClient.HostNameVerifier(url).verify(hostname, session));
+        } finally {
+            server.stop(0);
+            Files.deleteIfExists(trustStore);
+        }
     }
 
     @Test

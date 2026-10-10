@@ -20,7 +20,6 @@ package org.apache.hugegraph.rest;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
@@ -31,7 +30,6 @@ import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.HostnameVerifier;
-import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocketFactory;
@@ -125,9 +123,10 @@ public abstract class AbstractRestClient implements RestClient {
     }
 
     private static RequestBody buildRequestBody(Object body, RestHeaders headers) {
-        String contentType = parseContentType(headers);
+        MediaType contentType = MediaType.parse(parseContentType(headers));
         String bodyContent;
-        if (RestHeaders.APPLICATION_JSON.equals(contentType)) {
+        if (contentType != null && "application".equals(contentType.type()) &&
+            "json".equals(contentType.subtype())) {
             if (body == null) {
                 bodyContent = "{}";
             } else if (body instanceof String) {
@@ -138,8 +137,7 @@ public abstract class AbstractRestClient implements RestClient {
         } else {
             bodyContent = String.valueOf(body);
         }
-        RequestBody requestBody = RequestBody.create(bodyContent.getBytes(),
-                                                     MediaType.parse(contentType));
+        RequestBody requestBody = RequestBody.create(bodyContent, contentType);
 
         if (headers != null &&
             "gzip".equals(headers.get(RestHeaders.CONTENT_ENCODING))) {
@@ -211,7 +209,7 @@ public abstract class AbstractRestClient implements RestClient {
         }
 
         // ssl
-        configSsl(builder, this.baseUrl, config.getTrustStoreFile(),
+        configSsl(builder, config.getTrustStoreFile(),
                   config.getTrustStorePassword());
 
         // Execute builder callback before builder.build() for user configs
@@ -233,7 +231,7 @@ public abstract class AbstractRestClient implements RestClient {
     }
 
     @SneakyThrows
-    private void configSsl(OkHttpClient.Builder builder, String url, String trustStoreFile,
+    private void configSsl(OkHttpClient.Builder builder, String trustStoreFile,
                            String trustStorePass) {
         if (StringUtils.isBlank(trustStoreFile) || StringUtils.isBlank(trustStorePass)) {
             return;
@@ -244,8 +242,7 @@ public abstract class AbstractRestClient implements RestClient {
         sslContext.init(null, new TrustManager[]{trustManager}, null);
         SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
 
-        builder.sslSocketFactory(sslSocketFactory, trustManager)
-               .hostnameVerifier(new HostNameVerifier(url));
+        builder.sslSocketFactory(sslSocketFactory, trustManager);
     }
 
     @Override
@@ -465,26 +462,20 @@ public abstract class AbstractRestClient implements RestClient {
         return (X509TrustManager) trustManagers[0];
     }
 
+    /**
+     * Compatibility wrapper using the same certificate identity verification as OkHttp.
+     */
     public static class HostNameVerifier implements HostnameVerifier {
 
-        private final String url;
+        private static final HostnameVerifier DEFAULT_VERIFIER = new OkHttpClient().hostnameVerifier();
 
         public HostNameVerifier(String url) {
-            if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                url = "http://" + url;
-            }
-            url = URI.create(url).getHost();
-            this.url = url;
+            // Keep the public constructor; a URL is not evidence of the peer's identity.
         }
 
         @Override
         public boolean verify(String hostname, SSLSession session) {
-            if (!this.url.isEmpty() && this.url.endsWith(hostname)) {
-                return true;
-            } else {
-                HostnameVerifier verifier = HttpsURLConnection.getDefaultHostnameVerifier();
-                return verifier.verify(hostname, session);
-            }
+            return DEFAULT_VERIFIER.verify(hostname, session);
         }
     }
 }

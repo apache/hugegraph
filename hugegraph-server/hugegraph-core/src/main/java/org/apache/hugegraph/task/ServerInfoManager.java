@@ -17,15 +17,9 @@
 
 package org.apache.hugegraph.task;
 
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
-
-import org.apache.hugegraph.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.tx.GraphTransaction;
-import org.apache.hugegraph.exception.ConnectionException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
 import org.apache.hugegraph.type.define.NodeRole;
 import org.apache.hugegraph.util.E;
@@ -33,31 +27,22 @@ import org.apache.hugegraph.util.E;
 public class ServerInfoManager {
 
     private final HugeGraphParams graph;
-    private final ExecutorService dbExecutor;
 
     private volatile GlobalMasterInfo globalNodeInfo;
 
     private volatile boolean closed;
 
-    public ServerInfoManager(HugeGraphParams graph, ExecutorService dbExecutor) {
+    public ServerInfoManager(HugeGraphParams graph) {
         E.checkNotNull(graph, "graph");
-        E.checkNotNull(dbExecutor, "db executor");
 
         this.graph = graph;
-        this.dbExecutor = dbExecutor;
 
         this.globalNodeInfo = null;
 
         this.closed = false;
     }
 
-    public void init() {
-        // ServerInfo is soft-disabled; keep this method for compatibility.
-    }
-
     public synchronized boolean close() {
-        // ServerInfo persistence is soft-deprecated; init() and heartbeat()
-        // are no-ops, so there's nothing to clean up in close().
         this.closed = true;
         return true;
     }
@@ -102,28 +87,5 @@ public class ServerInfoManager {
 
     public boolean selfIsMaster() {
         return this.selfNodeRole() != null && this.selfNodeRole().master();
-    }
-
-    public synchronized void heartbeat() {
-        // ServerInfo heartbeat is deprecated for local scheduling.
-    }
-
-    private GraphTransaction tx() {
-        assert Thread.currentThread().getName().contains("server-info-db-worker");
-        return this.graph.systemTransaction();
-    }
-
-    private <V> V call(Callable<V> callable) {
-        assert !Thread.currentThread().getName().startsWith(
-                "server-info-db-worker") : "can't call by itself";
-        try {
-            // Pass context for db thread
-            callable = new TaskManager.ContextCallable<>(callable);
-            // Ensure all db operations are executed in dbExecutor thread(s)
-            return this.dbExecutor.submit(callable).get();
-        } catch (Throwable e) {
-            throw new HugeException("Failed to update/query server info: %s",
-                                    e, e.toString());
-        }
     }
 }

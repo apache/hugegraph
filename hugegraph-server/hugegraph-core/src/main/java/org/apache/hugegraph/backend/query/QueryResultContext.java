@@ -21,9 +21,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
-import org.apache.hugegraph.backend.query.ConditionQuery.ResultsFilter;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.query.ConditionQuery.ResultsFilter;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdQuery;
+import org.apache.hugegraph.query.Query;
 
 /** Decisions captured for one batch; queries retain shared index cleanup data. */
 public final class QueryResultContext {

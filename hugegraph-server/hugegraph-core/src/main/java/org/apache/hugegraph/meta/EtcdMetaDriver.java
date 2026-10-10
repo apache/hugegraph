@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.meta.lock.EtcdDistributedLock;
 import org.apache.hugegraph.meta.lock.LockResult;
 import org.apache.hugegraph.type.define.CollectionType;

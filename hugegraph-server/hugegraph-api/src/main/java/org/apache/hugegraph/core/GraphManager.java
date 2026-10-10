@@ -48,7 +48,7 @@ import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.MapConfiguration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeFactory;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.StandardHugeGraph;
@@ -59,7 +59,7 @@ import org.apache.hugegraph.auth.HugeFactoryAuthProxy;
 import org.apache.hugegraph.auth.HugeGraphAuthProxy;
 import org.apache.hugegraph.auth.HugeUser;
 import org.apache.hugegraph.auth.StandardAuthenticator;
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CacheManager;
 import org.apache.hugegraph.backend.store.AbstractBackendStoreProvider;
@@ -82,9 +82,6 @@ import org.apache.hugegraph.k8s.K8sRegister;
 import org.apache.hugegraph.kvstore.KvStore;
 import org.apache.hugegraph.kvstore.KvStoreImpl;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.masterelection.RoleElectionOptions;
-import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
-import org.apache.hugegraph.masterelection.StandardRoleListener;
 import org.apache.hugegraph.meta.MetaDriver;
 import org.apache.hugegraph.meta.MetaManager;
 import org.apache.hugegraph.meta.PdMetaDriver;
@@ -189,7 +186,6 @@ public final class GraphManager {
     private final Set<String> serverUrlsToPd;
     private final Boolean serverDeployInK8s;
     private final HugeConfig config;
-    private RoleElectionStateMachine roleStateMachine;
     private K8sDriver.CA ca;
     private final boolean PDExist;
 
@@ -226,7 +222,6 @@ public final class GraphManager {
         this.rpcClient = new RpcClientProvider(conf);
         this.pdPeers = conf.get(ServerOptions.PD_PEERS);
 
-        this.roleStateMachine = null;
         this.globalNodeRoleInfo = new GlobalMasterInfo();
 
         this.eventHub = hub;
@@ -696,7 +691,7 @@ public final class GraphManager {
         this.waitGraphsReady();
 
         this.checkBackendVersionOrExit(this.conf);
-        this.serverStarted(this.conf);
+        this.serverStarted();
 
         this.addMetrics(this.conf);
     }
@@ -1735,9 +1730,6 @@ public final class GraphManager {
         }
         this.destroyRpcServer();
         this.unlistenChanges();
-        if (this.roleStateMachine != null) {
-            this.roleStateMachine.shutdown();
-        }
     }
 
     private void startRpcServer() {
@@ -1828,6 +1820,13 @@ public final class GraphManager {
     }
 
     private void loadGraph(String name, String graphConfPath) {
+        // TODO: offer a loaded graph to Gremlin Server (notify GRAPH_CREATE, as the create paths
+        // do) or fail startup when its static Gremlin instantiation failed. Today a Server whose
+        // first open failed against a PD member mid-restart serves REST and passes readiness
+        // while every Gremlin call on it fails for the life of the process. The Helm chart
+        // (helm/hugegraph) detects this with a per-Pod Gremlin query in `helm test` and documents
+        // the manual Pod deletion; retire both once this is fixed.
+        // https://github.com/apache/hugegraph/issues/3228
         HugeConfig config = new HugeConfig(graphConfPath);
 
         // Transfer `raft.group_peers` from server config to graph config
@@ -1836,8 +1835,6 @@ public final class GraphManager {
                            raftGroupPeers);
 
         this.transferPdPeersConfig(config);
-
-        this.transferRoleWorkerConfig(config);
 
         Graph graph = GraphFactory.open(config);
         this.graphs.put(defaultSpaceGraphName(name), graph);
@@ -1866,21 +1863,6 @@ public final class GraphManager {
         if (needPdPeers) {
             config.addProperty(CoreOptions.PD_PEERS.name(), this.pdPeers);
         }
-    }
-
-    private void transferRoleWorkerConfig(HugeConfig config) {
-        config.setProperty(RoleElectionOptions.NODE_EXTERNAL_URL.name(),
-                           this.conf.get(ServerOptions.REST_SERVER_URL));
-        config.setProperty(RoleElectionOptions.BASE_TIMEOUT_MILLISECOND.name(),
-                           this.conf.get(RoleElectionOptions.BASE_TIMEOUT_MILLISECOND));
-        config.setProperty(RoleElectionOptions.EXCEEDS_FAIL_COUNT.name(),
-                           this.conf.get(RoleElectionOptions.EXCEEDS_FAIL_COUNT));
-        config.setProperty(RoleElectionOptions.RANDOM_TIMEOUT_MILLISECOND.name(),
-                           this.conf.get(RoleElectionOptions.RANDOM_TIMEOUT_MILLISECOND));
-        config.setProperty(RoleElectionOptions.HEARTBEAT_INTERVAL_SECOND.name(),
-                           this.conf.get(RoleElectionOptions.HEARTBEAT_INTERVAL_SECOND));
-        config.setProperty(RoleElectionOptions.MASTER_DEAD_TIMES.name(),
-                           this.conf.get(RoleElectionOptions.MASTER_DEAD_TIMES));
     }
 
     private void waitGraphsReady() {
@@ -1928,16 +1910,6 @@ public final class GraphManager {
     }
 
     private void initNodeRole() {
-        boolean enableRoleElection = config.get(
-                ServerOptions.ENABLE_SERVER_ROLE_ELECTION);
-        if (enableRoleElection) {
-            LOG.warn("The server.role_election option is deprecated and no " +
-                     "longer supported (removed with server_info persistence). " +
-                     "The configured server.role is still used for local node " +
-                     "role initialization. Set server.role_election=false to " +
-                     "suppress this warning.");
-        }
-
         String role = config.get(ServerOptions.SERVER_ROLE);
         E.checkArgument(StringUtils.isNotEmpty(role),
                         "The server role can't be null or empty");
@@ -1946,15 +1918,11 @@ public final class GraphManager {
         this.globalNodeRoleInfo.initNodeRole(nodeRole);
     }
 
-    private void serverStarted(HugeConfig conf) {
+    private void serverStarted() {
         for (String graph : this.graphs()) {
             HugeGraph hugegraph = this.graph(graph);
             assert hugegraph != null;
             hugegraph.serverStarted(this.globalNodeRoleInfo);
-        }
-        if (!this.globalNodeRoleInfo.nodeRole().computer() && this.supportRoleElection() &&
-            config.get(ServerOptions.ENABLE_SERVER_ROLE_ELECTION)) {
-            LOG.info("Skip role state machine init (deprecated with server_info)");
         }
     }
 
@@ -1962,30 +1930,6 @@ public final class GraphManager {
                                          String schemaTemplate) {
 
         return this.metaManager.schemaTemplate(graphSpace, schemaTemplate);
-    }
-
-    private void initRoleStateMachine() {
-        E.checkArgument(this.roleStateMachine == null,
-                        "Repeated initialization of role state worker");
-        this.globalNodeRoleInfo.supportElection(true);
-        this.roleStateMachine = this.authenticator().graph().roleElectionStateMachine();
-        StandardRoleListener listener = new StandardRoleListener(TaskManager.instance(),
-                                                                 this.globalNodeRoleInfo);
-        this.roleStateMachine.start(listener);
-    }
-
-    private boolean supportRoleElection() {
-        try {
-            if (!(this.authenticator() instanceof StandardAuthenticator)) {
-                LOG.info("{} authenticator does not support role election currently",
-                         this.authenticator().getClass().getSimpleName());
-                return false;
-            }
-            return true;
-        } catch (IllegalStateException e) {
-            LOG.info("{}, does not support role election currently", e.getMessage());
-            return false;
-        }
     }
 
     private void addMetrics(HugeConfig config) {

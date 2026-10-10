@@ -17,14 +17,14 @@
 
 package org.apache.hugegraph.memory.consumer.impl.id;
 
-import static org.apache.hugegraph.backend.id.IdGenerator.compareType;
+import static org.apache.hugegraph.id.IdGenerator.compareType;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.pool.MemoryPool;
 import org.jetbrains.annotations.TestOnly;

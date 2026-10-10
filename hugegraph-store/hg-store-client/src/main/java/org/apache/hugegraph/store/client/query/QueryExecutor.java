@@ -45,6 +45,7 @@ import org.apache.hugegraph.store.grpc.query.DeDupOption;
 import org.apache.hugegraph.store.grpc.query.Index;
 import org.apache.hugegraph.store.grpc.query.QueryRequest;
 import org.apache.hugegraph.store.grpc.query.QueryResponse;
+import org.apache.hugegraph.store.grpc.query.QueryResultFormat;
 import org.apache.hugegraph.store.grpc.query.ScanType;
 import org.apache.hugegraph.store.grpc.query.ScanTypeParam;
 import org.apache.hugegraph.store.query.BaseElementComparator;
@@ -60,6 +61,8 @@ import org.apache.hugegraph.structure.KvElement;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.stub.ClientCallStreamObserver;
+import io.grpc.stub.ClientResponseObserver;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -191,7 +194,8 @@ public class QueryExecutor {
                     public boolean hasNext() {
                         if (element == null) {
                             while (itr.hasNext()) {
-                                element = fromKv(request.getTable(), itr.next(), hasAgg);
+                                element = fromKv(request.getTable(), itr.next(), hasAgg,
+                                                 !QueryResultFormat.returnsTaggedElements(request));
                                 if (element != null) {
                                     break;
                                 }
@@ -235,10 +239,35 @@ public class QueryExecutor {
 
         );
 
-        var reqStream = stub.query(observer);
         observer.setWatcherQueryId(request.getQueryId() + '-' + address);
-        observer.setRequestSender(r -> reqStream.onNext(request));
-        observer.setTransferComplete(r -> reqStream.onCompleted());
+        stub.query(new ClientResponseObserver<QueryRequest, QueryResponse>() {
+            @Override
+            public void beforeStart(ClientCallStreamObserver<QueryRequest> requestStream) {
+                observer.setRequestSender(ignored -> requestStream.onNext(request));
+                observer.setTransferComplete(finished -> {
+                    if (finished) {
+                        requestStream.onCompleted();
+                    } else {
+                        requestStream.cancel("Query iterator closed", null);
+                    }
+                });
+            }
+
+            @Override
+            public void onNext(QueryResponse response) {
+                observer.onNext(response);
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                observer.onError(error);
+            }
+
+            @Override
+            public void onCompleted() {
+                observer.onCompleted();
+            }
+        });
         observer.setTimeout(this.timeout);
 
         var itr = new StreamKvIterator<>(b -> observer.clear(), observer::consume);
@@ -447,7 +476,7 @@ public class QueryExecutor {
         return new ArrayList<>();
     }
 
-    private BaseElement fromKv(String table, Kv kv, boolean isAgg) {
+    private BaseElement fromKv(String table, Kv kv, boolean isAgg, boolean schemaRow) {
         if (isAgg) {
             return KvElement.of(KvSerializer.fromBytes(kv.getKey().toByteArray()),
                                 KvSerializer.fromObjectBytes(kv.getValue().toByteArray()));
@@ -457,9 +486,11 @@ public class QueryExecutor {
                 BackendColumn.of(kv.getKey().toByteArray(), kv.getValue().toByteArray());
         try {
             if (IN_EDGE_TABLE.equals(table) || OUT_EDGE_TABLE.equals(table)) {
-                return serializer.parseEdge(this.supplier, backendColumn, null, true);
+                return schemaRow ? serializer.parseSchemaEdge(this.supplier, backendColumn, null, true) :
+                       serializer.parseEdge(this.supplier, backendColumn, null, true);
             }
-            return serializer.parseVertex(this.supplier, backendColumn, null);
+            return schemaRow ? serializer.parseSchemaVertex(this.supplier, backendColumn, null) :
+                   serializer.parseVertex(this.supplier, backendColumn, null);
         } catch (Exception e) {
             log.error("parse element error,", e);
             return null;
@@ -539,7 +570,7 @@ public class QueryExecutor {
 
                                           @Override
                                           public BaseElement next() {
-                                              return fromKv(query.getTable(), data.next(), false);
+                                              return fromKv(query.getTable(), data.next(), false, true);
                                           }
                                       };
                                   })
@@ -574,7 +605,7 @@ public class QueryExecutor {
 
                                           @Override
                                           public BaseElement next() {
-                                              return fromKv(query.getTable(), data.next(), true);
+                                              return fromKv(query.getTable(), data.next(), true, false);
                                           }
                                       };
                                   })

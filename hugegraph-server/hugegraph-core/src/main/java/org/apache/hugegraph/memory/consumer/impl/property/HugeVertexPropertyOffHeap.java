@@ -24,8 +24,9 @@ import java.util.NoSuchElementException;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.pool.MemoryPool;
 import org.apache.hugegraph.memory.util.FurySerializationUtil;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.structure.HugeElement;
+import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.structure.HugeVertexProperty;
 
 import io.netty.buffer.ByteBuf;
@@ -52,7 +53,7 @@ public class HugeVertexPropertyOffHeap<V> extends HugeVertexProperty<V> implemen
 
     @Override
     public void serializeSelfToByteBuf(MemoryPool memoryPool) {
-        byte[] bytes = FurySerializationUtil.FURY.serialize(this.value);
+        byte[] bytes = FurySerializationUtil.FURY.serialize(this.property.value());
         this.valueOffHeap = (ByteBuf) memoryPool.requireMemory(bytes.length, memoryPool);
         this.valueOffHeap.markReaderIndex();
         this.valueOffHeap.writeBytes(bytes);
@@ -60,7 +61,12 @@ public class HugeVertexPropertyOffHeap<V> extends HugeVertexProperty<V> implemen
 
     @Override
     public void releaseOriginalVarsOnHeap() {
-        this.value = null;
+        this.property = new BaseProperty<V>(this.pkey, null) {
+            @Override
+            public V value() {
+                return HugeVertexPropertyOffHeap.this.value();
+            }
+        };
     }
 
     @Override

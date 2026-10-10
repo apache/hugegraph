@@ -19,8 +19,8 @@ package org.apache.hugegraph.backend.store;
 
 import java.util.Map;
 
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.schema.SchemaElement;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.struct.schema.SchemaElement;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.util.collection.CollectionFactory;
 

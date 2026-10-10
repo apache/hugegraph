@@ -21,7 +21,7 @@ package org.apache.hugegraph.exception;
 
 public interface ErrorCodeProvider {
 
-    public String format(Object... args);
+    String format(Object... args);
 
-    public String with(String message);
+    String with(String message);
 }

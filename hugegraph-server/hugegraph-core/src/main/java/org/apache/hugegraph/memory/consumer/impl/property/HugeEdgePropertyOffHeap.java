@@ -24,10 +24,11 @@ import java.util.NoSuchElementException;
 import org.apache.hugegraph.memory.consumer.OffHeapObject;
 import org.apache.hugegraph.memory.pool.MemoryPool;
 import org.apache.hugegraph.memory.util.FurySerializationUtil;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeElement;
+import org.apache.hugegraph.structure.BaseProperty;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufUtil;
@@ -53,7 +54,7 @@ public class HugeEdgePropertyOffHeap<V> extends HugeEdgeProperty<V> implements O
 
     @Override
     public void serializeSelfToByteBuf(MemoryPool memoryPool) {
-        byte[] bytes = FurySerializationUtil.FURY.serialize(this.value);
+        byte[] bytes = FurySerializationUtil.FURY.serialize(this.property.value());
         this.valueOffHeap = (ByteBuf) memoryPool.requireMemory(bytes.length, memoryPool);
         this.valueOffHeap.markReaderIndex();
         this.valueOffHeap.writeBytes(bytes);
@@ -61,7 +62,12 @@ public class HugeEdgePropertyOffHeap<V> extends HugeEdgeProperty<V> implements O
 
     @Override
     public void releaseOriginalVarsOnHeap() {
-        this.value = null;
+        this.property = new BaseProperty<V>(this.pkey, null) {
+            @Override
+            public V value() {
+                return HugeEdgePropertyOffHeap.this.value();
+            }
+        };
     }
 
     @Override

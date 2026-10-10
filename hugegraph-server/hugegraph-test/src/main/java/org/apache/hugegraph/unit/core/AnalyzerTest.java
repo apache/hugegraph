@@ -23,6 +23,7 @@ import java.util.Set;
 
 import org.apache.hugegraph.analyzer.Analyzer;
 import org.apache.hugegraph.analyzer.AnalyzerFactory;
+import org.apache.hugegraph.config.ConfigException;
 import org.apache.hugegraph.testutil.Assert;
 import org.junit.After;
 import org.junit.Before;
@@ -42,6 +43,15 @@ public class AnalyzerTest {
     @After
     public void teardown() {
         // pass
+    }
+
+    @Test
+    public void testWordAnalyzerRequiresOptionalDependency() {
+        ConfigException exception = Assert.assertThrows(ConfigException.class, () -> {
+            AnalyzerFactory.analyzer("word", "PureEnglish");
+        });
+        Assert.assertTrue(exception.getMessage().contains("org.apdplat:word:1.3"));
+        Assert.assertTrue(exception.getCause() instanceof NoClassDefFoundError);
     }
 
     @Test

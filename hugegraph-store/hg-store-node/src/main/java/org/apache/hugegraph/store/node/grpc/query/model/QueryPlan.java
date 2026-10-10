@@ -118,10 +118,25 @@ public class QueryPlan {
     }
 
     public void clear() {
+        Throwable failure = null;
         for (var stage : stages) {
-            stage.close();
+            try {
+                stage.close();
+            } catch (RuntimeException | Error e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
+            }
         }
         this.stages.clear();
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure != null) {
+            throw (RuntimeException) failure;
+        }
     }
 
     public boolean isEmpty() {

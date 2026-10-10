@@ -19,15 +19,21 @@ package org.apache.hugegraph.k8s;
 
 import com.google.common.base.Strings;
 import io.fabric8.kubernetes.api.model.Namespace;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.space.GraphSpace;
 import org.apache.hugegraph.space.Service;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.StringWriter;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -236,7 +242,7 @@ public class K8sManager {
     @SuppressWarnings("unchecked")
     public void loadResourceQuota(String namespace, int cpuLimit, int memoryLimit) throws
                                                                                    HugeException {
-        Yaml yaml = new Yaml();
+        Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
         FileInputStream inputStream = null;
 
         namespace = namespace.replace("_", "-").toLowerCase();

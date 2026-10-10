@@ -21,19 +21,18 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 
 import org.apache.hugegraph.HugeGraphParams;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.exception.NotFoundException;
 import org.apache.hugegraph.iterator.ListIterator;
 import org.apache.hugegraph.iterator.MapperIterator;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.HugeKeys;
@@ -61,16 +60,14 @@ public abstract class TaskAndResultScheduler implements TaskScheduler {
 
     private final ServerInfoManager serverManager;
 
-    public TaskAndResultScheduler(
-            HugeGraphParams graph,
-            ExecutorService serverInfoDbExecutor) {
+    public TaskAndResultScheduler(HugeGraphParams graph) {
         E.checkNotNull(graph, "graph");
 
         this.graph = graph;
         this.graphSpace = graph.graph().graphSpace();
         this.graphName = graph.name();
 
-        this.serverManager = new ServerInfoManager(graph, serverInfoDbExecutor);
+        this.serverManager = new ServerInfoManager(graph);
     }
 
     @Override

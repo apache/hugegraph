@@ -17,17 +17,26 @@
 
 package org.apache.hugegraph.query;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
 import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.id.SplicingIdGenerator;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.query.Condition.Relation;
 import org.apache.hugegraph.query.Condition.RelationType;
+import org.apache.hugegraph.query.serializer.AggregateAdapter;
 import org.apache.hugegraph.query.serializer.QueryAdapter;
 import org.apache.hugegraph.query.serializer.QueryIdAdapter;
 import org.apache.hugegraph.structure.BaseElement;
@@ -35,17 +44,20 @@ import org.apache.hugegraph.structure.BaseProperty;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.CollectionType;
 import org.apache.hugegraph.type.define.HugeKeys;
-import org.apache.hugegraph.util.*;
+import org.apache.hugegraph.util.CollectionUtil;
+import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.InsertionOrderUtil;
+import org.apache.hugegraph.util.LongEncoding;
+import org.apache.hugegraph.util.NumericUtil;
 import org.apache.hugegraph.util.collection.CollectionFactory;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Sets;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 public class ConditionQuery extends IdQuery {
-
-    // Semantic counterpart: server's org.apache.hugegraph.backend.query.ConditionQuery.
-    // Keep resolution changes coordinated; parity follow-up: #3200.
 
     public static final char INDEX_SYM_MIN = '\u0000';
     public static final String INDEX_SYM_ENDING = "\u0000";
@@ -60,9 +72,9 @@ public class ConditionQuery extends IdQuery {
     private static final Gson gson = new GsonBuilder()
             .registerTypeAdapter(Condition.class, new QueryAdapter())
             .registerTypeAdapter(Id.class, new QueryIdAdapter())
+            .registerTypeAdapter(Aggregate.class, new AggregateAdapter())
             .setDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
             .create();
-    private static final int indexStringValueLength = 20;
 
     static {
         List<String> list = new ArrayList<>(INDEX_SYM_MAX - INDEX_SYM_MIN);
@@ -94,91 +106,6 @@ public class ConditionQuery extends IdQuery {
         super(resultType, originQuery);
     }
 
-    /**
-     * Index and composite index interception
-     *
-     * @param values
-     * @return
-     */
-    public static String concatValuesLimitLength(List<Object> values) {
-        List<Object> newValues = new ArrayList<>(values.size());
-        for (Object v : values) {
-            v = convertLargeValue(v);
-            newValues.add(convertNumberIfNeeded(v));
-        }
-        return SplicingIdGenerator.concatValues(newValues);
-    }
-
-    /**
-     * Index and composite index interception
-     *
-     * @param value
-     * @return
-     */
-    public static String concatValuesLimitLength(Object value) {
-        if (value instanceof List) {
-            return concatValuesLimitLength((List<Object>) value);
-        }
-
-        if (needConvertNumber(value)) {
-            return LongEncoding.encodeNumber(value);
-        }
-        value = convertLargeValue(value);
-        return value.toString();
-    }
-
-    public static int getIndexStringValueLength() {
-        return indexStringValueLength;
-    }
-
-    /**
-     * Extract the String value
-     *
-     * @param v
-     * @return
-     */
-    private static Object convertLargeValue(Object v) {
-
-        if (Objects.nonNull(v) && v instanceof String &&
-                ((String) v).length() > getIndexStringValueLength()) {
-
-            v = ((String) v).substring(0, getIndexStringValueLength());
-
-        }
-
-        return v;
-    }
-
-    private static Object convertNumberIfNeeded(Object value) {
-        if (needConvertNumber(value)) {
-            return LongEncoding.encodeNumber(value);
-        }
-        return value;
-    }
-
-    private static boolean removeValue(Set<Object> values, Object value) {
-        for (Object compareValue : values) {
-            if (numberEquals(compareValue, value)) {
-                values.remove(compareValue);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean numberEquals(Object number1, Object number2) {
-        // Same class compare directly
-        if (number1.getClass().equals(number2.getClass())) {
-            return number1.equals(number2);
-        }
-        // Otherwise convert to BigDecimal to make two numbers comparable
-        Number n1 = NumericUtil.convertToNumber(number1);
-        Number n2 = NumericUtil.convertToNumber(number2);
-        BigDecimal b1 = BigDecimal.valueOf(n1.doubleValue());
-        BigDecimal b2 = BigDecimal.valueOf(n2.doubleValue());
-        return b1.compareTo(b2) == 0;
-    }
-
     public static String concatValues(List<?> values) {
         assert !values.isEmpty();
         List<Object> newValues = new ArrayList<>(values.size());
@@ -202,15 +129,8 @@ public class ConditionQuery extends IdQuery {
     }
 
     public static ConditionQuery fromBytes(byte[] bytes) {
-        Gson gson = new GsonBuilder()
-                .registerTypeAdapter(Condition.class, new QueryAdapter())
-                .registerTypeAdapter(Id.class, new QueryIdAdapter())
-                .setDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
-                .create();
-        String cqs = new String(bytes, StandardCharsets.UTF_8);
-        ConditionQuery conditionQuery = gson.fromJson(cqs, ConditionQuery.class);
-
-        return conditionQuery;
+        return gson.fromJson(new String(bytes, StandardCharsets.UTF_8),
+                             ConditionQuery.class);
     }
 
     private static boolean needConvertNumber(Object value) {
@@ -259,11 +179,7 @@ public class ConditionQuery extends IdQuery {
         return this.shard;
     }
 
-    private void ensureElement2IndexValueMap() {
-        if (this.element2IndexValueMap == null) {
-            this.element2IndexValueMap = new Element2IndexValueMap();
-        }
-    }
+
 
     public ConditionQuery query(Condition condition) {
         // Query by id (HugeGraph-259)
@@ -348,12 +264,10 @@ public class ConditionQuery extends IdQuery {
     }
 
     public void recordIndexValue(Id propertyId, Id id, Object indexValue) {
-        this.ensureElement2IndexValueMap();
         this.element2IndexValueMap().addIndexValue(propertyId, id, indexValue);
     }
 
     public void selectedIndexField(Id indexField) {
-        this.ensureElement2IndexValueMap();
         this.element2IndexValueMap().selectedIndexField(indexField);
     }
 
@@ -462,24 +376,32 @@ public class ConditionQuery extends IdQuery {
         return false;
     }
 
+    /**
+     * Returns the legacy condition value of the specified key.
+     *
+     * This method keeps the historical behavior for existing callers:
+     * <ul>
+     * <li>returns {@code null} if no top-level EQ/IN relation exists</li>
+     * <li>returns the single EQ value if there is exactly one top-level EQ
+     * relation and no top-level IN relation</li>
+     * <li>returns the raw IN list, including an empty list, if there is exactly
+     * one top-level IN relation and no top-level EQ relation</li>
+     * <li>returns {@code null} if several top-level EQ/IN relations resolve to
+     * an empty set</li>
+     * <li>returns the single value if several relations resolve to one value</li>
+     * <li>throws if multiple values remain after resolving several relations</li>
+     * </ul>
+     *
+     * Prefer {@link #conditionValues(Object)},
+     * {@link #singleConditionValueOrNull(Object)} or
+     * {@link #conditionValue(Object)} for new code that needs explicit
+     * semantics.
+     */
     @Watched
     public <T> T condition(Object key) {
         List<Object> valuesEQ = InsertionOrderUtil.newList();
         List<Object> valuesIN = InsertionOrderUtil.newList();
-        for (Condition c : this.conditions) {
-            if (c.isRelation()) {
-                Condition.Relation r = (Condition.Relation) c;
-                if (r.key().equals(key)) {
-                    if (r.relation() == RelationType.EQ) {
-                        valuesEQ.add(r.value());
-                    } else if (r.relation() == RelationType.IN) {
-                        Object value = r.value();
-                        assert value instanceof List;
-                        valuesIN.add(value);
-                    }
-                }
-            }
-        }
+        this.collectConditionValues(key, valuesEQ, valuesIN);
         if (valuesEQ.isEmpty() && valuesIN.isEmpty()) {
             return null;
         }
@@ -494,43 +416,24 @@ public class ConditionQuery extends IdQuery {
             return value;
         }
 
-        Set<Object> intersectValues = InsertionOrderUtil.newSet();
-        for (Object value : valuesEQ) {
-            List<Object> valueAsList = ImmutableList.of(value);
-            if (intersectValues.isEmpty()) {
-                intersectValues.addAll(valueAsList);
-            } else {
-                CollectionUtil.intersectWithModify(intersectValues,
-                        valueAsList);
-            }
-        }
-        for (Object value : valuesIN) {
-            @SuppressWarnings("unchecked")
-            List<Object> valueAsList = (List<Object>) value;
-            if (intersectValues.isEmpty()) {
-                intersectValues.addAll(valueAsList);
-            } else {
-                CollectionUtil.intersectWithModify(intersectValues,
-                        valueAsList);
-            }
-        }
+        Set<Object> intersectValues = this.resolveConditionValues(valuesEQ,
+                                                                  valuesIN);
 
         if (intersectValues.isEmpty()) {
             return null;
         }
         E.checkState(intersectValues.size() == 1,
-                "Illegal key '%s' with more than one value: %s",
-                key, intersectValues);
+                     "Illegal key '%s' with more than one value: %s",
+                     key, intersectValues);
         @SuppressWarnings("unchecked")
         T value = (T) intersectValues.iterator().next();
         return value;
     }
 
-    public void unsetCondition(Object key) {
-        this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
-    }
-
-    public boolean containsCondition(HugeKeys key) {
+    /**
+     * Returns whether there is any top-level relation for the specified key.
+     */
+    private boolean containsCondition(Object key) {
         for (Condition c : this.conditions) {
             if (c.isRelation()) {
                 Condition.Relation r = (Condition.Relation) c;
@@ -540,6 +443,138 @@ public class ConditionQuery extends IdQuery {
             }
         }
         return false;
+    }
+
+    /**
+     * Returns the resolved candidate values of the specified key from
+     * top-level EQ/IN relations.
+     *
+     * Use {@link #containsConditionValues(Object)} to distinguish "no EQ/IN
+     * condition" from "EQ/IN conditions exist but resolve to an empty
+     * intersection".
+     */
+    public Set<Object> conditionValues(Object key) {
+        List<Object> valuesEQ = InsertionOrderUtil.newList();
+        List<Object> valuesIN = InsertionOrderUtil.newList();
+        this.collectConditionValues(key, valuesEQ, valuesIN);
+        if (valuesEQ.isEmpty() && valuesIN.isEmpty()) {
+            return InsertionOrderUtil.newSet();
+        }
+        return this.resolveConditionValues(valuesEQ, valuesIN);
+    }
+
+    /**
+     * Returns whether there is any top-level EQ/IN relation for the specified
+     * key.
+     */
+    public boolean containsConditionValues(Object key) {
+        for (Condition c : this.conditions) {
+            if (c.isRelation()) {
+                Condition.Relation r = (Condition.Relation) c;
+                if (r.key().equals(key) &&
+                    (r.relation() == RelationType.EQ ||
+                     r.relation() == RelationType.IN)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns the unique resolved value of the specified key from top-level
+     * EQ/IN relations.
+     *
+     * Returns {@code null} when the resolved candidate set is empty. Throws
+     * if multiple values remain after resolution.
+     */
+    public <T> T conditionValue(Object key) {
+        Set<Object> values = this.conditionValues(key);
+        if (values.isEmpty()) {
+            return null;
+        }
+        E.checkState(values.size() == 1,
+                     "Illegal key '%s' with more than one value: %s",
+                     key, values);
+        @SuppressWarnings("unchecked")
+        T value = (T) values.iterator().next();
+        return value;
+    }
+
+    /**
+     * Returns the unique resolved value of the specified key from top-level
+     * EQ/IN relations, or {@code null} if the resolved candidate set doesn't
+     * contain exactly one value.
+     *
+     * Use this method when callers want "single-or-null" semantics instead of
+     * treating multiple remaining values as an error.
+     */
+    public <T> T singleConditionValueOrNull(Object key) {
+        Set<Object> values = this.conditionValues(key);
+        if (values.size() != 1) {
+            return null;
+        }
+        @SuppressWarnings("unchecked")
+        T value = (T) values.iterator().next();
+        return value;
+    }
+
+    public void unsetCondition(Object key) {
+        this.conditions.removeIf(c -> c.isRelation() && ((Relation) c).key().equals(key));
+    }
+
+    public boolean containsCondition(HugeKeys key) {
+        return this.containsCondition((Object) key);
+    }
+
+    public boolean containsConditionValues(HugeKeys key) {
+        return this.containsConditionValues((Object) key);
+    }
+
+    private void collectConditionValues(Object key, List<Object> valuesEQ,
+                                        List<Object> valuesIN) {
+        for (Condition c : this.conditions) {
+            if (c.isRelation()) {
+                Condition.Relation r = (Condition.Relation) c;
+                if (r.key().equals(key)) {
+                    if (r.relation() == RelationType.EQ) {
+                        valuesEQ.add(r.value());
+                    } else if (r.relation() == RelationType.IN) {
+                        Object value = r.value();
+                        assert value instanceof List;
+                        valuesIN.add(value);
+                    }
+                }
+            }
+        }
+    }
+
+    private Set<Object> resolveConditionValues(List<Object> valuesEQ,
+                                               List<Object> valuesIN) {
+        boolean initialized = false;
+        Set<Object> intersectValues = InsertionOrderUtil.newSet();
+        for (Object value : valuesEQ) {
+            List<Object> valueAsList = ImmutableList.of(value);
+            if (!initialized) {
+                intersectValues.addAll(valueAsList);
+                initialized = true;
+            } else {
+                CollectionUtil.intersectWithModify(intersectValues,
+                                                   valueAsList);
+            }
+        }
+        for (Object value : valuesIN) {
+            @SuppressWarnings("unchecked")
+            List<Object> valueAsList = (List<Object>) value;
+            if (!initialized) {
+                intersectValues.addAll(valueAsList);
+                initialized = true;
+            } else {
+                CollectionUtil.intersectWithModify(intersectValues,
+                                                   valueAsList);
+            }
+        }
+        return intersectValues;
     }
 
     public boolean containsCondition(Condition.RelationType type) {
@@ -708,30 +743,7 @@ public class ConditionQuery extends IdQuery {
         return concatValues(values);
     }
 
-    public String userpropValuesStringForIndex(List<Id> fields) {
-        List<Object> values = new ArrayList<>(fields.size());
-        for (Id field : fields) {
-            boolean got = false;
-            for (Relation r : this.userpropRelations()) {
-                if (r.key().equals(field) && !r.isSysprop()) {
-                    E.checkState(r.relation() == RelationType.EQ ||
-                                    r.relation() == RelationType.CONTAINS,
-                            "Method userpropValues(List<String>) only " +
-                                    "used for secondary index, " +
-                                    "relation must be EQ or CONTAINS, but got %s",
-                            r.relation());
-                    values.add(r.serialValue());
-                    got = true;
-                }
-            }
-            if (!got) {
-                throw new BackendException(
-                        "No such userprop named '%s' in the query '%s'",
-                        field, this);
-            }
-        }
-        return concatValuesLimitLength(values);
-    }
+
 
     public Set<Object> userpropValues(Id field) {
         Set<Object> values = new HashSet<>();
@@ -859,6 +871,10 @@ public class ConditionQuery extends IdQuery {
 
     @Override
     public boolean test(BaseElement element) {
+        return this.test(element, this.resultsFilter);
+    }
+
+    public boolean test(BaseElement element, ResultsFilter filter) {
         if (!this.ids().isEmpty() && !super.test(element)) {
             return false;
         }
@@ -870,19 +886,25 @@ public class ConditionQuery extends IdQuery {
          * We can't use sub-query results-filter here for fresh element which is
          * not committed to backend store, because it's not from a sub-query.
          */
-        if (this.resultsFilter != null && !element.fresh()) {
-            return this.resultsFilter.test(element);
+        if (filter != null && !element.fresh()) {
+            return filter.test(element);
         }
 
         /*
          * NOTE: seems need to keep call checkRangeIndex() for each condition,
          * so don't break early even if test() return false.
-         */
+        */
         boolean valid = true;
+        Map<Id, Boolean> rangeIndexMatches = null;
+        if (this.element2IndexValueMap != null) {
+            rangeIndexMatches = new HashMap<>();
+        }
         for (Condition cond : this.conditions) {
             valid &= cond.test(element);
-            valid &= this.element2IndexValueMap == null ||
-                    this.element2IndexValueMap.checkRangeIndex(element, cond);
+            if (this.element2IndexValueMap != null) {
+                valid &= this.element2IndexValueMap.checkRangeIndex(
+                         element, cond, rangeIndexMatches);
+            }
         }
         return valid;
     }
@@ -945,6 +967,10 @@ public class ConditionQuery extends IdQuery {
     public void registerResultsFilter(ResultsFilter filter) {
         assert this.resultsFilter == null;
         this.resultsFilter = filter;
+    }
+
+    public ResultsFilter resultsFilter() {
+        return this.resultsFilter;
     }
 
     public void updateResultsFilter() {
@@ -1020,15 +1046,7 @@ public class ConditionQuery extends IdQuery {
             return false;
         }
 
-        private static boolean removeValue(Set<Object> values, Object value) {
-            for (Object compareValue : values) {
-                if (numberEquals(compareValue, value)) {
-                    values.remove(compareValue);
-                    return true;
-                }
-            }
-            return false;
-        }
+
 
         private static boolean numberEquals(Object number1, Object number2) {
             // Same class compare directly
@@ -1071,10 +1089,7 @@ public class ConditionQuery extends IdQuery {
         }
 
         public Set<Object> removeIndexValues(Id indexField, Id elementId) {
-            if (!this.filed2IndexValues.containsKey(indexField)) {
-                return null;
-            }
-            return this.filed2IndexValues.get(indexField).get(elementId);
+            return this.toRemoveIndexValues(indexField, elementId);
         }
 
         public void addLeftIndex(Id elementId, Id indexField,
@@ -1093,12 +1108,7 @@ public class ConditionQuery extends IdQuery {
 
         public void addLeftIndex(Id indexField, Set<Object> indexValues,
                                  Id elementId) {
-            LeftIndex leftIndex = new LeftIndex(indexValues, indexField);
-            if (this.leftIndexMap.containsKey(elementId)) {
-                this.leftIndexMap.get(elementId).add(leftIndex);
-            } else {
-                this.leftIndexMap.put(elementId, Sets.newHashSet(leftIndex));
-            }
+            this.addLeftIndex(elementId, indexField, indexValues);
         }
 
         public void removeElementLeftIndex(Id elementId) {
@@ -1106,25 +1116,36 @@ public class ConditionQuery extends IdQuery {
         }
 
         public boolean checkRangeIndex(BaseElement element, Condition cond) {
+            return this.checkRangeIndex(element, cond, new HashMap<>());
+        }
+
+        public boolean checkRangeIndex(BaseElement element, Condition cond,
+                                       Map<Id, Boolean> rangeIndexMatches) {
             // Not UserpropRelation
             if (!(cond instanceof Condition.UserpropRelation)) {
                 return true;
             }
 
-            Condition.UserpropRelation propRelation = (Condition.UserpropRelation) cond;
+            Condition.UserpropRelation propRelation =
+                    (Condition.UserpropRelation) cond;
             Id propId = propRelation.key();
             Set<Object> fieldValues = this.toRemoveIndexValues(propId,
-                    element.id());
+                                                               element.id());
             if (fieldValues == null) {
                 // Not range index
                 return true;
+            }
+
+            if (rangeIndexMatches.containsKey(propId)) {
+                return rangeIndexMatches.get(propId);
             }
 
             BaseProperty<Object> property = element.getProperty(propId);
             if (property == null) {
                 // Property value has been deleted, so it's not matched
                 this.addLeftIndex(element.id(), propId, fieldValues);
-                return false;
+                return this.cacheRangeIndexMatch(rangeIndexMatches, propId,
+                                                 false);
             }
 
             /*
@@ -1133,7 +1154,7 @@ public class ConditionQuery extends IdQuery {
              * wait the left-index to be removed.
              */
             boolean hasRightValue = removeFieldValue(fieldValues,
-                    property.value());
+                                                     property.value());
             if (!fieldValues.isEmpty()) {
                 this.addLeftIndex(element.id(), propId, fieldValues);
             }
@@ -1145,55 +1166,23 @@ public class ConditionQuery extends IdQuery {
              * the element is valid or not.
              */
             if (this.selectedIndexField != null) {
-                return !propId.equals(this.selectedIndexField) || hasRightValue;
+                hasRightValue = !propId.equals(this.selectedIndexField) ||
+                                hasRightValue;
             }
 
-            return hasRightValue;
+            return this.cacheRangeIndexMatch(rangeIndexMatches, propId,
+                                             hasRightValue);
+        }
+
+        private boolean cacheRangeIndexMatch(Map<Id, Boolean> rangeIndexMatches,
+                                             Id propertyId,
+                                             boolean matched) {
+            rangeIndexMatches.put(propertyId, matched);
+            return matched;
         }
 
         public boolean validRangeIndex(BaseElement element, Condition cond) {
-            // Not UserpropRelation
-            if (!(cond instanceof Condition.UserpropRelation)) {
-                return true;
-            }
-
-            Condition.UserpropRelation propRelation = (Condition.UserpropRelation) cond;
-            Id propId = propRelation.key();
-            Set<Object> fieldValues = this.removeIndexValues(propId,
-                    element.id());
-            if (fieldValues == null) {
-                // Not range index
-                return true;
-            }
-
-            BaseProperty<Object> hugeProperty = element.getProperty(propId);
-            if (hugeProperty == null) {
-                // Property value has been deleted
-                this.addLeftIndex(propId, fieldValues, element.id());
-                return false;
-            }
-
-            /*
-             * NOTE: If success remove means has correct index,
-             * we should add left index values to left index map
-             * waiting to be removed
-             */
-            boolean hasRightValue = removeValue(fieldValues, hugeProperty.value());
-            if (fieldValues.size() > 0) {
-                this.addLeftIndex(propId, fieldValues, element.id());
-            }
-
-            /*
-             * NOTE: When query by more than one range index field,
-             * if current field is not the selected one, it can only be used to
-             * determine whether the index values matched, can't determine
-             * the element is valid or not
-             */
-            if (this.selectedIndexField != null) {
-                return !propId.equals(this.selectedIndexField) || hasRightValue;
-            }
-
-            return hasRightValue;
+            return this.checkRangeIndex(element, cond, new HashMap<>());
         }
     }
 

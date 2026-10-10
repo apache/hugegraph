@@ -21,6 +21,10 @@ numeric or collection util classes to simplify the development of HugeGraph and 
 - Util: performance analyzer, version checker, numeric and Collection utils, log and exception utils, etc.
 - Rpc: rpc component for inner module communication, currently it's based on [Sofa-RPC](https://github.com/sofastack/sofa-rpc)
 
+The REST client serializes object bodies as JSON for `application/json`, including media types
+with parameters such as `application/json; charset=UTF-16`. Request bodies use the declared
+charset, or UTF-8 when none is specified; gzip preserves these encoded bytes.
+
 You could use import the dependencies in `maven` like this:
 
 ```xml

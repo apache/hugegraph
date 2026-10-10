@@ -32,9 +32,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.NotImplementedException;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.backend.store.BackendEntry.BackendColumn;
+import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
 import org.apache.hugegraph.config.CoreOptions;
@@ -143,7 +143,7 @@ public class HstoreSessionsImpl extends HstoreSessions {
 
     @Override
     protected boolean opened() {
-        return this.session != null;
+        return this.session.opened();
     }
 
     @Override
@@ -407,6 +407,11 @@ public class HstoreSessionsImpl extends HstoreSessions {
                 this.iter.close();
             }
         }
+    }
+
+    static BackendColumnIterator getWithBatchExact(HgStoreSession graph, String table, List<HgOwnerKey> keys) {
+        return BackendColumnIterator.wrap(graph.batchGetOwner(table, keys).stream()
+                .map(entry -> BackendColumn.of(entry.key(), entry.value())).iterator());
     }
 
     /**
@@ -785,6 +790,12 @@ public class HstoreSessionsImpl extends HstoreSessions {
             HgKvIterator<HgKvEntry> kvIterator =
                     this.graph.batchPrefix(table, keys);
             return new ColumnIterator<>(table, kvIterator);
+        }
+
+        @Override
+        public BackendColumnIterator getWithBatchExact(String table, List<HgOwnerKey> keys) {
+            assert !this.hasChanges();
+            return HstoreSessionsImpl.getWithBatchExact(this.graph, table, keys);
         }
 
         @Override

@@ -45,7 +45,7 @@ import jakarta.ws.rs.core.Response;
 /**
  * Simple Test generate the cluster env with 1 pd node + 1 store node + 1 server node.
  * All nodes are deployed in ports generated randomly; The application of nodes is stored
- * in /apache-hugegraph-ct-1.7.0, you can visit each node with rest api.
+ * in /apache-hugegraph-ct-1.8.0, you can visit each node with rest api.
  */
 public class BaseSimpleTest {
 
@@ -74,7 +74,10 @@ public class BaseSimpleTest {
     public static void clearEnv() throws InterruptedException {
         env.stopCluster();
         Thread.sleep(2000);
-        client.close();
+        if (client != null) {
+            client.close();
+            client = null;
+        }
     }
 
     protected String execCmd(String[] cmds) throws IOException {

@@ -28,8 +28,8 @@ import java.util.function.Predicate;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hugegraph.auth.AuthManager;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendStoreInfo;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
@@ -38,16 +38,15 @@ import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.config.TypedOption;
 import org.apache.hugegraph.kvstore.KvStore;
 import org.apache.hugegraph.masterelection.GlobalMasterInfo;
-import org.apache.hugegraph.masterelection.RoleElectionStateMachine;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Client;
 import org.apache.hugegraph.rpc.RpcServiceConfig4Server;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.SchemaLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.SchemaLabel;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeFeatures;
 import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.traversal.optimize.HugeConnectiveLabelStepStrategy;
@@ -72,7 +71,7 @@ import com.alipay.remoting.rpc.RpcServer;
 /**
  * Graph interface for Gremlin operations
  */
-public interface HugeGraph extends Graph {
+public interface HugeGraph extends Graph, HugeGraphSupplier {
 
     HugeGraph hugegraph();
 
@@ -274,8 +273,6 @@ public interface HugeGraph extends Graph {
 
     AuthManager authManager();
 
-    RoleElectionStateMachine roleElectionStateMachine();
-
     void switchAuthManager(AuthManager authManager);
 
     TaskScheduler taskScheduler();
@@ -284,7 +281,7 @@ public interface HugeGraph extends Graph {
 
     void proxy(HugeGraph graph);
 
-    boolean sameAs(HugeGraph graph);
+    boolean sameAs(HugeGraphSupplier graph);
 
     long now();
 
@@ -311,15 +308,6 @@ public interface HugeGraph extends Graph {
         List<String> names = new ArrayList<>(ids.size());
         for (Id id : ids) {
             SchemaElement schema = this.vertexLabel(id);
-            names.add(schema.name());
-        }
-        return names;
-    }
-
-    default List<String> mapElId2Name(Collection<Id> ids) {
-        List<String> names = new ArrayList<>(ids.size());
-        for (Id id : ids) {
-            SchemaElement schema = this.edgeLabel(id);
             names.add(schema.name());
         }
         return names;
@@ -354,16 +342,6 @@ public interface HugeGraph extends Graph {
             }
         }
         return ids;
-    }
-
-    default Set<Pair<String, String>> mapPairId2Name(
-            Set<Pair<Id, Id>> pairs) {
-        Set<Pair<String, String>> results = new HashSet<>(pairs.size());
-        for (Pair<Id, Id> pair : pairs) {
-            results.add(Pair.of(this.vertexLabel(pair.getLeft()).name(),
-                                this.vertexLabel(pair.getRight()).name()));
-        }
-        return results;
     }
 
     default Id[] mapVlName2Id(String[] vertexLabels) {

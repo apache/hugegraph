@@ -1,20 +1,18 @@
 /*
- * Copyright 2017 HugeGraph Authors
- *
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements. See the NOTICE file distributed with this
- * work for additional information regarding copyright ownership. The ASF
- * licenses this file to You under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- * License for the specific language governing permissions and limitations
- * under the License.
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package org.apache.hugegraph.id;
@@ -22,7 +20,7 @@ package org.apache.hugegraph.id;
 import java.nio.ByteBuffer;
 
 import org.apache.commons.lang3.StringUtils;
-
+import org.apache.hugegraph.id.Id.IdType;
 import org.apache.hugegraph.serializer.BytesBuffer;
 
 public final class IdUtil {
@@ -45,7 +43,7 @@ public final class IdUtil {
     }
 
     public static Id readStoredString(String id) {
-        Id.IdType type = Id.IdType.valueOfPrefix(id);
+        IdType type = IdType.valueOfPrefix(id);
         String idContent = id.substring(1);
         switch (type) {
             case LONG:
@@ -82,23 +80,20 @@ public final class IdUtil {
         return buffer.readId();
     }
 
-
     public static String writeString(Id id) {
         String idString = id.asString();
-        StringBuilder sb = new StringBuilder(1 + idString.length());
-        sb.append(id.type().prefix()).append(idString);
-        return sb.toString();
+        return id.type().prefix() + idString;
     }
 
     public static Id readString(String id) {
-        Id.IdType type = Id.IdType.valueOfPrefix(id);
+        IdType type = IdType.valueOfPrefix(id);
         String idContent = id.substring(1);
         switch (type) {
             case LONG:
                 return IdGenerator.of(Long.parseLong(idContent));
             case STRING:
             case UUID:
-                return IdGenerator.of(idContent, type == Id.IdType.UUID);
+                return IdGenerator.of(idContent, type == IdType.UUID);
             case EDGE:
                 return EdgeId.parse(idContent);
             default:
@@ -145,12 +140,13 @@ public final class IdUtil {
 
     public static String[] unescape(String id, String splitor, String escape) {
         /*
-         * Note that the `splitor`/`escape` maybe special characters in regular
+         * Note that the `splitter`/`escape` maybe special characters in regular
          * expressions, but this is a frequently called method, for faster
          * execution, we forbid the use of special characters as delimiter
          * or escape sign.
+         *
          * The `limit` param -1 in split method can ensure empty string be
-         * splited to a part.
+         * split to a part.
          */
         String[] parts = id.split("(?<!" + escape + ")" + splitor, -1);
         for (int i = 0; i < parts.length; i++) {

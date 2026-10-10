@@ -17,10 +17,16 @@
 
 package org.apache.hugegraph.query;
 
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableSet;
-import org.apache.commons.lang.ArrayUtils;
-import org.apache.commons.text.similarity.LevenshteinDistance;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.regex.Pattern;
+
 import org.apache.hugegraph.backend.Shard;
 import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.structure.BaseElement;
@@ -30,11 +36,12 @@ import org.apache.hugegraph.util.Bytes;
 import org.apache.hugegraph.util.DateUtil;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.NumericUtil;
+import org.apache.tinkerpop.gremlin.process.traversal.PBiPredicate;
 
-import java.util.*;
-import java.util.function.BiFunction;
-import java.util.function.BiPredicate;
-import java.util.regex.Pattern;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.text.similarity.LevenshteinDistance;
 
 public abstract class Condition {
 
@@ -199,7 +206,7 @@ public abstract class Condition {
         NOT
     }
 
-    public enum RelationType implements BiPredicate<Object, Object> {
+    public enum RelationType implements PBiPredicate<Object, Object> {
 
         EQ("==", RelationType::equals),
 
@@ -519,6 +526,11 @@ public abstract class Condition {
         }
 
         public String string() {
+            return this.operator;
+        }
+
+        @Override
+        public String getPredicateName() {
             return this.operator;
         }
 

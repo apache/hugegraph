@@ -19,18 +19,16 @@ package org.apache.hugegraph.traversal.optimize;
 
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 
 import org.apache.tinkerpop.gremlin.process.traversal.Step;
 import org.apache.tinkerpop.gremlin.process.traversal.Traversal;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategy.ProviderOptimizationStrategy;
-import org.apache.tinkerpop.gremlin.process.traversal.step.Mutating;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStartStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStep;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.AddVertexStepContract;
 import org.apache.tinkerpop.gremlin.process.traversal.step.sideEffect.AddPropertyStep;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.AbstractTraversalStrategy;
-import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty.Cardinality;
 
 public class HugePrimaryKeyStrategy
@@ -48,17 +46,17 @@ public class HugePrimaryKeyStrategy
     public void apply(Traversal.Admin<?, ?> traversal) {
 
         List<Step> removeSteps = new LinkedList<>();
-        Mutating curAddStep = null;
+        AddVertexStepContract<?> curAddStep = null;
         List<Step> stepList = traversal.getSteps();
 
         for (int i = 0, s = stepList.size(); i < s; i++) {
             Step step = stepList.get(i);
 
             if (i == 0 && step instanceof AddVertexStartStep) {
-                curAddStep = (Mutating) step;
+                curAddStep = (AddVertexStepContract<?>) step;
                 continue;
-            } else if (curAddStep == null && (step) instanceof AddVertexStep) {
-                curAddStep = (Mutating) step;
+            } else if (curAddStep == null && step instanceof AddVertexStep) {
+                curAddStep = (AddVertexStepContract<?>) step;
                 continue;
             }
 
@@ -71,34 +69,17 @@ public class HugePrimaryKeyStrategy
                 continue;
             }
 
-            AddPropertyStep propertyStep = (AddPropertyStep) step;
+            AddPropertyStep<?> propertyStep = (AddPropertyStep<?>) step;
 
             if (propertyStep.getCardinality() == Cardinality.single
                 || propertyStep.getCardinality() == null) {
 
-                Object[] kvs = new Object[2];
-                boolean extraParams = false;
-
-                for (Map.Entry<Object, List<Object>> param :
-                     propertyStep.getParameters().getRaw().entrySet()) {
-                    Object paramKey = param.getKey();
-                    if (T.key.equals(paramKey)) {
-                        kvs[0] = param.getValue().get(0);
-                    } else if (T.value.equals(paramKey)) {
-                        kvs[1] = param.getValue().get(0);
-                    } else {
-                        extraParams = true;
-                    }
-                }
-
-                curAddStep.configure(kvs);
-
-                if (extraParams) {
+                curAddStep.addProperty(propertyStep.getKey(),
+                                       propertyStep.getValue());
+                if (!propertyStep.getProperties().isEmpty()) {
                     /*
-                     * Rejecting here would run for every child traversal, so an
-                     * unreachable coalesce()/choose() branch would fail too. Leave
-                     * the step for HugeVertex.property() to reject when it really
-                     * runs, and stop folding across it.
+                     * Keep metadata for HugeVertex.property() to reject only
+                     * when this branch executes, including in coalesce/choose.
                      */
                     curAddStep = null;
                 } else {

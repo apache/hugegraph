@@ -17,18 +17,66 @@
 
 package org.apache.hugegraph.struct.schema;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Set;
 
 import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.structure.BaseEdge;
+import org.apache.hugegraph.structure.BaseVertex;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.IdStrategy;
 import org.apache.hugegraph.util.DateUtil;
+import org.apache.hugegraph.util.LongEncoding;
 import org.junit.Assert;
 import org.junit.Test;
 
 public class PropertyKeyTest {
+
+    @Test
+    public void testOffsetDateTimeNormalizedToDate() {
+        OffsetDateTime value = OffsetDateTime.parse("2026-05-14T10:11:12.345678+08:00");
+        OffsetDateTime utc = value.withOffsetSameInstant(ZoneOffset.UTC);
+        Date expected = new Date(value.toInstant().toEpochMilli());
+        PropertyKey propertyKey = new PropertyKey(null, IdGenerator.of(1), "joinDate");
+        propertyKey.dataType(DataType.DATE);
+
+        Object normalized = propertyKey.validValue(value);
+        Assert.assertEquals(expected, normalized);
+        Assert.assertEquals(expected, propertyKey.validValue(utc));
+        Assert.assertEquals(345L, ((Date) normalized).getTime() % 1000L);
+        Assert.assertNull(DataType.TEXT.valueToDate(value));
+        Assert.assertNull(DataType.DATE.valueToDate(value.toLocalDateTime()));
+    }
+
+    @Test
+    public void testOffsetDateTimeSerializedAsDateNavigationKeys() {
+        OffsetDateTime value = OffsetDateTime.parse("2026-05-14T10:11:12.345678+08:00");
+        Date expected = new Date(value.toInstant().toEpochMilli());
+        PropertyKey propertyKey = new PropertyKey(null, IdGenerator.of(1), "joinDate");
+        propertyKey.dataType(DataType.DATE);
+        Object encoded = LongEncoding.encodeNumber(expected);
+
+        Assert.assertEquals(encoded, propertyKey.serialValue(value, true));
+        Assert.assertEquals(expected.toString(), propertyKey.serialValue(value, false));
+
+        VertexLabel vertexLabel = new VertexLabel(null, IdGenerator.of(2), "person");
+        vertexLabel.idStrategy(IdStrategy.PRIMARY_KEY);
+        vertexLabel.primaryKey(propertyKey.id());
+        BaseVertex vertex = new BaseVertex(null, vertexLabel);
+        vertex.addProperty(propertyKey, value);
+        Assert.assertEquals(Collections.singletonList(encoded), vertex.primaryValues());
+
+        EdgeLabel edgeLabel = new EdgeLabel(null, IdGenerator.of(3), "joined");
+        edgeLabel.sortKey(propertyKey.id());
+        BaseEdge edge = new BaseEdge(null, edgeLabel);
+        edge.addProperty(propertyKey, value.withOffsetSameInstant(ZoneOffset.UTC));
+        Assert.assertEquals(Collections.singletonList(encoded), edge.sortValues());
+    }
 
     @Test
     public void testDefaultValueNormalizedToDate() {

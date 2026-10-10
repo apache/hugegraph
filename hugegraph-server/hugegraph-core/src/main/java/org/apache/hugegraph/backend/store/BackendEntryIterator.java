@@ -19,10 +19,10 @@ package org.apache.hugegraph.backend.store;
 
 import java.util.NoSuchElementException;
 
-import org.apache.hugegraph.backend.BackendException;
+import org.apache.hugegraph.exception.BackendException;
 import org.apache.hugegraph.backend.page.PageInfo;
 import org.apache.hugegraph.backend.page.PageState;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NotSupportException;
 import org.apache.hugegraph.iterator.CIter;

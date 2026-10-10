@@ -20,8 +20,8 @@ package org.apache.hugegraph.structure;
 import java.util.Iterator;
 
 import org.apache.hugegraph.exception.NotSupportException;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
 import org.apache.tinkerpop.gremlin.structure.Element;
@@ -34,6 +34,10 @@ public class HugeVertexProperty<V> extends HugeProperty<V>
 
     public HugeVertexProperty(HugeElement owner, PropertyKey key, V value) {
         super(owner, key, value);
+    }
+
+    public HugeVertexProperty(HugeElement owner, BaseProperty<V> property) {
+        super(owner, property);
     }
 
     @Override

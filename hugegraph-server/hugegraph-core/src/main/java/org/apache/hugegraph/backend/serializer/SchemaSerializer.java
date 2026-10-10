@@ -19,10 +19,10 @@ package org.apache.hugegraph.backend.serializer;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.store.BackendEntry;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 
 public interface SchemaSerializer {
 

@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.concurrent.KeyLock;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.util.E;

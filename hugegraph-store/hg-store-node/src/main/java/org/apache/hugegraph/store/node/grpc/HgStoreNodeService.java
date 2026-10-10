@@ -35,6 +35,7 @@ import org.apache.hugegraph.store.grpc.session.TableReq;
 import org.apache.hugegraph.store.node.AppConfig;
 import org.apache.hugegraph.store.options.HgStoreEngineOptions;
 import org.apache.hugegraph.store.options.RaftRocksdbOptions;
+import org.apache.hugegraph.util.RocksDBRuntime;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.raft.RaftTaskHandler;
@@ -84,6 +85,7 @@ public class HgStoreNodeService implements RaftTaskHandler {
             setDataPath(appConfig.getDataPath());
             setRaftPath(appConfig.getRaftPath());
             setPdAddress(appConfig.getPdServerAddress());
+            setPdCluster(appConfig.getPdCluster());
             setFakePD(appConfig.isFakePd());
             setRocksdbConfig(appConfig.getRocksdbConfig());
             setGrpcAddress(appConfig.getStoreServerAddress());
@@ -119,6 +121,7 @@ public class HgStoreNodeService implements RaftTaskHandler {
             setJobConfig(appConfig.getJobOptions());
         }};
 
+        RocksDBRuntime.verify(String.valueOf(options.getRocksdbConfig().getOrDefault("rocksdb.provider", "rocksdb")));
         RaftRocksdbOptions.initRocksdbGlobalConfig(options.getRocksdbConfig());
 
         options.getLabels().put("rest.port", Integer.toString(appConfig.getRestPort()));

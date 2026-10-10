@@ -21,12 +21,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.store.raft.RaftAddPeerJob;
 import org.apache.hugegraph.backend.store.raft.RaftGroupManager;
 import org.apache.hugegraph.backend.store.raft.RaftRemovePeerJob;
@@ -173,7 +172,6 @@ public class RaftAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member"})
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> addPeer(@Context GraphManager manager,
                                    @Parameter(description = "The graph space name")
                                    @PathParam("graphspace") String graphSpace,
@@ -209,7 +207,6 @@ public class RaftAPI extends API {
     @Consumes(APPLICATION_JSON)
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member"})
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> removePeer(@Context GraphManager manager,
                                       @Parameter(description = "The graph space name")
                                       @PathParam("graphspace") String graphSpace,

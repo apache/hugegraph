@@ -29,16 +29,17 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.Cache;
 import org.apache.hugegraph.backend.cache.CachedGraphTransaction;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.ConditionQuery.OptimizedType;
-import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.tx.GraphIndexTransaction.RemoveLeftIndexJob;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.job.EphemeralJob;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery.OptimizedType;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdQuery;
+import org.apache.hugegraph.struct.schema.VertexLabel;
+import org.apache.hugegraph.structure.BaseEdge;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeElement;
 import org.apache.hugegraph.structure.HugeVertex;
@@ -87,31 +88,50 @@ public class GraphTransactionTest {
                     "rightResultFromIndexQuery", QueryResultContext.class, HugeElement.class);
             filter.setAccessible(true);
             HugeEdge edge = Mockito.mock(HugeEdge.class);
+            BaseEdge baseEdge = Mockito.mock(BaseEdge.class);
+            Mockito.when(edge.element()).thenReturn(baseEdge);
             Mockito.when(edge.type()).thenReturn(HugeType.EDGE);
             Id first = IdGenerator.of(1L);
             Id second = IdGenerator.of(2L);
             ConditionQuery query = Mockito.spy(new ConditionQuery(HugeType.EDGE));
             query.optimized(OptimizedType.INDEX);
             query.query(Condition.in(HugeKeys.LABEL, Arrays.asList(first, second)));
-            Mockito.doReturn(false).when(query).test(Mockito.eq(edge), Mockito.isNull());
+            Mockito.doReturn(false).when(query).test(Mockito.eq(baseEdge), Mockito.isNull());
 
             // Multi-label batches must not take the single-label fast path.
             Assert.assertEquals(false, filter.invoke(fixture.transaction,
                                 new QueryResultContext(query), edge));
-            Mockito.verify(query).test(edge, null);
+            Mockito.verify(query).test(baseEdge, null);
 
             // An intersection that resolves to one label can use the fast path.
             query.query(Condition.eq(HugeKeys.LABEL, first));
             Assert.assertEquals(true, filter.invoke(fixture.transaction,
                                new QueryResultContext(query), edge));
-            Mockito.verify(query).test(edge, null);
+            Mockito.verify(query).test(baseEdge, null);
 
             // An empty intersection must be filtered, not accepted as one label.
             query.query(Condition.eq(HugeKeys.LABEL, second));
             Assert.assertEquals(false, filter.invoke(fixture.transaction,
                                 new QueryResultContext(query), edge));
-            Mockito.verify(query, Mockito.times(2)).test(edge, null);
+            Mockito.verify(query, Mockito.times(2)).test(baseEdge, null);
         }
+    }
+
+    @Test
+    public void testOlapDeletionDoesNotScanBaseVertexEdges() {
+        GraphTransaction transaction = Mockito.mock(GraphTransaction.class, Mockito.CALLS_REAL_METHODS);
+        HugeVertex vertex = Mockito.mock(HugeVertex.class);
+        Mockito.when(vertex.schemaLabel()).thenReturn(VertexLabel.OLAP_VL);
+        Id id = IdGenerator.of(1L);
+        Mockito.when(vertex.id()).thenReturn(id);
+
+        // Preserve OLAP's original rejection before any ordinary edge scan.
+        IllegalStateException error = Assert.assertThrows(IllegalStateException.class, () -> {
+            transaction.prepareDeletions(Collections.singletonMap(id, vertex), Collections.emptyMap());
+        });
+        Assert.assertTrue(error.getMessage().startsWith("Graph is null of schema"));
+        Mockito.verify(transaction, Mockito.never()).queryEdgesFromBackend(Mockito.any());
+        Mockito.verify(transaction, Mockito.never()).doRemove(Mockito.any());
     }
 
     @Test

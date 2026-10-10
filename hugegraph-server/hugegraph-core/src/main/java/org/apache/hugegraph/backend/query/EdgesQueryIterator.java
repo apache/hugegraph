@@ -20,8 +20,10 @@ package org.apache.hugegraph.backend.query;
 import java.util.Iterator;
 import java.util.List;
 
-import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.type.define.Directions;
 
 public class EdgesQueryIterator implements Iterator<Query> {

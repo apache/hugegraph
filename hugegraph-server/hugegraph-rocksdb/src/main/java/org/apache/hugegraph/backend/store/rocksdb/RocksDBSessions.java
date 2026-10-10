@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.backend.store.rocksdb;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 
@@ -55,9 +58,47 @@ public abstract class RocksDBSessions extends BackendSessionPool {
 
     public abstract String hardLinkSnapshot(String snapshotPath) throws RocksDBException;
 
+    // Only paths returned by this invocation of hardLinkSnapshot may be passed here.
+    void cleanupSnapshot(String snapshotPath) {
+        throw new UnsupportedOperationException("cleanupSnapshot");
+    }
+
     public abstract void reloadRocksDB() throws RocksDBException;
 
     public abstract void forceCloseRocksDB();
+
+    public boolean databaseOpened() {
+        return this.opened();
+    }
+
+    public void clearTables(Collection<String> tables) {
+        Session session = (Session) this.useSession();
+        try {
+            List<Pair<String, Pair<byte[], byte[]>>> ranges = new ArrayList<>();
+            for (String table : tables) {
+                Pair<byte[], byte[]> range = session.keyRange(table);
+                if (range != null) {
+                    ranges.add(Pair.of(table, range));
+                }
+            }
+
+            for (Pair<String, Pair<byte[], byte[]>> entry : ranges) {
+                String table = entry.getLeft();
+                byte[] first = entry.getRight().getLeft();
+                byte[] last = entry.getRight().getRight();
+                if (!Arrays.equals(first, last)) {
+                    session.deleteRange(table, first, last);
+                }
+                session.delete(table, last);
+            }
+            session.commit();
+        } catch (Throwable e) {
+            session.rollback();
+            throw e;
+        } finally {
+            this.close();
+        }
+    }
 
     @Override
     public abstract Session session();

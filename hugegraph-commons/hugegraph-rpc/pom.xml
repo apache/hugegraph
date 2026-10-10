@@ -106,7 +106,7 @@
         <dependency>
             <groupId>io.grpc</groupId>
             <artifactId>grpc-core</artifactId>
-            <version>1.28.1</version>
+            <version>${grpc.version}</version>
         </dependency>
     </dependencies>
 
@@ -124,7 +124,6 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>0.8.2</version>
                 <executions>
                     <execution>
                         <id>pre-unit-test</id>

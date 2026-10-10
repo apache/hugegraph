@@ -41,6 +41,7 @@ public final class OrderedMultiPartitionIterator implements ScanIterator {
 
     private boolean initialized;
     private boolean closed;
+    private Throwable cleanupFailure;
     private Integer currentPartitionId;
 
     private OrderedMultiPartitionIterator(List<Integer> partitionIds,
@@ -142,22 +143,29 @@ public final class OrderedMultiPartitionIterator implements ScanIterator {
     @Override
     public void close() {
         if (this.closed) {
+            rethrowCleanupFailure();
             return;
         }
         this.closed = true;
-        Throwable failure = null;
+        Throwable failure = this.cleanupFailure;
         for (SourceEntry source : this.sources) {
             try {
                 this.closeSource(source);
             } catch (RuntimeException | Error e) {
                 if (failure == null) {
                     failure = e;
-                } else {
+                } else if (failure != e) {
                     failure.addSuppressed(e);
                 }
             }
         }
         this.queue.clear();
+        this.cleanupFailure = failure;
+        rethrowCleanupFailure();
+    }
+
+    private void rethrowCleanupFailure() {
+        Throwable failure = this.cleanupFailure;
         if (failure instanceof RuntimeException) {
             throw (RuntimeException) failure;
         }
@@ -197,14 +205,23 @@ public final class OrderedMultiPartitionIterator implements ScanIterator {
             return;
         }
         source.closed = true;
-        source.iterator.close();
+        try {
+            source.iterator.close();
+        } catch (RuntimeException | Error failure) {
+            if (this.cleanupFailure == null) {
+                this.cleanupFailure = failure;
+            }
+            throw failure;
+        }
     }
 
     private void closeAfterFailure(Throwable failure) {
         try {
             this.close();
         } catch (RuntimeException | Error closeFailure) {
-            failure.addSuppressed(closeFailure);
+            if (failure != closeFailure) {
+                failure.addSuppressed(closeFailure);
+            }
         }
     }
 

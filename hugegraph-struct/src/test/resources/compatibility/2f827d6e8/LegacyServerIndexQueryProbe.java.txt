@@ -1,0 +1,49 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Collections;
+import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.backend.query.ConditionQuery;
+import org.apache.hugegraph.backend.query.IdPrefixQuery;
+import org.apache.hugegraph.backend.serializer.BinarySerializer;
+import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.HugeKeys;
+
+public class LegacyServerIndexQueryProbe {
+    public static void main(String[] args) throws Exception {
+        String input = "long-field-".repeat(20);
+        String value = ConditionQuery.concatValues(Collections.singletonList(input));
+        ConditionQuery query = new ConditionQuery(HugeType.SECONDARY_INDEX);
+        query.eq(HugeKeys.INDEX_LABEL_ID, IdGenerator.of(15L));
+        query.eq(HugeKeys.FIELD_VALUES, value);
+        IdPrefixQuery encoded = (IdPrefixQuery) new BinarySerializer().writeQuery(query);
+        String text = "server.query.field.length=" + value.length() + "\n" +
+                      "server.query.prefix=" + hex(encoded.prefix().asBytes()) + "\n";
+        Files.writeString(Path.of(args[0]).resolve("index-builder-contract.properties"), text,
+                          StandardCharsets.UTF_8, StandardOpenOption.APPEND);
+        System.out.println("Original Server query: field " + value.length() +
+                           " -> prefix " + hex(encoded.prefix().asBytes()));
+    }
+    private static String hex(byte[] bytes) {
+        StringBuilder text = new StringBuilder();
+        for (byte value : bytes) { text.append(String.format("%02x", value & 0xff)); }
+        return text.toString();
+    }
+}

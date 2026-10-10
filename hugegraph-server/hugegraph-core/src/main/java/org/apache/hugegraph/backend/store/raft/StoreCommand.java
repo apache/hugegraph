@@ -17,7 +17,7 @@
 
 package org.apache.hugegraph.backend.store.raft;
 
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.raft.rpc.RaftRequests.StoreAction;
 import org.apache.hugegraph.backend.store.raft.rpc.RaftRequests.StoreType;
 

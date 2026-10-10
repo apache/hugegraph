@@ -63,11 +63,12 @@ ensure_path_writable "$PLUGINS"
 # The maximum and minimum heap memory that service can use
 MAX_MEM=$((32 * 1024))
 MIN_MEM=$((1 * 512))
-MIN_JAVA_VERSION=11
+MIN_JAVA_VERSION=17
 # JDK 24 removed the Security Manager (JEP 486): "-Djava.security.manager=allow"
 # is a fatal VM initialization error there and System.setSecurityManager() always
 # throws, so HugeSecurityManager cannot be installed on newer runtimes.
 MAX_SECURITY_JAVA_VERSION=23
+JVM_MODULE_OPTIONS="${BIN}/jvm-module.options"
 
 # Add the slf4j-log4j12 binding
 CP=$(find -L $LIB -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
@@ -85,7 +86,8 @@ CP="$CP":$(find -L $PLUGINS -name '*.jar' | sort | tr '\n' ':')
 # (Cygwin only) Use ; classpath separator and reformat paths for Windows ("C:\foo")
 [[ $(uname) = CYGWIN* ]] && CP="$(cygpath -p -w "$CP")"
 
-export CLASSPATH="${CLASSPATH:-}:$CP"
+source "$BIN/preload-topling.sh" || exit 1
+export CLASSPATH="${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}${CLASSPATH:-}:$CP"
 
 # Change to $BIN's parent
 cd "${TOP}" || exit 1
@@ -114,6 +116,11 @@ if [[ -z $JAVA_VERSION || $JAVA_VERSION -lt $MIN_JAVA_VERSION ]]; then
     exit 1
 fi
 
+if [[ ! -r ${JVM_MODULE_OPTIONS} ]]; then
+    echo "Missing or unreadable JVM module options file: ${JVM_MODULE_OPTIONS}" >> "${OUTPUT}"
+    exit 1
+fi
+
 # Set Java options
 if [ "$JAVA_OPTIONS" = "" ]; then
     XMX=$(calc_xmx $MIN_MEM $MAX_MEM)
@@ -128,30 +135,27 @@ if [ "$JAVA_OPTIONS" = "" ]; then
     #              -Xloggc:./logs/gc.log -XX:+PrintHeapAtGC -XX:+PrintGCDetails -XX:+PrintGCDateStamps"
 fi
 
-if [[ $JAVA_VERSION -gt 9 ]]; then
-    JAVA_OPTIONS="${JAVA_OPTIONS} --add-exports=java.base/jdk.internal.reflect=ALL-UNNAMED \
-                                  --add-modules=jdk.unsupported \
-                                  --add-exports=java.base/sun.nio.ch=ALL-UNNAMED "
-fi
-
-# Using G1GC as the default garbage collector (Recommended for large memory machines)
-# mention: zgc is only available on ARM-Mac with java > 13
+# Keep JVM/caller GC selection by default; explicitly select G1 when requested.
 case "$GC_OPTION" in
-    "")
-        echo "Using G1GC as the default garbage collector"
-        JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+ParallelRefProcEnabled \
-                                      -XX:InitiatingHeapOccupancyPercent=50 \
-                                      -XX:G1RSetUpdatingPauseTimePercent=5"
+    ""|g1|G1)
+        if [[ "$GC_OPTION" == g1 || "$GC_OPTION" == G1 ]]; then
+            echo "Using G1GC"
+            JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseG1GC"
+        else
+            echo "Using JVM garbage collector configuration"
+        fi
+        JAVA_OPTIONS="-XX:+ParallelRefProcEnabled -XX:InitiatingHeapOccupancyPercent=50 \
+                      -XX:G1RSetUpdatingPauseTimePercent=5 ${JAVA_OPTIONS}"
         ;;
     zgc|ZGC)
-        echo "Using ZGC as the default garbage collector (Only support Java 11+)"
+        echo "Using ZGC as the default garbage collector (requires Java 17 or later)"
         JAVA_OPTIONS="${JAVA_OPTIONS} -XX:+UseZGC -XX:+UnlockExperimentalVMOptions \
                                       -XX:ConcGCThreads=2 -XX:ParallelGCThreads=6 \
                                       -XX:ZCollectionInterval=120 -XX:ZAllocationSpikeTolerance=5 \
                                       -XX:+UnlockDiagnosticVMOptions -XX:-ZProactive"
         ;;
     *)
-        echo "Unrecognized gc option: '$GC_OPTION', default use g1, options only support 'ZGC' now" >> ${OUTPUT}
+        echo "Unrecognized gc option: '$GC_OPTION', supported options: g1, ZGC" >> ${OUTPUT}
         exit 1
 esac
 
@@ -258,13 +262,13 @@ fi
 
 # Turn on security check
 if [[ "${STDOUT_MODE:-false}" == "true" ]]; then
-    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+    exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF}
 else
-    exec ${JAVA} -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
-        ${SECURITY_MANAGER_OPTION} -cp ${CLASSPATH}: \
+    exec ${JAVA} @"${JVM_MODULE_OPTIONS}" -Dname="HugeGraphServer" ${JVM_OPTIONS} ${JAVA_OPTIONS} \
+        ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
         >> ${LOGS}/hugegraph-server-stdout.log 2>&1

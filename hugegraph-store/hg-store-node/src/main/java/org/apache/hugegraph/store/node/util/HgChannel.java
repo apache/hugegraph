@@ -37,6 +37,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class HgChannel<T> {
 
+    // Recheck close without interrupting a borrowed caller thread.
+    private static final long CLOSE_POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
     private final BlockingQueue<Supplier<T>> queue;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final long timeoutSeconds;
@@ -69,14 +71,27 @@ public final class HgChannel<T> {
             if (this.closed.get()) {
                 return false;
             }
-            boolean flag;
+            long timeoutNanos = Math.max(0L, TimeUnit.SECONDS.toNanos(this.timeoutSeconds));
+            long started = System.nanoTime();
+            long remaining = timeoutNanos;
+            Supplier<T> supplier = () -> t;
             try {
-                flag = this.queue.offer(() -> t, timeoutSeconds, TimeUnit.SECONDS);
+                do {
+                    if (this.closed.get()) {
+                        return false;
+                    }
+                    if (this.queue.offer(supplier, Math.max(0L, Math.min(remaining, CLOSE_POLL_NANOS)),
+                                         TimeUnit.NANOSECONDS)) {
+                        return true;
+                    }
+                    remaining = timeoutNanos - (System.nanoTime() - started);
+                } while (remaining > 0L);
+                return false;
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 log.error("failed to send a item to chan. cause by: ", t);
                 throw new RuntimeException(e);
             }
-            return flag;
         }
     }
 
@@ -105,11 +120,29 @@ public final class HgChannel<T> {
             if (this.closed.get()) {
                 s = this.queue.poll();
             } else {
+                long timeoutNanos = Math.max(0L, TimeUnit.SECONDS.toNanos(this.timeoutSeconds));
+                long started = System.nanoTime();
+                long remaining = timeoutNanos;
+                s = null;
                 try {
-                    s = this.queue.poll(timeoutSeconds, TimeUnit.SECONDS);
-                } catch (Throwable t) {
-                    log.error("Failed to receive a item from chan. cause by: ", t);
-                    throw new RuntimeException(t);
+                    do {
+                        if (this.closed.get()) {
+                            return null;
+                        }
+                        s = this.queue.poll(Math.max(0L, Math.min(remaining, CLOSE_POLL_NANOS)),
+                                            TimeUnit.NANOSECONDS);
+                        if (s != null) {
+                            break;
+                        }
+                        remaining = timeoutNanos - (System.nanoTime() - started);
+                    } while (remaining > 0L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.error("Failed to receive a item from chan. cause by: ", e);
+                    throw new RuntimeException(e);
+                }
+                if (s == null && this.closed.get()) {
+                    return null;
                 }
                 if (s == null) {
                     if (timeoutCallBack == null) {
@@ -136,14 +169,7 @@ public final class HgChannel<T> {
      * @throws RuntimeException when fail to close the chan
      */
     public void close() {
-        if (this.closed.get()) {
-            return;
-        }
         this.closed.set(true);
-        this.queue.offer(() -> null);
-        Thread.yield();
-        this.queue.poll();
-
     }
 
 }

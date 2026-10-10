@@ -24,32 +24,32 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.lang.NotImplementedException;
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.EdgeId;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
-import org.apache.hugegraph.backend.id.IdUtil;
-import org.apache.hugegraph.backend.id.SplicingIdGenerator;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.IdPrefixQuery;
-import org.apache.hugegraph.backend.query.IdRangeQuery;
-import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.EdgeId;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
+import org.apache.hugegraph.id.IdUtil;
+import org.apache.hugegraph.id.SplicingIdGenerator;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.IdPrefixQuery;
+import org.apache.hugegraph.query.IdRangeQuery;
+import org.apache.hugegraph.query.Query;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.iterator.CIter;
-import org.apache.hugegraph.schema.EdgeLabel;
-import org.apache.hugegraph.schema.IndexLabel;
-import org.apache.hugegraph.schema.PropertyKey;
-import org.apache.hugegraph.schema.SchemaElement;
-import org.apache.hugegraph.schema.VertexLabel;
+import org.apache.hugegraph.struct.schema.EdgeLabel;
+import org.apache.hugegraph.struct.schema.IndexLabel;
+import org.apache.hugegraph.struct.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.SchemaElement;
+import org.apache.hugegraph.struct.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeEdgeProperty;
 import org.apache.hugegraph.structure.HugeElement;
-import org.apache.hugegraph.structure.HugeIndex;
-import org.apache.hugegraph.structure.HugeIndex.IdWithExpiredTime;
+import org.apache.hugegraph.structure.Index;
+import org.apache.hugegraph.structure.Index.IdWithExpiredTime;
 import org.apache.hugegraph.structure.HugeProperty;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.structure.HugeVertexProperty;
@@ -363,7 +363,7 @@ public class TextSerializer extends AbstractSerializer {
     }
 
     @Override
-    public BackendEntry writeIndex(HugeIndex index) {
+    public BackendEntry writeIndex(Index index) {
         TextBackendEntry entry = newBackendEntry(index.type(), index.id());
         if (index.fieldValues() == null && index.elementIds().isEmpty()) {
             /*
@@ -386,7 +386,7 @@ public class TextSerializer extends AbstractSerializer {
     }
 
     @Override
-    public HugeIndex readIndex(HugeGraph graph, ConditionQuery query,
+    public Index readIndex(HugeGraph graph, ConditionQuery query,
                                BackendEntry backendEntry) {
         E.checkNotNull(graph, "serializer graph");
         if (backendEntry == null) {
@@ -402,7 +402,7 @@ public class TextSerializer extends AbstractSerializer {
                 formatSyspropName(HugeKeys.ELEMENT_IDS));
 
         IndexLabel indexLabel = IndexLabel.label(graph, readId(indexLabelId));
-        HugeIndex index = new HugeIndex(graph, indexLabel);
+        Index index = new Index(graph, indexLabel);
         index.fieldValues(JsonUtil.fromJson(indexValues, Object.class));
         for (IdWithExpiredTime elemId : readElementIds(elemIds)) {
             long expiredTime = elemId.expiredTime();

@@ -190,6 +190,22 @@ public class TaskScheduleService {
 
     public void shutDown() {
         executor.shutdownNow();
+        boolean interrupted = Thread.interrupted();
+        try {
+            while (!executor.isTerminated()) {
+                try {
+                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        log.warn("Waiting for PD scheduled tasks to stop");
+                    }
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                }
+            }
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 
     private boolean isLeader() {

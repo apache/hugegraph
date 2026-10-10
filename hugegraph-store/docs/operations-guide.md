@@ -448,6 +448,15 @@ df -h
 
 ---
 
+### State Machine Apply Failures
+
+A partition that reports a Raft state machine error stops applying logs and is
+not automatically restarted, including by the activity check. Inspect the Store
+error log and repair the underlying storage or apply failure before manually
+restarting the Store process. Restarting without repairing the cause may replay
+the same failing entry. This protection does not undo writes already performed
+by the failed entry.
+
 ## Backup and Recovery
 
 ### Backup Strategies
@@ -498,6 +507,22 @@ scp backup-store1-*.tar.gz backup-server:/backups/
    - Deploy new Store node with same configuration
    - PD automatically assigns partitions to new node
    - Wait for data replication (may take hours)
+   - If the new node reuses the failed node's raft address with an empty data directory (for
+     example a Kubernetes StatefulSet Pod rebuilt after its volume was lost), it registers under
+     a new store ID while the old ID still holds its partitions. Retire the old ID on the PD
+     leader so the replicas move to the new node:
+     ```bash
+     # Two entries share the address: the new ID and the old one
+     curl http://192.168.1.10:8620/v1/stores
+     curl -X POST -H 'Content-Type: application/json' -d '{"storeState":"Tombstone"}' \
+          http://192.168.1.10:8620/v1/store/<oldStoreId>
+     curl http://192.168.1.10:8620/v1/task/patrolPartitions
+     ```
+     Every shard group in `/v1/shardGroups` should then list the new ID, and the new node's
+     `http://<store>:8520/v1/partition/<partitionId>` should answer for each group. Then remove
+     the old record with `curl -X DELETE http://192.168.1.10:8620/v1/store/<oldStoreId>`. Store
+     versions without the fix for apache/hugegraph#3227 never finish this: the groups keep the
+     old ID and the new node stays empty.
 
 4. **Verify**: Check partition distribution
    ```bash
@@ -659,6 +684,10 @@ curl http://192.168.1.10:8620/v1/partitionsAndStatus
 ---
 
 ## Rolling Upgrades
+
+<!-- TODO: verify the 1.8.0 package examples after publication; retain historical source-version and rollback paths. -->
+
+The 1.8.0 package paths below illustrate a future release upgrade. Run these steps only after that release is published.
 
 ### Upgrade Strategy
 

@@ -30,6 +30,7 @@ import org.apache.hugegraph.store.node.util.HgStoreNodeUtil;
 
 import com.google.protobuf.ByteString;
 
+import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import lombok.extern.slf4j.Slf4j;
@@ -51,10 +52,19 @@ public class ScanBatchOneShotResponse {
     public static void scanOneShot(ScanStreamBatchReq request,
                                    StreamObserver<KvPageRes> responseObserver,
                                    HgStoreWrapperEx wrapper) {
+        scanOneShot(request, responseObserver, wrapper, new ScanLifecycle());
+    }
+
+    static void scanOneShot(ScanStreamBatchReq request, StreamObserver<KvPageRes> output,
+                            HgStoreWrapperEx wrapper, ScanLifecycle lifecycle) {
+        StreamObserver<KvPageRes> responseObserver = lifecycle.response(output);
 
         String graph = request.getHeader().getGraph();
         ScanQueryRequest queryRequest = request.getQueryRequest();
-        ScanIterator iterator = getIterator(graph, queryRequest, wrapper);
+        if ((Context.current().isCancelled() || lifecycle.isCancelled())) {
+            return;
+        }
+        ScanIterator iterator = getIterator(graph, queryRequest, wrapper, lifecycle::failedCleanup);
 
         KvPageRes.Builder resBuilder = KvPageRes.newBuilder();
         Kv.Builder kvBuilder = Kv.newBuilder();
@@ -68,9 +78,11 @@ public class ScanBatchOneShotResponse {
         }
 
         int count = 0;
+        boolean cleanupAttempted = false;
 
         try {
-            while (iterator.hasNext()) {
+            while (!(Context.current().isCancelled() || lifecycle.isCancelled()) &&
+                   !Thread.currentThread().isInterrupted() && iterator.hasNext()) {
 
                 if (++count > limit) {
                     break;
@@ -86,6 +98,19 @@ public class ScanBatchOneShotResponse {
 
             }
 
+            if ((Context.current().isCancelled() || lifecycle.isCancelled())) {
+                return;
+            }
+            if (Thread.currentThread().isInterrupted()) {
+                responseObserver.onError(HgGrpc.toErr(Status.Code.CANCELLED, "Scanning interrupted"));
+                return;
+            }
+            cleanupAttempted = true;
+            if (!lifecycle.close(iterator)) {
+                responseObserver.onError(Status.INTERNAL.withDescription("Failed to close scan iterator")
+                                                       .withCause(lifecycle.cleanupFailure()).asRuntimeException());
+                return;
+            }
             responseObserver.onNext(resBuilder.build());
             responseObserver.onCompleted();
 
@@ -94,7 +119,10 @@ public class ScanBatchOneShotResponse {
             responseObserver.onError(
                     HgGrpc.toErr(Status.Code.INTERNAL, msg, t));
         } finally {
-            iterator.close();
+            if (!cleanupAttempted && !lifecycle.close(iterator)) {
+                responseObserver.onError(Status.INTERNAL.withDescription("Failed to close scan iterator")
+                                                       .withCause(lifecycle.cleanupFailure()).asRuntimeException());
+            }
         }
 
     }

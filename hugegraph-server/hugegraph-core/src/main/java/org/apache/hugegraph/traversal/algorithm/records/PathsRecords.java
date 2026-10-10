@@ -19,7 +19,7 @@ package org.apache.hugegraph.traversal.algorithm.records;
 
 import java.util.function.Function;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
 import org.apache.hugegraph.traversal.algorithm.HugeTraverser.PathSet;
 import org.apache.hugegraph.traversal.algorithm.records.record.RecordType;

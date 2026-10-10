@@ -30,24 +30,24 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraph;
-import org.apache.hugegraph.backend.BackendException;
-import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.id.IdGenerator;
+import org.apache.hugegraph.exception.BackendException;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.id.IdGenerator;
 import org.apache.hugegraph.backend.page.PageInfo;
-import org.apache.hugegraph.backend.query.Condition;
-import org.apache.hugegraph.backend.query.ConditionQuery;
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.serializer.BytesBuffer;
+import org.apache.hugegraph.query.Condition;
+import org.apache.hugegraph.query.ConditionQuery;
+import org.apache.hugegraph.query.Query;
+import org.apache.hugegraph.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.store.BackendTable;
-import org.apache.hugegraph.backend.store.Shard;
+import org.apache.hugegraph.backend.Shard;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.exception.LimitExceedException;
 import org.apache.hugegraph.exception.NoIndexException;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.struct.schema.Userdata;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.testutil.Assert;
@@ -211,6 +211,48 @@ public class EdgeCoreTest extends BaseCoreTest {
               .by("tool").create();
         schema.indexLabel("strikeByPlaceToolReason").onE("strike").secondary()
               .by("place", "tool", "reason").create();
+    }
+
+    @Test
+    public void testDeleteEdgeWithMissingSchemaLabel() throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+        Vertex author = graph.addVertex(T.label, "author", "id", 1, "name", "James",
+                                        "age", 62, "lived", "Canadian");
+        Vertex book = graph.addVertex(T.label, "book", "name", "Java");
+        Edge edge = author.addEdge("authored", book, "score", 3);
+        graph.tx().commit();
+
+        // Preserve the backend edge while removing its schema metadata.
+        params().schemaTransaction().removeSchema(graph.edgeLabel("authored"));
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+        Edge orphan = graph.edges(edge.id()).next();
+        Assert.assertEquals("~undefined", orphan.label());
+
+        orphan.remove();
+        graph.tx().commit();
+        Assert.assertFalse(graph.edges(edge.id()).hasNext());
+        Assert.assertFalse(graph.vertices(author.id()).next().edges(Direction.OUT).hasNext());
+        Assert.assertFalse(graph.vertices(book.id()).next().edges(Direction.IN).hasNext());
+    }
+
+    @Test
+    public void testDeleteVertexAdjacentToEdgeWithMissingSchemaLabel() throws InterruptedException, ExecutionException {
+        HugeGraph graph = graph();
+        Vertex author = graph.addVertex(T.label, "author", "id", 1, "name", "James",
+                                        "age", 62, "lived", "Canadian");
+        Vertex book = graph.addVertex(T.label, "book", "name", "Java");
+        Edge edge = author.addEdge("authored", book, "score", 3);
+        graph.tx().commit();
+
+        params().schemaTransaction().removeSchema(graph.edgeLabel("authored"));
+        params().graphEventHub().notify(Events.CACHE, "clear", null).get();
+        Assert.assertEquals("~undefined", graph.edges(edge.id()).next().label());
+
+        graph.vertices(author.id()).next().remove();
+        graph.tx().commit();
+        Assert.assertFalse(graph.vertices(author.id()).hasNext());
+        Assert.assertFalse(graph.edges(edge.id()).hasNext());
+        Assert.assertFalse(graph.vertices(book.id()).next().edges(Direction.IN).hasNext());
     }
 
     @Test
@@ -3176,9 +3218,7 @@ public class EdgeCoreTest extends BaseCoreTest {
 
         // Fill edge properties
         Assert.assertEquals(2, edge.getProperties().size());
-        Whitebox.setInternalState(edge, "propLoaded", false);
-        Whitebox.setInternalState(edge, "properties",
-                                  CollectionFactory.newIntObjectMap());
+        edge.resetProperties();
         Assert.assertEquals(0, edge.getProperties().size());
         Assert.assertEquals(2, edge.getFilledProperties().size());
         Assert.assertEquals(2, edge.getProperties().size());

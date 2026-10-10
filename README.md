@@ -16,7 +16,7 @@
 
 ---
 
-**Quick Navigation:** [Architecture](#architecture) • [Quick Start](#quick-start) • [Module Map](#module-map) • [Ecosystem](#ecosystem) • [For Contributors](#for-contributors) • [Community](#community)
+**Quick Navigation:** [Architecture](#architecture) • [Quick Start](#quick-start) • [Module Map](#module-map) • [Ecosystem](#ecosystem) • [For Contributors](#contributing) • [Community](#community)
 
 ---
 
@@ -66,7 +66,7 @@ HugeGraph supports both **standalone** and **distributed** deployments:
                         │             HugeGraph Server (:8080)                │
                         │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
                         │  │ REST API │  │ Gremlin  │  │   Cypher Engine  │   │
-                        │  │(Jersey 3)│  │ (TP 3.5) │  │   (OpenCypher)   │   │
+                        │  │(Jersey 3)│  │(TP 3.8.1)│  │   (OpenCypher)   │   │
                         │  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
                         │       └─────────────┼─────────────────┘             │
                         │            ┌────────▼────────┐                      │
@@ -100,6 +100,8 @@ HugeGraph supports both **standalone** and **distributed** deployments:
 
 See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-and-compatibility) for lifecycle and historical compatibility guidance.
 
+To use ToplingDB with the RocksDB backend, follow the [three-step switching guide](docs/storage-lifecycle.md#storage-provider-selection-and-toplingdb).
+
 ### Deployment Mode Comparison
 
 | Mode | Components | Use Case | Data Scale | High Availability |
@@ -115,6 +117,9 @@ See the [backend evolution guide](hugegraph-server/README.md#backend-evolution-a
 | [hugegraph-pd](hugegraph-pd/README.md) | Placement Driver for distributed mode - handles meta storage, partition management and cluster scheduling |
 | [hugegraph-store](hugegraph-store/README.md) | Distributed storage with Raft consensus for high availability and horizontal scaling |
 | [hugegraph-commons](hugegraph-commons) | Shared utilities, RPC framework and common components |
+| [hugegraph-struct](hugegraph-struct/README.md) | Shared schema, IDs, base elements, queries and encoding used by Server and Store |
+
+See the [1.8.0 shared-foundation migration guide](docs/shared-foundation-migration.md) for Java API changes, module ownership and coordinated upgrade requirements.
 
 <details>
 <summary><b>📊 Click to view detailed architecture diagram (Mermaid)</b></summary>
@@ -125,7 +130,7 @@ flowchart TB
 
     subgraph Server["HugeGraph Server :8080"]
         API[REST API<br/>Jersey 3]
-        GS[Gremlin Server<br/>TinkerPop 3.5]
+        GS[Gremlin Server<br/>TinkerPop 3.8.1]
         CS[Cypher Engine<br/>OpenCypher]
         CORE[Graph Engine<br/>hugegraph-core]
 
@@ -157,6 +162,8 @@ flowchart TB
 
 ## Quick Start
 
+<!-- TODO: update release downloads, package names, image tags and version examples after 1.8.0 is published. -->
+
 ### 5 Minutes Quick Start
 
 ```bash
@@ -176,8 +183,15 @@ curl -X POST http://localhost:8080/gremlin \
 
 ### Prerequisites
 
-- **Java 11+** (required)
-- **Maven 3.5+** (for building from source)
+- **Java 17** (required and currently the only supported Java release)
+- **Maven 3.6.3+** (for building from source)
+
+The launch scripts reject Java versions older than 17. That minimum-version
+check does not qualify later Java releases; use Java 17 unless another release
+is explicitly listed as supported.
+
+Read the [Server runtime guide](docs/server-runtime.md#runtime-and-client-configuration)
+for client configuration and query compatibility checks.
 
 ### Option 1: Docker (Fastest)
 
@@ -207,9 +221,16 @@ For advanced Docker configurations, see:
 >
 > **Version Tags**: Use release tags (e.g., `1.7.0`) for stable deployments. The `latest` tag should only be used for testing or development.
 
+### Option 2: Kubernetes with Helm
+
+The HStore Helm chart deploys HugeGraph PD, Store, and Server as a distributed
+Kubernetes cluster. See the [chart documentation](helm/hugegraph/README.md) for
+single-node and highly available presets, configuration, and
+upgrade guidance.
+
 
 <details>
-<summary><b>Option 2: Download Binary Package</b></summary>
+<summary><b>Option 3: Download Binary Package</b></summary>
 
 Download pre-built packages from the [Download Page](https://hugegraph.apache.org/docs/download/download/):
 
@@ -242,7 +263,7 @@ For detailed instructions, see the [Binary Installation Guide](https://hugegraph
 </details>
 
 <details>
-<summary><b>Option 3: Build from Source</b></summary>
+<summary><b>Option 4: Build from Source</b></summary>
 
 Build from source for development or customization:
 
@@ -281,7 +302,7 @@ curl http://localhost:8080/versions
 #   "versions": {
 #     "version": "v1",
 #     "core": "1.7.0",
-#     "gremlin": "3.5.1",
+#     "gremlin": "3.8.1",
 #     "api": "1.7.0"
 #   }
 # }
@@ -295,6 +316,8 @@ gremlin> :> g.V().limit(5)
 ```
 
 For comprehensive documentation, visit the [HugeGraph Documentation](https://hugegraph.apache.org/docs/).
+
+Read the [storage lifecycle and recovery guide](docs/storage-lifecycle.md) before restoring data, mounting store directories or upgrading the storage runtime.
 
 </details>
 
@@ -327,7 +350,7 @@ For repository constraints and module guidance, see [AGENTS.md](AGENTS.md).
    - Review the [Architecture Diagram](#architecture) above
 
 2. **Set Up Your Environment**
-   - Install Java 11+ and Maven 3.5+
+   - Install Java 17 and Maven 3.6.3+
    - Follow [BUILDING.md](docs/BUILDING.md) for build instructions
    - Configure your IDE to use `.editorconfig` for code style and `style/checkstyle.xml` for Checkstyle rules
 

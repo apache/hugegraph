@@ -17,9 +17,9 @@
 
 package org.apache.hugegraph.job.schema;
 
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.backend.tx.ISchemaTransaction;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 
 public class OlapPropertyKeyRemoveJob extends OlapPropertyKeyClearJob {
 

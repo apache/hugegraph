@@ -52,7 +52,7 @@ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE. 
+THE SOFTWARE.
 
 
 ========================================================================
@@ -152,153 +152,6 @@ Unless required by applicable law or agreed to in writing, software distributed 
 is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 or implied. See the License for the specific language governing permissions and limitations under
 the License.
-
-========================================================================
-
-Apache TinkerPop NOTICE
-
-========================================================================
-Apache TinkerPop
-Copyright 2015-2022 The Apache Software Foundation.
-
-------------------------------------------------------------------------
-Activiti
-------------------------------------------------------------------------
-Activiti BPM Platform
-Copyright 2010-2014 Alfresco Software, Ltd.
-
-gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/structure/io/graphml/GraphMLWriterHelper.java
-contains DelegatingXMLStreamWriter.java and IndentingXMLStreamWriter.java from
-https://github.com/Activiti/Activiti/tree/activiti-5.16/modules/activiti-bpmn-converter/src/main/java/org/activiti/bpmn/converter
-
-------------------------------------------------------------------------
-Apache Kerby
-------------------------------------------------------------------------
-Apache Kerby
-Copyright 2015-2017 The Apache Software Foundation
-
-gremlin-server/src/main/java/org/apache/tinkerpop/gremlin/server/auth/JaasKrbUtil.java
-from
-https://github.com/apache/directory-kerby/blob/kerby-all-1.0.0/kerby-kerb/kerb-simplekdc/src/main/java/org/apache/kerby/kerberos/kerb/client/JaasKrbUtil.java
-
-
-========================================================================
-
-gremlin-console NOTICE
-
-========================================================================
-
-Apache TinkerPop :: Gremlin Console
-Copyright 2013-2021 Apache Software Foundation
-
-========================================================================
-
-gremlin-core NOTICE
-
-========================================================================
-This product contains code form the JanusGraph Project:
-
-Apache TinkerPop :: Gremlin Core
-Copyright 2013-2021 Apache Software Foundation
-
-========================================================================
-
-gremlin-driver NOTICE
-
-========================================================================
-
-Apache TinkerPop :: Gremlin Driver
-Copyright 2013-2021 Apache Software Foundation
-
-========================================================================
-
-gremlin-groovy NOTICE
-
-========================================================================
-
-Apache TinkerPop :: Gremlin Groovy
-Copyright 2013-2021 Apache Software Foundation
-
-========================================================================
-
-gremlin-server NOTICE
-
-========================================================================
-
-Apache TinkerPop :: Gremlin Server
-Copyright 2013-2021 Apache Software Foundation
-
-========================================================================
-
-gremlin-shaded NOTICE
-
-========================================================================
-
-Apache TinkerPop :: Gremlin Shaded
-Copyright 2013-2021 Apache Software Foundation
-
-========================================================================
-
-gremlin-test NOTICE
-
-========================================================================
-
-Apache TinkerPop :: Gremlin Test
-Copyright 2013-2021 Apache Software Foundation
-
-
-========================================================================
-
-groovy-2.5.14 NOTICE
-
-========================================================================
-Apache Groovy
-Copyright 2003-2020 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-This product includes/uses ANTLR (http://www.antlr2.org/)
-developed by Terence Parr 1989-2006
-========================================================================
-
-groovy-cli-picocli NOTICE
-
-========================================================================
-Apache Groovy
-Copyright 2003-2020 The Apache Software Foundation
-
-========================================================================
-
-groovy-console NOTICE
-
-========================================================================
-Apache Groovy
-Copyright 2003-2020 The Apache Software Foundation
-
-========================================================================
-
-groovy-swing NOTICE
-
-========================================================================
-Apache Groovy
-Copyright 2003-2020 The Apache Software Foundation
-
-========================================================================
-
-groovy-templates NOTICE
-
-========================================================================
-Apache Groovy
-Copyright 2003-2020 The Apache Software Foundation
-
-========================================================================
-
-groovy-xml NOTICE
-
-========================================================================
-Apache Groovy
-Copyright 2003-2020 The Apache Software Foundation
 
 ========================================================================
 
@@ -452,27 +305,6 @@ The Apache Software Foundation (http://www.apache.org/).
 
 ========================================================================
 
-ivy NOTICE
-
-========================================================================
-Apache Ivy (TM)
-Copyright 2007-2014 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-Portions of Ivy were originally developed at
-Jayasoft SARL (http://www.jayasoft.fr/)
-and are licensed to the Apache Software Foundation under the
-"Software Grant License Agreement"
-
-SSH and SFTP support is provided by the JCraft JSch package,
-which is open source software, available under
-the terms of a BSD style license.
-The original software and related information is available
-at http://www.jcraft.com/jsch/.
-========================================================================
-
 jackson-core NOTICE
 
 ========================================================================
@@ -515,33 +347,6 @@ To find the details that apply to this artifact see the accompanying LICENSE fil
 A list of contributors may be found from CREDITS(-2.x) file, which is included
 in some artifacts (usually source distributions); but is always available
 from the source code management (SCM) system project uses.
-========================================================================
-
-jackson-dataformat-yaml NOTICE
-
-========================================================================
-# Jackson JSON processor
-
-Jackson is a high-performance, Free/Open Source JSON processing library.
-It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
-been in development since 2007.
-It is currently developed by a community of developers, as well as supported
-commercially by FasterXML.com.
-
-## Licensing
-
-Jackson core and extension components may be licensed under different licenses.
-To find the details that apply to this artifact see the accompanying LICENSE file.
-For more information, including possible other licensing options, contact
-FasterXML.com (http://fasterxml.com).
-
-## Credits
-
-A list of contributors may be found from CREDITS file, which is included
-in some artifacts (usually source distributions); but is always available
-from the source code management (SCM) system project uses.
-
-
 ========================================================================
 
 jackson-jaxrs-json-provider-2.12.1 NOTICE
@@ -625,188 +430,6 @@ from the source code management (SCM) system project uses.
 
 ========================================================================
 
-kerb-admin NOTICE
-
-========================================================================
-
-Kerby-kerb Admin
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-client NOTICE
-
-========================================================================
-
-Kerby-kerb Client
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-common NOTICE
-
-========================================================================
-
-Kerby-kerb Common
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-core NOTICE
-
-========================================================================
-
-Kerby-kerb core
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-crypto NOTICE
-
-========================================================================
-
-Kerby-kerb Crypto
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-identity NOTICE
-
-========================================================================
-
-Kerby-kerb Identity
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-server NOTICE
-
-========================================================================
-
-Kerby-kerb Server
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-simplekdc NOTICE
-
-========================================================================
-
-Kerb Simple Kdc
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerb-util NOTICE
-
-========================================================================
-
-Kerby-kerb Util
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerby-asn1 NOTICE
-
-========================================================================
-
-Kerby ASN1 Project
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerby-config NOTICE
-
-========================================================================
-
-Kerby Config
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerby-pkix NOTICE
-
-========================================================================
-
-Kerby PKIX Project
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerby-util NOTICE
-
-========================================================================
-
-Kerby Util
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-kerby-xdr NOTICE
-
-========================================================================
-
-Kerby XDR Project
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
 log4j-api NOTICE
 
 ========================================================================
@@ -859,32 +482,6 @@ objenesis NOTICE
 
 Objenesis
 Copyright 2006-2017 Joe Walnes, Henri Tremblay, Leonardo Mesquita
-
-
-========================================================================
-
-tinkergraph-gremlin NOTICE
-
-========================================================================
-
-Apache TinkerPop :: TinkerGraph Gremlin
-Copyright 2013-2021 Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-
-========================================================================
-
-token-provider NOTICE
-
-========================================================================
-
-Token provider
-Copyright 2014-2019 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
 
 
 ========================================================================
@@ -1081,27 +678,6 @@ Third-party licenses
 
 BSD - Scala License
   Scala Library
-
-
-========================================================================
-
-Groovy NOTICE
-
-========================================================================
-
-Apache Groovy
-Copyright 2003-2022 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-The Java source files in src/main/java/org/apache/groovy/util/concurrent/concurrentlinkedhashmap/
-are from https://github.com/ben-manes/concurrentlinkedhashmap and the following notice applies:
-Copyright 2010-2012 Google Inc. All Rights Reserved.
-
-The Java source file src/main/java/org/apache/groovy/util/concurrent/ConcurrentReferenceHashMap
-is from https://github.com/hazelcast/hazelcast and the following notice applies:
-Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
 
 
 ========================================================================
@@ -1407,7 +983,7 @@ jcommander NOTICE
 
 ========================================================================
 
-JCommander Copyright Notices 
+JCommander Copyright Notices
 ============================
 
 Copyright 2010 Cedric Beust <cedric@beust.com>
@@ -1560,7 +1136,7 @@ is derived from Unicode data such as the Unicode Character Database.
 See http://unicode.org/copyright.html for more details.
 
 The Morfologik analyzer (morfologik) includes BSD-licensed software
-developed by Dawid Weiss and Marcin Miłkowski 
+developed by Dawid Weiss and Marcin Miłkowski
 (https://github.com/morfologik/morfologik-stemming) and uses
 data from the BSD-licensed dictionary of Polish (SGJP, http://sgjp.pl/morfeusz/).
 
@@ -1683,7 +1259,7 @@ limitations under the License.
 -----------------------------------------------------------------------
 
 This product contains a modified portion of 'Catapult', an open source
-Trace Event viewer for Chome, Linux, and Android applications, which can 
+Trace Event viewer for Chome, Linux, and Android applications, which can
 be obtained at:
 
   * LICENSE:
@@ -1727,7 +1303,7 @@ zt-zip NOTICE
 
 ========================================================================
 
-Copyright 2012 ZeroTurnaround LLC. 
+Copyright 2012 ZeroTurnaround LLC.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -1766,3 +1342,1895 @@ Copyright 2020-2021 SmartBear Software Inc.
 # This product includes software developed by the Jansi project (http://fusesource.github.io/jansi/).
 # See licenses/LICENSE-jansi-2.4.0.txt for license details (Apache License 2.0 or LGPL 3.0+).
 
+========================================================================
+
+Apache TinkerPop 3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop
+Copyright 2015-2026 The Apache Software Foundation.
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This product includes/uses ANTLR (http://www.antlr2.org/)
+developed by Terence Parr 1989-2006
+------------------------------------------------------------------------
+Activiti
+------------------------------------------------------------------------
+Activiti BPM Platform
+Copyright 2010-2014 Alfresco Software, Ltd.
+
+gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/structure/io/graphml/GraphMLWriterHelper.java
+contains DelegatingXMLStreamWriter.java and IndentingXMLStreamWriter.java from
+https://github.com/Activiti/Activiti/tree/activiti-5.16/modules/activiti-bpmn-converter/src/main/java/org/activiti/bpmn/converter
+
+------------------------------------------------------------------------
+Apache Kerby
+------------------------------------------------------------------------
+Apache Kerby
+Copyright 2015-2017 The Apache Software Foundation
+
+gremlin-server/src/main/java/org/apache/tinkerpop/gremlin/server/auth/JaasKrbUtil.java
+from
+https://github.com/apache/directory-kerby/blob/kerby-all-1.0.0/kerby-kerb/kerb-simplekdc/src/main/java/org/apache/kerby/kerberos/kerb/client/JaasKrbUtil.java
+
+========================================================================
+
+audience-annotations-0.13.0 NOTICE
+
+========================================================================
+
+Apache Yetus - Audience Annotations
+Copyright 2015-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+byte-buddy-1.17.6 NOTICE
+
+========================================================================
+
+Copyright 2014 - Present Rafael Winterhalter
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+========================================================================
+
+byte-buddy-agent-1.17.6 NOTICE
+
+========================================================================
+
+Copyright 2014 - Present Rafael Winterhalter
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+========================================================================
+
+commons-configuration2-2.10.1 NOTICE
+
+========================================================================
+
+Apache Commons Configuration
+Copyright 2001-2024 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+========================================================================
+
+commons-configuration2-2.9.0 NOTICE
+
+========================================================================
+
+Apache Commons Configuration
+Copyright 2001-2023 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+========================================================================
+
+commons-text-1.11.0 NOTICE
+
+========================================================================
+
+Apache Commons Text
+Copyright 2014-2023 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+========================================================================
+
+cucumber-core-7.21.1 NOTICE
+
+========================================================================
+
+# FastDoubleParser
+
+This is a Java port of Daniel Lemire's fast_float project.
+This project provides parsers for double, float, BigDecimal and BigInteger values.
+
+## Copyright
+
+Copyright © 2024 Werner Randelshofer, Switzerland.
+
+## Licensing
+
+This code is licensed under MIT License.
+https://github.com/wrandelshofer/FastDoubleParser/blob/522be16e145f43308c43b23094e31d5efcaa580e/LICENSE
+(The file 'LICENSE' is included in the sources and classes Jar files that are released by this project
+- as is required by that license.)
+
+Some portions of the code have been derived from other projects.
+All these projects require that we include a copyright notice, and some require that we also include some text of their
+license file.
+
+fast_double_parser, Copyright (c) 2022 Daniel Lemire. BSL License.
+https://github.com/lemire/fast_double_parser
+https://github.com/lemire/fast_double_parser/blob/07d9189a8fb815fe800cb15ca022e7a07093236e/LICENSE.BSL
+(The file 'thirdparty-LICENSE' is included in the sources and classes Jar files that are released by this project
+- as is required by that license.)
+
+fast_float, Copyright (c) 2021 The fast_float authors. MIT License.
+https://github.com/fastfloat/fast_float
+https://github.com/fastfloat/fast_float/blob/cc1e01e9eee74128e48d51488a6b1df4a767a810/LICENSE-MIT
+(The file 'thirdparty-LICENSE' is included in the sources and classes Jar files that are released by this project
+- as is required by that license.)
+
+bigint, Copyright 2020 Tim Buktu. 2-clause BSD License.
+https://github.com/tbuktu/bigint/tree/floatfft
+https://github.com/tbuktu/bigint/blob/617c8cd8a7c5e4fb4d919c6a4d11e2586107f029/LICENSE
+https://github.com/wrandelshofer/FastDoubleParser/blob/39e123b15b71f29a38a087d16a0bc620fc879aa6/bigint-LICENSE
+(We only use those portions of the bigint project that can be licensed under 2-clause BSD License.)
+(The file 'thirdparty-LICENSE' is included in the sources and classes Jar files that are released by this project
+- as is required by that license.)
+
+Copyright © 2023 Werner Randelshofer, Switzerland. MIT License.
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Copyright
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+## Licensing
+
+Jackson 2.x core and extension components are licensed under Apache License 2.0
+To find the details that apply to this artifact see the accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS(-2.x) file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+## FastDoubleParser
+
+jackson-core bundles a shaded copy of FastDoubleParser <https://github.com/wrandelshofer/FastDoubleParser>.
+That code is available under an MIT license <https://github.com/wrandelshofer/FastDoubleParser/blob/main/LICENSE>
+under the following copyright.
+
+See FastDoubleParser-NOTICE for details of other source code included in FastDoubleParser
+and the licenses and copyrights that apply to that code.
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per accompanying LICENSE file.
+
+A list of contributors may be found from CREDITS file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+========================================================================
+
+gremlin-console-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Console
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-core-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Core
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-driver-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Driver
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-groovy-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Groovy
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-language-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Language
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-server-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Server
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-shaded-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Shaded
+Copyright 2015-2026 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+------------------------------------------------------------------------
+Jackson-Databind, Jackson-Annotation and Jackson-Core 2.15.2
+------------------------------------------------------------------------
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+* FastDoubleParser
+
+    jackson-core bundles a shaded copy of FastDoubleParser <https://github.com/wrandelshofer/FastDoubleParser>.
+    That code is available under an MIT license <https://github.com/wrandelshofer/FastDoubleParser/blob/main/LICENSE>
+    under the following copyright.
+
+    Copyright © 2023 Werner Randelshofer, Switzerland. MIT License.
+
+    Some portions of the code have been derived from other projects.
+
+        fast_double_parser, Copyright (c) 2022 Daniel Lemire. Apache 2.0 License.
+        https://github.com/fastfloat/fast_float
+
+        fast_float, Copyright (c) 2021 The fast_float authors. Apache 2.0 License.
+        https://github.com/fastfloat/fast_float
+
+        bigint, Copyright 2020 Tim Buktu. 2-clause BSD License.
+        https://github.com/tbuktu/bigint/tree/floatfft
+        (We only use those portions of the bigint project that can be licensed under 2-clause BSD License.)
+
+------------------------------------------------------------------------
+Objenesis 3.3 - shaded in gremlin-shaded to org.apache.tinkerpop.shaded.objenesis
+------------------------------------------------------------------------
+Copyright 2006-2022 Joe Walnes, Henri Tremblay, Leonardo Mesquita
+
+========================================================================
+
+gremlin-test-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Test
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+gremlin-util-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Util
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+groovy-4.0.25 NOTICE
+
+========================================================================
+
+Apache Groovy
+Copyright 2003-2025 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This product includes/uses ANTLR4 (https://github.com/antlr/antlr4)
+Copyright (c) 2012-2017 The ANTLR Project. All rights reserved.
+
+========================================================================
+
+htrace-core4-4.1.0-incubating NOTICE
+
+========================================================================
+
+htrace-core4
+Copyright 2016 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+ivy-2.6.0 NOTICE
+
+========================================================================
+
+Apache Ivy (TM)
+Copyright 2007-2026 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+Portions of Ivy were originally developed at
+Jayasoft SARL (http://www.jayasoft.fr/)
+and are licensed to the Apache Software Foundation under the
+"Software Grant License Agreement"
+
+SSH and SFTP support is provided by the JCraft JSch package,
+which is open source software, available under
+the terms of a BSD style license.
+The original software and related information is available
+at http://www.jcraft.com/jsch/.
+
+The Scp class is based on the SCPClient from the ganymed ssh
+library. Which has been distributed under the BSD style license
+included in the LICENSE file.
+
+========================================================================
+
+kerb-admin-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Admin
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-client-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Client
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-common-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Common
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-core-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb core
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-crypto-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Crypto
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-identity-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Identity
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-server-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Server
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-simplekdc-2.0.1 NOTICE
+
+========================================================================
+
+Kerb Simple Kdc
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerb-util-2.0.1 NOTICE
+
+========================================================================
+
+Kerby-kerb Util
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerby-asn1-2.0.1 NOTICE
+
+========================================================================
+
+Kerby ASN1 Project
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerby-config-2.0.1 NOTICE
+
+========================================================================
+
+Kerby Config
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerby-pkix-2.0.1 NOTICE
+
+========================================================================
+
+Kerby PKIX Project
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerby-util-2.0.1 NOTICE
+
+========================================================================
+
+Kerby Util
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+kerby-xdr-2.0.1 NOTICE
+
+========================================================================
+
+Kerby XDR Project
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+lucene-analyzers-common-7.4.0 NOTICE
+
+========================================================================
+
+Apache Lucene
+Copyright 2001-2018 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+Includes software from other Apache Software Foundation projects,
+including, but not limited to:
+ - Apache Ant
+ - Apache Jakarta Regexp
+ - Apache Commons
+ - Apache Xerces
+
+ICU4J, (under analysis/icu) is licensed under an MIT styles license
+and Copyright (c) 1995-2008 International Business Machines Corporation and others
+
+Some data files (under analysis/icu/src/data) are derived from Unicode data such
+as the Unicode Character Database. See http://unicode.org/copyright.html for more
+details.
+
+Brics Automaton (under core/src/java/org/apache/lucene/util/automaton) is
+BSD-licensed, created by Anders Møller. See http://www.brics.dk/automaton/
+
+The levenshtein automata tables (under core/src/java/org/apache/lucene/util/automaton) were
+automatically generated with the moman/finenight FSA library, created by
+Jean-Philippe Barrette-LaPierre. This library is available under an MIT license,
+see http://sites.google.com/site/rrettesite/moman and
+http://bitbucket.org/jpbarrette/moman/overview/
+
+The class org.apache.lucene.util.WeakIdentityMap was derived from
+the Apache CXF project and is Apache License 2.0.
+
+The Google Code Prettify is Apache License 2.0.
+See http://code.google.com/p/google-code-prettify/
+
+JUnit (junit-4.10) is licensed under the Common Public License v. 1.0
+See http://junit.sourceforge.net/cpl-v10.html
+
+This product includes code (JaspellTernarySearchTrie) from Java Spelling Checkin
+g Package (jaspell): http://jaspell.sourceforge.net/
+License: The BSD License (http://www.opensource.org/licenses/bsd-license.php)
+
+The snowball stemmers in
+  analysis/common/src/java/net/sf/snowball
+were developed by Martin Porter and Richard Boulton.
+The snowball stopword lists in
+  analysis/common/src/resources/org/apache/lucene/analysis/snowball
+were developed by Martin Porter and Richard Boulton.
+The full snowball package is available from
+  http://snowball.tartarus.org/
+
+The KStem stemmer in
+  analysis/common/src/org/apache/lucene/analysis/en
+was developed by Bob Krovetz and Sergio Guzman-Lara (CIIR-UMass Amherst)
+under the BSD-license.
+
+The Arabic,Persian,Romanian,Bulgarian, Hindi and Bengali analyzers (common) come with a default
+stopword list that is BSD-licensed created by Jacques Savoy.  These files reside in:
+analysis/common/src/resources/org/apache/lucene/analysis/ar/stopwords.txt,
+analysis/common/src/resources/org/apache/lucene/analysis/fa/stopwords.txt,
+analysis/common/src/resources/org/apache/lucene/analysis/ro/stopwords.txt,
+analysis/common/src/resources/org/apache/lucene/analysis/bg/stopwords.txt,
+analysis/common/src/resources/org/apache/lucene/analysis/hi/stopwords.txt,
+analysis/common/src/resources/org/apache/lucene/analysis/bn/stopwords.txt
+See http://members.unine.ch/jacques.savoy/clef/index.html.
+
+The German,Spanish,Finnish,French,Hungarian,Italian,Portuguese,Russian and Swedish light stemmers
+(common) are based on BSD-licensed reference implementations created by Jacques Savoy and
+Ljiljana Dolamic. These files reside in:
+analysis/common/src/java/org/apache/lucene/analysis/de/GermanLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/de/GermanMinimalStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/es/SpanishLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/fi/FinnishLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/fr/FrenchLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/fr/FrenchMinimalStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/hu/HungarianLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/it/ItalianLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/pt/PortugueseLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/ru/RussianLightStemmer.java
+analysis/common/src/java/org/apache/lucene/analysis/sv/SwedishLightStemmer.java
+
+The Stempel analyzer (stempel) includes BSD-licensed software developed
+by the Egothor project http://egothor.sf.net/, created by Leo Galambos, Martin Kvapil,
+and Edmond Nolan.
+
+The Polish analyzer (stempel) comes with a default
+stopword list that is BSD-licensed created by the Carrot2 project. The file resides
+in stempel/src/resources/org/apache/lucene/analysis/pl/stopwords.txt.
+See http://project.carrot2.org/license.html.
+
+The SmartChineseAnalyzer source code (smartcn) was
+provided by Xiaoping Gao and copyright 2009 by www.imdict.net.
+
+WordBreakTestUnicode_*.java (under modules/analysis/common/src/test/)
+is derived from Unicode data such as the Unicode Character Database.
+See http://unicode.org/copyright.html for more details.
+
+The Morfologik analyzer (morfologik) includes BSD-licensed software
+developed by Dawid Weiss and Marcin Miłkowski (http://morfologik.blogspot.com/).
+
+Morfologik uses data from Polish ispell/myspell dictionary
+(http://www.sjp.pl/slownik/en/) licenced on the terms of (inter alia)
+LGPL and Creative Commons ShareAlike.
+
+Morfologic includes data from BSD-licensed dictionary of Polish (SGJP)
+(http://sgjp.pl/morfeusz/)
+
+Servlet-api.jar and javax.servlet-*.jar are under the CDDL license, the original
+source code for this can be found at http://www.eclipse.org/jetty/downloads.php
+
+===========================================================================
+Kuromoji Japanese Morphological Analyzer - Apache Lucene Integration
+===========================================================================
+
+This software includes a binary and/or source version of data from
+
+  mecab-ipadic-2.7.0-20070801
+
+which can be obtained from
+
+  http://atilika.com/releases/mecab-ipadic/mecab-ipadic-2.7.0-20070801.tar.gz
+
+or
+
+  http://jaist.dl.sourceforge.net/project/mecab/mecab-ipadic/2.7.0-20070801/mecab-ipadic-2.7.0-20070801.tar.gz
+
+===========================================================================
+mecab-ipadic-2.7.0-20070801 Notice
+===========================================================================
+
+Nara Institute of Science and Technology (NAIST),
+the copyright holders, disclaims all warranties with regard to this
+software, including all implied warranties of merchantability and
+fitness, in no event shall NAIST be liable for
+any special, indirect or consequential damages or any damages
+whatsoever resulting from loss of use, data or profits, whether in an
+action of contract, negligence or other tortuous action, arising out
+of or in connection with the use or performance of this software.
+
+A large portion of the dictionary entries
+originate from ICOT Free Software.  The following conditions for ICOT
+Free Software applies to the current dictionary as well.
+
+Each User may also freely distribute the Program, whether in its
+original form or modified, to any third party or parties, PROVIDED
+that the provisions of Section 3 ("NO WARRANTY") will ALWAYS appear
+on, or be attached to, the Program, which is distributed substantially
+in the same form as set out herein and that such intended
+distribution, if actually made, will neither violate or otherwise
+contravene any of the laws and regulations of the countries having
+jurisdiction over the User or the intended distribution itself.
+
+NO WARRANTY
+
+The program was produced on an experimental basis in the course of the
+research and development conducted during the project and is provided
+to users as so produced on an experimental basis.  Accordingly, the
+program is provided without any warranty whatsoever, whether express,
+implied, statutory or otherwise.  The term "warranty" used herein
+includes, but is not limited to, any warranty of the quality,
+performance, merchantability and fitness for a particular purpose of
+the program and the nonexistence of any infringement or violation of
+any right of any third party.
+
+Each user of the program will agree and understand, and be deemed to
+have agreed and understood, that there is no warranty whatsoever for
+the program and, accordingly, the entire risk arising from or
+otherwise connected with the program is assumed by the user.
+
+Therefore, neither ICOT, the copyright holder, or any other
+organization that participated in or was otherwise related to the
+development of the program and their respective officials, directors,
+officers and other employees shall be held liable for any and all
+damages, including, without limitation, general, special, incidental
+and consequential damages, arising out of or otherwise in connection
+with the use or inability to use the program or any product, material
+or result produced or otherwise obtained by using the program,
+regardless of whether they have been advised of, or otherwise had
+knowledge of, the possibility of such damages at any time during the
+project or thereafter.  Each user will be deemed to have agreed to the
+foregoing by his or her commencement of use of the program.  The term
+"use" as used herein includes, but is not limited to, the use,
+modification, copying and distribution of the program and the
+production of secondary products from the program.
+
+In the case where the program, whether in its original form or
+modified, was distributed or delivered to or received by a user from
+any person, organization or entity other than ICOT, unless it makes or
+grants independently of ICOT any specific warranty to the user in
+writing, such person, organization or entity, will also be exempted
+from and not be held liable to the user for any such damages as noted
+above as far as the program is concerned.
+
+===========================================================================
+Nori Korean Morphological Analyzer - Apache Lucene Integration
+===========================================================================
+
+This software includes a binary and/or source version of data from
+
+  mecab-ko-dic-2.0.3-20170922
+
+which can be obtained from
+
+  https://bitbucket.org/eunjeon/mecab-ko-dic/downloads/mecab-ko-dic-2.0.3-20170922.tar.gz
+
+========================================================================
+
+objenesis-3.3 NOTICE
+
+========================================================================
+
+// ------------------------------------------------------------------
+// NOTICE file corresponding to the section 4d of The Apache License,
+// Version 2.0, in this case for Objenesis
+// ------------------------------------------------------------------
+
+Objenesis
+Copyright 2006-2022 Joe Walnes, Henri Tremblay, Leonardo Mesquita
+
+========================================================================
+
+tinkergraph-gremlin-3.8.1 NOTICE
+
+========================================================================
+
+Apache TinkerPop :: TinkerGraph Gremlin
+Copyright 2013-2022 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+token-provider-2.0.1 NOTICE
+
+========================================================================
+
+Token provider
+Copyright 2014-2020 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+Netty 4.1.137.Final NOTICE
+
+========================================================================
+
+                            The Netty Project
+                            =================
+
+Please visit the Netty web site for more information:
+
+  * https://netty.io/
+
+Copyright 2014 The Netty Project
+
+The Netty Project licenses this file to you under the Apache License,
+version 2.0 (the "License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at:
+
+  https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+
+Also, please refer to each LICENSE.<component>.txt file, which is located in
+the 'license' directory of the distribution file, for the license terms of the
+components that this product depends on.
+
+-------------------------------------------------------------------------------
+This product contains the extensions to Java Collections Framework which has
+been derived from the works by JSR-166 EG, Doug Lea, and Jason T. Greene:
+
+  * LICENSE:
+    * license/LICENSE.jsr166y.txt (Public Domain)
+  * HOMEPAGE:
+    * http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/
+    * http://viewvc.jboss.org/cgi-bin/viewvc.cgi/jbosscache/experimental/jsr166/
+
+This product contains a modified version of Robert Harder's Public Domain
+Base64 Encoder and Decoder, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.base64.txt (Public Domain)
+  * HOMEPAGE:
+    * http://iharder.sourceforge.net/current/java/base64/
+
+This product contains a modified portion of 'Webbit', an event based
+WebSocket and HTTP server, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.webbit.txt (BSD License)
+  * HOMEPAGE:
+    * https://github.com/joewalnes/webbit
+
+This product contains a modified portion of 'SLF4J', a simple logging
+facade for Java, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.slf4j.txt (MIT License)
+  * HOMEPAGE:
+    * https://www.slf4j.org/
+
+This product contains a modified portion of 'Apache Harmony', an open source
+Java SE, which can be obtained at:
+
+  * NOTICE:
+    * license/NOTICE.harmony.txt
+  * LICENSE:
+    * license/LICENSE.harmony.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://archive.apache.org/dist/harmony/
+
+This product contains a modified portion of 'jbzip2', a Java bzip2 compression
+and decompression library written by Matthew J. Francis. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.jbzip2.txt (MIT License)
+  * HOMEPAGE:
+    * https://code.google.com/p/jbzip2/
+
+This product contains a modified portion of 'libdivsufsort', a C API library to construct
+the suffix array and the Burrows-Wheeler transformed string for any input string of
+a constant-size alphabet written by Yuta Mori. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.libdivsufsort.txt (MIT License)
+  * HOMEPAGE:
+    * https://github.com/y-256/libdivsufsort
+
+This product contains a modified portion of Nitsan Wakart's 'JCTools', Java Concurrency Tools for the JVM,
+ which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.jctools.txt (ASL2 License)
+  * HOMEPAGE:
+    * https://github.com/JCTools/JCTools
+
+This product optionally depends on 'JZlib', a re-implementation of zlib in
+pure Java, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.jzlib.txt (BSD style License)
+  * HOMEPAGE:
+    * http://www.jcraft.com/jzlib/
+
+This product optionally depends on 'Compress-LZF', a Java library for encoding and
+decoding data in LZF format, written by Tatu Saloranta. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.compress-lzf.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/ning/compress
+
+This product optionally depends on 'lz4', a LZ4 Java compression
+and decompression library written by Adrien Grand. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.lz4.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/jpountz/lz4-java
+
+This product optionally depends on 'lzma-java', a LZMA Java compression
+and decompression library, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.lzma-java.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/jponge/lzma-java
+
+This product optionally depends on 'zstd-jni', a zstd-jni Java compression
+and decompression library, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.zstd-jni.txt (BSD)
+  * HOMEPAGE:
+    * https://github.com/luben/zstd-jni
+
+This product contains a modified portion of 'jfastlz', a Java port of FastLZ compression
+and decompression library written by William Kinney. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.jfastlz.txt (MIT License)
+  * HOMEPAGE:
+    * https://code.google.com/p/jfastlz/
+
+This product contains a modified portion of and optionally depends on 'Protocol Buffers', Google's data
+interchange format, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.protobuf.txt (New BSD License)
+  * HOMEPAGE:
+    * https://github.com/google/protobuf
+
+This product optionally depends on 'Bouncy Castle Crypto APIs' to generate
+a temporary self-signed X.509 certificate when the JVM does not provide the
+equivalent functionality.  It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.bouncycastle.txt (MIT License)
+  * HOMEPAGE:
+    * https://www.bouncycastle.org/
+
+This product optionally depends on 'Snappy', a compression library produced
+by Google Inc, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.snappy.txt (New BSD License)
+  * HOMEPAGE:
+    * https://github.com/google/snappy
+
+This product optionally depends on 'JBoss Marshalling', an alternative Java
+serialization API, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.jboss-marshalling.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/jboss-remoting/jboss-marshalling
+
+This product optionally depends on 'Caliper', Google's micro-
+benchmarking framework, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.caliper.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/google/caliper
+
+This product optionally depends on 'Apache Commons Logging', a logging
+framework, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.commons-logging.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://commons.apache.org/logging/
+
+This product optionally depends on 'Apache Log4J', a logging framework, which
+can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.log4j.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://logging.apache.org/log4j/
+
+This product optionally depends on 'Aalto XML', an ultra-high performance
+non-blocking XML processor, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.aalto-xml.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://wiki.fasterxml.com/AaltoHome
+
+This product contains a modified version of 'HPACK', a Java implementation of
+the HTTP/2 HPACK algorithm written by Twitter. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.hpack.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/twitter/hpack
+
+This product contains a modified version of 'HPACK', a Java implementation of
+the HTTP/2 HPACK algorithm written by Cory Benfield. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.hyper-hpack.txt (MIT License)
+  * HOMEPAGE:
+    * https://github.com/python-hyper/hpack/
+
+This product contains a modified version of 'HPACK', a Java implementation of
+the HTTP/2 HPACK algorithm written by Tatsuhiro Tsujikawa. It can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.nghttp2-hpack.txt (MIT License)
+  * HOMEPAGE:
+    * https://github.com/nghttp2/nghttp2/
+
+This product contains a modified portion of 'Apache Commons Lang', a Java library
+provides utilities for the java.lang API, which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.commons-lang.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://commons.apache.org/proper/commons-lang/
+
+
+This product contains the Maven wrapper scripts from 'Maven Wrapper', that provides an easy way to ensure a user has everything necessary to run the Maven build.
+
+  * LICENSE:
+    * license/LICENSE.mvn-wrapper.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/takari/maven-wrapper
+
+This product contains the dnsinfo.h header file, that provides a way to retrieve the system DNS configuration on MacOS.
+This private header is also used by Apple's open source
+ mDNSResponder (https://opensource.apple.com/tarballs/mDNSResponder/).
+
+ * LICENSE:
+    * license/LICENSE.dnsinfo.txt (Apple Public Source License 2.0)
+  * HOMEPAGE:
+    * https://www.opensource.apple.com/source/configd/configd-453.19/dnsinfo/dnsinfo.h
+
+This product optionally depends on 'Brotli4j', Brotli compression and
+decompression for Java., which can be obtained at:
+
+  * LICENSE:
+    * license/LICENSE.brotli4j.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/hyperxpro/Brotli4j
+
+The Netty license paths above are reproduced as sections in
+licenses/LICENSE-netty-4.1.137.Final.txt.
+
+
+========================================================================
+
+Netty tcnative 2.0.81.Final NOTICE
+
+========================================================================
+
+                          The Netty Project
+                            =================
+
+Please visit the Netty web site for more information:
+
+  * http://netty.io/
+
+Copyright 2016 The Netty Project
+
+The Netty Project licenses this file to you under the Apache License,
+version 2.0 (the "License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at:
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+
+-------------------------------------------------------------------------------
+This product contains a forked and modified version of Tomcat Native
+
+  * LICENSE:
+    * license/LICENSE.tomcat-native.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * http://tomcat.apache.org/native-doc/
+    * https://svn.apache.org/repos/asf/tomcat/native/
+
+This product contains the Maven wrapper scripts from 'Maven Wrapper', that provides an easy way to ensure a user has everything necessary to run the Maven build.
+
+  * LICENSE:
+    * license/LICENSE.mvn-wrapper.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/takari/maven-wrapper
+
+This product contains code from boringssl.
+
+  * LICENSE
+    * license/LICENSE.boringssl.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://boringssl.googlesource.com/boringssl/
+
+The referenced license paths are reproduced in
+licenses/LICENSE-netty-tcnative-2.0.81.Final.txt.
+
+========================================================================
+
+grpc-netty-shaded 1.55.3 NOTICE
+
+========================================================================
+
+                          The Netty Project
+                            =================
+
+Please visit the Netty web site for more information:
+
+  * http://netty.io/
+
+Copyright 2016 The Netty Project
+
+The Netty Project licenses this file to you under the Apache License,
+version 2.0 (the "License"); you may not use this file except in compliance
+with the License. You may obtain a copy of the License at:
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations
+under the License.
+
+-------------------------------------------------------------------------------
+This product contains a forked and modified version of Tomcat Native
+
+  * LICENSE:
+    * license/LICENSE.tomcat-native.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * http://tomcat.apache.org/native-doc/
+    * https://svn.apache.org/repos/asf/tomcat/native/
+
+This product contains the Maven wrapper scripts from 'Maven Wrapper', that provides an easy way to ensure a user has everything necessary to run the Maven build.
+
+  * LICENSE:
+    * license/LICENSE.mvn-wrapper.txt (Apache License 2.0)
+  * HOMEPAGE:
+    * https://github.com/takari/maven-wrapper
+
+This product contains small piece of code to support AIX, taken from netbsd.
+
+  * LICENSE:
+    * license/LICENSE.aix-netbsd.txt (OpenSSL License)
+  * HOMEPAGE:
+    * https://ftp.netbsd.org/pub/NetBSD/NetBSD-current/src/crypto/external/bsd/openssl/dist
+
+
+This product contains code from boringssl.
+
+  * LICENSE (Combination ISC and OpenSSL license)
+    * license/LICENSE.boringssl.txt (Combination ISC and OpenSSL license)
+  * HOMEPAGE:
+    * https://boringssl.googlesource.com/boringssl/
+
+The referenced license paths are reproduced in
+licenses/LICENSE-grpc-netty-shaded-1.55.3.txt.
+========================================================================
+
+spring-boot-jarmode-layertools-2.7.1 NOTICE
+
+========================================================================
+
+Spring Boot 2.7.1
+Copyright (c) 2012-2022 Pivotal, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+========================================================================
+
+Apache TinkerPop NOTICE
+
+========================================================================
+Apache TinkerPop
+Copyright 2015-2022 The Apache Software Foundation.
+
+------------------------------------------------------------------------
+Activiti
+------------------------------------------------------------------------
+Activiti BPM Platform
+Copyright 2010-2014 Alfresco Software, Ltd.
+
+gremlin-core/src/main/java/org/apache/tinkerpop/gremlin/structure/io/graphml/GraphMLWriterHelper.java
+contains DelegatingXMLStreamWriter.java and IndentingXMLStreamWriter.java from
+https://github.com/Activiti/Activiti/tree/activiti-5.16/modules/activiti-bpmn-converter/src/main/java/org/activiti/bpmn/converter
+
+------------------------------------------------------------------------
+Apache Kerby
+------------------------------------------------------------------------
+Apache Kerby
+Copyright 2015-2017 The Apache Software Foundation
+
+gremlin-server/src/main/java/org/apache/tinkerpop/gremlin/server/auth/JaasKrbUtil.java
+from
+https://github.com/apache/directory-kerby/blob/kerby-all-1.0.0/kerby-kerb/kerb-simplekdc/src/main/java/org/apache/kerby/kerberos/kerb/client/JaasKrbUtil.java
+
+
+
+========================================================================
+
+gremlin-console NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Console
+Copyright 2013-2021 Apache Software Foundation
+
+
+========================================================================
+
+gremlin-core NOTICE
+
+========================================================================
+This product contains code form the JanusGraph Project:
+
+Apache TinkerPop :: Gremlin Core
+Copyright 2013-2021 Apache Software Foundation
+
+
+========================================================================
+
+gremlin-driver NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Driver
+Copyright 2013-2021 Apache Software Foundation
+
+
+========================================================================
+
+gremlin-groovy NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Groovy
+Copyright 2013-2021 Apache Software Foundation
+
+
+========================================================================
+
+gremlin-server NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Server
+Copyright 2013-2021 Apache Software Foundation
+
+
+========================================================================
+
+gremlin-shaded NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Shaded
+Copyright 2013-2021 Apache Software Foundation
+
+
+========================================================================
+
+gremlin-test NOTICE
+
+========================================================================
+
+Apache TinkerPop :: Gremlin Test
+Copyright 2013-2021 Apache Software Foundation
+
+
+
+========================================================================
+
+groovy-cli-picocli NOTICE
+
+========================================================================
+Apache Groovy
+Copyright 2003-2020 The Apache Software Foundation
+
+
+========================================================================
+
+groovy-console NOTICE
+
+========================================================================
+Apache Groovy
+Copyright 2003-2020 The Apache Software Foundation
+
+
+========================================================================
+
+groovy-swing NOTICE
+
+========================================================================
+Apache Groovy
+Copyright 2003-2020 The Apache Software Foundation
+
+
+========================================================================
+
+groovy-templates NOTICE
+
+========================================================================
+Apache Groovy
+Copyright 2003-2020 The Apache Software Foundation
+
+
+========================================================================
+
+groovy-xml NOTICE
+
+========================================================================
+Apache Groovy
+Copyright 2003-2020 The Apache Software Foundation
+
+
+========================================================================
+
+kerb-admin NOTICE
+
+========================================================================
+
+Kerby-kerb Admin
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-client NOTICE
+
+========================================================================
+
+Kerby-kerb Client
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-common NOTICE
+
+========================================================================
+
+Kerby-kerb Common
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-core NOTICE
+
+========================================================================
+
+Kerby-kerb core
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-crypto NOTICE
+
+========================================================================
+
+Kerby-kerb Crypto
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-identity NOTICE
+
+========================================================================
+
+Kerby-kerb Identity
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-server NOTICE
+
+========================================================================
+
+Kerby-kerb Server
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-simplekdc NOTICE
+
+========================================================================
+
+Kerb Simple Kdc
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerb-util NOTICE
+
+========================================================================
+
+Kerby-kerb Util
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerby-asn1 NOTICE
+
+========================================================================
+
+Kerby ASN1 Project
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerby-config NOTICE
+
+========================================================================
+
+Kerby Config
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerby-pkix NOTICE
+
+========================================================================
+
+Kerby PKIX Project
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerby-util NOTICE
+
+========================================================================
+
+Kerby Util
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+kerby-xdr NOTICE
+
+========================================================================
+
+Kerby XDR Project
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+tinkergraph-gremlin NOTICE
+
+========================================================================
+
+Apache TinkerPop :: TinkerGraph Gremlin
+Copyright 2013-2021 Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+token-provider NOTICE
+
+========================================================================
+
+Token provider
+Copyright 2014-2019 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+
+
+========================================================================
+
+Groovy NOTICE
+
+========================================================================
+
+Apache Groovy
+Copyright 2003-2022 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+The Java source files in src/main/java/org/apache/groovy/util/concurrent/concurrentlinkedhashmap/
+are from https://github.com/ben-manes/concurrentlinkedhashmap and the following notice applies:
+Copyright 2010-2012 Google Inc. All Rights Reserved.
+
+The Java source file src/main/java/org/apache/groovy/util/concurrent/ConcurrentReferenceHashMap
+is from https://github.com/hazelcast/hazelcast and the following notice applies:
+Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+
+
+========================================================================
+
+Spring Framework 5.3.27 NOTICE
+
+========================================================================
+
+Spring Framework 5.3.27
+Copyright (c) 2002-2023 Pivotal, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+This product may include a number of subcomponents with separate
+copyright notices and license terms. Your use of the source code for
+these subcomponents is subject to the terms and conditions of the
+subcomponent's license, as noted in the license.txt file.
+
+
+========================================================================
+
+Spring Boot 2.5.15 NOTICE
+
+========================================================================
+
+Spring Boot 2.5.15
+Copyright (c) 2012-2022 Pivotal, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+
+========================================================================
+
+Jetty 9.4.51 NOTICE
+
+========================================================================
+
+==============================================================
+ Jetty Web Container
+ Copyright 1995-2018 Mort Bay Consulting Pty Ltd.
+==============================================================
+
+The Jetty Web Container is Copyright Mort Bay Consulting Pty Ltd
+unless otherwise noted.
+
+Jetty is dual licensed under both
+
+  * The Apache 2.0 License
+    http://www.apache.org/licenses/LICENSE-2.0.html
+
+      and
+
+  * The Eclipse Public 1.0 License
+    http://www.eclipse.org/legal/epl-v10.html
+
+Jetty may be distributed under either license.
+
+------
+Eclipse
+
+The following artifacts are EPL.
+ * org.eclipse.jetty.orbit:org.eclipse.jdt.core
+
+The following artifacts are EPL and ASL2.
+ * org.eclipse.jetty.orbit:javax.security.auth.message
+
+
+The following artifacts are EPL and CDDL 1.0.
+ * org.eclipse.jetty.orbit:javax.mail.glassfish
+
+
+------
+Oracle
+
+The following artifacts are CDDL + GPLv2 with classpath exception.
+https://glassfish.dev.java.net/nonav/public/CDDL+GPL.html
+
+ * javax.servlet:javax.servlet-api
+ * javax.annotation:javax.annotation-api
+ * javax.transaction:javax.transaction-api
+ * javax.websocket:javax.websocket-api
+
+------
+Oracle OpenJDK
+
+If ALPN is used to negotiate HTTP/2 connections, then the following
+artifacts may be included in the distribution or downloaded when ALPN
+module is selected.
+
+ * java.sun.security.ssl
+
+These artifacts replace/modify OpenJDK classes.  The modififications
+are hosted at github and both modified and original are under GPL v2 with
+classpath exceptions.
+http://openjdk.java.net/legal/gplv2+ce.html
+
+
+------
+OW2
+
+The following artifacts are licensed by the OW2 Foundation according to the
+terms of http://asm.ow2.org/license.html
+
+org.ow2.asm:asm-commons
+org.ow2.asm:asm
+
+
+------
+Apache
+
+The following artifacts are ASL2 licensed.
+
+org.apache.taglibs:taglibs-standard-spec
+org.apache.taglibs:taglibs-standard-impl
+
+
+------
+MortBay
+
+The following artifacts are ASL2 licensed.  Based on selected classes from
+following Apache Tomcat jars, all ASL2 licensed.
+
+org.mortbay.jasper:apache-jsp
+  org.apache.tomcat:tomcat-jasper
+  org.apache.tomcat:tomcat-juli
+  org.apache.tomcat:tomcat-jsp-api
+  org.apache.tomcat:tomcat-el-api
+  org.apache.tomcat:tomcat-jasper-el
+  org.apache.tomcat:tomcat-api
+  org.apache.tomcat:tomcat-util-scan
+  org.apache.tomcat:tomcat-util
+
+org.mortbay.jasper:apache-el
+  org.apache.tomcat:tomcat-jasper-el
+  org.apache.tomcat:tomcat-el-api
+
+
+------
+Mortbay
+
+The following artifacts are CDDL + GPLv2 with classpath exception.
+
+https://glassfish.dev.java.net/nonav/public/CDDL+GPL.html
+
+org.eclipse.jetty.toolchain:jetty-schemas
+
+------
+Assorted
+
+The UnixCrypt.java code implements the one way cryptography used by
+Unix systems for simple password protection.  Copyright 1996 Aki Yoshida,
+modified April 2001  by Iris Van den Broeke, Daniel Deville.
+Permission to use, copy, modify and distribute UnixCrypt
+for non-commercial or commercial purposes and without fee is
+granted provided that the copyright notice appears in all copies.
+
+
+========================================================================
+
+tomcat-embed-el-9.0.75 NOTICE
+
+========================================================================
+
+Apache Tomcat
+Copyright 1999-2023 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+========================================================================
+
+jackson-dataformat-yaml-2.15.2 NOTICE
+
+========================================================================
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Copyright
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+## Licensing
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+========================================================================
+
+jackson-datatype-jdk8-2.15.2 NOTICE
+
+========================================================================
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Licensing
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+========================================================================
+
+jackson-datatype-jsr310-2.15.2 NOTICE
+
+========================================================================
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Licensing
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+========================================================================
+
+jackson-module-parameter-names-2.15.2 NOTICE
+
+========================================================================
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Licensing
+
+Jackson components are licensed under Apache (Software) License, version 2.0,
+as per accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+========================================================================
+
+commons-text-1.10.0 NOTICE
+
+========================================================================
+
+Apache Commons Text
+Copyright 2014-2022 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).

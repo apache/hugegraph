@@ -19,19 +19,24 @@ package org.apache.hugegraph.core;
 
 import java.util.Date;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.exception.ExistedException;
 import org.apache.hugegraph.exception.NotAllowException;
 import org.apache.hugegraph.exception.NotFoundException;
-import org.apache.hugegraph.schema.PropertyKey;
+import org.apache.hugegraph.id.Id;
+import org.apache.hugegraph.struct.schema.PropertyKey;
 import org.apache.hugegraph.schema.SchemaManager;
-import org.apache.hugegraph.schema.Userdata;
+import org.apache.hugegraph.struct.schema.Userdata;
+import org.apache.hugegraph.task.TaskStatus;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.define.AggregateType;
 import org.apache.hugegraph.type.define.Cardinality;
 import org.apache.hugegraph.type.define.DataType;
+import org.apache.hugegraph.type.define.GraphReadMode;
 import org.apache.hugegraph.type.define.WriteType;
 import org.apache.hugegraph.util.DateUtil;
+import org.apache.tinkerpop.gremlin.structure.T;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.junit.Assume;
 import org.junit.Test;
 
@@ -450,6 +455,48 @@ public class PropertyKeyCoreTest extends SchemaCoreTest {
         Assert.assertEquals(DataType.TEXT, wcc.dataType());
         Assert.assertEquals(Cardinality.SINGLE, wcc.cardinality());
         Assert.assertEquals(WriteType.OLAP_SECONDARY, wcc.writeType());
+    }
+
+    @Test
+    public void testClearAndRemoveOlapDataKeepsOtherProperty() throws Exception {
+        Assume.assumeTrue("Not support olap properties", storeFeatures().supportsOlapProperties());
+        SchemaManager schema = graph().schema();
+        schema.propertyKey("olap-owner").asText().create();
+        PropertyKey clear = schema.propertyKey("olap-clear").asText()
+                                  .writeType(WriteType.OLAP_COMMON).create();
+        schema.propertyKey("olap-keep").asText().writeType(WriteType.OLAP_COMMON).create();
+        schema.vertexLabel("olap-person").properties("olap-owner").primaryKeys("olap-owner").create();
+        Vertex owner = graph().addVertex(T.label, "olap-person", "olap-owner", "alice");
+        this.commitTx();
+        graph().addVertex(T.id, owner.id(), "olap-clear", "removed");
+        this.commitTx();
+        graph().addVertex(T.id, owner.id(), "olap-keep", "kept");
+        this.commitTx();
+        try {
+            graph().readMode(GraphReadMode.ALL);
+            Vertex before = graph().vertices(owner.id()).next();
+            Assert.assertEquals("removed", before.value("olap-clear"));
+            Assert.assertEquals("kept", before.value("olap-keep"));
+            this.commitTx();
+            Id clearTask = graph().clearPropertyKey(clear);
+            Assert.assertEquals(TaskStatus.SUCCESS,
+                                graph().taskScheduler().waitUntilTaskCompleted(clearTask, 60).status());
+            Assert.assertEquals(clear.id(), schema.getPropertyKey("olap-clear").id());
+            Vertex after = graph().vertices(owner.id()).next();
+            Assert.assertFalse(after.property("olap-clear").isPresent());
+            Assert.assertEquals("kept", after.value("olap-keep"));
+            this.commitTx();
+
+            graph().addVertex(T.id, owner.id(), "olap-clear", "removed-again");
+            this.commitTx();
+            Id removeTask = schema.propertyKey("olap-clear").remove();
+            Assert.assertEquals(TaskStatus.SUCCESS,
+                                graph().taskScheduler().waitUntilTaskCompleted(removeTask, 60).status());
+            Assert.assertThrows(NotFoundException.class, () -> schema.getPropertyKey("olap-clear"));
+            Assert.assertEquals("kept", graph().vertices(owner.id()).next().value("olap-keep"));
+        } finally {
+            graph().readMode(GraphReadMode.OLTP_ONLY);
+        }
     }
 
     @Test

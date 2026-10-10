@@ -30,6 +30,7 @@ import java.util.Set;
 
 import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.configuration2.PropertiesConfiguration;
+import org.apache.commons.text.StringEscapeUtils;
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.perf.PerfUtil.Watched;
@@ -47,11 +48,13 @@ import org.apache.tinkerpop.gremlin.FeatureRequirement;
 import org.apache.tinkerpop.gremlin.FeatureRequirements;
 import org.apache.tinkerpop.gremlin.LoadGraphWith;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
+import org.apache.tinkerpop.gremlin.process.traversal.step.map.MergeEdgeTest;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.optimization.LazyBarrierStrategy;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Graph;
 import org.apache.tinkerpop.gremlin.structure.Graph.Features.VertexPropertyFeatures;
 import org.apache.tinkerpop.gremlin.structure.Transaction;
+import org.apache.tinkerpop.gremlin.structure.TransactionMultiThreadedTest;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.slf4j.Logger;
@@ -85,10 +88,19 @@ public class TestGraphProvider extends AbstractGraphProvider {
     private static final String GREMLIN_GRAPH_KEY = "gremlin.graph";
     private static final String GREMLIN_GRAPH_VALUE =
             "org.apache.hugegraph.tinkerpop.TestGraphFactory";
+    private static final String BACKEND = "backend";
+    private static final String BACKEND_ROCKSDB = "rocksdb";
+    private static final String ROCKSDB_DATA_PATH = "rocksdb.data_path";
+    private static final String ROCKSDB_WAL_PATH = "rocksdb.wal_path";
+    private static final String ROCKSDB_DATA_DISKS = "rocksdb.data_disks";
+    private static final String TEST_PATH_SEPARATOR = "/";
+    private static final int MAX_ROCKSDB_PATH_SUFFIX_PREFIX_LENGTH = 80;
 
     private static final String AKEY_CLASS_PREFIX =
             "org.apache.tinkerpop.gremlin.structure." +
             "PropertyTest.PropertyFeatureSupportTest";
+    private static final String SUPPORTS_PREFIX = "supports";
+    private static final String FEATURE_VALUES_SUFFIX = "Values";
     private static final String IO_CLASS_PREFIX =
             "org.apache.tinkerpop.gremlin.structure.io.IoGraphTest";
     private static final String IO_TEST_PREFIX =
@@ -182,8 +194,17 @@ public class TestGraphProvider extends AbstractGraphProvider {
             confMap.put(key, config.getProperty(key));
         }
         String storePrefix = config.getString(CoreOptions.STORE.name());
-        confMap.put(CoreOptions.STORE.name(),
-                    storePrefix + "_" + this.suite + "_" + graphName);
+        String store = storePrefix + "_" + this.suite + "_" + graphName;
+        if (isTransactionMultiThreadedPropertyTest(testClass, testMethod)) {
+            store += "_txprop";
+        } else if (isMergeEdgeSelfTest(testClass, testMethod)) {
+            store += "_meself";
+        }
+        confMap.put(CoreOptions.STORE.name(), store);
+        if (isRocksDBBackend(config)) {
+            this.isolateRocksDBPaths(confMap, graphName, testClass,
+                                     testMethod);
+        }
         confMap.put(GREMLIN_GRAPH_KEY, GREMLIN_GRAPH_VALUE);
         confMap.put(TEST_CLASS, testClass);
         confMap.put(TEST_METHOD, testMethod);
@@ -191,6 +212,90 @@ public class TestGraphProvider extends AbstractGraphProvider {
         confMap.put(EXPECT_CUSTOMIZED_ID, customizedId(testClass, testMethod));
 
         return confMap;
+    }
+
+    private void isolateRocksDBPaths(Map<String, Object> confMap,
+                                     String graphName, Class<?> testClass,
+                                     String testMethod) {
+        String testClassName = testClass.getName();
+        String rawSuffix = this.suite + "_" + graphName + "_" +
+                           testClassName + "_" + testMethod;
+        String prefix = sanitizePathPart(this.suite + "_" + graphName + "_" +
+                                         testClass.getSimpleName() + "_" +
+                                         testMethod);
+        if (prefix.length() > MAX_ROCKSDB_PATH_SUFFIX_PREFIX_LENGTH) {
+            prefix = prefix.substring(0,
+                                      MAX_ROCKSDB_PATH_SUFFIX_PREFIX_LENGTH);
+        }
+        String pathSuffix = prefix + "_" + shortHash(rawSuffix);
+        isolatePath(confMap, ROCKSDB_DATA_PATH, pathSuffix);
+        isolatePath(confMap, ROCKSDB_WAL_PATH, pathSuffix);
+
+        Object dataDisks = confMap.get(ROCKSDB_DATA_DISKS);
+        if (dataDisks != null) {
+            confMap.put(ROCKSDB_DATA_DISKS,
+                        isolateDataDisks(dataDisks, pathSuffix));
+        }
+    }
+
+    private static void isolatePath(Map<String, Object> confMap, String key,
+                                    String pathSuffix) {
+        Object path = confMap.get(key);
+        if (path == null) {
+            return;
+        }
+        confMap.put(key, appendPath(path.toString(), pathSuffix));
+    }
+
+    private static String isolateDataDisks(Object dataDisks,
+                                           String pathSuffix) {
+        String value = dataDisks.toString().trim();
+        if (value.isEmpty()) {
+            return value;
+        }
+
+        boolean wrapped = value.startsWith("[") && value.endsWith("]");
+        String body = wrapped ? value.substring(1, value.length() - 1) : value;
+        String[] entries = body.split(",");
+        StringBuilder builder = new StringBuilder();
+        for (String entry : entries) {
+            String item = entry.trim();
+            int index = item.indexOf(':');
+            if (index < 0) {
+                return value;
+            }
+            String table = item.substring(0, index).trim();
+            String path = item.substring(index + 1).trim();
+            if (table.isEmpty() || path.isEmpty()) {
+                return value;
+            }
+            if (builder.length() > 0) {
+                builder.append(',');
+            }
+            builder.append(table).append(':')
+                   .append(appendPath(path, pathSuffix));
+        }
+        return wrapped ? "[" + builder + "]" : builder.toString();
+    }
+
+    private static String appendPath(String path, String suffix) {
+        if (path.endsWith("/") || path.endsWith("\\")) {
+            return path + suffix;
+        }
+        return path + TEST_PATH_SEPARATOR + suffix;
+    }
+
+    private static String sanitizePathPart(String value) {
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private static String shortHash(String value) {
+        return Integer.toHexString(value.hashCode());
+    }
+
+    private static boolean isRocksDBBackend(Configuration config) {
+        return config != null &&
+               BACKEND_ROCKSDB.equals(config.getString(BACKEND, ""));
     }
 
     private static boolean customizedId(Class<?> test, String testMethod) {
@@ -215,10 +320,41 @@ public class TestGraphProvider extends AbstractGraphProvider {
         return false;
     }
 
+    private static boolean isTransactionMultiThreadedPropertyTest(
+            Class<?> testClass, String testMethod) {
+        return testClass == TransactionMultiThreadedTest.class &&
+               testMethod.equals("shouldChangeVertexProperty");
+    }
+
+    private static boolean isMergeEdgeSelfTest(Class<?> testClass,
+                                               String testMethod) {
+        return testClass == MergeEdgeTest.Traversals.class &&
+               testMethod.equals("g_V_mergeEXlabel_self_weight_05X");
+    }
+
     private static String getAKeyType(Class<?> clazz, String method) {
         if (clazz.getCanonicalName().startsWith(AKEY_CLASS_PREFIX)) {
-            return method.substring(method.indexOf('[') + 9,
-                                    method.indexOf('(') - 6);
+            String feature = method;
+            int featureStart = method.indexOf('[');
+            int featureEnd = method.indexOf(']');
+            if (featureStart >= 0 && featureEnd > featureStart) {
+                feature = method.substring(featureStart + 1, featureEnd);
+            }
+
+            if (!feature.startsWith(SUPPORTS_PREFIX)) {
+                return null;
+            }
+            feature = feature.substring(SUPPORTS_PREFIX.length());
+
+            int valueStart = feature.indexOf('(');
+            if (valueStart >= 0) {
+                feature = feature.substring(0, valueStart);
+            }
+            if (!feature.endsWith(FEATURE_VALUES_SUFFIX)) {
+                return null;
+            }
+            return feature.substring(0, feature.length() -
+                                        FEATURE_VALUES_SUFFIX.length());
         }
         return null;
     }
@@ -292,8 +428,15 @@ public class TestGraphProvider extends AbstractGraphProvider {
             testGraph.initPropertyKey("long", "Long");
         }
 
+        if (isTransactionMultiThreadedPropertyTest(testClass, testMethod)) {
+            testGraph.initPropertyKey("test", "Integer");
+        }
+
         // Basic schema is initiated by default once a graph is open
-        testGraph.initBasicSchema(idStrategy(config), TestGraph.DEFAULT_VL);
+        String selfVL = isMergeEdgeSelfTest(testClass, testMethod) ?
+                        "person" : TestGraph.DEFAULT_VL;
+        testGraph.initBasicSchema(idStrategy(config), TestGraph.DEFAULT_VL,
+                                  selfVL);
         if (testClass.getName().equals(
                 "org.apache.tinkerpop.gremlin.process.traversal.step.map.ReadTest$Traversals")) {
             testGraph.initEdgeLabelPersonKnowsPerson();
@@ -330,6 +473,10 @@ public class TestGraphProvider extends AbstractGraphProvider {
         String graphName = config.getString(CoreOptions.STORE.name());
         if (!testGraph.initedBackend()) {
             testGraph.close();
+            if (this.graphs.get(graphName) == testGraph) {
+                this.graphs.remove(graphName);
+            }
+            return;
         }
         if (testGraph.closed()) {
             if (this.graphs.get(graphName) == testGraph) {
@@ -348,6 +495,13 @@ public class TestGraphProvider extends AbstractGraphProvider {
         // Clear all data
         Class<?> testClass = (Class<?>) config.getProperty(TEST_CLASS);
         testGraph.clearAll(testClass.getCanonicalName());
+
+        if (isRocksDBBackend(config)) {
+            testGraph.close();
+            if (this.graphs.get(graphName) == testGraph) {
+                this.graphs.remove(graphName);
+            }
+        }
 
         LOG.debug("Clear graph '{}'", graphName);
     }
@@ -389,7 +543,7 @@ public class TestGraphProvider extends AbstractGraphProvider {
         TestGraph testGraph = (TestGraph) graph;
 
         // Clear basic schema initiated in openTestGraph
-        testGraph.clearAll("");
+        testGraph.clearForLoad();
 
         if (testGraph.loadedGraph() == null) {
             testGraph.loadedGraph(REGULAR_LOAD);
@@ -441,6 +595,10 @@ public class TestGraphProvider extends AbstractGraphProvider {
 
     @Override
     public String convertId(Object id, Class<? extends Element> c) {
-        return id.toString();
+        if (id instanceof Number) {
+            return id.toString();
+        }
+        return String.format("\"%s\"", StringEscapeUtils.escapeJava(
+                id.toString()));
     }
 }

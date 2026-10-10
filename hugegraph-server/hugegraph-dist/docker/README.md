@@ -1,5 +1,7 @@
 # Deploy HugeGraph Server with Docker
 
+<!-- TODO: update release image tags and version examples after 1.8.0 is published. -->
+
 > Note:
 >
 > 1. The HugeGraph Docker image is a convenience release, not an official ASF distribution artifact. See the [ASF Release Distribution Policy](https://infra.apache.org/release-distribution.html#dockerhub) for details.

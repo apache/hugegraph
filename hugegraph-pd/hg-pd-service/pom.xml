@@ -57,16 +57,29 @@
             <version>${revision}</version>
         </dependency>
 
+        <!-- Preserve the interpolation library previously supplied by Server core. -->
         <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hg-store-common</artifactId>
-            <version>${revision}</version>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-text</artifactId>
+            <version>1.10.0</version>
         </dependency>
 
         <dependency>
-            <groupId>org.apache.hugegraph</groupId>
-            <artifactId>hugegraph-core</artifactId>
-            <version>${revision}</version>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.11.5</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.11.5</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.11.5</version>
+            <scope>runtime</scope>
         </dependency>
 
         <dependency>
@@ -83,7 +96,7 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
-            <version>2.5.14</version>
+            <version>${spring-boot.version}</version>
             <!-- Exclude the Tomcat dependency -->
             <exclusions>
                 <!-- Exclude the Tomcat dependency -->
@@ -101,7 +114,7 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
-            <version>2.5.14</version>
+            <version>${spring-boot.version}</version>
         </dependency>
         <dependency>
             <groupId>io.micrometer</groupId>
@@ -111,12 +124,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jetty</artifactId>
-            <version>2.5.14</version>
+            <version>${spring-boot.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-log4j2</artifactId>
-            <version>2.5.14</version>
+            <version>${spring-boot.version}</version>
             <exclusions>
                 <exclusion>
                     <artifactId>log4j-slf4j-impl</artifactId>
@@ -137,7 +150,7 @@
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java-util</artifactId>
-            <version>3.17.2</version>
+            <version>${protobuf.runtime.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>

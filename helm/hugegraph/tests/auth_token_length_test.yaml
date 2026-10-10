@@ -1,0 +1,38 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+suite: Auth token length guard
+templates:
+  - server-deployment.yaml
+tests:
+  - it: accepts an empty token value, which defers to autoGenerate
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: accepts a signing key of at least 32 characters
+    set:
+      server.auth.token.value: ktestJwtSigningKey2026xyzABCDEFGH12345678
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: rejects a signing key shorter than 32 characters
+    set:
+      server.auth.token.value: tooshortkey
+    asserts:
+      - failedTemplate: {}

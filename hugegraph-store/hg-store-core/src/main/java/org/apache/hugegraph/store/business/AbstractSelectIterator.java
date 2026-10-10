@@ -17,6 +17,9 @@
 
 package org.apache.hugegraph.store.business;
 
+import java.util.Objects;
+
+import org.apache.hugegraph.HugeGraphSupplier;
 import org.apache.hugegraph.backend.BackendColumn;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
 import org.apache.hugegraph.serializer.BinaryElementSerializer;
@@ -29,8 +32,10 @@ public abstract class AbstractSelectIterator implements ScanIterator {
 
     protected ScanIterator iterator;
     protected BinaryElementSerializer serializer;
+    protected final HugeGraphSupplier graph;
 
-    public AbstractSelectIterator() {
+    public AbstractSelectIterator(HugeGraphSupplier graph) {
+        this.graph = Objects.requireNonNull(graph, "graph");
         this.serializer = new BinaryElementSerializer();
     }
 
@@ -39,9 +44,9 @@ public abstract class AbstractSelectIterator implements ScanIterator {
             throw new IllegalArgumentException("BackendColumn cannot be null");
         }
         if (isVertex) {
-            return serializer.parseVertex(null, column, null);
+            return serializer.parseSchemaVertex(this.graph, column, null);
         } else {
-            return serializer.parseEdge(null, column, null, true);
+            return serializer.parseSchemaEdge(this.graph, column, null, true);
         }
     }
 }

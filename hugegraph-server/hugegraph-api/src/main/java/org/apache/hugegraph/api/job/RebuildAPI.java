@@ -21,9 +21,8 @@ import java.util.Map;
 
 import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.api.API;
-import org.apache.hugegraph.api.filter.RedirectFilter;
 import org.apache.hugegraph.api.filter.StatusFilter.Status;
-import org.apache.hugegraph.backend.id.Id;
+import org.apache.hugegraph.id.Id;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.util.Log;
 import org.slf4j.Logger;
@@ -55,7 +54,6 @@ public class RebuildAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
                             "$action=index_label_write"})
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> vertexLabelRebuild(@Context GraphManager manager,
                                               @Parameter(description = "The graphspace name")
                                               @PathParam("graphspace")
@@ -100,7 +98,6 @@ public class RebuildAPI extends API {
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space", "$graphspace=$graphspace $owner=$graph " +
                             "$action=index_label_write"})
-    @RedirectFilter.RedirectMasterRole
     public Map<String, Id> indexLabelRebuild(@Context GraphManager manager,
                                              @Parameter(description = "The graphspace name")
                                              @PathParam("graphspace")

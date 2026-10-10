@@ -1,5 +1,7 @@
 # HugeGraph Docker Compose
 
+<!-- TODO: update release image tags and version examples after 1.8.0 is published. -->
+
 ## Users
 
 ### Choose a topology

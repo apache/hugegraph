@@ -3,10 +3,8 @@ name: "Rerun CI"
 on:
   workflow_run:
     workflows:
-      - "HugeGraph-Server CI"
-      - "HugeGraph-Commons CI"
-      - "HugeGraph-PD & Store & Hstore CI"
-      - "Cluster Test CI"
+      - "Server Memory CI"
+      - "License Checker"
     types:
       - completed
 
@@ -18,7 +16,7 @@ env:
 
 jobs:
   decide-rerun-action:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
     outputs:
       action: ${{ steps.decision.outputs.action }}
@@ -37,7 +35,7 @@ jobs:
           action="skip"
           reason="unsupported event: $EVENT_NAME"
 
-          if [[ "$EVENT_NAME" == "push" || "$EVENT_NAME" == "pull_request" ]]; then
+          if [[ "$EVENT_NAME" == "push" ]]; then
             if (( RUN_ATTEMPT > MAX_RERUNS )); then
               reason="retry limit reached"
             else
@@ -73,11 +71,45 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     steps:
-      - name: Wait before rerun
+      # workflow_run is privileged: only load code from the default-branch commit.
+      - name: Checkout trusted retry checker
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Check source freshness before waiting
+        id: initial-freshness
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
-          sleep "$RETRY_DELAY_SECONDS"
+          python3 .github/scripts/check-rerun.py \
+            --repository "$GH_REPO" --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" --max-reruns "$MAX_RERUNS"
+
+      - name: Wait before rerun
+        if: steps.initial-freshness.outputs.action == 'rerun'
+        run: sleep "$RETRY_DELAY_SECONDS"
+
+      - name: Check source freshness after waiting
+        id: freshness
+        if: steps.initial-freshness.outputs.action == 'rerun'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          python3 .github/scripts/check-rerun.py \
+            --repository "$GH_REPO" --run-id "$RUN_ID" \
+            --run-attempt "$RUN_ATTEMPT" --max-reruns "$MAX_RERUNS"
 
       - name: Rerun failed jobs
+        if: steps.freshness.outputs.action == 'rerun'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

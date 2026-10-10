@@ -18,14 +18,16 @@
 package org.apache.hugegraph.task;
 
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import org.apache.hugegraph.HugeException;
+import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.concurrent.PausableScheduledThreadPool;
 import org.apache.hugegraph.util.Consumers;
@@ -36,10 +38,7 @@ import org.slf4j.Logger;
 
 /**
  * Central task management system that coordinates task scheduling and execution.
- * Manages task schedulers for different graphs and handles role-based execution.
- * <p>
- * Note: The local master-worker mechanism will be deprecated in version 1.7
- * (configuration has been removed from config files).
+ * Manages the task schedulers of each graph and the executors they share.
  */
 public final class TaskManager {
 
@@ -48,8 +47,6 @@ public final class TaskManager {
     public static final String TASK_WORKER_PREFIX = "task-worker";
     public static final String TASK_WORKER = TASK_WORKER_PREFIX + "-%d";
     public static final String TASK_DB_WORKER = "task-db-worker-%d";
-    public static final String SERVER_INFO_DB_WORKER = "server-info-db-worker-%d";
-    public static final String TASK_SCHEDULER = "task-scheduler-%d";
 
     public static final String OLAP_TASK_WORKER = "olap-task-worker-%d";
     public static final String SCHEMA_TASK_WORKER = "schema-task-worker-%d";
@@ -65,8 +62,6 @@ public final class TaskManager {
 
     private final ExecutorService taskExecutor;
     private final ExecutorService taskDbExecutor;
-    private final ExecutorService serverInfoDbExecutor;
-    private final PausableScheduledThreadPool schedulerExecutor;
 
     private final ExecutorService schemaTaskExecutor;
     private final ExecutorService olapTaskExecutor;
@@ -85,18 +80,12 @@ public final class TaskManager {
         // For save/query task state, just one thread is ok
         this.taskDbExecutor = ExecutorUtil.newFixedThreadPool(
                 1, TASK_DB_WORKER);
-        this.serverInfoDbExecutor = ExecutorUtil.newFixedThreadPool(
-                1, SERVER_INFO_DB_WORKER);
 
         this.schemaTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, SCHEMA_TASK_WORKER);
         this.olapTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, OLAP_TASK_WORKER);
         this.ephemeralTaskExecutor = ExecutorUtil.newFixedThreadPool(pool, EPHEMERAL_TASK_WORKER);
         this.distributedSchedulerExecutor =
                 ExecutorUtil.newPausableScheduledThreadPool(1, DISTRIBUTED_TASK_SCHEDULER);
-
-        // For a schedule task to run, just one thread is ok
-        this.schedulerExecutor = ExecutorUtil.newPausableScheduledThreadPool(
-                1, TASK_SCHEDULER);
     }
 
     public void addScheduler(HugeGraphParams graph) {
@@ -116,8 +105,7 @@ public final class TaskManager {
                                 schemaTaskExecutor,
                                 olapTaskExecutor,
                                 taskExecutor, /* gremlinTaskExecutor */
-                                ephemeralTaskExecutor,
-                                serverInfoDbExecutor);
+                                ephemeralTaskExecutor);
                 this.schedulers.put(graph, scheduler);
                 break;
             }
@@ -127,8 +115,7 @@ public final class TaskManager {
                         new StandardTaskScheduler(
                                 graph,
                                 this.taskExecutor,
-                                this.taskDbExecutor,
-                                this.serverInfoDbExecutor);
+                                this.taskDbExecutor);
                 this.schedulers.put(graph, scheduler);
                 break;
             }
@@ -137,35 +124,65 @@ public final class TaskManager {
 
     public void closeScheduler(HugeGraphParams graph) {
         TaskScheduler scheduler = this.schedulers.get(graph);
+        Throwable failure = null;
+        boolean drained = scheduler == null;
         if (scheduler != null) {
             /*
-             * Synch close+remove scheduler and iterate scheduler, details:
-             * 'closeScheduler' should sync with 'scheduleOrExecuteJob'.
-             * Because 'closeScheduler' will be called by 'graph.close()' in
-             * main thread and there is gap between 'scheduler.close()'
-             * (will close graph tx) and 'this.schedulers.remove(graph)'.
-             * In this gap 'scheduleOrExecuteJob' may be run in
-             * scheduler-db-thread and 'scheduleOrExecuteJob' will reopen
-             * graph tx. As a result, graph tx will mistakenly not be closed
-             * after 'graph.close()'.
+             * Keep close+remove exclusive with scheduler iteration: in their gap
+             * a scheduler DB worker could otherwise reopen the graph transaction.
              */
             synchronized (scheduler) {
-                if (scheduler.close()) {
-                    this.schedulers.remove(graph);
+                boolean stopped = false;
+                try {
+                    stopped = scheduler.close();
+                } catch (RuntimeException | Error error) {
+                    failure = error;
+                    // Standard closes its server manager in finally; Distributed
+                    // sets its dispatch-stop flag before cancellation/drain begins.
+                    stopped = true;
+                }
+                // A timeout leaves running jobs registered for the next drain attempt.
+                if (stopped && scheduler.pendingTasks() == 0) {
+                    this.schedulers.remove(graph, scheduler);
+                    drained = true;
                 }
             }
         }
-
-        if (!this.taskExecutor.isTerminated()) {
-            this.closeTaskTx(graph);
+        if (!drained) {
+            // A running cron/job must finish before owner callbacks are queued
+            // on its executor. In particular, do not rejoin a timed-out cron.
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            if (failure != null) {
+                throw (RuntimeException) failure;
+            }
+            return;
         }
-
-        if (!this.schedulerExecutor.isTerminated()) {
-            this.closeSchedulerTx(graph);
+        for (Runnable close : new Runnable[]{() -> {
+            if (!this.taskExecutor.isTerminated()) {
+                this.closeTaskTx(graph);
+            }
+        }, () -> {
+            if (!this.distributedSchedulerExecutor.isTerminated()) {
+                this.closeDistributedSchedulerTx(graph);
+            }
+        }}) {
+            try {
+                close.run();
+            } catch (RuntimeException | Error error) {
+                if (failure == null) {
+                    failure = error;
+                } else if (failure != error) {
+                    failure.addSuppressed(error);
+                }
+            }
         }
-
-        if (!this.distributedSchedulerExecutor.isTerminated()) {
-            this.closeDistributedSchedulerTx(graph);
+        if (failure instanceof Error) {
+            throw (Error) failure;
+        }
+        if (failure != null) {
+            throw (RuntimeException) failure;
         }
     }
 
@@ -177,31 +194,42 @@ public final class TaskManager {
         final boolean selfIsTaskWorker = Thread.currentThread().getName()
                                                .startsWith(TASK_WORKER_PREFIX);
         final int totalThreads = selfIsTaskWorker ? THREADS - 1 : THREADS;
+        Queue<Throwable> failures = new ConcurrentLinkedQueue<>();
+        Runnable close = () -> {
+            try {
+                graph.closeTx();
+            } catch (RuntimeException | Error error) {
+                // invokeAll() does not inspect worker Futures. Capture failures
+                // here so each worker still completes its execution accounting.
+                failures.add(error);
+                LOG.error("Failed to close task tx in thread '{}'", Thread.currentThread().getName(), error);
+            }
+        };
         try {
             if (selfIsTaskWorker) {
                 // Call closeTx directly if myself is task thread(ignore others)
-                graph.closeTx();
+                close.run();
             } else {
                 Consumers.executeOncePerThread(this.taskExecutor, totalThreads,
-                                               graph::closeTx, TX_CLOSE_TIMEOUT);
+                                               close, TX_CLOSE_TIMEOUT);
             }
-        } catch (Exception e) {
-            throw new HugeException("Exception when closing task tx", e);
+        } catch (Exception error) {
+            failures.add(error);
+            if (error instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
         }
-    }
-
-    private void closeSchedulerTx(HugeGraphParams graph) {
-        final Callable<Void> closeTx = () -> {
-            // Do close-tx for the current thread
-            graph.closeTx();
-            // Let other threads run
-            Thread.yield();
-            return null;
-        };
-        try {
-            this.schedulerExecutor.submit(closeTx).get();
-        } catch (Exception e) {
-            throw new HugeException("Exception when closing scheduler tx", e);
+        Throwable failure = failures.poll();
+        if (failure != null) {
+            for (Throwable error : failures) {
+                if (error != failure) {
+                    failure.addSuppressed(error);
+                }
+            }
+            if (failure instanceof Error) {
+                throw (Error) failure;
+            }
+            throw new HugeException("Exception when closing task tx", failure);
         }
     }
 
@@ -236,19 +264,10 @@ public final class TaskManager {
         assert this.schedulers.isEmpty() : this.schedulers.size();
 
         Throwable ex = null;
-        boolean terminated = this.schedulerExecutor.isTerminated();
+        boolean terminated = this.distributedSchedulerExecutor.isTerminated();
         final TimeUnit unit = TimeUnit.SECONDS;
 
-        if (!this.schedulerExecutor.isShutdown()) {
-            this.schedulerExecutor.shutdown();
-            try {
-                terminated = this.schedulerExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.distributedSchedulerExecutor.isShutdown()) {
+        if (!this.distributedSchedulerExecutor.isShutdown()) {
             this.distributedSchedulerExecutor.shutdown();
             try {
                 terminated = this.distributedSchedulerExecutor.awaitTermination(timeout, unit);
@@ -261,15 +280,6 @@ public final class TaskManager {
             this.taskExecutor.shutdown();
             try {
                 terminated = this.taskExecutor.awaitTermination(timeout, unit);
-            } catch (Throwable e) {
-                ex = e;
-            }
-        }
-
-        if (terminated && !this.serverInfoDbExecutor.isShutdown()) {
-            this.serverInfoDbExecutor.shutdown();
-            try {
-                terminated = this.serverInfoDbExecutor.awaitTermination(timeout, unit);
             } catch (Throwable e) {
                 ex = e;
             }
@@ -329,14 +339,6 @@ public final class TaskManager {
             size += scheduler.pendingTasks();
         }
         return size;
-    }
-
-    public void onAsRoleMaster() {
-        // ServerInfo based role propagation is deprecated.
-    }
-
-    public void onAsRoleWorker() {
-        // ServerInfo based role propagation is deprecated.
     }
 
     private static final ThreadLocal<String> CONTEXTS = new ThreadLocal<>();
