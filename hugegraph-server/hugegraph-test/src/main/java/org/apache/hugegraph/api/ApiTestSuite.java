@@ -35,6 +35,7 @@ import org.junit.runners.Suite;
         TaskApiTest.class,
         GremlinApiTest.class,
         MetricsApiTest.class,
+        ReadinessApiTest.class,
         UserApiTest.class,
         LoginApiTest.class,
         ProjectApiTest.class,

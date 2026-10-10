@@ -33,6 +33,38 @@ Memory remains a test-only backend throughout. Historical backend users must ope
 maintain a compatible release; these implementations are not restored to the current source
 tree or distribution packages.
 
+## Readiness endpoint
+
+`GET /readiness` answers `200` while this Server can serve graph traffic and `503` otherwise. It is
+unauthenticated and needs no graphspace prefix, so a Kubernetes `httpGet` probe can call it as is. The
+JSON body carries `ready`, `storage` (`embedded`, `hstore`, `hbase`, or a comma-separated list), a
+`reason`, whether the answer was `cached`, and one `probes` entry per probed backend configuration
+(backend, `ready`, `reason`); it carries no addresses and no graph names.
+
+What ready means:
+
+- `embedded`: no graph on a remote storage; ready once the REST layer is up.
+- `hstore`: this Server knows a Store list and at least one Store answers a direct status ping
+  (`HgStoreState.getScanState`). A Store whose status answers while its raft or partition path is
+  broken is not detected.
+- `hbase`: every table of the graph (schema store, graph store, system store) exists, is enabled and
+  is available.
+- A configured graph that failed to load at startup makes the Server not ready whatever its backend
+  (`reason` says how many, `failed_graphs` carries the count).
+
+Graphs that share a backend configuration (the same `pd.peers`; for hbase every graph is its own
+scope, since the table namespace is derived from the graph name) share one probe; independent
+configurations are probed side by side within one time budget and the Server is ready only when all
+of them are.
+
+Options in `rest-server.properties`:
+
+| option | default | meaning |
+|---|---|---|
+| `readiness.timeout` | `1000` | time budget of one probe in ms; a backend that does not answer within it reads as not ready |
+| `readiness.cache_ttl` | `2000` | a probe result is reused for this many ms |
+| `readiness.max_waiters` | `16` | callers that may wait for the probe in flight; beyond it a caller gets `503` at once |
+
 ## Docker
 
 ### Standalone Mode

@@ -166,6 +166,8 @@ public final class GraphManager {
     private final Map<String, Service> services;
     //FIXME: add one class like graphKey as key,which contains graphSpace and graphName
     private final Map<String, Graph> graphs;
+    /** configured graphs whose load failed (name -> exception class), for the readiness gate */
+    private final Map<String, String> failedGraphs = new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<String> localGraphs;
     private final Set<String> removingGraphs;
     private final Set<String> creatingGraphs;
@@ -1267,7 +1269,9 @@ public final class GraphManager {
             HugeFactory.checkGraphName(name, "rest-server.properties");
             try {
                 this.loadGraph(name, graphConfPath);
+                this.failedGraphs.remove(name);
             } catch (Throwable e) {
+                this.failedGraphs.put(name, e.getClass().getSimpleName());
                 LOG.error("Graph '{}' can't be loaded: '{}'",
                           name, graphConfPath, e);
             }
@@ -1650,6 +1654,11 @@ public final class GraphManager {
 
     public Set<String> graphs() {
         return Collections.unmodifiableSet(this.graphs.keySet());
+    }
+
+    /** The configured graphs whose last load failed: name -> exception class. */
+    public Map<String, String> failedGraphs() {
+        return Collections.unmodifiableMap(this.failedGraphs);
     }
 
     public HugeGraph graph(String spaceGraphName) {

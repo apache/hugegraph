@@ -63,6 +63,8 @@ import org.apache.hugegraph.unit.core.DataTypeTest;
 import org.apache.hugegraph.unit.core.GraphSpaceInfoLocaleTest;
 import org.apache.hugegraph.unit.core.GraphManagerStoresWaitTest;
 import org.apache.hugegraph.unit.core.MetaManagerClusterTest;
+import org.apache.hugegraph.unit.core.HbaseReadinessTest;
+import org.apache.hugegraph.unit.core.StorageReadinessTest;
 import org.apache.hugegraph.unit.core.DirectionsTest;
 import org.apache.hugegraph.unit.core.ExceptionTest;
 import org.apache.hugegraph.unit.core.GraphManagerAdminInitTest;
@@ -165,6 +167,8 @@ import org.junit.runners.Suite;
         GraphSpaceInfoLocaleTest.class,
         GraphManagerStoresWaitTest.class,
         MetaManagerClusterTest.class,
+        StorageReadinessTest.class,
+        HbaseReadinessTest.class,
         DirectionsTest.class,
         SerialEnumTest.class,
 
