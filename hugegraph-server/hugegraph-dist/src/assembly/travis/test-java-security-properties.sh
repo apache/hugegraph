@@ -216,7 +216,6 @@ fi
 
 TEMP_DIR=$(mktemp -d)
 CRASH_NAME_FIXTURES=()
-LAUNCHER_DUMP_DIRS=()
 OOM_DUMP_DIR=""
 SECURITY_PROPERTIES_BACKUP="${TEMP_DIR}/java-security.properties"
 
@@ -236,11 +235,12 @@ cleanup() {
     if [[ -n "${OOM_DUMP_DIR:-}" ]]; then
         rm -f "$OOM_DUMP_DIR"/java_pid*.hprof
     fi
-    # Each launcher run creates a heap dump directory. Remove only the empty ones
-    # this run created: those named after TEST_HOST, and the few it names itself.
+    # Each launcher run creates a heap dump directory. Every host name this run
+    # uses is TEST_HOST or starts with "${TEST_HOST}-", so these globs match only
+    # this run's directories; remove the empty ones.
     local dump_dir
     for dump_dir in "${SERVER_ROOT}"/logs/heapdump_"${TEST_HOST}"_*/ \
-                    ${LAUNCHER_DUMP_DIRS[@]+"${LAUNCHER_DUMP_DIRS[@]}"}; do
+                    "${SERVER_ROOT}"/logs/heapdump_"${TEST_HOST}"-*_*/; do
         if [[ -d "$dump_dir" && ! -L "${dump_dir%/}" ]]; then
             rmdir "$dump_dir" 2>/dev/null || true
         fi
@@ -766,26 +766,24 @@ add_crash_fixture() {
         esac
     fi
 }
-USED_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20200101-000000"
-OLD_EMPTY_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-a_20191231-000000"
-OTHER_HOST_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-pod-c_20191231-000000"
+USED_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-a_20200101-000000"
+OLD_EMPTY_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-a_20191231-000000"
+OTHER_HOST_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-c_20191231-000000"
 add_crash_fixture "$USED_DUMP_DIR" dump-dir
-add_crash_fixture "${SERVER_ROOT}/logs/hs_err_pid1_test-pod-a_20200101-000000-1.log" file
-add_crash_fixture "${SERVER_ROOT}/logs/heapdump_test-pod-a_20200101-000000-2" dangling-link
-LAUNCHER_DUMP_DIRS+=("${SERVER_ROOT}/logs/heapdump_test-pod-a_20200101-000000-3"
-                     "${SERVER_ROOT}/logs/heapdump_test_pod-b_20200101-000000")
+add_crash_fixture "${SERVER_ROOT}/logs/hs_err_pid1_${TEST_HOST}-a_20200101-000000-1.log" file
+add_crash_fixture "${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-a_20200101-000000-2" dangling-link
 add_crash_fixture "$OLD_EMPTY_DUMP_DIR" empty-dir
 add_crash_fixture "$OTHER_HOST_DUMP_DIR" empty-dir
 UNIQUE_NAME_CAPTURE="${TEMP_DIR}/unique-name.args"
 CAPTURE_FILE="$UNIQUE_NAME_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
-    HOSTNAME=test-pod-a PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    HOSTNAME="${TEST_HOST}-a" PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" HeapDumpPath \
-    "^${LOGS_PATTERN}/heapdump_test-pod-a_20200101-000000-3$"
+    "^${LOGS_PATTERN}/heapdump_${TEST_HOST}-a_20200101-000000-3$"
 assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
-    "^${LOGS_PATTERN}/hs_err_pid%p_test-pod-a_20200101-000000-3\.log$"
-[[ -f "${SERVER_ROOT}/logs/hs_err_pid1_test-pod-a_20200101-000000-1.log" ]] ||
+    "^${LOGS_PATTERN}/hs_err_pid%p_${TEST_HOST}-a_20200101-000000-3\.log$"
+[[ -f "${SERVER_ROOT}/logs/hs_err_pid1_${TEST_HOST}-a_20200101-000000-1.log" ]] ||
     fail "launcher removed an existing crash log"
 [[ -d "$OLD_EMPTY_DUMP_DIR" ]] ||
     fail "launcher removed an empty heap dump directory from an earlier launch"
@@ -798,11 +796,11 @@ assert_effective_flag "$UNIQUE_NAME_CAPTURE" ErrorFile \
 # characters unsafe in a file name are replaced.
 OTHER_HOST_CAPTURE="${TEMP_DIR}/other-host.args"
 CAPTURE_FILE="$OTHER_HOST_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" \
-    HOSTNAME='test/pod-b' PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
+    HOSTNAME="${TEST_HOST}-b/x" PATH="${MOCK_DATE_BIN}:${PATH}" STDOUT_MODE=true "$SERVER_SCRIPT" \
     "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true >/dev/null
 
 assert_effective_flag "$OTHER_HOST_CAPTURE" HeapDumpPath \
-    "^${LOGS_PATTERN}/heapdump_test_pod-b_20200101-000000$"
+    "^${LOGS_PATTERN}/heapdump_${TEST_HOST}-b_x_20200101-000000$"
 if [[ ${#CRASH_NAME_FIXTURES[@]} -gt 0 ]]; then
     rm -rf "${CRASH_NAME_FIXTURES[@]}"
 fi
@@ -813,9 +811,8 @@ CRASH_NAME_FIXTURES=()
 # failed launch must not leave a heap dump directory behind.
 : > "$SERVER_LOG"
 PREFLIGHT_ERROR="${TEMP_DIR}/preflight.err"
-PREFLIGHT_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_test-preflight_20200101-000000"
-LAUNCHER_DUMP_DIRS+=("$PREFLIGHT_DUMP_DIR")
-if JAVA_HOME="$MOCK_JAVA_HOME" HOSTNAME=test-preflight PATH="${MOCK_DATE_BIN}:${PATH}" \
+PREFLIGHT_DUMP_DIR="${SERVER_ROOT}/logs/heapdump_${TEST_HOST}-preflight_20200101-000000"
+if JAVA_HOME="$MOCK_JAVA_HOME" HOSTNAME="${TEST_HOST}-preflight" PATH="${MOCK_DATE_BIN}:${PATH}" \
    STDOUT_MODE=true "$SERVER_SCRIPT" \
    "${CONF}/gremlin-server.yaml" "${CONF}/rest-server.properties" true "" "bad-gc" \
    >/dev/null 2>"$PREFLIGHT_ERROR"; then
