@@ -195,7 +195,7 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ env.REPORT_DIR }}/*.xml
+          files: ${{ env.REPORT_DIR }}/*.xml,hugegraph-server/target/site/jacoco/jacoco.xml
           disable_search: true
           fail_ci_if_error: false
 
