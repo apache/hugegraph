@@ -886,6 +886,30 @@ grep -Fq "WARN: cannot create ${SERVER_ROOT}/logs/heapdump_" "$SERVER_LOG" ||
     fail "launcher did not log that the heap dump directory was not created"
 assert_effective_flag "$NO_DUMP_DIR_CAPTURE" HeapDumpPath "^${LOGS_PATTERN}$"
 
+# A logs path with a double quote or % cannot go into JAVA_TOOL_OPTIONS. Heap
+# dumps must stay on there, on the command line as before this change, with only
+# the crash log default left out. Each case runs in its own copy of bin/ and conf/.
+for ODD_DIR_NAME in 'pct%dir' 'dq"dir'; do
+    mkdir -p "${TEMP_DIR}/${ODD_DIR_NAME}/logs" "${TEMP_DIR}/${ODD_DIR_NAME}/plugins"
+    ODD_ROOT=$(cd "${TEMP_DIR}/${ODD_DIR_NAME}" && pwd -P)
+    cp -R "${SERVER_ROOT}/bin" "${SERVER_ROOT}/conf" "${ODD_ROOT}/"
+    ODD_CAPTURE="${TEMP_DIR}/odd-path.args"
+    ODD_ERROR="${TEMP_DIR}/odd-path.err"
+    CAPTURE_FILE="$ODD_CAPTURE" JAVA_HOME="$MOCK_JAVA_HOME" STDOUT_MODE=true \
+        "${ODD_ROOT}/bin/hugegraph-server.sh" \
+        "${ODD_ROOT}/conf/gremlin-server.yaml" "${ODD_ROOT}/conf/rest-server.properties" true \
+        >/dev/null 2>"$ODD_ERROR" ||
+        fail "launcher failed with ${ODD_DIR_NAME} in the logs path: $(cat "$ODD_ERROR")"
+    assert_argument "-XX:+HeapDumpOnOutOfMemoryError" "$ODD_CAPTURE"
+    assert_argument "-XX:HeapDumpPath=${ODD_ROOT}/logs" "$ODD_CAPTURE"
+    assert_no_argument '^-XX:ErrorFile=' "$ODD_CAPTURE"
+    if grep -q -- '-XX:' "${ODD_CAPTURE}.tool-options"; then
+        fail "launcher put crash defaults in JAVA_TOOL_OPTIONS for ${ODD_DIR_NAME}"
+    fi
+    grep -Fq "WARN: ${ODD_ROOT}/logs contains a double quote or %" "$ODD_ERROR" ||
+        fail "launcher did not warn about ${ODD_DIR_NAME} in the logs path"
+done
+
 # An unwritable logs/ is reported on stderr, where the container log keeps it.
 # Root can write anywhere, so the check only runs for other users.
 if [[ "$(id -u)" -ne 0 ]]; then

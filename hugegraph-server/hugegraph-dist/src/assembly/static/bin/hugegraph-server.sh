@@ -303,9 +303,13 @@ crash_name_taken() {
 }
 case "${LOGS}" in
     *\"*|*%*)
-        # JAVA_TOOL_OPTIONS has no escape for a double quote, and ErrorFile expands %.
-        report_error "WARN: ${LOGS} contains a double quote or %, so the heap dump and crash log\
- defaults are not set; set -XX:HeapDumpPath and -XX:ErrorFile yourself"
+        # The defaults below cannot carry this path: they quote it with double quotes
+        # inside JAVA_TOOL_OPTIONS, and ErrorFile expands %. Keep the base behaviour
+        # instead: heap dumps into $LOGS on the Server's command line, ahead of
+        # JAVA_OPTIONS so an operator value there still wins, and no ErrorFile default.
+        report_error "WARN: ${LOGS} contains a double quote or %, so heap dumps go to ${LOGS}\
+ without a per-launch directory and no crash log default is set; set -XX:ErrorFile yourself"
+        JAVA_OPTIONS="-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=${LOGS} ${JAVA_OPTIONS}"
         ;;
     *)
         LAUNCH_HOST=$(printf '%s' "${HOSTNAME:-localhost}" | LC_ALL=C tr -c 'A-Za-z0-9._-' '_')
