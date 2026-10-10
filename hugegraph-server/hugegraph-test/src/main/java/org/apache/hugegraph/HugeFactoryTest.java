@@ -76,12 +76,12 @@ public class HugeFactoryTest {
     }
 
     @Test
-    public void testGraphCloseContinuesAfterReleasedWorkerOwnerFails() throws Exception {
+    public void testGraphCloseRetriesAfterReleasedWorkerOwnerFails() throws Exception {
         this.checkGraphCloseAfterOwnerFailure(false);
     }
 
     @Test
-    public void testGraphCloseContinuesAfterWorkerOwnerFailsBeforeRelease() throws Exception {
+    public void testGraphCloseRetriesAfterWorkerOwnerFailsBeforeRelease() throws Exception {
         this.checkGraphCloseAfterOwnerFailure(true);
     }
 
@@ -129,19 +129,37 @@ public class HugeFactoryTest {
             Throwable failure = Assert.assertThrows(HugeException.class, graph::close);
             Assert.assertSame(first, HugeException.rootCause(failure));
             Assert.assertTrue(Arrays.asList(failure.getSuppressed()).contains(second));
-            Assert.assertTrue(graph.closed());
-            Assert.assertNull(manager.getScheduler(params));
+            Assert.assertFalse(graph.closed());
+            Assert.assertSame(scheduler, manager.getScheduler(params));
             Assert.assertTrue((boolean) Whitebox.getInternalState(scheduler.serverManager(), "closed"));
             Assert.assertNull(scheduler.call(owners::get));
             Assert.assertNull(owners.get());
             Assert.assertEquals(1, workerClosed.get());
             Assert.assertEquals(1, callerClosed.get());
+            // Task-worker cleanup waits for an acknowledged scheduler close.
+            Assert.assertEquals(0, otherWorkerClosed.get());
+            Mockito.verify(provider, Mockito.never()).close();
+
+            if (beforeRelease) {
+                // The fixture owns the native owner whose failing callback did not release it.
+                scheduler.call(() -> {
+                    workerOwner.getAndSet(null).close();
+                    return null;
+                });
+            }
+            graph.close();
+            Assert.assertTrue(graph.closed());
+            Assert.assertNull(manager.getScheduler(params));
+            Assert.assertNull(scheduler.call(owners::get));
+            Assert.assertNull(owners.get());
+            Assert.assertEquals(1, workerClosed.get());
+            Assert.assertEquals(1, callerClosed.get());
             Assert.assertEquals(1, otherWorkerClosed.get());
-            Mockito.verify(provider).close();
+            Mockito.verify(provider, Mockito.times(1)).close();
         } finally {
             try {
                 // Only the memory fixture owns this retained failed transaction.
-                // Logical graph closure deliberately does not claim it was released.
+                // A failed close does not claim the native owner was released.
                 GraphTransaction retained = workerOwner.get();
                 if (beforeRelease && retained != null) {
                     scheduler.call(() -> {

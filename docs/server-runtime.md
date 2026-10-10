@@ -463,3 +463,26 @@ Structure or Process suites must execute tests; an all-skipped report is not
 compatibility evidence. Run the read-only application examples against representative
 existing data and validate the serializers, client versions and authentication
 combinations actually used by the application.
+
+## Deleting graphs with active tasks
+
+Stop application writes before deleting a graph and keep them stopped during retries.
+Deletion does not fence graph transactions across requests; a partial deletion is
+cleanup in progress, not permission to resume using the graph.
+
+Deletion refuses to remove graph metadata, configuration or backend data until the
+local task scheduler has drained. Both schedulers reject new submissions and
+dependency retries once shutdown starts; the distributed scheduler also requests
+cancellation of local tasks. An incomplete shutdown does not restore task admission.
+Wait for task execution and transaction
+owners to drain, then retry the request. Task results remain writable while tasks
+drain. If PD metadata removal fails after closure,
+the graph remains registered with its data and configuration, and new task
+submissions remain rejected until deletion is explicitly retried. If later graph closure fails, its registrations
+and local configuration remain for retry, but backend data or PD metadata may already
+have been removed. Deletion is not transactional and retry does not restore that data.
+
+A remote removal notification can arrive after PD metadata has already been removed.
+If local graph closure is incomplete, its owners remain locally reachable. Repeat
+the notification or explicitly retry local removal after closure completes. There
+is no automatic notification retry or cluster-wide task admission coordination.

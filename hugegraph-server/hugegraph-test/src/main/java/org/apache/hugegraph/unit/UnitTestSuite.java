@@ -18,6 +18,9 @@
 package org.apache.hugegraph.unit;
 
 import org.apache.hugegraph.HugeFactoryTest;
+import org.apache.hugegraph.GraphDropPendingTest;
+import org.apache.hugegraph.DistributedTaskAdmissionTest;
+import org.apache.hugegraph.StandardTaskAdmissionTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.api.cypher.CypherClientTest;
@@ -147,6 +150,9 @@ import org.junit.runners.Suite;
         StandardAuthManagerV2Test.class,
         ContextTaskTest.class,
         HugeFactoryTest.class,
+        GraphDropPendingTest.class,
+        DistributedTaskAdmissionTest.class,
+        StandardTaskAdmissionTest.class,
         AuthMetaManagerTest.class,
 
         /* api space */

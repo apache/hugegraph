@@ -114,6 +114,7 @@ import org.apache.hugegraph.space.register.RegisterConfig;
 import org.apache.hugegraph.space.register.dto.ServiceDTO;
 import org.apache.hugegraph.space.register.registerImpl.PdRegister;
 import org.apache.hugegraph.task.TaskManager;
+import org.apache.hugegraph.task.TaskScheduler;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.traversal.optimize.HugeScriptTraversal;
 import org.apache.hugegraph.type.define.CollectionType;
@@ -1107,23 +1108,22 @@ public final class GraphManager {
     }
 
     public void clearGraphSpace(String name) {
-        // Clear all roles
-        this.metaManager.clearGraphAuth(name);
-
-        // Clear all schemaTemplate
-        this.metaManager.clearSchemaTemplate(name);
-
+        String prefix = name + DELIMITER;
         // Clear all graphs
         for (String key : this.graphs.keySet()) {
-            if (key.startsWith(name)) {
+            if (key.startsWith(prefix)) {
                 String[] parts = key.split(DELIMITER);
                 this.dropGraph(parts[0], parts[1], true);
             }
         }
 
+        // Keep shared auth/templates until every graph has successfully dropped.
+        this.metaManager.clearGraphAuth(name);
+        this.metaManager.clearSchemaTemplate(name);
+
         // Clear all services
         for (String key : this.services.keySet()) {
-            if (key.startsWith(name)) {
+            if (key.startsWith(prefix)) {
                 String[] parts = key.split(DELIMITER);
                 this.dropService(parts[0], parts[1]);
             }
@@ -1457,12 +1457,17 @@ public final class GraphManager {
             LOG.error("Failed to create graph '{}' due to: {}",
                       name, e.getMessage(), e);
             if (graph != null) {
-                this.graphs.remove(graph.spaceGraphName(), graph);
                 try {
                     this.dropGraphLocal(graph);
-                } finally {
-                    // The create event may have partially registered the graph
+                    this.graphs.remove(graph.spaceGraphName(), graph);
+                    // The create event may have partially registered the graph.
                     this.notifyEventLenient(Events.GRAPH_DROP, graph);
+                } catch (Throwable cleanupError) {
+                    // Retain owners for an explicit deletion retry, including partial creation.
+                    this.graphs.putIfAbsent(graph.spaceGraphName(), graph);
+                    if (cleanupError != e) {
+                        e.addSuppressed(cleanupError);
+                    }
                 }
             }
             throw e;
@@ -1472,16 +1477,9 @@ public final class GraphManager {
     }
 
     private void dropGraphLocal(HugeGraph graph) {
-        try {
-            // Clear data and config files
-            graph.drop();
-        } finally {
-            /*
-             * Will fill graph instance into HugeFactory.graphs after
-             * GraphFactory.open() succeed, remove it when the graph drops
-             */
-            HugeFactory.remove(graph);
-        }
+        // Retain the registered graph if active tasks prevent the drop.
+        graph.drop();
+        HugeFactory.remove(graph);
     }
 
     public HugeGraph createGraph(String graphSpace, String name, String creator,
@@ -2268,40 +2266,77 @@ public final class GraphManager {
         }
 
         String graphName = spaceGraphName(graphSpace, name);
-        if (clear) {
-            this.removingGraphs.add(graphName);
+        boolean alreadyClosed = g.closed();
+        E.checkState(!clear || !alreadyClosed || this.removingGraphs.contains(graphName),
+                     "Can't clear an already closed graph '%s' without an accepted deletion", graphName);
+        // Task results still need the backend until their scheduler has drained.
+        TaskScheduler scheduler = null;
+        if (clear && !alreadyClosed) {
             try {
-                this.metaManager.removeGraphConfig(graphSpace, name);
+                // Keep the auth proxy's cached owner and its pre-close ADMIN check.
+                scheduler = g.taskScheduler();
+            } catch (IllegalStateException e) {
+                if (!(g instanceof StandardHugeGraph) ||
+                    TaskManager.instance().getScheduler(g) != null) {
+                    throw e;
+                }
+                // A previous plain-graph close removed its scheduler but retained owners.
+            }
+        }
+        if (clear && scheduler != null && !scheduler.close()) {
+            throw new HugeException("Can't drop graph '%s' while tasks are active, " +
+                                    "please retry later", graphName);
+        }
+        if (clear) {
+            try {
+                if (!this.removingGraphs.contains(graphName)) {
+                    this.metaManager.removeGraphConfig(graphSpace, name);
+                    this.removingGraphs.add(graphName);
+                }
                 this.metaManager.notifyGraphRemove(graphSpace, name);
             } catch (Exception e) {
                 throw new HugeException(
-                        "Failed to remove graph config of '%s'", name, e);
+                        "Failed to remove graph config of '%s'", e, name);
             }
 
-            /**
-             * close task scheduler before clear data,
-             * because taskinfo stored in backend in
-             * {@link org.apache.hugegraph.task.DistributedTaskScheduler}
-             */
+            if (!alreadyClosed) {
+                // Unwrapping an auth proxy preserves its ADMIN permission check.
+                HugeGraph underlying = g.hugegraph();
+                if (underlying instanceof StandardHugeGraph) {
+                    ((StandardHugeGraph) underlying).clearBackendForDrop();
+                } else {
+                    g.clearBackend();
+                }
+            }
             try {
-                g.taskScheduler().close();
-            } catch (Throwable t) {
-                LOG.warn(String.format(
-                                 "Error when close TaskScheduler of %s",
-                                 graphName),
-                         t);
+                if (!alreadyClosed) {
+                    g.close();
+                }
+            } catch (Exception e) {
+                if (!g.closed()) {
+                    throw new HugeException("Failed to close graph '%s', please retry later",
+                                            e, graphName);
+                }
+                LOG.warn("Graph '{}' closed with an owner cleanup failure", graphName, e);
             }
-
-            g.clearBackend();
+        } else {
+            // Remote notifications detach owners only after close succeeds.
             try {
                 g.close();
             } catch (Exception e) {
-                LOG.warn("Failed to close graph", e);
+                if (!g.closed()) {
+                    throw new HugeException("Failed to close graph '%s', please retry later",
+                                            e, graphName);
+                }
+                // Close can report a released-owner failure after graph closure completed.
+                LOG.warn("Graph '{}' closed with an owner cleanup failure", graphName, e);
             }
         }
         GraphSpace gs = this.graphSpace(graphSpace);
         if (!grpcThread) {
-            gs.recycleGraph();
+            if (!alreadyClosed) {
+                gs.recycleGraph();
+            }
             LOG.info("The graph_number_used successfully decreased to {} " +
                      "of graph space: {} for graph: {}",
                      gs.graphNumberUsed(), gs.name(), name);
@@ -2324,6 +2359,7 @@ public final class GraphManager {
             }
         }
         this.eventHub.notify(Events.GRAPH_DROP, g);
+        this.removingGraphs.remove(graphName);
     }
 
     private void checkOptions(String graphSpace, HugeConfig config) {
@@ -2672,9 +2708,12 @@ public final class GraphManager {
         List<String> graphNames = this.metaManager
                 .extractGraphsFromResponse(response);
         for (String graphName : graphNames) {
-            if (!this.graphs.containsKey(graphName) ||
-                this.removingGraphs.contains(graphName)) {
+            if (!this.graphs.containsKey(graphName)) {
                 this.removingGraphs.remove(graphName);
+                continue;
+            }
+            if (this.removingGraphs.contains(graphName)) {
+                // The initiator retains this marker until local close succeeds, including retries.
                 continue;
             }
 

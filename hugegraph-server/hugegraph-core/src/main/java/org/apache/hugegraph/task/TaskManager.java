@@ -29,6 +29,7 @@ import java.util.concurrent.TimeoutException;
 
 import org.apache.hugegraph.exception.HugeException;
 import org.apache.hugegraph.HugeGraphParams;
+import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.concurrent.PausableScheduledThreadPool;
 import org.apache.hugegraph.util.Consumers;
 import org.apache.hugegraph.util.E;
@@ -127,26 +128,16 @@ public final class TaskManager {
         Throwable failure = null;
         boolean drained = scheduler == null;
         if (scheduler != null) {
-            /*
-             * Keep close+remove exclusive with scheduler iteration: in their gap
-             * a scheduler DB worker could otherwise reopen the graph transaction.
-             */
-            synchronized (scheduler) {
-                boolean stopped = false;
-                try {
-                    stopped = scheduler.close();
-                } catch (RuntimeException | Error error) {
-                    failure = error;
-                    // Standard closes its server manager in finally; Distributed
-                    // sets its dispatch-stop flag before cancellation/drain begins.
-                    stopped = true;
-                }
-                // A timeout leaves running jobs registered for the next drain attempt.
-                if (stopped && scheduler.pendingTasks() == 0) {
-                    this.schedulers.remove(graph, scheduler);
-                    drained = true;
+            if (scheduler instanceof DistributedTaskScheduler) {
+                // Distributed close must release admission's monitor before draining cron/jobs.
+                failure = this.drainScheduler(graph, scheduler);
+            } else {
+                // Keep the Standard close/remove gap exclusive with scheduler iteration.
+                synchronized (scheduler) {
+                    failure = this.drainScheduler(graph, scheduler);
                 }
             }
+            drained = this.schedulers.get(graph) == null;
         }
         if (!drained) {
             // A running cron/job must finish before owner callbacks are queued
@@ -188,6 +179,22 @@ public final class TaskManager {
 
     public void forceRemoveScheduler(HugeGraphParams params) {
         this.schedulers.remove(params);
+    }
+
+    private Throwable drainScheduler(HugeGraphParams graph, TaskScheduler scheduler) {
+        Throwable failure = null;
+        boolean stopped = false;
+        try {
+            stopped = scheduler.close();
+        } catch (RuntimeException | Error error) {
+            failure = error;
+            // Zero pending tasks alone does not acknowledge scheduler owner cleanup.
+            // Retain its registration so a later close can complete that cleanup.
+        }
+        if (stopped && scheduler.pendingTasks() == 0) {
+            this.schedulers.remove(graph, scheduler);
+        }
+        return failure;
     }
 
     private void closeTaskTx(HugeGraphParams graph) {
@@ -250,6 +257,16 @@ public final class TaskManager {
 
     public TaskScheduler getScheduler(HugeGraphParams graph) {
         return this.schedulers.get(graph);
+    }
+
+    public TaskScheduler getScheduler(HugeGraph graph) {
+        for (Map.Entry<HugeGraphParams, TaskScheduler> entry : this.schedulers.entrySet()) {
+            HugeGraph owner = entry.getKey().graph();
+            if (owner == graph || graph.sameAs(owner)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     public ServerInfoManager getServerInfoManager(HugeGraphParams graph) {

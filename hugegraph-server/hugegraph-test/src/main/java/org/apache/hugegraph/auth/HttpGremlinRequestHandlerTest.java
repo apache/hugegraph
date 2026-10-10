@@ -139,7 +139,7 @@ public class HttpGremlinRequestHandlerTest {
                     } finally {
                         response.release();
                     }
-                    channel.runPendingTasks();
+                    awaitClosed(channel);
                     Assert.assertFalse(channel.isActive());
                     Assert.assertEquals(0, request.refCnt());
                     Assert.assertNull(channel.readOutbound());
@@ -266,6 +266,18 @@ public class HttpGremlinRequestHandlerTest {
                               HttpHeaderValues.KEEP_ALIVE);
         HttpUtil.setContentLength(request, request.content().readableBytes());
         return request;
+    }
+
+    private static void awaitClosed(EmbeddedChannel channel)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (channel.isActive() && System.nanoTime() < deadline) {
+            channel.runPendingTasks();
+            channel.runScheduledPendingTasks();
+            if (channel.isActive()) {
+                Thread.sleep(5L);
+            }
+        }
     }
 
     private static FullHttpResponse response(EmbeddedChannel channel)

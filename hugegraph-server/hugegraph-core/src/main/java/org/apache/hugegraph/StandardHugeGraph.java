@@ -174,6 +174,7 @@ public class StandardHugeGraph implements HugeGraph {
     private final RamTable ramtable;
     private volatile boolean started;
     private volatile boolean closed;
+    private boolean dropBackendCleared;
     private volatile GraphMode mode;
     private volatile GraphReadMode readMode;
     private volatile HugeVariables variables;
@@ -1203,26 +1204,46 @@ public class StandardHugeGraph implements HugeGraph {
         this.configuration.file(confPath);
     }
 
+    public synchronized void clearBackendForDrop() {
+        if (!this.dropBackendCleared) {
+            this.clearBackend();
+            this.dropBackendCleared = true;
+        }
+    }
+
     @Override
     public void drop() {
-        this.clearBackend();
+        E.checkState(!this.closed() || this.dropBackendCleared,
+                     "Can't drop an already closed graph '%s' before clearing its backend",
+                     this.spaceGraphName());
+        if (!this.closed()) {
+            TaskScheduler scheduler = this.taskManager.getScheduler(this.params);
+            if (scheduler != null && !scheduler.close()) {
+                throw new HugeException("Can't drop graph '%s' while tasks are active, " +
+                                        "please retry later", this.spaceGraphName());
+            }
+            this.clearBackendForDrop();
 
+            try {
+                /*
+                 * It's hard to ensure all threads close the tx.
+                 * TODO:
+                 *  - schedule a tx-close to each thread,
+                 *   or
+                 *  - add forceClose() method to backend store.
+                 */
+                this.close();
+            } catch (Throwable e) {
+                if (!this.closed()) {
+                    throw new HugeException("Failed to close graph '%s', please retry later",
+                                            e, this.spaceGraphName());
+                }
+                LOG.warn("Graph {} closed with an owner cleanup failure", this, e);
+            }
+        }
         HugeConfig config = this.configuration();
         this.storeProvider.onDeleteConfig(config);
         ConfigUtil.deleteFile(config.file());
-
-        try {
-            /*
-             * It's hard to ensure all threads close the tx.
-             * TODO:
-             *  - schedule a tx-close to each thread,
-             *   or
-             *  - add forceClose() method to backend store.
-             */
-            this.close();
-        } catch (Throwable e) {
-            LOG.warn("Failed to close graph {} {}", this, e);
-        }
     }
 
     @Override
@@ -1375,9 +1396,15 @@ public class StandardHugeGraph implements HugeGraph {
     }
 
     private void waitUntilAllTasksCompleted() {
+        this.checkGraphNotClosed();
+        TaskScheduler scheduler = this.taskManager.getScheduler(this.params);
+        if (scheduler == null) {
+            // A previous close drained/removed the scheduler but retained transaction owners.
+            return;
+        }
         long timeout = this.configuration.get(CoreOptions.TASK_WAIT_TIMEOUT);
         try {
-            this.taskScheduler().waitUntilAllTasksCompleted(timeout);
+            scheduler.waitUntilAllTasksCompleted(timeout);
         } catch (TimeoutException e) {
             throw new HugeException("Failed to wait all tasks to complete", e);
         }
