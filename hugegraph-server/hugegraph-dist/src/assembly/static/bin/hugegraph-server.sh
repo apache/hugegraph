@@ -34,11 +34,11 @@ fi
 
 BIN=$(abs_path)
 TOP="$(cd "$BIN"/../ && pwd)"
-CONF="$TOP/conf"
+CONF="${CONF_OVERRIDE:-$TOP/conf}"
 LIB="$TOP/lib"
 EXT="$TOP/ext"
-PLUGINS="$TOP/plugins"
-LOGS="$TOP/logs"
+PLUGINS="${PLUGINS_OVERRIDE:-$TOP/plugins}"
+LOGS="${LOGS_OVERRIDE:-$TOP/logs}"
 OUTPUT=${LOGS}/hugegraph-server.log
 GITHUB="https://github.com"
 
@@ -92,7 +92,7 @@ CP="$CP":$(find -L $LIB -name '*.jar' \
 # Add the jars in ext (at any subdirectory depth)
 CP="$CP":$(find -L $EXT -name '*.jar' | sort | tr '\n' ':')
 # Add the jars in plugins (at any subdirectory depth), check "javaagent" related jars carefully
-CP="$CP":$(find -L $PLUGINS -name '*.jar' | sort | tr '\n' ':')
+CP="$CP":$(find -L "$PLUGINS" -name '*.jar' | sort | tr '\n' ':')
 
 # (Cygwin only) Use ; classpath separator and reformat paths for Windows ("C:\foo")
 [[ $(uname) = CYGWIN* ]] && CP="$(cygpath -p -w "$CP")"
@@ -169,7 +169,8 @@ case "$GC_OPTION" in
         exit 1
 esac
 
-JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml"
+JVM_OPTIONS="-Dlog4j.configurationFile=${CONF}/log4j2.xml -Dlogging.config=${CONF}/log4j2.xml -DLOG_PATH=${LOGS} -Dbolt.log.path=${LOGS} -Dlogging.path=${LOGS}"
+
 SECURITY_MANAGER_OPTION=""
 if [[ ${OPEN_SECURITY_CHECK} == "true" ]]; then
     if [[ ${JAVA_VERSION} -gt ${MAX_SECURITY_JAVA_VERSION} ]]; then
@@ -236,7 +237,7 @@ if [ "${OPEN_TELEMETRY}" == "true" ]; then
         fi
     fi
 
-    # Note: remember update it if we change the jar 
+    # Note: remember update it if we change the jar
     expected_md5="e3bcbbe8ed9b6d840fa4c333b36f369f"
     actual_md5=$(md5sum "${OT_JAR_PATH}" | awk '{print $1}')
 
@@ -371,5 +372,5 @@ else
         ${SECURITY_MANAGER_OPTION} -cp "${CLASSPATH}:" \
         org.apache.hugegraph.bootstrap.HugeGraphServerBootstrap \
         ${OPEN_SECURITY_CHECK} ${GREMLIN_SERVER_CONF} ${REST_SERVER_CONF} \
-        >> ${LOGS}/hugegraph-server-stdout.log 2>&1
+        >> "${LOGS}/hugegraph-server-stdout.log" 2>&1
 fi

@@ -318,27 +318,64 @@ function check_port() {
     return 0
 }
 
+# Emit $1 as ONE complete POSIX shell word, INCLUDING the surrounding quotes.
+# Callers should NOT add another pair of quotes:
+#     /data/team's-logs  ->  '/data/team'\''s-logs'
+#
+function shell_quote() {
+    local sq="'" repl="'\\''"
+    printf "'%s'" "${1//$sq/$repl}"
+}
+
+# Validate a path-like value. $1=value  $2=label for the error  $3=crlf|cron
+#   crlf : reject CR/LF. Call on the RAW value (e.g. $OPTARG) BEFORE
+#          canonicalize_dir/canonicalize_file.
+#   cron : crlf + reject '%'.
+function reject_unsafe_path() {
+    case "$1" in
+        *[$'\n\r']*)
+            echo "ERROR: $2 must not contain CR/LF characters" >&2
+            return 1 ;;
+    esac
+
+    [ "$3" = "cron" ] || return 0
+
+    case "$1" in
+        *%*)
+            echo "ERROR: $2 must not contain '%' (reserved by cron)" >&2
+            return 1 ;;
+    esac
+    return 0
+}
+
+# Validate (cron rules) then quote. $1=value  $2=label. Prints the quoted word.
+function cron_quote() {
+    reject_unsafe_path "$1" "$2" cron || return 1
+    shell_quote "$1"
+}
+
 function crontab_append() {
     local job="$1"
-    crontab -l | grep -F "$job" >/dev/null 2>&1
+    crontab -l 2>/dev/null | grep -F -- "$job" >/dev/null 2>&1
     if [ $? -eq 0 ]; then
         return 1
     fi
-    (crontab -l ; echo "$job") | crontab -
+    # printf, not echo: echo may interpret backslashes or swallow a leading -n/-e
+    { crontab -l 2>/dev/null; printf '%s\n' "$job"; } | crontab -
 }
 
 function crontab_remove() {
     local job="$1"
     # check exist before remove
-    crontab -l | grep -F "$job" >/dev/null 2>&1
-    if [ $? -eq 1 ]; then
+    crontab -l 2>/dev/null | grep -F -- "$job" >/dev/null 2>&1
+    if [ $? -ne 0 ]; then
         return 0
     fi
 
-    crontab -l | grep -Fv "$job"  | crontab -
+    crontab -l 2>/dev/null | grep -Fv -- "$job" | crontab -
 
     # Check exist after remove
-    crontab -l | grep -F "$job" >/dev/null 2>&1
+    crontab -l 2>/dev/null | grep -F -- "$job" >/dev/null 2>&1
     if [ $? -eq 0 ]; then
         return 1
     else
@@ -667,6 +704,33 @@ function ensure_path_writable() {
     fi
 }
 
+# Canonicalize a (possibly relative) directory override into an absolute path.
+function canonicalize_dir() {
+    local path="$1"
+    [ -z "$path" ] && return 0
+    mkdir -p "$path" 2>/dev/null
+    (cd "$path" 2>/dev/null && pwd) || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+}
+
+# Canonicalize a (possibly relative) file override (e.g. the pid file) into an
+# absolute path .
+function canonicalize_file() {
+    local path="$1"
+    [ -z "$path" ] && return 0
+    local dir file abs_dir
+    dir="$(dirname "$path")"
+    file="$(basename "$path")"
+    mkdir -p "$dir" 2>/dev/null
+    abs_dir="$(cd "$dir" 2>/dev/null && pwd)" || {
+        echo "Error: cannot resolve path '$path'" >&2
+        exit 1
+    }
+    echo "$abs_dir/$file"
+}
+
 function get_ip() {
     local os=$(uname)
     local loopback="127.0.0.1"
@@ -839,7 +903,8 @@ function kill_process_and_wait() {
 
 function exit_with_usage_help(){
     echo "USAGE: $0 [-d true|false] [-g g1|G1|zgc|ZGC] [-m true|false] [-p true|false]" \
-         "[-s true|false] [-j java_options] [-t timeout] [-y true|false]"
+         "[-s true|false] [-j java_options] [-t timeout] [-y true|false]" \
+         "[-c conf_dir] [-l logs_dir] [-o plugins_dir] [-i pid_file]"
     echo "Without -g, JVM/caller collector selection applies. -j applies when JAVA_OPTIONS is empty."
     echo "Default/G1 tuning precedes caller options, so caller tuning values win."
     echo "Do not combine -g with a different collector in JAVA_OPTIONS or -j."

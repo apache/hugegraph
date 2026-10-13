@@ -17,15 +17,16 @@
 #
 CLOSE_MONITOR="true"
 
-while getopts "m:" arg; do
+while getopts "i:m:" arg; do
     case ${arg} in
+        i) PID_FILE_OVERRIDE="$OPTARG" ;;
         m) CLOSE_MONITOR="$OPTARG" ;;
-        ?) echo "USAGE: $0 [-m true|false]" && exit 1 ;;
+        ?) echo "USAGE: $0 [-i pid_file] [-m true|false]" && exit 1 ;;
     esac
 done
 
 if [[ "$CLOSE_MONITOR" != "true" && "$CLOSE_MONITOR" != "false" ]]; then
-    echo "USAGE: $0 [-m true|false]"
+    echo "USAGE: $0 [-i pid_file] [-m true|false]"
     exit 1
 fi
 
@@ -44,7 +45,7 @@ TOP="$(cd $BIN/../ && pwd)"
 
 . "$BIN"/util.sh
 
-PID_FILE=$BIN/pid
+PID_FILE="${PID_FILE_OVERRIDE:-$BIN/pid}"
 SERVER_SHUTDOWN_TIMEOUT_S=10
 
 if [ "$CLOSE_MONITOR" == "true" ]; then
@@ -61,7 +62,7 @@ if [ ! -f "${PID_FILE}" ]; then
     exit 1
 fi
 
-PID=$(cat $PID_FILE)
+PID=$(cat "$PID_FILE")
 
 if ! kill_process_and_wait "HugeGraphServer" "$PID" "$SERVER_SHUTDOWN_TIMEOUT_S"; then
     exit 1

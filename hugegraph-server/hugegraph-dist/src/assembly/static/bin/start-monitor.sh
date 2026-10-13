@@ -25,10 +25,10 @@ function abs_path() {
     echo "$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 }
 
-BIN=`abs_path`
-TOP="$(cd $BIN/../ && pwd)"
+BIN="$(abs_path)"
+TOP="$(cd "$BIN"/../ && pwd)"
 
-. $BIN/util.sh
+. "$BIN"/util.sh
 
 if [ "$JAVA_HOME" == "" ]; then
     echo "Must set JAVA_HOME environment variable and install JDK >= 17"
@@ -37,6 +37,30 @@ fi
 
 # Monitor HugeGraphServer every minute, if the server crashes then restart it.
 # Modify the frequency according to actual needs carefully.
-CRONTAB_JOB="*/1 * * * * export JAVA_HOME=$JAVA_HOME && $TOP/bin/monitor-hugegraph.sh"
+
+# Persist any path overrides (-c/-l/-i/-o) that the caller (start-hugegraph.sh) exported.
+# Every value goes through cron_quote: it validates (CR/LF, '%') and emits ONE complete
+# POSIX shell word.
+JAVA_HOME_Q="$(cron_quote "$JAVA_HOME" "JAVA_HOME")" || exit 1
+MONITOR_Q="$(cron_quote "$TOP/bin/monitor-hugegraph.sh" "monitor script path")" || exit 1
+
+CRONTAB_JOB="*/1 * * * * export JAVA_HOME=$JAVA_HOME_Q &&"
+if [ -n "$CONF_OVERRIDE" ]; then
+    CONF_Q="$(cron_quote "$CONF_OVERRIDE" "CONF_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export CONF_OVERRIDE=$CONF_Q &&"
+fi
+if [ -n "$LOGS_OVERRIDE" ]; then
+    LOGS_Q="$(cron_quote "$LOGS_OVERRIDE" "LOGS_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export LOGS_OVERRIDE=$LOGS_Q &&"
+fi
+if [ -n "$PID_FILE_OVERRIDE" ]; then
+    PID_Q="$(cron_quote "$PID_FILE_OVERRIDE" "PID_FILE_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export PID_FILE_OVERRIDE=$PID_Q &&"
+fi
+if [ -n "$PLUGINS_OVERRIDE" ]; then
+    PLUGINS_Q="$(cron_quote "$PLUGINS_OVERRIDE" "PLUGINS_OVERRIDE")" || exit 1
+    CRONTAB_JOB="$CRONTAB_JOB export PLUGINS_OVERRIDE=$PLUGINS_Q &&"
+fi
+CRONTAB_JOB="$CRONTAB_JOB $MONITOR_Q"
 
 crontab_append "$CRONTAB_JOB"
