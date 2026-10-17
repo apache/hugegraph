@@ -57,15 +57,15 @@ public class CypherApiTest extends BaseApiTest {
         String schema = URL_PREFIX + "/schema/";
         for (String[] property : new String[][]{{"name", "TEXT"}, {"age", "INT"},
                                                 {"city", "TEXT"}, {"active", "BOOLEAN"},
-                                                {"note", "TEXT"}}) {
+                                                {"note", "TEXT"}, {"birthday", "DATE"}}) {
             createAndAssert(schema + "propertykeys", JsonUtil.toJson(ImmutableMap.of(
                     "name", property[0], "data_type", property[1],
                     "cardinality", "SINGLE")), 202);
         }
         createAndAssert(schema + "vertexlabels", "{\"name\":\"cypher_person\", " +
-                        "\"id_strategy\":\"PRIMARY_KEY\",\"primary_keys\":[\"name\"]," +
-                        "\"properties\":[\"name\",\"age\",\"city\",\"active\",\"note\"]," +
-                        "\"nullable_keys\":[\"active\",\"note\"]}");
+                        "\"id_strategy\":\"PRIMARY_KEY\",\"primary_keys\":[\"name\"], " +
+                        "\"properties\":[\"name\",\"age\",\"city\",\"active\",\"note\"," +
+                        "\"birthday\"],\"nullable_keys\":[\"active\",\"note\",\"birthday\"]}");
         createAndAssert(schema + "edgelabels", "{\"name\":\"cypher_knows\", " +
                         "\"source_label\":\"cypher_person\",\"target_label\":\"cypher_person\"," +
                         "\"frequency\":\"SINGLE\",\"properties\":[],\"nullable_keys\":[]}");
@@ -79,7 +79,7 @@ public class CypherApiTest extends BaseApiTest {
                     .put("fields", Collections.singletonList(index[0]))
                     .put("rebuild", false).build()), 202);
         }
-        addVertex("marko", 20, "Beijing", true);
+        addVertex("marko", 20, "Beijing", true, "2000-01-01");
         addVertex("peter", 30, "Beijing", false);
         addVertex("alice", 40, "Shanghai", true);
         addVertex("dave", 30, "Shanghai", false);
@@ -120,6 +120,19 @@ public class CypherApiTest extends BaseApiTest {
                        "RETURN n.name AS name";
         String content = this.testCypherQueryAndContains(query, "data");
         Assert.assertTrue(assertCypherSuccessData(content).isEmpty());
+    }
+
+    @Test
+    public void testDateFunctionMatchesDateProperty() {
+        assertColumn(query("MATCH (n:cypher_person) WHERE n.birthday = date('2000-01-01') " +
+                           "RETURN n.name AS name"), "name", "marko");
+    }
+
+    @Test
+    public void testDateFunctionYieldsNoMatchOnTextProperty() {
+        Map<?, ?> row = assertSingleMapRow(query(
+                "MATCH (n:cypher_person {note: date('2024-02-05')}) RETURN count(n) AS count"));
+        Assert.assertEquals(0L, ((Number) row.get("count")).longValue());
     }
 
     @Test
@@ -656,6 +669,13 @@ public class CypherApiTest extends BaseApiTest {
         createAndAssert(URL_PREFIX + "/graph/vertices", JsonUtil.toJson(ImmutableMap.of(
                 "label", "cypher_person", "properties", ImmutableMap.of(
                         "name", name, "age", age, "city", city, "active", active))));
+    }
+
+    private void addVertex(String name, int age, String city, boolean active, String birthday) {
+        createAndAssert(URL_PREFIX + "/graph/vertices", JsonUtil.toJson(ImmutableMap.of(
+                "label", "cypher_person", "properties", ImmutableMap.of(
+                        "name", name, "age", age, "city", city, "active", active,
+                        "birthday", birthday))));
     }
 
     private void addEdge(String source, String target) {

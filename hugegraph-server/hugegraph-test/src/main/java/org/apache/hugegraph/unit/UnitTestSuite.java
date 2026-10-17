@@ -45,6 +45,7 @@ import org.apache.hugegraph.tinkerpop.HugeGraphTestInfrastructureTest;
 import org.apache.hugegraph.traversal.optimize.TraversalUtilOptimizeTest;
 import org.apache.hugegraph.unit.api.auth.LoginAPITest;
 import org.apache.hugegraph.unit.api.cypher.CypherErrorTest;
+import org.apache.hugegraph.unit.api.cypher.CypherTemporalFunctionTest;
 import org.apache.hugegraph.unit.api.filter.AccessLogFilterTest;
 import org.apache.hugegraph.unit.api.filter.CompressInterceptorTest;
 import org.apache.hugegraph.unit.api.filter.LoadDetectFilterTest;
@@ -155,6 +156,7 @@ import org.junit.runners.Suite;
 
         /* api cypher */
         CypherErrorTest.class,
+        CypherTemporalFunctionTest.class,
 
         /* api gremlin */
         GremlinQueryAPITest.class,

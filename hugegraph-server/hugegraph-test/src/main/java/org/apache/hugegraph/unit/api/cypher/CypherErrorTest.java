@@ -99,7 +99,7 @@ public class CypherErrorTest {
                 "MATCH (n:person RETURN n",
                 "MATCH (n:person) RETRUN n",
                 "MATCH (n) RETURN n; MATCH (m) RETURN m",
-                "RETURN date()",
+                "RETURN duration('P1Y')",
                 "MATCH (n:person) RETURN not_defined_var",
                 "MATCH (n) RETURN n.age + 'a' * true",
                 "CREATE (n) CREATE (n) RETURN n",
