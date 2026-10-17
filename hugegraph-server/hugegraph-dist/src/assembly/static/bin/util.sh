@@ -16,6 +16,51 @@
 # limitations under the License.
 #
 
+function record_jvm_startup_diagnostics() {
+    JVM_STARTUP_TIME=$(date -u +'%Y-%m-%d %H:%M:%S.%N UTC')
+    JVM_STARTUP_LOG_OFFSET=$(stat -c %s ./logs/hugegraph-server.log 2>/dev/null || echo 0)
+}
+
+function print_jvm_thread_hint() {
+    local kind
+    kind=$(awk '
+        /pthread_create.*\(EPERM\)|pthread_create.*Operation not permitted/ { denied = 1 }
+        /[Tt]hread.*Operation not permitted/ { denied = 1 }
+        /Cannot create worker GC thread/ { resources = 1 }
+        END { if (denied) print "denied"; else if (resources) print "resources" }
+    ')
+    case "$kind" in
+        denied)
+            echo 'ERROR: JVM thread creation was denied (EPERM). Check the Docker host seccomp profile and security policy.' >&2
+            echo 'To diagnose seccomp restrictions, retry with --security-opt seccomp=unconfined; use a compatible host/runtime profile for normal operation.' >&2
+            ;;
+        resources)
+            echo 'ERROR: JVM could not create a GC worker thread. Possible causes include seccomp denial, insufficient memory, or process/thread limits.' >&2
+            echo 'Look for pthread_create failed (EPERM) above in the container log; if present, check the host seccomp profile and security policy.' >&2
+            echo 'To diagnose seccomp restrictions, retry with --security-opt seccomp=unconfined; use a compatible host/runtime profile for normal operation.' >&2
+            echo 'If the process limit is too low, set --ulimit nproc=65535:65535.' >&2
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+function diagnose_jvm_startup_failure() {
+    local crash size offset
+    while IFS= read -r -d '' crash; do
+        if [[ -r "$crash" ]] && print_jvm_thread_hint < "$crash"; then
+            return 0
+        fi
+    done < <(find -H . ./logs -maxdepth 1 -type f -name 'hs_err_pid*.log' \
+                 -newermt "$JVM_STARTUP_TIME" -print0 2>/dev/null)
+    if [[ -r ./logs/hugegraph-server.log ]]; then
+        size=$(stat -c %s ./logs/hugegraph-server.log 2>/dev/null || echo 0)
+        offset=$JVM_STARTUP_LOG_OFFSET
+        [[ "$size" -ge "$offset" ]] || offset=0
+        tail -c +$((offset + 1)) ./logs/hugegraph-server.log | print_jvm_thread_hint || true
+    fi
+    return 0
+}
+
 function command_available() {
     local cmd=$1
     if command -v "$cmd" >/dev/null 2>&1; then

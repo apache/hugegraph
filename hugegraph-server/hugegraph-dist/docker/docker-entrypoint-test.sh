@@ -51,6 +51,8 @@ fi
 EOF
 cat > "${TEST_HOME}/bin/util.sh" <<'EOF'
 # Configuration tests isolate readiness; process lifecycle is tested separately.
+record_jvm_startup_diagnostics() { :; }
+diagnose_jvm_startup_failure() { :; }
 read_property() { sed -n "s/^$2=//p" "$1"; }
 wait_for_startup() { return 0; }
 EOF

@@ -36,6 +36,13 @@ repo = pathlib.Path(sys.argv[1])
 static = repo / 'hugegraph-server/hugegraph-dist/src/assembly/static/bin'
 entrypoint = repo / 'hugegraph-server/hugegraph-dist/docker/docker-entrypoint.sh'
 
+denied = subprocess.run(['bash', '-c', 'source "$1"; print_jvm_thread_hint',
+                         'bash', str(static / 'util.sh')],
+                        input='pthread_create failed (EPERM)\n', text=True, capture_output=True)
+assert denied.returncode == 0, denied.stderr
+assert '--security-opt seccomp=unconfined' in denied.stderr, denied.stderr
+assert 'nproc' not in denied.stderr and 'thread limits' not in denied.stderr, denied.stderr
+
 
 def await_file(path, process):
     deadline = time.monotonic() + 5
@@ -49,6 +56,9 @@ with tempfile.TemporaryDirectory(prefix='hugegraph-entrypoint-process-') as dire
     for mode, expected in [('exit0', 0), ('exit42', 42), ('kill137', 137),
                            ('TERM', 143), ('INT', 130), ('groupTERM', 143),
                            ('early42', 42), ('early0', 1), ('timeout', 1),
+                           ('early42-eperm-stdout', 42),
+                           ('early42-resource', 42), ('early42-stale-file', 42),
+                           ('early42-stale-log', 42), ('early37-init', 37),
                            ('timeout-ignore', 1), ('partition42', 42),
                            ('partitionTERM', 143), ('partitionINT', 130),
                            ('partitiongroupTERM', 143), ('readinessTERM', 143),
@@ -62,6 +72,12 @@ with tempfile.TemporaryDirectory(prefix='hugegraph-entrypoint-process-') as dire
         for name in ['start-hugegraph.sh', 'util.sh']:
             shutil.copy(static / name, work / 'bin' / name)
         (work / 'docker/init_complete').touch()
+        if mode == 'early42-stale-file':
+            stale = work / 'logs/hs_err_pid1.log'
+            stale.write_text('pthread_create failed (EPERM)\n')
+            os.utime(stale, (1, 1))
+        if mode == 'early42-stale-log':
+            (work / 'logs/hugegraph-server.log').write_text('pthread_create failed (EPERM)\n')
         backend = 'hstore' if mode.startswith('partition') else 'rocksdb'
         (work / 'conf/graphs/hugegraph.properties').write_text('backend=' + backend + '\n')
         (work / 'conf/rest-server.properties').write_text(
@@ -112,6 +128,11 @@ with tempfile.TemporaryDirectory(prefix='hugegraph-entrypoint-process-') as dire
 
             threading.Thread(target=hold_http, daemon=True).start()
         (work / 'bin/init-store.sh').write_text('#!/bin/bash\nexit 0\n')
+        if mode == 'early37-init':
+            (work / 'bin/init-store.sh').write_text(
+                '#!/bin/bash\nprintf \'Failed to start thread "GC Thread#0" - '
+                'pthread_create failed (EPERM)\\n\'\n'
+                'printf "Cannot create worker GC thread\\n" > logs/hs_err_pid37.log\nexit 37\n')
         (work / 'bin/wait-partition.sh').write_text(
             '#!/bin/bash\ntouch ./partition-ran\nexit 7\n')
         if mode.startswith('partition') and mode != 'partition42':
@@ -167,7 +188,14 @@ def stop(signum, frame):
 signal.signal(signal.SIGTERM, signal.SIG_IGN if mode == 'timeout-ignore' else stop)
 (work / 'child-running').touch()
 if mode.startswith('early'):
-    sys.exit(int(mode[5:]))
+    if mode in ['early42-eperm-stdout', 'early42-resource']:
+        if mode == 'early42-eperm-stdout':
+            print('Failed to start thread "GC Thread#0" - pthread_create failed (EPERM)', flush=True)
+        (work / 'logs/hs_err_pid42.log').write_text('Cannot create worker GC thread\\n')
+    elif mode == 'early42-stale-log':
+        with (work / 'logs/hugegraph-server.log').open('a') as output:
+            output.write('unrelated startup failure\\n')
+    sys.exit(int(mode[5:].split('-')[0]))
 while not (work / 'child-exit').exists():
     time.sleep(0.02)
 sys.exit(int((work / 'child-exit').read_text()))
@@ -221,6 +249,17 @@ sys.exit(int((work / 'child-exit').read_text()))
                         (work / 'child-exit').write_text(str(status))
                 actual = process.wait(timeout=5)
                 assert actual == expected, (mode, expected, actual, (work / 'output').read_text())
+                diagnostic = (work / 'output').read_text()
+                if mode in ['early42-eperm-stdout', 'early42-resource', 'early37-init']:
+                    assert '--security-opt seccomp=unconfined' in diagnostic, diagnostic
+                    assert '--ulimit nproc=65535:65535' in diagnostic, diagnostic
+                    assert 'Possible causes include seccomp denial, insufficient memory' in diagnostic, diagnostic
+                    assert 'Look for pthread_create failed (EPERM) above' in diagnostic, diagnostic
+                    assert 'JVM thread creation was denied' not in diagnostic, diagnostic
+                    if mode != 'early42-resource':
+                        assert 'Failed to start thread "GC Thread#0"' in diagnostic, diagnostic
+                else:
+                    assert '--security-opt seccomp=unconfined' not in diagnostic, diagnostic
                 if mode.startswith('timeout'):
                     assert time.monotonic() - started < 5, 'startup cleanup exceeded the deadline'
                 if mode in ['TERM', 'INT', 'groupTERM', 'partitionTERM', 'partitionINT',
@@ -228,7 +267,7 @@ sys.exit(int((work / 'child-exit').read_text()))
                             'readinessgroupTERM', 'partitionDiagnosticTERM',
                             'partitionDiagnosticINT', 'partitionDiagnosticgroupTERM']:
                     assert (work / 'term-observed').exists(), 'TERM did not reach the JVM substitute'
-                if not mode.startswith('timeout'):
+                if not mode.startswith('timeout') and mode != 'early37-init':
                     owned = ([work / 'bin/pid'] + list(work.glob('partition-*.pid')) +
                              list(work.glob('readiness-*.pid')))
                     for pid_file in owned:

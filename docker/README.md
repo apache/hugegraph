@@ -358,6 +358,28 @@ The launcher never deletes dumps or `heapdump_*` directories. Each start that ge
 
 To turn heap dumps off for every JVM, set `JAVA_TOOL_OPTIONS=-XX:-HeapDumpOnOutOfMemoryError`, which also keeps the image's default `JAVA_OPTS`. Set it in the container's environment, not in the host shell: `docker run -e JAVA_TOOL_OPTIONS=...`, an `environment:` entry on the Server service in Compose (the shipped Compose files do not pass it through), or `env` on the container in Kubernetes. Putting the flag in `JAVA_OPTS` turns dumps off for the Server JVM only, because the JVMs it starts do not see its command line, and setting `JAVA_OPTS` replaces the image default (`-XX:+UseContainerSupport -XX:MaxRAMPercentage=50 ...`), so repeat those flags. Either way, each start still creates its empty `heapdump_*` directory, unless creating it failed or the logs path contains a double quote or `%`.
 
+### JVM thread creation failures during startup
+
+If startup reports `pthread_create failed (EPERM)`, the host may be denying the
+JVM's thread-creation syscall through its seccomp profile or another security
+policy. HotSpot prints this warning to its stdout (the container log with
+`STDOUT_MODE=true`), while its crash file may contain only the generic
+`Cannot create worker GC thread` message. After an initialization or Server
+readiness failure, the entrypoint checks new crash files and newly appended
+Server log output and prints possible causes without changing the exit code.
+Check the preceding JVM output for the specific error. Crash files left by
+previous starts do not trigger the hint.
+
+To confirm a seccomp restriction, retry the same container with
+`--security-opt seccomp=unconfined`. Use a compatible Docker/runtime seccomp profile
+for normal operation. EPERM indicates a security denial, not a process-limit
+failure. If the JVM instead reports EAGAIN, inspect process/thread limits and
+use `--ulimit nproc=65535:65535` if appropriate. A generic
+`Cannot create worker GC thread` message alone does not distinguish seccomp
+denial from insufficient memory or process/thread limits. Check the container's
+memory budget and the preceding JVM output. The entrypoint changes neither
+the host security policy nor the container limits.
+
 ## Developers
 
 ### Images and Compose files
