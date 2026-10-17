@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.pd.core;
 
+import org.apache.hugegraph.pd.core.meta.IdMetaStoreReadIndexTest;
 import org.apache.hugegraph.pd.core.meta.MetadataKeyHelperTest;
 import org.apache.hugegraph.pd.core.store.HgKVStoreImplTest;
 import org.apache.hugegraph.pd.core.store.RaftKVStoreTest;
@@ -25,8 +26,11 @@ import org.apache.hugegraph.pd.raft.KVOperationTest;
 import org.apache.hugegraph.pd.raft.PeerUtilTest;
 import org.apache.hugegraph.pd.raft.RaftEngineIpAuthIntegrationTest;
 import org.apache.hugegraph.pd.raft.RaftEngineLeaderAddressTest;
+import org.apache.hugegraph.pd.raft.RaftEngineReadIndexTest;
 import org.apache.hugegraph.pd.raft.RaftEngineReadinessTest;
+import org.apache.hugegraph.pd.raft.RaftEngineRpcTimeoutTest;
 import org.apache.hugegraph.pd.raft.RaftReflectionUtilTest;
+import org.apache.hugegraph.pd.raft.RaftStateMachineSnapshotTest;
 import org.apache.hugegraph.pd.raft.ZipUtilsTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
@@ -37,6 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 @Suite.SuiteClasses({
         RaftStateMachineTest.class,
         MetadataKeyHelperTest.class,
+        IdMetaStoreReadIndexTest.class,
         HgKVStoreImplTest.class,
         PDNativeOwnerTest.class,
         PDConfigTest.class,
@@ -57,6 +62,9 @@ import lombok.extern.slf4j.Slf4j;
         PeerUtilTest.class,
         ZipUtilsTest.class,
         RaftKVStoreTest.class,
+        RaftEngineReadIndexTest.class,
+        RaftStateMachineSnapshotTest.class,
+        RaftEngineRpcTimeoutTest.class,
         // StoreNodeServiceTest.class,
 })
 @Slf4j

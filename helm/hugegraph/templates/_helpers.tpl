@@ -618,9 +618,13 @@ without the property ignore the flag. Set pd.raftIpWhitelistEnabled=true to
 restore the image default.
 
 raft.rpc-timeout is a plain runtime property, applied on every start rather
-than seeded at bootstrap. It bounds how long the surviving PDs wait on a
-peer that stopped answering without closing its sockets, which is what a
-leader election waits on; empty preserves the image default.
+than seeded at bootstrap; empty preserves the image default. It bounds raft
+requests between PDs, and on images that wait for a raft ReadIndex before
+they read an id counter, that wait. Images that have raft.rpc-connect-timeout
+use that option for the Ping that opens a connection to a peer (default 1000,
+set through pd.javaOpts); it does not bound requests on a connection that is
+already open. On older images raft.rpc-timeout is the timeout of that Ping as
+well, which is what a leader election waited on.
 */}}
 {{- define "hugegraph.pd.effectiveJavaOpts" -}}
 {{- $pd := .Values.pd -}}
