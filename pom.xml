@@ -94,7 +94,7 @@
         <grpc.version>1.55.3</grpc.version>
         <protobuf.runtime.version>3.22.3</protobuf.runtime.version>
         <snakeyaml.version>2.2</snakeyaml.version>
-        <spring-boot.version>2.5.15</spring-boot.version>
+        <spring-boot.version>3.5.12</spring-boot.version>
         <spring-framework.version>5.3.27</spring-framework.version>
         <lombok.version>1.18.30</lombok.version>
         <!-- JRaft 1.3.14 supports the RocksDB 8.x table options API. -->
