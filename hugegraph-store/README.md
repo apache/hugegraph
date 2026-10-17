@@ -389,6 +389,10 @@ docker run -d \
   hugegraph/store:latest
 ```
 
+Add `-e HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE=<bytes>` to pin the off-heap RocksDB budget.
+Without it the Store sizes the budget from the container memory limit; see
+[Store Configuration](docs/deployment-guide.md#store-configuration) in the deployment guide.
+
 **Exposed Ports**:
 - `8520`: REST API (management, metrics)
 - `8500`: gRPC (client connections)

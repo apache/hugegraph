@@ -347,7 +347,7 @@ File: `hugegraph-store/conf/application-pd.yml` (RocksDB tuning)
 ```yaml
 rocksdb:
   # Memory Configuration
-  total_memory_size: 32000000000        # Total memory for RocksDB (32GB)
+  total_memory_size: 0                  # Off-heap RocksDB budget in bytes; 0 = auto-size
   write_buffer_size: 134217728          # Memtable size (128MB)
   max_write_buffer_number: 6            # Max memtables
   min_write_buffer_number_to_merge: 2   # Min memtables to merge
@@ -356,13 +356,52 @@ rocksdb:
   level0_file_num_compaction_trigger: 4
   max_background_jobs: 8                # Background compaction/flush threads
 
-  # Block Cache
-  block_cache_size: 16000000000         # Block cache (16GB)
+  # Budget split: this share goes to memtables, the rest to the block cache
+  write_buffer_ratio: 0.66
 
   # SST File Size
   target_file_size_base: 134217728      # Target SST size (128MB)
   max_bytes_for_level_base: 1073741824  # L1 size (1GB)
 ```
+
+`total_memory_size` bounds the memtables (`write_buffer_ratio` of it) and the block cache
+(the rest). Both live outside the Java heap, so `-Xmx` does not limit them. A fixed 1 GiB
+cache for the Raft log comes on top of this budget.
+
+With `total_memory_size: 0`, or the key unset, the Store sizes the budget at startup as half
+of what is left after the heap, the maximum direct memory and a 1.5 GiB reserve, clamped to
+256 MiB–32 GB. Inside a container the starting point is the cgroup memory limit, including a
+limit set only on a parent cgroup when the Store can see that cgroup; inside a private cgroup
+namespace only the container's own limit is visible, so pin the value there if only the pod or
+slice is limited. A Store with a 4 GiB limit, `-Xmx1g` and `-XX:MaxDirectMemorySize=512m` gets 512 MiB. Without
+`-XX:MaxDirectMemorySize` the JVM allows as much direct memory as heap, and the budget counts
+it that way. `bin/start-hugegraph-store.sh` sets the flag to the heap it picks; when `-j` sets
+`-Xmx`, `-XX:MaxHeapSize` or `-XX:MaxDirectMemorySize` itself, the launcher leaves the flag out and the JVM's
+default (that heap) or the given cap applies. Either way the budget counts a limit the JVM
+enforces. In small containers set a
+cap below the heap, or the budget falls to the 256 MiB floor.
+
+On a host without a container limit the starting point is physical memory. The default
+`bin/start-hugegraph-store.sh` caps the heap at 2 GiB and direct memory at the same 2 GiB, so a
+16 GiB host gets about 5.25 GiB. When you raise the heap, pass a direct-memory cap with it,
+for example `-j "-Xmx36g -XX:MaxDirectMemorySize=2g"`; otherwise direct memory counts as a
+second heap. With a 2 GiB cap a 16 GiB host with `-Xmx8g` gets 2.25 GiB and a 64 GiB host with
+`-Xmx36g` gets 12.25 GiB. Before this default every host got a fixed `32000000000`, so pin the
+value after upgrading if a large node relied on it.
+
+The chosen value is logged by `RocksdbMemoryBudget` at startup, with a warning when the floor
+applies, or when an explicit value is under 256 MiB or exceeds the memory left after the heap,
+direct memory and the reserve. Set a number of bytes, at least 1048576 (1 MiB), to pin it; a
+smaller value or a unit suffix such as `4GB` is rejected. Before this default existed the
+shipped value was `32000000000`, which can exceed a container limit and get the Store
+OOM-killed. Both caps are soft: RocksDB can briefly go over them under heavy writes, and a
+small budget with many partitions means frequent memtable flushes.
+
+**Upgrading an existing deployment.** Auto-sizing applies only when the loaded configuration
+has `total_memory_size: 0` or no value. A Store that mounts its own `conf/application-pd.yml`,
+or a tarball install that kept its `conf/` from an earlier release, still has `32000000000` and
+keeps that fixed budget; the Store logs a warning naming the old value at startup. Set the key
+to `0` or remove it, or set `HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE` in Docker.
 
 ### Server Configuration
 
@@ -726,7 +765,16 @@ environment:
   HG_STORE_REST_PORT: "8520"                           # maps to server.port
   HG_STORE_RAFT_ADDRESS: store0:8510                   # maps to raft.address
   HG_STORE_DATA_PATH: /hugegraph-store/storage         # maps to app.data-path
+  # optional; maps to rocksdb.total_memory_size (bytes); unset = config file or auto-size
+  # HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE: "2147483648"
 ```
+
+`HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE` must be a plain number of bytes; the entrypoint refuses
+anything else. When set it outranks `rocksdb.total_memory_size` in a mounted
+`conf/application-pd.yml` and a `-Drocksdb.total_memory_size` in `JAVA_OPTS`. Leave it unset
+to let the Store size the budget from the container memory limit, provided the loaded config
+also has `total_memory_size: 0` or no value; a mounted `application-pd.yml` from an earlier
+release still has `32000000000` (see [Store Configuration](#store-configuration)).
 
 **Server environment variables**:
 
@@ -826,6 +874,10 @@ spec:
           value: "$(POD_NAME).hugegraph-store"
         - name: HG_STORE_RAFT_ADDRESS
           value: "$(POD_NAME).hugegraph-store:8510"
+        # Optional: pin the off-heap RocksDB budget (bytes). Unset, it is sized
+        # from the container memory limit below.
+        # - name: HG_STORE_ROCKSDB_TOTAL_MEMORY_SIZE
+        #   value: "4294967296"
         volumeMounts:
         - name: data
           mountPath: /hugegraph-store/storage

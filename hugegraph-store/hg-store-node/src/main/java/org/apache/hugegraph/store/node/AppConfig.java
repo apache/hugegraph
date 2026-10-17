@@ -23,6 +23,7 @@ import java.util.Map;
 import javax.annotation.PostConstruct;
 
 import org.apache.hugegraph.store.options.JobOptions;
+import org.apache.hugegraph.store.options.RocksdbMemoryBudget;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -104,20 +105,17 @@ public class AppConfig {
         }
 
         Map<String, String> rocksdb = rocksdbConfig.rocksdb;
-        if (!rocksdb.containsKey("total_memory_size")
-            || "0".equals(rocksdb.get("total_memory_size"))) {
-            rocksdb.put("total_memory_size", Long.toString(rt.maxMemory()));
-        }
-        long totalMemory = Long.parseLong(rocksdbConfig.rocksdb.get("total_memory_size"));
+        long totalMemory = RocksdbMemoryBudget.resolve(rocksdb.get(RocksdbMemoryBudget.KEY));
+        rocksdb.put(RocksdbMemoryBudget.KEY, Long.toString(totalMemory));
         if (raft.getDisruptorBufferSize() == 0) {
-            int size = (int) (totalMemory / 1000 / 1000 / 1000);
-            size = (int) Math.pow(2, Math.round(Math.log(size) / Math.log(2))) * 32;
-            raft.setDisruptorBufferSize(size); // Increase one buffer every 32M
+            // Increase one buffer every 32M
+            raft.setDisruptorBufferSize(RocksdbMemoryBudget.disruptorBufferSize(totalMemory));
         }
 
         if (!rocksdb.containsKey("write_buffer_size") ||
             "0".equals(rocksdb.get("write_buffer_size"))) {
-            rocksdb.put("write_buffer_size", Long.toString(totalMemory / 1000));
+            rocksdb.put("write_buffer_size",
+                        Long.toString(RocksdbMemoryBudget.writeBufferSize(totalMemory)));
         }
     }
 

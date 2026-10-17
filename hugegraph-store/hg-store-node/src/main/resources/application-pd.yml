@@ -33,6 +33,7 @@ logging:
   level:
     root: info
 rocksdb:
-  # total memory size used by rocksdb
-  total_memory_size: 32000000000
+  # Off-heap memory for rocksdb memtables and block cache, in bytes. 0 sizes it from
+  # the memory left after heap and direct memory (container limit aware, capped at 32 GB).
+  total_memory_size: 0
   write_buffer_size: 32000000

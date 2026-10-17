@@ -356,14 +356,16 @@ class PolicyTest(unittest.TestCase):
                  ("test-check-java-runtime-logs.sh", {"struct"}),
                  ("test-check-jacoco-report.sh", {"struct"}),
                  ("test-codecov-upload-config.sh", {"struct"}),
-                 ("test-riscv64-java-runtime.sh", {"server", "riscv64"})]
+                 ("test-riscv64-java-runtime.sh", {"server", "riscv64"}),
+                 ("test-store-docker-entrypoint.sh", {"store"}),
+                 ("test-start-server.sh", {"server"})]
         for name, suites in cases:
             script = policy.TRAVIS + name
             with self.subTest(script=script):
                 plan = self.plan_for([script])
                 self.assertEqual(suites, set(plan["selected"]))
                 callers = self.coordinator_jobs(plan)
-                if "struct" in suites:
+                if "struct" in suites or "store" in suites:
                     self.assertEqual({"pd_store"}, callers)
                     root = (workflows / "server-ci.yml").read_text()
                     caller = re.search(r"^  pd_store:\n(.*?)(?=^  [\w-]+:|\Z)", root, re.M | re.S).group(1)
@@ -373,12 +375,13 @@ class PolicyTest(unittest.TestCase):
                         binding = binding.replace("needs.preflight.outputs." + key, repr(str(plan[key]).lower()))
                         inputs[key] = eval(binding, {"__builtins__": {}})
                     workflow = (workflows / "pd-store-ci.yml").read_text()
-                    struct = workflow.split("\n  struct:\n", 1)[1].split("\n  pd:\n", 1)[0]
-                    condition = re.search(r"^    if: (.+)$", struct, re.M).group(1)
+                    job = "struct" if "struct" in suites else "store"
+                    body = re.search(r"^  " + job + r":\n(.*?)(?=^  [\w-]+:|\Z)", workflow, re.M | re.S).group(1)
+                    condition = re.search(r"^    if: (.+)$", body, re.M).group(1)
                     condition = condition.replace("inputs.run-struct", str(inputs["struct"]))
                     condition = condition.replace("inputs.run-store", str(inputs["store"]))
                     self.assertTrue(eval(condition.replace("||", "or"), {"__builtins__": {}}))
-                    step = next(step for step in struct.split("\n      - ") if Path(script).name in step)
+                    step = next(step for step in body.split("\n      - ") if Path(script).name in step)
                     self.assertNotRegex(step, r"(?m)^        if:")
                 else:
                     self.assertIn("server-rocksdb", callers)

@@ -406,6 +406,10 @@ jobs:
         run: |
           mvn editorconfig:check -pl hugegraph-store/hg-store-test -am -ntp
 
+      - name: Run Store docker entrypoint rocksdb memory tests
+        run: |
+          $TRAVIS_DIR/test-store-docker-entrypoint.sh
+
       - name: Check startup test prerequisites (Store)
         id: store-preflight
         run: |

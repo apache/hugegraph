@@ -21,6 +21,7 @@ import org.apache.hugegraph.store.HeartbeatShutdownTest;
 import org.apache.hugegraph.store.StoreIdChangeTest;
 import org.apache.hugegraph.store.core.snapshot.HgSnapshotHandlerTest;
 import org.apache.hugegraph.store.core.store.meta.PartitionMetaCodecTest;
+import org.apache.hugegraph.store.options.RocksdbMemoryBudgetTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 
@@ -51,7 +52,8 @@ import lombok.extern.slf4j.Slf4j;
         MetricSessionTest.class,
         HgSnapshotHandlerTest.class,
         StoreIdChangeTest.class,
-        PartitionMetaCodecTest.class
+        PartitionMetaCodecTest.class,
+        RocksdbMemoryBudgetTest.class
 })
 @Slf4j
 public class CoreSuiteTest {

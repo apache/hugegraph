@@ -42,6 +42,20 @@ function sed_in_place() {
     esac
 }
 
+# Leave exactly one key=value line: run-api-test.sh starts the same directory
+# more than once, and a key appended twice reaches HugeConfig as a list.
+function set_property() {
+    local file=$1
+    local key=$2
+    local value=$3
+    # The keys passed here are fixed names whose only regex character is ".".
+    # Escape it in the shell: BSD sed rejects a "/" inside a bracket expression.
+    local pattern=${key//./\\.}
+
+    sed_in_place "/^[[:space:]]*${pattern}[[:space:]]*[=:]/d" "$file"
+    echo "${key}=${value}" >> "$file"
+}
+
 case "$BACKEND" in
     memory)
         SERIALIZER=text
@@ -64,18 +78,18 @@ write_property "$CONF" "serializer" "$SERIALIZER"
 
 # Set timeout for hbase
 if [ "$BACKEND" == "hbase" ]; then
-    echo "restserver.request_timeout=200" >> $REST_CONF
-    echo "gremlinserver.timeout=200" >> $REST_CONF
+    set_property "$REST_CONF" "restserver.request_timeout" "200"
+    set_property "$REST_CONF" "gremlinserver.timeout" "200"
     sed_in_place 's/evaluationTimeout.*/evaluationTimeout: 200000/' "$GREMLIN_CONF"
 fi
 
 # Set usePD=true for hstore
 if [ "$BACKEND" == "hstore" ]; then
-    echo "usePD=true" >> $REST_CONF
+    set_property "$REST_CONF" "usePD" "true"
 fi
 
 # Append schema.sync_deletion=true to config file
-echo "schema.sync_deletion=true" >> $CONF
+set_property "$CONF" "schema.sync_deletion" "true"
 
 JACOCO_OPTION=""
 if [ -n "$JACOCO_PORT" ]; then

@@ -172,7 +172,9 @@ JAVA
     printf '%s\n' '#!/bin/sh' 'echo launcher-test' > "$fixture/jdk/bin/uname"
     chmod +x "$fixture/jdk/bin/"* "$fixture/bin/start-hugegraph-store.sh"
     for option in default custom-java-options user-options default-serial default-zgc \
-                  g1 G1 zgc ZGC invalid missing-module-options; do
+                  g1 G1 zgc ZGC direct-default direct-heap-lower direct-heap-raised \
+                  direct-heap-tab direct-heap-alias direct-explicit-cap \
+                  invalid missing-module-options; do
         capture="$fixture/$option.args"
         local -a args=(-d false)
         jvm_options="-Xms64m -Xmx64m"
@@ -180,6 +182,13 @@ JAVA
             default) jvm_options="" ;;
             custom-java-options) jvm_options="$jvm_options -Dlauncher.test.custom=true" ;;
             user-options) jvm_options=""; args+=(-j "-Xmx96m -Dlauncher.test=true") ;;
+            # The direct-memory cap follows the heap the JVM actually gets (calc_xmx: 1024)
+            direct-default) jvm_options="" ;;
+            direct-heap-lower) jvm_options=""; args+=(-j "-Xmx512m") ;;
+            direct-heap-raised) jvm_options=""; args+=(-j "-Dlauncher.test=true -Xmx4g") ;;
+            direct-heap-tab) jvm_options=""; args+=(-j $'-Dlauncher.test=true\t-Xmx4g') ;;
+            direct-heap-alias) jvm_options=""; args+=(-j "-XX:MaxHeapSize=4g") ;;
+            direct-explicit-cap) jvm_options=""; args+=(-j "-XX:MaxDirectMemorySize=256m") ;;
             missing-module-options) rm "$fixture/bin/jvm-module.options" ;;
             default-serial) jvm_options="$jvm_options -XX:+UseSerialGC" ;;
             default-zgc) jvm_options="$jvm_options -XX:+UseZGC" ;;
@@ -217,6 +226,21 @@ JAVA
         elif [[ "$option" == user-options ]] &&
              ! grep -Fxq -- '-Dlauncher.test=true' "$capture"; then
             fail "launcher dropped custom -j options"
+        elif [[ "$option" == direct-* ]]; then
+            local cap want
+            # The JVM uses the last -XX:MaxDirectMemorySize on the command line
+            cap=$(grep -E '^-XX:MaxDirectMemorySize=' "$capture" | tail -1)
+            case "$option" in
+                direct-default) want='-XX:MaxDirectMemorySize=1024m' ;;
+                direct-explicit-cap) want='-XX:MaxDirectMemorySize=256m' ;;
+                # A heap-only -j leaves the cap to the JVM, which defaults it to that heap
+                *) want='' ;;
+            esac
+            if [[ "$cap" == "$want" ]]; then
+                pass "launcher '$option' sets direct memory to '${want:-the JVM default (-j heap)}'"
+            else
+                fail "launcher '$option' set direct memory to '${cap:-none}', expected '${want:-none}'"
+            fi
         elif [[ "$option" == zgc || "$option" == ZGC ]]; then
             if grep -Fxq -- '-XX:+UseZGC' "$capture" && \
                ! grep -Fxq -- '-XX:InitiatingHeapOccupancyPercent=50' "$capture"; then
