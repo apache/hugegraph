@@ -121,6 +121,19 @@ class PolicyTest(unittest.TestCase):
         self.assertTrue({"pd", "store", "hstore", "cluster"}.issubset(policy.select(
             "server", ["hugegraph-pd/hg-pd-grpc/src/main/proto/common.proto"])))
 
+    def test_dependency_snapshot_inputs_do_not_fan_out_to_runtime_suites(self):
+        for path in [".github/scripts/dependency-snapshot.py", ".github/scripts/dependency-inventory.py",
+                     ".github/workflows/submit-dependencies.yml"]:
+            self.assertEqual({"dependency_license"}, set(self.plan_for([path])["selected"]))
+            self.assertEqual({"dependency_license"}, self.coordinator_jobs(self.plan_for([path])))
+        fixture = ".github/scripts/test_dependency_snapshot.py"
+        self.assertEqual([], self.plan_for([fixture])["expected"])
+        runtime = "hugegraph-server/hugegraph-core/src/main/A.java"
+        self.assertEqual(self.plan_for([runtime])["selected"], self.plan_for([runtime, fixture])["selected"])
+        # Classifier changes still receive conservative mainline validation.
+        self.assertEqual(policy.select("server", [".github/scripts/ci-policy.py"]),
+                         policy.select("server", [".github/scripts/ci-policy.py", fixture]))
+
     def test_noncore_platforms_only_follow_direct_inputs(self):
         for path in ["hugegraph-server/hugegraph-hbase/src/main/A.java",
                      "hugegraph-server/hugegraph-dist/src/assembly/travis/install-hbase.sh",

@@ -1,0 +1,359 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: Dependency baseline
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-baseline-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    if: >-
+      (github.repository == 'apache/hugegraph' || github.repository == 'hugegraph/hugegraph') &&
+      github.ref == 'refs/heads/master' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout event commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test CI policy and dependency inventory
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_ci_policy.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_dependency_snapshot.py'
+          python3 -m unittest discover -s install-dist/scripts/dependency -p 'test_*.py'
+
+  generate:
+    needs: validate
+    if: >-
+      ((github.repository == 'apache/hugegraph' && github.event.repository.fork == false) ||
+       github.repository == 'hugegraph/hugegraph') &&
+      github.ref == 'refs/heads/master' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      INPUT_TOKEN: ''
+      GITHUB_TOKEN: ''
+      GH_TOKEN: ''
+    outputs:
+      artifact_id: ${{ steps.snapshot.outputs.artifact-id }}
+      inventory_artifact_id: ${{ steps.inventory.outputs.artifact-id }}
+    steps:
+      - name: Checkout event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Set up project JDK
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version-file: .github/workflows/.java-version
+          distribution: 'temurin'
+          cache: maven
+      - name: Verify checkout and current master
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git ls-remote origin refs/heads/master | cut -f1)" = "$EXPECTED_SHA"
+      - name: Install the complete Maven reactor
+        run: mvn -B -ntp install -Dmaven.test.skip=true -Dmaven.javadoc.skip=true --fail-at-end
+      - name: Generate resolved reactor snapshot
+        run: |
+          mvn -B -ntp com.github.ferstl:depgraph-maven-plugin:4.0.3:graph \
+            -DgraphFormat=json -DoutputFileName=maven-dependency-submission-action-depgraph.json \
+            -Dmaven.test.skip=true -Dmaven.javadoc.skip=true
+          python3 .github/scripts/dependency-snapshot.py "$RUNNER_TEMP/snapshot.json"
+      - name: Resolve independent dependency inventory
+        run: |
+          mvn -B -ntp org.apache.maven.plugins:maven-dependency-plugin:3.8.1:tree \
+            -DoutputType=json -DoutputFile=target/dependency-inventory.json \
+            -Dverbose=false -DappendOutput=false \
+            -Dmaven.test.skip=true -Dmaven.javadoc.skip=true
+          python3 .github/scripts/dependency-inventory.py "$RUNNER_TEMP/inventory.json"
+      - name: Refuse stale dependency reports
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: test "$(git ls-remote origin refs/heads/master | cut -f1)" = "$EXPECTED_SHA"
+      - name: Upload snapshot data only
+        id: snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/snapshot.json
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload inventory data only
+        id: inventory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dependency-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/inventory.json
+          if-no-files-found: error
+          retention-days: 1
+
+  submit:
+    needs: [validate, generate]
+    if: >-
+      needs.validate.result == 'success' && needs.generate.result == 'success' &&
+      ((github.repository == 'apache/hugegraph' && github.event.repository.fork == false) ||
+       github.repository == 'hugegraph/hugegraph') &&
+      github.ref == 'refs/heads/master' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Validate and submit snapshot data
+        env:
+          SNAPSHOT_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ARTIFACT_ID: ${{ needs.generate.outputs.artifact_id }}
+          INVENTORY_ARTIFACT_ID: ${{ needs.generate.outputs.inventory_artifact_id }}
+        run: |
+          python3 -I - <<'PY'
+          import datetime
+          import hashlib
+          import io
+          import json
+          import os
+          import re
+          import stat
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import zipfile
+
+          LIMIT = 25 * 1024 * 1024
+
+          def require(condition, message):
+              if not condition:
+                  raise ValueError(message)
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  require(key not in result, 'Duplicate JSON key')
+                  result[key] = value
+              return result
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          def github_request(repository, path, data=None):
+              return urllib.request.Request('https://api.github.com/repos/' + repository + '/' + path,
+                  data=None if data is None else json.dumps(data).encode(),
+                  headers={'Authorization': 'Bearer ' + os.environ['SNAPSHOT_TOKEN'],
+                           'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json',
+                           'X-GitHub-Api-Version': '2022-11-28'})
+
+          def bounded_body(response):
+              raw = response.read(LIMIT + 1)
+              require(len(raw) <= LIMIT, 'Response too large')
+              return raw
+
+          def api(repository, path, data=None):
+              request = github_request(repository, path, data)
+              with urllib.request.build_opener(NoRedirect()).open(request, timeout=60) as response:
+                  require(response.status == (200 if data is None else 201), 'Unexpected API status')
+                  raw = bounded_body(response)
+              return json.loads(raw, object_pairs_hook=unique_object)
+
+          def read_snapshot(raw, member_name='snapshot.json'):
+              require(0 < len(raw) <= LIMIT, 'Invalid ZIP size')
+              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                  members = archive.infolist()
+                  require(len(members) == 1, 'ZIP must contain one data file')
+                  member = members[0]
+                  require(member.orig_filename == member_name and not member.is_dir() and
+                          not (member.external_attr & 0x10) and
+                          stat.S_IFMT(member.external_attr >> 16) in [0, stat.S_IFREG] and
+                          not (member.flag_bits & 1) and
+                          member.compress_type in [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED] and
+                          0 < member.file_size <= LIMIT, 'Invalid ZIP member')
+                  with archive.open(member) as stream:
+                      payload = bounded_body(stream)
+                  require(len(payload) == member.file_size, 'Incomplete ZIP member')
+              return json.loads(payload, object_pairs_hook=unique_object)
+
+          def download_snapshot(repository, artifact_id, artifact, member_name='snapshot.json'):
+              opener = urllib.request.build_opener(NoRedirect())
+              try:
+                  response = opener.open(github_request(repository, f'actions/artifacts/{artifact_id}/zip'), timeout=60)
+              except urllib.error.HTTPError as error:
+                  require(error.code == 302, 'Expected artifact redirect')
+                  location = error.headers.get('Location', '')
+                  error.close()
+              else:
+                  response.close()
+                  raise ValueError('Expected artifact redirect')
+              target = urllib.parse.urlsplit(location)
+              require(target.scheme == 'https' and target.hostname and
+                      target.hostname.endswith(('.blob.core.windows.net', '.githubusercontent.com')) and
+                      target.username is None and target.password is None and
+                      target.port in [None, 443] and not target.fragment, 'Invalid artifact redirect')
+              # A separate request carries no GitHub Authorization to blob storage.
+              with opener.open(urllib.request.Request(location), timeout=60) as response:
+                  require(response.status == 200, 'Artifact download failed')
+                  raw = bounded_body(response)
+              require(len(raw) == artifact['size_in_bytes'] and
+                      'sha256:' + hashlib.sha256(raw).hexdigest() == artifact['digest'], 'Artifact digest/size mismatch')
+              return read_snapshot(raw, member_name)
+
+          def timestamp(value):
+              parsed = datetime.datetime.fromisoformat(value.replace('Z', '+00:00'))
+              require(parsed.tzinfo is not None, 'Timestamp lacks timezone')
+              return parsed
+
+          def main():
+              repository, sha = os.environ['EXPECTED_REPOSITORY'], os.environ['EXPECTED_SHA']
+              run_id, attempt, artifact_id = (os.environ[key] for key in ['RUN_ID', 'RUN_ATTEMPT', 'ARTIFACT_ID'])
+              require(repository in ['apache/hugegraph', 'hugegraph/hugegraph'], 'Repository refused')
+              require(re.fullmatch('[0-9a-f]{40}', sha), 'Invalid commit')
+              require(all(re.fullmatch('[1-9][0-9]*', x) for x in [run_id, attempt, artifact_id]), 'Invalid ID')
+              run = api(repository, f'actions/runs/{run_id}/attempts/{attempt}')
+              require(run['id'] == int(run_id) and run['run_attempt'] == int(attempt) and
+                      run['head_sha'] == sha and run['head_branch'] == 'master' and
+                      run['event'] in ['push', 'workflow_dispatch'] and
+                      run['repository']['full_name'] == repository and
+                      run['path'] in ['.github/workflows/submit-dependencies.yml',
+                                      '.github/workflows/submit-dependencies.yml@master'], 'Run identity')
+              jobs = api(repository, f'actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100')
+              require(jobs['total_count'] <= 100, 'Too many jobs')
+              producers = [job for job in jobs['jobs'] if job['name'] == 'generate']
+              require(len(producers) == 1 and producers[0]['conclusion'] == 'success' and
+                      producers[0]['status'] == 'completed' and producers[0]['run_id'] == int(run_id) and
+                      producers[0]['head_sha'] == sha, 'Producer did not succeed for this commit')
+              inventory_id = os.environ['INVENTORY_ARTIFACT_ID']
+              require(re.fullmatch('[1-9][0-9]*', inventory_id) and inventory_id != artifact_id, 'Inventory ID')
+
+              def checked_artifact(identifier, kind):
+                  item = api(repository, f'actions/artifacts/{identifier}')
+                  require(item['id'] == int(identifier) and item['expired'] is False and
+                          item['name'] == f'dependency-{kind}-{run_id}-{attempt}' and
+                          item['workflow_run']['id'] == int(run_id) and item['workflow_run']['head_sha'] == sha and
+                          item['workflow_run']['head_branch'] == 'master' and
+                          type(item['size_in_bytes']) is int and 0 < item['size_in_bytes'] <= LIMIT and
+                          isinstance(item['digest'], str) and re.fullmatch('sha256:[0-9a-f]{64}', item['digest']),
+                          'Artifact identity')
+                  return item
+
+              artifact = checked_artifact(artifact_id, 'snapshot')
+              inventory_artifact = checked_artifact(inventory_id, 'inventory')
+              snapshot = download_snapshot(repository, artifact_id, artifact)
+              require(isinstance(snapshot, dict) and set(snapshot) ==
+                      {'version', 'sha', 'ref', 'job', 'detector', 'metadata', 'scanned', 'manifests'}, 'Snapshot schema')
+              require(type(snapshot['version']) is int and snapshot['version'] == 0 and
+                      snapshot['sha'] == sha and snapshot['ref'] == 'refs/heads/master', 'Snapshot source')
+              require(snapshot['job'] == {'id': run_id,
+                      'correlator': '.github/workflows/submit-dependencies.yml:submit',
+                      'html_url': f'https://github.com/{repository}/actions/runs/{run_id}'}, 'Snapshot job')
+              require(snapshot['detector'] == {'name': 'maven-dependency-submission-action', 'version': '6.0.1',
+                      'url': 'https://github.com/advanced-security/maven-dependency-submission-action'}, 'Detector')
+              require(snapshot['metadata'] == {'serializer':
+                      'Ferstl 4.0.3; repository stdlib adapter for Maven parser 6.0.1',
+                      'producer': 'generate', 'run_attempt': attempt}, 'Producer identity')
+              now = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=1)
+              require(timestamp(run['run_started_at']) <= timestamp(snapshot['scanned']) <=
+                      timestamp(artifact['created_at']) + datetime.timedelta(minutes=1) and
+                      timestamp(artifact['created_at']) <= now and timestamp(snapshot['scanned']) <= now,
+                      'Snapshot freshness')
+              inventory = download_snapshot(repository, inventory_id, inventory_artifact, 'inventory.json')
+              require(isinstance(inventory, dict) and set(inventory) ==
+                      {'version', 'sha', 'repository', 'run_id', 'run_attempt', 'producer', 'resolver',
+                       'scanned', 'manifests'}, 'Inventory schema')
+              require(type(inventory['version']) is int and inventory['version'] == 1 and
+                      inventory['sha'] == sha and inventory['repository'] == repository and
+                      inventory['run_id'] == run_id and inventory['run_attempt'] == attempt and
+                      inventory['producer'] == 'inventory' and inventory['resolver'] ==
+                      'org.apache.maven.plugins:maven-dependency-plugin:3.8.1:tree', 'Inventory source')
+              require(timestamp(run['run_started_at']) <= timestamp(inventory['scanned']) <=
+                      timestamp(inventory_artifact['created_at']) + datetime.timedelta(minutes=1) and
+                      timestamp(inventory_artifact['created_at']) <= now and timestamp(inventory['scanned']) <= now,
+                      'Inventory freshness')
+              tree = api(repository, f'git/trees/{sha}?recursive=1')
+              require(tree['truncated'] is False, 'Incomplete source tree')
+              poms = {node['path'] for node in tree['tree'] if node['type'] == 'blob' and
+                      node['path'].split('/')[-1] == 'pom.xml' and node['mode'] != '120000'}
+              require(isinstance(inventory['manifests'], dict) and set(inventory['manifests']) == poms,
+                      'Incomplete independent inventory')
+              manifests, paths = snapshot['manifests'], set()
+              require(isinstance(manifests, dict) and manifests and poms, 'Empty inventory')
+              component = r"(?:[A-Za-z0-9._!~*'():+-]|%[0-9A-F]{2})+"
+              qualifier = r'(?:[A-Za-z0-9._*\-]|%[0-9A-F]{2})+'
+              purl_pattern = (r'pkg:maven/' + component + '(?:/' + component + ')+@' + component +
+                              r'(?:\?classifier=' + qualifier + '(?:&type=' + qualifier + r')?|\?type=' + qualifier + ')?')
+              for name, manifest in manifests.items():
+                  require(isinstance(name, str) and name.strip() and isinstance(manifest, dict) and
+                          set(manifest) == {'name', 'file', 'resolved'} and manifest['name'] == name and
+                          isinstance(manifest['file'], dict) and set(manifest['file']) == {'source_location'},
+                          'Manifest schema')
+                  location = manifest['file']['source_location']
+                  require(isinstance(location, str) and location in poms and location not in paths, 'Manifest source')
+                  paths.add(location)
+                  resolved = manifest['resolved']
+                  require(isinstance(resolved, dict), 'Resolved schema')
+                  for purl, package in resolved.items():
+                      require(isinstance(purl, str) and len(purl) <= 4096 and
+                              re.fullmatch(purl_pattern, purl), 'Package URL')
+                      require(isinstance(package, dict) and set(package) ==
+                              {'package_url', 'relationship', 'scope', 'dependencies'} and
+                              package['package_url'] == purl and package['relationship'] in ['direct', 'indirect'] and
+                              package['scope'] in ['runtime', 'development'] and
+                              isinstance(package['dependencies'], list) and
+                              all(isinstance(child, str) and child in resolved for child in package['dependencies']),
+                              'Package schema')
+                  require(not resolved or any(p['relationship'] == 'direct' for p in resolved.values()),
+                          'Missing direct dependencies')
+                  observed = {purl: {'scope': package['scope'], 'relationship': package['relationship']}
+                              for purl, package in resolved.items()}
+                  require(observed == inventory['manifests'][location], 'Dependency inventory mismatch')
+              require(paths == poms and any(m['resolved'] for m in manifests.values()), 'Incomplete inventory')
+              require(api(repository, 'git/ref/heads/master')['object']['sha'] == sha, 'Stale master before submission')
+              result = api(repository, 'dependency-graph/snapshots', snapshot)
+              require(result['result'] == 'SUCCESS', 'Snapshot not accepted')
+              require(api(repository, 'git/ref/heads/master')['object']['sha'] == sha, 'Master advanced during submission')
+              print('Dependency baseline submitted for ' + sha)
+
+          if __name__ == '__main__':
+              main()
+          PY
