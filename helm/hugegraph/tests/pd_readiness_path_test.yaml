@@ -87,7 +87,7 @@ tests:
           value: /v1/health
 
   # A single PD has no election to lose, so a permanent step-down has to be
-  # restartable; /v1/health would pass forever. Startup follows liveness so the
+  # restartable; older images pass /v1/health forever. Startup follows liveness so the
   # boot-to-ready window is charged to the startup budget, not the liveness one.
   - it: moves PD startup and liveness to the raft-aware path at one replica
     template: pd-statefulset.yaml

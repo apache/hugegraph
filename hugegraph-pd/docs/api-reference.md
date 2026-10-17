@@ -809,7 +809,7 @@ Two unauthenticated endpoints are meant for probes and startup gates:
 
 | Endpoint | Meaning | Status |
 |----------|---------|--------|
-| `GET /v1/health` | Liveness: the REST listener is up. Does not consult raft. | always `200` |
+| `GET /v1/health` | Liveness: the REST listener is up and Raft has no terminal error. Empty text body. | `503` for `STATE_ERROR` or `STATE_SHUTDOWN`, `200` otherwise |
 | `GET /v1/ready` | Readiness: the raft node is active and sees a leader, so this PD is inside a quorum. | `200` when ready, `503` otherwise |
 
 ```bash
@@ -828,6 +828,11 @@ curl -i http://localhost:8620/v1/ready
 A follower reports `"state": "STATE_FOLLOWER"` with `"isLeader": false`. When the quorum is lost the PD keeps answering `/v1/health` with `200` but `/v1/ready` turns into `503` with `"ready": false`. Being unauthenticated, the body carries no cluster addresses; the leader's address stays on `/v1/members`.
 
 The answer is served from state the raft callbacks maintain rather than from the raft node, so it stays prompt while an election is running and never waits on the node lock. `state` is therefore the last change raft announced. A PD reports `STATE_UNINITIALIZED` with `"ready": false` from process start until its first raft callback, which is the ordinary startup window before a quorum first forms, and jraft emits no callback for candidacy or leadership transfer, so a candidate reports `STATE_FOLLOWER` with `"ready": false`.
+
+After a fatal snapshot error, `/v1/ready` retains `STATE_ERROR` even after the leader
+steps down, and `/v1/health` returns `503`. Fix the underlying disk or storage
+problem and restart the affected PD: freeing disk space alone does not restart
+JRaft's terminal state machine.
 
 Point Kubernetes readiness probes, `depends_on` healthchecks and any "wait for PD" script at `/v1/ready`; keep liveness probes on `/v1/health` so a PD that merely lost its leader is not restarted.
 

@@ -172,6 +172,20 @@ curl -fsS http://localhost:8088/about
 
 </details>
 
+### PD health and readiness
+
+PD's `/v1/ready` returns HTTP 503 while it cannot serve through a Raft quorum.
+`/v1/health` remains HTTP 200 during an election or temporary quorum loss, but
+returns HTTP 503 after a fatal Raft error or state-machine shutdown. Both health
+responses retain the empty text body. Probes read cached state without waiting
+for the Raft node lock.
+
+A failed snapshot, for example after the PD disk fills, leaves JRaft in a terminal
+error state. Free disk space before restarting the affected PD; freeing space
+alone does not reinitialize its Raft node. Configure liveness against `/v1/health`
+with an image containing this fix and gate traffic on `/v1/ready`. Older images
+still need the single-PD readiness-based liveness workaround supplied by the Helm chart.
+
 ### Stop or remove a deployment
 
 `stop` keeps containers and data; `down` removes containers and the network but keeps data. **`down -v` also deletes all topology data.**

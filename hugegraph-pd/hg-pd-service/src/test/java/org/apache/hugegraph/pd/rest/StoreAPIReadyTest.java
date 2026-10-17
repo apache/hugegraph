@@ -35,6 +35,7 @@ import com.alipay.sofa.jraft.Status;
 import com.alipay.sofa.jraft.core.State;
 import com.alipay.sofa.jraft.entity.LeaderChangeContext;
 import com.alipay.sofa.jraft.entity.PeerId;
+import com.alipay.sofa.jraft.error.RaftException;
 
 /**
  * Pins the status a readiness probe actually receives from {@code GET /v1/ready}: 503 while
@@ -118,6 +119,44 @@ public class StoreAPIReadyTest {
 
     private static LeaderChangeContext context() {
         return new LeaderChangeContext(LEADER, 5, Status.OK());
+    }
+
+    @Test
+    public void testFatalErrorSurvivesLeaderStopAndAnswers503() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onLeaderStart(5);
+        this.stateMachine.onError(new RaftException());
+        this.stateMachine.onLeaderStop(new Status(-1, "snapshot failed"));
+
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                            this.api.checkHealthy().getStatusCode());
+        Assert.assertEquals("", this.api.checkHealthy().getBody());
+        ResponseEntity<Map<String, Object>> response = this.api.checkReady();
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        Assert.assertEquals(State.STATE_ERROR.name(), response.getBody().get("state"));
+        Assert.assertEquals(Boolean.FALSE, response.getBody().get("isLeader"));
+    }
+
+    @Test
+    public void testQuorumLossRemainsLive() {
+        Whitebox.setInternalState(RaftEngine.getInstance(), "raftNode", untouchableNode());
+        this.stateMachine.onLeaderStart(5);
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        this.stateMachine.onLeaderStop(Status.OK());
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        this.stateMachine.onStartFollowing(context());
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        this.stateMachine.onStopFollowing(context());
+        Assert.assertEquals(HttpStatus.OK, this.api.checkHealthy().getStatusCode());
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                            this.api.checkReady().getStatusCode());
+    }
+
+    @Test
+    public void testShutdownIsNotLive() {
+        this.stateMachine.onShutdown();
+        Assert.assertEquals(HttpStatus.SERVICE_UNAVAILABLE,
+                            this.api.checkHealthy().getStatusCode());
     }
 
     /**
