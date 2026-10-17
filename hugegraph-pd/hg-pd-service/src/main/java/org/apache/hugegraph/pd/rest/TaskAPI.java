@@ -20,6 +20,7 @@ package org.apache.hugegraph.pd.rest;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.hugegraph.pd.TaskScheduleService.PartitionPatrolResult;
 import org.apache.hugegraph.pd.common.KVPair;
 import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.Metapb;
@@ -57,8 +58,11 @@ public class TaskAPI extends API {
     @ResponseBody
     public String patrolPartitions() {
         try {
-            List<Metapb.Partition> partitions = pdRestService.patrolPartitions();
-            return toJSON(partitions, "partitions");
+            PartitionPatrolResult result = pdRestService.patrolPartitionsWithResult();
+            String partitions = toJSON(result.getPartitions(), "partitions");
+            return partitions.substring(0, partitions.length() - 1) +
+                   ",\"reallocatedShardGroups\":" + toJSON(result.getReallocatedShardGroups()) +
+                   ",\"offlineShardRequests\":" + toJSON(result.getOfflineShardRequests()) + "}";
         } catch (PDException e) {
             e.printStackTrace();
             return toJSON(e);
@@ -67,13 +71,16 @@ public class TaskAPI extends API {
 
     @GetMapping(value = "/balancePartitions", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
-    public Map<Integer, KVPair<Long, Long>> balancePartitions() {
+    public String balancePartitions() {
         try {
             Map<Integer, KVPair<Long, Long>> partitions = pdRestService.balancePartitions();
-            return partitions;
+            if (partitions == null) {
+                return toJSON(Map.of("status", 0, "outcome", "skipped"));
+            }
+            return toJSON(partitions);
         } catch (PDException e) {
             e.printStackTrace();
-            return null;
+            return toJSON(e);
         }
     }
 
@@ -89,12 +96,6 @@ public class TaskAPI extends API {
         }
     }
 
-    // TODO: make the task routes tell a real run from a no-op and a follower answer (a follower
-    // returns an empty success without doing anything), and return a body that names what was
-    // scheduled. Part 1 (#3233) replaced the bare 500 with a refusal body; this is part 2. The
-    // Helm chart (helm/hugegraph) documents the leader-first sequence and the 180 s spacing in its
-    // README until then.
-    // https://github.com/apache/hugegraph/issues/3231
     @GetMapping(value = "/balanceLeaders", produces = MediaType.APPLICATION_JSON_VALUE)
     @ResponseBody
     public String balanceLeaders() {
@@ -108,8 +109,12 @@ public class TaskAPI extends API {
     }
 
     @GetMapping(value = "/compact")
-    public String dbCompaction() throws PDException {
-        pdRestService.dbCompaction();
-        return "compact ok";
+    public String dbCompaction() {
+        try {
+            pdRestService.dbCompaction();
+            return "compact ok";
+        } catch (PDException e) {
+            return toJSON(e);
+        }
     }
 }

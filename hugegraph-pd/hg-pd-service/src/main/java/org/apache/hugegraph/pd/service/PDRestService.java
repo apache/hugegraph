@@ -40,6 +40,7 @@ import org.apache.hugegraph.pd.grpc.discovery.Query;
 import org.apache.hugegraph.pd.grpc.discovery.RegisterInfo;
 import org.apache.hugegraph.pd.model.RegistryRestRequest;
 import org.apache.hugegraph.pd.model.RegistryRestResponse;
+import org.apache.hugegraph.pd.raft.RaftEngine;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -137,11 +138,38 @@ public class PDRestService implements InitializingBean {
     }
 
     public List<Metapb.Store> patrolStores() throws PDException {
-        return monitorService.patrolStores();
+        return runLeaderTask(() -> monitorService.patrolStores());
     }
 
     public List<Metapb.Partition> patrolPartitions() throws PDException {
-        return monitorService.patrolPartitions();
+        return runLeaderTask(() -> monitorService.patrolPartitions());
+    }
+
+    public TaskScheduleService.PartitionPatrolResult patrolPartitionsWithResult() throws PDException {
+        return runLeaderTask(() -> monitorService.patrolPartitionsWithResult());
+    }
+
+    private <T> T runLeaderTask(LeaderTask<T> task) throws PDException {
+        checkTaskLeader();
+        T result = task.run();
+        // Do not turn a scheduler's follower no-op into success if leadership changed mid-call.
+        checkTaskLeader();
+        return result;
+    }
+
+    private void checkTaskLeader() throws PDException {
+        RaftEngine engine = RaftEngine.getInstance();
+        if (!engine.isLeader()) {
+            throw new PDException(Pdpb.ErrorType.NOT_LEADER_VALUE,
+                                  "Task requires the PD leader; leader Raft address: " +
+                                  engine.getLeader());
+        }
+    }
+
+    @FunctionalInterface
+    private interface LeaderTask<T> {
+
+        T run() throws PDException;
     }
 
     public Metapb.PartitionStats getPartitionStats(String graphName, int partitionId) throws
@@ -154,11 +182,11 @@ public class PDRestService implements InitializingBean {
     }
 
     public Map<Integer, KVPair<Long, Long>> balancePartitions() throws PDException {
-        return monitorService.balancePartitionShard();
+        return runLeaderTask(() -> monitorService.balancePartitionShard());
     }
 
     public List<Metapb.Partition> splitPartitions() throws PDException {
-        return monitorService.autoSplitPartition();
+        return runLeaderTask(() -> monitorService.autoSplitPartition());
     }
 
     public List<Metapb.Store> getStoreStats(boolean isActive) throws PDException {
@@ -262,11 +290,14 @@ public class PDRestService implements InitializingBean {
     }
 
     public Map<Integer, Long> balancePartitionLeader() throws PDException {
-        return monitorService.balancePartitionLeader(true);
+        return runLeaderTask(() -> monitorService.balancePartitionLeader(true));
     }
 
     public void dbCompaction() throws PDException {
-        monitorService.dbCompaction("");
+        runLeaderTask(() -> {
+            monitorService.dbCompaction("");
+            return null;
+        });
     }
 
     public List<Metapb.Shard> getShardList(int partitionId) throws PDException {

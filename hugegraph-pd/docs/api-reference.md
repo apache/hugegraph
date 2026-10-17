@@ -833,6 +833,24 @@ Point Kubernetes readiness probes, `depends_on` healthchecks and any "wait for P
 
 Match on the body rather than on the status code alone. A PD that predates this endpoint does not reliably answer `404` for it: `RestAuthentication` refuses a request it does not exclude by writing an error envelope, and as of 1.7.0 it does so without setting a status, so an unknown path answers `200` with `{"status":-1,"error":"Unauthorized!"}`. A status-only probe therefore reads such a PD as ready. The body match holds whichever status a refusal carries: a shell gate should use `curl -fsS http://<pd-host>:8620/v1/ready | grep -q '"ready":true'`, and a Kubernetes `httpGet` probe should be paired with a PD image that carries the endpoint.
 
+### Manual maintenance task results
+
+Task endpoints under `/v1/task` require the local PD to be leader. A follower
+answers an error envelope with `status: 100` and the known leader's Raft address
+in `error` (`null` if no leader is known). Check `status`, not HTTP 200 alone.
+`/v1/balanceLeaders` applies the same check. A leadership change during execution
+can also return this error; inspect cluster state before retrying.
+
+`/v1/task/patrolPartitions` retains `status` and `partitions`, and adds
+`reallocatedShardGroups` (IDs whose allocation changed) and `offlineShardRequests`
+(group ID to retired Store ID). Offline-shard requests do not prove completed
+repairs. Empty collections distinguish a completed patrol with nothing to do.
+
+Leader and partition balances retain their transfer maps. A skipped partition
+balance instead returns `{"status":0,"outcome":"skipped"}`; a completed balance
+with no transfers returns `{}`. Transfers are asynchronous, so verify membership
+and leaders before proceeding with maintenance.
+
 ### Metrics
 
 ```bash
