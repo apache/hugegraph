@@ -19,10 +19,10 @@ package org.apache.hugegraph.api;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.apache.hugegraph.util.JsonUtil;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.ImmutableMap;
@@ -35,7 +35,7 @@ public class ArthasApiTest extends BaseApiTest {
     private static final String ARTHAS_API_BASE_URL = "http://127.0.0.1:8561";
     private static final String ARTHAS_API_PATH = "/api";
 
-    @Before
+    @Test
     public void testArthasStart() {
         Response r = client().put(ARTHAS_START_PATH, "", "", ImmutableMap.of());
         String result = assertResponseStatus(200, r);
@@ -44,10 +44,39 @@ public class ArthasApiTest extends BaseApiTest {
         assertJsonContains(result, "arthas.httpPort");
         assertJsonContains(result, "arthas.ip");
         assertJsonContains(result, "arthas.disabledCommands");
+        Assert.assertEquals("127.0.0.1", assertJsonContains(result, "arthas.ip"));
+    }
+
+    @Test
+    public void testAnonymousCannotActivate() {
+        RestClient anonymous = new RestClient(BASE_URL, false);
+        try {
+            assertResponseStatus(401, anonymous.put(ARTHAS_START_PATH, "", "", ImmutableMap.of()));
+        } finally {
+            anonymous.close();
+        }
+    }
+
+    @Test
+    public void testNonAdminCannotActivate() {
+        String username = "arthas_user_" + UUID.randomUUID().toString().replace("-", "");
+        String usersPath = "graphspaces/DEFAULT/auth/users";
+        String userBody = JsonUtil.toJson(ImmutableMap.of("user_name", username,
+                                                         "user_password", "Arthas1234"));
+        String created = assertResponseStatus(201, client().post(usersPath, userBody));
+        String userId = assertJsonContains(created, "id");
+        RestClient user = new RestClient(BASE_URL, username, "Arthas1234");
+        try {
+            assertResponseStatus(403, user.put(ARTHAS_START_PATH, "", "", ImmutableMap.of()));
+        } finally {
+            user.close();
+            assertResponseStatus(204, client().delete(usersPath, userId));
+        }
     }
 
     @Test
     public void testArthasApi() {
+        testArthasStart();
         RestClient arthasApiClient = new RestClient(ARTHAS_API_BASE_URL, false);
         try {
             // A one-time command must succeed through its automatic session cleanup.

@@ -24,6 +24,10 @@
 
     <fileSets>
         <fileSet>
+            <directory>${project.build.directory}/arthas</directory>
+            <outputDirectory>lib/arthas</outputDirectory>
+        </fileSet>
+        <fileSet>
             <directory>${assembly.static.dir}/bin</directory>
             <outputDirectory>bin</outputDirectory>
             <includes>

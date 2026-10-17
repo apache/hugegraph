@@ -62,3 +62,6 @@ logging:
   config: 'file:./conf/log4j2.xml'
   level:
     root: info
+
+
+# HTTP Arthas activation is disabled. Use bin/arthas.sh locally without restarting Store.

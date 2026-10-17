@@ -54,7 +54,8 @@ echo "Initializing HugeGraph Store..."
 
 # Build classpath with hugegraph*.jar first to avoid class loading conflicts
 CP=$(find -L "${LIB}" -name 'hugegraph*.jar' | sort | tr '\n' ':')
-CP="$CP":$(find -L "${LIB}" -name '*.jar' \! -name 'hugegraph*' | sort | tr '\n' ':')
+CP="$CP":$(find -L "${LIB}" -name '*.jar' \
+    \! -path "${LIB}/arthas/*" \! -name 'hugegraph*' | sort | tr '\n' ':')
 CP="$CP":$(find -L "${PLUGINS}" -name '*.jar' | sort | tr '\n' ':')
 source "$BIN/preload-topling.sh" || exit 1
 CP="${TOPLING_RUNTIME_CLASSPATH:+$TOPLING_RUNTIME_CLASSPATH:}$CP"

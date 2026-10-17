@@ -14,10 +14,13 @@ antlr4-runtime-4.9.1.jar
 aopalliance-repackaged-3.0.1.jar
 apiguardian-api-1.1.0.jar
 apiguardian-api-1.1.2.jar
-arthas-agent-attach-3.6.4.jar
 arthas-agent-attach-4.1.5.jar
-arthas-packaging-3.6.4.jar
+arthas-agent.jar
+arthas-boot.jar
+arthas-client.jar
+arthas-core.jar
 arthas-packaging-4.1.5.jar
+arthas-spy.jar
 asm-6.0.jar
 asm-commons-9.4.jar
 asm-tree-9.4.jar
@@ -33,7 +36,6 @@ bolt-1.6.4.jar
 byte-buddy-1.10.20.jar
 byte-buddy-1.17.6.jar
 byte-buddy-agent-1.10.20.jar
-byte-buddy-agent-1.11.6.jar
 byte-buddy-agent-1.17.6.jar
 byte-buddy-agent-1.18.3.jar
 caffeine-2.3.1.jar
@@ -515,5 +517,4 @@ xmlunit-core-2.8.4.jar
 zjsonpatch-0.3.0.jar
 zookeeper-3.8.6.jar
 zookeeper-jute-3.8.6.jar
-zt-zip-1.14.jar
 zt-zip-1.16.jar

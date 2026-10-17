@@ -265,6 +265,8 @@ Arthas 4.1.5 includes shaded Jackson, FastDoubleParser, ASM 9.9, Logback 1.2.13
 and RSyntaxTextArea 3.3.4.
 Their additional MIT, BSD, Boost and EPL 1.0 license texts and source locations
 are in licenses/LICENSE-arthas-packaging-4.1.5.txt.
+The same bundle supplies the agent, boot, client, core and spy JARs unpacked
+under lib/arthas for offline local diagnosis.
 Paths referenced by upstream licenses are reproduced as labeled sections in
 the corresponding per-component license file.
 
@@ -363,9 +365,7 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/com.squareup.okio/okio-jvm/3.0.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.squareup.okio/okio/1.15.0 -> Apache 2.0
     https://central.sonatype.com/artifact/com.squareup/javapoet/1.13.0 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.taobao.arthas/arthas-agent-attach/3.6.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.taobao.arthas/arthas-agent-attach/4.1.5 -> Apache 2.0
-    https://central.sonatype.com/artifact/com.taobao.arthas/arthas-packaging/3.6.4 -> Apache 2.0
     https://central.sonatype.com/artifact/com.taobao.arthas/arthas-packaging/4.1.5 -> Apache 2.0
     https://central.sonatype.com/artifact/com.vaadin.external.google/android-json/0.0.20131108.vaadin1 -> Apache 2.0
     https://central.sonatype.com/artifact/commons-beanutils/commons-beanutils/1.9.4 -> Apache 2.0
@@ -494,7 +494,6 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/javax.validation/validation-api/1.1.0.Final -> Apache 2.0
     https://central.sonatype.com/artifact/joda-time/joda-time/2.10.8 -> Apache 2.0
     https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.10.20 -> Apache 2.0
-    https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.11.6 -> Apache 2.0
     https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.18.3 -> Apache 2.0
     https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy-agent/1.17.6 -> Apache 2.0
     https://central.sonatype.com/artifact/net.bytebuddy/byte-buddy/1.10.20 -> Apache 2.0
@@ -696,7 +695,6 @@ the corresponding per-component license file.
     https://central.sonatype.com/artifact/org.springframework/spring-webmvc/5.3.27 -> Apache 2.0
     https://central.sonatype.com/artifact/org.xmlunit/xmlunit-core/2.8.4 -> Apache 2.0
     https://central.sonatype.com/artifact/org.yaml/snakeyaml/2.2 -> Apache 2.0
-    https://central.sonatype.com/artifact/org.zeroturnaround/zt-zip/1.14 -> Apache 2.0
     https://central.sonatype.com/artifact/org.zeroturnaround/zt-zip/1.16 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.commons/commons-pool2/2.0 -> Apache 2.0
     https://central.sonatype.com/artifact/org.apache.lucene/lucene-analyzers-common/5.2.1 -> Apache 2.0

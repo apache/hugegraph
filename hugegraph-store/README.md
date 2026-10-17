@@ -415,6 +415,9 @@ timeout handling, diagnostics and resource drain behavior.
 
 ## Documentation
 
+For offline diagnosis of a running node without restarting it, see
+[Arthas diagnostics](../docs/server-runtime.md#arthas-diagnostics).
+
 See the [storage lifecycle guide](../docs/storage-lifecycle.md) for request ownership,
 shutdown, recovery and provider configuration.
 

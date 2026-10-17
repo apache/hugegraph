@@ -22,6 +22,7 @@ import org.apache.hugegraph.unit.core.LoadingModeTest;
 import org.apache.hugegraph.GraphDropPendingTest;
 import org.apache.hugegraph.StandardTaskAdmissionTest;
 import org.apache.hugegraph.DistributedTaskAdmissionTest;
+import org.apache.hugegraph.api.arthas.ArthasConfigTest;
 import org.apache.hugegraph.api.auth.GraphSpaceAuthPayloadTest;
 import org.apache.hugegraph.api.auth.GraphSpaceGroupAPITest;
 import org.apache.hugegraph.api.cypher.CypherClientTest;
@@ -151,6 +152,7 @@ import org.junit.runners.Suite;
         LoadDetectFilterTest.class,
         LoginAPITest.class,
         PathFilterTest.class,
+        ArthasConfigTest.class,
         VertexAuthorizationTest.class,
 
         /* api cypher */

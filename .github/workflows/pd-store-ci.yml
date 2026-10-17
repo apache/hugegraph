@@ -374,6 +374,12 @@ jobs:
         run: |
           mvn clean package -U -Dmaven.javadoc.skip=true -Dmaven.test.skip=true -ntp --fail-at-end
 
+      - name: Verify Store Arthas local CLI attachment
+        run: |
+          VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION
+          bash "$TRAVIS_DIR/test-arthas-cli.sh" "$STORE_DIR"
+
       - name: Verify Surefire single-class routing
         run: |
           SUREFIRE_DIR=hugegraph-store/hg-store-test/target/surefire-reports
@@ -446,12 +452,12 @@ jobs:
           echo "PD_DIR=hugegraph-pd/apache-hugegraph-pd-$VERSION" >> "$GITHUB_ENV"
           echo "STORE_DIR=hugegraph-store/apache-hugegraph-store-$VERSION" >> "$GITHUB_ENV"
 
-      - name: Run historical Store ingress tests
+      - name: Run Store ingress and Arthas security tests
         run: |
           set -o pipefail
           RUNTIME_LOG=$(mktemp "$RUNNER_TEMP/java-runtime.XXXXXX")
           mvn test -pl hugegraph-store/hg-store-node -am \
-            -Dtest=StoredRowIngressTest -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtest=StoredRowIngressTest,ArthasSecurityTest -Dsurefire.failIfNoSpecifiedTests=false \
             -Djacoco.sessionId=store-node-test \
             -Djacoco.destFile="$PWD/hugegraph-store/hg-store-test/target/store-node-test.exec" 2>&1 | tee "$RUNTIME_LOG"
           bash "$TRAVIS_DIR/check-java-runtime-logs.sh" "$RUNTIME_LOG" "$PD_DIR/logs" "$STORE_DIR/logs"
@@ -526,6 +532,8 @@ jobs:
             "$TEST_REPORT_DIR/TEST-org.apache.hugegraph.store.service.ServerSuiteTest.xml" \
             --require-test-report \
             "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.business.StoredRowIngressTest.xml" \
+            --require-test-report \
+            "hugegraph-store/hg-store-node/target/surefire-reports/TEST-org.apache.hugegraph.store.node.controller.ArthasSecurityTest.xml" \
             --require-covered-group hg-store-common \
             --require-covered-group hg-store-client \
             --require-covered-group hg-store-rocksdb \

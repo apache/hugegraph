@@ -19,6 +19,7 @@ package org.apache.hugegraph.store.node.controller;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,11 +34,12 @@ import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.business.InnerKeyCreator;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.metric.HgStoreMetric;
-import org.apache.hugegraph.store.node.AppConfig;
 import org.apache.hugegraph.store.node.grpc.HgStoreNodeService;
 import org.apache.hugegraph.util.Bytes;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -47,7 +49,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.alipay.sofa.jraft.entity.PeerId;
 import com.alipay.sofa.jraft.util.Endpoint;
-import com.taobao.arthas.agent.attach.ArthasAgent;
 
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -59,9 +60,6 @@ public class PartitionAPI {
 
     @Autowired
     HgStoreNodeService nodeService;
-
-    @Autowired
-    AppConfig appConfig;
 
     @GetMapping(value = "/partitions", produces = "application/json")
     public Map<String, Object> getPartitions(
@@ -198,19 +196,11 @@ public class PartitionAPI {
     }
 
     @GetMapping(value = "/arthasstart", produces = "application/json")
-    public Map<String, Object> arthasstart(
-            @RequestParam(required = false, defaultValue = "") String flags) {
-        HashMap<String, String> configMap = new HashMap<>();
-        configMap.put("arthas.telnetPort", appConfig.getArthasConfig().getTelnetPort());
-        configMap.put("arthas.httpPort", appConfig.getArthasConfig().getHttpPort());
-        configMap.put("arthas.ip", appConfig.getArthasConfig().getArthasip());
-        configMap.put("arthas.disabledCommands", appConfig.getArthasConfig().getDisCmd());
-        ArthasAgent.attach(configMap);
-        // TODO: remove this commented-out line, retPose is never used
-//        DashResponse retPose = new DashResponse();
-        List<String> ret = new ArrayList<>();
-        ret.add("Arthas started successfully");
-        return okMap("arthasstart", ret);
+    public ResponseEntity<Map<String, String>> arthasstart() {
+        // Store has no administrator authentication. Reject all HTTP callers,
+        // including loopback proxies, and use OS permissions for local attach.
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Collections.singletonMap(
+                "message", "HTTP Arthas activation is disabled; run bin/arthas.sh on the Store host"));
     }
 
     @PostMapping("/compat")

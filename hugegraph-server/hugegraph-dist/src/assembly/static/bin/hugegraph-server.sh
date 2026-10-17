@@ -87,6 +87,7 @@ CP=$(find -L $LIB -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
 CP="$CP":$(find -L $LIB -name 'hugegraph*.jar' | sort | tr '\n' ':')
 # Add the remaining jars in lib.
 CP="$CP":$(find -L $LIB -name '*.jar' \
+    \! -path "$LIB/arthas/*" \
     \! -name 'hugegraph*' \
     \! -name 'log4j-slf4j-impl*.jar' | sort | tr '\n' ':')
 # Add the jars in ext (at any subdirectory depth)
