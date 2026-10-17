@@ -22,6 +22,7 @@ import static org.apache.hugegraph.pd.grpc.MetaTask.TaskType.Clean_Partition;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -44,6 +45,8 @@ import org.apache.hugegraph.pd.common.PDException;
 import org.apache.hugegraph.pd.grpc.MetaTask;
 import org.apache.hugegraph.pd.grpc.Metapb;
 import org.apache.hugegraph.pd.raft.RaftReflectionUtil;
+import org.apache.hugegraph.rocksdb.access.RocksDBFactory;
+import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.store.business.BusinessHandler;
 import org.apache.hugegraph.store.business.BusinessHandlerImpl;
 import org.apache.hugegraph.store.cmd.HgCmdClient;
@@ -52,6 +55,7 @@ import org.apache.hugegraph.store.cmd.request.CleanDataRequest;
 import org.apache.hugegraph.store.cmd.request.DbCompactionRequest;
 import org.apache.hugegraph.store.cmd.request.UpdatePartitionRequest;
 import org.apache.hugegraph.store.listener.PartitionStateListener;
+import org.apache.hugegraph.store.meta.GraphIdManager;
 import org.apache.hugegraph.store.meta.Partition;
 import org.apache.hugegraph.store.meta.PartitionManager;
 import org.apache.hugegraph.store.meta.Shard;
@@ -175,6 +179,7 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
             return true;
         }
 
+        this.checkLegacyGraphIdData(opts.getGroupId());
         log.info("PartitionEngine starting: {}", this);
         this.taskManager = new TaskManager(storeEngine.getBusinessHandler(), opts.getGroupId());
         this.snapshotHandler = new SnapshotHandler(this);
@@ -265,6 +270,30 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
         log.info("PartitionEngine start successfully: id = {}, peers list = {}",
                  options.getGroupId(), nodeOptions.getInitialConf().getPeers());
         return this.started;
+    }
+
+    private void checkLegacyGraphIdData(int partitionId) {
+        String dbName = BusinessHandlerImpl.getDbName(partitionId);
+        try (RocksDBSession cached = RocksDBFactory.getInstance().queryGraphDB(dbName)) {
+            if (cached != null) {
+                // Use the primary's view, including unflushed writes made with WAL disabled.
+                GraphIdManager.checkLegacyGraphIdData(cached, partitionId);
+                return;
+            }
+        }
+        Metapb.PartitionStore location =
+                this.partitionManager.getStoreMetadata().getPartitionStore(partitionId);
+        // Looking up or assigning a new store location would write metadata before inspection.
+        String[] roots = location != null ? new String[]{location.getStoreLocation()} :
+                         this.storeEngine.getOption().getDataPath().split(",");
+        for (String root : roots) {
+            String dataPath = Paths.get(root, HgStoreEngineOptions.DB_Path_Prefix).toString();
+            String existing = RocksDBSession.resolveExistingDBPath(
+                    dataPath, dbName, this.storeEngine.getCommittedIndex(partitionId));
+            if (existing != null) {
+                GraphIdManager.checkLegacyGraphIdData(existing, partitionId);
+            }
+        }
     }
 
     public HgStoreEngine getStoreEngine() {

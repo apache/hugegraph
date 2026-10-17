@@ -31,6 +31,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import org.apache.commons.io.FileUtils;
@@ -185,6 +186,11 @@ public final class RocksDBFactory {
     }
 
     public RocksDBSession createGraphDB(String dbPath, String dbName, long version) {
+        return createGraphDB(dbPath, dbName, version, null);
+    }
+
+    public RocksDBSession createGraphDB(String dbPath, String dbName, long version,
+                                        Consumer<String> existingDatabaseValidator) {
         if (closing.get()) {
             throw new RuntimeException("db closed");
         }
@@ -192,6 +198,10 @@ public final class RocksDBFactory {
         try {
             RocksDBSession dbSession = dbSessionMap.get(dbName);
             if (dbSession == null) {
+                if (existingDatabaseValidator != null) {
+                    RocksDBSession.resolveExistingDBPath(dbPath, dbName, version,
+                                                          existingDatabaseValidator);
+                }
                 log.info("create rocksdb for {}", dbName);
                 dbSession = new RocksDBSession(this.hugeConfig, dbPath, dbName, version);
                 dbSessionMap.put(dbName, dbSession);
