@@ -171,6 +171,8 @@ public final class GraphManager {
     private final Map<String, Service> services;
     //FIXME: add one class like graphKey as key,which contains graphSpace and graphName
     private final Map<String, Graph> graphs;
+    /** configured graphs whose load failed (name -> backend of the config), for the readiness gate */
+    private final Map<String, String> failedGraphs = new java.util.concurrent.ConcurrentHashMap<>();
     private final Set<String> localGraphs;
     private final Set<String> removingGraphs;
     // Guarded by this manager monitor; placement-event tokens are consumed independently.
@@ -1281,7 +1283,9 @@ public final class GraphManager {
             HugeFactory.checkGraphName(name, "rest-server.properties");
             try {
                 this.loadGraph(name, graphConfPath);
+                this.failedGraphs.remove(name);
             } catch (Throwable e) {
+                this.failedGraphs.put(name, backendOf(graphConfPath));
                 LOG.error("Graph '{}' can't be loaded: '{}'",
                           name, graphConfPath, e);
             }
@@ -1468,6 +1472,8 @@ public final class GraphManager {
             // Complete RPC registration before Gremlin listeners expose the graph.
             this.publishGraph(graph);
             this.notifyEvent(Events.GRAPH_CREATE, graph);
+            // a graph created through the API replaces a failed startup load of that name
+            this.failedGraphs.remove(name);
         } catch (Throwable e) {
             LOG.error("Failed to create graph '{}' due to: {}",
                       name, e.getMessage(), e);
@@ -1664,6 +1670,20 @@ public final class GraphManager {
 
     public Set<String> graphs() {
         return Collections.unmodifiableSet(this.graphs.keySet());
+    }
+
+    /** The configured graphs whose last load failed: name -> the backend of the config. */
+    public Map<String, String> failedGraphs() {
+        return Collections.unmodifiableMap(this.failedGraphs);
+    }
+
+    /** The backend named in a graph config file, "unknown" when the file cannot be read. */
+    private static String backendOf(String graphConfPath) {
+        try {
+            return new HugeConfig(graphConfPath).get(CoreOptions.BACKEND);
+        } catch (Throwable e) {
+            return "unknown";
+        }
     }
 
     public HugeGraph graph(String spaceGraphName) {
