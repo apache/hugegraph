@@ -45,6 +45,7 @@ import org.slf4j.Logger;
         EdgeLabelCoreTest.class,
         IndexLabelCoreTest.class,
         VertexCoreTest.class,
+        SourceIndexCoverageTest.class,
         EdgeCoreTest.class,
         CountStrategyCoreTest.class,
         IdPredicateCoreTest.class,

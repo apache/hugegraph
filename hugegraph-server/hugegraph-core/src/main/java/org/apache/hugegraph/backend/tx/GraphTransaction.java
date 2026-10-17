@@ -1523,23 +1523,35 @@ public class GraphTransaction extends IndexableTransaction {
             return queries;
         }
 
-        boolean supportIn = this.storeFeatures().supportsQueryWithInCondition();
-        for (ConditionQuery cq : ConditionQueryFlatten.flatten(
-                (ConditionQuery) query, supportIn)) {
-            // Optimize by sysprop
-            Query q = this.optimizeQuery(cq);
-            /*
-             * NOTE: There are two possibilities for the returned q:
-             * 1.sysprop-query, which would not be empty.
-             * 2.index-query result(ids after optimization), which may be empty.
-             */
-            if (q == null) {
-                queries.add(this.indexQuery(cq), this.batchSize);
-            } else if (!q.empty()) {
-                queries.add(q);
+        try {
+            boolean supportIn = this.storeFeatures().supportsQueryWithInCondition();
+            for (ConditionQuery cq : ConditionQueryFlatten.flatten(
+                    (ConditionQuery) query, supportIn)) {
+                // Optimize by sysprop
+                Query q = this.optimizeQuery(cq);
+                /*
+                 * NOTE: There are two possibilities for the returned q:
+                 * 1.sysprop-query, which would not be empty.
+                 * 2.index-query result(ids after optimization), which may be empty.
+                 */
+                if (q == null) {
+                    queries.add(this.indexQuery(cq), this.batchSize);
+                } else if (!q.empty()) {
+                    queries.add(q);
+                }
             }
+            return queries;
+        } catch (Throwable failure) {
+            // Earlier flattened branches may already own backend cursors.
+            try {
+                queries.close();
+            } catch (Throwable closing) {
+                if (closing != failure) {
+                    failure.addSuppressed(closing);
+                }
+            }
+            throw QueryBatch.propagate(failure);
         }
-        return queries;
     }
 
     private Query optimizeQuery(ConditionQuery query) {

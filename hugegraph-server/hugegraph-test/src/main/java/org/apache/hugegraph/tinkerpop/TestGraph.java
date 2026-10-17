@@ -565,6 +565,10 @@ public class TestGraph implements Graph {
               .ifNotExist().create();
         schema.indexLabel("dogByName").onV("dog").by("name")
               .ifNotExist().create();
+        schema.indexLabel("animalByName").onV("animal").by("name")
+              .ifNotExist().create();
+        schema.indexLabel("animalByAge").onV("animal").by("age").range()
+              .ifNotExist().create();
         schema.indexLabel("vertexByName").onV("vertex").by("name")
               .ifNotExist().create();
         schema.indexLabel("vertexByAge").onV("vertex").by("age").range()
@@ -572,6 +576,8 @@ public class TestGraph implements Graph {
         schema.indexLabel("knowsByWeight").onE("knows").by("weight").range()
               .ifNotExist().create();
         schema.indexLabel("createdByWeight").onE("created").by("weight")
+              .range().ifNotExist().create();
+        schema.indexLabel("createdByEdgeWeight").onE("createdBy").by("weight")
               .range().ifNotExist().create();
         schema.indexLabel("personByNameAge").onV("person").by("name", "age")
               .ifNotExist().create();
@@ -898,6 +904,16 @@ public class TestGraph implements Graph {
 
         schema.indexLabel("selfByName").onE("self").by("name")
               .ifNotExist().create();
+        if (!"person".equals(defaultVL)) {
+            schema.indexLabel("personByName").onV("person").by("name")
+                  .ifNotExist().create();
+        }
+        schema.indexLabel("softwareByName").onV("software").by("name")
+              .ifNotExist().create();
+        schema.indexLabel("friendByName").onE("friend").by("name")
+              .ifNotExist().create();
+        schema.indexLabel("lByName").onE("l").by("name")
+              .ifNotExist().create();
         schema.indexLabel("selfBy__id").onE("self").by("__id")
               .ifNotExist().create();
         schema.indexLabel("selfBySome").onE("self").by("some")
@@ -912,10 +928,19 @@ public class TestGraph implements Graph {
         schema.indexLabel("aTOaByGremlinPartition").onE("aTOa")
               .by("gremlin.partitionGraphStrategy.partition")
               .ifNotExist().create();
+        schema.indexLabel("aTObByGremlinPartition").onE("aTOb")
+              .by("gremlin.partitionGraphStrategy.partition")
+              .ifNotExist().create();
         schema.indexLabel("aTOcByGremlinPartition").onE("aTOc")
               .by("gremlin.partitionGraphStrategy.partition")
               .ifNotExist().create();
         schema.indexLabel("bTOcByGremlinPartition").onE("bTOc")
+              .by("gremlin.partitionGraphStrategy.partition")
+              .ifNotExist().create();
+        schema.indexLabel("connectsToByGremlinPartition").onE("connectsTo")
+              .by("gremlin.partitionGraphStrategy.partition")
+              .ifNotExist().create();
+        schema.indexLabel("relatesToByGremlinPartition").onE("relatesTo")
               .by("gremlin.partitionGraphStrategy.partition")
               .ifNotExist().create();
         schema.edgeLabel("blah1").link(defaultVL, defaultVL)
@@ -983,6 +1008,9 @@ public class TestGraph implements Graph {
               .ifNotExist().create();
 
         schema.indexLabel("loopsByName").onV("loops")
+              .secondary().by("name")
+              .ifNotExist().create();
+        schema.indexLabel("messageByName").onV("message")
               .secondary().by("name")
               .ifNotExist().create();
     }
