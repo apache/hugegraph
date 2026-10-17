@@ -180,6 +180,9 @@ pd:
   patrol-interval: 1800             # Partition rebalancing interval (seconds)
   initial-store-count: 1            # Minimum stores for cluster availability
   initial-store-list: 127.0.0.1:8500  # Auto-activated stores
+  balance-leader-enable: false      # Periodic partition leader balancing
+  balance-leader-interval: 300      # Seconds between leader balance checks
+  balance-leader-max-skew: 2        # Tolerated leader count spread across stores
 ```
 
 | Parameter | Type | Default | Description |
@@ -188,6 +191,9 @@ pd:
 | `pd.patrol-interval` | Integer | `1800` | Interval (in seconds) for partition health patrol and automatic rebalancing. Lower values = more frequent checks. |
 | `pd.initial-store-count` | Integer | `1` | Minimum number of Store nodes required for cluster to be operational. Set to expected initial store count. |
 | `pd.initial-store-list` | String | `127.0.0.1:8500` | Comma-separated list of Store gRPC addresses to auto-activate on startup. Useful for bootstrapping. |
+| `pd.balance-leader-enable` | Boolean | `false` | Run partition leader balancing periodically on the PD leader. When off, leaders move back only through `/v1/task/balanceLeaders`. |
+| `pd.balance-leader-interval` | Integer | `300` | Seconds between periodic leader balance checks. Only read when `pd.balance-leader-enable` is `true`. Must be positive; otherwise PD logs a warning and does not run periodic balancing. |
+| `pd.balance-leader-max-skew` | Integer | `2` | A check balances leaders only when the most leaders on one store minus the fewest on another exceeds this value. Must be `0` or more; otherwise PD logs a warning and does not run periodic balancing. |
 
 **Production Recommendations**:
 - `pd.data-path`: Use dedicated SSD with at least 50GB free space
@@ -196,6 +202,21 @@ pd:
   - Production: `1800` (30 minutes) to reduce overhead
   - Large clusters: `3600` (1 hour)
 - `pd.initial-store-count`: Set to expected initial store count (e.g., `3` for 3 stores)
+- `pd.balance-leader-enable`: After a Store restarts, its raft groups keep the leaders they elected
+  on the surviving Stores. Enable this so PD moves leaders back without a manual
+  `balanceLeaders` call. A check is skipped while any shard group is not in the `Normal` state,
+  has sent no partition heartbeat in the last 30 seconds, or has a replica that is not a Leader
+  or Follower (a membership change in progress); while a Store that holds a shard is not sending
+  heartbeats; and while a split, move or shard balance task is running. A planned transfer is
+  not sent if this PD is no longer the leader, if its shard group changed after the check, or
+  if the target's applied index trails the leader's by more than an estimated 1000 entries. The
+  indexes come from each Store's last heartbeat, and PD estimates the leader's index at the time
+  of the target's report from its average rate since the previous check; when there is no usable
+  earlier sample from the same leader Store, PD compares the indexes as reported. The leader stays
+  where it is until a later check. The estimate is best effort, not a strict bound: a write burst
+  late in the interval can keep a caught-up Store waiting for later checks, and a burst early in
+  it can let a Store that fell behind through, in which case JRaft ends the transfer after its
+  timeout and the old leader takes writes again.
 
 ### Store Management Settings
 

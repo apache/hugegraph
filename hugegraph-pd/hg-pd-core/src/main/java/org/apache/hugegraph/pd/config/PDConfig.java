@@ -58,6 +58,16 @@ public class PDConfig implements InitializingBean {
     // The patrol task interval
     @Value("${pd.patrol-interval:300}")
     private long patrolInterval = 300;
+
+    // Periodic partition leader balancing, off by default; the interval is in seconds
+    @Value("${pd.balance-leader-enable:false}")
+    private boolean balanceLeaderEnable = false;
+    @Value("${pd.balance-leader-interval:300}")
+    private long balanceLeaderInterval = 300;
+    // Skip the periodic run while max - min leaders per store is at or below this (0 or more)
+    @Value("${pd.balance-leader-max-skew:2}")
+    private int balanceLeaderMaxSkew = 2;
+
     @Value("${pd.data-path}")
     private String dataPath;
     @Value("${pd.initial-store-count:3}")
